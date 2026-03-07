@@ -21,7 +21,7 @@ echo "Build a user authentication system" | cargo run -p tddy-coder -- --goal pl
 
 ## Architecture
 
-CLI binary with goals: `plan` (reads feature from stdin, invokes Claude Code, writes PRD.md, TODO.md, .session) and `acceptance-tests` (reads plan from `--plan-dir`, resumes session, creates failing acceptance tests). Supports interactive Q&A (inquire Select/MultiSelect), real-time progress display, `--agent-output` for raw output, and goal-specific exit output.
+CLI binary with goals: `plan`, `acceptance-tests`, `red`, `green`. Backends: `--agent claude` (default) or `--agent cursor`. Feature description from stdin or `--prompt`. Writes PRD.md, TODO.md, changeset.yaml to plan directory. Supports interactive Q&A (inquire Select/MultiSelect), real-time progress display, `--agent-output` for raw output.
 
 ## Documentation
 

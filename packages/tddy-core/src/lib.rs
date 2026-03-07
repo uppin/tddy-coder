@@ -9,8 +9,9 @@ pub mod stream;
 pub mod workflow;
 
 pub use backend::{
-    build_claude_args, ClarificationQuestion, ClaudeCodeBackend, CodingBackend, InvokeRequest,
-    InvokeResponse, MockBackend, PermissionMode, QuestionOption,
+    build_claude_args, AnyBackend, ClarificationQuestion, ClaudeCodeBackend, ClaudeInvokeConfig,
+    CodingBackend, CursorBackend, Goal, InvokeRequest, InvokeResponse, MockBackend, PermissionMode,
+    QuestionOption,
 };
 pub use changeset::{
     append_session_and_update_state, get_session_for_tag, next_goal_for_state, read_changeset,

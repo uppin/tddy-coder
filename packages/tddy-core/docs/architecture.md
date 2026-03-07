@@ -8,10 +8,10 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Backend (`backend/`)
 
-- **CodingBackend**: Trait for invoking LLM-based coders. Implementations include `ClaudeCodeBackend` (production) and `MockBackend` (testing).
-- **InvokeRequest/InvokeResponse**: Request and response types. Supports session_id, is_resume, agent_output, system_prompt_path, allowed_tools (goal allowlist for `--allowedTools`), permission_prompt_tool, mcp_config_path, working_dir, debug.
-- **ClarificationQuestion**: Structured question type from AskUserQuestion tool events (header, question, options, multi_select).
-- **PermissionMode**: Plan (read-only), AcceptEdits (auto-approve file edits), or Default.
+- **CodingBackend**: Trait for invoking LLM-based coders. Implementations: `ClaudeCodeBackend`, `CursorBackend` (production), `MockBackend` (testing). `AnyBackend` enum for CLI dispatch.
+- **InvokeRequest/InvokeResponse**: Request and response types. InvokeRequest: prompt, system_prompt, goal (Plan/AcceptanceTests/Red/Green), model, session_id, is_resume, working_dir, debug, agent_output, inherit_stdin, extra_allowed_tools. InvokeResponse: output, exit_code, session_id (Option), questions.
+- **ClarificationQuestion**: Structured question type from AskUserQuestion tool events or `<clarification-questions>` text block (header, question, options, multi_select).
+- **ClaudeInvokeConfig**: Claude-specific config (permission_mode, allowed_tools, permission_prompt_tool, mcp_config_path) derived from goal internally.
 
 ### Changeset (`changeset.rs`)
 
@@ -19,14 +19,15 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **SessionEntry**: id, agent, tag, created_at, system_prompt_file (path to system prompt for this session).
 - **ClarificationQa**: Question and answer pairs from planning clarification.
 - **read_changeset / write_changeset**: Load and persist changeset.yaml.
-- **append_session_and_update_state**: Add session with optional system_prompt_file; update workflow state.
+- **append_session_and_update_state**: Add session (agent from backend.name(), id, tag, system_prompt_file); update workflow state.
 
 ### Stream (`stream/`)
 
-- **process_ndjson_stream**: Parses Claude Code CLI `--output-format=stream-json` NDJSON output.
-- **StreamResult**: result_text (accumulated assistant text + result), session_id, questions.
+- **stream/claude.rs**: `process_ndjson_stream` — Claude Code CLI NDJSON parser (assistant, user, result, tool_use, task_started, task_progress).
+- **stream/cursor.rs**: `process_cursor_stream` — Cursor agent NDJSON parser (assistant, tool_call, result; askUserQuestionToolCall/askQuestionToolCall).
+- **StreamResult**: result_text, session_id, questions, raw_lines.
 - **ProgressEvent**: ToolUse, TaskStarted, TaskProgress for real-time display.
-- Extracts AskUserQuestion tool events for structured Q&A; deduplicates questions.
+- **parse_clarification_questions_from_text**: Fallback when agent outputs `<clarification-questions>` block instead of AskUserQuestion tool.
 
 ### Permission (`permission.rs`)
 

@@ -6,7 +6,11 @@ pub fn system_prompt() -> String {
 1. A PRD (Product Requirements Document) in markdown format
 2. A TODO list in markdown format with implementation milestones
 
-If you need clarification before creating the PRD, use the AskUserQuestion tool.
+If you need clarification before creating the PRD, either use the AskUserQuestion tool OR output a structured block with your questions:
+
+<clarification-questions content-type="application-json">
+{"questions":[{"header":"<section>","question":"<text>","options":[{"label":"<choice>","description":"<desc>"}],"multiSelect":false}]}
+</clarification-questions>
 
 Otherwise, you MUST include a structured-response block with your output. Use this exact format:
 
@@ -20,7 +24,7 @@ The prd and todo values must be JSON strings (escape quotes and newlines as need
 
 **demo_plan** (optional): When the feature has a user-facing demo (CLI, API, UI), include demo_type, setup_instructions, steps with description/command_or_action/expected_result, and verification criteria.
 
-You may include explanatory text before or after the structured-response block, but the block itself is required for parsing."#
+**CRITICAL**: Your response MUST contain the <structured-response> block with the actual PRD and TODO content. Do NOT return a summary, meta-commentary, or description of what you created. The parser extracts the block directly — if it is missing, the workflow fails. You may add brief explanatory text before the block, but the block itself is mandatory."#
         .to_string()
 }
 

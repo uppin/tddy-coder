@@ -6,9 +6,9 @@ use inquire::{MultiSelect, Select, Text};
 use std::io::{self, BufRead, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use tddy_core::{
-    next_goal_for_state, read_changeset, AcceptanceTestsOptions, ClarificationQuestion,
-    ClaudeCodeBackend, GreenOptions, PlanOptions, ProgressEvent, RedOptions, Workflow,
-    WorkflowError,
+    next_goal_for_state, read_changeset, AcceptanceTestsOptions, AnyBackend, ClarificationQuestion,
+    ClaudeCodeBackend, CodingBackend, CursorBackend, GreenOptions, PlanOptions, ProgressEvent,
+    RedOptions, Workflow, WorkflowError, WorkflowState,
 };
 
 #[derive(Parser, Debug)]
@@ -42,6 +42,14 @@ struct Args {
     /// Print Claude CLI command and cwd before running (for debugging empty output)
     #[arg(long)]
     debug: bool,
+
+    /// Agent backend: claude or cursor (default: claude)
+    #[arg(long, default_value = "claude", value_parser = ["claude", "cursor"])]
+    agent: String,
+
+    /// Feature description (alternative to stdin). When set, skips interactive/piped input.
+    #[arg(long)]
+    prompt: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -58,10 +66,9 @@ fn main() -> anyhow::Result<()> {
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for acceptance-tests goal"))?;
 
         let model = args.model.as_deref().unwrap_or("sonnet");
-        eprintln!("agent: claude");
+        let mut workflow = create_workflow(&args.agent);
+        eprintln!("agent: {}", workflow.backend().name());
         eprintln!("model: {}", model);
-
-        let mut workflow = create_workflow();
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
         loop {
@@ -112,10 +119,9 @@ fn main() -> anyhow::Result<()> {
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for green goal"))?;
 
         let model = args.model.as_deref().unwrap_or("sonnet");
-        eprintln!("agent: claude");
+        let mut workflow = create_workflow(&args.agent);
+        eprintln!("agent: {}", workflow.backend().name());
         eprintln!("model: {}", model);
-
-        let mut workflow = create_workflow();
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
         loop {
@@ -175,10 +181,9 @@ fn main() -> anyhow::Result<()> {
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for red goal"))?;
 
         let model = args.model.as_deref().unwrap_or("sonnet");
-        eprintln!("agent: claude");
+        let mut workflow = create_workflow(&args.agent);
+        eprintln!("agent: {}", workflow.backend().name());
         eprintln!("model: {}", model);
-
-        let mut workflow = create_workflow();
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
         loop {
@@ -238,17 +243,17 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    let mut input = read_feature_input().context("read feature from stdin")?;
+    let mut input = read_feature_input(&args).context("read feature description")?;
     input = input.trim().to_string();
     if input.is_empty() {
-        anyhow::bail!("empty feature description (read from stdin)");
+        anyhow::bail!("empty feature description");
     }
 
     let model = args.model.as_deref().unwrap_or("opus");
-    eprintln!("agent: claude");
+    let mut workflow = create_workflow(&args.agent);
+    eprintln!("agent: {}", workflow.backend().name());
     eprintln!("model: {}", model);
 
-    let mut workflow = create_workflow();
     let inherit_stdin = io::stdin().is_terminal();
     let mut answers: Option<String> = None;
     loop {
@@ -278,30 +283,35 @@ fn main() -> anyhow::Result<()> {
 fn on_progress(event: &ProgressEvent) {
     let dim = "\x1b[2m";
     let reset = "\x1b[0m";
+    // Ensure progress lines start on a new line (agent_output may have printed text without newline).
+    let prefix = "\n";
     match event {
         ProgressEvent::ToolUse {
             name,
             detail: Some(d),
-        } => eprintln!("  {}📎 {} {}...{}", dim, name, d, reset),
+        } => eprintln!("{}  {}📎 {} {}...{}", prefix, dim, name, d, reset),
         ProgressEvent::ToolUse { name, detail: None } => {
-            eprintln!("  {}📎 {}...{}", dim, name, reset)
+            eprintln!("{}  {}📎 {}...{}", prefix, dim, name, reset)
         }
         ProgressEvent::TaskStarted { description } => {
-            eprintln!("  {}▶ {}...{}", dim, description, reset)
+            eprintln!("{}  {}▶ {}...{}", prefix, dim, description, reset)
         }
         ProgressEvent::TaskProgress {
             description,
             last_tool: Some(tool),
-        } => eprintln!("  {}⏳ {} ({}){}", dim, description, tool, reset),
+        } => eprintln!("{}  {}⏳ {} ({}){}", prefix, dim, description, tool, reset),
         ProgressEvent::TaskProgress {
             description,
             last_tool: None,
-        } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
+        } => eprintln!("{}  {}⏳ {}...{}", prefix, dim, description, reset),
     }
 }
 
-fn create_workflow() -> Workflow<ClaudeCodeBackend> {
-    let backend = ClaudeCodeBackend::new().with_progress(on_progress);
+fn create_workflow(agent: &str) -> Workflow<AnyBackend> {
+    let backend: AnyBackend = match agent {
+        "cursor" => AnyBackend::Cursor(CursorBackend::new().with_progress(on_progress)),
+        _ => AnyBackend::Claude(ClaudeCodeBackend::new().with_progress(on_progress)),
+    };
     Workflow::new(backend).with_on_state_change(|from, to| eprintln!("State: {} → {}", from, to))
 }
 
@@ -328,7 +338,8 @@ fn find_resumable_plan_dir(output_dir: &Path) -> Option<PathBuf> {
 
 fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
     let model = args.model.as_deref().unwrap_or("opus");
-    eprintln!("agent: claude");
+    let workflow = create_workflow(&args.agent);
+    eprintln!("agent: {}", workflow.backend().name());
     eprintln!("model: {}", model);
 
     let inherit_stdin = io::stdin().is_terminal();
@@ -348,12 +359,12 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
         }
         resumable
     } else {
-        let mut input = read_feature_input().context("read feature from stdin")?;
+        let mut input = read_feature_input(args).context("read feature description")?;
         input = input.trim().to_string();
         if input.is_empty() {
-            anyhow::bail!("empty feature description (read from stdin)");
+            anyhow::bail!("empty feature description");
         }
-        let mut workflow = create_workflow();
+        let mut workflow = create_workflow(&args.agent);
         let plan_options = PlanOptions {
             model: args.model.clone(),
             agent_output: args.agent_output,
@@ -374,7 +385,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
         }
     };
 
-    let mut workflow = create_workflow();
+    let mut workflow = create_workflow(&args.agent);
     let cs = read_changeset(&plan_dir).ok();
     let start_goal = cs
         .as_ref()
@@ -385,6 +396,11 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
     let run_red = matches!(start_goal, "plan" | "acceptance-tests" | "red");
 
     if run_acceptance_tests {
+        if cs.as_ref().map(|c| c.state.current.as_str()) == Some("Planned") {
+            workflow.restore_state(WorkflowState::Planned {
+                output_dir: plan_dir.to_path_buf(),
+            });
+        }
         let at_options = AcceptanceTestsOptions {
             model: args.model.clone(),
             agent_output: args.agent_output,
@@ -476,9 +492,11 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
     }
 }
 
-/// Read feature description from stdin. When interactive (TTY), uses inquire.
-/// When piped, reads until EOF.
-fn read_feature_input() -> anyhow::Result<String> {
+/// Read feature description. Uses --prompt if set; otherwise stdin (interactive or piped).
+fn read_feature_input(args: &Args) -> anyhow::Result<String> {
+    if let Some(ref p) = args.prompt {
+        return Ok(p.clone());
+    }
     let stdin = io::stdin();
     if stdin.is_terminal() {
         Text::new("Feature description:")

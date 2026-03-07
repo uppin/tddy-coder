@@ -270,12 +270,13 @@ pub fn append_session_and_update_state(
     session_id: String,
     tag: &str,
     new_state: &str,
+    agent: &str,
     system_prompt_file: Option<String>,
 ) {
     let now = chrono::Utc::now().to_rfc3339();
     changeset.sessions.push(SessionEntry {
         id: session_id,
-        agent: "claude".to_string(),
+        agent: agent.to_string(),
         tag: tag.to_string(),
         created_at: now.clone(),
         system_prompt_file,

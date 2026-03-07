@@ -160,6 +160,11 @@ impl<B: CodingBackend> Workflow<B> {
         &self.state
     }
 
+    /// Restore state from persisted changeset (e.g. when resuming). Does not invoke on_state_change.
+    pub fn restore_state(&mut self, state: WorkflowState) {
+        self.state = state;
+    }
+
     /// Access the backend (e.g. for tests to inspect invocations).
     pub fn backend(&self) -> &B {
         &self.backend
@@ -229,28 +234,21 @@ impl<B: CodingBackend> Workflow<B> {
             Some(sid) => (Some(sid.clone()), answers.is_some()),
         };
 
-        let mut allowed_tools = crate::permission::plan_allowlist();
-        if let Some(extras) = &options.allowed_tools_extras {
-            allowed_tools.extend(extras.iter().cloned());
-        }
-
         let model = options.model.clone();
 
         let request = crate::backend::InvokeRequest {
             prompt,
             system_prompt: None,
             system_prompt_path: Some(system_prompt_path),
-            permission_mode: crate::backend::PermissionMode::Plan,
+            goal: crate::backend::Goal::Plan,
             model,
             session_id,
             is_resume,
-            agent_output: options.agent_output,
-            inherit_stdin: options.inherit_stdin,
-            allowed_tools: Some(allowed_tools),
-            permission_prompt_tool: None,
-            mcp_config_path: None,
             working_dir: Some(output_dir.to_path_buf()),
             debug: options.debug,
+            agent_output: options.agent_output,
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
 
         let response = match self.backend.invoke(request) {
@@ -264,13 +262,13 @@ impl<B: CodingBackend> Workflow<B> {
         };
 
         if !response.questions.is_empty() {
-            if !response.session_id.is_empty() {
-                self.session_id = Some(response.session_id.clone());
+            if let Some(ref sid) = response.session_id {
+                self.session_id = Some(sid.clone());
             }
             self.pending_clarification_questions = Some(response.questions.clone());
             return Err(WorkflowError::ClarificationNeeded {
                 questions: response.questions,
-                session_id: response.session_id,
+                session_id: response.session_id.unwrap_or_default(),
             });
         }
 
@@ -280,6 +278,11 @@ impl<B: CodingBackend> Workflow<B> {
                 eprintln!(
                     "--- Failed parse input (length {} bytes) ---",
                     response.output.len()
+                );
+                eprintln!(
+                    "Hint: The agent must output a <structured-response> block with the actual PRD and TODO content. \
+                     Meta-commentary (e.g. 'I've created the PRD...') without the block causes this error. \
+                     See the system prompt for the required format."
                 );
                 eprintln!("{}", response.output);
                 eprintln!("--- End failed parse input ---");
@@ -309,6 +312,7 @@ impl<B: CodingBackend> Workflow<B> {
                 sid.clone(),
                 "plan",
                 "Planned",
+                self.backend.name(),
                 Some("system-prompt-plan.md".to_string()),
             );
             write_changeset(&output_path, &changeset)?;
@@ -367,11 +371,6 @@ impl<B: CodingBackend> Workflow<B> {
             Some(a) => acceptance_tests::build_followup_prompt(&prd_content, a),
         };
 
-        let mut allowed_tools = crate::permission::acceptance_tests_allowlist();
-        if let Some(extras) = &options.allowed_tools_extras {
-            allowed_tools.extend(extras.iter().cloned());
-        }
-
         let model = resolve_model(
             Some(&changeset),
             "acceptance-tests",
@@ -382,17 +381,15 @@ impl<B: CodingBackend> Workflow<B> {
             prompt,
             system_prompt: Some(system_prompt),
             system_prompt_path: None,
-            permission_mode: crate::backend::PermissionMode::AcceptEdits,
+            goal: crate::backend::Goal::AcceptanceTests,
             model,
             session_id: Some(session_id.clone()),
             is_resume: true,
-            agent_output: options.agent_output,
-            inherit_stdin: options.inherit_stdin,
-            allowed_tools: Some(allowed_tools),
-            permission_prompt_tool: None,
-            mcp_config_path: None,
             working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
             debug: options.debug,
+            agent_output: options.agent_output,
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
 
         let response = match self.backend.invoke(request) {
@@ -406,16 +403,16 @@ impl<B: CodingBackend> Workflow<B> {
         };
 
         if !response.questions.is_empty() {
-            if !response.session_id.is_empty() {
+            if let Some(ref sid) = response.session_id {
                 let mut cs = read_changeset(plan_dir)?;
                 if let Some(last) = cs.sessions.last_mut() {
-                    last.id = response.session_id.clone();
+                    last.id = sid.clone();
                 }
                 let _ = write_changeset(plan_dir, &cs);
             }
             return Err(WorkflowError::ClarificationNeeded {
                 questions: response.questions,
-                session_id: response.session_id,
+                session_id: response.session_id.unwrap_or_default(),
             });
         }
 
@@ -423,16 +420,16 @@ impl<B: CodingBackend> Workflow<B> {
             Ok(out) => {
                 write_acceptance_tests_file(plan_dir, &out)?;
                 let mut cs = read_changeset(plan_dir)?;
-                let at_session_id = if response.session_id.is_empty() {
-                    uuid::Uuid::new_v4().to_string()
-                } else {
-                    response.session_id.clone()
-                };
+                let at_session_id = response
+                    .session_id
+                    .clone()
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 append_session_and_update_state(
                     &mut cs,
                     at_session_id,
                     "acceptance-tests",
                     "AcceptanceTestsReady",
+                    self.backend.name(),
                     None,
                 );
                 let _ = write_changeset(plan_dir, &cs);
@@ -545,26 +542,19 @@ impl<B: CodingBackend> Workflow<B> {
 
         let session_id = uuid::Uuid::new_v4().to_string();
 
-        let mut allowed_tools = crate::permission::red_allowlist();
-        if let Some(extras) = &options.allowed_tools_extras {
-            allowed_tools.extend(extras.iter().cloned());
-        }
-
         let request = crate::backend::InvokeRequest {
             prompt,
             system_prompt: Some(system_prompt),
             system_prompt_path: None,
-            permission_mode: crate::backend::PermissionMode::AcceptEdits,
+            goal: crate::backend::Goal::Red,
             model,
             session_id: Some(session_id.clone()),
             is_resume: false,
-            agent_output: options.agent_output,
-            inherit_stdin: options.inherit_stdin,
-            allowed_tools: Some(allowed_tools),
-            permission_prompt_tool: None,
-            mcp_config_path: None,
             working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
             debug: options.debug,
+            agent_output: options.agent_output,
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
 
         let response = match self.backend.invoke(request) {
@@ -580,7 +570,7 @@ impl<B: CodingBackend> Workflow<B> {
         if !response.questions.is_empty() {
             return Err(WorkflowError::ClarificationNeeded {
                 questions: response.questions,
-                session_id: response.session_id,
+                session_id: response.session_id.unwrap_or_default(),
             });
         }
 
@@ -594,6 +584,7 @@ impl<B: CodingBackend> Workflow<B> {
                         session_id.clone(),
                         "impl",
                         "RedTestsReady",
+                        self.backend.name(),
                         None,
                     );
                     let _ = write_changeset(plan_dir, &cs);
@@ -604,6 +595,7 @@ impl<B: CodingBackend> Workflow<B> {
                         session_id.clone(),
                         "impl",
                         "RedTestsReady",
+                        self.backend.name(),
                         None,
                     );
                     let _ = write_changeset(plan_dir, &cs);
@@ -712,26 +704,19 @@ impl<B: CodingBackend> Workflow<B> {
             ),
         };
 
-        let mut allowed_tools = crate::permission::green_allowlist();
-        if let Some(extras) = &options.allowed_tools_extras {
-            allowed_tools.extend(extras.iter().cloned());
-        }
-
         let request = crate::backend::InvokeRequest {
             prompt,
             system_prompt: Some(system_prompt),
             system_prompt_path: None,
-            permission_mode: crate::backend::PermissionMode::AcceptEdits,
+            goal: crate::backend::Goal::Green,
             model,
             session_id: Some(session_id.clone()),
             is_resume: true,
-            agent_output: options.agent_output,
-            inherit_stdin: options.inherit_stdin,
-            allowed_tools: Some(allowed_tools),
-            permission_prompt_tool: None,
-            mcp_config_path: None,
             working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
             debug: options.debug,
+            agent_output: options.agent_output,
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
 
         let response = match self.backend.invoke(request) {
@@ -747,7 +732,7 @@ impl<B: CodingBackend> Workflow<B> {
         if !response.questions.is_empty() {
             return Err(WorkflowError::ClarificationNeeded {
                 questions: response.questions,
-                session_id: response.session_id,
+                session_id: response.session_id.unwrap_or_default(),
             });
         }
 

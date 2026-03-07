@@ -224,6 +224,50 @@ fn cli_displays_state_transitions() {
 }
 
 #[test]
+#[cfg(unix)]
+fn cli_accepts_prompt_flag_instead_of_stdin() {
+    let tmp = std::env::temp_dir().join("tddy-cli-prompt-flag-test");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    create_fake_claude_prd_only(&tmp).expect("create fake claude");
+
+    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .env("PATH", tmp_path.to_str().unwrap())
+        .env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        )
+        .args([
+            "--goal",
+            "plan",
+            "--output-dir",
+            tmp.to_str().unwrap(),
+            "--prompt",
+            "Build feature from CLI arg",
+        ]);
+    // No write_stdin — --prompt provides the description
+
+    let output = cmd.output().expect("run tddy-coder");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "expected success: stderr={} stdout={}",
+        String::from_utf8_lossy(&output.stderr),
+        stdout
+    );
+    assert!(
+        stdout.trim().ends_with("PRD.md"),
+        "stdout should be path to PRD.md: {}",
+        stdout
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn cli_accepts_model_flag() {
     let mut cmd = tddy_coder_bin();
     cmd.arg("--help");
@@ -234,6 +278,41 @@ fn cli_accepts_model_flag() {
     assert!(
         stdout.contains("--model") || stdout.contains("-m"),
         "help should document --model: {}",
+        stdout
+    );
+}
+
+#[test]
+fn cli_accepts_prompt_flag_in_help() {
+    let mut cmd = tddy_coder_bin();
+    cmd.arg("--help");
+
+    let output = cmd.output().expect("run tddy-coder --help");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--prompt"),
+        "help should document --prompt: {}",
+        stdout
+    );
+}
+
+#[test]
+fn cli_accepts_agent_flag() {
+    let mut cmd = tddy_coder_bin();
+    cmd.arg("--help");
+
+    let output = cmd.output().expect("run tddy-coder --help");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--agent"),
+        "help should document --agent: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("claude") && stdout.contains("cursor"),
+        "help should mention claude and cursor: {}",
         stdout
     );
 }

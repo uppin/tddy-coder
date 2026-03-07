@@ -1,7 +1,8 @@
 //! Claude Code CLI backend implementation.
 
-use super::{InvokeRequest, InvokeResponse, PermissionMode};
+use super::{Goal, InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
+use crate::permission;
 use crate::stream;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -10,6 +11,23 @@ use std::sync::{Arc, Mutex};
 
 /// Type for progress callback (tool activity, task events).
 type ProgressCallback = Option<Arc<Mutex<Box<dyn FnMut(&stream::ProgressEvent) + Send>>>>;
+
+/// Claude-specific permission mode (maps from Goal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionMode {
+    Plan,
+    Default,
+    AcceptEdits,
+}
+
+/// Claude-specific config derived from InvokeRequest (permission_mode, allowlist, etc.).
+#[derive(Debug, Clone)]
+pub struct ClaudeInvokeConfig {
+    pub permission_mode: PermissionMode,
+    pub allowed_tools: Vec<String>,
+    pub permission_prompt_tool: Option<String>,
+    pub mcp_config_path: Option<PathBuf>,
+}
 
 /// Build the argument list for the Claude Code CLI (excluding the binary path).
 /// Exposed for testing to verify correct command construction.
@@ -22,6 +40,7 @@ type ProgressCallback = Option<Arc<Mutex<Box<dyn FnMut(&stream::ProgressEvent) +
 /// When `session_id` is set: `--session-id <id>` (first call) or `--resume <id>` (followup).
 pub fn build_claude_args(
     request: &InvokeRequest,
+    config: &ClaudeInvokeConfig,
     system_prompt_path: Option<&std::path::Path>,
 ) -> Vec<String> {
     // Prompt must come immediately after -p per CLI docs: claude -p "query"
@@ -33,7 +52,7 @@ pub fn build_claude_args(
         "--verbose".to_string(),
     ];
 
-    match request.permission_mode {
+    match config.permission_mode {
         PermissionMode::Plan => {
             args.push("--permission-mode".to_string());
             args.push("plan".to_string());
@@ -67,24 +86,43 @@ pub fn build_claude_args(
         args.push(sys_prompt.clone());
     }
 
-    if let Some(ref tools) = request.allowed_tools {
-        for tool in tools {
+    if !config.allowed_tools.is_empty() {
+        for tool in &config.allowed_tools {
             args.push("--allowedTools".to_string());
             args.push(tool.clone());
         }
     }
 
-    if let Some(ref tool_name) = request.permission_prompt_tool {
+    if let Some(ref tool_name) = config.permission_prompt_tool {
         args.push("--permission-prompt-tool".to_string());
         args.push(tool_name.clone());
     }
 
-    if let Some(ref mcp_path) = request.mcp_config_path {
+    if let Some(ref mcp_path) = config.mcp_config_path {
         args.push("--mcp-config".to_string());
         args.push(mcp_path.to_string_lossy().to_string());
     }
 
     args
+}
+
+fn goal_to_claude_config(request: &InvokeRequest) -> ClaudeInvokeConfig {
+    let (permission_mode, mut allowed_tools) = match request.goal {
+        Goal::Plan => (PermissionMode::Plan, permission::plan_allowlist()),
+        Goal::AcceptanceTests | Goal::Red | Goal::Green => (
+            PermissionMode::AcceptEdits,
+            permission::acceptance_tests_allowlist(),
+        ),
+    };
+    if let Some(ref extras) = request.extra_allowed_tools {
+        allowed_tools.extend(extras.iter().cloned());
+    }
+    ClaudeInvokeConfig {
+        permission_mode,
+        allowed_tools,
+        permission_prompt_tool: None,
+        mcp_config_path: None,
+    }
 }
 
 /// Backend that invokes the Claude Code CLI binary.
@@ -181,7 +219,8 @@ impl super::CodingBackend for ClaudeCodeBackend {
             None
         };
 
-        let args = build_claude_args(&request, system_prompt_path.as_deref());
+        let config = goal_to_claude_config(&request);
+        let args = build_claude_args(&request, &config, system_prompt_path.as_deref());
         let mut cmd = Command::new(&self.binary_path);
         if let Some(ref wd) = request.working_dir {
             cmd.current_dir(wd);
@@ -252,11 +291,24 @@ impl super::CodingBackend for ClaudeCodeBackend {
             }
         };
 
+        let mut on_debug_line = |line: &str| {
+            if request.debug {
+                eprintln!("[tddy-coder debug] {}", line);
+            }
+        };
+
         let reader = BufReader::new(stdout_handle);
-        let stream_result =
-            stream::process_ndjson_stream(reader, &mut on_progress, &mut on_raw_output).map_err(
-                |e| BackendError::InvocationFailed(format!("stream parse error: {}", e)),
-            )?;
+        let stream_result = stream::process_ndjson_stream(
+            reader,
+            &mut on_progress,
+            &mut on_raw_output,
+            if request.debug {
+                Some(&mut on_debug_line)
+            } else {
+                None
+            },
+        )
+        .map_err(|e| BackendError::InvocationFailed(format!("stream parse error: {}", e)))?;
 
         let stderr_buf = stderr_thread
             .and_then(|j| j.join().ok())
@@ -292,13 +344,28 @@ impl super::CodingBackend for ClaudeCodeBackend {
             None
         };
 
+        // Fallback: when agent outputs questions in text (no AskUserQuestion tool events), parse from output
+        let questions = if stream_result.questions.is_empty() {
+            stream::parse_clarification_questions_from_text(&stream_result.result_text)
+        } else {
+            stream_result.questions
+        };
+
         Ok(InvokeResponse {
             output: stream_result.result_text,
             exit_code,
-            session_id: stream_result.session_id,
-            questions: stream_result.questions,
+            session_id: if stream_result.session_id.is_empty() {
+                None
+            } else {
+                Some(stream_result.session_id)
+            },
+            questions,
             raw_stream,
             stderr,
         })
+    }
+
+    fn name(&self) -> &str {
+        "claude"
     }
 }

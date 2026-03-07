@@ -261,23 +261,11 @@ fn green_workflow_passes_goal_allowlist_to_invoke_request() {
     let invocations = workflow.backend().invocations();
     assert!(invocations.len() >= 2, "green should have been invoked");
     let req = invocations.last().unwrap();
-    let allowed = req.allowed_tools.as_ref().expect("allowed_tools set");
-    let expected = vec![
-        "Read",
-        "Write",
-        "Edit",
-        "Glob",
-        "Grep",
-        "Bash(cargo *)",
-        "SemanticSearch",
-    ];
-    for tool in &expected {
-        assert!(
-            allowed.contains(&(*tool).to_string()),
-            "allowlist should contain {}",
-            tool
-        );
-    }
+    assert_eq!(
+        req.goal,
+        tddy_core::Goal::Green,
+        "InvokeRequest should have goal Green for green workflow"
+    );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
