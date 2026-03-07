@@ -153,35 +153,18 @@ fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
     let invocations = workflow.backend().invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
-    let allowed = req
-        .allowed_tools
-        .as_ref()
-        .expect("InvokeRequest should have allowed_tools set for acceptance-tests goal");
-    let expected: Vec<&str> = vec![
-        "Read",
-        "Write",
-        "Edit",
-        "Glob",
-        "Grep",
-        "Bash(cargo *)",
-        "SemanticSearch",
-    ];
-    for tool in &expected {
-        assert!(
-            allowed.contains(&(*tool).to_string()),
-            "allowlist should contain {}, got {:?}",
-            tool,
-            allowed
-        );
-    }
+    assert_eq!(
+        req.goal,
+        tddy_core::Goal::AcceptanceTests,
+        "InvokeRequest should have goal AcceptanceTests for acceptance-tests workflow"
+    );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// Plan goal passes goal-specific allowlist to InvokeRequest.
-/// Allowlist should include Read, Glob, Grep, SemanticSearch.
+/// Plan goal passes goal to InvokeRequest.
 #[test]
-fn plan_workflow_passes_goal_allowlist_to_invoke_request() {
+fn plan_workflow_passes_goal_to_invoke_request() {
     let backend = MockBackend::new();
     backend.push_ok(DELIMITED_OUTPUT);
 
@@ -194,19 +177,11 @@ fn plan_workflow_passes_goal_allowlist_to_invoke_request() {
     let invocations = workflow.backend().invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
-    let allowed = req
-        .allowed_tools
-        .as_ref()
-        .expect("InvokeRequest should have allowed_tools set for plan goal");
-    let expected: Vec<&str> = vec!["Read", "Glob", "Grep", "SemanticSearch"];
-    for tool in &expected {
-        assert!(
-            allowed.contains(&(*tool).to_string()),
-            "allowlist should contain {}, got {:?}",
-            tool,
-            allowed
-        );
-    }
+    assert_eq!(
+        req.goal,
+        tddy_core::Goal::Plan,
+        "InvokeRequest should have goal Plan for plan workflow"
+    );
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }

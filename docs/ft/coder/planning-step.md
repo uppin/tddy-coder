@@ -6,7 +6,7 @@
 
 ## Summary
 
-The Planning Step is the first phase of the tddy-coder workflow. When `--goal` is omitted, tddy-coder runs the full workflow (plan → acceptance-tests → red → green) in a single invocation, with auto-resume from `changeset.yaml` state. When a specific goal is given, it executes that step only. The **plan** goal accepts a user's goal description via stdin, invokes an LLM backend (Claude Code CLI) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, resumes the Claude session, creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
+The Planning Step is the first phase of the tddy-coder workflow. When `--goal` is omitted, tddy-coder runs the full workflow (plan → acceptance-tests → red → green) in a single invocation, with auto-resume from `changeset.yaml` state. When a specific goal is given, it executes that step only. The **plan** goal accepts a user's goal description via stdin or `--prompt`, invokes an LLM backend (Claude or Cursor per `--agent`) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, resumes the Claude session, creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
 
 ## Background
 
@@ -16,7 +16,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 
 ## Requirements
 
-### CLI Interface
+### CLI Interface (Updated: 2026-03-07)
 
 1. Binary name: `tddy-coder`
 2. When `--goal` is omitted, runs the full workflow (plan → acceptance-tests → red → green) with auto-resume from `changeset.yaml` state
@@ -28,15 +28,16 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 8. Accepts `--output-dir <path>` to configure where planning output is written (default: current directory)
 9. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
 10. Accepts `--agent-output` to print raw agent output to stderr in real time
-11. Accepts `--debug` to print Claude CLI command and cwd before running (for debugging empty output)
-12. Reads the feature description from stdin (supports piped input and interactive prompt)
-13. *Deferred*: `--list-models` to list available models (not needed for current scope)
+11. Accepts `--debug` to print CLI command and cwd before running (for debugging empty output)
+12. Accepts `--agent <name>` to select backend: `claude` (default) or `cursor`
+13. Reads the feature description from stdin (supports piped input and interactive prompt), or from `--prompt <text>` when provided
+14. *Deferred*: `--list-models` to list available models (not needed for current scope)
 
-### Planning Workflow
+### Planning Workflow (Updated: 2026-03-07)
 
-1. Read feature description from stdin
-2. Invoke Claude Code CLI in plan mode to analyze the feature description
-3. **Q&A phase**: Claude Code may ask clarifying questions; the user is expected to answer them. The system must support this interactive exchange (Claude asks → user answers → Claude continues analysis).
+1. Read feature description from `--prompt` (if set) or stdin (piped or interactive)
+2. Invoke the selected backend (Claude or Cursor) in plan mode to analyze the feature description
+3. **Q&A phase**: The agent may ask clarifying questions; the user is expected to answer them. The system must support this interactive exchange (Claude asks → user answers → Claude continues analysis).
 4. Generate a deterministic directory name based on the feature (date-prefixed, slugified)
 5. Parse Claude Code's structured output into PRD, TODO, discovery, and demo plan artifacts
 6. Write `PRD.md`, `TODO.md`, and `changeset.yaml` (unified manifest: session ID, workflow state, discovery, models, initial_prompt, clarification_qa) to the output directory
@@ -56,12 +57,12 @@ The PRD must include a **Testing Plan** section with: test level (E2E/Integratio
 8. Write `acceptance-tests.md` to the plan directory (structured list + rich descriptions for downstream goals)
 9. On successful exit, output a human-readable summary (test count, paths, failing status)
 
-### LLM Backend Abstraction
+### LLM Backend Abstraction (Updated: 2026-03-07)
 
-1. The system defines a Rust trait (`CodingBackend` or similar) for LLM interactions
-2. Claude Code CLI is the first concrete implementation
-3. The trait must support: invoking the LLM, passing prompts, receiving structured output
-4. The backend must support **model selection** (pass model name to the underlying CLI/API)
+1. The system defines a Rust trait (`CodingBackend`) for LLM interactions
+2. Supported backends: Claude Code CLI and Cursor agent. Use `--agent claude` (default) or `--agent cursor` to select
+3. The trait supports: invoking the LLM, passing prompts, receiving structured output
+4. Backends support **model selection** (pass model name to the underlying CLI/API)
 5. Tests use a mock implementation that allows test-controlled responses and behavior
 
 ### Claude Code Integration
@@ -205,7 +206,6 @@ When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → 
 ## Future Considerations (Not In Scope)
 
 - Multi-turn refinement after initial plan (invoke → review → refine)
-- Support for backends other than Claude Code
 - File dependency analysis (Bazel-like)
 - Test coverage and mutation testing integration
 - Demo setup for user review

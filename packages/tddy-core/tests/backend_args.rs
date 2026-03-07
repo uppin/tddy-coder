@@ -5,32 +5,41 @@
 
 use std::fs;
 use tddy_core::{
-    build_claude_args, ClaudeCodeBackend, CodingBackend, InvokeRequest, PermissionMode,
+    build_claude_args, plan_allowlist, ClaudeCodeBackend, ClaudeInvokeConfig, CodingBackend, Goal,
+    InvokeRequest, PermissionMode,
 };
+
+fn plan_config() -> ClaudeInvokeConfig {
+    ClaudeInvokeConfig {
+        permission_mode: PermissionMode::Plan,
+        allowed_tools: plan_allowlist(),
+        permission_prompt_tool: None,
+        mcp_config_path: None,
+    }
+}
 
 fn request_with_both_prompts(system_prompt: &str, user_prompt: &str) -> InvokeRequest {
     InvokeRequest {
         prompt: user_prompt.to_string(),
         system_prompt: Some(system_prompt.to_string()),
         system_prompt_path: None,
-        permission_mode: PermissionMode::Plan,
+        goal: Goal::Plan,
         model: None,
         session_id: None,
         is_resume: false,
-        agent_output: false,
-        inherit_stdin: false,
-        allowed_tools: None,
-        permission_prompt_tool: None,
-        mcp_config_path: None,
         working_dir: None,
         debug: false,
+        agent_output: false,
+        inherit_stdin: false,
+        extra_allowed_tools: None,
     }
 }
 
 #[test]
 fn build_claude_args_includes_output_format_stream_json() {
     let req = request_with_both_prompts("Sys", "User");
-    let args = build_claude_args(&req, None);
+    let config = plan_config();
+    let args = build_claude_args(&req, &config, None);
 
     assert!(
         args.contains(&"--output-format".to_string()),
@@ -50,7 +59,8 @@ fn build_claude_args_includes_session_id_on_first_call() {
     req.session_id = Some("abc-123".to_string());
     req.is_resume = false;
 
-    let args = build_claude_args(&req, None);
+    let config = plan_config();
+    let args = build_claude_args(&req, &config, None);
 
     assert!(args.contains(&"--session-id".to_string()));
     let sid_idx = args.iter().position(|a| a == "--session-id").unwrap();
@@ -63,7 +73,8 @@ fn build_claude_args_includes_resume_on_followup_call() {
     req.session_id = Some("abc-123".to_string());
     req.is_resume = true;
 
-    let args = build_claude_args(&req, None);
+    let config = plan_config();
+    let args = build_claude_args(&req, &config, None);
 
     assert!(args.contains(&"--resume".to_string()));
     let resume_idx = args.iter().position(|a| a == "--resume").unwrap();
@@ -76,7 +87,8 @@ fn user_prompt_follows_print_flag() {
         "You are a technical planning assistant.",
         "Create a PRD for: user auth",
     );
-    let args = build_claude_args(&req, None);
+    let config = plan_config();
+    let args = build_claude_args(&req, &config, None);
 
     // Per CLI docs (claude -p "query"), prompt must come immediately after -p
     let p_idx = args
@@ -94,7 +106,8 @@ fn system_prompt_and_user_prompt_are_separate_arguments() {
     let sys = "System instructions here";
     let user = "User query here";
     let req = request_with_both_prompts(sys, user);
-    let args = build_claude_args(&req, None);
+    let config = plan_config();
+    let args = build_claude_args(&req, &config, None);
 
     let sys_idx = args
         .iter()
@@ -119,7 +132,8 @@ fn no_single_arg_contains_both_system_and_user_prompt_content() {
     let sys = "SYSTEM_MARKER";
     let user = "USER_MARKER";
     let req = request_with_both_prompts(sys, user);
-    let args = build_claude_args(&req, None);
+    let config = plan_config();
+    let args = build_claude_args(&req, &config, None);
 
     for arg in &args {
         let has_sys = arg.contains("SYSTEM_MARKER");
@@ -137,7 +151,8 @@ fn append_system_prompt_receives_exactly_one_argument() {
     let sys = "Single system prompt value";
     let user = "User prompt";
     let req = request_with_both_prompts(sys, user);
-    let args = build_claude_args(&req, None);
+    let config = plan_config();
+    let args = build_claude_args(&req, &config, None);
 
     let append_idx = args
         .iter()
@@ -157,7 +172,8 @@ fn multiline_system_prompt_passed_as_single_arg() {
     let sys = "Line 1\nLine 2\nLine 3";
     let user = "Create PRD for feature X";
     let req = request_with_both_prompts(sys, user);
-    let args = build_claude_args(&req, None);
+    let config = plan_config();
+    let args = build_claude_args(&req, &config, None);
 
     let sys_idx = args
         .iter()
@@ -178,19 +194,23 @@ fn request_without_system_prompt_has_user_prompt_after_p() {
         prompt: "Just the user prompt".to_string(),
         system_prompt: None,
         system_prompt_path: None,
-        permission_mode: PermissionMode::Default,
+        goal: Goal::Plan,
         model: None,
         session_id: None,
         is_resume: false,
-        agent_output: false,
-        inherit_stdin: false,
-        allowed_tools: None,
-        permission_prompt_tool: None,
-        mcp_config_path: None,
         working_dir: None,
         debug: false,
+        agent_output: false,
+        inherit_stdin: false,
+        extra_allowed_tools: None,
     };
-    let args = build_claude_args(&req, None);
+    let config = ClaudeInvokeConfig {
+        permission_mode: PermissionMode::Default,
+        allowed_tools: vec![],
+        permission_prompt_tool: None,
+        mcp_config_path: None,
+    };
+    let args = build_claude_args(&req, &config, None);
 
     assert!(!args.contains(&"--append-system-prompt".to_string()));
     assert!(!args.contains(&"--append-system-prompt-file".to_string()));
@@ -204,8 +224,9 @@ fn system_prompt_passed_via_file_when_path_provided() {
     let sys = "System instructions with newlines\nand special chars";
     let user = "User prompt";
     let req = request_with_both_prompts(sys, user);
+    let config = plan_config();
     let path = std::path::Path::new("/tmp/sys-prompt.txt");
-    let args = build_claude_args(&req, Some(path));
+    let args = build_claude_args(&req, &config, Some(path));
 
     assert!(
         args.contains(&"--append-system-prompt-file".to_string()),
@@ -221,17 +242,18 @@ fn system_prompt_passed_via_file_when_path_provided() {
     );
 }
 
-/// build_claude_args includes --allowedTools for each entry when allowed_tools is Some.
+/// build_claude_args includes --allowedTools for each entry when config.allowed_tools is set.
 #[test]
 fn build_claude_args_includes_allowed_tools_when_set() {
-    let mut req = request_with_both_prompts("Sys", "User");
-    req.allowed_tools = Some(vec![
+    let req = request_with_both_prompts("Sys", "User");
+    let mut config = plan_config();
+    config.allowed_tools = vec![
         "Read".to_string(),
         "Write".to_string(),
         "Bash(cargo *)".to_string(),
-    ]);
+    ];
 
-    let args = build_claude_args(&req, None);
+    let args = build_claude_args(&req, &config, None);
 
     let allowed_tools_indices: Vec<usize> = args
         .iter()
@@ -266,11 +288,12 @@ fn build_claude_args_includes_allowed_tools_when_set() {
 /// build_claude_args includes --permission-prompt-tool and --mcp-config when both are set.
 #[test]
 fn build_claude_args_includes_permission_prompt_tool_and_mcp_config_when_set() {
-    let mut req = request_with_both_prompts("Sys", "User");
-    req.permission_prompt_tool = Some("approval_prompt".to_string());
-    req.mcp_config_path = Some(std::path::PathBuf::from("/tmp/mcp.json"));
+    let req = request_with_both_prompts("Sys", "User");
+    let mut config = plan_config();
+    config.permission_prompt_tool = Some("approval_prompt".to_string());
+    config.mcp_config_path = Some(std::path::PathBuf::from("/tmp/mcp.json"));
 
-    let args = build_claude_args(&req, None);
+    let args = build_claude_args(&req, &config, None);
 
     assert!(
         args.contains(&"--permission-prompt-tool".to_string()),
@@ -330,17 +353,15 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n---PRD_END---
         prompt: "User prompt".to_string(),
         system_prompt: Some("System instructions".to_string()),
         system_prompt_path: None,
-        permission_mode: PermissionMode::Plan,
+        goal: Goal::Plan,
         model: None,
         session_id: None,
         is_resume: false,
-        agent_output: false,
-        inherit_stdin: false,
-        allowed_tools: None,
-        permission_prompt_tool: None,
-        mcp_config_path: None,
         working_dir: None,
         debug: false,
+        agent_output: false,
+        inherit_stdin: false,
+        extra_allowed_tools: None,
     };
 
     let _ = backend.invoke(req).expect("invoke should succeed");

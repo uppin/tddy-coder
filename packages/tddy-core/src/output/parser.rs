@@ -104,7 +104,7 @@ pub fn parse_planning_response(s: &str) -> Result<PlanningOutput, ParseError> {
         return parse_planning_output(s);
     }
     Err(ParseError::Malformed(
-        "PRD/TODO delimiters not found".into(),
+        "PRD/TODO delimiters not found. The agent must output either (1) a <structured-response content-type=\"application-json\"> block with {\"goal\":\"plan\",\"prd\":\"...\",\"todo\":\"...\"} or (2) ---PRD_START---/---PRD_END--- and ---TODO_START---/---TODO_END---. Meta-commentary or summaries without the actual plan content cause this error.".into(),
     ))
 }
 

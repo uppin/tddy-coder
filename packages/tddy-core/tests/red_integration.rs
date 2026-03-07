@@ -204,27 +204,11 @@ fn red_workflow_passes_goal_allowlist_to_invoke_request() {
     let invocations = workflow.backend().invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
-    let allowed = req
-        .allowed_tools
-        .as_ref()
-        .expect("InvokeRequest should have allowed_tools set for red goal");
-    let expected: Vec<&str> = vec![
-        "Read",
-        "Write",
-        "Edit",
-        "Glob",
-        "Grep",
-        "Bash(cargo *)",
-        "SemanticSearch",
-    ];
-    for tool in &expected {
-        assert!(
-            allowed.contains(&(*tool).to_string()),
-            "allowlist should contain {}, got {:?}",
-            tool,
-            allowed
-        );
-    }
+    assert_eq!(
+        req.goal,
+        tddy_core::Goal::Red,
+        "InvokeRequest should have goal Red for red workflow"
+    );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }

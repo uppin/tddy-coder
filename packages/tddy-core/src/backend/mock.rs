@@ -28,7 +28,7 @@ impl MockBackend {
         self.push_response(Ok(InvokeResponse {
             output: output.into(),
             exit_code: 0,
-            session_id: String::new(),
+            session_id: None,
             questions: vec![],
             raw_stream: None,
             stderr: None,
@@ -50,7 +50,7 @@ impl MockBackend {
         self.push_response(Ok(InvokeResponse {
             output: output.into(),
             exit_code: 0,
-            session_id: session_id.into(),
+            session_id: Some(session_id.into()),
             questions,
             raw_stream: None,
             stderr: None,
@@ -72,5 +72,9 @@ impl CodingBackend for MockBackend {
             .unwrap()
             .pop_front()
             .unwrap_or_else(|| Err(BackendError::InvocationFailed("no mock response".into())))
+    }
+
+    fn name(&self) -> &str {
+        "mock"
     }
 }

@@ -1,12 +1,47 @@
 //! Coding backend abstraction for LLM-based coders.
 
 mod claude;
+mod cursor;
 mod mock;
 
-pub use claude::{build_claude_args, ClaudeCodeBackend};
+pub use claude::{build_claude_args, ClaudeCodeBackend, ClaudeInvokeConfig, PermissionMode};
+pub use cursor::CursorBackend;
 pub use mock::MockBackend;
 
+/// Enum dispatch for CLI backend selection (avoids trait object overhead).
+#[derive(Debug)]
+pub enum AnyBackend {
+    Claude(ClaudeCodeBackend),
+    Cursor(CursorBackend),
+}
+
+impl CodingBackend for AnyBackend {
+    fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        match self {
+            AnyBackend::Claude(b) => b.invoke(request),
+            AnyBackend::Cursor(b) => b.invoke(request),
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            AnyBackend::Claude(b) => b.name(),
+            AnyBackend::Cursor(b) => b.name(),
+        }
+    }
+}
+
 use crate::error::BackendError;
+use std::path::PathBuf;
+
+/// Workflow goal; backends map this to their own permission/session model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Goal {
+    Plan,
+    AcceptanceTests,
+    Red,
+    Green,
+}
 
 /// Request to invoke the coding backend.
 #[derive(Debug, Clone)]
@@ -14,39 +49,24 @@ pub struct InvokeRequest {
     pub prompt: String,
     pub system_prompt: Option<String>,
     /// When set, backend uses this path instead of system_prompt (avoids temp file).
-    pub system_prompt_path: Option<std::path::PathBuf>,
-    pub permission_mode: PermissionMode,
-    /// Optional model name (e.g. "sonnet") passed as --model to Claude Code CLI.
+    pub system_prompt_path: Option<PathBuf>,
+    pub goal: Goal,
+    /// Optional model name (e.g. "sonnet") passed to the agent.
     pub model: Option<String>,
-    /// Session ID for --session-id (first call) or --resume (followup).
+    /// Session/thread ID for resume (first call: None; followup: Some(id)).
     pub session_id: Option<String>,
-    /// When true, use --resume instead of --session-id.
+    /// When true, use --resume instead of --session-id (or equivalent).
     pub is_resume: bool,
+    /// Working directory for the subprocess (default: inherit from parent).
+    pub working_dir: Option<PathBuf>,
+    /// When true, print the command and cwd to stderr before running.
+    pub debug: bool,
     /// When true, print raw agent output to stderr in real-time.
     pub agent_output: bool,
     /// When true, inherit stdin so the user can grant permission prompts interactively.
     pub inherit_stdin: bool,
-    /// Optional list of tools to auto-allow via --allowedTools (e.g. Read, Write, Bash(cargo *)).
-    pub allowed_tools: Option<Vec<String>>,
-    /// Optional permission prompt tool name for --permission-prompt-tool (e.g. approval_prompt).
-    pub permission_prompt_tool: Option<String>,
-    /// Optional path to MCP config for --mcp-config when using permission prompt tool.
-    pub mcp_config_path: Option<std::path::PathBuf>,
-    /// Working directory for the subprocess (default: inherit from parent).
-    pub working_dir: Option<std::path::PathBuf>,
-    /// When true, print the command and cwd to stderr before running.
-    pub debug: bool,
-}
-
-/// Permission mode for the backend (e.g. plan = read-only).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PermissionMode {
-    /// Read-only analysis, no file edits or Bash.
-    Plan,
-    /// Standard behavior: prompts for permission on first use of each tool.
-    Default,
-    /// Automatically accepts file edit permissions for the session.
-    AcceptEdits,
+    /// Extra tools to add to the goal's allowlist (backends that support allowlists merge these).
+    pub extra_allowed_tools: Option<Vec<String>>,
 }
 
 /// Structured clarification question from AskUserQuestion tool.
@@ -70,9 +90,10 @@ pub struct QuestionOption {
 pub struct InvokeResponse {
     pub output: String,
     pub exit_code: i32,
-    pub session_id: String,
+    /// Session/thread ID for resume; None when backend does not support or provide one.
+    pub session_id: Option<String>,
     pub questions: Vec<ClarificationQuestion>,
-    /// Raw NDJSON stream lines from Claude CLI stdout, for debugging when output parsing fails.
+    /// Raw stream lines from agent stdout, for debugging when output parsing fails.
     pub raw_stream: Option<String>,
     /// Stderr from the subprocess, for debugging when output is empty.
     pub stderr: Option<String>,
@@ -81,4 +102,6 @@ pub struct InvokeResponse {
 /// Trait for LLM-based coding backends.
 pub trait CodingBackend: Send + Sync {
     fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError>;
+    /// Backend identifier (e.g. "claude", "cursor", "mock") for changeset and display.
+    fn name(&self) -> &str;
 }

@@ -4,7 +4,11 @@
 //! and AskUserQuestion tool events from Claude's stream-json output.
 
 use std::io::Cursor;
-use tddy_core::stream::{process_ndjson_stream, ProgressEvent};
+use tddy_core::output::parse_planning_response;
+use tddy_core::stream::cursor::process_cursor_stream;
+use tddy_core::stream::{
+    parse_clarification_questions_from_text, process_ndjson_stream, ProgressEvent,
+};
 
 /// Minimal NDJSON that produces PRD+TODO in result event.
 const NDJSON_WITH_RESULT: &str = r#"{"type":"system","subtype":"init","session_id":"sess-123"}
@@ -21,7 +25,7 @@ const NDJSON_WITH_QUESTIONS: &str = r#"{"type":"system","subtype":"init","sessio
 #[test]
 fn process_ndjson_extracts_result_text_and_session_id() {
     let cursor = Cursor::new(NDJSON_WITH_RESULT);
-    let result = process_ndjson_stream(cursor, |_| {}, |_| {}).expect("should process");
+    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None).expect("should process");
 
     assert_eq!(result.session_id, "sess-123");
     assert!(result.result_text.contains("---PRD_START---"));
@@ -33,7 +37,7 @@ fn process_ndjson_extracts_result_text_and_session_id() {
 #[test]
 fn process_ndjson_extracts_ask_user_question_events() {
     let cursor = Cursor::new(NDJSON_WITH_QUESTIONS);
-    let result = process_ndjson_stream(cursor, |_| {}, |_| {}).expect("should process");
+    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None).expect("should process");
 
     assert_eq!(result.session_id, "sess-456");
     assert_eq!(result.questions.len(), 1);
@@ -55,7 +59,7 @@ const NDJSON_DUPLICATE_QUESTIONS: &str = r#"{"type":"system","subtype":"init","s
 #[test]
 fn process_ndjson_deduplicates_questions() {
     let cursor = Cursor::new(NDJSON_DUPLICATE_QUESTIONS);
-    let result = process_ndjson_stream(cursor, |_| {}, |_| {}).expect("should process");
+    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None).expect("should process");
 
     assert_eq!(
         result.questions.len(),
@@ -76,7 +80,7 @@ const NDJSON_TASK_EVENTS: &str = r#"{"type":"system","subtype":"task_started","d
 fn process_ndjson_emits_progress_events_for_tasks_and_tools() {
     let cursor = Cursor::new(NDJSON_TASK_EVENTS);
     let mut events = Vec::new();
-    let result = process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {})
+    let result = process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None)
         .expect("should process");
 
     assert_eq!(result.result_text, "done");
@@ -103,7 +107,8 @@ const NDJSON_GLOB_WITH_PATTERN: &str = r#"{"type":"system","subtype":"init","ses
 fn process_ndjson_extracts_glob_pattern_as_detail() {
     let cursor = Cursor::new(NDJSON_GLOB_WITH_PATTERN);
     let mut events = Vec::new();
-    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}).expect("should process");
+    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None)
+        .expect("should process");
 
     assert_eq!(events.len(), 1);
     assert!(matches!(
@@ -122,7 +127,8 @@ const NDJSON_WRITE_WITH_PATH: &str = r#"{"type":"system","subtype":"init","sessi
 fn process_ndjson_extracts_write_file_path_as_detail() {
     let cursor = Cursor::new(NDJSON_WRITE_WITH_PATH);
     let mut events = Vec::new();
-    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}).expect("should process");
+    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None)
+        .expect("should process");
 
     assert_eq!(events.len(), 1);
     assert!(matches!(
@@ -141,7 +147,8 @@ const NDJSON_READ_WITH_PATH: &str = r#"{"type":"system","subtype":"init","sessio
 fn process_ndjson_extracts_tool_use_detail_from_input() {
     let cursor = Cursor::new(NDJSON_READ_WITH_PATH);
     let mut events = Vec::new();
-    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}).expect("should process");
+    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None)
+        .expect("should process");
 
     assert_eq!(events.len(), 1);
     assert!(matches!(
@@ -161,7 +168,7 @@ const NDJSON_STRUCTURED_IN_TOOL_RESULT: &str = r#"{"type":"system","subtype":"in
 #[test]
 fn process_ndjson_extracts_structured_response_from_tool_result() {
     let cursor = Cursor::new(NDJSON_STRUCTURED_IN_TOOL_RESULT);
-    let result = process_ndjson_stream(cursor, |_| {}, |_| {}).expect("should process");
+    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None).expect("should process");
 
     assert_eq!(result.session_id, "s1");
     assert!(
@@ -184,7 +191,8 @@ const NDJSON_SUBAGENT_TOOL_USE: &str = r#"{"type":"system","subtype":"init","ses
 fn process_ndjson_skips_tool_use_when_parent_tool_use_id_set() {
     let cursor = Cursor::new(NDJSON_SUBAGENT_TOOL_USE);
     let mut events = Vec::new();
-    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}).expect("should process");
+    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None)
+        .expect("should process");
 
     assert_eq!(
         events.len(),
@@ -193,4 +201,163 @@ fn process_ndjson_skips_tool_use_when_parent_tool_use_id_set() {
     );
     assert!(matches!(&events[0], ProgressEvent::TaskStarted { .. }));
     assert!(matches!(&events[1], ProgressEvent::TaskProgress { .. }));
+}
+
+/// Cursor emits assistant events with partial text chunks. Structured-response may be split across
+/// multiple events. We must concatenate chunks and parse the combined result.
+fn cursor_partial_chunks_ndjson() -> String {
+    let chunk1 = r#"{"type":"system","subtype":"init","session_id":"cursor-sess"}"#;
+    let chunk2 = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"<structured-response content-type=\"application-json\">"}]}}"#;
+    let chunk3 = r##"{"type":"assistant","message":{"content":[{"type":"text","text":"{\"goal\":\"plan\",\"prd\":\"# X\",\"todo\":\"- [ ] T1\"}"}]}}"##;
+    let chunk4 = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"</structured-response>"}]}}"#;
+    let chunk5 = r#"{"type":"result","subtype":"success","result":"","session_id":"cursor-sess","is_error":false}"#;
+    format!(
+        "{}\n{}\n{}\n{}\n{}\n",
+        chunk1, chunk2, chunk3, chunk4, chunk5
+    )
+}
+
+#[test]
+fn process_cursor_stream_concatenates_partial_chunks_for_parsing() {
+    let ndjson = cursor_partial_chunks_ndjson();
+    let cursor = Cursor::new(ndjson);
+    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None).expect("should process");
+
+    assert_eq!(result.session_id, "cursor-sess");
+    assert!(
+        result.result_text.contains("<structured-response"),
+        "concatenated text should contain structured-response, got: {}",
+        result.result_text
+    );
+    assert!(
+        result.result_text.contains("</structured-response>"),
+        "concatenated text should contain closing tag, got: {}",
+        result.result_text
+    );
+
+    let planning =
+        parse_planning_response(&result.result_text).expect("should parse concatenated chunks");
+    assert_eq!(planning.prd, "# X");
+    assert_eq!(planning.todo, "- [ ] T1");
+}
+
+/// Cursor tool_call events should emit ToolUse with displayable detail (glob pattern, file path).
+fn cursor_tool_calls_with_detail_ndjson() -> String {
+    let line1 = r#"{"type":"system","subtype":"init","session_id":"s1"}"#;
+    let line2 = r#"{"type":"tool_call","subtype":"started","tool_call":{"globToolCall":{"args":{"globPattern":"*.md"}}},"session_id":"s1"}"#;
+    let line3 = r#"{"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{"path":"/project/README.md"}}},"session_id":"s1"}"#;
+    let line4 = r#"{"type":"result","subtype":"success","result":"done","session_id":"s1","is_error":false}"#;
+    format!("{}\n{}\n{}\n{}\n", line1, line2, line3, line4)
+}
+
+#[test]
+fn process_cursor_stream_emits_tool_use_with_detail_for_display() {
+    let ndjson = cursor_tool_calls_with_detail_ndjson();
+    let cursor = Cursor::new(ndjson);
+    let mut events = Vec::new();
+    let _ = process_cursor_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None)
+        .expect("should process");
+
+    assert_eq!(events.len(), 2, "should emit 2 ToolUse events");
+    assert!(
+        matches!(&events[0], ProgressEvent::ToolUse { name, detail: Some(d) } if name == "glob" && d == "*.md"),
+        "glob should have detail *.md, got: {:?}",
+        events[0]
+    );
+    assert!(
+        matches!(&events[1], ProgressEvent::ToolUse { name, detail: Some(d) } if name == "read" && d == "README.md"),
+        "read should have detail README.md (filename), got: {:?}",
+        events[1]
+    );
+}
+
+/// Cursor askUserQuestionToolCall should extract questions for Q&A flow.
+/// Schema: {"type":"tool_call","subtype":"started","tool_call":{"askUserQuestionToolCall":{"args":{"questions":[...]}}}}
+fn cursor_ask_question_ndjson() -> String {
+    let line1 = r#"{"type":"system","subtype":"init","session_id":"s1"}"#;
+    let line2 = r#"{"type":"tool_call","subtype":"started","call_id":"t1","tool_call":{"askUserQuestionToolCall":{"args":{"questions":[{"question":"Which tech stack?","header":"Tech Stack","options":[{"label":"React","description":"React with hooks"},{"label":"Vanilla","description":"Vanilla JS"}],"multiSelect":false}]}}},"session_id":"s1"}"#;
+    let line3 = r#"{"type":"result","subtype":"success","result":"","session_id":"s1"}"#;
+    format!("{}\n{}\n{}\n", line1, line2, line3)
+}
+
+#[test]
+fn process_cursor_stream_extracts_ask_user_question_for_qa() {
+    let ndjson = cursor_ask_question_ndjson();
+    let cursor = Cursor::new(ndjson);
+    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None).expect("should process");
+
+    assert_eq!(result.questions.len(), 1, "should extract 1 question");
+    assert_eq!(result.questions[0].header, "Tech Stack");
+    assert_eq!(result.questions[0].question, "Which tech stack?");
+    assert_eq!(result.questions[0].options.len(), 2);
+    assert_eq!(result.questions[0].options[0].label, "React");
+    assert_eq!(
+        result.questions[0].options[0].description,
+        "React with hooks"
+    );
+    assert!(!result.questions[0].multi_select);
+}
+
+/// parse_clarification_questions_from_text extracts questions from structured XML block in agent output.
+#[test]
+fn parse_clarification_questions_from_text_extracts_questions() {
+    let text = r#"I need more information before creating the plan.
+
+<clarification-questions content-type="application-json">
+{"questions":[{"header":"Tech Stack","question":"Which tech stack?","options":[{"label":"React","description":"React with hooks"},{"label":"Vanilla","description":"Vanilla JS"}],"multiSelect":false},{"header":"Scope","question":"What is the target audience?","options":[],"multiSelect":false}]}
+</clarification-questions>"#;
+    let questions = parse_clarification_questions_from_text(text);
+    assert_eq!(questions.len(), 2);
+    assert_eq!(questions[0].header, "Tech Stack");
+    assert_eq!(questions[0].question, "Which tech stack?");
+    assert_eq!(questions[0].options.len(), 2);
+    assert_eq!(questions[0].options[0].label, "React");
+    assert!(!questions[0].multi_select);
+    assert_eq!(questions[1].header, "Scope");
+    assert_eq!(questions[1].question, "What is the target audience?");
+    assert!(questions[1].options.is_empty());
+}
+
+/// parse_clarification_questions_from_text returns empty when block is absent.
+#[test]
+fn parse_clarification_questions_from_text_returns_empty_when_no_block() {
+    let text = "Just some plain text without any structured block.";
+    let questions = parse_clarification_questions_from_text(text);
+    assert!(questions.is_empty());
+}
+
+/// Cursor stream falls back to text parsing when no AskQuestion tool events.
+#[test]
+fn process_cursor_stream_falls_back_to_clarification_questions_block() {
+    let line1 = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"I need clarification.\n\n"}]}}"#;
+    let line2 = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"<clarification-questions content-type=\"application-json\">{\"questions\":[{\"header\":\"Confirm\",\"question\":\"Proceed?\",\"options\":[{\"label\":\"Yes\",\"description\":\"OK\"}],\"multiSelect\":false}]}</clarification-questions>"}]}}"#;
+    let line3 = r#"{"type":"result","result":"","session_id":"s3"}"#;
+    let ndjson = format!("{}\n{}\n{}\n", line1, line2, line3);
+    let cursor = Cursor::new(ndjson);
+    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None).expect("should process");
+
+    assert_eq!(
+        result.questions.len(),
+        1,
+        "should extract from text block when no tool events"
+    );
+    assert_eq!(result.questions[0].header, "Confirm");
+    assert_eq!(result.questions[0].question, "Proceed?");
+    assert_eq!(result.questions[0].options[0].label, "Yes");
+}
+
+/// Cursor askQuestionToolCall (alternative name) should also extract questions.
+#[test]
+fn process_cursor_stream_extracts_ask_question_tool_call() {
+    let line1 = r#"{"type":"system","subtype":"init","session_id":"s2"}"#;
+    let line2 = r#"{"type":"tool_call","subtype":"started","tool_call":{"askQuestionToolCall":{"args":{"questions":[{"question":"Proceed?","header":"Confirm","options":[{"label":"Yes","description":"Continue"},{"label":"No","description":"Cancel"}],"multiSelect":false}]}}},"session_id":"s2"}"#;
+    let line3 = r#"{"type":"result","result":"","session_id":"s2"}"#;
+    let ndjson = format!("{}\n{}\n{}\n", line1, line2, line3);
+    let cursor = Cursor::new(ndjson);
+    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None).expect("should process");
+
+    assert_eq!(result.questions.len(), 1);
+    assert_eq!(result.questions[0].header, "Confirm");
+    assert_eq!(result.questions[0].question, "Proceed?");
+    assert_eq!(result.questions[0].options[0].label, "Yes");
 }
