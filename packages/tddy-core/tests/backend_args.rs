@@ -12,6 +12,7 @@ fn request_with_both_prompts(system_prompt: &str, user_prompt: &str) -> InvokeRe
     InvokeRequest {
         prompt: user_prompt.to_string(),
         system_prompt: Some(system_prompt.to_string()),
+        system_prompt_path: None,
         permission_mode: PermissionMode::Plan,
         model: None,
         session_id: None,
@@ -176,6 +177,7 @@ fn request_without_system_prompt_has_user_prompt_after_p() {
     let req = InvokeRequest {
         prompt: "Just the user prompt".to_string(),
         system_prompt: None,
+        system_prompt_path: None,
         permission_mode: PermissionMode::Default,
         model: None,
         session_id: None,
@@ -327,6 +329,7 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n---PRD_END---
     let req = InvokeRequest {
         prompt: "User prompt".to_string(),
         system_prompt: Some("System instructions".to_string()),
+        system_prompt_path: None,
         permission_mode: PermissionMode::Plan,
         model: None,
         session_id: None,

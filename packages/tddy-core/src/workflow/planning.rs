@@ -11,10 +11,14 @@ If you need clarification before creating the PRD, use the AskUserQuestion tool.
 Otherwise, you MUST include a structured-response block with your output. Use this exact format:
 
 <structured-response content-type="application-json">
-{"goal": "plan", "prd": "<PRD markdown content>", "todo": "<TODO markdown content>"}
+{"goal": "plan", "prd": "<PRD markdown content>", "todo": "<TODO markdown content>", "discovery": {"toolchain": {"<tool>": "<version>"}, "scripts": {"<name>": "<command>"}, "doc_locations": ["<path>"], "plan_dir_suggestion": "<path>", "relevant_code": [{"path": "<path>", "reason": "<why>"}], "test_infrastructure": {"runner": "<cmd>", "conventions": "<pattern>"}}, "demo_plan": {"demo_type": "cli|api|ui", "setup_instructions": "<text>", "steps": [{"description": "<text>", "command_or_action": "<cmd>", "expected_result": "<text>"}], "verification": "<text>"}}
 </structured-response>
 
 The prd and todo values must be JSON strings (escape quotes and newlines as needed). The PRD should include: Summary, Background, Requirements, Acceptance Criteria, and a Testing Plan section. The Testing Plan must contain: (1) test level determination (E2E/Integration/Unit) with rationale, (2) a list of acceptance tests with descriptive names, (3) target test file paths (existing or new), (4) strong assertions for each test. The TODO should list discrete implementation tasks in dependency order using - [ ] for pending and [x] for completed.
+
+**discovery** (optional): Inspect the project to populate toolchain (e.g. rust, cargo, node), scripts (test, lint), doc_locations, plan_dir_suggestion (where to create plan dir, e.g. docs/dev/1-WIP/), relevant_code paths, and test_infrastructure.
+
+**demo_plan** (optional): When the feature has a user-facing demo (CLI, API, UI), include demo_type, setup_instructions, steps with description/command_or_action/expected_result, and verification criteria.
 
 You may include explanatory text before or after the structured-response block, but the block itself is required for parsing."#
         .to_string()

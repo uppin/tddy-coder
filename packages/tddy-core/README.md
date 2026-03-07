@@ -16,7 +16,7 @@ cargo test -p tddy-core
 
 ## Architecture
 
-Core library providing: `CodingBackend` trait for LLM backends, `Workflow` state machine, NDJSON stream parser for Claude Code CLI, output parser for PRD/TODO and acceptance-tests (structured-response and delimited), artifact writer, and session file persistence. Implements `ClaudeCodeBackend` (production) and `MockBackend` (testing). Supports `plan` and `acceptance_tests` workflow steps.
+Core library providing: `CodingBackend` trait for LLM backends, `Workflow` state machine, NDJSON stream parser for Claude Code CLI, output parser for PRD/TODO and acceptance-tests (structured-response and delimited), artifact writer, and changeset.yaml persistence. Implements `ClaudeCodeBackend` (production) and `MockBackend` (testing). Supports plan, acceptance-tests, red, and green workflow steps. Changeset stores initial_prompt, clarification_qa, sessions (with system_prompt_file per session), discovery, and workflow state.
 
 ## Documentation
 

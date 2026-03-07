@@ -139,15 +139,33 @@ fn green_workflow_returns_error_when_impl_session_missing() {
     backend.push_ok(RED_OUTPUT);
     let mut workflow = Workflow::new(backend);
     let _ = workflow.red(&plan_dir, None, &RedOptions::default());
-    std::fs::remove_file(plan_dir.join(".impl-session")).expect("remove .impl-session");
+    // Overwrite changeset with one that has no impl session — green should fail
+    let changeset_no_impl = r#"version: 1
+models: {}
+sessions:
+  - id: "plan-only"
+    agent: claude
+    tag: plan
+    created_at: "2026-03-07T10:00:00Z"
+state:
+  current: AcceptanceTestsReady
+  updated_at: "2026-03-07T10:00:00Z"
+  history: []
+artifacts: {}
+"#;
+    std::fs::write(plan_dir.join("changeset.yaml"), changeset_no_impl).expect("write changeset");
 
     let options = tddy_core::GreenOptions::default();
     let result = workflow.green(&plan_dir, None, &options);
 
     assert!(result.is_err());
     assert!(
-        matches!(result, Err(tddy_core::WorkflowError::SessionMissing(_))),
-        "expected SessionMissing when .impl-session missing, got {:?}",
+        matches!(
+            result,
+            Err(tddy_core::WorkflowError::ChangesetInvalid(_))
+                | Err(tddy_core::WorkflowError::InvalidTransition(_))
+        ),
+        "expected ChangesetInvalid or InvalidTransition when impl session missing, got {:?}",
         result
     );
 
@@ -275,9 +293,11 @@ fn green_workflow_resumes_session_from_impl_session_file() {
     let mut workflow = Workflow::new(backend);
     let _ = workflow.red(&plan_dir, None, &RedOptions::default());
 
-    let impl_session_path = plan_dir.join(".impl-session");
-    let expected_session_id =
-        std::fs::read_to_string(&impl_session_path).expect(".impl-session should exist");
+    let invocations_before_green = workflow.backend().invocations();
+    let expected_session_id = invocations_before_green
+        .last()
+        .and_then(|r| r.session_id.as_deref())
+        .expect("red should have set session_id");
 
     let options = tddy_core::GreenOptions::default();
     let _ = workflow.green(&plan_dir, None, &options);
@@ -286,8 +306,8 @@ fn green_workflow_resumes_session_from_impl_session_file() {
     let green_req = invocations.last().unwrap();
     assert_eq!(
         green_req.session_id.as_deref(),
-        Some(expected_session_id.trim()),
-        "green should resume with session_id from .impl-session"
+        Some(expected_session_id),
+        "green should resume with session_id from changeset.yaml"
     );
     assert!(
         green_req.is_resume,
@@ -307,13 +327,50 @@ fn red_workflow_writes_impl_session_to_plan_dir() {
     let mut workflow = Workflow::new(backend);
     let _ = workflow.red(&plan_dir, None, &RedOptions::default());
 
-    let impl_session_path = plan_dir.join(".impl-session");
+    let changeset_path = plan_dir.join("changeset.yaml");
     assert!(
-        impl_session_path.exists(),
-        ".impl-session should be written by red goal"
+        changeset_path.exists(),
+        "changeset.yaml should be written by red goal"
     );
-    let content = std::fs::read_to_string(&impl_session_path).expect("read .impl-session");
-    assert!(!content.is_empty());
+    let content = std::fs::read_to_string(&changeset_path).expect("read changeset.yaml");
+    assert!(content.contains("tag: impl") || content.contains("tag:impl"));
+    assert!(content.contains("RedTestsReady"));
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+#[test]
+fn green_goal_reports_demo_results() {
+    let plan_dir = std::env::temp_dir().join("tddy-green-demo-results");
+    setup_plan_dir_with_red_output(&plan_dir);
+    std::fs::write(
+        plan_dir.join("demo-plan.md"),
+        "# Demo Plan\n## Type\ncli\n## Steps\n1. Run `cargo run`\n## Verification\nSee output",
+    )
+    .expect("write demo-plan.md");
+
+    const GREEN_OUTPUT_WITH_DEMO: &str = r#"Implemented. Demo verified.
+
+<structured-response content-type="application-json">
+{"goal":"green","summary":"Implemented. All tests passing. Demo verified.","tests":[{"name":"auth_service_validates_email","file":"packages/auth/src/service.rs","line":42,"status":"passing"},{"name":"auth_service_rejects_empty_email","file":"packages/auth/src/service.rs","line":55,"status":"passing"},{"name":"session_store_persists_token","file":"packages/auth/tests/session_it.rs","line":22,"status":"passing"}],"implementations":[{"name":"AuthService","file":"packages/auth/src/service.rs","line":10,"kind":"struct"}],"demo_results":{"summary":"Demo executed successfully","steps_completed":1}}
+</structured-response>
+"#;
+
+    let backend = MockBackend::new();
+    backend.push_ok(RED_OUTPUT);
+    backend.push_ok(GREEN_OUTPUT_WITH_DEMO);
+    let mut workflow = Workflow::new(backend);
+    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
+    let options = tddy_core::GreenOptions::default();
+    let result = workflow.green(&plan_dir, None, &options);
+
+    let _output = result.expect("green should succeed");
+
+    let demo_results_path = plan_dir.join("demo-results.md");
+    assert!(
+        demo_results_path.exists(),
+        "demo-results.md should be written when green completes with demo-plan.md present"
+    );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }

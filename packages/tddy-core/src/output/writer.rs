@@ -1,9 +1,40 @@
 //! Write planning artifacts to the filesystem.
 
 use crate::error::WorkflowError;
-use crate::output::{AcceptanceTestsOutput, GreenOutput, PlanningOutput, RedOutput};
+use crate::output::{AcceptanceTestsOutput, DemoPlan, GreenOutput, PlanningOutput, RedOutput};
 use std::fs;
 use std::path::Path;
+
+/// Inject a "Related Documents" section with relative links to peer .md files.
+pub fn inject_cross_references(content: &str, plan_dir: &Path, self_name: &str) -> String {
+    let mut peers: Vec<String> = fs::read_dir(plan_dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            if name.ends_with(".md") && name != self_name {
+                Some(format!("[{}](./{})", name, name))
+            } else {
+                None
+            }
+        })
+        .collect();
+    peers.sort();
+    if peers.is_empty() {
+        return content.to_string();
+    }
+    let mut out = content.to_string();
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str("\n## Related Documents\n\n");
+    for p in &peers {
+        out.push_str(&format!("- {}\n", p));
+    }
+    out
+}
 
 /// Generate a directory name from the feature description: YYYY-MM-DD-<slug>.
 pub fn slugify_directory_name(feature: &str) -> String {
@@ -59,15 +90,60 @@ pub fn read_impl_session_file(plan_dir: &Path) -> Result<String, WorkflowError> 
 }
 
 /// Write PRD.md and TODO.md to the given directory.
+/// Injects cross-references to peer documents.
 pub fn write_artifacts(output_dir: &Path, planning: &PlanningOutput) -> Result<(), WorkflowError> {
     fs::create_dir_all(output_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
-    let prd_path = output_dir.join("PRD.md");
-    fs::write(&prd_path, &planning.prd).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
-
+    // Write TODO first so it exists when we inject cross-refs into PRD
     let todo_path = output_dir.join("TODO.md");
-    fs::write(&todo_path, &planning.todo).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    let todo_content = inject_cross_references(&planning.todo, output_dir, "TODO.md");
+    fs::write(&todo_path, todo_content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
+    let prd_path = output_dir.join("PRD.md");
+    let prd_content = inject_cross_references(&planning.prd, output_dir, "PRD.md");
+    fs::write(&prd_path, prd_content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+
+    if let Some(ref demo) = planning.demo_plan {
+        write_demo_plan_file(output_dir, demo)?;
+    }
+
+    Ok(())
+}
+
+/// Write demo-plan.md to the plan directory.
+pub fn write_demo_plan_file(plan_dir: &Path, demo: &DemoPlan) -> Result<(), WorkflowError> {
+    let mut out = format!(
+        "# Demo Plan\n\n## Type\n{}\n\n## Setup\n\n{}\n\n## Steps\n\n",
+        demo.demo_type, demo.setup_instructions
+    );
+    for (i, step) in demo.steps.iter().enumerate() {
+        out.push_str(&format!(
+            "### Step {}\n\n- **Description**: {}\n- **Action**: {}\n- **Expected**: {}\n\n",
+            i + 1,
+            step.description,
+            step.command_or_action,
+            step.expected_result
+        ));
+    }
+    out.push_str(&format!("## Verification\n\n{}\n", demo.verification));
+    let content = inject_cross_references(&out, plan_dir, "demo-plan.md");
+    let path = plan_dir.join("demo-plan.md");
+    fs::write(&path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    Ok(())
+}
+
+/// Write demo-results.md to the plan directory.
+pub fn write_demo_results_file(
+    plan_dir: &Path,
+    summary: &str,
+    steps_completed: u32,
+) -> Result<(), WorkflowError> {
+    let content = format!(
+        "# Demo Results\n\n## Summary\n\n{}\n\n## Steps Completed\n\n{}\n",
+        summary, steps_completed
+    );
+    let path = plan_dir.join("demo-results.md");
+    fs::write(&path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     Ok(())
 }
 
@@ -77,7 +153,7 @@ pub fn write_acceptance_tests_file(
     output: &AcceptanceTestsOutput,
 ) -> Result<(), WorkflowError> {
     let md_path = plan_dir.join("acceptance-tests.md");
-    let content = output.to_markdown();
+    let content = inject_cross_references(&output.to_markdown(), plan_dir, "acceptance-tests.md");
     fs::write(&md_path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     Ok(())
 }
@@ -85,7 +161,7 @@ pub fn write_acceptance_tests_file(
 /// Write red-output.md to the plan directory.
 pub fn write_red_output_file(plan_dir: &Path, output: &RedOutput) -> Result<(), WorkflowError> {
     let md_path = plan_dir.join("red-output.md");
-    let content = output.to_markdown();
+    let content = inject_cross_references(&output.to_markdown(), plan_dir, "red-output.md");
     fs::write(&md_path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     Ok(())
 }
