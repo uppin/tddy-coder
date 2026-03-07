@@ -1,0 +1,10 @@
+[package]
+name = "tddy-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core library for tddy-coder"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+thiserror = "2"
+

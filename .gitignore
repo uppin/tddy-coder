@@ -1,0 +1,12 @@
+# Nix profile (GC root) - created by `./dev` or `nix develop --profile ./.nix-profile`
+.nix-profile
+.nix-profile-*
+
+# Agent verification output (when terminal capture is broken)
+.verify-result.txt
+
+# Build artifacts
+target/
+
+# macOS
+.DS_Store

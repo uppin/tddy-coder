@@ -1,0 +1,616 @@
+---
+description:
+globs: docs/ft/*
+alwaysApply: false
+---
+## Feature Documentation Standards
+
+## Purpose
+
+1. Feature documents contain **high-level product requirements** with minimal technical implementation details
+2. They serve as a **meeting point** between Product Manager, UX, Developer, and LLM assistant
+3. Feature documents are **organized by product area** under `docs/ft/`
+4. Each document includes **acceptance criteria** with checked (completed) and unchecked (remaining) tasks
+
+## Product vs Technical Product
+
+### Product (End-User Facing)
+**Definition**: Applications or services that end users directly interact with.
+
+**Characteristics**:
+- Has a user interface (web, desktop, mobile)
+- Solves user problems directly
+- Measured by user engagement and satisfaction
+- UX and design are critical
+
+**Examples**:
+- **Editor**: Frontend application for document editing
+- **Dashboard**: Admin interface for managing documents
+
+### Technical Product (Developer/System Facing)
+**Definition**: APIs, SDKs, libraries, or tools that developers or systems consume.
+
+**Characteristics**:
+- No direct end-user UI (or minimal dev-facing UI)
+- Provides capabilities to other systems/developers
+- Measured by API adoption, performance, reliability
+- Developer experience (DX) and documentation are critical
+
+**Categories**:
+
+#### 1. **APIs** (Application Programming Interfaces)
+- Expose service capabilities via HTTP/gRPC/other protocols
+- Consumed by other applications or services
+- **Example**: `api-server` provides document processing API
+- **Example**: `gotenberg-api` provides document conversion API
+
+#### 2. **Libraries/SDKs** (Software Development Kits)
+- Embedded into other applications
+- Provide reusable functionality
+- **Example**: `native-parser` is a WASM library for parsing
+- **Example**: `tddy-core` Cargo crate
+
+#### 3. **Tools** (Developer Tools)
+- Help developers build, test, or debug
+- Improve development workflow
+- **Example**: MCP servers for document inspection
+- **Example**: Test harness for E2E testing
+
+#### 4. **Infrastructure** (Platform Services)
+- Cross-cutting concerns
+- Support multiple products/services
+- **Example**: Logging, observability, BI tracking
+
+### Documentation Focus Shift
+
+**For Products** (User-Facing):
+- Focus on **user stories** and **user workflows**
+- Emphasize UX/UI requirements
+- Success metrics: user satisfaction, engagement, conversion
+- Feature: "User can drag signature onto document"
+
+**For Technical Products** (Developer/System-Facing):
+- Focus on **API contracts** and **integration patterns**
+- Emphasize developer experience (DX)
+- Success metrics: adoption, performance, reliability, error rates
+- Feature: "API endpoint accepts multipart upload with retry support"
+
+### Key Distinction: Server vs API
+
+❌ **WRONG**: "api-server is a product"
+✅ **CORRECT**: "api-server API is a technical product (the API consumers use)"
+
+**The server is infrastructure, the API is the product.**
+
+**Example**:
+- Directory: `docs/ft/api-server/` (named after implementation)
+- 1-OVERVIEW.md title: "API Server" (product name)
+- Features describe: API endpoints, integrations, data contracts
+
+## Documentation Structure
+
+### Product Area Organization
+
+All feature documentation is organized by product area:
+
+```
+docs/ft/
+├── editor-app/        # 🎨 PRODUCT: Frontend editing application
+│   ├── 1-OVERVIEW.md          # Title: "Editor"
+│   ├── appendices/          # Technical specs, diagrams, assets
+│   ├── 1-WIP/              # Feature PRD documents
+│   └── *.md                 # User-facing features (signature tools, etc.)
+│
+├── domain-api/           # 🔌 TECHNICAL PRODUCT (API): Domain API
+│   ├── 1-OVERVIEW.md          # Title: "Domain API"
+│   ├── appendices/          # API specs, proto definitions
+│   ├── 1-WIP/
+│   └── *.md                 # API features (endpoints, integrations)
+│
+├── native-parser/       # 📚 TECHNICAL PRODUCT (Library): Native Parser
+│   ├── 1-OVERVIEW.md          # Title: "Native Parser Library"
+│   ├── appendices/          # Parser specs, WASM details
+│   ├── 1-WIP/
+│   └── *.md                 # Library features (parsing, revisions, etc.)
+│
+├── gotenberg-api/           # 🔌 TECHNICAL PRODUCT (API): Document Conversion API
+│   ├── 1-OVERVIEW.md          # Title: "Gotenberg API"
+│   ├── appendices/          # API specs, conversion formats
+│   ├── 1-WIP/
+│   └── *.md                 # API features (conversion endpoints)
+│
+├── mcp-servers/             # 🛠️ TECHNICAL PRODUCT (Tools): MCP Development Tools
+│   ├── 1-OVERVIEW.md          # Title: "MCP Servers"
+│   ├── appendices/          # MCP protocol specs
+│   ├── 1-WIP/
+│   └── *.md                 # Tool features (inspection, testing)
+│
+└── infrastructure/          # 🏗️ TECHNICAL PRODUCT (Platform): Cross-Cutting Services
+    ├── 1-OVERVIEW.md          # Title: "Infrastructure Services"
+    ├── appendices/          # Platform specs
+    ├── 1-WIP/
+    └── *.md                 # Platform features (logging, BI)
+```
+
+### Directory Purposes
+
+#### 1-OVERVIEW.md
+- High-level product area description
+- Core capabilities summary
+- Target users and use cases
+- Links to all feature documents in the area
+- Integration points with other product areas
+- Link to product area changelog.md
+
+#### changelog.md
+- **Change History** for all features in the product area
+- Tracks requirement changes and PRDs applied
+- Organized by feature name, then chronologically
+- Release note-style summaries (no file references)
+- See [prd-doc.mdc](mdc:.cursor/rules/prd-doc.mdc) for format and guidelines
+
+#### appendices/
+- Technical specifications
+- Architecture diagrams
+- Research documents
+- Figma designs and mockups
+- Reference materials
+- Assets (images, documents, etc.)
+
+#### 1-WIP/
+- **Feature PRD documents** (requirement updates)
+- **See**: [prd-doc.mdc](mdc:.cursor/rules/prd-doc.mdc) for complete PRD document structure and requirements
+
+#### Feature Documents (*.md)
+- Individual feature specifications
+- Product requirements
+- User stories and acceptance criteria
+- Success metrics
+
+## Feature Document Template
+
+### Template Selection
+
+**For PRODUCTS (End-User Facing)**: Use the **User-Focused Template** below
+**For TECHNICAL PRODUCTS (APIs, Libraries, Tools)**: Use the **Developer-Focused Template** below
+
+---
+
+### User-Focused Template (Products)
+
+Use this for: **editor-app** and other end-user applications.
+
+```markdown
+# [Feature Name]
+
+## Overview
+Brief description of the feature (2-3 sentences).
+
+## Business Context
+
+### Problem Statement
+What problem does this feature solve for end users?
+
+### Target Users
+- **User Type 1**: Description
+- **User Type 2**: Description
+
+### Success Metrics
+- **Metric 1**: Target value (e.g., user engagement, task completion time)
+- **Metric 2**: Target value
+
+## Feature Requirements
+
+### Core Functionality
+List of main user-facing capabilities with brief descriptions.
+
+### User Experience Requirements
+How should users interact with this feature? What's the UX flow?
+
+## Feature Requirements
+
+### Core Functionality
+List of main capabilities with brief descriptions.
+
+### User Experience Requirements
+How should users interact with this feature?
+
+## Technical Requirements
+
+### Architecture
+High-level technical approach (no implementation details).
+
+### Performance Constraints
+Expected performance targets.
+
+### Security Requirements
+Security considerations.
+
+## User Stories
+
+### Primary Use Cases
+
+#### Story 1: [Title]
+**As a** [user type]
+**I want to** [action]
+**So that** [benefit]
+
+**Acceptance Criteria:**
+- [ ] Criterion 1
+- [ ] Criterion 2
+- [ ] Criterion 3
+
+## Constraints and Limitations
+
+### Scope Limitations
+What is explicitly NOT included.
+
+### Technical Constraints
+Known technical limitations.
+
+## Implementation Phases
+
+### Phase 1: [Name]
+**Status**: ✅ Complete | 🚧 In Progress | 📋 Planned
+**Duration**: X weeks
+**Scope**: Brief description
+
+- [ ] Task 1
+- [ ] Task 2
+
+## Success Criteria
+
+### Functional Requirements
+- [ ] Requirement 1
+- [ ] Requirement 2
+
+### Performance Requirements
+- [ ] Requirement 1
+- [ ] Requirement 2
+
+## Related Documentation
+- [Link to related feature]
+- [Link to technical doc]
+```
+
+---
+
+### Developer-Focused Template (Technical Products)
+
+Use this for: **domain-api**, **native-parser**, **gotenberg-api**, **mcp-servers**, **infrastructure**.
+
+```markdown
+# [Feature Name]
+
+## Overview
+Brief description of the API/library/tool feature (2-3 sentences).
+
+## Technical Context
+
+### Problem Statement
+What technical problem does this feature solve? What developer need does it address?
+
+### Target Consumers
+- **Consumer Type 1**: (e.g., Frontend applications, other services)
+- **Consumer Type 2**: Description
+- **Integration Points**: Where/how is this consumed?
+
+### Success Metrics
+- **Performance**: Target latency, throughput
+- **Reliability**: Target uptime, error rate
+- **Adoption**: Usage metrics, integration count
+
+## API/Library Requirements
+
+### Core Capabilities
+List of main API endpoints, library functions, or tool features.
+
+### Developer Experience (DX) Requirements
+- API contract clarity
+- Error handling patterns
+- Documentation completeness
+- Integration ease
+
+## Technical Requirements
+
+### API Contract (for APIs)
+- Request/response schemas
+- Authentication/authorization
+- Rate limiting
+- Versioning strategy
+
+### Library Interface (for Libraries)
+- Public API surface
+- Type definitions
+- Export patterns
+- Bundling requirements
+
+### Tool Capabilities (for Tools)
+- Commands/operations available
+- Input/output formats
+- Configuration options
+
+### Architecture
+High-level technical approach.
+
+### Performance Constraints
+Expected performance targets (latency, throughput, resource usage).
+
+### Integration Patterns
+How do consumers integrate with this feature?
+
+## Integration Examples
+
+### Example 1: [Consumer Type]
+```
+[Code example or API call example]
+```
+
+### Example 2: [Consumer Type]
+```
+[Code example or integration pattern]
+```
+
+## API/Contract Specification
+
+### Endpoints (for APIs)
+- `POST /endpoint`: Description
+- `GET /endpoint/{id}`: Description
+
+### Functions (for Libraries)
+- `functionName(params)`: Description
+- `exportedClass`: Description
+
+### Commands (for Tools)
+- `/command`: Description
+- `tool-operation`: Description
+
+## Acceptance Criteria
+
+### Functional Requirements
+- [ ] API endpoint returns correct schema
+- [ ] Library function handles edge cases
+- [ ] Tool operation completes successfully
+
+### Performance Requirements
+- [ ] Response time < Xms at p95
+- [ ] Library memory usage < X MB
+- [ ] Tool operation throughput > X ops/sec
+
+### Integration Requirements
+- [ ] Consumer application successfully integrates
+- [ ] Error handling tested
+- [ ] Documentation complete
+
+## Testing Strategy
+
+### Integration Testing
+How will consumers test their integration?
+
+### Performance Testing
+Load testing, benchmark criteria
+
+## Related Documentation
+- [API Reference](./appendices/api-reference.md)
+- [Integration Guide](./appendices/integration-guide.md)
+- [Related technical doc]
+```
+
+---
+
+### Optional Sections (Both Templates)
+
+- **Risks and Mitigation**: Known risks and mitigation strategies
+- **Dependencies**: External dependencies
+- **Testing Strategy**: High-level testing approach
+- **Monitoring and Observability**: How to monitor the feature
+- **PRDs**: Historical record of PRDs applied to this feature (see [prd-doc.mdc](mdc:.cursor/rules/prd-doc.mdc))
+
+## Acceptance Criteria Format
+
+Use checkboxes to track completion:
+
+```markdown
+## Acceptance Criteria
+
+### Functional Requirements
+- ✅ **Completed requirement**: Description
+- 🚧 **In progress requirement**: Description
+- ❌ **Blocked requirement**: Description (reason)
+- [ ] **Pending requirement**: Description
+```
+
+### Status Indicators
+- ✅ Complete
+- 🚧 In Progress
+- ❌ Blocked/Failed
+- 📋 Planned
+- ⏳ Pending
+- ⚠️ Warning/Issue
+
+## PRDs Section Format
+
+**Purpose**: Track the history of PRDs applied to a feature document.
+
+**Full Documentation**: See [prd-doc.mdc](mdc:.cursor/rules/prd-doc.mdc) for complete PRD section format, guidelines, examples, and benefits.
+
+## Asset Management
+
+### Where to Place Assets
+
+1. **Product area appendices**: `docs/ft/{product-area}/appendices/`
+2. **Shared assets**: `docs/ft/{product-area}/appendices/assets/`
+
+### Asset Types
+- Figma designs and mockups
+- Architecture diagrams
+- Flowcharts
+- Screenshots
+- Sample documents
+- Technical specifications
+- Detailed implementation docs
+
+### Referencing Assets
+
+**CRITICAL RULE**: Every file in `appendices/` MUST be referenced in at least one of:
+1. A feature document (in Overview, Related Documentation, or inline)
+2. The product area 1-OVERVIEW.md (in an Appendices section)
+
+Use relative paths from the feature document:
+
+```markdown
+![Architecture Diagram](./appendices/architecture.png)
+[Technical Spec](./appendices/technical-spec.md)
+```
+
+### Reference Patterns
+
+**Pattern 1: In Overview Section**
+```markdown
+## Overview
+
+Brief feature description.
+
+> **📋 Technical Specification**: For detailed implementation, see [Technical Spec](./appendices/technical-spec.md)
+```
+
+**Pattern 2: In Related Documentation**
+```markdown
+## Related Documentation
+
+### Technical Specifications
+- **Technical Spec**: [Implementation Details](./appendices/technical-spec.md) - Detailed proto definitions and data flows
+```
+
+**Pattern 3: In Product Area 1-OVERVIEW.md**
+```markdown
+### Appendices
+
+Technical specifications and supporting documentation:
+
+- **[Technical Spec](./appendices/technical-spec.md)** - Description of contents
+- **[Architecture Diagram](./appendices/architecture.png)** - System architecture
+```
+
+**Example Pattern**: A feature document might reference `appendices/technical-spec.md` in both the Overview section and Related Documentation section for comprehensive coverage.
+
+## PRD Document Workflow
+
+**Full Documentation**: See [prd-doc.mdc](mdc:.cursor/rules/prd-doc.mdc) for:
+- When to create a PRD document
+- Complete PRD document template
+- PRD lifecycle and wrapping process
+- Multi-feature PRD guidelines
+- Preserving history and best practices
+
+## Best Practices
+
+### Do's ✅
+- Keep feature documents focused on **product requirements**, not implementation
+- Use clear, concise language
+- Include visual aids (diagrams, mockups) in appendices
+- Update acceptance criteria as work progresses
+- Link to related features and technical documentation
+- Create PRD documents for requirement updates (see [prd-doc.mdc](mdc:.cursor/rules/prd-doc.mdc))
+- Place features in the correct product area
+
+### Don'ts ❌
+- Don't include implementation details (code, algorithms)
+- Don't modify original feature documents when requirements change (use PRDs instead)
+- Don't create features in the root `docs/ft/` directory
+- Don't skip acceptance criteria
+- Don't forget to update 1-OVERVIEW.md when adding new features
+- Don't mix product areas
+
+## Product Area Guidelines
+
+Product areas should be organized by logical product groupings. Each product area should have a clear type classification.
+
+### Creating Product Areas
+
+**For Products (End-User Facing)**:
+- **Type**: End-User Application (Web, Desktop, Mobile, Editor Module)
+- **Focus**: User-facing features and workflows
+- **Examples**: Editing tools, generation workflows, asset management, UI components
+- **Success Metrics**: User engagement, feature adoption, task completion time, satisfaction
+- **Documentation Style**: User stories, UX flows, interaction patterns
+
+**For Technical Products (APIs)**:
+- **Type**: API (REST, gRPC, GraphQL)
+- **Focus**: API endpoints, integration patterns, data contracts
+- **Examples**: CRUD operations, async processing, webhooks, batch operations
+- **Success Metrics**: API response time, uptime, error rate, throughput
+- **Documentation Style**: API contracts, integration guides, data schemas
+- **Note**: Use domain-driven naming (e.g., "Document API" not "Document Server API")
+
+**For Technical Products (Libraries/SDKs)**:
+- **Type**: Library, SDK, Cargo Crate, WASM Module
+- **Focus**: Reusable functionality, API surface, integration patterns
+- **Examples**: Parsing, transformation, validation, utility functions
+- **Success Metrics**: Adoption rate, performance, memory usage, bundle size
+- **Documentation Style**: API reference, integration guides, capability matrix
+- **Note**: Libraries are consumed by other products
+
+**For Technical Products (Tools)**:
+- **Type**: Developer Tools, CLI, MCP Servers, Test Harnesses
+- **Focus**: Development workflows, automation, debugging
+- **Examples**: Inspection tools, generators, test utilities, development proxies
+- **Success Metrics**: Developer productivity, tool adoption, debugging efficiency
+- **Documentation Style**: Tool capabilities, usage guides, command reference
+
+**For Technical Products (Platform/Infrastructure)**:
+- **Type**: Platform Services, Infrastructure, Observability
+- **Focus**: Cross-cutting concerns, foundational services
+- **Examples**: Logging, monitoring, event tracking, authentication, storage
+- **Success Metrics**: System reliability, coverage, uptime, data accuracy
+- **Documentation Style**: Platform capabilities, integration patterns, SLAs
+
+## Related Rules and Commands
+
+**Related Rules**:
+- [prd-doc.mdc](mdc:.cursor/rules/prd-doc.mdc) - PRD document structure and workflow for tracking requirement changes
+- [dev-doc.mdc](mdc:.cursor/rules/dev-doc.mdc) - Development documentation (HOW to build) that implements these feature requirements
+- [changeset-doc.mdc](mdc:.cursor/rules/changeset-doc.mdc) - Technical changes documentation
+
+**Related Commands**:
+- `/plan-ft` - Creates feature or PRD document
+- `/plan-ft-dev` - Creates changeset document from feature/PRD
+- `/wrap-context-docs` - Applies PRDs to feature docs and archives them
+- `/requirements-change` - Guides decision on PRD vs direct update
+
+**Workflow Integration**:
+```
+Feature requirement change → PRD → Changeset → Implementation → Wrap → Updated docs
+```
+
+## Examples
+
+### Example 1: Product Feature (End-User)
+**Type**: Product (User-Facing)
+**File**: `docs/ft/my-editor/watermark-feature.md` *(example path)*
+**Template**: User-Focused Template
+**Assets**: `docs/ft/my-editor/appendices/watermark-mockup.png`
+**Focus**: User stories, UX flows, visual design
+**Success Metrics**: User engagement, task completion time
+**Update**: Add reference in `docs/ft/my-editor/1-OVERVIEW.md`
+
+### Example 2: Technical Product Feature (API)
+**Type**: Technical Product (API)
+**File**: `docs/ft/my-api/upload-endpoint.md` *(example path)*
+**Template**: Developer-Focused Template
+**Assets**: `docs/ft/my-api/appendices/upload-technical-spec.md`
+**Focus**: API endpoints, integration patterns, performance
+**Success Metrics**: API latency, error rate, throughput
+**Update**: Add reference in `docs/ft/my-api/1-OVERVIEW.md`
+
+### Example 3: Technical Product Feature (Library)
+**Type**: Technical Product (Library)
+**File**: `docs/ft/my-library/parser-module.md` *(example path)*
+**Template**: Developer-Focused Template
+**Assets**: `docs/ft/my-library/appendices/parser-architecture.png`
+**Focus**: Library API, integration examples, performance characteristics
+**Success Metrics**: Parse success rate, memory usage, bundle size
+**Update**: Add reference in `docs/ft/my-library/1-OVERVIEW.md`
+
+### Example 4: Feature PRD
+**See**: [prd-doc.mdc](mdc:.cursor/rules/prd-doc.mdc) for complete PRD examples and workflow

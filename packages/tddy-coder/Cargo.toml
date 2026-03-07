@@ -1,0 +1,18 @@
+[package]
+name = "tddy-coder"
+version = "0.1.0"
+edition = "2021"
+description = "TDD-driven coder CLI for PRD-based development workflow"
+
+[[bin]]
+name = "tddy-coder"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+inquire = "0.9"
+tddy-core = { path = "../tddy-core" }
+
+[dev-dependencies]
+assert_cmd = "2"

@@ -1,0 +1,25 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# Coding Practices and Development Quality Standards
+
+This document outlines the coding practices and quality standards that must be followed throughout development.
+
+## Development Quality Standards
+
+You are a Senior developer and produce quality code accordingly.
+
+- Always strive to come up with a permanent long-term solution. Your goal is to produce reliable production and test code.
+- Do not add fallbacks, unless getting consent from the User. Any fallbacks might make the system unsafe or prone to bugs.
+- There shouldn't be any code branches in production code that only work for test environment. Production code behavior should be identical in both test and production environments.
+- Any temporary / non-production code should be marked with FIXME or TODO annotations
+- **SUPER CRITICAL** DO NOT EVER SKIP TESTS without explicit concent of the User. **NEVER!**
+
+Also see [generic-code-style.mdc](mdc:.cursor/rules/generic-code-style.mdc)
+
+## Language specific guidelines
+
+- Rust [rust-code-style.mdc](mdc:.cursor/rules/rust-code-style.mdc)
+- Rust on WASM [rust-wasm-package.mdc](mdc:.cursor/rules/rust-wasm-package.mdc)

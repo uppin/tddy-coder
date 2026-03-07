@@ -1,0 +1,346 @@
+---
+description: PRD (Product Requirements Document) structure, workflow, and requirements for tracking feature requirement changes
+globs: ["docs/ft/1-WIP/*.md"]
+alwaysApply: false
+---
+# PRD (Product Requirements Document) Standards
+
+## Purpose
+
+PRD documents track requirement changes to existing features without modifying original feature documents. They provide:
+
+1. **Historical context** - Shows how requirements evolved over time
+2. **Audit trail** - Clear record of what changed, when, and why
+3. **Multi-feature tracking** - Can affect multiple feature documents in one PRD
+4. **Rollback capability** - Original requirements preserved for reference
+5. **Traceability** - Links all affected features and their specific changes
+
+## When to Create a PRD Document
+
+Create a PRD document when:
+- Requirements change for an existing feature
+- New capabilities are added to an existing feature
+- Scope is reduced or expanded
+- Technical approach changes significantly
+- Multiple features are affected by related changes
+
+**CRITICAL**: Never modify original feature documents when requirements change. Always create a PRD document.
+
+## PRD Document Location
+
+**Directory**: `docs/ft/1-WIP/`
+
+All PRD documents are created in a single global directory regardless of which product area they affect.
+
+**Naming Convention**: `PRD-YYYY-MM-DD-feature-name.md`
+
+**Examples**:
+- `docs/ft/1-WIP/PRD-2025-01-05-signature-styles.md`
+- `docs/ft/1-WIP/PRD-2024-11-15-revision-support.md`
+
+## PRD Document Template
+
+```
+# [Feature Name] - PRD
+
+**Date**: YYYY-MM-DD
+**PRD Type**: Enhancement | Bug Fix | Requirement Update | Technical Improvement
+
+## Affected Features
+
+**CRITICAL**: List ALL feature documents affected by this PRD:
+
+- **Primary Feature**: [Feature Name](../editor-app/feature-name.md) - Description of primary changes
+- **Related Feature 1**: [Feature Name](../native-parser/related-feature-1.md) - Description of secondary impact
+- **Related Feature 2**: [Feature Name](../domain-api/related-feature-2.md) - Description of dependency changes
+
+## Summary
+Brief description of what is changing across the affected features.
+
+## Background
+Why this PRD is needed.
+
+## Proposed Changes
+
+### What's Changing
+- List specific changes to requirements for each affected feature
+- Include new capabilities or removed capabilities
+- Note any API changes
+- Cross-reference affected feature documents
+
+### What's Staying the Same
+- List what remains unchanged in affected features
+- Provide context for stability
+
+## Impact Analysis
+
+### Technical Impact
+- Code changes required (per affected feature)
+- Dependencies affected
+- Performance implications
+- Integration points affected
+
+### User Impact
+- UX changes (per affected feature)
+- Workflow modifications
+- Breaking changes
+- Migration requirements
+
+## Implementation Plan
+1. Step-by-step plan referencing affected features
+2. Migration strategy (if applicable)
+3. Testing approach for each affected feature
+4. Rollout/deployment strategy
+
+## Acceptance Criteria
+- [ ] Updated requirement 1 ([Feature Name](../product-area/feature-name.md))
+- [ ] Updated requirement 2 ([Related Feature](../product-area/related-feature.md))
+- [ ] Migration completed
+- [ ] Tests passing for all affected features
+
+## References
+
+### Affected Features (Complete List)
+- [Feature 1](../product-area/feature-1.md) - Specific changes
+- [Feature 2](../product-area/feature-2.md) - Specific changes
+
+### Related Documentation
+- Related tickets: [links]
+- Design assets: [links to appendices]
+- Technical specs: [links to appendices]
+```
+
+## Change History Section in Feature Documents
+
+### Purpose
+
+Track the history of changes applied to a feature document in release note style. This provides traceability without cluttering the main content or linking to deleted source files.
+
+### When Added
+
+The changelog file is automatically created/updated by the `/wrap-context-docs` command when a PRD is applied to a feature document.
+
+### Location
+
+**Separate file**: `docs/ft/{product-area}/changelog.md`
+
+Each product area maintains one changelog file that tracks all changes across all features in that product area.
+
+### Format
+
+```markdown
+# Change History - {Product Area Name}
+
+Requirement changes applied to features in {Product Area Name}.
+
+- **2024-11-15** Signature Tool: Initial Form Field Support — Added basic text/checkbox field support, implemented field validation.
+- **2025-01-05** Signature Tool: Signature Styles Enhancement — Added multiple ink styles, pressure sensitivity, color picker integration.
+- **2025-02-10** Signature Tool: Touch Gesture Support — Added pinch-to-zoom, pan gestures, enhanced touch input handling.
+```
+
+### Guidelines
+
+**Format**: `- **YYYY-MM-DD** Feature: Title — Summary.`
+
+**Rules**:
+- **Chronological order** (oldest first, new entries appended at bottom) — avoids git conflicts from parallel branches
+- **One bullet per entry** — keeps the conflict zone to a single line
+- **Feature name inline** — no H2 grouping headers, feature name prefixes the title
+- **No file references** — source PRDs are deleted after wrapping
+- **Past tense** — "Added X", "Enhanced Y", "Removed Z"
+- One `changelog.md` per product area (not per feature)
+
+## PRD Lifecycle
+
+### 1. Created
+
+**When**: Requirements change for existing features
+
+**Command**: `/plan-ft` (creates PRD document)
+
+**Content**:
+- List all affected features
+- Describe what's changing and what's staying the same
+- Impact analysis (technical and user)
+- Implementation plan
+- Acceptance criteria
+
+### 2. In Progress
+
+**Status**: 🚧 In Progress
+
+**Activities**:
+- Implementation based on updated requirements
+- Update acceptance criteria checkboxes as work progresses
+- Track testing for each affected feature
+- Document any discovered issues or additional impacts
+
+### 3. Complete
+
+**Status**: ✅ Complete
+
+**Criteria**:
+- All acceptance criteria checked
+- All affected features implemented
+- Tests passing for all affected features
+- Documentation updated
+
+### 4. Wrapped
+
+**Command**: `/wrap-context-docs` (applies PRD to feature docs)
+
+**Actions**:
+1. Applies changes to all affected feature documents
+2. Adds "Change History" section to each affected feature (if not present)
+3. Adds release note-style entry for this PRD to each affected feature's "Change History" section
+4. **Deletes** PRD document (not archived)
+5. Updates any related changeset documents
+
+**Result**: PRD document deleted, feature documents updated with change history
+
+## Preserving History
+
+**CRITICAL PRINCIPLE**: Never modify original feature documents directly when requirements change.
+
+**Why?**
+- Maintains historical context
+- Shows evolution of requirements
+- Enables rollback if needed
+- Provides audit trail
+- Clear traceability to affected features
+
+**How?**
+1. Create PRD document in `docs/ft/1-WIP/` directory
+2. List all affected features
+3. Describe changes without modifying originals
+4. Implement changes based on PRD
+5. Use `/wrap-context-docs` to apply and archive
+
+## Multi-Feature PRDs
+
+### When to Use
+
+Use a single PRD document when:
+- Changes affect multiple related features
+- Changes span multiple product areas
+- Technical approach change impacts multiple features
+- Refactoring affects feature boundaries
+
+### Structure for Multi-Feature PRDs
+
+```
+## Affected Features
+
+**CRITICAL**: List ALL feature documents affected by this PRD:
+
+### Primary Features
+- **[Feature A](../editor-app/feature-a.md)** - Major changes to core functionality
+- **[Feature B](../domain-api/feature-b.md)** - API changes for integration
+
+### Secondary Features
+- **[Feature C](../editor-app/feature-c.md)** - UI updates to reflect new capabilities
+- **[Feature D](../native-parser/feature-d.md)** - Documentation updates
+
+### Dependencies
+- **[Feature E](../infrastructure/feature-e.md)** - No code changes, but updated integration examples
+```
+
+### Impact Analysis for Multi-Feature PRDs
+
+```
+Break down impact by feature:
+## Impact Analysis
+
+### Feature A Impact
+- **Technical**: Code changes to X, Y, Z
+- **User**: New UI for A functionality
+
+### Feature B Impact
+- **Technical**: API contract change, breaking change
+- **User**: Migration required for existing integrations
+
+### Feature C Impact
+- **Technical**: UI component updates
+- **User**: Visual changes only, no behavior change
+```
+
+## Best Practices
+
+### Do's ✅
+- Always list ALL affected features
+- Create PRD before implementing changes
+- Cross-reference all affected feature documents
+- Include impact analysis for each affected feature
+- Preserve original feature documents unchanged
+- Use clear PRD types (Enhancement, Bug Fix, etc.)
+- Update acceptance criteria as work progresses
+- Link to related design assets and technical specs
+
+### Don'ts ❌
+- Don't modify original feature documents when requirements change
+- Don't create PRD without listing affected features
+- Don't skip impact analysis
+- Don't forget User Impact section
+- Don't modify archived PRDs
+- Don't create PRDs for new features (use feature docs instead)
+- Don't mix unrelated changes in one PRD
+
+## Related Rules and Commands
+
+**Related Rules**:
+- [feature-doc.mdc](mdc:.cursor/rules/feature-doc.mdc) - Feature documentation standards and templates
+- [dev-doc.mdc](mdc:.cursor/rules/dev-doc.mdc) - Development documentation and changeset workflow
+
+**Related Commands**:
+- `/plan-ft` - Creates feature PRD document
+- `/wrap-context-docs` - Applies PRD to feature docs and archives it
+- `/requirements-change` - Guides decision on PRD vs direct update
+
+**Workflow Integration**:
+```
+Requirements change → Create PRD → Implement → Wrap → Updated feature docs
+```
+
+## Examples
+
+### Example 1: Single Feature PRD
+
+**File**: `docs/ft/1-WIP/PRD-2025-01-05-signature-styles.md`
+
+**Affected**: Single feature (`editor-app/signature-toolbar.md`)
+
+**Type**: Enhancement
+
+**Changes**: Added multiple ink styles and pressure sensitivity
+
+**Impact**: Code changes to signature rendering, new UI controls
+
+### Example 2: Multi-Feature PRD
+
+**File**: `docs/ft/1-WIP/PRD-2024-12-10-async-processing.md`
+
+**Affected**: Multiple features
+- `domain-api/upload-endpoint.md` (primary)
+- `domain-api/status-polling.md` (secondary)
+- `domain-api/webhook-notifications.md` (new capability)
+
+**Type**: Architecture Change
+
+**Changes**: Migration from synchronous to asynchronous processing
+
+**Impact**: Breaking API change, requires migration guide
+
+### Example 3: Cross-Product PRD
+
+**File**: `docs/ft/1-WIP/PRD-2025-03-15-logging-standard.md`
+
+**Affected**: Features across multiple product areas
+- `editor-app/error-handling.md`
+- `domain-api/observability.md`
+- `native-parser/diagnostics.md`
+
+**Type**: Technical Improvement
+
+**Changes**: Standardized logging format across all products
+
+**Impact**: Code changes to logging calls, no user-visible impact

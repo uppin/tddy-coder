@@ -1,0 +1,6 @@
+---
+description:
+globs: *.rs
+alwaysApply: false
+---
+See [docs/dev/guides/tech-stack.md](../../docs/dev/guides/tech-stack.md).

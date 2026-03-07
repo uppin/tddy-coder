@@ -1,0 +1,7 @@
+---
+description:
+globs: *.rs
+alwaysApply: false
+---
+For testing practices, anti-patterns, and test composition guidelines,
+see [docs/dev/guides/testing.md](../../docs/dev/guides/testing.md)

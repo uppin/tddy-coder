@@ -1,0 +1,68 @@
+---
+description: Complete Test-Driven Development workflow and phase coordination
+globs:
+alwaysApply: false
+---
+# Test-Driven Development (TDD) Workflow
+
+This document outlines the complete Test-Driven Development workflow using the red-green-refactor cycle for both human developers and AI assistants.
+
+## TDD Cycle Overview
+
+Test-Driven Development follows a strict three-phase cycle that ensures robust, well-tested code:
+
+### 🔴 Red Phase - Write Failing Tests
+**Rule Reference**: Apply `@red` rule
+
+1. **Write comprehensive failing tests** before any implementation
+2. **Define the public API** through test usage and expected behavior
+3. **Establish clear test structure** with descriptive names and assertions
+4. **Verify tests fail** for the right reasons (missing implementation, not bugs)
+
+**Purpose**: Capture requirements and desired behavior before coding begins.
+
+### 🟢 Green Phase - Make Tests Pass
+**Rule Reference**: Apply `@green` rule
+
+1. **Implement minimal code** to make all failing tests pass
+2. **Focus on functionality over form** - don't worry about perfect code yet
+3. **Avoid over-engineering** - write just enough to satisfy tests
+4. **Keep test changes minimal** - tests define the requirements
+
+**Purpose**: Create working implementation with the least amount of code changes.
+
+### 🔵 Refactor Phase - Clean Up Code
+**Rule Reference**: Apply `@refactor` rule
+
+1. **Improve code quality** without changing functionality
+2. **Add proper typing** and remove `any` types
+3. **Follow clean code principles** - small methods, reduced nesting
+4. **Ensure production readiness** while keeping all tests green
+
+**Purpose**: Polish the implementation while maintaining test coverage and functionality.
+
+## Workflow Coordination
+
+### Phase Transitions
+- **Red → Green**: Only proceed when you have comprehensive failing tests
+- **Green → Refactor**: Only proceed when all tests are passing
+- **Refactor → Red**: Start next feature cycle with new failing tests
+
+### Testing Strategy
+- **Run tests frequently** during each phase to verify state
+- **Use BDD principles** to make tests readable and behavior-focused
+- **Maintain test isolation** - each test should be independent
+- **Focus on edge cases** during the red phase
+
+### Quality Gates
+- **Red Phase**: All new tests must fail initially
+- **Green Phase**: All tests must pass with minimal implementation
+- **Refactor Phase**: All tests remain green after improvements
+
+## Benefits of This Approach
+
+- **Comprehensive test coverage** by design
+- **Clear requirements definition** through failing tests
+- **Regression prevention** with continuous test validation
+- **Maintainable codebase** through structured refactoring
+- **Documentation** via executable test specifications

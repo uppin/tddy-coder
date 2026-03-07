@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Run verification (cargo test) and write output to .verify-result.txt.
+# Agent can read this file when terminal output capture is broken (Cursor bug).
+# Run from nix shell: ./dev, then ./verify  (or: nix develop -c ./verify)
+set -e
+cd "$(dirname "$0")"
+cargo test 2>&1 | tee .verify-result.txt

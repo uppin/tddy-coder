@@ -1,0 +1,795 @@
+---
+description: Changeset document structure and requirements for tracking development changes
+globs: ["docs/dev/1-WIP/*"]
+alwaysApply: false
+---
+
+# Changeset Documentation
+
+## Purpose
+
+Changeset documents track **delta changes** (State A → State B) to development documentation across one or more packages. They are **living documents** during implementation and get wrapped into stable dev docs when complete.
+
+**Key Concept**:
+- **Development Documentation** = Read-only stable reference
+- **Changeset Document** = Write-during-development delta tracker
+
+## Changeset vs Development Docs
+
+| Aspect | Development Docs | Changeset Docs |
+|--------|------------------|----------------|
+| **Location** | `packages/*/README.md`, `packages/{package}/docs/` | `docs/dev/1-WIP/YYYY-MM-DD-name.md` |
+| **State** | Read-only (State B only) | Writable (tracks A → B transition) |
+| **Purpose** | Stable technical reference | Track changes during development |
+| **Lifecycle** | Permanent, updated via wrapping | Temporary, deleted after wrapping |
+| **Content** | Current implementation state | Delta, milestones, acceptance tests |
+
+## Document Structure
+
+### Required Sections
+
+#### 1. Header Metadata
+
+```markdown
+# Changeset: {Feature/Change Name}
+
+**Date**: YYYY-MM-DD
+**Status**: 🚧 In Progress | ✅ Complete
+**Type**: Feature | Refactor | Bug Fix | Architecture Change
+```
+
+**Status progression**:
+- `🚧 In Progress` - Active development
+- `✅ Complete` - Ready for wrapping
+
+#### 2. Affected Packages
+
+**CRITICAL**: List ALL packages with documentation changes.
+
+```markdown
+## Affected Packages
+
+**CRITICAL**: List ALL packages with documentation changes:
+
+- **@org/package-1**: [README.md](../../packages/package-1/README.md) - Description of changes
+  - [architecture.md](./package-1/architecture.md) - Specific changes
+  - [api-reference.md](./package-1/api-reference.md) - API updates
+- **@org/package-2**: [README.md](../../packages/package-2/README.md) - Description of changes
+  - [integration.md](./package-2/integration.md) - Integration changes
+```
+
+**Purpose**:
+- Identifies which package documentation will be updated
+- Provides links to READMEs and detailed docs that will change
+- Used by `/wrap-context-docs` to know what to update
+
+#### 3. Related Feature Documentation
+
+**Optional but recommended**: Link to feature documents or PRDs that drive these technical changes.
+
+```markdown
+## Related Feature Documentation
+
+References to feature docs (if applicable):
+- [Feature Document](../ft/{product-area}/feature-name.md)
+- [PRD Document](../ft/{product-area}/1-WIP/PRD-YYYY-MM-DD-*.md)
+```
+
+**Purpose**: Bidirectional linking between user requirements and technical implementation.
+
+#### 4. Summary
+
+```markdown
+## Summary
+
+Brief description of what is changing in the technical implementation.
+```
+
+**Guidelines**:
+- 2-3 sentences
+- High-level overview
+- Focus on WHAT is changing, not WHY
+
+#### 5. Background
+
+```markdown
+## Background
+
+Why these technical changes are needed.
+```
+
+**Guidelines**:
+- Explain motivation and context
+- Reference architectural decisions
+- Explain technical debt or limitations being addressed
+
+#### 6. Scope
+
+**CRITICAL**: High-level deliverables that track overall progress.
+
+```markdown
+## Scope
+
+**High-level deliverables tracking progress throughout development:**
+
+- [ ] **Package Documentation**: Update package READMEs and dev docs
+- [ ] **Implementation**: Complete code changes across affected packages
+- [ ] **Testing**: All acceptance tests passing
+- [ ] **Integration**: Cross-package integration verified
+- [ ] **Technical Debt**: Production readiness gaps addressed
+- [ ] **Code Quality**: Linting, type checking, and code review complete
+
+**Status indicators**:
+- `[ ]` Not started
+- `[~]` In progress (use during active development)
+- `[x]` Complete ✅
+```
+
+**Purpose**:
+- Single source of truth for changeset completion
+- Updated by various rules/commands throughout workflow
+- Validated by `/wrap-context-docs` before wrapping
+
+**Update Responsibility**: See [update-context-docs.md](.cursor/commands/update-context-docs.md) for Scope Update Responsibility Matrix.
+
+#### 7. Technical Changes
+
+```markdown
+## Technical Changes
+
+### State A (Current)
+
+Describe current implementation state:
+- Current architecture
+- Current APIs
+- Current behaviors
+
+### State B (Target)
+
+Describe target implementation state:
+- New architecture
+- New APIs
+- New behaviors
+
+### Delta (What's Changing)
+
+Specific changes per package:
+
+#### @org/package-1
+- **Architecture**: Change description
+- **API**: New endpoints/functions
+- **Implementation**: Core algorithm changes
+
+#### @org/package-2
+- **Integration**: How integration changes
+- **Dependencies**: New dependencies
+```
+
+**Purpose**:
+- **State A**: Document current implementation (before changes)
+- **State B**: Document target implementation (after changes)
+- **Delta**: Package-specific technical changes
+
+**Guidelines**:
+- State A and State B should be clear and specific
+- Delta should map to affected packages
+- Focus on technical details, not process
+
+#### 8. Implementation Milestones
+
+```markdown
+## Implementation Milestones
+
+- [ ] Milestone 1: Description
+- [ ] Milestone 2: Description
+- [ ] Milestone 3: Description
+```
+
+**Purpose**: Break implementation into measurable milestones.
+
+**Guidelines**:
+- Milestones should be specific and verifiable
+- Each milestone represents substantial progress
+- Check off as completed during implementation
+- Updated by `/update-context-docs`
+
+#### 9. Testing Plan
+
+```markdown
+## Testing Plan
+
+### Testing Strategy
+
+**Determine Appropriate Test Level:**
+
+The appropriate test level depends on the changeset scope:
+
+- **E2E tests** when: Building complete features, user workflows, full API flows
+- **Integration tests** when: Changing component interactions, DAO methods, service integrations, package boundaries
+- **Unit tests** when: Modifying individual functions, algorithms, isolated logic
+
+**Primary Test Approach:**
+[Describe the most appropriate test level for this changeset and why]
+
+**Example 1** (Full Feature - Async Export):
+- **Test Level**: E2E
+- **Why**: Complete user-facing feature with API, async processing, and storage
+- **Approach**: Trigger export via API → Poll with poll-until → Verify archive contents
+
+**Example 2** (DAO Method - Batch Update):
+- **Test Level**: Integration
+- **Why**: Changes how data is written to database, not full feature
+- **Approach**: Call DAO method → Verify database state → Check side effects
+
+**Example 3** (Algorithm - Data Transformation):
+- **Test Level**: Unit
+- **Why**: Pure function with deterministic input/output
+- **Approach**: Call function with test data → Verify output structure and correctness
+
+### Testing Options Analysis
+
+#### Option 1: [Primary Testing Approach]
+**Test Level**: E2E | Integration | Unit (choose based on changeset scope)
+**Description**: [Detailed description of the most appropriate testing approach for this changeset]
+
+**Scope**: What this test covers
+- [Describe what needs to be tested based on changeset scope]
+- [For features: Full workflow from trigger to completion]
+- [For components/DAOs: Integration with dependencies]
+- [For functions: Input/output with edge cases]
+- Success and error scenarios
+- Edge cases and boundary conditions
+
+**Assertions**:
+- [ ] **Strong assertion 1**: Specific, deterministic verification (e.g., "Archive contains exactly 3 files: data.json, metadata.xml, summary.txt")
+- [ ] **Strong assertion 2**: Content verification (e.g., "data.json contains valid JSON with expected schema")
+- [ ] **Strong assertion 3**: State verification (e.g., "Database record status = 'COMPLETED'")
+
+**Reliability Considerations**:
+- Deterministic: Test produces same result every time
+- No false positives: Passes only when feature truly works
+- No false negatives: Fails only when feature truly broken
+- Timeout handling: Appropriate `poll-until` timeout for async operations
+- Cleanup: Proper test data cleanup to prevent interference
+
+**Implementation Location**: `packages/{package-name}/tests/{test-name}.e2e.rs`
+
+#### Option 2: [Alternative/Complementary Approach]
+**Description**: [Alternative testing strategy or complementary integration test]
+
+**Scope**: What additional coverage this provides
+- Specific integration between Package A and Package B
+- Performance characteristics verification
+- Error handling and recovery
+
+**Assertions**:
+- [ ] **Strong assertion 1**: [Specific verification]
+- [ ] **Strong assertion 2**: [Specific verification]
+
+**Trade-offs**:
+- **Pros**: [Benefits of this approach]
+- **Cons**: [Limitations compared to Option 1]
+
+#### Option 3: [Unit-Level Testing]
+**Description**: [Granular unit testing for critical components]
+
+**Scope**: Isolated component/function testing
+- Core algorithm verification
+- Edge case handling
+- Input validation
+
+**Assertions**:
+- [ ] **Strong assertion 1**: [Specific verification]
+- [ ] **Strong assertion 2**: [Specific verification]
+
+**Note**: Unit tests complement but do NOT replace end-to-end acceptance tests.
+
+### Testing Principles Applied
+
+**✅ Appropriate Test Level:**
+- Choose test level based on changeset scope (E2E for features, Integration for components/DAOs, Unit for functions)
+- Test at the highest appropriate level that provides confidence without unnecessary complexity
+- E2E: Entry point to final outcome including all integrations
+- Integration: Component/service interaction with real dependencies
+- Unit: Isolated function/logic with deterministic inputs
+
+**✅ Strong Assertions:**
+- Verify actual outcomes, not just status codes
+- Check file/data contents, not just existence
+- Validate data structure and correctness
+- Use exact values where possible, avoid ranges/margins unless testing uncontrollable factors
+
+**✅ Deterministic Tests:**
+- Same input produces same output every time
+- No flaky tests due to timing, randomness, or external factors
+- Controlled test data and environment
+- Proper async handling with `poll-until` for timing-dependent operations
+
+**✅ Complete Scope Verification:**
+- Verify the entire scope of the change, not just partial results
+- E2E: From entry point to final outcome including side effects
+- Integration: Component interaction and actual integration with dependencies
+- Unit: Function behavior including all branches and edge cases
+- Don't stop at "operation initiated" - verify actual completion and results
+
+**❌ Anti-Patterns to Avoid:**
+- Testing at wrong level (E2E for function changes, Unit for full features)
+- Checking only status codes/return values without verifying actual effects
+- Using wide tolerance ranges for deterministic operations
+- Testing only the "happy path" without error scenarios
+- Over-mocking in acceptance tests (mock only what's outside changeset scope)
+- Weak assertions like "array has length > 0" instead of verifying specific contents
+- Testing less than the full scope of the change
+
+### Async Operation Testing
+
+**For async operations (exports, processing jobs, webhooks):**
+
+```rust
+// Example pattern for async operation testing
+await pollUntil.expect({
+  timeout: 30000, // Appropriate timeout for the operation
+  interval: 1000, // Polling interval
+}, async () => {
+  // 1. Check operation completion
+  const status = await getOperationStatus(operationId);
+  expect(status).toBe('COMPLETED'); // Not 'IN_PROGRESS' or 'PENDING'
+
+  // 2. Verify the actual outcome
+  const result = await getOperationResult(operationId);
+  expect(result).toBeDefined();
+
+  // 3. Verify contents/data (not just existence)
+  expect(result.files).toHaveLength(3);
+  expect(result.files).toContainEqual(
+    expect.objectContaining({
+      name: 'data.json',
+      size: expect.any(Number),
+      contentType: 'application/json'
+    })
+  );
+
+  // 4. Verify actual file contents
+  const fileContent = await downloadFile(result.files[0].url);
+  const parsedData = JSON.parse(fileContent);
+  expect(parsedData.items).toHaveLength(expectedItemCount);
+  expect(parsedData.metadata.version).toBe('2.0');
+});
+```
+
+### Coverage Requirements
+
+**Acceptance tests MUST cover (at appropriate test level):**
+- [ ] **Happy path**: Successful flow with typical inputs/data
+- [ ] **Error scenarios**: Expected error conditions and recovery
+- [ ] **Edge cases**: Boundary conditions, empty data, maximum limits
+- [ ] **Integration points**: Dependencies and boundaries within changeset scope
+- [ ] **Actual effects verification**: Real outcomes, not just return values/status codes
+- [ ] **Side effects**: State changes, database updates, file creation (if in scope)
+
+### Test Data Strategy
+
+**Controlled test data approach:**
+- Use deterministic test data (no random values unless necessary)
+- Create isolated test data per test (no shared mutable state)
+- Clean up test data after test execution
+- Use realistic data volumes for performance testing
+```
+
+**Purpose**: Plan comprehensive, rock-solid testing approach before implementation.
+
+**Guidelines**:
+- **Analyze thoroughly**: Take time to identify testing options and challenges
+- **Prioritize end-to-end**: Primary acceptance tests should test the full workflow
+- **Strong assertions**: Verify actual outcomes and contents, not just status
+- **Deterministic**: Tests must be reliable and repeatable
+- **Multiple options**: Document primary and alternative testing strategies
+- **Trade-off analysis**: Explain pros/cons of different approaches
+- **Created during planning**: Completed by `@plan-ft-dev` before implementation begins
+- **Referenced during implementation**: Used by `@ft-dev` and `@test-acceptance` to create actual tests
+
+#### 10. Acceptance Tests
+
+```markdown
+## Acceptance Tests
+
+### @org/package-1
+- [ ] **E2E**: Full workflow test from X to Y with content verification (feature.e2e.rs)
+- [ ] **Integration**: Package-1 to Package-2 integration with data validation (integration.it.rs)
+- [ ] **Unit**: Core algorithm with deterministic assertions (core-logic.rs)
+
+### @org/package-2
+- [ ] **E2E**: End-to-end user workflow covering all integration points (workflow.e2e.rs)
+- [ ] **Integration**: External API integration with response verification (api-client.it.rs)
+```
+
+**Purpose**: Define specific test implementations that verify State B is achieved.
+
+**Types**:
+- **E2E tests**: Complete workflows from entry point to final outcome (for full features)
+- **Integration tests**: Component/service interactions with real dependencies (for integrations/DAOs)
+- **Unit tests**: Isolated function/logic testing (for algorithm/function changes)
+
+**Guidelines**:
+- **Choose test level based on changeset scope** - use Testing Plan analysis to determine
+- **Group by affected package** with test type and file path
+- **Descriptive test names** that explain what behavior/scenario is being tested
+- **Reference Testing Plan** - tests should implement the strategies defined in Testing Plan section
+- **Include file paths** for traceability (e.g., `batch-update.it.rs`)
+- **Check off when tests pass** during implementation
+- **Updated by `@test-acceptance`** as tests are implemented and verified
+
+**Relationship to Testing Plan**:
+- Testing Plan (Section 9): Determines APPROPRIATE test level and HOW to test (strategies, approaches, analysis)
+- Acceptance Tests (Section 10): WHAT specific tests to implement at the determined level
+
+#### 11. Technical Debt & Production Readiness
+
+```markdown
+## Technical Debt & Production Readiness
+
+Track gaps and technical debt introduced:
+- [ ] Performance optimization needed in X
+- [ ] Error handling incomplete in Y
+- [ ] Documentation update needed for Z
+```
+
+**Purpose**: Track production readiness gaps discovered during implementation.
+
+**Guidelines**:
+- Add items as discovered during development
+- Check off when addressed
+- Updated by `@prod-ready`
+
+#### 12. Decisions & Trade-offs
+
+```markdown
+## Decisions & Trade-offs
+
+Document technical decisions made during implementation:
+- **Decision 1**: Why and what trade-offs
+- **Decision 2**: Alternatives considered
+```
+
+**Purpose**: Document architectural decisions and rationale.
+
+**Guidelines**:
+- Explain key technical decisions
+- Document trade-offs and alternatives
+- Provide context for future maintainers
+
+#### 13. Refactoring Needed
+
+```markdown
+## Refactoring Needed
+
+Track code quality issues and refactoring opportunities discovered during development:
+
+### From @ft-dev (Acceptance Test Creation)
+- [ ] Issue: Description
+- [ ] Issue: Description
+
+### From @red (TDD Red Phase)
+- [ ] Issue: Description
+- [ ] Issue: Description
+
+### From @validate-changes (Change Validation)
+- [ ] Issue: Description
+- [ ] Issue: Description
+
+### From @validate-tests (Test Quality)
+- [ ] Issue: Description
+- [ ] Issue: Description
+
+### From @prod-ready (Production Readiness)
+- [ ] Issue: Description
+- [ ] Issue: Description
+
+### From @analyze-clean-code (Code Quality)
+- [ ] Issue: Description
+- [ ] Issue: Description
+
+### From @refactor (Completed Refactorings)
+- [x] Refactoring: Description ✅
+- [x] Refactoring: Description ✅
+```
+
+**Purpose**: Central tracking of all refactoring needs discovered throughout development lifecycle.
+
+**Guidelines**:
+- Add issues as discovered by any rule
+- Organize by source rule for traceability
+- Check off when refactored
+- Updated by: `@ft-dev`, `@red`, `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`, `refactor` (subagent)
+
+#### 14. Validation Results
+
+```markdown
+## Validation Results
+
+### Change Validation (@validate-changes)
+
+**Last Run**: YYYY-MM-DD
+**Status**: ✅ Passed | ⚠️ Warnings | ❌ Issues Found
+
+**Summary**:
+- Files changed: X
+- Test impact: Y tests affected
+- Risk assessment: Low/Medium/High
+
+**Critical Issues**:
+- Issue 1: Description
+- Issue 2: Description
+
+**Recommendations**:
+- Recommendation 1
+- Recommendation 2
+
+---
+
+### Test Validation (@validate-tests)
+
+**Last Run**: YYYY-MM-DD
+**Status**: ✅ Passed | ⚠️ Warnings | ❌ Issues Found
+
+**Summary**:
+- Tests analyzed: X
+- Anti-patterns found: Y
+- Description-body mismatches: Z
+
+**Critical Issues**:
+- Issue 1: Description (file:line)
+- Issue 2: Description (file:line)
+
+**Recommendations**:
+- Recommendation 1
+- Recommendation 2
+
+---
+
+### Production Readiness (@prod-ready)
+
+**Last Run**: YYYY-MM-DD
+**Status**: ✅ Ready | ⚠️ Gaps | ❌ Blockers
+
+**Summary**:
+- Mock code in production: X instances
+- Fallback code: Y instances
+- Unimplemented features: Z
+
+**Blockers**:
+- Blocker 1: Description
+- Blocker 2: Description
+
+**Recommendations**:
+- Recommendation 1
+- Recommendation 2
+
+---
+
+### Code Quality (@analyze-clean-code)
+
+**Last Run**: YYYY-MM-DD
+**Overall Score**: X/10 ⭐
+
+**Summary**:
+- Critical issues: X
+- Major issues: Y
+- Minor issues: Z
+
+**Critical Issues**:
+- Issue 1: Description (file:line)
+- Issue 2: Description (file:line)
+
+**Recommendations**:
+- Recommendation 1
+- Recommendation 2
+```
+
+**Purpose**: Document findings from validation rules to track quality and readiness.
+
+**Guidelines**:
+- Update after each validation run
+- Keep latest results at top
+- Preserve historical results for audit trail
+- Link to refactoring items when applicable
+- Updated by: `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`
+
+**Format for each validation**:
+- **Last Run**: Date of validation
+- **Status**: Overall pass/warning/fail indicator
+- **Summary**: Key metrics and counts
+- **Critical Issues**: Must-fix items
+- **Recommendations**: Suggested improvements
+
+#### 15. References
+
+```markdown
+## References
+
+- Related changesets: [link]
+- Design documents: [link]
+- Feature requirements: [link]
+```
+
+**Purpose**: Link to related documentation.
+
+## Changeset Lifecycle
+
+### 1. Created (`@plan-ft-dev`)
+
+**State**: New changeset document created
+**Status**: `🚧 In Progress`
+**Scope**: All items `[ ]` (unchecked)
+
+**Actions**:
+- Document created with full template
+- Affected packages listed
+- State A, State B, Delta defined
+- Implementation milestones planned
+- Acceptance tests defined
+
+### 2. In Progress
+
+**State**: Active development
+**Status**: `🚧 In Progress`
+**Scope**: Items progress from `[ ]` → `[~]` → `[x]`
+
+**Actions**:
+- Implementation milestones checked off as completed
+- Acceptance tests checked off as they pass
+- Scope checkboxes updated by various rules/commands
+- Technical debt items added as discovered
+- Decisions documented as made
+- **Refactoring issues tracked** as discovered by validation rules
+- **Validation results** added after each validation run
+
+**Updated by**:
+- `/update-context-docs` - Updates Scope, milestones
+- `@ft-dev` - Creates acceptance tests, updates Scope, adds refactoring issues
+- `@red` - Adds refactoring issues from TDD red phase
+- `@test-acceptance` - Checks off passing tests, updates Scope
+- `/validate-changes` - Adds validation results and refactoring issues
+- `/validate-tests` - Adds test validation results and refactoring issues
+- `/validate-prod-ready` - Validates technical debt resolution, updates Scope, adds validation results
+- `/analyze-clean-code` - Adds code quality validation results and refactoring issues
+- `refactor` (subagent) - Checks off completed refactorings, adds results
+
+### 3. Complete
+
+**State**: All work finished
+**Status**: `✅ Complete`
+**Scope**: All items `[x]` (checked)
+
+**Prerequisites**:
+- All Scope checkboxes marked `[x]`
+- All implementation milestones checked off
+- All acceptance tests passing
+- Technical debt addressed or documented
+- Code quality validated
+- **All validation results** show passing status
+- **All refactoring issues** addressed or documented
+
+**Actions**:
+- Status changed to `✅ Complete`
+- Ready for wrapping
+
+### 4. Wrapped (`/wrap-context-docs`)
+
+**State**: Applied to dev docs, deleted
+**Status**: Deleted
+
+**Actions**:
+- Changeset applied to package READMEs and `packages/{pkg}/docs/`
+- State B content merged into stable docs
+- Delta, milestones, Scope sections removed from final docs
+- **Refactoring Needed** section removed (issues should be resolved)
+- **Validation Results** section removed (not preserved)
+- Changeset **deleted**: `YYYY-MM-DD-changeset-name.md` (not archived)
+- Release note-style summary added to `packages/{pkg}/docs/changesets.md`
+
+## Cross-Package Changesets
+
+A single changeset can span multiple packages:
+
+```markdown
+## Affected Packages
+
+- **@org/native-parser**: [README.md](../../packages/native-parser/README.md)
+  - [architecture.md](./native-parser/architecture.md) - Parser updates
+  - [api-reference.md](./native-parser/api-reference.md) - New parse methods
+
+- **@org/client-lib-server**: [README.md](../../packages/client-lib-server/README.md)
+  - [integration.md](./client-lib-server/integration.md) - Parser integration
+  - [api-reference.md](./client-lib-server/api-reference.md) - Updated endpoints
+
+- **@org/client-lib**: [README.md](../../packages/client-lib/README.md)
+  - [api-reference.md](./client-lib/api-reference.md) - Client API updates
+```
+
+## Best Practices
+
+### Do's ✅
+
+- **List ALL affected packages** (even minor changes)
+- **Describe State A and State B clearly** with technical specifics
+- **Make milestones specific and measurable** (verifiable deliverables)
+- **Define acceptance tests for each package** with file paths
+- **Update Scope checkboxes** as work progresses
+- **Document decisions and trade-offs** as they're made
+- **Keep changeset timing-agnostic** (milestones, not dates)
+- **Use relative markdown links** for cross-references
+
+### Don'ts ❌
+
+- **Don't modify dev docs directly** (use changeset workflow)
+- **Don't include process instructions** in changeset (focus on technical outcomes)
+- **Don't skip "Affected Packages" section** (required)
+- **Don't create changeset without reading State A docs** (know current state)
+- **Don't forget to link to feature/PRD docs** (maintain traceability)
+- **Don't guess at package scope** (read code/docs first)
+- **Don't skip Scope section** (required for tracking)
+
+## Validation Checklist
+
+**Before wrapping** (`/wrap-context-docs`):
+- [ ] All Scope checkboxes marked `[x]`
+- [ ] All implementation milestones checked off
+- [ ] All acceptance tests passing (marked `[x]`)
+- [ ] Technical debt addressed or documented
+- [ ] Status changed to `✅ Complete`
+- [ ] All affected packages listed with valid links
+- [ ] State B clearly defined
+- [ ] **All validation results show passing status**:
+  - [ ] @validate-changes: ✅ Passed
+  - [ ] @validate-tests: ✅ Passed
+  - [ ] @prod-ready: ✅ Ready
+  - [ ] @analyze-clean-code: Score ≥ 7/10
+- [ ] **All refactoring issues** resolved or documented as acceptable technical debt
+
+## Related Rules and Commands
+
+**Related Rules**:
+- [dev-doc.mdc](mdc:.cursor/rules/dev-doc.mdc) - Development documentation structure
+- [plan-ft-dev.mdc](mdc:.cursor/rules/plan-ft-dev.mdc) - Creating changeset documents
+- [feature-doc.mdc](mdc:.cursor/rules/feature-doc.mdc) - Feature documentation that drives changesets
+- [amendment-doc.mdc](mdc:.cursor/rules/amendment-doc.mdc) - Amendment documents that link to changesets
+- [prd-doc.mdc](mdc:.cursor/rules/prd-doc.mdc) - PRD documents that link to changesets
+
+**Related Subagents**:
+- `refactor` - Code refactoring
+
+**Related Commands**:
+- `/validate-changes` - Change validation and analysis
+- `/validate-tests` - Test quality validation
+- `/validate-prod-ready` - Production readiness validation
+- `/analyze-clean-code` - Code quality analysis
+- `/wrap-context-docs` - Apply changeset to dev docs when complete
+- `/update-context-docs` - Update changeset during development
+
+**Workflow Integration**:
+```
+@plan-ft-dev → Create changeset (State A → State B)
+        ↓
+@ft-dev → Create acceptance tests, add refactoring issues
+        ↓
+@red → Write failing tests, identify refactoring needs
+        ↓
+Implementation → Update changeset milestones and Scope
+        ↓
+/validate-changes → Add validation results, refactoring issues
+        ↓
+/validate-tests → Add test validation results, refactoring issues
+        ↓
+@test-acceptance → Check off passing acceptance tests
+        ↓
+/validate-prod-ready → Validate production readiness, add results
+        ↓
+/analyze-clean-code → Add code quality results, refactoring issues
+        ↓
+refactor (subagent) → Address refactoring issues, check off completed
+        ↓
+/wrap-context-docs → Apply to dev docs, archive changeset
+        ↓
+Updated read-only dev documentation (State B)
+```

@@ -1,0 +1,364 @@
+---
+globs: packages/**/docs/**/*.md,packages/**/README.md,packages/**/AGENTS.md,docs/dev/guides/*.md
+alwaysApply: false
+---
+# Development Documentation
+
+## Purpose
+
+Development documentation serves as the **stable, read-only technical reference** for each package in the monorepo. This documentation:
+
+1. Describes technical architecture, implementation details, and component structure
+2. Provides guidance on how to develop, run, and test each package
+3. Serves as the authoritative source for implementation milestones and technical decisions
+4. Is **NOT modified directly** - changes come through changeset documents (see [Changeset Workflow](#changeset-workflow))
+5. Complements **feature documentation** ([feature-doc.mdc](mdc:.cursor/rules/feature-doc.mdc)) by providing the "how" to feature doc's "what"
+
+## Relationship with Feature Documentation
+
+**Feature Documentation** (`docs/ft/`) defines **WHAT** to build:
+- Product requirements and use cases
+- User stories and acceptance criteria
+- Business context and success metrics
+- See [feature-doc.mdc](mdc:.cursor/rules/feature-doc.mdc) for complete guidelines
+
+**Development Documentation** (`packages/*/docs/`) defines **HOW** to build it:
+- Technical architecture and implementation
+- Component structure and code organization
+- Integration patterns and dependencies
+- Testing strategies and best practices
+
+**Cross-References**:
+- Package READMEs should link to both feature docs (what) and dev docs (how)
+- Dev docs should reference relevant feature docs to provide product context
+- Changesets bridge the gap by tracking technical changes driven by feature requirements
+
+## Monorepo Structure
+
+**Rust workspace**: Root `Cargo.toml` defines workspace members in `packages/`. Build/test from root: `cargo build`, `cargo test`, or `cargo build -p {crate-name}` for a single crate. See [tech-stack.md](../../docs/dev/guides/tech-stack.md#monorepo-workspace).
+
+**Package types**: Rust crates (`packages/*/Cargo.toml`) in the workspace.
+
+## Documentation Structure
+
+### Package-Level Documentation
+
+Each package in `packages/` has a two-tier documentation structure:
+
+#### 1. Package README.md (Entry Point)
+
+**Location**: `packages/{package-name}/README.md`
+
+**Purpose**: Concise entry point with essential information and references to detailed docs.
+
+**CRITICAL Principles**:
+
+1. **Single README Principle** - Each package must have ONLY ONE README.md file at the package root. No nested READMEs in subdirectories (e.g., `test/README.md`, `src/README.md`). All documentation belongs either in the main README.md or in detailed docs under `packages/{package-name}/docs/`.
+
+2. **Conciseness Principle** - README must be **brief** (target: < 100 lines, max: 150 lines). It's an **entry point**, not comprehensive documentation.
+
+3. **No Implementation Details** - README contains NO:
+   - ❌ Detailed feature descriptions
+   - ❌ User workflows or UX flows
+   - ❌ Code examples or implementation patterns
+   - ❌ API usage examples
+   - ❌ Integration patterns
+   - ❌ File structure details
+   - ❌ Technical implementation details
+   - ❌ Artifact specifications
+
+   **All these belong in `packages/{package-name}/docs/` detailed docs!**
+
+**Content** (ONLY):
+- Brief package description (2-3 sentences max)
+- Quick start: how to develop, run, and test (commands only, no explanations)
+- Architecture overview (**1 paragraph**, high-level concept only)
+- Links to detailed technical documentation in `packages/{package-name}/docs/`
+- Links to related packages and dependencies
+
+**Think of README as**: A business card with contact info, NOT a resume with full work history.
+
+**Template** (strict, DO NOT add more):
+```markdown
+# {Package Name}
+
+Brief description of what this package does (2-3 sentences max).
+
+## Quick Start
+
+### Development
+\`\`\`bash
+cargo run
+\`\`\`
+
+### Testing
+\`\`\`bash
+cargo test
+\`\`\`
+
+## Architecture
+
+High-level architecture description (1 paragraph ONLY, no diagrams, no details).
+
+## Documentation
+
+### Product Requirements (What)
+- [Feature Documentation](../../docs/ft/{product-area}/1-OVERVIEW.md) - Product requirements and features
+
+### Technical Implementation (How)
+- [Architecture](./docs/architecture.md) - System design and components
+- [API Reference](./docs/api-reference.md) - API documentation
+- [Integration Guide](./docs/integration.md) - Service integrations
+- [Changesets](./docs/changesets.md) - Applied changeset history
+
+## Related Packages
+- [related-package](../related-package/README.md) — Crate or package reference
+```
+
+**What NOT to Include** (common violations):
+```markdown
+❌ ## Features (with subsections and bullet points)
+❌ ## User Workflows (step-by-step flows)
+❌ ## Export Workflow (detailed process descriptions)
+❌ ## Integration Patterns (code examples)
+❌ ## Platform Integration (implementation details)
+❌ ## File Structure (ZIP contents, naming conventions)
+❌ ## Usage Examples (code snippets)
+❌ ## Configuration (detailed config options)
+```
+
+**Where These Belong Instead**:
+- Features → `docs/ft/{product-area}/` (feature docs define WHAT)
+- Workflows → `packages/{package-name}/docs/integration.md`
+- Code examples → `packages/{package-name}/docs/api-reference.md`
+- Implementation details → `packages/{package-name}/docs/architecture.md`
+- Integration patterns → `packages/{package-name}/docs/integration.md`
+- Configuration → `packages/{package-name}/docs/configuration.md`
+
+**Golden Rule**: If it requires scrolling past one screen, it doesn't belong in README.
+
+#### 2. Package AGENTS.md (Agent Briefing)
+
+**Location**: `packages/{package-name}/AGENTS.md`
+
+**Purpose**: Tool-agnostic agent briefing for AI coding assistants. Under 60 lines.
+
+**Content**: Mission (1-2 sentences), Toolchain (table), Key Dependencies, Architecture (3-5 bullets), Judgment Boundaries (NEVER/ALWAYS), Documentation pointers to `./docs/`.
+
+**CRITICAL**: Never auto-generate AGENTS.md — it must be hand-authored.
+
+#### 3. Detailed Documentation (package docs/)
+
+**Location**: `packages/{package-name}/docs/`
+
+**Purpose**: Comprehensive technical documentation that is **stable and read-only**.
+
+**Structure**:
+```
+packages/{package-name}/docs/
+├── architecture.md          # System design, component structure
+├── api-reference.md         # Public API documentation
+├── implementation.md        # Implementation details, algorithms
+├── testing.md              # Testing strategy and patterns
+├── integration.md          # Integration with other packages
+├── changesets.md           # Applied changeset history
+└── decisions/              # Architecture decision records
+    ├── 001-decision.md
+    └── 002-decision.md
+```
+
+**Content Guidelines**:
+- **Architecture**: Component diagrams, data flow, design patterns
+- **API Reference**: Public interfaces, types, function signatures
+- **Implementation**: Core algorithms, data structures, technical details
+- **Testing**: Test strategy, patterns, acceptance criteria
+- **Integration**: How package integrates with others, dependencies
+- **Changesets**: Chronological list of wrapped changesets applied to this package
+- **Decisions**: Timestamped ADRs (Architecture Decision Records)
+
+### Cross-Package References
+
+Documentation can reference other packages using relative markdown links:
+
+```markdown
+This package depends on [native-parser](../../native-parser/docs/architecture.md) for parsing.
+
+See [client-lib-server integration](../../client-lib-server/docs/integration.md) for details.
+```
+
+## Changeset Workflow
+
+### Overview
+
+**CRITICAL**: Development documentation is **read-only**. Changes come through **changeset documents**.
+
+**Changeset** = Delta between documentation State A (before change) and State B (after change)
+
+**Workflow**:
+```
+Feature requirement → Create changeset → Implement → Wrap changeset → Update dev docs
+```
+
+### Changeset Documents
+
+**Location**: `docs/dev/1-WIP/YYYY-MM-DD-changeset-name.md`
+
+**Purpose**: Track changes to development documentation across one or more packages.
+
+**Full Documentation**: See [changeset-doc.mdc](mdc:.cursor/rules/changeset-doc.mdc) for complete changeset structure, requirements, and lifecycle details.
+
+**Quick Reference Structure**:
+```markdown
+# Changeset: {Feature/Change Name}
+
+**Date**: YYYY-MM-DD
+**Status**: 🚧 In Progress | ✅ Complete
+**Type**: Feature | Refactor | Bug Fix | Architecture Change
+
+## Affected Packages
+[List ALL packages - see changeset-doc.mdc for details]
+
+## Related Feature Documentation
+[Links to feature docs and PRD docs - see [prd-doc.mdc](mdc:.cursor/rules/prd-doc.mdc) for PRD structure]
+
+## Summary
+[Brief description]
+
+## Background
+[Why needed]
+
+## Scope
+[High-level deliverables with checkboxes - see changeset-doc.mdc for Scope section details]
+
+## Technical Changes
+[State A, State B, Delta - see changeset-doc.mdc for format]
+
+## Implementation Milestones
+[Checkboxes - see changeset-doc.mdc]
+
+## Acceptance Tests
+[Per-package tests - see changeset-doc.mdc]
+
+## Technical Debt & Production Readiness
+[Gaps tracking - see changeset-doc.mdc]
+
+## Decisions & Trade-offs
+[Technical decisions - see changeset-doc.mdc]
+
+## Refactoring Needed
+[Code quality issues by source rule - see changeset-doc.mdc]
+
+## Validation Results
+[Findings from validation rules - see changeset-doc.mdc]
+
+## References
+[Related docs - see changeset-doc.mdc]
+```
+
+**For complete template, section requirements, and examples**: See [changeset-doc.mdc](mdc:.cursor/rules/changeset-doc.mdc)
+
+### Changeset Lifecycle
+
+1. **Created** (`@plan-ft-dev`): Changeset document created with State A, State B, milestones
+2. **In Progress**: Updated as implementation progresses, milestones checked off, Scope tracked
+3. **Complete**: All milestones complete, acceptance tests passing, all Scope items checked
+4. **Wrapped** (`/wrap-context-docs`): Applied to dev docs, **deleted** (not archived)
+
+**Detailed lifecycle documentation**: See [changeset-doc.mdc](mdc:.cursor/rules/changeset-doc.mdc)
+
+## Package Change History Tracking
+
+**Purpose**: Track the history of technical changes applied to package development documentation in release note style. This provides traceability without linking to deleted source files.
+
+**When updated**: The `changesets.md` file is automatically updated by the `/wrap-context-docs` command when a changeset is wrapped.
+
+**Location**: `packages/{package-name}/docs/changesets.md` - Existing file that tracks wrapped changesets for each package.
+
+### File Format
+
+```markdown
+# Changesets Applied
+
+Wrapped changeset history for {package-name}.
+
+- **2026-01-22** [Bug Fix] Icon Export Quality Fixes — Fixed blurry PNG at small sizes, gradient stop-color not themed, background visible at 0% opacity. (icons-server)
+- **2026-01-27** [Bug Fix] RGBA to HEX Color Format — Converted RGBA to HEX with separate opacity attributes for native image preview compatibility. (icons-server)
+- **2026-01-29** [Bug Fix] Icon Generation Idempotency — Fixed duplicate Duplexer events from Greyhound retries via processedIconIds tracking. (icons-server)
+```
+
+### Guidelines
+
+**Format**: `- **YYYY-MM-DD** [Type] Title — Summary. (affected packages)`
+
+**Rules**:
+- **Chronological order** (oldest first, new entries appended at bottom) — avoids git conflicts from parallel branches
+- **One bullet per entry** — keeps the conflict zone to a single line
+- **No headers per entry** — no H2/H3, just a flat bullet list under the H1 title
+- **No file references** — source changesets are deleted after wrapping
+- **Past tense** — "Fixed X", "Added Y", "Refactored Z"
+- **Type in brackets** — `[Feature]`, `[Bug Fix]`, `[Refactor]`, `[Architecture Change]`
+
+## Acceptance Tests
+
+**Purpose**: Define what "done" looks like for a changeset.
+
+**Types**:
+- **Unit tests**: For isolated component/function changes
+- **Integration tests**: For package-to-package integration changes
+- **E2E tests**: For user-facing feature changes
+
+**Format and examples**: See [changeset-doc.mdc](mdc:.cursor/rules/changeset-doc.mdc) for acceptance test format and detailed examples.
+
+## Best Practices
+
+### Do's ✅
+- Keep package READMEs concise (< 200 lines)
+- Use detailed docs in `packages/{package-name}/docs/` for complexity
+- Always create changeset for documentation updates
+- Reference related packages explicitly
+- Document technical decisions in ADRs
+- Keep changesets timing-agnostic (milestones, not deadlines)
+- Update acceptance tests as implementation progresses
+- **Maintain single README.md per package** - consolidate all package-level info there
+
+### Don'ts ❌
+- Don't modify dev docs directly (use changesets)
+- Don't put implementation details in package README
+- Don't create changesets without affected packages list
+- Don't skip acceptance criteria in changesets
+- Don't add process instructions (e.g., "use TDD") to docs
+- Don't modify original changeset after wrapping
+- **Don't create nested READMEs** (e.g., `test/README.md`, `src/README.md`) - use main README or detailed docs
+
+## Related Rules and Commands
+
+**Related Rules**:
+- [feature-doc.mdc](mdc:.cursor/rules/feature-doc.mdc) - **Product requirements** (WHAT to build) that drive technical implementation
+- [prd-doc.mdc](mdc:.cursor/rules/prd-doc.mdc) - PRD documents for tracking feature requirement changes
+- [changeset-doc.mdc](mdc:.cursor/rules/changeset-doc.mdc) - Complete changeset document structure and requirements
+- [plan-ft-dev.mdc](mdc:.cursor/rules/plan-ft-dev.mdc) - Creates changeset documents
+
+**Related Commands**:
+- `/wrap-context-docs` - Applies changeset to dev docs and archives it
+
+**Documentation Hierarchy**:
+```
+Feature docs (WHAT)          Dev docs (HOW)
+docs/ft/                     packages/*/docs/
+├── Product requirements  →  ├── Architecture
+├── User stories          →  ├── Implementation
+├── Acceptance criteria   →  ├── Testing strategy
+└── Success metrics       →  └── Integration patterns
+
+packages/*/AGENTS.md         Agent briefing (per package)
+
+              ↓
+         Changeset (DELTA)
+         docs/dev/1-WIP/
+         └── Technical changes (State A → State B)
+```
+
+**Workflow Integration**:
+```
+Feature docs (what) → Changeset (how) → Implementation → Wrap → Updated dev docs
+```
