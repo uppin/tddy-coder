@@ -36,6 +36,10 @@ pub fn build_claude_args(
             args.push("--permission-mode".to_string());
             args.push("plan".to_string());
         }
+        PermissionMode::AcceptEdits => {
+            args.push("--permission-mode".to_string());
+            args.push("acceptEdits".to_string());
+        }
         PermissionMode::Default => {}
     }
 
@@ -159,7 +163,11 @@ impl super::CodingBackend for ClaudeCodeBackend {
         }
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
-        cmd.stdin(Stdio::null());
+        cmd.stdin(if request.inherit_stdin {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        });
 
         let mut child = cmd.spawn().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {

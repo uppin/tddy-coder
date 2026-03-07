@@ -11,6 +11,9 @@ pub use backend::{
     InvokeResponse, MockBackend, PermissionMode, QuestionOption,
 };
 pub use error::{BackendError, ParseError, WorkflowError};
-pub use output::{parse_planning_output, write_artifacts, PlanningOutput};
+pub use output::{
+    parse_acceptance_tests_response, parse_planning_output, read_session_file, write_artifacts,
+    write_session_file, AcceptanceTestInfo, AcceptanceTestsOutput, PlanningOutput,
+};
 pub use stream::ProgressEvent;
 pub use workflow::{Workflow, WorkflowState};

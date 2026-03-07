@@ -56,6 +56,7 @@ fn planning_workflow_produces_prd_and_todo_in_output_directory() {
         None,
         None,
         false,
+        false,
     );
 
     let output_path = result.expect("planning should succeed");
@@ -99,7 +100,7 @@ fn planning_workflow_invokes_backend_with_plan_permission_mode() {
     let output_dir = std::env::temp_dir().join("tddy-planning-invoke-test");
     let _ = std::fs::remove_dir_all(&output_dir);
 
-    let _ = workflow.plan("Feature X", &output_dir, None, None, false);
+    let _ = workflow.plan("Feature X", &output_dir, None, None, false, false);
 
     let state = workflow.state();
     assert!(
@@ -119,7 +120,7 @@ fn planning_workflow_transitions_to_failed_when_backend_errors() {
     let output_dir = std::env::temp_dir().join("tddy-planning-fail-test");
     let _ = std::fs::remove_dir_all(&output_dir);
 
-    let result = workflow.plan("Feature Y", &output_dir, None, None, false);
+    let result = workflow.plan("Feature Y", &output_dir, None, None, false, false);
 
     assert!(result.is_err(), "planning should fail");
     assert!(
@@ -139,7 +140,7 @@ fn planning_workflow_returns_clarification_needed_when_backend_returns_questions
     let output_dir = std::env::temp_dir().join("tddy-planning-questions-test");
     let _ = std::fs::remove_dir_all(&output_dir);
 
-    let result = workflow.plan("Feature Z", &output_dir, None, None, false);
+    let result = workflow.plan("Feature Z", &output_dir, None, None, false, false);
 
     match &result {
         Err(tddy_core::WorkflowError::ClarificationNeeded { questions, .. }) => {
@@ -188,7 +189,7 @@ fn planning_workflow_returns_clarification_needed_with_structured_questions() {
     let output_dir = std::env::temp_dir().join("tddy-planning-structured-qa-test");
     let _ = std::fs::remove_dir_all(&output_dir);
 
-    let result = workflow.plan("Feature Z", &output_dir, None, None, false);
+    let result = workflow.plan("Feature Z", &output_dir, None, None, false, false);
 
     match &result {
         Err(tddy_core::WorkflowError::ClarificationNeeded {
@@ -223,7 +224,7 @@ fn planning_workflow_produces_prd_after_clarification_answers() {
     let output_dir = std::env::temp_dir().join("tddy-planning-followup-test");
     let _ = std::fs::remove_dir_all(&output_dir);
 
-    let first = workflow.plan("Feature Z", &output_dir, None, None, false);
+    let first = workflow.plan("Feature Z", &output_dir, None, None, false, false);
     assert!(
         matches!(
             first,
@@ -233,7 +234,7 @@ fn planning_workflow_produces_prd_after_clarification_answers() {
     );
 
     let answers = "Developers\nQ2 2025";
-    let second = workflow.plan("Feature Z", &output_dir, Some(answers), None, false);
+    let second = workflow.plan("Feature Z", &output_dir, Some(answers), None, false, false);
 
     let output_path = second.expect("second call with answers should succeed");
     assert!(output_path.is_dir());

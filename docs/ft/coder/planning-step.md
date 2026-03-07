@@ -6,7 +6,7 @@
 
 ## Summary
 
-The Planning Step is the first phase of the tddy-coder workflow. It accepts a user's goal description via stdin, invokes an LLM backend (Claude Code CLI) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document) and a `TODO.md` (implementation task list).
+The Planning Step is the first phase of the tddy-coder workflow. It accepts a user's goal description via stdin, invokes an LLM backend (Claude Code CLI) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `.session` (session ID for resumption). The **acceptance-tests** goal reads a completed plan, resumes the Claude session, creates failing acceptance tests, and verifies they fail.
 
 ## Background
 
@@ -20,11 +20,13 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 
 1. Binary name: `tddy-coder`
 2. Accepts `--goal plan` to trigger the planning step
-3. Accepts `--output-dir <path>` to configure where planning output is written (defaults to current directory)
-4. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
-5. Accepts `--agent-output` to print raw agent output to stderr in real time
-6. Reads the feature description from stdin (supports piped input and interactive prompt)
-7. *Deferred*: `--list-models` to list available models (not needed for current scope)
+3. Accepts `--goal acceptance-tests` to create failing acceptance tests from a completed plan
+4. Accepts `--plan-dir <path>`: path to plan output directory (PRD.md, TODO.md, .session); required when `--goal acceptance-tests`
+5. Accepts `--output-dir <path>` to configure where planning output is written (defaults to current directory)
+6. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
+7. Accepts `--agent-output` to print raw agent output to stderr in real time
+8. Reads the feature description from stdin (supports piped input and interactive prompt)
+9. *Deferred*: `--list-models` to list available models (not needed for current scope)
 
 ### Planning Workflow
 
@@ -33,8 +35,21 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 3. **Q&A phase**: Claude Code may ask clarifying questions; the user is expected to answer them. The system must support this interactive exchange (Claude asks → user answers → Claude continues analysis).
 4. Generate a deterministic directory name based on the feature (date-prefixed, slugified)
 5. Parse Claude Code's structured output into PRD and TODO artifacts
-6. Write `PRD.md` and `TODO.md` to the output directory
+6. Write `PRD.md`, `TODO.md`, and `.session` (session ID) to the output directory
 7. On successful exit, output the path to `PRD.md` (goal-specific exit output)
+
+The PRD must include a **Testing Plan** section with: test level (E2E/Integration/Unit), list of acceptance tests, target test file paths, and strong assertions.
+
+### Acceptance-Tests Workflow
+
+1. Read PRD.md and TODO.md from the plan directory specified by `--plan-dir`
+2. Read the session ID from `.session` in the plan directory
+3. Resume the Claude session using `--resume <session-id>`
+4. Use `--permission-mode acceptEdits` (auto-approves file edits for creating tests and running `cargo test`)
+5. **Q&A phase**: When Claude returns clarifying questions (e.g., permission requests), the user provides answers and the workflow continues
+6. System prompt instructs Claude to: read the testing plan from the PRD; create acceptance tests as specified; verify all new tests fail (Red state); remove or adjust any tests that pass
+7. Parse Claude's output to extract a summary of created tests and their status
+8. On successful exit, output a human-readable summary (test count, paths, failing status)
 
 ### LLM Backend Abstraction
 
@@ -47,13 +62,14 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 ### Claude Code Integration
 
 1. Invokes `claude` CLI binary (from PATH)
-2. Uses plan mode via `--permission-mode plan` (read-only analysis)
-3. **Model selection**: Passes `--model <name>` to the `claude` binary when the user specifies one via `--model` / `-m`. Default model when unspecified (e.g. `opus` or backend default).
-4. **Output format**: Uses `--output-format=stream-json` for NDJSON event stream (tool_use, result, task_progress).
-5. **Session management**: First invoke uses `--session-id <uuid>`; Q&A followup uses `--resume <uuid>` so Claude retains context across the exchange.
-6. **Structured Q&A**: Clarifying questions come from `AskUserQuestion` tool events (header, question, options, multi_select). Presented via inquire Select/MultiSelect prompts.
-7. **Real-time progress**: Tool activity (Read, Glob, Bash, etc.) displayed while Claude works.
-8. **Output parsing**: System prompt instructs Claude to emit PRD and TODO in `<structured-response content-type="application-json">` format; parser also supports delimiter fallback.
+2. **Plan goal**: Uses `--permission-mode plan` (read-only analysis)
+3. **Acceptance-tests goal**: Uses `--permission-mode acceptEdits` (auto-approves file edits)
+4. **Model selection**: Passes `--model <name>` to the `claude` binary when the user specifies one via `--model` / `-m`. Default model when unspecified (e.g. `opus` or backend default).
+5. **Output format**: Uses `--output-format=stream-json` for NDJSON event stream (tool_use, result, task_progress).
+6. **Session management**: First invoke uses `--session-id <uuid>`; Q&A followup uses `--resume <uuid>` so Claude retains context across the exchange.
+7. **Structured Q&A**: Clarifying questions come from `AskUserQuestion` tool events (header, question, options, multi_select). Presented via inquire Select/MultiSelect prompts.
+8. **Real-time progress**: Tool activity (Read, Glob, Bash, etc.) displayed while Claude works.
+9. **Output parsing**: System prompt instructs Claude to emit PRD and TODO in `<structured-response content-type="application-json">` format; parser also supports delimiter fallback.
 
 ### Output Artifacts
 
@@ -74,32 +90,47 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 ### State Machine
 
 1. The planning step is one state in the overall workflow state machine
-2. It transitions from `Init` → `Planning` → `Planned` (or `Failed`)
-3. The state machine enforces that planning must complete before development begins
-4. State transitions are explicit and auditable
+2. **Plan goal**: Transitions `Init` → `Planning` → `Planned` (or `Failed`)
+3. **Acceptance-tests goal**: Transitions `Init`/`Planned` → `AcceptanceTesting` → `AcceptanceTestsReady` (or `Failed`)
+4. The state machine enforces that planning must complete before development begins
+5. State transitions are explicit and auditable
 
 ### Exit Output
 
 On successful completion, the program prints a goal-specific artifact path to stdout (one line):
 
 - **plan**: Path to `PRD.md` (e.g. `./2026-03-07-feature-slug/PRD.md`)
+- **acceptance-tests**: Summary of created tests and their failing status (requires `--plan-dir`)
 
 This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt | xargs cat`).
 
 ## Acceptance Criteria
 
+### Plan Goal
+
 - [ ] `tddy-coder --goal plan` reads from stdin and produces a named output directory
-- [ ] Output directory contains well-formed `PRD.md` and `TODO.md`
+- [ ] Output directory contains well-formed `PRD.md`, `TODO.md`, and `.session`
 - [ ] `--output-dir` flag controls output location
 - [ ] `--model <name>` selects the LLM model; default used when omitted
 - [ ] *Deferred*: `--list-models` lists available models
 - [ ] Claude Code CLI is invoked in plan mode with appropriate arguments
 - [ ] **Q&A support**: When Claude asks clarifying questions during planning, the user can provide answers and Claude continues analysis
+- [ ] Plan system prompt produces a Testing Plan section in the PRD (test level, acceptance tests list, target files, assertions)
 - [ ] CodingBackend trait enables mock-based testing without real Claude Code CLI
 - [ ] Tests use a fake/mock backend to verify the planning workflow end-to-end
 - [ ] Error cases handled: empty input, Claude Code not found, malformed LLM output
 - [ ] State machine enforces valid transitions
 - [ ] On successful plan completion, stdout prints the path to `PRD.md` (goal-specific exit output)
+
+### Acceptance-Tests Goal
+
+- [ ] `tddy-coder --goal acceptance-tests --plan-dir <path>` creates failing acceptance tests from a plan
+- [ ] Acceptance-tests goal resumes the planning session via `--resume` for context continuity
+- [ ] Claude runs tests and verifies all new tests fail (Red state); passing tests are adjusted or removed
+- [ ] Output prints a summary of created tests, their paths, and failing status
+- [ ] State machine transitions: Init/Planned → AcceptanceTesting → AcceptanceTestsReady
+- [ ] Error handling: missing plan-dir, missing PRD.md, missing .session, session resume failure
+- [ ] `--model` and `--agent-output` flags work with the acceptance-tests goal
 
 ## Future Considerations (Not In Scope)
 

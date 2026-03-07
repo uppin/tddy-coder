@@ -1,10 +1,14 @@
 //! Workflow state machine for tddy-coder.
 
+mod acceptance_tests;
 mod planning;
 
 use crate::backend::CodingBackend;
 use crate::error::WorkflowError;
-use crate::output::{parse_planning_response, slugify_directory_name, write_artifacts};
+use crate::output::{
+    parse_acceptance_tests_response, parse_planning_response, read_session_file,
+    slugify_directory_name, write_artifacts, write_session_file,
+};
 use std::path::{Path, PathBuf};
 
 /// Workflow state.
@@ -12,8 +16,16 @@ use std::path::{Path, PathBuf};
 pub enum WorkflowState {
     Init,
     Planning,
-    Planned { output_dir: PathBuf },
-    Failed { error: String },
+    Planned {
+        output_dir: PathBuf,
+    },
+    AcceptanceTesting,
+    AcceptanceTestsReady {
+        output: crate::output::AcceptanceTestsOutput,
+    },
+    Failed {
+        error: String,
+    },
 }
 
 /// Workflow orchestrator with a coding backend.
@@ -49,6 +61,7 @@ impl<B: CodingBackend> Workflow<B> {
         answers: Option<&str>,
         model: Option<String>,
         agent_output: bool,
+        inherit_stdin: bool,
     ) -> Result<PathBuf, WorkflowError> {
         let can_start = matches!(self.state, WorkflowState::Init);
         let can_continue = matches!(self.state, WorkflowState::Planning) && answers.is_some();
@@ -94,6 +107,7 @@ impl<B: CodingBackend> Workflow<B> {
             session_id,
             is_resume,
             agent_output,
+            inherit_stdin,
         };
 
         let response = match self.backend.invoke(request) {
@@ -137,10 +151,113 @@ impl<B: CodingBackend> Workflow<B> {
 
         write_artifacts(&output_path, &planning)?;
 
+        if let Some(ref sid) = self.session_id {
+            write_session_file(&output_path, sid)?;
+        }
+
         self.state = WorkflowState::Planned {
             output_dir: output_path.clone(),
         };
 
         Ok(output_path)
+    }
+
+    /// Run the acceptance-tests step: read plan from plan_dir, resume session, create failing tests.
+    /// When `answers` is `None`, performs first invoke; when backend returns questions,
+    /// returns `ClarificationNeeded`. Call again with `Some(answers)` to continue.
+    pub fn acceptance_tests(
+        &mut self,
+        plan_dir: &Path,
+        model: Option<String>,
+        agent_output: bool,
+        inherit_stdin: bool,
+        answers: Option<&str>,
+    ) -> Result<crate::output::AcceptanceTestsOutput, WorkflowError> {
+        let can_start = matches!(self.state, WorkflowState::Init)
+            || matches!(self.state, WorkflowState::Planned { .. });
+        let can_continue =
+            matches!(self.state, WorkflowState::AcceptanceTesting) && answers.is_some();
+
+        if !can_start && !can_continue {
+            return Err(WorkflowError::InvalidTransition(format!(
+                "cannot run acceptance_tests from {:?}",
+                self.state
+            )));
+        }
+
+        let prd_path = plan_dir.join("PRD.md");
+        if !prd_path.exists() {
+            return Err(WorkflowError::PlanDirInvalid(
+                "PRD.md not found in plan directory".into(),
+            ));
+        }
+
+        let mut session_id = read_session_file(plan_dir)?;
+        let prd_content = std::fs::read_to_string(&prd_path)
+            .map_err(|e| WorkflowError::PlanDirInvalid(e.to_string()))?;
+
+        if can_start {
+            self.state = WorkflowState::AcceptanceTesting;
+        }
+
+        let system_prompt = acceptance_tests::system_prompt();
+        let prompt = match answers {
+            None => acceptance_tests::build_prompt(&prd_content),
+            Some(a) => acceptance_tests::build_followup_prompt(&prd_content, a),
+        };
+
+        let request = crate::backend::InvokeRequest {
+            prompt,
+            system_prompt: Some(system_prompt),
+            permission_mode: crate::backend::PermissionMode::AcceptEdits,
+            model,
+            session_id: Some(session_id.clone()),
+            is_resume: true,
+            agent_output,
+            inherit_stdin,
+        };
+
+        let response = match self.backend.invoke(request) {
+            Ok(r) => r,
+            Err(e) => {
+                self.state = WorkflowState::Failed {
+                    error: e.to_string(),
+                };
+                return Err(WorkflowError::Backend(e));
+            }
+        };
+
+        if !response.questions.is_empty() {
+            if !response.session_id.is_empty() {
+                session_id = response.session_id.clone();
+                let _ = write_session_file(plan_dir, &session_id);
+            }
+            return Err(WorkflowError::ClarificationNeeded {
+                questions: response.questions,
+                session_id: response.session_id,
+            });
+        }
+
+        let output = match parse_acceptance_tests_response(&response.output) {
+            Ok(out) => out,
+            Err(e) => {
+                eprintln!(
+                    "--- Failed parse acceptance tests output (length {} bytes) ---",
+                    response.output.len()
+                );
+                eprintln!("{}", response.output);
+                eprintln!("--- End failed parse ---");
+                self.state = WorkflowState::Failed {
+                    error: e.to_string(),
+                };
+                return Err(WorkflowError::ParseError(e));
+            }
+        };
+
+        self.state = WorkflowState::AcceptanceTestsReady {
+            output: output.clone(),
+        };
+
+        Ok(output)
     }
 }

@@ -31,6 +31,19 @@ fn slugify(s: &str, max_len: usize) -> String {
     out.trim_matches('-').to_string()
 }
 
+/// Write the session ID to `.session` in the output directory.
+pub fn write_session_file(output_dir: &Path, session_id: &str) -> Result<(), WorkflowError> {
+    let session_path = output_dir.join(".session");
+    fs::write(&session_path, session_id).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    Ok(())
+}
+
+/// Read the session ID from `.session` in the plan directory.
+pub fn read_session_file(plan_dir: &Path) -> Result<String, WorkflowError> {
+    let session_path = plan_dir.join(".session");
+    fs::read_to_string(&session_path).map_err(|e| WorkflowError::SessionMissing(format!("{}", e)))
+}
+
 /// Write PRD.md and TODO.md to the given directory.
 pub fn write_artifacts(output_dir: &Path, planning: &PlanningOutput) -> Result<(), WorkflowError> {
     fs::create_dir_all(output_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;

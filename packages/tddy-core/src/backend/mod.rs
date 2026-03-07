@@ -22,13 +22,19 @@ pub struct InvokeRequest {
     pub is_resume: bool,
     /// When true, print raw agent output to stderr in real-time.
     pub agent_output: bool,
+    /// When true, inherit stdin so the user can grant permission prompts interactively.
+    pub inherit_stdin: bool,
 }
 
 /// Permission mode for the backend (e.g. plan = read-only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionMode {
+    /// Read-only analysis, no file edits or Bash.
     Plan,
+    /// Standard behavior: prompts for permission on first use of each tool.
     Default,
+    /// Automatically accepts file edit permissions for the session.
+    AcceptEdits,
 }
 
 /// Structured clarification question from AskUserQuestion tool.

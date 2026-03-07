@@ -14,7 +14,7 @@ Otherwise, you MUST include a structured-response block with your output. Use th
 {"goal": "plan", "prd": "<PRD markdown content>", "todo": "<TODO markdown content>"}
 </structured-response>
 
-The prd and todo values must be JSON strings (escape quotes and newlines as needed). The PRD should include: Summary, Background, Requirements, Acceptance Criteria. The TODO should list discrete implementation tasks in dependency order using - [ ] for pending and [x] for completed.
+The prd and todo values must be JSON strings (escape quotes and newlines as needed). The PRD should include: Summary, Background, Requirements, Acceptance Criteria, and a Testing Plan section. The Testing Plan must contain: (1) test level determination (E2E/Integration/Unit) with rationale, (2) a list of acceptance tests with descriptive names, (3) target test file paths (existing or new), (4) strong assertions for each test. The TODO should list discrete implementation tasks in dependency order using - [ ] for pending and [x] for completed.
 
 You may include explanatory text before or after the structured-response block, but the block itself is required for parsing."#
         .to_string()
@@ -38,4 +38,18 @@ Now create the PRD and TODO for: {feature}"#,
         answers = answers.trim(),
         feature = feature
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_prompt_includes_testing_plan_requirements() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("Testing Plan") || prompt.to_lowercase().contains("testing plan"),
+            "system prompt must require Testing Plan section in PRD"
+        );
+    }
 }

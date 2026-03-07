@@ -185,3 +185,79 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// Create a fake claude script that returns acceptance-tests structured output.
+fn create_fake_claude_acceptance_tests(dir: &Path) -> std::io::Result<()> {
+    let script = r###"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
+printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">{\"goal\":\"acceptance-tests\",\"summary\":\"Created 2 tests. All failing.\",\"tests\":[{\"name\":\"test_a\",\"file\":\"tests/a.rs\",\"line\":1,\"status\":\"failing\"}]}</structured-response>","session_id":"fake-sess","is_error":false}'
+"###;
+    write_executable_script(dir, "claude", script)
+}
+
+#[test]
+#[cfg(unix)]
+fn cli_accepts_goal_acceptance_tests_with_plan_dir() {
+    let tmp = std::env::temp_dir().join("tddy-cli-at-goal-test");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    create_fake_claude_acceptance_tests(&tmp).expect("create fake claude");
+
+    let plan_dir = tmp.join("plan-output");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    std::fs::write(plan_dir.join(".session"), "fake-sess").expect("write .session");
+
+    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .env("PATH", tmp_path.to_str().unwrap())
+        .env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        )
+        .args([
+            "--goal",
+            "acceptance-tests",
+            "--plan-dir",
+            plan_dir.to_str().unwrap(),
+        ]);
+
+    let output = cmd.output().expect("run tddy-coder");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "expected success: stderr={} stdout={}",
+        stderr,
+        stdout
+    );
+    assert!(
+        stdout.contains("Created 2 tests") || stdout.contains("failing"),
+        "stdout should contain test summary: {}",
+        stdout
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_errors_when_plan_dir_missing_for_acceptance_tests_goal() {
+    let mut cmd = tddy_coder_bin();
+    cmd.args(["--goal", "acceptance-tests"]);
+    // --plan-dir is NOT provided
+
+    let output = cmd.output().expect("run tddy-coder");
+
+    assert!(
+        !output.status.success(),
+        "should fail when --plan-dir missing"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("plan-dir") || stderr.contains("plan_dir"),
+        "error should mention plan-dir: {}",
+        stderr
+    );
+}

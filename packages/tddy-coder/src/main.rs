@@ -11,13 +11,17 @@ use tddy_core::{ClarificationQuestion, ClaudeCodeBackend, ProgressEvent, Workflo
 #[command(name = "tddy-coder")]
 #[command(about = "TDD-driven coder for PRD-based development workflow")]
 struct Args {
-    /// Goal to execute: plan, develop, etc.
-    #[arg(long, value_parser = ["plan"])]
+    /// Goal to execute: plan, acceptance-tests, etc.
+    #[arg(long, value_parser = ["plan", "acceptance-tests"])]
     goal: String,
 
     /// Output directory for planning artifacts (default: current directory)
     #[arg(long, default_value = ".")]
     output_dir: PathBuf,
+
+    /// Plan directory for acceptance-tests goal (required when goal is acceptance-tests)
+    #[arg(long)]
+    plan_dir: Option<PathBuf>,
 
     /// Print raw agent output to stderr in real-time
     #[arg(long)]
@@ -30,6 +34,71 @@ struct Args {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    if args.goal == "acceptance-tests" {
+        let plan_dir = args
+            .plan_dir
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for acceptance-tests goal"))?;
+
+        let backend = ClaudeCodeBackend::new().with_progress(|event| {
+            let dim = "\x1b[2m";
+            let reset = "\x1b[0m";
+            match event {
+                ProgressEvent::ToolUse {
+                    name,
+                    detail: Some(d),
+                } => eprintln!("  {}📎 {} {}...{}", dim, name, d, reset),
+                ProgressEvent::ToolUse { name, detail: None } => {
+                    eprintln!("  {}📎 {}...{}", dim, name, reset)
+                }
+                ProgressEvent::TaskStarted { description } => {
+                    eprintln!("  {}▶ {}...{}", dim, description, reset)
+                }
+                ProgressEvent::TaskProgress {
+                    description,
+                    last_tool: Some(tool),
+                } => eprintln!("  {}⏳ {} ({}){}", dim, description, tool, reset),
+                ProgressEvent::TaskProgress {
+                    description,
+                    last_tool: None,
+                } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
+            }
+        });
+        let mut workflow = Workflow::new(backend);
+
+        let inherit_stdin = io::stdin().is_terminal();
+        let mut answers: Option<String> = None;
+        loop {
+            let result = workflow.acceptance_tests(
+                plan_dir,
+                args.model.clone(),
+                args.agent_output,
+                inherit_stdin,
+                answers.as_deref(),
+            );
+
+            match result {
+                Ok(output) => {
+                    println!("{}", output.summary);
+                    for t in &output.tests {
+                        println!(
+                            "  - {} ({}:{}): {}",
+                            t.name,
+                            t.file,
+                            t.line.unwrap_or(0),
+                            t.status
+                        );
+                    }
+                    return Ok(());
+                }
+                Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
+                    answers = Some(read_answers(&questions).context("read answers")?);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
 
     if args.goal != "plan" {
         anyhow::bail!("unsupported goal: {}", args.goal);
@@ -67,6 +136,7 @@ fn main() -> anyhow::Result<()> {
     });
     let mut workflow = Workflow::new(backend);
 
+    let inherit_stdin = io::stdin().is_terminal();
     let mut answers: Option<String> = None;
     loop {
         let result = workflow.plan(
@@ -75,6 +145,7 @@ fn main() -> anyhow::Result<()> {
             answers.as_deref(),
             args.model.clone(),
             args.agent_output,
+            inherit_stdin,
         );
 
         match result {

@@ -83,6 +83,79 @@ fn extract_section<'a>(s: &'a str, start: &str, end: &str) -> Option<&'a str> {
     Some(rest[..end_idx].trim())
 }
 
+/// Parsed acceptance tests output.
+#[derive(Debug, Clone)]
+pub struct AcceptanceTestsOutput {
+    pub summary: String,
+    pub tests: Vec<AcceptanceTestInfo>,
+}
+
+/// Info about a single acceptance test.
+#[derive(Debug, Clone)]
+pub struct AcceptanceTestInfo {
+    pub name: String,
+    pub file: String,
+    pub line: Option<u32>,
+    pub status: String,
+}
+
+#[derive(serde::Deserialize)]
+struct StructuredAcceptanceTests {
+    goal: Option<String>,
+    summary: Option<String>,
+    tests: Option<Vec<AcceptanceTestInfoDe>>,
+}
+
+#[derive(serde::Deserialize)]
+struct AcceptanceTestInfoDe {
+    name: String,
+    file: String,
+    line: Option<u32>,
+    status: String,
+}
+
+/// Parse LLM acceptance tests response from structured-response block.
+/// Returns Malformed if the expected format is not found.
+pub fn parse_acceptance_tests_response(s: &str) -> Result<AcceptanceTestsOutput, ParseError> {
+    let open = s
+        .find(STRUCTURED_OPEN)
+        .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
+    let after_open = &s[open + STRUCTURED_OPEN.len()..];
+    let gt = after_open
+        .find('>')
+        .ok_or_else(|| ParseError::Malformed("structured-response malformed".into()))?;
+    let content = after_open[gt + 1..].trim();
+    let close = content
+        .find(STRUCTURED_CLOSE)
+        .ok_or_else(|| ParseError::Malformed("structured-response close not found".into()))?;
+    let json_str = content[..close].trim();
+    let parsed: StructuredAcceptanceTests =
+        serde_json::from_str(json_str).map_err(|e| ParseError::Malformed(e.to_string()))?;
+
+    if parsed.goal.as_deref() != Some("acceptance-tests") {
+        return Err(ParseError::Malformed("goal is not acceptance-tests".into()));
+    }
+
+    let summary = parsed
+        .summary
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+
+    let tests = parsed
+        .tests
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| AcceptanceTestInfo {
+            name: t.name,
+            file: t.file,
+            line: t.line,
+            status: t.status,
+        })
+        .collect();
+
+    Ok(AcceptanceTestsOutput { summary, tests })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +234,23 @@ What is the target audience?
         let out = parse_planning_response(input).expect("should parse");
         assert!(out.prd.contains("Feature X"));
         assert!(out.todo.contains("Task 1"));
+    }
+
+    #[test]
+    fn parse_acceptance_tests_response_extracts_summary_and_tests() {
+        use super::parse_acceptance_tests_response;
+        let input = r#"Created acceptance tests.
+
+<structured-response content-type="application-json">
+{"goal":"acceptance-tests","summary":"Created 2 acceptance tests. All failing (Red state) as expected.","tests":[{"name":"login_stores_session_token","file":"packages/auth/tests/session.it.rs","line":15,"status":"failing"},{"name":"logout_clears_session","file":"packages/auth/tests/session.it.rs","line":28,"status":"failing"}]}
+</structured-response>
+"#;
+        let out = parse_acceptance_tests_response(input).expect("should parse");
+        assert!(out.summary.contains("Created 2 acceptance tests"));
+        assert_eq!(out.tests.len(), 2);
+        assert_eq!(out.tests[0].name, "login_stores_session_token");
+        assert_eq!(out.tests[0].file, "packages/auth/tests/session.it.rs");
+        assert_eq!(out.tests[0].line, Some(15));
+        assert_eq!(out.tests[0].status, "failing");
     }
 }

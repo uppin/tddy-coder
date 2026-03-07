@@ -11,7 +11,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **CodingBackend**: Trait for invoking LLM-based coders. Implementations include `ClaudeCodeBackend` (production) and `MockBackend` (testing).
 - **InvokeRequest/InvokeResponse**: Request and response types. Supports session_id, is_resume, agent_output.
 - **ClarificationQuestion**: Structured question type from AskUserQuestion tool events (header, question, options, multi_select).
-- **PermissionMode**: Plan (read-only) or Default.
+- **PermissionMode**: Plan (read-only), AcceptEdits (auto-approve file edits), or Default.
 
 ### Stream (`stream/`)
 
@@ -22,14 +22,17 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Workflow (`workflow/`)
 
-- **WorkflowState**: Init, Planning, Planned, Failed.
-- **Workflow**: Orchestrates the planning step with session continuity for Q&A followup.
+- **WorkflowState**: Init, Planning, Planned, AcceptanceTesting, AcceptanceTestsReady, Failed.
+- **Workflow**: Orchestrates the planning step and acceptance-tests step with session continuity for Q&A followup.
 - **planning**: System prompt (structured-response format) and user prompt construction.
+- **acceptance_tests**: System prompt for test creation and verification; parses test summary from response.
 
 ### Output (`output/`)
 
 - **parse_planning_response**: Extracts PRD and TODO from structured-response (`<structured-response content-type="application-json">`) or delimited text.
+- **parse_acceptance_tests_response**: Extracts test summary from acceptance-tests response.
 - **write_artifacts**: Writes PRD.md and TODO.md to the filesystem.
+- **write_session_file / read_session_file**: Session ID persistence for session resumption.
 - **slugify_directory_name**: Generates directory names (YYYY-MM-DD-<slug>).
 
 ## Data Flow

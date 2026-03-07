@@ -17,6 +17,7 @@ fn request_with_both_prompts(system_prompt: &str, user_prompt: &str) -> InvokeRe
         session_id: None,
         is_resume: false,
         agent_output: false,
+        inherit_stdin: false,
     }
 }
 
@@ -160,6 +161,7 @@ fn request_without_system_prompt_has_user_prompt_last() {
         session_id: None,
         is_resume: false,
         agent_output: false,
+        inherit_stdin: false,
     };
     let args = build_claude_args(&req, None);
 
@@ -227,6 +229,7 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n---PRD_END---
         session_id: None,
         is_resume: false,
         agent_output: false,
+        inherit_stdin: false,
     };
 
     let _ = backend.invoke(req).expect("invoke should succeed");

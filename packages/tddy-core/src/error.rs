@@ -28,6 +28,12 @@ pub enum WorkflowError {
     #[error("artifact write failed: {0}")]
     WriteFailed(String),
 
+    #[error("plan directory invalid: {0}")]
+    PlanDirInvalid(String),
+
+    #[error("session file missing: {0}")]
+    SessionMissing(String),
+
     /// Clarification questions from the LLM; caller should display and re-invoke with answers.
     #[error("clarification needed: {questions:?}")]
     ClarificationNeeded {
