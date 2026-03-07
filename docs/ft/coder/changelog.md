@@ -2,6 +2,13 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-07 — Full Workflow When --goal Omitted
+
+- **Full workflow**: When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → green in a single invocation
+- **Resume**: Auto-detects completed state from `changeset.yaml`; re-running skips completed steps (via `--plan-dir` or scanning `--output-dir`)
+- **CLI**: `--goal` is now optional; individual goals (`plan`, `acceptance-tests`, `red`, `green`) unchanged
+- **Output**: Full workflow prints green step output on success; when `GreenComplete`, re-running exits with summary
+
 ## 2026-03-10 — Goal Enhancements
 
 - **changeset.yaml**: Replaces `.session` and `.impl-session` as the unified manifest. Contains name (PRD name from plan agent), initial_prompt, clarification_qa, sessions (with system_prompt_file per session), state, models, discovery, artifacts.

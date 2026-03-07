@@ -4,19 +4,20 @@ use anyhow::Context;
 use clap::Parser;
 use inquire::{MultiSelect, Select, Text};
 use std::io::{self, BufRead, IsTerminal, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tddy_core::{
-    AcceptanceTestsOptions, ClarificationQuestion, ClaudeCodeBackend, GreenOptions, PlanOptions,
-    ProgressEvent, RedOptions, Workflow, WorkflowError,
+    next_goal_for_state, read_changeset, AcceptanceTestsOptions, ClarificationQuestion,
+    ClaudeCodeBackend, GreenOptions, PlanOptions, ProgressEvent, RedOptions, Workflow,
+    WorkflowError,
 };
 
 #[derive(Parser, Debug)]
 #[command(name = "tddy-coder")]
 #[command(about = "TDD-driven coder for PRD-based development workflow")]
 struct Args {
-    /// Goal to execute: plan, acceptance-tests, red, etc.
+    /// Goal to execute: plan, acceptance-tests, red, green. Omit to run full workflow.
     #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green"])]
-    goal: String,
+    goal: Option<String>,
 
     /// Output directory for planning artifacts (default: current directory)
     #[arg(long, default_value = ".")]
@@ -46,7 +47,11 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    if args.goal == "acceptance-tests" {
+    if args.goal.is_none() {
+        return run_full_workflow(&args);
+    }
+
+    if args.goal.as_deref() == Some("acceptance-tests") {
         let plan_dir = args
             .plan_dir
             .as_ref()
@@ -56,33 +61,7 @@ fn main() -> anyhow::Result<()> {
         eprintln!("agent: claude");
         eprintln!("model: {}", model);
 
-        let backend = ClaudeCodeBackend::new().with_progress(|event| {
-            let dim = "\x1b[2m";
-            let reset = "\x1b[0m";
-            match event {
-                ProgressEvent::ToolUse {
-                    name,
-                    detail: Some(d),
-                } => eprintln!("  {}📎 {} {}...{}", dim, name, d, reset),
-                ProgressEvent::ToolUse { name, detail: None } => {
-                    eprintln!("  {}📎 {}...{}", dim, name, reset)
-                }
-                ProgressEvent::TaskStarted { description } => {
-                    eprintln!("  {}▶ {}...{}", dim, description, reset)
-                }
-                ProgressEvent::TaskProgress {
-                    description,
-                    last_tool: Some(tool),
-                } => eprintln!("  {}⏳ {} ({}){}", dim, description, tool, reset),
-                ProgressEvent::TaskProgress {
-                    description,
-                    last_tool: None,
-                } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
-            }
-        });
-        let mut workflow = Workflow::new(backend)
-            .with_on_state_change(|from, to| eprintln!("State: {} → {}", from, to));
-
+        let mut workflow = create_workflow();
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
         loop {
@@ -126,7 +105,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    if args.goal == "green" {
+    if args.goal.as_deref() == Some("green") {
         let plan_dir = args
             .plan_dir
             .as_ref()
@@ -136,33 +115,7 @@ fn main() -> anyhow::Result<()> {
         eprintln!("agent: claude");
         eprintln!("model: {}", model);
 
-        let backend = ClaudeCodeBackend::new().with_progress(|event| {
-            let dim = "\x1b[2m";
-            let reset = "\x1b[0m";
-            match event {
-                ProgressEvent::ToolUse {
-                    name,
-                    detail: Some(d),
-                } => eprintln!("  {}📎 {} {}...{}", dim, name, d, reset),
-                ProgressEvent::ToolUse { name, detail: None } => {
-                    eprintln!("  {}📎 {}...{}", dim, name, reset)
-                }
-                ProgressEvent::TaskStarted { description } => {
-                    eprintln!("  {}▶ {}...{}", dim, description, reset)
-                }
-                ProgressEvent::TaskProgress {
-                    description,
-                    last_tool: Some(tool),
-                } => eprintln!("  {}⏳ {} ({}){}", dim, description, tool, reset),
-                ProgressEvent::TaskProgress {
-                    description,
-                    last_tool: None,
-                } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
-            }
-        });
-        let mut workflow = Workflow::new(backend)
-            .with_on_state_change(|from, to| eprintln!("State: {} → {}", from, to));
-
+        let mut workflow = create_workflow();
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
         loop {
@@ -215,7 +168,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    if args.goal == "red" {
+    if args.goal.as_deref() == Some("red") {
         let plan_dir = args
             .plan_dir
             .as_ref()
@@ -225,33 +178,7 @@ fn main() -> anyhow::Result<()> {
         eprintln!("agent: claude");
         eprintln!("model: {}", model);
 
-        let backend = ClaudeCodeBackend::new().with_progress(|event| {
-            let dim = "\x1b[2m";
-            let reset = "\x1b[0m";
-            match event {
-                ProgressEvent::ToolUse {
-                    name,
-                    detail: Some(d),
-                } => eprintln!("  {}📎 {} {}...{}", dim, name, d, reset),
-                ProgressEvent::ToolUse { name, detail: None } => {
-                    eprintln!("  {}📎 {}...{}", dim, name, reset)
-                }
-                ProgressEvent::TaskStarted { description } => {
-                    eprintln!("  {}▶ {}...{}", dim, description, reset)
-                }
-                ProgressEvent::TaskProgress {
-                    description,
-                    last_tool: Some(tool),
-                } => eprintln!("  {}⏳ {} ({}){}", dim, description, tool, reset),
-                ProgressEvent::TaskProgress {
-                    description,
-                    last_tool: None,
-                } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
-            }
-        });
-        let mut workflow = Workflow::new(backend)
-            .with_on_state_change(|from, to| eprintln!("State: {} → {}", from, to));
-
+        let mut workflow = create_workflow();
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
         loop {
@@ -304,8 +231,11 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    if args.goal != "plan" {
-        anyhow::bail!("unsupported goal: {}", args.goal);
+    if args.goal.as_deref() != Some("plan") {
+        anyhow::bail!(
+            "unsupported goal: {}",
+            args.goal.as_deref().unwrap_or("(none)")
+        );
     }
 
     let mut input = read_feature_input().context("read feature from stdin")?;
@@ -318,33 +248,7 @@ fn main() -> anyhow::Result<()> {
     eprintln!("agent: claude");
     eprintln!("model: {}", model);
 
-    let backend = ClaudeCodeBackend::new().with_progress(|event| {
-        let dim = "\x1b[2m";
-        let reset = "\x1b[0m";
-        match event {
-            ProgressEvent::ToolUse {
-                name,
-                detail: Some(d),
-            } => eprintln!("  {}📎 {} {}...{}", dim, name, d, reset),
-            ProgressEvent::ToolUse { name, detail: None } => {
-                eprintln!("  {}📎 {}...{}", dim, name, reset)
-            }
-            ProgressEvent::TaskStarted { description } => {
-                eprintln!("  {}▶ {}...{}", dim, description, reset)
-            }
-            ProgressEvent::TaskProgress {
-                description,
-                last_tool: Some(tool),
-            } => eprintln!("  {}⏳ {} ({}){}", dim, description, tool, reset),
-            ProgressEvent::TaskProgress {
-                description,
-                last_tool: None,
-            } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
-        }
-    });
-    let mut workflow = Workflow::new(backend)
-        .with_on_state_change(|from, to| eprintln!("State: {} → {}", from, to));
-
+    let mut workflow = create_workflow();
     let inherit_stdin = io::stdin().is_terminal();
     let mut answers: Option<String> = None;
     loop {
@@ -361,6 +265,207 @@ fn main() -> anyhow::Result<()> {
             Ok(output_path) => {
                 let prd_path = output_path.join("PRD.md");
                 println!("{}", prd_path.display());
+                return Ok(());
+            }
+            Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
+                answers = Some(read_answers(&questions).context("read answers")?);
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
+fn on_progress(event: &ProgressEvent) {
+    let dim = "\x1b[2m";
+    let reset = "\x1b[0m";
+    match event {
+        ProgressEvent::ToolUse {
+            name,
+            detail: Some(d),
+        } => eprintln!("  {}📎 {} {}...{}", dim, name, d, reset),
+        ProgressEvent::ToolUse { name, detail: None } => {
+            eprintln!("  {}📎 {}...{}", dim, name, reset)
+        }
+        ProgressEvent::TaskStarted { description } => {
+            eprintln!("  {}▶ {}...{}", dim, description, reset)
+        }
+        ProgressEvent::TaskProgress {
+            description,
+            last_tool: Some(tool),
+        } => eprintln!("  {}⏳ {} ({}){}", dim, description, tool, reset),
+        ProgressEvent::TaskProgress {
+            description,
+            last_tool: None,
+        } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
+    }
+}
+
+fn create_workflow() -> Workflow<ClaudeCodeBackend> {
+    let backend = ClaudeCodeBackend::new().with_progress(on_progress);
+    Workflow::new(backend).with_on_state_change(|from, to| eprintln!("State: {} → {}", from, to))
+}
+
+/// Scan output_dir for the most recently modified subdirectory containing changeset.yaml.
+fn find_resumable_plan_dir(output_dir: &Path) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(output_dir).ok()?;
+    let mut candidates: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let changeset_path = path.join("changeset.yaml");
+            if changeset_path.exists() {
+                if let Ok(meta) = path.metadata() {
+                    if let Ok(modified) = meta.modified() {
+                        candidates.push((path, modified));
+                    }
+                }
+            }
+        }
+    }
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    candidates.into_iter().next().map(|(p, _)| p)
+}
+
+fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
+    let model = args.model.as_deref().unwrap_or("opus");
+    eprintln!("agent: claude");
+    eprintln!("model: {}", model);
+
+    let inherit_stdin = io::stdin().is_terminal();
+
+    let plan_dir = if let Some(ref plan_dir) = args.plan_dir {
+        plan_dir.clone()
+    } else if let Some(resumable) = find_resumable_plan_dir(&args.output_dir) {
+        if let Ok(cs) = read_changeset(&resumable) {
+            let state = cs.state.current.as_str();
+            if next_goal_for_state(state).is_none() {
+                eprintln!(
+                    "Workflow already complete (state: {}). Nothing to do.",
+                    state
+                );
+                return Ok(());
+            }
+        }
+        resumable
+    } else {
+        let mut input = read_feature_input().context("read feature from stdin")?;
+        input = input.trim().to_string();
+        if input.is_empty() {
+            anyhow::bail!("empty feature description (read from stdin)");
+        }
+        let mut workflow = create_workflow();
+        let plan_options = PlanOptions {
+            model: args.model.clone(),
+            agent_output: args.agent_output,
+            inherit_stdin,
+            allowed_tools_extras: args.allowed_tools.clone(),
+            debug: args.debug,
+        };
+        let mut answers: Option<String> = None;
+        loop {
+            let result = workflow.plan(&input, &args.output_dir, answers.as_deref(), &plan_options);
+            match result {
+                Ok(output_path) => break output_path,
+                Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
+                    answers = Some(read_answers(&questions).context("read answers")?);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    };
+
+    let mut workflow = create_workflow();
+    let cs = read_changeset(&plan_dir).ok();
+    let start_goal = cs
+        .as_ref()
+        .and_then(|c| next_goal_for_state(&c.state.current))
+        .unwrap_or("plan");
+
+    let run_acceptance_tests = matches!(start_goal, "plan" | "acceptance-tests");
+    let run_red = matches!(start_goal, "plan" | "acceptance-tests" | "red");
+
+    if run_acceptance_tests {
+        let at_options = AcceptanceTestsOptions {
+            model: args.model.clone(),
+            agent_output: args.agent_output,
+            inherit_stdin,
+            allowed_tools_extras: args.allowed_tools.clone(),
+            debug: args.debug,
+        };
+        let mut answers: Option<String> = None;
+        loop {
+            let result = workflow.acceptance_tests(&plan_dir, answers.as_deref(), &at_options);
+            match result {
+                Ok(_) => break,
+                Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
+                    answers = Some(read_answers(&questions).context("read answers")?);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
+    if run_red {
+        let red_options = RedOptions {
+            model: args.model.clone(),
+            agent_output: args.agent_output,
+            inherit_stdin,
+            allowed_tools_extras: args.allowed_tools.clone(),
+            debug: args.debug,
+        };
+        let mut answers: Option<String> = None;
+        loop {
+            let result = workflow.red(&plan_dir, answers.as_deref(), &red_options);
+            match result {
+                Ok(_) => break,
+                Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
+                    answers = Some(read_answers(&questions).context("read answers")?);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
+    let green_options = GreenOptions {
+        model: args.model.clone(),
+        agent_output: args.agent_output,
+        inherit_stdin,
+        allowed_tools_extras: args.allowed_tools.clone(),
+        debug: args.debug,
+    };
+    let mut answers: Option<String> = None;
+    loop {
+        let result = workflow.green(&plan_dir, answers.as_deref(), &green_options);
+        match result {
+            Ok(output) => {
+                println!("{}", output.summary);
+                for t in &output.tests {
+                    println!(
+                        "  - {} ({}:{}): {}",
+                        t.name,
+                        t.file,
+                        t.line.unwrap_or(0),
+                        t.status
+                    );
+                }
+                for i in &output.implementations {
+                    println!(
+                        "  [impl] {} ({}:{}): {}",
+                        i.name,
+                        i.file,
+                        i.line.unwrap_or(0),
+                        i.kind
+                    );
+                }
+                if let Some(cmd) = &output.test_command {
+                    println!("\nHow to run tests: {}", cmd);
+                }
+                if let Some(prereq) = &output.prerequisite_actions {
+                    println!("Prerequisite actions: {}", prereq);
+                }
+                if let Some(single) = &output.run_single_or_selected_tests {
+                    println!("How to run a single or selected tests: {}", single);
+                }
                 return Ok(());
             }
             Err(WorkflowError::ClarificationNeeded { questions, .. }) => {

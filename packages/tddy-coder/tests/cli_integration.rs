@@ -50,6 +50,41 @@ fn write_executable_script(dir: &Path, name: &str, script: &str) -> std::io::Res
     Ok(())
 }
 
+/// When --goal is omitted, the full workflow (plan -> acceptance-tests -> red -> green) runs.
+/// This test fails until --goal is made optional and run_full_workflow is implemented.
+#[test]
+#[cfg(unix)]
+fn cli_runs_full_workflow_when_goal_omitted() {
+    let tmp = std::env::temp_dir().join("tddy-cli-full-workflow-test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).expect("create tmp");
+
+    create_fake_claude_prd_only(&tmp).expect("create fake claude");
+
+    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .env("PATH", tmp_path.to_str().unwrap())
+        .env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        )
+        .args(["--output-dir", tmp.to_str().unwrap()])
+        .write_stdin("Build auth");
+
+    let output = cmd.output().expect("run tddy-coder");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("the following required arguments were not provided")
+            && !stderr.contains("--goal"),
+        "when --goal is omitted, full workflow should run (not require --goal). stderr: {}",
+        stderr
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[test]
 #[cfg(unix)]
 fn cli_accepts_goal_plan() {

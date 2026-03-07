@@ -200,6 +200,19 @@ pub fn resolve_model(
     changeset.and_then(|c| c.models.get(goal)).cloned()
 }
 
+/// Map changeset state to the next goal to execute in the full workflow.
+/// Returns `None` when workflow is complete (GreenComplete) or failed.
+pub fn next_goal_for_state(state: &str) -> Option<&'static str> {
+    match state {
+        "Init" => Some("plan"),
+        "Planned" => Some("acceptance-tests"),
+        "AcceptanceTestsReady" => Some("red"),
+        "RedTestsReady" => Some("green"),
+        "GreenComplete" | "Failed" => None,
+        _ => Some("plan"),
+    }
+}
+
 /// Get session ID for a tag (e.g. "plan" or "impl").
 pub fn get_session_for_tag(changeset: &Changeset, tag: &str) -> Option<String> {
     changeset
