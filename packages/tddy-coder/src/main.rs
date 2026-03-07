@@ -5,7 +5,10 @@ use clap::Parser;
 use inquire::{MultiSelect, Select, Text};
 use std::io::{self, BufRead, IsTerminal, Read};
 use std::path::PathBuf;
-use tddy_core::{ClarificationQuestion, ClaudeCodeBackend, ProgressEvent, Workflow, WorkflowError};
+use tddy_core::{
+    AcceptanceTestsOptions, ClarificationQuestion, ClaudeCodeBackend, PlanOptions, ProgressEvent,
+    Workflow, WorkflowError,
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "tddy-coder")]
@@ -30,6 +33,10 @@ struct Args {
     /// Model name for Claude Code CLI (e.g. sonnet)
     #[arg(short, long)]
     model: Option<String>,
+
+    /// Extra tools to add to the goal's allowlist (comma-separated, e.g. "Bash(npm install)")
+    #[arg(long, value_delimiter = ',')]
+    allowed_tools: Option<Vec<String>>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -70,13 +77,13 @@ fn main() -> anyhow::Result<()> {
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
         loop {
-            let result = workflow.acceptance_tests(
-                plan_dir,
-                args.model.clone(),
-                args.agent_output,
+            let options = AcceptanceTestsOptions {
+                model: args.model.clone(),
+                agent_output: args.agent_output,
                 inherit_stdin,
-                answers.as_deref(),
-            );
+                allowed_tools_extras: args.allowed_tools.clone(),
+            };
+            let result = workflow.acceptance_tests(plan_dir, answers.as_deref(), &options);
 
             match result {
                 Ok(output) => {
@@ -139,14 +146,13 @@ fn main() -> anyhow::Result<()> {
     let inherit_stdin = io::stdin().is_terminal();
     let mut answers: Option<String> = None;
     loop {
-        let result = workflow.plan(
-            &input,
-            &args.output_dir,
-            answers.as_deref(),
-            args.model.clone(),
-            args.agent_output,
+        let options = PlanOptions {
+            model: args.model.clone(),
+            agent_output: args.agent_output,
             inherit_stdin,
-        );
+            allowed_tools_extras: args.allowed_tools.clone(),
+        };
+        let result = workflow.plan(&input, &args.output_dir, answers.as_deref(), &options);
 
         match result {
             Ok(output_path) => {

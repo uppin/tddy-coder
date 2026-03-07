@@ -65,6 +65,23 @@ pub fn build_claude_args(
         args.push(sys_prompt.clone());
     }
 
+    if let Some(ref tools) = request.allowed_tools {
+        for tool in tools {
+            args.push("--allowedTools".to_string());
+            args.push(tool.clone());
+        }
+    }
+
+    if let Some(ref tool_name) = request.permission_prompt_tool {
+        args.push("--permission-prompt-tool".to_string());
+        args.push(tool_name.clone());
+    }
+
+    if let Some(ref mcp_path) = request.mcp_config_path {
+        args.push("--mcp-config".to_string());
+        args.push(mcp_path.to_string_lossy().to_string());
+    }
+
     args.push(request.prompt.clone());
     args
 }

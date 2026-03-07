@@ -21,12 +21,13 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 1. Binary name: `tddy-coder`
 2. Accepts `--goal plan` to trigger the planning step
 3. Accepts `--goal acceptance-tests` to create failing acceptance tests from a completed plan
-4. Accepts `--plan-dir <path>`: path to plan output directory (PRD.md, TODO.md, .session); required when `--goal acceptance-tests`
-5. Accepts `--output-dir <path>` to configure where planning output is written (defaults to current directory)
-6. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
-7. Accepts `--agent-output` to print raw agent output to stderr in real time
-8. Reads the feature description from stdin (supports piped input and interactive prompt)
-9. *Deferred*: `--list-models` to list available models (not needed for current scope)
+4. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
+5. Accepts `--plan-dir <path>`: path to plan output directory (PRD.md, TODO.md, .session); required when `--goal acceptance-tests`
+6. Accepts `--output-dir <path>` to configure where planning output is written (defaults to current directory)
+7. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
+8. Accepts `--agent-output` to print raw agent output to stderr in real time
+9. Reads the feature description from stdin (supports piped input and interactive prompt)
+10. *Deferred*: `--list-models` to list available models (not needed for current scope)
 
 ### Planning Workflow
 
@@ -62,14 +63,16 @@ The PRD must include a **Testing Plan** section with: test level (E2E/Integratio
 ### Claude Code Integration
 
 1. Invokes `claude` CLI binary (from PATH)
-2. **Plan goal**: Uses `--permission-mode plan` (read-only analysis)
-3. **Acceptance-tests goal**: Uses `--permission-mode acceptEdits` (auto-approves file edits)
-4. **Model selection**: Passes `--model <name>` to the `claude` binary when the user specifies one via `--model` / `-m`. Default model when unspecified (e.g. `opus` or backend default).
-5. **Output format**: Uses `--output-format=stream-json` for NDJSON event stream (tool_use, result, task_progress).
-6. **Session management**: First invoke uses `--session-id <uuid>`; Q&A followup uses `--resume <uuid>` so Claude retains context across the exchange.
-7. **Structured Q&A**: Clarifying questions come from `AskUserQuestion` tool events (header, question, options, multi_select). Presented via inquire Select/MultiSelect prompts.
-8. **Real-time progress**: Tool activity (Read, Glob, Bash, etc.) displayed while Claude works.
-9. **Output parsing**: System prompt instructs Claude to emit PRD and TODO in `<structured-response content-type="application-json">` format; parser also supports delimiter fallback.
+2. **Print mode**: tddy-coder always uses `-p` (print mode) for non-interactive, single-query execution. In print mode, **stdin is not used for interactive permission prompts** — Claude Code handles permissions via `--permission-mode`, `--allowedTools`, or `--permission-prompt-tool`, not by reading user input from stdin.
+3. **Plan goal**: Uses `--permission-mode plan` (read-only analysis) plus a predefined allowlist (`Read`, `Glob`, `Grep`, `SemanticSearch`) passed as `--allowedTools`.
+4. **Acceptance-tests goal**: Uses `--permission-mode acceptEdits` plus a predefined allowlist (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash(cargo *)`, `SemanticSearch`) passed as `--allowedTools`.
+5. **Hybrid permission policy**: Each goal has a built-in allowlist; tools matching the allowlist are auto-approved. Optional `--allowed-tools` CLI flag adds extra tools to the allowlist. Unexpected permission requests (not in the allowlist) are denied in non-interactive mode; interactive handling via embedded permission tool is available when enabled.
+6. **Model selection**: Passes `--model <name>` to the `claude` binary when the user specifies one via `--model` / `-m`. Default model when unspecified (e.g. `opus` or backend default).
+7. **Output format**: Uses `--output-format=stream-json` for NDJSON event stream (tool_use, result, task_progress).
+8. **Session management**: First invoke uses `--session-id <uuid>`; Q&A followup uses `--resume <uuid>` so Claude retains context across the exchange.
+9. **Structured Q&A**: Clarifying questions come from `AskUserQuestion` tool events (header, question, options, multi_select). Presented via inquire Select/MultiSelect prompts.
+10. **Real-time progress**: Tool activity (Read, Glob, Bash, etc.) displayed while Claude works.
+11. **Output parsing**: System prompt instructs Claude to emit PRD and TODO in `<structured-response content-type="application-json">` format; parser also supports delimiter fallback.
 
 ### Output Artifacts
 

@@ -18,6 +18,9 @@ fn request_with_both_prompts(system_prompt: &str, user_prompt: &str) -> InvokeRe
         is_resume: false,
         agent_output: false,
         inherit_stdin: false,
+        allowed_tools: None,
+        permission_prompt_tool: None,
+        mcp_config_path: None,
     }
 }
 
@@ -162,6 +165,9 @@ fn request_without_system_prompt_has_user_prompt_last() {
         is_resume: false,
         agent_output: false,
         inherit_stdin: false,
+        allowed_tools: None,
+        permission_prompt_tool: None,
+        mcp_config_path: None,
     };
     let args = build_claude_args(&req, None);
 
@@ -192,6 +198,76 @@ fn system_prompt_passed_via_file_when_path_provided() {
         !args.contains(&"--append-system-prompt".to_string()),
         "should not use inline --append-system-prompt when path provided"
     );
+}
+
+/// build_claude_args includes --allowedTools for each entry when allowed_tools is Some.
+#[test]
+fn build_claude_args_includes_allowed_tools_when_set() {
+    let mut req = request_with_both_prompts("Sys", "User");
+    req.allowed_tools = Some(vec![
+        "Read".to_string(),
+        "Write".to_string(),
+        "Bash(cargo *)".to_string(),
+    ]);
+
+    let args = build_claude_args(&req, None);
+
+    let allowed_tools_indices: Vec<usize> = args
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| *a == "--allowedTools")
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(
+        allowed_tools_indices.len(),
+        3,
+        "should have three --allowedTools entries"
+    );
+    assert_eq!(
+        args.get(allowed_tools_indices[0] + 1),
+        Some(&"Read".to_string())
+    );
+    assert_eq!(
+        args.get(allowed_tools_indices[1] + 1),
+        Some(&"Write".to_string())
+    );
+    assert_eq!(
+        args.get(allowed_tools_indices[2] + 1),
+        Some(&"Bash(cargo *)".to_string())
+    );
+    assert_eq!(args.last().unwrap(), "User", "user prompt must remain last");
+}
+
+/// build_claude_args includes --permission-prompt-tool and --mcp-config when both are set.
+#[test]
+fn build_claude_args_includes_permission_prompt_tool_and_mcp_config_when_set() {
+    let mut req = request_with_both_prompts("Sys", "User");
+    req.permission_prompt_tool = Some("approval_prompt".to_string());
+    req.mcp_config_path = Some(std::path::PathBuf::from("/tmp/mcp.json"));
+
+    let args = build_claude_args(&req, None);
+
+    assert!(
+        args.contains(&"--permission-prompt-tool".to_string()),
+        "should include --permission-prompt-tool"
+    );
+    let tool_idx = args
+        .iter()
+        .position(|a| a == "--permission-prompt-tool")
+        .unwrap();
+    assert_eq!(args.get(tool_idx + 1), Some(&"approval_prompt".to_string()));
+
+    assert!(
+        args.contains(&"--mcp-config".to_string()),
+        "should include --mcp-config"
+    );
+    let mcp_idx = args.iter().position(|a| a == "--mcp-config").unwrap();
+    assert_eq!(
+        args.get(mcp_idx + 1),
+        Some(&"/tmp/mcp.json".to_string()),
+        "mcp-config path should be passed"
+    );
+    assert_eq!(args.last().unwrap(), "User", "user prompt must remain last");
 }
 
 /// Invoke uses --append-system-prompt-file (not inline) when system prompt is present,
@@ -230,6 +306,9 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n---PRD_END---
         is_resume: false,
         agent_output: false,
         inherit_stdin: false,
+        allowed_tools: None,
+        permission_prompt_tool: None,
+        mcp_config_path: None,
     };
 
     let _ = backend.invoke(req).expect("invoke should succeed");

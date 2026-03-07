@@ -1,6 +1,6 @@
 //! Integration tests for the acceptance-tests workflow with MockBackend.
 
-use tddy_core::{MockBackend, Workflow};
+use tddy_core::{AcceptanceTestsOptions, MockBackend, PlanOptions, Workflow};
 
 const DELIMITED_OUTPUT: &str = r#"Here is my analysis.
 
@@ -47,7 +47,8 @@ fn acceptance_tests_workflow_reads_plan_dir_and_invokes_backend_with_resumed_ses
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
-    let result = workflow.acceptance_tests(&plan_dir, None, false, false, None);
+    let options = AcceptanceTestsOptions::default();
+    let result = workflow.acceptance_tests(&plan_dir, None, &options);
 
     let output = result.expect("acceptance_tests should succeed");
     assert!(output.summary.contains("Created 2 acceptance tests"));
@@ -71,7 +72,8 @@ fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_ready_sta
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
-    let _ = workflow.acceptance_tests(&plan_dir, None, false, false, None);
+    let options = AcceptanceTestsOptions::default();
+    let _ = workflow.acceptance_tests(&plan_dir, None, &options);
 
     let state = workflow.state();
     assert!(
@@ -94,7 +96,8 @@ fn acceptance_tests_workflow_returns_error_when_plan_dir_missing_prd() {
     let backend = MockBackend::new();
     let mut workflow = Workflow::new(backend);
 
-    let result = workflow.acceptance_tests(&plan_dir, None, false, false, None);
+    let options = AcceptanceTestsOptions::default();
+    let result = workflow.acceptance_tests(&plan_dir, None, &options);
 
     assert!(result.is_err());
     assert!(
@@ -117,7 +120,8 @@ fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
     let backend = MockBackend::new();
     let mut workflow = Workflow::new(backend);
 
-    let result = workflow.acceptance_tests(&plan_dir, None, false, false, None);
+    let options = AcceptanceTestsOptions::default();
+    let result = workflow.acceptance_tests(&plan_dir, None, &options);
 
     assert!(result.is_err());
     assert!(
@@ -127,6 +131,84 @@ fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// Acceptance-tests goal passes goal-specific allowlist to InvokeRequest.
+/// Allowlist should include Read, Write, Edit, Glob, Grep, Bash(cargo *), SemanticSearch.
+#[test]
+fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
+    let plan_dir = std::env::temp_dir().join("tddy-at-allowlist-test");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    std::fs::write(plan_dir.join(".session"), "sess-allowlist").expect("write .session");
+
+    let backend = MockBackend::new();
+    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+
+    let mut workflow = Workflow::new(backend);
+    let options = AcceptanceTestsOptions::default();
+    let _ = workflow.acceptance_tests(&plan_dir, None, &options);
+
+    let invocations = workflow.backend().invocations();
+    assert!(!invocations.is_empty(), "backend should have been invoked");
+    let req = invocations.last().unwrap();
+    let allowed = req
+        .allowed_tools
+        .as_ref()
+        .expect("InvokeRequest should have allowed_tools set for acceptance-tests goal");
+    let expected: Vec<&str> = vec![
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Bash(cargo *)",
+        "SemanticSearch",
+    ];
+    for tool in &expected {
+        assert!(
+            allowed.contains(&(*tool).to_string()),
+            "allowlist should contain {}, got {:?}",
+            tool,
+            allowed
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// Plan goal passes goal-specific allowlist to InvokeRequest.
+/// Allowlist should include Read, Glob, Grep, SemanticSearch.
+#[test]
+fn plan_workflow_passes_goal_allowlist_to_invoke_request() {
+    let backend = MockBackend::new();
+    backend.push_ok(DELIMITED_OUTPUT);
+
+    let mut workflow = Workflow::new(backend);
+    let output_dir = std::env::temp_dir().join("tddy-plan-allowlist-test");
+    let _ = std::fs::remove_dir_all(&output_dir);
+    let options = PlanOptions::default();
+    let _ = workflow.plan("Build auth", &output_dir, None, &options);
+
+    let invocations = workflow.backend().invocations();
+    assert!(!invocations.is_empty(), "backend should have been invoked");
+    let req = invocations.last().unwrap();
+    let allowed = req
+        .allowed_tools
+        .as_ref()
+        .expect("InvokeRequest should have allowed_tools set for plan goal");
+    let expected: Vec<&str> = vec!["Read", "Glob", "Grep", "SemanticSearch"];
+    for tool in &expected {
+        assert!(
+            allowed.contains(&(*tool).to_string()),
+            "allowlist should contain {}, got {:?}",
+            tool,
+            allowed
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 #[test]
@@ -139,7 +221,7 @@ fn plan_workflow_writes_session_file_to_output_directory() {
     let _ = std::fs::remove_dir_all(&output_dir);
 
     let output_path = workflow
-        .plan("Build auth", &output_dir, None, None, false, false)
+        .plan("Build auth", &output_dir, None, &PlanOptions::default())
         .expect("planning should succeed");
 
     let session_path = output_path.join(".session");

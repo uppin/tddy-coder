@@ -3,6 +3,7 @@
 pub mod backend;
 pub mod error;
 pub mod output;
+pub mod permission;
 pub mod stream;
 pub mod workflow;
 
@@ -15,5 +16,6 @@ pub use output::{
     parse_acceptance_tests_response, parse_planning_output, read_session_file, write_artifacts,
     write_session_file, AcceptanceTestInfo, AcceptanceTestsOutput, PlanningOutput,
 };
+pub use permission::{acceptance_tests_allowlist, plan_allowlist};
 pub use stream::ProgressEvent;
-pub use workflow::{Workflow, WorkflowState};
+pub use workflow::{AcceptanceTestsOptions, PlanOptions, Workflow, WorkflowState};
