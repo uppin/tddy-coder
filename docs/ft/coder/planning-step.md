@@ -2,11 +2,11 @@
 
 **Product Area**: Coder
 **Status**: Draft
-**Updated**: 2026-03-10
+**Updated**: 2026-03-07
 
 ## Summary
 
-The Planning Step is the first phase of the tddy-coder workflow. It accepts a user's goal description via stdin, invokes an LLM backend (Claude Code CLI) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, resumes the Claude session, creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
+The Planning Step is the first phase of the tddy-coder workflow. When `--goal` is omitted, tddy-coder runs the full workflow (plan → acceptance-tests → red → green) in a single invocation, with auto-resume from `changeset.yaml` state. When a specific goal is given, it executes that step only. The **plan** goal accepts a user's goal description via stdin, invokes an LLM backend (Claude Code CLI) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, resumes the Claude session, creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
 
 ## Background
 
@@ -19,16 +19,18 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 ### CLI Interface
 
 1. Binary name: `tddy-coder`
-2. Accepts `--goal plan` to trigger the planning step
-3. Accepts `--goal acceptance-tests` to create failing acceptance tests from a completed plan
-4. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
-5. Accepts `--plan-dir <path>`: path to plan output directory (PRD.md, TODO.md, changeset.yaml, acceptance-tests.md); required when `--goal acceptance-tests`
-6. Accepts `--output-dir <path>` to configure where planning output is written (default: current directory)
-7. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
-8. Accepts `--agent-output` to print raw agent output to stderr in real time
-9. Accepts `--debug` to print Claude CLI command and cwd before running (for debugging empty output)
-10. Reads the feature description from stdin (supports piped input and interactive prompt)
-11. *Deferred*: `--list-models` to list available models (not needed for current scope)
+2. When `--goal` is omitted, runs the full workflow (plan → acceptance-tests → red → green) with auto-resume from `changeset.yaml` state
+3. Accepts `--goal plan` to trigger the planning step
+4. Accepts `--goal acceptance-tests` to create failing acceptance tests from a completed plan
+5. Accepts `--goal red` and `--goal green` for the implementation phase
+6. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
+7. Accepts `--plan-dir <path>`: path to plan output directory; required when `--goal acceptance-tests`, `--goal red`, or `--goal green`; used for resume when running full workflow
+8. Accepts `--output-dir <path>` to configure where planning output is written (default: current directory)
+9. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
+10. Accepts `--agent-output` to print raw agent output to stderr in real time
+11. Accepts `--debug` to print Claude CLI command and cwd before running (for debugging empty output)
+12. Reads the feature description from stdin (supports piped input and interactive prompt)
+13. *Deferred*: `--list-models` to list available models (not needed for current scope)
 
 ### Planning Workflow
 
@@ -151,18 +153,31 @@ System prompts are written to the plan directory (e.g. `system-prompt-plan.md`) 
 
 ### Exit Output
 
-On successful completion, the program prints a goal-specific artifact path to stdout (one line):
+On successful completion, the program prints goal-specific output to stdout:
 
+- **Full workflow** (no `--goal`): Green step output (summary, tests, implementations)
 - **plan**: Path to `PRD.md` (e.g. `./2026-03-07-feature-slug/PRD.md`)
 - **acceptance-tests**: Summary of created tests and their failing status (requires `--plan-dir`)
+- **red**, **green**: Summary of created tests/skeletons or implementations
 
 This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt | xargs cat`).
 
+### Full Workflow (No --goal)
+
+When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → green in sequence. Resume is supported: if interrupted, re-running (with the same `--output-dir` or explicit `--plan-dir`) skips completed steps by reading `changeset.yaml.state.current`. When state is `GreenComplete`, re-running exits with a summary.
+
 ## Acceptance Criteria
+
+### Full Workflow (No --goal)
+
+- [x] `tddy-coder` (no `--goal`) reads from stdin and runs plan → acceptance-tests → red → green
+- [x] Full workflow prints green step output on success
+- [x] Full workflow supports resume via `--plan-dir` or auto-detect from `--output-dir`
+- [x] When state is GreenComplete, re-running exits with summary
 
 ### Plan Goal
 
-- [ ] `tddy-coder --goal plan` reads from stdin and produces a named output directory
+- [x] `tddy-coder --goal plan` reads from stdin and produces a named output directory
 - [ ] Output directory contains well-formed `PRD.md`, `TODO.md`, and `changeset.yaml`
 - [ ] `--output-dir` flag controls output location
 - [ ] `--model <name>` selects the LLM model; default used when omitted

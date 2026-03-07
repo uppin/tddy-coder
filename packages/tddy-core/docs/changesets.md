@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-core.
 
+- **2026-03-07** [Feature] Full Workflow When --goal Omitted — Added next_goal_for_state() to changeset.rs for resume logic. Re-exported from lib.rs. New full_workflow_integration.rs tests. (tddy-core)
 - **2026-03-10** [Feature] Goal Enhancements — Replaced .session/.impl-session with changeset.yaml. Added initial_prompt and clarification_qa to changeset. Session entries have system_prompt_file. Plan workflow persists questions when ClarificationNeeded; pairs with answers on follow-up. Planning parser tries each structured-response block until one parses (handles system prompt before model output). (tddy-core)
 - **2026-03-07** [Feature] Red Goal Output Enhancements — acceptance-tests.md and red-output.md now include How to run tests, Prerequisite actions, How to run a single or selected tests (project-derived, cheapest approach). Red goal writes progress.md with unfilled checkboxes for failed tests and skeletons (next goal marks done/skipped/failed). CLI prints test_command, prerequisite_actions, run_single_or_selected_tests when present. (tddy-core)
 - **2026-03-07** [Feature] Red Goal & Acceptance-Tests.md — Added red goal (reads PRD + acceptance-tests.md, creates skeleton code and failing lower-level tests). acceptance-tests goal now writes acceptance-tests.md to plan directory. New states RedTesting, RedTestsReady. (tddy-core)
