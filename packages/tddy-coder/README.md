@@ -21,7 +21,7 @@ echo "Build a user authentication system" | cargo run -p tddy-coder -- --goal pl
 
 ## Architecture
 
-CLI binary that reads feature descriptions from stdin, invokes Claude Code in plan mode via tddy-core, and writes PRD.md and TODO.md to a named output directory.
+CLI binary that reads feature descriptions from stdin, invokes Claude Code in plan mode via tddy-core, and writes PRD.md and TODO.md to a named output directory. Supports interactive Q&A (inquire Select/MultiSelect), real-time progress display, `--agent-output` for raw output, and goal-specific exit output (path to PRD.md).
 
 ## Documentation
 

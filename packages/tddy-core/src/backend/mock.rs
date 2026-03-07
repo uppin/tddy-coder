@@ -1,6 +1,6 @@
 //! Mock backend for testing.
 
-use super::{CodingBackend, InvokeRequest, InvokeResponse};
+use super::{ClarificationQuestion, CodingBackend, InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
 use std::collections::VecDeque;
 use std::sync::RwLock;
@@ -28,12 +28,29 @@ impl MockBackend {
         self.push_response(Ok(InvokeResponse {
             output: output.into(),
             exit_code: 0,
+            session_id: String::new(),
+            questions: vec![],
         }));
     }
 
     /// Push an error response.
     pub fn push_err(&self, error: &str) {
         self.push_response(Err(BackendError::InvocationFailed(error.to_string())));
+    }
+
+    /// Push a successful response with the given output, session_id, and questions.
+    pub fn push_ok_with_questions(
+        &self,
+        output: impl Into<String>,
+        session_id: impl Into<String>,
+        questions: Vec<ClarificationQuestion>,
+    ) {
+        self.push_response(Ok(InvokeResponse {
+            output: output.into(),
+            exit_code: 0,
+            session_id: session_id.into(),
+            questions,
+        }));
     }
 
     /// Get all invocations recorded so far.

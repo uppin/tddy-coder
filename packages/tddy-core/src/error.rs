@@ -1,5 +1,6 @@
 //! Error types for tddy-core.
 
+use crate::backend::ClarificationQuestion;
 use thiserror::Error;
 
 /// Errors from coding backends (Claude Code CLI, etc.).
@@ -29,7 +30,10 @@ pub enum WorkflowError {
 
     /// Clarification questions from the LLM; caller should display and re-invoke with answers.
     #[error("clarification needed: {questions:?}")]
-    ClarificationNeeded { questions: Vec<String> },
+    ClarificationNeeded {
+        questions: Vec<ClarificationQuestion>,
+        session_id: String,
+    },
 }
 
 /// Errors from parsing LLM output.

@@ -2,10 +2,10 @@
 
 use anyhow::Context;
 use clap::Parser;
-use inquire::Text;
+use inquire::{MultiSelect, Select, Text};
 use std::io::{self, BufRead, IsTerminal, Read};
 use std::path::PathBuf;
-use tddy_core::{ClaudeCodeBackend, Workflow, WorkflowError};
+use tddy_core::{ClarificationQuestion, ClaudeCodeBackend, ProgressEvent, Workflow, WorkflowError};
 
 #[derive(Parser, Debug)]
 #[command(name = "tddy-coder")]
@@ -18,6 +18,10 @@ struct Args {
     /// Output directory for planning artifacts (default: current directory)
     #[arg(long, default_value = ".")]
     output_dir: PathBuf,
+
+    /// Print raw agent output to stderr in real-time
+    #[arg(long)]
+    agent_output: bool,
 
     /// Model name for Claude Code CLI (e.g. sonnet)
     #[arg(short, long)]
@@ -37,7 +41,30 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("empty feature description (read from stdin)");
     }
 
-    let backend = ClaudeCodeBackend::new();
+    let backend = ClaudeCodeBackend::new().with_progress(|event| {
+        let dim = "\x1b[2m";
+        let reset = "\x1b[0m";
+        match event {
+            ProgressEvent::ToolUse {
+                name,
+                detail: Some(d),
+            } => eprintln!("  {}📎 {} {}...{}", dim, name, d, reset),
+            ProgressEvent::ToolUse { name, detail: None } => {
+                eprintln!("  {}📎 {}...{}", dim, name, reset)
+            }
+            ProgressEvent::TaskStarted { description } => {
+                eprintln!("  {}▶ {}...{}", dim, description, reset)
+            }
+            ProgressEvent::TaskProgress {
+                description,
+                last_tool: Some(tool),
+            } => eprintln!("  {}⏳ {} ({}){}", dim, description, tool, reset),
+            ProgressEvent::TaskProgress {
+                description,
+                last_tool: None,
+            } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
+        }
+    });
     let mut workflow = Workflow::new(backend);
 
     let mut answers: Option<String> = None;
@@ -47,14 +74,16 @@ fn main() -> anyhow::Result<()> {
             &args.output_dir,
             answers.as_deref(),
             args.model.clone(),
+            args.agent_output,
         );
 
         match result {
             Ok(output_path) => {
-                println!("Planning complete. Output: {}", output_path.display());
+                let prd_path = output_path.join("PRD.md");
+                println!("{}", prd_path.display());
                 return Ok(());
             }
-            Err(WorkflowError::ClarificationNeeded { questions }) => {
+            Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
                 answers = Some(read_answers(&questions).context("read answers")?);
             }
             Err(e) => return Err(e.into()),
@@ -88,32 +117,48 @@ fn strip_leading_number(s: &str) -> String {
             || rest.starts_with('.')
             || rest.starts_with(')'))
     {
-        let rest = rest.trim_start_matches(|c: char| c == '.' || c == ')' || c == ' ');
+        let rest = rest.trim_start_matches(['.', ')', ' ']);
         return rest.to_string();
     }
     s.to_string()
 }
 
 /// Read answers to clarification questions. When interactive (TTY), uses inquire.
+/// Uses Select/MultiSelect for option-based questions, Text for free-form.
 /// When piped, reads line by line until EOF.
-fn read_answers(questions: &[String]) -> anyhow::Result<String> {
+fn read_answers(questions: &[ClarificationQuestion]) -> anyhow::Result<String> {
     let stdin = io::stdin();
     if stdin.is_terminal() {
         let mut answers = Vec::with_capacity(questions.len());
         for q in questions {
-            let prompt = strip_leading_number(q);
-            let answer = Text::new(&prompt)
-                .with_help_message("Press Enter to submit")
-                .prompt()
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let prompt = strip_leading_number(&q.question);
+            let answer = if q.options.is_empty() {
+                Text::new(&prompt)
+                    .with_help_message("Press Enter to submit")
+                    .prompt()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?
+            } else if q.multi_select {
+                let options: Vec<&str> = q.options.iter().map(|o| o.label.as_str()).collect();
+                let chosen = MultiSelect::new(&prompt, options)
+                    .with_help_message("Space to select, Enter to confirm")
+                    .prompt()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                chosen.join(", ")
+            } else {
+                let options: Vec<&str> = q.options.iter().map(|o| o.label.as_str()).collect();
+                Select::new(&prompt, options)
+                    .prompt()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?
+                    .to_string()
+            };
             answers.push(answer);
         }
         Ok(answers.join("\n"))
     } else {
         println!("\nClarification needed:");
         for (i, q) in questions.iter().enumerate() {
-            let q = strip_leading_number(q);
-            println!("  {}. {}", i + 1, q);
+            let prompt = strip_leading_number(&q.question);
+            println!("  {}. {}", i + 1, prompt);
         }
         println!("\nEnter answers (one per line):");
         let mut lines = Vec::with_capacity(questions.len());
@@ -131,4 +176,3 @@ fn read_answers(questions: &[String]) -> anyhow::Result<String> {
         Ok(lines.join("\n"))
     }
 }
-

@@ -4,9 +4,7 @@ mod planning;
 
 use crate::backend::CodingBackend;
 use crate::error::WorkflowError;
-use crate::output::{
-    parse_planning_response, slugify_directory_name, write_artifacts, PlanningResponse,
-};
+use crate::output::{parse_planning_response, slugify_directory_name, write_artifacts};
 use std::path::{Path, PathBuf};
 
 /// Workflow state.
@@ -23,6 +21,7 @@ pub enum WorkflowState {
 pub struct Workflow<B: CodingBackend> {
     state: WorkflowState,
     backend: B,
+    session_id: Option<String>,
 }
 
 impl<B: CodingBackend> Workflow<B> {
@@ -31,6 +30,7 @@ impl<B: CodingBackend> Workflow<B> {
         Self {
             state: WorkflowState::Init,
             backend,
+            session_id: None,
         }
     }
 
@@ -48,6 +48,7 @@ impl<B: CodingBackend> Workflow<B> {
         output_dir: &Path,
         answers: Option<&str>,
         model: Option<String>,
+        agent_output: bool,
     ) -> Result<PathBuf, WorkflowError> {
         let can_start = matches!(self.state, WorkflowState::Init);
         let can_continue = matches!(self.state, WorkflowState::Planning) && answers.is_some();
@@ -76,11 +77,23 @@ impl<B: CodingBackend> Workflow<B> {
             Some(a) => planning::build_followup_prompt(input, a),
         };
 
+        let (session_id, is_resume) = match &self.session_id {
+            None => {
+                let sid = uuid::Uuid::new_v4().to_string();
+                self.session_id = Some(sid.clone());
+                (Some(sid), false)
+            }
+            Some(sid) => (Some(sid.clone()), answers.is_some()),
+        };
+
         let request = crate::backend::InvokeRequest {
             prompt,
             system_prompt: Some(system_prompt),
             permission_mode: crate::backend::PermissionMode::Plan,
             model,
+            session_id,
+            is_resume,
+            agent_output,
         };
 
         let response = match self.backend.invoke(request) {
@@ -93,9 +106,25 @@ impl<B: CodingBackend> Workflow<B> {
             }
         };
 
-        let planning_response = match parse_planning_response(&response.output) {
-            Ok(r) => r,
+        if !response.questions.is_empty() {
+            if !response.session_id.is_empty() {
+                self.session_id = Some(response.session_id.clone());
+            }
+            return Err(WorkflowError::ClarificationNeeded {
+                questions: response.questions,
+                session_id: response.session_id,
+            });
+        }
+
+        let planning = match parse_planning_response(&response.output) {
+            Ok(out) => out,
             Err(e) => {
+                eprintln!(
+                    "--- Failed parse input (length {} bytes) ---",
+                    response.output.len()
+                );
+                eprintln!("{}", response.output);
+                eprintln!("--- End failed parse input ---");
                 self.state = WorkflowState::Failed {
                     error: e.to_string(),
                 };
@@ -103,23 +132,15 @@ impl<B: CodingBackend> Workflow<B> {
             }
         };
 
-        match planning_response {
-            PlanningResponse::Questions { questions } => {
-                Err(WorkflowError::ClarificationNeeded { questions })
-            }
-            PlanningResponse::PlanningOutput { prd, todo } => {
-                let planning = crate::output::PlanningOutput { prd, todo };
-                let dir_name = slugify_directory_name(input);
-                let output_path = output_dir.join(&dir_name);
+        let dir_name = slugify_directory_name(input);
+        let output_path = output_dir.join(&dir_name);
 
-                write_artifacts(&output_path, &planning)?;
+        write_artifacts(&output_path, &planning)?;
 
-                self.state = WorkflowState::Planned {
-                    output_dir: output_path.clone(),
-                };
+        self.state = WorkflowState::Planned {
+            output_dir: output_path.clone(),
+        };
 
-                Ok(output_path)
-            }
-        }
+        Ok(output_path)
     }
 }
