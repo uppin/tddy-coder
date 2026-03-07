@@ -1,7 +1,7 @@
 //! Write planning artifacts to the filesystem.
 
 use crate::error::WorkflowError;
-use crate::output::{AcceptanceTestsOutput, PlanningOutput, RedOutput};
+use crate::output::{AcceptanceTestsOutput, GreenOutput, PlanningOutput, RedOutput};
 use std::fs;
 use std::path::Path;
 
@@ -44,6 +44,20 @@ pub fn read_session_file(plan_dir: &Path) -> Result<String, WorkflowError> {
     fs::read_to_string(&session_path).map_err(|e| WorkflowError::SessionMissing(format!("{}", e)))
 }
 
+/// Write the implementation session ID to `.impl-session` in the plan directory.
+/// Used by the red goal so the green goal can resume the same session.
+pub fn write_impl_session_file(plan_dir: &Path, session_id: &str) -> Result<(), WorkflowError> {
+    let session_path = plan_dir.join(".impl-session");
+    fs::write(&session_path, session_id).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    Ok(())
+}
+
+/// Read the implementation session ID from `.impl-session` in the plan directory.
+pub fn read_impl_session_file(plan_dir: &Path) -> Result<String, WorkflowError> {
+    let session_path = plan_dir.join(".impl-session");
+    fs::read_to_string(&session_path).map_err(|e| WorkflowError::SessionMissing(format!("{}", e)))
+}
+
 /// Write PRD.md and TODO.md to the given directory.
 pub fn write_artifacts(output_dir: &Path, planning: &PlanningOutput) -> Result<(), WorkflowError> {
     fs::create_dir_all(output_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
@@ -82,5 +96,31 @@ pub fn write_progress_file(plan_dir: &Path, output: &RedOutput) -> Result<(), Wo
     let md_path = plan_dir.join("progress.md");
     let content = output.to_progress_markdown();
     fs::write(&md_path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    Ok(())
+}
+
+/// Update progress.md in the plan directory with green goal results.
+/// Overwrites with updated checkboxes: [x] for passing, [!] for failing.
+pub fn update_progress_file(plan_dir: &Path, output: &GreenOutput) -> Result<(), WorkflowError> {
+    let md_path = plan_dir.join("progress.md");
+    let content = output.to_updated_progress_markdown();
+    fs::write(&md_path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    Ok(())
+}
+
+/// Update acceptance-tests.md in the plan directory with green goal results.
+/// Replaces "failing" with "passing" for tests that now pass.
+pub fn update_acceptance_tests_file(
+    plan_dir: &Path,
+    output: &GreenOutput,
+) -> Result<(), WorkflowError> {
+    let md_path = plan_dir.join("acceptance-tests.md");
+    if !md_path.exists() {
+        return Ok(());
+    }
+    let content =
+        fs::read_to_string(&md_path).map_err(|e| WorkflowError::PlanDirInvalid(e.to_string()))?;
+    let updated = output.update_acceptance_tests_content(&content);
+    fs::write(&md_path, updated).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     Ok(())
 }

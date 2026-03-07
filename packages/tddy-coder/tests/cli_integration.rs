@@ -336,3 +336,101 @@ fn cli_errors_when_plan_dir_missing_for_red_goal() {
         stderr
     );
 }
+
+/// Create a fake claude script that returns red on first call, green on second.
+fn create_fake_claude_red_then_green(dir: &Path) -> std::io::Result<()> {
+    let script = r###"#!/bin/sh
+CALL_FILE="$0.calls"
+if [ -f "$CALL_FILE" ]; then
+  printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
+  printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">{\"goal\":\"green\",\"summary\":\"Implemented. All tests passing.\",\"tests\":[{\"name\":\"test_foo\",\"file\":\"src/foo.rs\",\"line\":10,\"status\":\"passing\"}],\"implementations\":[{\"name\":\"Foo\",\"file\":\"src/foo.rs\",\"line\":5,\"kind\":\"struct\"}]}</structured-response>","session_id":"fake-sess","is_error":false}'
+else
+  echo 1 > "$CALL_FILE"
+  printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
+  printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">{\"goal\":\"red\",\"summary\":\"Created 1 skeleton and 1 failing test.\",\"tests\":[{\"name\":\"test_foo\",\"file\":\"src/foo.rs\",\"line\":10,\"status\":\"failing\"}],\"skeletons\":[{\"name\":\"Foo\",\"file\":\"src/foo.rs\",\"line\":5,\"kind\":\"struct\"}]}</structured-response>","session_id":"fake-sess","is_error":false}'
+fi
+"###;
+    write_executable_script(dir, "claude", script)
+}
+
+#[test]
+#[cfg(unix)]
+fn cli_accepts_goal_green_with_plan_dir() {
+    let tmp = std::env::temp_dir().join("tddy-cli-green-goal-test");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    create_fake_claude_red_then_green(&tmp).expect("create fake claude");
+
+    let plan_dir = tmp.join("plan-output");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    std::fs::write(
+        plan_dir.join("acceptance-tests.md"),
+        "# Acceptance Tests\n## Tests\n### test_foo\n- **File**: src/foo.rs\n- **Line**: 10\n- **Status**: failing\n",
+    )
+    .expect("write acceptance-tests.md");
+
+    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .env("PATH", tmp_path.to_str().unwrap())
+        .env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        )
+        .args(["--goal", "red", "--plan-dir", plan_dir.to_str().unwrap()]);
+
+    let output = cmd.output().expect("run tddy-coder red");
+    assert!(
+        output.status.success(),
+        "red should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut cmd2 = tddy_coder_bin();
+    cmd2.env_clear()
+        .env("PATH", tmp_path.to_str().unwrap())
+        .env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        )
+        .args(["--goal", "green", "--plan-dir", plan_dir.to_str().unwrap()]);
+
+    let output2 = cmd2.output().expect("run tddy-coder green");
+
+    let stderr = String::from_utf8_lossy(&output2.stderr);
+    let stdout = String::from_utf8_lossy(&output2.stdout);
+    assert!(
+        output2.status.success(),
+        "expected success: stderr={} stdout={}",
+        stderr,
+        stdout
+    );
+    assert!(
+        stdout.contains("passing") || stdout.contains("Implemented") || stdout.contains("impl"),
+        "stdout should contain green output summary: {}",
+        stdout
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_errors_when_plan_dir_missing_for_green_goal() {
+    let mut cmd = tddy_coder_bin();
+    cmd.args(["--goal", "green"]);
+    // --plan-dir is NOT provided
+
+    let output = cmd.output().expect("run tddy-coder");
+
+    assert!(
+        !output.status.success(),
+        "should fail when --plan-dir missing for green goal"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("plan-dir") || stderr.contains("plan_dir"),
+        "error should mention plan-dir: {}",
+        stderr
+    );
+}

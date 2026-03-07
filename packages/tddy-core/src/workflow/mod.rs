@@ -1,15 +1,18 @@
 //! Workflow state machine for tddy-coder.
 
 mod acceptance_tests;
+mod green;
 mod planning;
 mod red;
 
 use crate::backend::CodingBackend;
 use crate::error::WorkflowError;
 use crate::output::{
-    parse_acceptance_tests_response, parse_planning_response, parse_red_response,
-    read_session_file, slugify_directory_name, write_acceptance_tests_file, write_artifacts,
-    write_progress_file, write_red_output_file, write_session_file,
+    parse_acceptance_tests_response, parse_green_response, parse_planning_response,
+    parse_red_response, read_impl_session_file, read_session_file, slugify_directory_name,
+    update_acceptance_tests_file, update_progress_file, write_acceptance_tests_file,
+    write_artifacts, write_impl_session_file, write_progress_file, write_red_output_file,
+    write_session_file,
 };
 use std::path::{Path, PathBuf};
 
@@ -43,6 +46,16 @@ pub struct RedOptions {
     pub debug: bool,
 }
 
+/// Options for the green step.
+#[derive(Debug, Default)]
+pub struct GreenOptions {
+    pub model: Option<String>,
+    pub agent_output: bool,
+    pub inherit_stdin: bool,
+    pub allowed_tools_extras: Option<Vec<String>>,
+    pub debug: bool,
+}
+
 /// Workflow state.
 #[derive(Debug, Clone)]
 pub enum WorkflowState {
@@ -58,6 +71,10 @@ pub enum WorkflowState {
     RedTesting,
     RedTestsReady {
         output: crate::output::RedOutput,
+    },
+    GreenImplementing,
+    GreenComplete {
+        output: crate::output::GreenOutput,
     },
     Failed {
         error: String,
@@ -448,6 +465,7 @@ impl<B: CodingBackend> Workflow<B> {
             Ok(out) => {
                 let _ = write_red_output_file(plan_dir, &out);
                 let _ = write_progress_file(plan_dir, &out);
+                let _ = write_impl_session_file(plan_dir, &session_id);
                 out
             }
             Err(e) => {
@@ -463,5 +481,146 @@ impl<B: CodingBackend> Workflow<B> {
         };
 
         Ok(output)
+    }
+
+    /// Run the green step: read progress.md and .impl-session from plan_dir, implement production code.
+    /// Starts from RedTestsReady (or Init when plan_dir has red output for standalone CLI runs).
+    /// Resumes the red session via .impl-session.
+    pub fn green(
+        &mut self,
+        plan_dir: &Path,
+        answers: Option<&str>,
+        options: &GreenOptions,
+    ) -> Result<crate::output::GreenOutput, WorkflowError> {
+        let progress_exists = plan_dir.join("progress.md").exists();
+        let impl_session_exists = plan_dir.join(".impl-session").exists();
+        let can_start = matches!(self.state, WorkflowState::RedTestsReady { .. })
+            || (matches!(self.state, WorkflowState::Init)
+                && progress_exists
+                && impl_session_exists);
+        let can_continue =
+            matches!(self.state, WorkflowState::GreenImplementing) && answers.is_some();
+
+        if !can_start && !can_continue {
+            let err_msg = if matches!(self.state, WorkflowState::Init) && (!progress_exists || !impl_session_exists) {
+                let missing: Vec<&str> = [(!progress_exists).then_some("progress.md"), (!impl_session_exists).then_some(".impl-session")]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                format!(
+                    "plan directory missing {} — run the red goal first: tddy-coder --goal red --plan-dir <path>",
+                    missing.join(" and ")
+                )
+            } else {
+                format!("cannot run green from {:?}", self.state)
+            };
+            return Err(WorkflowError::InvalidTransition(err_msg));
+        }
+
+        let progress_path = plan_dir.join("progress.md");
+        if !progress_path.exists() {
+            return Err(WorkflowError::PlanDirInvalid(
+                "progress.md not found in plan directory".into(),
+            ));
+        }
+
+        let progress_content = std::fs::read_to_string(&progress_path)
+            .map_err(|e| WorkflowError::PlanDirInvalid(e.to_string()))?;
+
+        let session_id = read_impl_session_file(plan_dir)?;
+
+        let prd_content = std::fs::read_to_string(plan_dir.join("PRD.md")).ok();
+        let acceptance_tests_content =
+            std::fs::read_to_string(plan_dir.join("acceptance-tests.md")).ok();
+
+        if can_start {
+            self.state = WorkflowState::GreenImplementing;
+        }
+
+        let system_prompt = green::system_prompt();
+        let prompt = match answers {
+            None => green::build_prompt(
+                &progress_content,
+                prd_content.as_deref(),
+                acceptance_tests_content.as_deref(),
+            ),
+            Some(a) => green::build_followup_prompt(
+                &progress_content,
+                a,
+                prd_content.as_deref(),
+                acceptance_tests_content.as_deref(),
+            ),
+        };
+
+        let mut allowed_tools = crate::permission::green_allowlist();
+        if let Some(extras) = &options.allowed_tools_extras {
+            allowed_tools.extend(extras.iter().cloned());
+        }
+
+        let request = crate::backend::InvokeRequest {
+            prompt,
+            system_prompt: Some(system_prompt),
+            permission_mode: crate::backend::PermissionMode::AcceptEdits,
+            model: options.model.clone(),
+            session_id: Some(session_id.clone()),
+            is_resume: true,
+            agent_output: options.agent_output,
+            inherit_stdin: options.inherit_stdin,
+            allowed_tools: Some(allowed_tools),
+            permission_prompt_tool: None,
+            mcp_config_path: None,
+            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            debug: options.debug,
+        };
+
+        let response = match self.backend.invoke(request) {
+            Ok(r) => r,
+            Err(e) => {
+                self.state = WorkflowState::Failed {
+                    error: e.to_string(),
+                };
+                return Err(WorkflowError::Backend(e));
+            }
+        };
+
+        if !response.questions.is_empty() {
+            return Err(WorkflowError::ClarificationNeeded {
+                questions: response.questions,
+                session_id: response.session_id,
+            });
+        }
+
+        match parse_green_response(&response.output) {
+            Ok(out) => {
+                let _ = update_progress_file(plan_dir, &out);
+                let _ = update_acceptance_tests_file(plan_dir, &out);
+                if out.all_tests_passing() {
+                    self.state = WorkflowState::GreenComplete {
+                        output: out.clone(),
+                    };
+                    Ok(out)
+                } else {
+                    let failing: Vec<_> = out
+                        .tests
+                        .iter()
+                        .filter(|t| t.status != "passing")
+                        .map(|t| {
+                            format!("{}: {}", t.name, t.reason.as_deref().unwrap_or("failing"))
+                        })
+                        .collect();
+                    let err_msg = format!("Some tests still failing: {}", failing.join("; "));
+                    self.state = WorkflowState::Failed {
+                        error: err_msg.clone(),
+                    };
+                    Err(WorkflowError::InvalidTransition(err_msg))
+                }
+            }
+            Err(e) => {
+                self.state = WorkflowState::Failed {
+                    error: e.to_string(),
+                };
+                Err(WorkflowError::ParseError(e))
+            }
+        }
     }
 }

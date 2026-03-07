@@ -212,6 +212,202 @@ pub fn parse_acceptance_tests_response(s: &str) -> Result<AcceptanceTestsOutput,
     })
 }
 
+/// Parsed green goal output.
+#[derive(Debug, Clone)]
+pub struct GreenOutput {
+    pub summary: String,
+    pub tests: Vec<GreenTestResult>,
+    pub implementations: Vec<ImplementationInfo>,
+    pub test_command: Option<String>,
+    pub prerequisite_actions: Option<String>,
+    pub run_single_or_selected_tests: Option<String>,
+}
+
+/// Info about a single test result from the green goal.
+#[derive(Debug, Clone)]
+pub struct GreenTestResult {
+    pub name: String,
+    pub file: String,
+    pub line: Option<u32>,
+    pub status: String,
+    pub reason: Option<String>,
+}
+
+/// Info about an implementation (method, struct, etc.) from the green goal.
+#[derive(Debug, Clone)]
+pub struct ImplementationInfo {
+    pub name: String,
+    pub file: String,
+    pub line: Option<u32>,
+    pub kind: String,
+}
+
+#[derive(serde::Deserialize)]
+struct StructuredGreen {
+    goal: Option<String>,
+    summary: Option<String>,
+    tests: Option<Vec<GreenTestResultDe>>,
+    implementations: Option<Vec<ImplementationInfoDe>>,
+    test_command: Option<String>,
+    prerequisite_actions: Option<String>,
+    run_single_or_selected_tests: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct GreenTestResultDe {
+    name: String,
+    file: String,
+    line: Option<u32>,
+    status: String,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ImplementationInfoDe {
+    name: String,
+    file: String,
+    line: Option<u32>,
+    kind: String,
+}
+
+/// Parse LLM green goal response from structured-response block.
+pub fn parse_green_response(s: &str) -> Result<GreenOutput, ParseError> {
+    let open = s
+        .find(STRUCTURED_OPEN)
+        .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
+    let after_open = &s[open + STRUCTURED_OPEN.len()..];
+    let gt = after_open
+        .find('>')
+        .ok_or_else(|| ParseError::Malformed("structured-response malformed".into()))?;
+    let content = after_open[gt + 1..].trim();
+    let close = content
+        .find(STRUCTURED_CLOSE)
+        .ok_or_else(|| ParseError::Malformed("structured-response close not found".into()))?;
+    let json_str = content[..close].trim();
+    let parsed: StructuredGreen =
+        serde_json::from_str(json_str).map_err(|e| ParseError::Malformed(e.to_string()))?;
+
+    if parsed.goal.as_deref() != Some("green") {
+        return Err(ParseError::Malformed("goal is not green".into()));
+    }
+
+    let summary = parsed
+        .summary
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+
+    let tests = parsed
+        .tests
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| GreenTestResult {
+            name: t.name,
+            file: t.file,
+            line: t.line,
+            status: t.status,
+            reason: t.reason,
+        })
+        .collect();
+
+    let implementations = parsed
+        .implementations
+        .unwrap_or_default()
+        .into_iter()
+        .map(|i| ImplementationInfo {
+            name: i.name,
+            file: i.file,
+            line: i.line,
+            kind: i.kind,
+        })
+        .collect();
+
+    Ok(GreenOutput {
+        summary,
+        tests,
+        implementations,
+        test_command: parsed.test_command.filter(|s| !s.is_empty()),
+        prerequisite_actions: parsed.prerequisite_actions.filter(|s| !s.is_empty()),
+        run_single_or_selected_tests: parsed
+            .run_single_or_selected_tests
+            .filter(|s| !s.is_empty()),
+    })
+}
+
+impl GreenOutput {
+    /// Render updated progress.md with [x] for passing, [!] for failing.
+    pub fn to_updated_progress_markdown(&self) -> String {
+        let mut out = String::from("# Progress\n\n");
+        out.push_str("Unfilled milestones. Mark each as done [x], skipped, or failed.\n\n");
+        out.push_str("## Failed Tests\n\n");
+        for t in &self.tests {
+            let loc = t
+                .line
+                .map(|l| format!("{}:{}", t.file, l))
+                .unwrap_or_else(|| t.file.clone());
+            let marker = if t.status == "passing" { "[x]" } else { "[!]" };
+            let reason = t
+                .reason
+                .as_deref()
+                .map(|r| format!(" — {}", r))
+                .unwrap_or_default();
+            out.push_str(&format!("- {} {} ({}){}\n", marker, t.name, loc, reason));
+        }
+        out.push_str("\n## Skeletons\n\n");
+        for i in &self.implementations {
+            let loc = i
+                .line
+                .map(|l| format!("{}:{}", i.file, l))
+                .unwrap_or_else(|| i.file.clone());
+            out.push_str(&format!("- [x] {} ({}) — {}\n", i.name, loc, i.kind));
+        }
+        out
+    }
+
+    /// Update acceptance-tests.md content: replace "failing" with "passing" for passing tests.
+    pub fn update_acceptance_tests_content(&self, content: &str) -> String {
+        let passing: std::collections::HashSet<&str> = self
+            .tests
+            .iter()
+            .filter(|t| t.status == "passing")
+            .map(|t| t.name.as_str())
+            .collect();
+        if passing.is_empty() {
+            return content.to_string();
+        }
+        let mut out = String::new();
+        let sections: Vec<&str> = content.split("\n### ").collect();
+        for (i, section) in sections.iter().enumerate() {
+            if i == 0 {
+                out.push_str(section);
+                if sections.len() > 1 {
+                    out.push_str("\n### ");
+                }
+                continue;
+            }
+            let (name, rest) = section.split_once('\n').unwrap_or((section, ""));
+            let test_name = name.trim();
+            let updated_rest = if passing.contains(test_name) {
+                rest.replace("- **Status**: failing", "- **Status**: passing")
+            } else {
+                rest.to_string()
+            };
+            out.push_str(test_name);
+            out.push('\n');
+            out.push_str(&updated_rest);
+            if i < sections.len() - 1 {
+                out.push_str("\n### ");
+            }
+        }
+        out
+    }
+
+    /// Returns true if all tests are passing.
+    pub fn all_tests_passing(&self) -> bool {
+        self.tests.iter().all(|t| t.status == "passing")
+    }
+}
+
 /// Parsed red goal output.
 #[derive(Debug, Clone)]
 pub struct RedOutput {
@@ -588,5 +784,89 @@ What is the target audience?
             out.run_single_or_selected_tests.as_deref(),
             Some("cargo test <name>")
         );
+    }
+
+    #[test]
+    fn parse_green_response_extracts_summary_tests_implementations() {
+        let input = r#"Implemented production code.
+
+<structured-response content-type="application-json">
+{"goal":"green","summary":"Implemented 2 methods. All tests passing.","tests":[{"name":"test_foo","file":"src/foo.rs","line":10,"status":"passing"},{"name":"test_bar","file":"src/bar.rs","line":20,"status":"failing","reason":"timeout"}],"implementations":[{"name":"AuthService::validate","file":"src/service.rs","line":15,"kind":"method"}]}
+</structured-response>
+"#;
+        let out = parse_green_response(input).expect("should parse");
+        assert!(out.summary.contains("All tests passing"));
+        assert_eq!(out.tests.len(), 2);
+        assert_eq!(out.tests[0].name, "test_foo");
+        assert_eq!(out.tests[0].status, "passing");
+        assert_eq!(out.tests[1].status, "failing");
+        assert_eq!(out.tests[1].reason.as_deref(), Some("timeout"));
+        assert_eq!(out.implementations.len(), 1);
+        assert_eq!(out.implementations[0].name, "AuthService::validate");
+        assert_eq!(out.implementations[0].kind, "method");
+    }
+
+    #[test]
+    fn parse_green_response_extracts_test_command_fields() {
+        let input = r#"Implemented production code.
+
+<structured-response content-type="application-json">
+{"goal":"green","summary":"Implemented.","tests":[],"implementations":[],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}
+</structured-response>
+"#;
+        let out = parse_green_response(input).expect("should parse");
+        assert_eq!(out.test_command.as_deref(), Some("cargo test"));
+        assert_eq!(out.prerequisite_actions.as_deref(), Some("None"));
+        assert_eq!(
+            out.run_single_or_selected_tests.as_deref(),
+            Some("cargo test <name>")
+        );
+    }
+
+    #[test]
+    fn parse_green_response_errors_on_wrong_goal() {
+        let input = r#"<structured-response content-type="application-json">
+{"goal":"red","summary":"Wrong goal.","tests":[],"implementations":[]}
+</structured-response>"#;
+        let err = parse_green_response(input).unwrap_err();
+        assert!(matches!(err, ParseError::Malformed(_)));
+    }
+
+    #[test]
+    fn green_output_to_updated_progress_markdown_marks_passing_and_failing() {
+        use super::{GreenOutput, GreenTestResult, ImplementationInfo};
+        let out = GreenOutput {
+            summary: "Implemented.".into(),
+            tests: vec![
+                GreenTestResult {
+                    name: "test_foo".into(),
+                    file: "src/foo.rs".into(),
+                    line: Some(10),
+                    status: "passing".into(),
+                    reason: None,
+                },
+                GreenTestResult {
+                    name: "test_bar".into(),
+                    file: "src/bar.rs".into(),
+                    line: Some(20),
+                    status: "failing".into(),
+                    reason: Some("timeout".into()),
+                },
+            ],
+            implementations: vec![ImplementationInfo {
+                name: "Foo".into(),
+                file: "src/foo.rs".into(),
+                line: Some(5),
+                kind: "struct".into(),
+            }],
+            test_command: None,
+            prerequisite_actions: None,
+            run_single_or_selected_tests: None,
+        };
+        let md = out.to_updated_progress_markdown();
+        assert!(md.contains("- [x] test_foo"));
+        assert!(md.contains("- [!] test_bar"));
+        assert!(md.contains("timeout"));
+        assert!(md.contains("- [x] Foo"));
     }
 }
