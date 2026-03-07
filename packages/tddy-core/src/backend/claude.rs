@@ -5,9 +5,32 @@ use crate::error::BackendError;
 use crate::permission;
 use crate::stream;
 use std::io::{BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+
+/// Resolve binary path for logging (which-like). Returns path as string for display.
+pub(crate) fn which_binary(binary: &Path) -> String {
+    let name = binary.to_string_lossy();
+    if name.contains('/') || name.contains('\\') {
+        if let Ok(canon) = std::fs::canonicalize(binary) {
+            return canon.display().to_string();
+        }
+        return name.to_string();
+    }
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join(&*name);
+            if candidate.is_file() {
+                if let Ok(canon) = std::fs::canonicalize(&candidate) {
+                    return canon.display().to_string();
+                }
+                return candidate.display().to_string();
+            }
+        }
+    }
+    format!("{} (not found in PATH)", name)
+}
 
 /// Type for progress callback (tool activity, task events).
 type ProgressCallback = Option<Arc<Mutex<Box<dyn FnMut(&stream::ProgressEvent) + Send>>>>;
@@ -230,6 +253,19 @@ impl super::CodingBackend for ClaudeCodeBackend {
             cmd.arg(arg);
         }
 
+        // Always log spawn for debugging backend/binary confusion (e.g. claude -> cursor)
+        let resolved = which_binary(&self.binary_path);
+        eprintln!(
+            "[tddy-coder] Claude backend spawning: {} (resolved: {})",
+            self.binary_path.display(),
+            resolved
+        );
+        eprintln!(
+            "[tddy-coder] cmd: {} {}",
+            self.binary_path.display(),
+            args.join(" ")
+        );
+
         if request.debug {
             let cwd = request
                 .working_dir
@@ -317,7 +353,17 @@ impl super::CodingBackend for ClaudeCodeBackend {
             None
         };
 
+        let mut first_line_logged = false;
         let mut on_conversation_line = |line: &str| {
+            if !first_line_logged {
+                first_line_logged = true;
+                let preview = if line.len() > 150 {
+                    format!("{}...", &line[..150])
+                } else {
+                    line.to_string()
+                };
+                eprintln!("[tddy-coder] first stream line (format hint): {}", preview);
+            }
             if let Some(ref mut f) = conv_file {
                 let _ = writeln!(f, "{}", line);
                 let _ = f.flush();

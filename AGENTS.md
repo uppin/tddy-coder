@@ -29,6 +29,7 @@ With **direnv**: `direnv allow` once; the shell loads automatically when you `cd
 | Action | Command |
 |--------|---------|
 | Build | `cargo build` or `cargo build -p tddy-core` / `-p tddy-coder` |
+| Release | `./release` — optimized production build (output: `target/release/tddy-coder`) |
 | Test | `cargo test` or `cargo test -p tddy-core` |
 | Lint | `cargo clippy -- -D warnings` |
 | Format | `cargo fmt` |

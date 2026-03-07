@@ -852,13 +852,14 @@ struct ValidateTestImpactDe {
 }
 
 /// Parse LLM validate-changes response from structured-response block.
+/// Uses the last block (rfind) to skip tool results / system prompt examples that may appear earlier.
 /// Returns Malformed if the expected format is not found or goal != "validate-changes".
 pub fn parse_validate_response(s: &str) -> Result<ValidateOutput, ParseError> {
     eprintln!(
         r#"{{"tddy":{{"marker_id":"M007","scope":"output::parse_validate_response","data":{{}}}}}}"#
     );
     let open = s
-        .find(STRUCTURED_OPEN)
+        .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
     let after_open = &s[open + STRUCTURED_OPEN.len()..];
     let gt = after_open

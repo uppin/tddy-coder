@@ -8,15 +8,15 @@ use std::path::{Path, PathBuf};
 use tddy_core::{
     next_goal_for_state, read_changeset, AcceptanceTestsOptions, AnyBackend, ClarificationQuestion,
     ClaudeCodeBackend, CodingBackend, CursorBackend, GreenOptions, PlanOptions, ProgressEvent,
-    RedOptions, Workflow, WorkflowError, WorkflowState,
+    RedOptions, ValidateOptions, Workflow, WorkflowError, WorkflowState,
 };
 
 #[derive(Parser, Debug)]
 #[command(name = "tddy-coder")]
 #[command(about = "TDD-driven coder for PRD-based development workflow")]
 struct Args {
-    /// Goal to execute: plan, acceptance-tests, red, green. Omit to run full workflow.
-    #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green"])]
+    /// Goal to execute: plan, acceptance-tests, red, green, validate-changes. Omit to run full workflow.
+    #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "validate-changes"])]
     goal: Option<String>,
 
     /// Output directory for planning artifacts (default: current directory)
@@ -177,6 +177,37 @@ fn main() -> anyhow::Result<()> {
                 }
                 Err(e) => return Err(e.into()),
             }
+        }
+    }
+
+    if args.goal.as_deref() == Some("validate-changes") {
+        let working_dir = &args.output_dir;
+        eprintln!("[tddy-coder] --agent={} (from CLI, default: claude)", args.agent);
+        let mut workflow = create_workflow(&args.agent);
+        eprintln!("[tddy-coder] backend: {}", workflow.backend().name());
+        let options = ValidateOptions {
+            model: args.model.clone(),
+            agent_output: args.agent_output,
+            conversation_output_path: args.conversation_output.clone(),
+            inherit_stdin: io::stdin().is_terminal(),
+            allowed_tools_extras: args.allowed_tools.clone(),
+            debug: args.debug,
+        };
+        let result = workflow.validate(
+            working_dir,
+            args.plan_dir.as_deref(),
+            None,
+            &options,
+        );
+        match result {
+            Ok(output) => {
+                println!("{}", output.summary);
+                println!("Risk level: {}", output.risk_level);
+                let report_path = working_dir.join("validation-report.md");
+                println!("Report: {}", report_path.display());
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
         }
     }
 

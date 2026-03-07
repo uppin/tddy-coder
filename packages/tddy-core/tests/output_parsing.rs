@@ -122,6 +122,25 @@ fn parse_validate_response_extracts_all_fields() {
     assert_eq!(impact.tests_affected, 1);
 }
 
+/// parse_validate_response() uses the last structured-response block, skipping tool results.
+#[test]
+fn parse_validate_response_skips_tool_result_block() {
+    // Simulates Cursor stream: tool result with usage JSON before agent's validate response.
+    let input = r#"Tool result from earlier in stream:
+<structured-response content-type="application-json">
+{"inputTokens":760,"outputTokens":42,"cacheReadInputTokens":100}
+</structured-response>
+
+Agent's actual response:
+<structured-response content-type="application-json">
+{"goal":"validate-changes","summary":"Analyzed 1 file.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"not_found","items_updated":0,"items_added":0},"files_analyzed":[{"file":"src/main.rs","lines_changed":5,"changeset_item":null}],"test_impact":{"tests_affected":0,"new_tests_needed":0}}
+</structured-response>"#;
+
+    let out = parse_validate_response(input).expect("parse_validate_response should succeed");
+    assert_eq!(out.summary, "Analyzed 1 file.");
+    assert_eq!(out.risk_level, "low");
+}
+
 /// parse_validate_response() returns ParseError::Malformed when the goal field is not "validate-changes".
 #[test]
 fn parse_validate_response_fails_on_wrong_goal_field() {

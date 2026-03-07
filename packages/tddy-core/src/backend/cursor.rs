@@ -115,6 +115,15 @@ impl super::CodingBackend for CursorBackend {
             cmd.arg(arg);
         }
 
+        // Always log spawn for debugging backend/binary confusion
+        let resolved = super::claude::which_binary(&self.binary_path);
+        eprintln!(
+            "[tddy-coder] Cursor backend spawning: {} (resolved: {})",
+            self.binary_path.display(),
+            resolved
+        );
+        eprintln!("[tddy-coder] cmd: cursor {}", args.join(" "));
+
         if request.debug {
             let cwd = request
                 .working_dir
