@@ -20,30 +20,78 @@ const TODO_END: &str = "---TODO_END---";
 pub struct PlanningOutput {
     pub prd: String,
     pub todo: String,
+    /// PRD/feature name from plan agent (e.g. "Auth Feature").
+    pub name: Option<String>,
+    /// Discovery data (toolchain, scripts, doc locations) from plan goal.
+    pub discovery: Option<crate::changeset::DiscoveryData>,
+    /// Demo plan for user verification.
+    pub demo_plan: Option<DemoPlan>,
+}
+
+/// Demo plan for presenting the feature to the user.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DemoPlan {
+    pub demo_type: String,
+    pub setup_instructions: String,
+    pub steps: Vec<DemoStep>,
+    pub verification: String,
+}
+
+/// A single demo step.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DemoStep {
+    pub description: String,
+    pub command_or_action: String,
+    pub expected_result: String,
 }
 
 #[derive(serde::Deserialize)]
 struct StructuredPlan {
     goal: Option<String>,
+    name: Option<String>,
     prd: Option<String>,
     todo: Option<String>,
+    discovery: Option<crate::changeset::DiscoveryData>,
+    demo_plan: Option<DemoPlan>,
 }
 
-/// Extract JSON from first <structured-response content-type="application-json">...</structured-response>.
+/// Extract JSON from <structured-response content-type="application-json">...</structured-response>.
+/// Tries each block in order; the first that parses successfully is returned.
+/// This handles output that contains the system prompt (with example block) before the model's response.
 fn extract_structured_response(s: &str) -> Option<PlanningOutput> {
-    let open = s.find(STRUCTURED_OPEN)?;
-    let after_open = &s[open + STRUCTURED_OPEN.len()..];
-    let gt = after_open.find('>')?;
-    let content = after_open[gt + 1..].trim();
-    let close = content.find(STRUCTURED_CLOSE)?;
-    let json_str = content[..close].trim();
-    let parsed: StructuredPlan = serde_json::from_str(json_str).ok()?;
-    if parsed.goal.as_deref() != Some("plan") {
-        return None;
+    let mut search_from = 0;
+    while let Some(open) = s[search_from..].find(STRUCTURED_OPEN) {
+        let open = search_from + open;
+        let after_open = &s[open + STRUCTURED_OPEN.len()..];
+        let Some(gt) = after_open.find('>') else {
+            search_from = open + 1;
+            continue;
+        };
+        let content = after_open[gt + 1..].trim();
+        let Some(close) = content.find(STRUCTURED_CLOSE) else {
+            search_from = open + 1;
+            continue;
+        };
+        let json_str = content[..close].trim();
+        if let Ok(parsed) = serde_json::from_str::<StructuredPlan>(json_str) {
+            if parsed.goal.as_deref() == Some("plan") {
+                if let (Some(prd), Some(todo)) = (
+                    parsed.prd.filter(|s| !s.is_empty()),
+                    parsed.todo.filter(|s| !s.is_empty()),
+                ) {
+                    return Some(PlanningOutput {
+                        prd,
+                        todo,
+                        name: parsed.name.filter(|s| !s.is_empty()),
+                        discovery: parsed.discovery,
+                        demo_plan: parsed.demo_plan,
+                    });
+                }
+            }
+        }
+        search_from = open + 1;
     }
-    let prd = parsed.prd.filter(|s| !s.is_empty())?;
-    let todo = parsed.todo.filter(|s| !s.is_empty())?;
-    Some(PlanningOutput { prd, todo })
+    None
 }
 
 /// Parse LLM planning response: tries structured-response first, then delimited output.
@@ -72,7 +120,13 @@ pub fn parse_planning_output(s: &str) -> Result<PlanningOutput, ParseError> {
         .trim()
         .to_string();
 
-    Ok(PlanningOutput { prd, todo })
+    Ok(PlanningOutput {
+        prd,
+        todo,
+        name: None,
+        discovery: None,
+        demo_plan: None,
+    })
 }
 
 fn extract_section<'a>(s: &'a str, start: &str, end: &str) -> Option<&'a str> {
@@ -94,6 +148,14 @@ pub struct AcceptanceTestsOutput {
     pub prerequisite_actions: Option<String>,
     /// How to run a single or selected tests (e.g. "cargo test <name>", "pytest -k <pattern>").
     pub run_single_or_selected_tests: Option<String>,
+    /// How to run tests sequentially (e.g. "cargo test -- --test-threads=1").
+    pub sequential_command: Option<String>,
+    /// How to run tests with logging (e.g. "RUST_LOG=debug cargo test").
+    pub logging_command: Option<String>,
+    /// Metric reporting hooks (e.g. "cargo test -- --format json").
+    pub metric_hooks: Option<String>,
+    /// Execution feedback options (e.g. "cargo test 2>&1 | tee test-output.txt").
+    pub feedback_options: Option<String>,
 }
 
 /// Info about a single acceptance test.
@@ -152,6 +214,14 @@ struct StructuredAcceptanceTests {
     test_command: Option<String>,
     prerequisite_actions: Option<String>,
     run_single_or_selected_tests: Option<String>,
+    #[serde(default)]
+    sequential_command: Option<String>,
+    #[serde(default)]
+    logging_command: Option<String>,
+    #[serde(default)]
+    metric_hooks: Option<String>,
+    #[serde(default)]
+    feedback_options: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -209,6 +279,10 @@ pub fn parse_acceptance_tests_response(s: &str) -> Result<AcceptanceTestsOutput,
         run_single_or_selected_tests: parsed
             .run_single_or_selected_tests
             .filter(|s| !s.is_empty()),
+        sequential_command: parsed.sequential_command.filter(|s| !s.is_empty()),
+        logging_command: parsed.logging_command.filter(|s| !s.is_empty()),
+        metric_hooks: parsed.metric_hooks.filter(|s| !s.is_empty()),
+        feedback_options: parsed.feedback_options.filter(|s| !s.is_empty()),
     })
 }
 
@@ -221,6 +295,15 @@ pub struct GreenOutput {
     pub test_command: Option<String>,
     pub prerequisite_actions: Option<String>,
     pub run_single_or_selected_tests: Option<String>,
+    /// Demo results when demo-plan.md was present and green completed.
+    pub demo_results: Option<DemoResults>,
+}
+
+/// Demo execution results from green goal.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DemoResults {
+    pub summary: String,
+    pub steps_completed: u32,
 }
 
 /// Info about a single test result from the green goal.
@@ -251,6 +334,14 @@ struct StructuredGreen {
     test_command: Option<String>,
     prerequisite_actions: Option<String>,
     run_single_or_selected_tests: Option<String>,
+    #[serde(default)]
+    demo_results: Option<DemoResultsDe>,
+}
+
+#[derive(serde::Deserialize)]
+struct DemoResultsDe {
+    summary: String,
+    steps_completed: u32,
 }
 
 #[derive(serde::Deserialize)]
@@ -322,6 +413,11 @@ pub fn parse_green_response(s: &str) -> Result<GreenOutput, ParseError> {
         })
         .collect();
 
+    let demo_results = parsed.demo_results.map(|d| DemoResults {
+        summary: d.summary,
+        steps_completed: d.steps_completed,
+    });
+
     Ok(GreenOutput {
         summary,
         tests,
@@ -331,6 +427,7 @@ pub fn parse_green_response(s: &str) -> Result<GreenOutput, ParseError> {
         run_single_or_selected_tests: parsed
             .run_single_or_selected_tests
             .filter(|s| !s.is_empty()),
+        demo_results,
     })
 }
 
@@ -420,6 +517,40 @@ pub struct RedOutput {
     pub prerequisite_actions: Option<String>,
     /// How to run a single or selected tests (e.g. "cargo test <name>", "pytest -k <pattern>").
     pub run_single_or_selected_tests: Option<String>,
+    /// Logging markers added to skeleton code.
+    #[allow(clippy::struct_excessive_bools)]
+    pub markers: Vec<MarkerInfo>,
+    /// Which markers were collected from test output.
+    pub marker_results: Vec<MarkerResult>,
+    /// Path to captured test output file.
+    pub test_output_file: Option<String>,
+    /// How to run tests sequentially.
+    pub sequential_command: Option<String>,
+    /// How to run tests with logging.
+    pub logging_command: Option<String>,
+    /// Metric reporting hooks.
+    pub metric_hooks: Option<String>,
+    /// Execution feedback options.
+    pub feedback_options: Option<String>,
+}
+
+/// Logging marker definition (JSON format with scope data).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MarkerInfo {
+    pub marker_id: String,
+    pub test_name: String,
+    pub scope: String,
+    pub data: serde_json::Value,
+}
+
+/// Result of marker collection verification.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MarkerResult {
+    pub marker_id: String,
+    pub test_name: String,
+    pub scope: String,
+    pub collected: bool,
+    pub investigation: Option<String>,
 }
 
 /// Info about a single test created by the red goal.
@@ -449,6 +580,38 @@ struct StructuredRed {
     test_command: Option<String>,
     prerequisite_actions: Option<String>,
     run_single_or_selected_tests: Option<String>,
+    #[serde(default)]
+    markers: Option<Vec<MarkerInfoDe>>,
+    #[serde(default)]
+    marker_results: Option<Vec<MarkerResultDe>>,
+    #[serde(default)]
+    test_output_file: Option<String>,
+    #[serde(default)]
+    sequential_command: Option<String>,
+    #[serde(default)]
+    logging_command: Option<String>,
+    #[serde(default)]
+    metric_hooks: Option<String>,
+    #[serde(default)]
+    feedback_options: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct MarkerInfoDe {
+    marker_id: String,
+    test_name: String,
+    scope: String,
+    #[serde(default)]
+    data: serde_json::Value,
+}
+
+#[derive(serde::Deserialize)]
+struct MarkerResultDe {
+    marker_id: String,
+    test_name: String,
+    scope: String,
+    collected: bool,
+    investigation: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -517,6 +680,31 @@ pub fn parse_red_response(s: &str) -> Result<RedOutput, ParseError> {
         })
         .collect();
 
+    let markers = parsed
+        .markers
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| MarkerInfo {
+            marker_id: m.marker_id,
+            test_name: m.test_name,
+            scope: m.scope,
+            data: m.data,
+        })
+        .collect();
+
+    let marker_results = parsed
+        .marker_results
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| MarkerResult {
+            marker_id: m.marker_id,
+            test_name: m.test_name,
+            scope: m.scope,
+            collected: m.collected,
+            investigation: m.investigation,
+        })
+        .collect();
+
     Ok(RedOutput {
         summary,
         tests,
@@ -526,6 +714,13 @@ pub fn parse_red_response(s: &str) -> Result<RedOutput, ParseError> {
         run_single_or_selected_tests: parsed
             .run_single_or_selected_tests
             .filter(|s| !s.is_empty()),
+        markers,
+        marker_results,
+        test_output_file: parsed.test_output_file.filter(|s| !s.is_empty()),
+        sequential_command: parsed.sequential_command.filter(|s| !s.is_empty()),
+        logging_command: parsed.logging_command.filter(|s| !s.is_empty()),
+        metric_hooks: parsed.metric_hooks.filter(|s| !s.is_empty()),
+        feedback_options: parsed.feedback_options.filter(|s| !s.is_empty()),
     })
 }
 
@@ -566,6 +761,24 @@ impl RedOutput {
             out.push_str(&format!("- **File**: {}\n", s.file));
             out.push_str(&format!("- **Line**: {}\n", s.line.unwrap_or(0)));
             out.push_str(&format!("- **Kind**: {}\n\n", s.kind));
+        }
+        if !self.markers.is_empty() {
+            out.push_str("## Logging Markers\n\n");
+            for m in &self.markers {
+                out.push_str(&format!(
+                    "- **{}** (scope: {}): {}\n",
+                    m.marker_id, m.scope, m.test_name
+                ));
+            }
+        }
+        if !self.marker_results.is_empty() {
+            out.push_str("\n## Marker Verification\n\n");
+            for r in &self.marker_results {
+                out.push_str(&format!(
+                    "- **{}**: collected={}\n",
+                    r.marker_id, r.collected
+                ));
+            }
         }
         out
     }
@@ -676,6 +889,22 @@ What is the target audience?
     }
 
     #[test]
+    fn parse_planning_response_skips_invalid_block_and_uses_valid_one() {
+        let input = r#"System prompt with example (invalid JSON):
+<structured-response content-type="application-json">
+{"goal": "plan", "prd": "<PRD markdown content>", "todo": 
+</structured-response>
+
+Model output:
+<structured-response content-type="application-json">
+{"goal": "plan", "prd": "Summary: Real PRD", "todo": "- [ ] Real task"}
+</structured-response>"#;
+        let out = parse_planning_response(input).expect("should parse");
+        assert!(out.prd.contains("Real PRD"));
+        assert!(out.todo.contains("Real task"));
+    }
+
+    #[test]
     fn red_output_to_progress_markdown_produces_unfilled_checkboxes() {
         use super::{RedOutput, RedTestInfo, SkeletonInfo};
         let out = RedOutput {
@@ -703,6 +932,13 @@ What is the target audience?
             test_command: None,
             prerequisite_actions: None,
             run_single_or_selected_tests: None,
+            markers: vec![],
+            marker_results: vec![],
+            test_output_file: None,
+            sequential_command: None,
+            logging_command: None,
+            metric_hooks: None,
+            feedback_options: None,
         };
         let md = out.to_progress_markdown();
         assert!(md.contains("## Failed Tests"));
@@ -862,6 +1098,7 @@ What is the target audience?
             test_command: None,
             prerequisite_actions: None,
             run_single_or_selected_tests: None,
+            demo_results: None,
         };
         let md = out.to_updated_progress_markdown();
         assert!(md.contains("- [x] test_foo"));

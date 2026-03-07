@@ -2,11 +2,11 @@
 
 **Product Area**: Coder
 **Status**: Draft
-**Updated**: 2026-03-07
+**Updated**: 2026-03-10
 
 ## Summary
 
-The Planning Step is the first phase of the tddy-coder workflow. It accepts a user's goal description via stdin, invokes an LLM backend (Claude Code CLI) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `.session` (session ID for resumption). The **acceptance-tests** goal reads a completed plan, resumes the Claude session, creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
+The Planning Step is the first phase of the tddy-coder workflow. It accepts a user's goal description via stdin, invokes an LLM backend (Claude Code CLI) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, resumes the Claude session, creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
 
 ## Background
 
@@ -22,7 +22,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 2. Accepts `--goal plan` to trigger the planning step
 3. Accepts `--goal acceptance-tests` to create failing acceptance tests from a completed plan
 4. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
-5. Accepts `--plan-dir <path>`: path to plan output directory (PRD.md, TODO.md, .session, acceptance-tests.md); required when `--goal acceptance-tests`
+5. Accepts `--plan-dir <path>`: path to plan output directory (PRD.md, TODO.md, changeset.yaml, acceptance-tests.md); required when `--goal acceptance-tests`
 6. Accepts `--output-dir <path>` to configure where planning output is written (default: current directory)
 7. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
 8. Accepts `--agent-output` to print raw agent output to stderr in real time
@@ -36,8 +36,8 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 2. Invoke Claude Code CLI in plan mode to analyze the feature description
 3. **Q&A phase**: Claude Code may ask clarifying questions; the user is expected to answer them. The system must support this interactive exchange (Claude asks → user answers → Claude continues analysis).
 4. Generate a deterministic directory name based on the feature (date-prefixed, slugified)
-5. Parse Claude Code's structured output into PRD and TODO artifacts
-6. Write `PRD.md`, `TODO.md`, and `.session` (session ID) to the output directory
+5. Parse Claude Code's structured output into PRD, TODO, discovery, and demo plan artifacts
+6. Write `PRD.md`, `TODO.md`, and `changeset.yaml` (unified manifest: session ID, workflow state, discovery, models, initial_prompt, clarification_qa) to the output directory
 7. On successful exit, output the path to `PRD.md` (goal-specific exit output)
 
 The PRD must include a **Testing Plan** section with: test level (E2E/Integration/Unit), list of acceptance tests, target test file paths, and strong assertions.
@@ -45,7 +45,7 @@ The PRD must include a **Testing Plan** section with: test level (E2E/Integratio
 ### Acceptance-Tests Workflow
 
 1. Read PRD.md and TODO.md from the plan directory specified by `--plan-dir`
-2. Read the session ID from `.session` in the plan directory
+2. Read the session ID and model from `changeset.yaml` in the plan directory
 3. Resume the Claude session using `--resume <session-id>`
 4. Use `--permission-mode acceptEdits` (auto-approves file edits for creating tests and running `cargo test`)
 5. **Q&A phase**: When Claude returns clarifying questions (e.g., permission requests), the user provides answers and the workflow continues
@@ -69,14 +69,54 @@ The PRD must include a **Testing Plan** section with: test level (E2E/Integratio
 3. **Plan goal**: Uses `--permission-mode plan` (read-only analysis) plus a predefined allowlist (`Read`, `Glob`, `Grep`, `SemanticSearch`) passed as `--allowedTools`.
 4. **Acceptance-tests goal**: Uses `--permission-mode acceptEdits` plus a predefined allowlist (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash(cargo *)`, `SemanticSearch`) passed as `--allowedTools`.
 5. **Hybrid permission policy**: Each goal has a built-in allowlist; tools matching the allowlist are auto-approved. Optional `--allowed-tools` CLI flag adds extra tools to the allowlist. Unexpected permission requests (not in the allowlist) are denied in non-interactive mode; interactive handling via embedded permission tool is available when enabled.
-6. **Model selection**: Passes `--model <name>` to the `claude` binary when the user specifies one via `--model` / `-m`. Default model when unspecified (e.g. `opus` or backend default).
+6. **Model selection**: Passes `--model <name>` to the `claude` binary. Model comes from `changeset.yaml` when `--model` is not specified; CLI `--model` overrides.
 7. **Output format**: Uses `--output-format=stream-json` for NDJSON event stream (tool_use, result, task_progress).
-8. **Session management**: First invoke uses `--session-id <uuid>`; Q&A followup uses `--resume <uuid>` so Claude retains context across the exchange.
-9. **Structured Q&A**: Clarifying questions come from `AskUserQuestion` tool events (header, question, options, multi_select). Presented via inquire Select/MultiSelect prompts.
+8. **Session management**: First invoke uses `--session-id <uuid>`; Q&A followup uses `--resume <uuid>` so Claude retains context across the exchange. Session IDs are persisted in `changeset.yaml`.
+9. **Structured Q&A**: Clarifying questions come from `AskUserQuestion` tool events (header, question, options, multi_select). Presented via inquire Select/MultiSelect prompts. Questions and answers are stored in `changeset.yaml` as `clarification_qa`.
 10. **Real-time progress**: Tool activity (Read, Glob, Bash, etc.) displayed while Claude works.
 11. **Output parsing**: System prompt instructs Claude to emit PRD and TODO in `<structured-response content-type="application-json">` format; parser also supports delimiter fallback.
 
+### Project Discovery (Plan Goal)
+
+The plan goal performs read-only discovery before producing the PRD:
+- Parse `Cargo.toml`, `package.json`, `Makefile`, `flake.nix`, `.nvmrc`, `.tool-versions`, `.python-version`, `AGENTS.md` for tool/SDK versions and scripts
+- Identify documentation locations (`docs/`, `packages/*/docs/`, README files)
+- Discover the best location for the plan directory based on repo conventions
+- Reveal relevant code areas (modules, traits, key files)
+- Capture test infrastructure (runners, conventions, CI scripts)
+
+Discovery is persisted in `changeset.yaml` for downstream goals.
+
+### Demo Planning (Plan Goal)
+
+The plan goal produces a demo plan based on project type detection:
+- CLI: command invocations with expected output
+- Web apps: browser navigation (URLs, interactions, expected states)
+- Libraries: REPL/test-based demonstrations
+- Storybook-enabled projects: storybook component views
+
+Includes setup instructions and verification criteria. Written to `demo-plan.md` in the plan directory.
+
+### Observability
+
+- Each goal displays the agent and model before execution (e.g. `Using agent: claude, model: sonnet`)
+- Each workflow state transition is displayed (e.g. `State: Init → Planning`)
+
 ### Output Artifacts
+
+#### changeset.yaml
+
+Unified manifest in the plan directory:
+- `name`: One-liner PRD name (decided by the plan agent)
+- `initial_prompt`: User's goal/feature description from stdin
+- `clarification_qa`: Questions asked during planning and user's answers (empty if no clarification)
+- `sessions`: Array of session entries (id, agent, tag, created_at, system_prompt_file)
+- `state`: Current workflow state and history
+- `models`: Model per goal (plan, acceptance-tests, red, green)
+- `discovery`: Toolchain, scripts, doc locations, relevant code
+- `artifacts`: Paths to PRD.md, TODO.md, acceptance-tests.md, etc.
+
+System prompts are written to the plan directory (e.g. `system-prompt-plan.md`) and referenced per-session via `system_prompt_file`.
 
 #### PRD.md
 
@@ -123,7 +163,7 @@ This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt | 
 ### Plan Goal
 
 - [ ] `tddy-coder --goal plan` reads from stdin and produces a named output directory
-- [ ] Output directory contains well-formed `PRD.md`, `TODO.md`, and `.session`
+- [ ] Output directory contains well-formed `PRD.md`, `TODO.md`, and `changeset.yaml`
 - [ ] `--output-dir` flag controls output location
 - [ ] `--model <name>` selects the LLM model; default used when omitted
 - [ ] *Deferred*: `--list-models` lists available models
@@ -143,7 +183,7 @@ This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt | 
 - [ ] Claude runs tests and verifies all new tests fail (Red state); passing tests are adjusted or removed
 - [ ] Output prints a summary of created tests, their paths, and failing status
 - [ ] State machine transitions: Init/Planned → AcceptanceTesting → AcceptanceTestsReady
-- [ ] Error handling: missing plan-dir, missing PRD.md, missing .session, session resume failure
+- [ ] Error handling: missing plan-dir, missing PRD.md, missing changeset.yaml, session resume failure
 - [ ] `--model` and `--agent-output` flags work with the acceptance-tests goal
 - [ ] acceptance-tests goal writes acceptance-tests.md to the plan directory
 

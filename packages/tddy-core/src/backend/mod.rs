@@ -13,6 +13,8 @@ use crate::error::BackendError;
 pub struct InvokeRequest {
     pub prompt: String,
     pub system_prompt: Option<String>,
+    /// When set, backend uses this path instead of system_prompt (avoids temp file).
+    pub system_prompt_path: Option<std::path::PathBuf>,
     pub permission_mode: PermissionMode,
     /// Optional model name (e.g. "sonnet") passed as --model to Claude Code CLI.
     pub model: Option<String>,

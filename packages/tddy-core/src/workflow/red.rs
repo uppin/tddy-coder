@@ -14,10 +14,12 @@ You MUST:
 Your final output MUST include this exact block (replace placeholders with actual values):
 
 <structured-response content-type="application-json">
-{"goal": "red", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "failing"}], "skeletons": [{"name": "<name>", "file": "<path>", "line": <number>, "kind": "<trait|struct|method|function|module>"}], "test_command": "<command to run tests, e.g. cargo test or npm test>", "prerequisite_actions": "<prereqs or None. Use cheapest way: if test command already builds/bundles, use None>", "run_single_or_selected_tests": "<how to run one or filtered tests, e.g. cargo test <name>, pytest -k <pattern>>"}
+{"goal": "red", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "failing"}], "skeletons": [{"name": "<name>", "file": "<path>", "line": <number>, "kind": "<trait|struct|method|function|module>"}], "test_command": "<command>", "prerequisite_actions": "<prereqs or None>", "run_single_or_selected_tests": "<how to run one test>", "markers": [{"marker_id": "M001", "test_name": "<name>", "scope": "<code path>", "data": {}}], "marker_results": [{"marker_id": "M001", "test_name": "<name>", "scope": "<scope>", "collected": true, "investigation": null}], "test_output_file": "<path>", "sequential_command": "<optional>", "logging_command": "<optional>", "metric_hooks": "<optional>", "feedback_options": "<optional>"}
 </structured-response>
 
 The summary must describe what skeletons and tests were created and confirm all tests are failing. The tests array lists each failing test. The skeletons array lists each skeleton (trait, struct, method, function, or module) added.
+
+**Logging markers**: At each skeleton entry point, add an eprintln! (or equivalent) that outputs JSON with a unique "tddy" key, e.g. eprintln!("{{\"tddy\":{{\"marker_id\":\"M001\",\"scope\":\"module::fn\",\"data\":{{}}}}}}");. Run tests and capture output to a file. Grep the output for "tddy": to find collected markers. Populate markers (expected) and marker_results (collected vs expected). test_output_file is the path where test output was saved.
 
 **test_command**: Derive from the project (Cargo.toml → cargo test, package.json → npm test, pytest.ini → pytest, etc.).
 **prerequisite_actions**: Suggest the cheapest approach. If the test command already compiles/builds (e.g. cargo test compiles first), use "None". Only suggest explicit build steps when needed (e.g. "npm install" before "npm test").

@@ -14,10 +14,12 @@ You MUST:
 Your final output MUST include this exact block (replace placeholders with actual values):
 
 <structured-response content-type="application-json">
-{"goal": "green", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "passing|failing", "reason": "<optional reason if failing>"}], "implementations": [{"name": "<name>", "file": "<path>", "line": <number>, "kind": "<struct|method|function|trait|module>"}], "test_command": "<command>", "prerequisite_actions": "<prereqs or None>", "run_single_or_selected_tests": "<how to run one test>"}
+{"goal": "green", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "passing|failing", "reason": "<optional reason if failing>"}], "implementations": [{"name": "<name>", "file": "<path>", "line": <number>, "kind": "<struct|method|function|trait|module>"}], "test_command": "<command>", "prerequisite_actions": "<prereqs or None>", "run_single_or_selected_tests": "<how to run one test>", "demo_results": {"summary": "<text>", "steps_completed": <number>}}
 </structured-response>
 
-The summary must describe what was implemented and confirm test results. The tests array lists each test with status "passing" or "failing"; include "reason" for failing tests. The implementations array lists each implemented item (struct, method, etc.)."#
+The summary must describe what was implemented and confirm test results. The tests array lists each test with status "passing" or "failing"; include "reason" for failing tests. The implementations array lists each implemented item (struct, method, etc.).
+
+**demo_results** (required when demo-plan.md exists): If the plan directory contains demo-plan.md, after all tests pass run the demo steps from demo-plan.md. Report summary and steps_completed in demo_results."#
         .to_string()
 }
 

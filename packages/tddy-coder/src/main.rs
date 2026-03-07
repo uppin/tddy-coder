@@ -52,6 +52,10 @@ fn main() -> anyhow::Result<()> {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for acceptance-tests goal"))?;
 
+        let model = args.model.as_deref().unwrap_or("sonnet");
+        eprintln!("agent: claude");
+        eprintln!("model: {}", model);
+
         let backend = ClaudeCodeBackend::new().with_progress(|event| {
             let dim = "\x1b[2m";
             let reset = "\x1b[0m";
@@ -76,7 +80,8 @@ fn main() -> anyhow::Result<()> {
                 } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
             }
         });
-        let mut workflow = Workflow::new(backend);
+        let mut workflow = Workflow::new(backend)
+            .with_on_state_change(|from, to| eprintln!("State: {} → {}", from, to));
 
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
@@ -127,6 +132,10 @@ fn main() -> anyhow::Result<()> {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for green goal"))?;
 
+        let model = args.model.as_deref().unwrap_or("sonnet");
+        eprintln!("agent: claude");
+        eprintln!("model: {}", model);
+
         let backend = ClaudeCodeBackend::new().with_progress(|event| {
             let dim = "\x1b[2m";
             let reset = "\x1b[0m";
@@ -151,7 +160,8 @@ fn main() -> anyhow::Result<()> {
                 } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
             }
         });
-        let mut workflow = Workflow::new(backend);
+        let mut workflow = Workflow::new(backend)
+            .with_on_state_change(|from, to| eprintln!("State: {} → {}", from, to));
 
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
@@ -211,6 +221,10 @@ fn main() -> anyhow::Result<()> {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for red goal"))?;
 
+        let model = args.model.as_deref().unwrap_or("sonnet");
+        eprintln!("agent: claude");
+        eprintln!("model: {}", model);
+
         let backend = ClaudeCodeBackend::new().with_progress(|event| {
             let dim = "\x1b[2m";
             let reset = "\x1b[0m";
@@ -235,7 +249,8 @@ fn main() -> anyhow::Result<()> {
                 } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
             }
         });
-        let mut workflow = Workflow::new(backend);
+        let mut workflow = Workflow::new(backend)
+            .with_on_state_change(|from, to| eprintln!("State: {} → {}", from, to));
 
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
@@ -299,6 +314,10 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("empty feature description (read from stdin)");
     }
 
+    let model = args.model.as_deref().unwrap_or("opus");
+    eprintln!("agent: claude");
+    eprintln!("model: {}", model);
+
     let backend = ClaudeCodeBackend::new().with_progress(|event| {
         let dim = "\x1b[2m";
         let reset = "\x1b[0m";
@@ -323,7 +342,8 @@ fn main() -> anyhow::Result<()> {
             } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
         }
     });
-    let mut workflow = Workflow::new(backend);
+    let mut workflow = Workflow::new(backend)
+        .with_on_state_change(|from, to| eprintln!("State: {} → {}", from, to));
 
     let inherit_stdin = io::stdin().is_terminal();
     let mut answers: Option<String> = None;

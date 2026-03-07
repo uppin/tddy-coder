@@ -149,7 +149,10 @@ impl ClaudeCodeBackend {
 
 impl super::CodingBackend for ClaudeCodeBackend {
     fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
-        let system_prompt_path = if let Some(ref sys_prompt) = request.system_prompt {
+        let (system_prompt_path, cleanup_temp) = if let Some(ref path) = request.system_prompt_path
+        {
+            (Some(path.clone()), false)
+        } else if let Some(ref sys_prompt) = request.system_prompt {
             let tmp = std::env::temp_dir().join(format!(
                 "tddy-sys-{}-{}.txt",
                 std::process::id(),
@@ -161,9 +164,9 @@ impl super::CodingBackend for ClaudeCodeBackend {
             std::fs::write(&tmp, sys_prompt).map_err(|e| {
                 BackendError::InvocationFailed(format!("failed to write system prompt file: {}", e))
             })?;
-            Some(tmp)
+            (Some(tmp), true)
         } else {
-            None
+            (None, false)
         };
 
         struct CleanupGuard(PathBuf);
@@ -172,7 +175,11 @@ impl super::CodingBackend for ClaudeCodeBackend {
                 let _ = std::fs::remove_file(&self.0);
             }
         }
-        let _cleanup = system_prompt_path.as_ref().map(|p| CleanupGuard(p.clone()));
+        let _cleanup = if cleanup_temp {
+            system_prompt_path.as_ref().map(|p| CleanupGuard(p.clone()))
+        } else {
+            None
+        };
 
         let args = build_claude_args(&request, system_prompt_path.as_deref());
         let mut cmd = Command::new(&self.binary_path);

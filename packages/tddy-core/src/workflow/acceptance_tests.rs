@@ -13,14 +13,18 @@ You MUST:
 Your final output MUST include this exact block (replace placeholders with actual values):
 
 <structured-response content-type="application-json">
-{"goal": "acceptance-tests", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "failing"}], "test_command": "<command to run tests, e.g. cargo test or npm test>", "prerequisite_actions": "<prereqs or None. Use cheapest way: if test command already builds/bundles, use None>", "run_single_or_selected_tests": "<how to run one or filtered tests, e.g. cargo test <name>, pytest -k <pattern>>"}
+{"goal": "acceptance-tests", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "failing"}], "test_command": "<command>", "prerequisite_actions": "<prereqs or None>", "run_single_or_selected_tests": "<how to run one test>", "sequential_command": "<optional: run tests sequentially>", "logging_command": "<optional: run with verbose/logging>", "metric_hooks": "<optional: how to add perf/metric hooks>", "feedback_options": "<optional: CI/IDE feedback options>"}
 </structured-response>
 
 The summary must describe what tests exist and confirm all are failing. The tests array must list each acceptance test with name, file, line, and status.
 
 **test_command**: Derive from the project (Cargo.toml → cargo test, package.json → npm test, pytest.ini → pytest, etc.).
 **prerequisite_actions**: Suggest the cheapest approach. If the test command already compiles/builds (e.g. cargo test compiles first), use "None". Only suggest explicit build steps when needed (e.g. "npm install" before "npm test").
-**run_single_or_selected_tests**: How to run a single test or filter by name/pattern (e.g. `cargo test <name>`, `pytest -k <pattern>`, `npm test -- --testNamePattern=<pattern>`)."#
+**run_single_or_selected_tests**: How to run a single test or filter by name/pattern (e.g. `cargo test <name>`, `pytest -k <pattern>`, `npm test -- --testNamePattern=<pattern>`).
+**sequential_command** (optional): If tests must run sequentially (e.g. shared state), provide the command.
+**logging_command** (optional): Command to run tests with verbose or structured logging enabled.
+**metric_hooks** (optional): How to add performance or metric collection hooks for tests.
+**feedback_options** (optional): CI or IDE integration options for test feedback."#
         .to_string()
 }
 

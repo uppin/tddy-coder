@@ -118,6 +118,76 @@ fn cli_accepts_output_dir_flag() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// Each goal should display the agent and model it is using before execution.
+#[test]
+#[cfg(unix)]
+fn cli_displays_agent_and_model_before_goal_execution() {
+    let tmp = std::env::temp_dir().join("tddy-cli-agent-model-display");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    create_fake_claude_prd_only(&tmp).expect("create fake claude");
+
+    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .env("PATH", tmp_path.to_str().unwrap())
+        .env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        )
+        .args(["--goal", "plan", "--output-dir", tmp.to_str().unwrap()])
+        .write_stdin("Build feature X");
+
+    let output = cmd.output().expect("run tddy-coder");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        (stderr.contains("agent") || stderr.contains("claude"))
+            && (stderr.contains("model") || stderr.contains("opus") || stderr.contains("sonnet")),
+        "stderr should display agent and model before execution: {}",
+        stderr
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Each state transition should be displayed.
+#[test]
+#[cfg(unix)]
+fn cli_displays_state_transitions() {
+    let tmp = std::env::temp_dir().join("tddy-cli-state-transitions");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    create_fake_claude_prd_only(&tmp).expect("create fake claude");
+
+    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .env("PATH", tmp_path.to_str().unwrap())
+        .env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        )
+        .args(["--goal", "plan", "--output-dir", tmp.to_str().unwrap()])
+        .write_stdin("Build feature X");
+
+    let output = cmd.output().expect("run tddy-coder");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let has_state_info = stderr.contains("State")
+        || stderr.contains("Init")
+        || stderr.contains("Planning")
+        || stderr.contains("Planned")
+        || stderr.contains("→");
+    assert!(
+        has_state_info,
+        "stderr should display state transitions: {}",
+        stderr
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn cli_accepts_model_flag() {
     let mut cmd = tddy_coder_bin();
@@ -206,7 +276,20 @@ fn cli_accepts_goal_acceptance_tests_with_plan_dir() {
     let plan_dir = tmp.join("plan-output");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
-    std::fs::write(plan_dir.join(".session"), "fake-sess").expect("write .session");
+    let changeset = r#"version: 1
+models: {}
+sessions:
+  - id: "fake-sess"
+    agent: claude
+    tag: plan
+    created_at: "2026-03-07T10:00:00Z"
+state:
+  current: Planned
+  updated_at: "2026-03-07T10:00:00Z"
+  history: []
+artifacts: {}
+"#;
+    std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
 
     let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();

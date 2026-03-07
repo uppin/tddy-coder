@@ -34,6 +34,12 @@ pub enum WorkflowError {
     #[error("session file missing: {0}")]
     SessionMissing(String),
 
+    #[error("changeset.yaml missing: {0}")]
+    ChangesetMissing(String),
+
+    #[error("changeset.yaml invalid: {0}")]
+    ChangesetInvalid(String),
+
     /// Clarification questions from the LLM; caller should display and re-invoke with answers.
     #[error("clarification needed: {questions:?}")]
     ClarificationNeeded {

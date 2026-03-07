@@ -41,7 +41,7 @@ fn acceptance_tests_workflow_reads_plan_dir_and_invokes_backend_with_resumed_ses
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan\n- Test 1").expect("write PRD");
-    std::fs::write(plan_dir.join(".session"), "sess-resume-123").expect("write .session");
+    write_changeset_for_plan_session(&plan_dir, "sess-resume-123");
 
     let backend = MockBackend::new();
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
@@ -66,7 +66,7 @@ fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_ready_sta
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
-    std::fs::write(plan_dir.join(".session"), "sess-456").expect("write .session");
+    write_changeset_for_plan_session(&plan_dir, "sess-456");
 
     let backend = MockBackend::new();
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
@@ -125,8 +125,8 @@ fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
 
     assert!(result.is_err());
     assert!(
-        matches!(result, Err(tddy_core::WorkflowError::SessionMissing(_))),
-        "expected SessionMissing, got {:?}",
+        matches!(result, Err(tddy_core::WorkflowError::ChangesetMissing(_))),
+        "expected ChangesetMissing, got {:?}",
         result
     );
 
@@ -141,7 +141,7 @@ fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
-    std::fs::write(plan_dir.join(".session"), "sess-allowlist").expect("write .session");
+    write_changeset_for_plan_session(&plan_dir, "sess-allowlist");
 
     let backend = MockBackend::new();
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
@@ -218,7 +218,7 @@ fn acceptance_tests_workflow_writes_acceptance_tests_md_to_plan_dir() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
-    std::fs::write(plan_dir.join(".session"), "sess-writes-md").expect("write .session");
+    write_changeset_for_plan_session(&plan_dir, "sess-writes-md");
 
     let backend = MockBackend::new();
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
@@ -271,16 +271,32 @@ fn plan_workflow_writes_session_file_to_output_directory() {
         .plan("Build auth", &output_dir, None, &PlanOptions::default())
         .expect("planning should succeed");
 
-    let session_path = output_path.join(".session");
-    assert!(session_path.exists(), ".session file should exist");
-    let session_content = std::fs::read_to_string(&session_path).expect("read .session");
-    assert!(!session_content.is_empty());
-    assert!(
-        session_content
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-'),
-        "session ID should be UUID-like"
-    );
+    let changeset_path = output_path.join("changeset.yaml");
+    assert!(changeset_path.exists(), "changeset.yaml should exist");
+    let content = std::fs::read_to_string(&changeset_path).expect("read changeset.yaml");
+    assert!(content.contains("sessions:"));
+    assert!(content.contains("plan"));
+    assert!(content.contains("state:"));
 
     let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+fn write_changeset_for_plan_session(plan_dir: &std::path::Path, session_id: &str) {
+    let changeset = format!(
+        r#"version: 1
+models: {{}}
+sessions:
+  - id: "{}"
+    agent: claude
+    tag: plan
+    created_at: "2026-03-07T10:00:00Z"
+state:
+  current: Planned
+  updated_at: "2026-03-07T10:00:00Z"
+  history: []
+artifacts: {{}}
+"#,
+        session_id
+    );
+    std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
 }
