@@ -4,18 +4,63 @@
 //! to avoid malformed commands where they appear concatenated.
 
 use std::fs;
-use tddy_core::{build_claude_args, ClaudeCodeBackend, CodingBackend, InvokeRequest, PermissionMode};
+use tddy_core::{
+    build_claude_args, ClaudeCodeBackend, CodingBackend, InvokeRequest, PermissionMode,
+};
 
-fn request_with_both_prompts(
-    system_prompt: &str,
-    user_prompt: &str,
-) -> InvokeRequest {
+fn request_with_both_prompts(system_prompt: &str, user_prompt: &str) -> InvokeRequest {
     InvokeRequest {
         prompt: user_prompt.to_string(),
         system_prompt: Some(system_prompt.to_string()),
         permission_mode: PermissionMode::Plan,
         model: None,
+        session_id: None,
+        is_resume: false,
+        agent_output: false,
     }
+}
+
+#[test]
+fn build_claude_args_includes_output_format_stream_json() {
+    let req = request_with_both_prompts("Sys", "User");
+    let args = build_claude_args(&req, None);
+
+    assert!(
+        args.contains(&"--output-format".to_string()),
+        "should include --output-format"
+    );
+    let of_idx = args.iter().position(|a| a == "--output-format").unwrap();
+    assert_eq!(args.get(of_idx + 1), Some(&"stream-json".to_string()));
+    assert!(
+        args.contains(&"--verbose".to_string()),
+        "stream-json with -p requires --verbose"
+    );
+}
+
+#[test]
+fn build_claude_args_includes_session_id_on_first_call() {
+    let mut req = request_with_both_prompts("Sys", "User");
+    req.session_id = Some("abc-123".to_string());
+    req.is_resume = false;
+
+    let args = build_claude_args(&req, None);
+
+    assert!(args.contains(&"--session-id".to_string()));
+    let sid_idx = args.iter().position(|a| a == "--session-id").unwrap();
+    assert_eq!(args.get(sid_idx + 1), Some(&"abc-123".to_string()));
+}
+
+#[test]
+fn build_claude_args_includes_resume_on_followup_call() {
+    let mut req = request_with_both_prompts("Sys", "User");
+    req.session_id = Some("abc-123".to_string());
+    req.is_resume = true;
+
+    let args = build_claude_args(&req, None);
+
+    assert!(args.contains(&"--resume".to_string()));
+    let resume_idx = args.iter().position(|a| a == "--resume").unwrap();
+    assert_eq!(args.get(resume_idx + 1), Some(&"abc-123".to_string()));
 }
 
 #[test]
@@ -82,7 +127,11 @@ fn append_system_prompt_receives_exactly_one_argument() {
         .expect("--append-system-prompt should be present");
     let value_idx = append_idx + 1;
     assert_eq!(args[value_idx], sys);
-    assert_eq!(args[value_idx + 1], user, "user prompt should follow system prompt as separate arg");
+    assert_eq!(
+        args[value_idx + 1],
+        user,
+        "user prompt should follow system prompt as separate arg"
+    );
 }
 
 #[test]
@@ -108,6 +157,9 @@ fn request_without_system_prompt_has_user_prompt_last() {
         system_prompt: None,
         permission_mode: PermissionMode::Default,
         model: None,
+        session_id: None,
+        is_resume: false,
+        agent_output: false,
     };
     let args = build_claude_args(&req, None);
 
@@ -152,12 +204,7 @@ fn invoke_uses_system_prompt_file_not_inline() {
     let script = format!(
         r##"#!/bin/sh
 printf '%s\n' "$@" > "{}"
-echo "---PRD_START---"
-echo "# PRD"
-echo "---PRD_END---"
-echo "---TODO_START---"
-echo "- [ ] Task"
-echo "---TODO_END---"
+printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n---PRD_END---\n---TODO_START---\n- [ ] Task\n---TODO_END---","session_id":"test-session"}}'
 "##,
         args_file.display()
     );
@@ -177,6 +224,9 @@ echo "---TODO_END---"
         system_prompt: Some("System instructions".to_string()),
         permission_mode: PermissionMode::Plan,
         model: None,
+        session_id: None,
+        is_resume: false,
+        agent_output: false,
     };
 
     let _ = backend.invoke(req).expect("invoke should succeed");

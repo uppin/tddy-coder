@@ -4,48 +4,34 @@ use assert_cmd::Command;
 use std::fs;
 use std::path::Path;
 
-
 #[allow(deprecated)]
 fn tddy_coder_bin() -> Command {
     Command::cargo_bin("tddy-coder").expect("tddy-coder binary")
 }
 
-/// Create a fake claude script that returns PRD+TODO immediately (for single-call tests).
+/// Create a fake claude script that returns NDJSON with PRD+TODO in result event.
+/// Uses \\n in shell so output is literal \n (JSON escape), not actual newlines.
 fn create_fake_claude_prd_only(dir: &Path) -> std::io::Result<()> {
     let script = r###"#!/bin/sh
-echo "---PRD_START---"
-echo "# Feature PRD"
-echo "## Summary"
-echo "Test feature."
-echo "---PRD_END---"
-echo "---TODO_START---"
-echo "- [ ] Task 1"
-echo "---TODO_END---"
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
+printf '%s\n' '{"type":"result","subtype":"success","result":"---PRD_START---\n# Feature PRD\n## Summary\nTest feature.\n---PRD_END---\n---TODO_START---\n- [ ] Task 1\n---TODO_END---","session_id":"fake-sess","is_error":false}'
 "###;
     write_executable_script(dir, "claude", script)
 }
 
-/// Create a fake claude script that returns QUESTIONS on first call, PRD+TODO on second.
+/// Create a fake claude script that returns questions (via tool_use) on first call, PRD+TODO on second.
+/// Uses printf so JSON stays on one line (\\n outputs literal backslash-n for JSON).
 fn create_fake_claude_script(dir: &Path) -> std::io::Result<()> {
-    // Use file existence to track call count - avoids needing 'cat' in PATH.
-    // First call: create marker file and output QUESTIONS. Second call: output PRD+TODO.
     let script = r###"#!/bin/sh
 CALL_FILE="$0.calls"
 if [ -f "$CALL_FILE" ]; then
-  echo "---PRD_START---"
-  echo "# Feature PRD"
-  echo "## Summary"
-  echo "User authentication system."
-  echo "---PRD_END---"
-  echo "---TODO_START---"
-  echo "- [ ] Create auth module"
-  echo "---TODO_END---"
+  printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
+  printf '%s\n' '{"type":"result","subtype":"success","result":"---PRD_START---\n# Feature PRD\n## Summary\nUser authentication system.\n---PRD_END---\n---TODO_START---\n- [ ] Create auth module\n---TODO_END---","session_id":"fake-sess","is_error":false}'
 else
   echo 1 > "$CALL_FILE"
-  echo "---QUESTIONS_START---"
-  echo "What is the target audience?"
-  echo "What is the expected timeline?"
-  echo "---QUESTIONS_END---"
+  printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"AskUserQuestion","input":{"questions":[{"question":"What is the target audience?","header":"Audience","options":[],"multiSelect":false},{"question":"What is the expected timeline?","header":"Timeline","options":[],"multiSelect":false}]}}]}}'
+  printf '%s\n' '{"type":"result","subtype":"success","result":"","session_id":"fake-sess","is_error":false}'
 fi
 "###;
     write_executable_script(dir, "claude", script)
@@ -76,7 +62,10 @@ fn cli_accepts_goal_plan() {
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .env("PATH", tmp_path.to_str().unwrap())
-        .env("HOME", std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()))
+        .env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        )
         .args(["--goal", "plan", "--output-dir", tmp.to_str().unwrap()])
         .write_stdin("Build feature X");
 
@@ -104,7 +93,10 @@ fn cli_accepts_output_dir_flag() {
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .env("PATH", tmp_path.to_str().unwrap())
-        .env("HOME", std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()))
+        .env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        )
         .args(["--goal", "plan", "--output-dir", tmp.to_str().unwrap()])
         .write_stdin("Build feature Y");
 
@@ -118,8 +110,8 @@ fn cli_accepts_output_dir_flag() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        stdout.contains("Output:") || stdout.contains("Planning complete"),
-        "stdout: {}",
+        stdout.trim().ends_with("PRD.md"),
+        "stdout should be path to PRD.md: {}",
         stdout
     );
 
@@ -157,7 +149,10 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .env("PATH", path_str)
-        .env("HOME", std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()))
+        .env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        )
         .args(["--goal", "plan", "--output-dir", tmp.to_str().unwrap()])
         .write_stdin("Build auth\nDevelopers\nQ2 2025\n");
 
@@ -177,16 +172,15 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
         "expected Q&A prompt in stdout: {}",
         stdout
     );
-    assert!(stdout.contains("Planning complete"));
+    assert!(
+        stdout.trim().ends_with("PRD.md"),
+        "stdout should be path to PRD.md: {}",
+        stdout
+    );
 
-    let has_artifacts = fs::read_dir(&tmp)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .any(|e| {
-            e.path().is_dir()
-                && e.path().join("PRD.md").exists()
-                && e.path().join("TODO.md").exists()
-        });
+    let has_artifacts = fs::read_dir(&tmp).unwrap().filter_map(|e| e.ok()).any(|e| {
+        e.path().is_dir() && e.path().join("PRD.md").exists() && e.path().join("TODO.md").exists()
+    });
     assert!(has_artifacts, "expected PRD.md and TODO.md in output dir");
 
     let _ = std::fs::remove_dir_all(&tmp);

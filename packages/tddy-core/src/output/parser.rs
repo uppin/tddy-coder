@@ -1,22 +1,19 @@
-//! Parser for delimited PRD/TODO output from LLM.
+//! Parser for LLM planning output.
+//!
+//! Supports two formats (in order of precedence):
+//! 1. Structured response: `<structured-response content-type="application-json">{"goal":"plan","prd":"...","todo":"..."}</structured-response>`
+//! 2. Delimited: `---PRD_START---` / `---PRD_END---` and `---TODO_START---` / `---TODO_END---`
+//!
+//! Questions are extracted from AskUserQuestion tool events in the NDJSON stream, not from text.
 
 use crate::error::ParseError;
 
+const STRUCTURED_OPEN: &str = "<structured-response";
+const STRUCTURED_CLOSE: &str = "</structured-response>";
 const PRD_START: &str = "---PRD_START---";
 const PRD_END: &str = "---PRD_END---";
 const TODO_START: &str = "---TODO_START---";
 const TODO_END: &str = "---TODO_END---";
-const QUESTIONS_START: &str = "---QUESTIONS_START---";
-const QUESTIONS_END: &str = "---QUESTIONS_END---";
-
-/// Result of parsing a planning response: either questions for clarification or PRD/TODO output.
-#[derive(Debug, Clone)]
-pub enum PlanningResponse {
-    /// Claude asked clarifying questions.
-    Questions { questions: Vec<String> },
-    /// Claude produced PRD and TODO.
-    PlanningOutput { prd: String, todo: String },
-}
 
 /// Parsed planning output containing PRD and TODO content.
 #[derive(Debug, Clone)]
@@ -25,27 +22,42 @@ pub struct PlanningOutput {
     pub todo: String,
 }
 
-/// Parse LLM planning response: either QUESTIONS or PRD/TODO. Returns Malformed if neither.
-pub fn parse_planning_response(s: &str) -> Result<PlanningResponse, ParseError> {
-    if s.contains(QUESTIONS_START) && s.contains(QUESTIONS_END) {
-        let content = extract_section(s, QUESTIONS_START, QUESTIONS_END)
-            .ok_or_else(|| ParseError::Malformed("questions section incomplete".into()))?;
-        let questions: Vec<String> = content
-            .lines()
-            .map(|l| l.trim())
-            .filter(|l| !l.is_empty())
-            .map(String::from)
-            .collect();
-        return Ok(PlanningResponse::Questions { questions });
+#[derive(serde::Deserialize)]
+struct StructuredPlan {
+    goal: Option<String>,
+    prd: Option<String>,
+    todo: Option<String>,
+}
+
+/// Extract JSON from first <structured-response content-type="application-json">...</structured-response>.
+fn extract_structured_response(s: &str) -> Option<PlanningOutput> {
+    let open = s.find(STRUCTURED_OPEN)?;
+    let after_open = &s[open + STRUCTURED_OPEN.len()..];
+    let gt = after_open.find('>')?;
+    let content = after_open[gt + 1..].trim();
+    let close = content.find(STRUCTURED_CLOSE)?;
+    let json_str = content[..close].trim();
+    let parsed: StructuredPlan = serde_json::from_str(json_str).ok()?;
+    if parsed.goal.as_deref() != Some("plan") {
+        return None;
+    }
+    let prd = parsed.prd.filter(|s| !s.is_empty())?;
+    let todo = parsed.todo.filter(|s| !s.is_empty())?;
+    Some(PlanningOutput { prd, todo })
+}
+
+/// Parse LLM planning response: tries structured-response first, then delimited output.
+/// Returns Malformed if neither format is found.
+pub fn parse_planning_response(s: &str) -> Result<PlanningOutput, ParseError> {
+    if let Some(out) = extract_structured_response(s) {
+        return Ok(out);
     }
     if s.contains(PRD_START) && s.contains(TODO_START) {
-        let out = parse_planning_output(s)?;
-        return Ok(PlanningResponse::PlanningOutput {
-            prd: out.prd,
-            todo: out.todo,
-        });
+        return parse_planning_output(s);
     }
-    Err(ParseError::Malformed("neither questions nor PRD/TODO found".into()))
+    Err(ParseError::Malformed(
+        "PRD/TODO delimiters not found".into(),
+    ))
 }
 
 /// Parse LLM output that contains delimited PRD and TODO sections.
@@ -110,25 +122,6 @@ trailing"#;
     }
 
     #[test]
-    fn parse_planning_response_returns_questions_when_questions_delimiters_present() {
-        let input = r#"preface
----QUESTIONS_START---
-What is the target audience?
-What is the expected timeline?
----QUESTIONS_END---
-trailing"#;
-        let resp = parse_planning_response(input).expect("should parse");
-        match &resp {
-            PlanningResponse::Questions { questions } => {
-                assert_eq!(questions.len(), 2);
-                assert_eq!(questions[0], "What is the target audience?");
-                assert_eq!(questions[1], "What is the expected timeline?");
-            }
-            _ => panic!("expected Questions variant"),
-        }
-    }
-
-    #[test]
     fn parse_planning_response_returns_planning_output_when_prd_todo_present() {
         let input = r#"preface
 ---PRD_START---
@@ -141,14 +134,9 @@ Feature X
 - [ ] Task 1
 ---TODO_END---
 trailing"#;
-        let resp = parse_planning_response(input).expect("should parse");
-        match &resp {
-            PlanningResponse::PlanningOutput { prd, todo } => {
-                assert!(prd.contains("Feature X"));
-                assert!(todo.contains("Task 1"));
-            }
-            _ => panic!("expected PlanningOutput variant"),
-        }
+        let out = parse_planning_response(input).expect("should parse");
+        assert!(out.prd.contains("Feature X"));
+        assert!(out.todo.contains("Task 1"));
     }
 
     #[test]
@@ -156,5 +144,22 @@ trailing"#;
         let input = "Some random text without delimiters";
         let err = parse_planning_response(input).unwrap_err();
         assert!(matches!(err, ParseError::Malformed(_)));
+    }
+
+    #[test]
+    fn parse_planning_response_errors_when_only_questions_delimiters_present() {
+        let input = r#"---QUESTIONS_START---
+What is the target audience?
+---QUESTIONS_END---"#;
+        let err = parse_planning_response(input).unwrap_err();
+        assert!(matches!(err, ParseError::Malformed(_)));
+    }
+
+    #[test]
+    fn parse_planning_response_extracts_structured_response() {
+        let input = "Here is my analysis.\n\n<structured-response content-type=\"application-json\">\n{\"goal\": \"plan\", \"prd\": \"Summary: Feature X\", \"todo\": \"- [ ] Task 1\"}\n</structured-response>\n\nThat concludes the plan.";
+        let out = parse_planning_response(input).expect("should parse");
+        assert!(out.prd.contains("Feature X"));
+        assert!(out.todo.contains("Task 1"));
     }
 }

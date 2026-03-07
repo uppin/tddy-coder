@@ -2,7 +2,7 @@
 
 **Product Area**: Coder
 **Status**: Draft
-**Updated**: 2026-03-06 (model listing/selection)
+**Updated**: 2026-03-07 (goal-specific exit output)
 
 ## Summary
 
@@ -33,7 +33,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 4. Generate a deterministic directory name based on the feature (date-prefixed, slugified)
 5. Parse Claude Code's structured output into PRD and TODO artifacts
 6. Write `PRD.md` and `TODO.md` to the output directory
-7. Report success/failure with the output directory path
+7. On successful exit, output the path to `PRD.md` (goal-specific exit output)
 
 ### LLM Backend Abstraction
 
@@ -74,6 +74,14 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 3. The state machine enforces that planning must complete before development begins
 4. State transitions are explicit and auditable
 
+### Exit Output (Updated: 2026-03-07)
+
+On successful completion, the program prints a goal-specific artifact path to stdout (one line):
+
+- **plan**: Path to `PRD.md` (e.g. `./2026-03-07-feature-slug/PRD.md`)
+
+This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt | xargs cat`).
+
 ## Acceptance Criteria
 
 - [ ] `tddy-coder --goal plan` reads from stdin and produces a named output directory
@@ -87,6 +95,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 - [ ] Tests use a fake/mock backend to verify the planning workflow end-to-end
 - [ ] Error cases handled: empty input, Claude Code not found, malformed LLM output
 - [ ] State machine enforces valid transitions
+- [ ] On successful plan completion, stdout prints the path to `PRD.md` (goal-specific exit output)
 
 ## Future Considerations (Not In Scope)
 
