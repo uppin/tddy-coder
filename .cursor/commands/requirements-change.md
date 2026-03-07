@@ -261,7 +261,7 @@ When applying this rule:
 - [dev-doc.mdc](mdc:.cursor/rules/dev-doc.mdc) - For development documentation standards and changeset workflow
 
 **Related Commands:**
-- `/wrap-context-docs` - Apply changeset to dev docs when technical implementation is complete. This command also archives the source changeset to `1-ARCHIVE/` subdirectory.
+- `/wrap-context-docs` - Apply changeset to dev docs when technical implementation is complete.
 
 **Workflow Integration:**
 ```
@@ -269,15 +269,14 @@ Feature requirement change → Update existing feature doc → Git commit
                                      ↓
 Technical progress update → Find existing changeset/PRD → Update progress → Git commit
                                      ↑
-When complete → Wrap changeset via /wrap-context-docs → Archive to 1-ARCHIVE/
+When complete → Wrap changeset via /wrap-context-docs
 ```
 
-**Archiving Behavior:**
+**Wrap Behavior:**
 When `/wrap-context-docs` is run on a complete changeset:
 1. Updates package READMEs and dev docs with final state
-2. Archives changeset to `docs/dev/1-WIP/1-ARCHIVE/`
-3. Updates changeset history in `packages/{package}/docs/changesets.md`
-4. Creates git commit with wrapped changes
+2. Updates changeset history in `packages/{package}/docs/changesets.md`
+3. Creates git commit with wrapped changes
 
 Example:
 ```bash
@@ -285,7 +284,6 @@ Example:
 docs/dev/1-WIP/2026-01-23-feature.md
 
 # After wrap
-docs/dev/1-WIP/1-ARCHIVE/2026-01-23-feature.md  # Archived
-packages/{package}/docs/changesets.md             # Entry added
-packages/{package}/README.md                     # Updated with final state
+packages/{package}/docs/changesets.md   # Entry added
+packages/{package}/README.md            # Updated with final state
 ```
