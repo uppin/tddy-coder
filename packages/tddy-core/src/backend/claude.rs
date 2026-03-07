@@ -4,10 +4,33 @@ use super::{Goal, InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
 use crate::permission;
 use crate::stream;
-use std::io::BufReader;
-use std::path::PathBuf;
+use std::io::{BufReader, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+
+/// Resolve binary path for logging (which-like). Returns path as string for display.
+pub(crate) fn which_binary(binary: &Path) -> String {
+    let name = binary.to_string_lossy();
+    if name.contains('/') || name.contains('\\') {
+        if let Ok(canon) = std::fs::canonicalize(binary) {
+            return canon.display().to_string();
+        }
+        return name.to_string();
+    }
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join(&*name);
+            if candidate.is_file() {
+                if let Ok(canon) = std::fs::canonicalize(&candidate) {
+                    return canon.display().to_string();
+                }
+                return candidate.display().to_string();
+            }
+        }
+    }
+    format!("{} (not found in PATH)", name)
+}
 
 /// Type for progress callback (tool activity, task events).
 type ProgressCallback = Option<Arc<Mutex<Box<dyn FnMut(&stream::ProgressEvent) + Send>>>>;
@@ -113,6 +136,7 @@ fn goal_to_claude_config(request: &InvokeRequest) -> ClaudeInvokeConfig {
             PermissionMode::AcceptEdits,
             permission::acceptance_tests_allowlist(),
         ),
+        Goal::Validate => (PermissionMode::Plan, permission::validate_allowlist()),
     };
     if let Some(ref extras) = request.extra_allowed_tools {
         allowed_tools.extend(extras.iter().cloned());
@@ -229,6 +253,19 @@ impl super::CodingBackend for ClaudeCodeBackend {
             cmd.arg(arg);
         }
 
+        // Always log spawn for debugging backend/binary confusion (e.g. claude -> cursor)
+        let resolved = which_binary(&self.binary_path);
+        eprintln!(
+            "[tddy-coder] Claude backend spawning: {} (resolved: {})",
+            self.binary_path.display(),
+            resolved
+        );
+        eprintln!(
+            "[tddy-coder] cmd: {} {}",
+            self.binary_path.display(),
+            args.join(" ")
+        );
+
         if request.debug {
             let cwd = request
                 .working_dir
@@ -297,6 +334,42 @@ impl super::CodingBackend for ClaudeCodeBackend {
             }
         };
 
+        let mut conv_file = if let Some(ref path) = request.conversation_output_path {
+            Some(
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(path)
+                    .map_err(|e| {
+                        BackendError::InvocationFailed(format!(
+                            "failed to open conversation output {}: {}",
+                            path.display(),
+                            e
+                        ))
+                    })?,
+            )
+        } else {
+            None
+        };
+
+        let mut first_line_logged = false;
+        let mut on_conversation_line = |line: &str| {
+            if !first_line_logged {
+                first_line_logged = true;
+                let preview = if line.len() > 150 {
+                    format!("{}...", &line[..150])
+                } else {
+                    line.to_string()
+                };
+                eprintln!("[tddy-coder] first stream line (format hint): {}", preview);
+            }
+            if let Some(ref mut f) = conv_file {
+                let _ = writeln!(f, "{}", line);
+                let _ = f.flush();
+            }
+        };
+
         let reader = BufReader::new(stdout_handle);
         let stream_result = stream::process_ndjson_stream(
             reader,
@@ -304,6 +377,11 @@ impl super::CodingBackend for ClaudeCodeBackend {
             &mut on_raw_output,
             if request.debug {
                 Some(&mut on_debug_line)
+            } else {
+                None
+            },
+            if request.conversation_output_path.is_some() {
+                Some(&mut on_conversation_line)
             } else {
                 None
             },

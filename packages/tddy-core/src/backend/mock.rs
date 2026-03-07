@@ -57,6 +57,22 @@ impl MockBackend {
         }));
     }
 
+    /// Push a successful response with raw_stream (for conversation output tests).
+    pub fn push_ok_with_raw_stream(
+        &self,
+        output: impl Into<String>,
+        raw_stream: impl Into<String>,
+    ) {
+        self.push_response(Ok(InvokeResponse {
+            output: output.into(),
+            exit_code: 0,
+            session_id: None,
+            questions: vec![],
+            raw_stream: Some(raw_stream.into()),
+            stderr: None,
+        }));
+    }
+
     /// Get all invocations recorded so far.
     pub fn invocations(&self) -> Vec<InvokeRequest> {
         self.invocations.read().unwrap().clone()
@@ -67,11 +83,25 @@ impl CodingBackend for MockBackend {
     fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         self.invocations.write().unwrap().push(request.clone());
 
-        self.responses
+        let response = self
+            .responses
             .write()
             .unwrap()
             .pop_front()
-            .unwrap_or_else(|| Err(BackendError::InvocationFailed("no mock response".into())))
+            .unwrap_or_else(|| Err(BackendError::InvocationFailed("no mock response".into())))?;
+
+        if let Some(ref path) = request.conversation_output_path {
+            let bytes = response.raw_stream.as_deref().unwrap_or(&response.output);
+            std::fs::write(path, bytes.as_bytes()).map_err(|e| {
+                BackendError::InvocationFailed(format!(
+                    "failed to write conversation output to {}: {}",
+                    path.display(),
+                    e
+                ))
+            })?;
+        }
+
+        Ok(response)
     }
 
     fn name(&self) -> &str {

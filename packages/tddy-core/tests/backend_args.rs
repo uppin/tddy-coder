@@ -30,6 +30,7 @@ fn request_with_both_prompts(system_prompt: &str, user_prompt: &str) -> InvokeRe
         working_dir: None,
         debug: false,
         agent_output: false,
+        conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
     }
@@ -201,6 +202,7 @@ fn request_without_system_prompt_has_user_prompt_after_p() {
         working_dir: None,
         debug: false,
         agent_output: false,
+        conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
     };
@@ -360,6 +362,7 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n---PRD_END---
         working_dir: None,
         debug: false,
         agent_output: false,
+        conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
     };

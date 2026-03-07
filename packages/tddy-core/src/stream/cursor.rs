@@ -32,6 +32,7 @@ struct CursorEvent {
     #[serde(default)]
     message: Option<CursorAssistantMessage>,
     #[serde(default, rename = "model_call_id")]
+    #[allow(dead_code)] // Kept for deserialization; no longer used after removing skip logic
     model_call_id: Option<String>,
     #[serde(default)]
     tool_call: Option<serde_json::Value>,
@@ -118,11 +119,13 @@ fn extract_tool_call_name_and_detail(
 
 /// Process NDJSON lines from Cursor agent stdout.
 /// When `on_debug_line` is provided, calls it with each raw NDJSON line (for --debug).
+/// When `on_conversation_line` is provided, calls it with each raw line for real-time logging.
 pub fn process_cursor_stream<R, F, O>(
     reader: R,
     mut on_progress: F,
     mut on_raw_output: O,
     mut on_debug_line: Option<&mut dyn FnMut(&str)>,
+    mut on_conversation_line: Option<&mut dyn FnMut(&str)>,
 ) -> Result<StreamResult, Box<dyn std::error::Error + Send + Sync>>
 where
     R: BufRead,
@@ -143,6 +146,9 @@ where
         }
         raw_lines.push(line.to_string());
         if let Some(ref mut f) = on_debug_line {
+            f(line);
+        }
+        if let Some(ref mut f) = on_conversation_line {
             f(line);
         }
 
@@ -167,10 +173,9 @@ where
 
         match event.event_type.as_str() {
             "assistant" => {
-                // Skip complete messages (have model_call_id) — we already got deltas
-                if event.model_call_id.is_some() {
-                    continue;
-                }
+                // Extract text from all assistant messages (deltas and complete).
+                // Do NOT skip complete messages (model_call_id) — Cursor may send only the
+                // complete message with the structured-response, not incremental deltas.
                 if let Some(msg) = event.message {
                     for block in msg.content {
                         if let CursorContentBlock::Text { text } = block {

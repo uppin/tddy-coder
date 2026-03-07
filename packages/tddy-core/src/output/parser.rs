@@ -247,6 +247,12 @@ pub fn parse_acceptance_tests_response(s: &str) -> Result<AcceptanceTestsOutput,
         .find(STRUCTURED_CLOSE)
         .ok_or_else(|| ParseError::Malformed("structured-response close not found".into()))?;
     let json_str = content[..close].trim();
+    if json_str.is_empty() {
+        return Err(ParseError::Malformed(
+            "structured-response block is empty — agent must output valid JSON between the tags"
+                .into(),
+        ));
+    }
     let parsed: StructuredAcceptanceTests =
         serde_json::from_str(json_str).map_err(|e| ParseError::Malformed(e.to_string()))?;
 
@@ -376,6 +382,12 @@ pub fn parse_green_response(s: &str) -> Result<GreenOutput, ParseError> {
         .find(STRUCTURED_CLOSE)
         .ok_or_else(|| ParseError::Malformed("structured-response close not found".into()))?;
     let json_str = content[..close].trim();
+    if json_str.is_empty() {
+        return Err(ParseError::Malformed(
+            "structured-response block is empty — agent must output valid JSON between the tags"
+                .into(),
+        ));
+    }
     let parsed: StructuredGreen =
         serde_json::from_str(json_str).map_err(|e| ParseError::Malformed(e.to_string()))?;
 
@@ -631,9 +643,10 @@ struct SkeletonInfoDe {
 }
 
 /// Parse LLM red goal response from structured-response block.
+/// Uses the last block in the output — earlier blocks may be from tool results (e.g. system prompt).
 pub fn parse_red_response(s: &str) -> Result<RedOutput, ParseError> {
     let open = s
-        .find(STRUCTURED_OPEN)
+        .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
     let after_open = &s[open + STRUCTURED_OPEN.len()..];
     let gt = after_open
@@ -644,6 +657,12 @@ pub fn parse_red_response(s: &str) -> Result<RedOutput, ParseError> {
         .find(STRUCTURED_CLOSE)
         .ok_or_else(|| ParseError::Malformed("structured-response close not found".into()))?;
     let json_str = content[..close].trim();
+    if json_str.is_empty() {
+        return Err(ParseError::Malformed(
+            "structured-response block is empty — agent must output valid JSON between the tags"
+                .into(),
+        ));
+    }
     let parsed: StructuredRed =
         serde_json::from_str(json_str).map_err(|e| ParseError::Malformed(e.to_string()))?;
 
@@ -721,6 +740,214 @@ pub fn parse_red_response(s: &str) -> Result<RedOutput, ParseError> {
         logging_command: parsed.logging_command.filter(|s| !s.is_empty()),
         metric_hooks: parsed.metric_hooks.filter(|s| !s.is_empty()),
         feedback_options: parsed.feedback_options.filter(|s| !s.is_empty()),
+    })
+}
+
+/// Parsed validate-changes goal output.
+#[derive(Debug, Clone)]
+pub struct ValidateOutput {
+    pub summary: String,
+    pub risk_level: String,
+    pub build_results: Vec<ValidateBuildResult>,
+    pub issues: Vec<ValidateIssue>,
+    pub changeset_sync: Option<ValidateChangesetSync>,
+    pub files_analyzed: Vec<ValidateFileAnalyzed>,
+    pub test_impact: Option<ValidateTestImpact>,
+}
+
+/// Build result entry from validate-changes output.
+#[derive(Debug, Clone)]
+pub struct ValidateBuildResult {
+    pub package: String,
+    pub status: String,
+    pub notes: Option<String>,
+}
+
+/// An issue found during validation.
+#[derive(Debug, Clone)]
+pub struct ValidateIssue {
+    pub severity: String,
+    pub category: String,
+    pub file: String,
+    pub line: Option<u32>,
+    pub description: String,
+    pub suggestion: Option<String>,
+}
+
+/// Changeset sync status from validate-changes output.
+#[derive(Debug, Clone)]
+pub struct ValidateChangesetSync {
+    pub status: String,
+    pub items_updated: u32,
+    pub items_added: u32,
+}
+
+/// File analyzed entry from validate-changes output.
+#[derive(Debug, Clone)]
+pub struct ValidateFileAnalyzed {
+    pub file: String,
+    pub lines_changed: Option<u32>,
+    pub changeset_item: Option<String>,
+}
+
+/// Test impact summary from validate-changes output.
+#[derive(Debug, Clone)]
+pub struct ValidateTestImpact {
+    pub tests_affected: u32,
+    pub new_tests_needed: u32,
+}
+
+#[derive(serde::Deserialize)]
+struct StructuredValidate {
+    goal: Option<String>,
+    summary: Option<String>,
+    risk_level: Option<String>,
+    #[serde(default)]
+    build_results: Option<Vec<ValidateBuildResultDe>>,
+    #[serde(default)]
+    issues: Option<Vec<ValidateIssueDe>>,
+    #[serde(default)]
+    changeset_sync: Option<ValidateChangesetSyncDe>,
+    #[serde(default)]
+    files_analyzed: Option<Vec<ValidateFileAnalyzedDe>>,
+    #[serde(default)]
+    test_impact: Option<ValidateTestImpactDe>,
+}
+
+#[derive(serde::Deserialize)]
+struct ValidateBuildResultDe {
+    package: String,
+    status: String,
+    notes: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ValidateIssueDe {
+    severity: String,
+    category: String,
+    file: String,
+    line: Option<u32>,
+    description: String,
+    suggestion: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ValidateChangesetSyncDe {
+    status: String,
+    items_updated: u32,
+    items_added: u32,
+}
+
+#[derive(serde::Deserialize)]
+struct ValidateFileAnalyzedDe {
+    file: String,
+    lines_changed: Option<u32>,
+    changeset_item: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ValidateTestImpactDe {
+    tests_affected: u32,
+    new_tests_needed: u32,
+}
+
+/// Parse LLM validate-changes response from structured-response block.
+/// Uses the last block (rfind) to skip tool results / system prompt examples that may appear earlier.
+/// Returns Malformed if the expected format is not found or goal != "validate-changes".
+pub fn parse_validate_response(s: &str) -> Result<ValidateOutput, ParseError> {
+    eprintln!(
+        r#"{{"tddy":{{"marker_id":"M007","scope":"output::parse_validate_response","data":{{}}}}}}"#
+    );
+    let open = s
+        .rfind(STRUCTURED_OPEN)
+        .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
+    let after_open = &s[open + STRUCTURED_OPEN.len()..];
+    let gt = after_open
+        .find('>')
+        .ok_or_else(|| ParseError::Malformed("structured-response malformed".into()))?;
+    let content = after_open[gt + 1..].trim();
+    let close = content
+        .find(STRUCTURED_CLOSE)
+        .ok_or_else(|| ParseError::Malformed("structured-response close not found".into()))?;
+    let json_str = content[..close].trim();
+    if json_str.is_empty() {
+        return Err(ParseError::Malformed(
+            "structured-response block is empty — agent must output valid JSON between the tags"
+                .into(),
+        ));
+    }
+    let parsed: StructuredValidate =
+        serde_json::from_str(json_str).map_err(|e| ParseError::Malformed(e.to_string()))?;
+
+    if parsed.goal.as_deref() != Some("validate-changes") {
+        return Err(ParseError::Malformed("goal is not validate-changes".into()));
+    }
+
+    let summary = parsed
+        .summary
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "No summary provided.".to_string());
+
+    let risk_level = parsed
+        .risk_level
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let build_results = parsed
+        .build_results
+        .unwrap_or_default()
+        .into_iter()
+        .map(|b| ValidateBuildResult {
+            package: b.package,
+            status: b.status,
+            notes: b.notes,
+        })
+        .collect();
+
+    let issues = parsed
+        .issues
+        .unwrap_or_default()
+        .into_iter()
+        .map(|i| ValidateIssue {
+            severity: i.severity,
+            category: i.category,
+            file: i.file,
+            line: i.line,
+            description: i.description,
+            suggestion: i.suggestion,
+        })
+        .collect();
+
+    let changeset_sync = parsed.changeset_sync.map(|c| ValidateChangesetSync {
+        status: c.status,
+        items_updated: c.items_updated,
+        items_added: c.items_added,
+    });
+
+    let files_analyzed = parsed
+        .files_analyzed
+        .unwrap_or_default()
+        .into_iter()
+        .map(|f| ValidateFileAnalyzed {
+            file: f.file,
+            lines_changed: f.lines_changed,
+            changeset_item: f.changeset_item,
+        })
+        .collect();
+
+    let test_impact = parsed.test_impact.map(|t| ValidateTestImpact {
+        tests_affected: t.tests_affected,
+        new_tests_needed: t.new_tests_needed,
+    });
+
+    Ok(ValidateOutput {
+        summary,
+        risk_level,
+        build_results,
+        issues,
+        changeset_sync,
+        files_analyzed,
+        test_impact,
     })
 }
 
@@ -968,6 +1195,28 @@ Model output:
         assert_eq!(out.skeletons[0].kind, "struct");
         assert_eq!(out.skeletons[1].name, "bar");
         assert_eq!(out.skeletons[1].kind, "method");
+    }
+
+    #[test]
+    fn parse_red_response_skips_example_block_in_system_prompt() {
+        // Simulates Cursor stream: tool results contain system prompt with example block,
+        // then assistant/result has the actual agent output. Parser must skip the first
+        // (invalid) block and use the second.
+        let input = r#"From tool result (red.rs file content):
+<structured-response content-type="application-json">
+{"goal": "red", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "failing"}], "skeletons": []}
+</structured-response>
+
+The Red phase skeleton and tests are already in place.
+
+<structured-response content-type="application-json">
+{"goal":"red","summary":"Created 2 skeletons and 1 failing test.","tests":[{"name":"test_foo","file":"src/foo.rs","line":10,"status":"failing"}],"skeletons":[{"name":"Foo","file":"src/foo.rs","line":5,"kind":"struct"}]}
+</structured-response>
+"#;
+        let out = super::parse_red_response(input).expect("should parse");
+        assert!(out.summary.contains("2 skeletons"));
+        assert_eq!(out.skeletons.len(), 1);
+        assert_eq!(out.skeletons[0].name, "Foo");
     }
 
     #[test]

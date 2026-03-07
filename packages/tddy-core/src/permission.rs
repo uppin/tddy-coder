@@ -39,3 +39,22 @@ pub fn red_allowlist() -> Vec<String> {
 pub fn green_allowlist() -> Vec<String> {
     acceptance_tests_allowlist()
 }
+
+/// Allowlist for the validate-changes goal (read-only + git diff/log/find + cargo check/build).
+/// Complements --permission-mode plan.
+pub fn validate_allowlist() -> Vec<String> {
+    eprintln!(
+        r#"{{"tddy":{{"marker_id":"M005","scope":"permission::validate_allowlist","data":{{}}}}}}"#
+    );
+    vec![
+        "Read".to_string(),
+        "Glob".to_string(),
+        "Grep".to_string(),
+        "SemanticSearch".to_string(),
+        "Bash(git diff *)".to_string(),
+        "Bash(git log *)".to_string(),
+        "Bash(cargo build *)".to_string(),
+        "Bash(cargo check *)".to_string(),
+        "Bash(find *)".to_string(),
+    ]
+}

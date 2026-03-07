@@ -11,6 +11,8 @@ You MUST:
 5. Remove or adjust any tests that pass - passing tests do not verify new behavior
 6. ALWAYS end your response with a structured-response block — REQUIRED.
 
+**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object. Do NOT output a number, array (e.g. [8, {...}]), numbered list items, or any text inside the block. The parser expects a single JSON object starting with {"goal":"red",...} — nothing else.
+
 Your final output MUST include this exact block (replace placeholders with actual values):
 
 <structured-response content-type="application-json">

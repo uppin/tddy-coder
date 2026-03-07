@@ -10,6 +10,12 @@ You MUST:
 4. Do NOT ask for permission to write files - you have write access. Create the test files directly.
 5. ALWAYS end your response with a structured-response block — REQUIRED even when summarizing existing work or when tests were already created in a previous turn.
 
+**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object. Do NOT output:
+- A number or array (e.g. [15, {...}])
+- Numbered list items (e.g. 15. First test...)
+- Any text before or inside the JSON block
+The parser expects a single JSON object starting with {"goal":"acceptance-tests",...} — nothing else.
+
 Your final output MUST include this exact block (replace placeholders with actual values):
 
 <structured-response content-type="application-json">
