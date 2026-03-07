@@ -18,6 +18,7 @@ pub struct PlanOptions {
     pub agent_output: bool,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
+    pub debug: bool,
 }
 
 /// Options for the acceptance-tests step.
@@ -27,6 +28,7 @@ pub struct AcceptanceTestsOptions {
     pub agent_output: bool,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
+    pub debug: bool,
 }
 
 /// Workflow state.
@@ -138,6 +140,8 @@ impl<B: CodingBackend> Workflow<B> {
             allowed_tools: Some(allowed_tools),
             permission_prompt_tool: None,
             mcp_config_path: None,
+            working_dir: Some(output_dir.to_path_buf()),
+            debug: options.debug,
         };
 
         let response = match self.backend.invoke(request) {
@@ -252,6 +256,8 @@ impl<B: CodingBackend> Workflow<B> {
             allowed_tools: Some(allowed_tools),
             permission_prompt_tool: None,
             mcp_config_path: None,
+            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            debug: options.debug,
         };
 
         let response = match self.backend.invoke(request) {
@@ -282,7 +288,32 @@ impl<B: CodingBackend> Workflow<B> {
                     "--- Failed parse acceptance tests output (length {} bytes) ---",
                     response.output.len()
                 );
-                eprintln!("{}", response.output);
+                if response.output.is_empty() {
+                    eprintln!(
+                        "Hint: Empty output can mean Claude Code CLI produced no stream-json content, \
+                         or the result event had an empty result field (known bug: anthropics/claude-code#7124). \
+                         Ensure you have rebuilt with `cargo build -p tddy-coder` and that the plan directory \
+                         has a valid .session file from a prior plan run."
+                    );
+                } else {
+                    eprintln!("{}", response.output);
+                }
+                match &response.raw_stream {
+                    Some(raw) if !raw.is_empty() => {
+                        eprintln!("--- Raw stream from Claude CLI ({} lines) ---", raw.lines().count());
+                        eprintln!("{}", raw);
+                        eprintln!("--- End raw stream ---");
+                    }
+                    _ => {
+                        eprintln!("Raw stream: (empty - no NDJSON lines received from Claude CLI stdout)");
+                    }
+                }
+                eprintln!("Claude CLI exit code: {}", response.exit_code);
+                if let Some(ref stderr) = response.stderr {
+                    eprintln!("--- Claude CLI stderr ---");
+                    eprintln!("{}", stderr);
+                    eprintln!("--- End stderr ---");
+                }
                 eprintln!("--- End failed parse ---");
                 self.state = WorkflowState::Failed {
                     error: e.to_string(),

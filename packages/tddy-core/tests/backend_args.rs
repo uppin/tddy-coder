@@ -21,6 +21,8 @@ fn request_with_both_prompts(system_prompt: &str, user_prompt: &str) -> InvokeRe
         allowed_tools: None,
         permission_prompt_tool: None,
         mcp_config_path: None,
+        working_dir: None,
+        debug: false,
     }
 }
 
@@ -68,15 +70,16 @@ fn build_claude_args_includes_resume_on_followup_call() {
 }
 
 #[test]
-fn user_prompt_is_last_argument() {
+fn user_prompt_follows_print_flag() {
     let req = request_with_both_prompts(
         "You are a technical planning assistant.",
         "Create a PRD for: user auth",
     );
     let args = build_claude_args(&req, None);
 
-    let last = args.last().expect("args should not be empty");
-    assert_eq!(last, "Create a PRD for: user auth");
+    // Per CLI docs (claude -p "query"), prompt must come immediately after -p
+    let p_idx = args.iter().position(|a| a == "-p").expect("-p should be present");
+    assert_eq!(args.get(p_idx + 1), Some(&"Create a PRD for: user auth".to_string()));
 }
 
 #[test]
@@ -97,7 +100,7 @@ fn system_prompt_and_user_prompt_are_separate_arguments() {
     );
 
     assert_eq!(args[sys_value_idx], sys);
-    assert_eq!(args.last().unwrap(), user);
+    assert_eq!(args.get(1).map(|s| s.as_str()), Some(user), "user prompt must follow -p");
 }
 
 #[test]
@@ -131,11 +134,7 @@ fn append_system_prompt_receives_exactly_one_argument() {
         .expect("--append-system-prompt should be present");
     let value_idx = append_idx + 1;
     assert_eq!(args[value_idx], sys);
-    assert_eq!(
-        args[value_idx + 1],
-        user,
-        "user prompt should follow system prompt as separate arg"
-    );
+    assert_eq!(args.get(1).map(|s| s.as_str()), Some(user), "user prompt must follow -p at args[1]");
 }
 
 #[test]
@@ -151,11 +150,11 @@ fn multiline_system_prompt_passed_as_single_arg() {
         .unwrap()
         + 1;
     assert_eq!(args[sys_idx], sys);
-    assert_eq!(args.last().unwrap(), user);
+    assert_eq!(args.get(1).map(|s| s.as_str()), Some(user), "user prompt must follow -p");
 }
 
 #[test]
-fn request_without_system_prompt_has_user_prompt_last() {
+fn request_without_system_prompt_has_user_prompt_after_p() {
     let req = InvokeRequest {
         prompt: "Just the user prompt".to_string(),
         system_prompt: None,
@@ -168,12 +167,14 @@ fn request_without_system_prompt_has_user_prompt_last() {
         allowed_tools: None,
         permission_prompt_tool: None,
         mcp_config_path: None,
+        working_dir: None,
+        debug: false,
     };
     let args = build_claude_args(&req, None);
 
     assert!(!args.contains(&"--append-system-prompt".to_string()));
     assert!(!args.contains(&"--append-system-prompt-file".to_string()));
-    assert_eq!(args.last().unwrap(), "Just the user prompt");
+    assert_eq!(args.get(1), Some(&"Just the user prompt".to_string()));
 }
 
 /// Uses --append-system-prompt-file (not --append-system-prompt) when path is provided,
@@ -235,7 +236,7 @@ fn build_claude_args_includes_allowed_tools_when_set() {
         args.get(allowed_tools_indices[2] + 1),
         Some(&"Bash(cargo *)".to_string())
     );
-    assert_eq!(args.last().unwrap(), "User", "user prompt must remain last");
+    assert_eq!(args.get(1), Some(&"User".to_string()), "user prompt must follow -p");
 }
 
 /// build_claude_args includes --permission-prompt-tool and --mcp-config when both are set.
@@ -267,7 +268,7 @@ fn build_claude_args_includes_permission_prompt_tool_and_mcp_config_when_set() {
         Some(&"/tmp/mcp.json".to_string()),
         "mcp-config path should be passed"
     );
-    assert_eq!(args.last().unwrap(), "User", "user prompt must remain last");
+    assert_eq!(args.get(1), Some(&"User".to_string()), "user prompt must follow -p");
 }
 
 /// Invoke uses --append-system-prompt-file (not inline) when system prompt is present,
@@ -309,6 +310,8 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n---PRD_END---
         allowed_tools: None,
         permission_prompt_tool: None,
         mcp_config_path: None,
+        working_dir: None,
+        debug: false,
     };
 
     let _ = backend.invoke(req).expect("invoke should succeed");

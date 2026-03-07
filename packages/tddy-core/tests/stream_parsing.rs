@@ -150,6 +150,28 @@ fn process_ndjson_extracts_tool_use_detail_from_input() {
     ));
 }
 
+/// NDJSON where structured output is in user tool_result (Agent tool return) instead of result event.
+/// Fallback for Claude Code CLI empty result bug (issue #7124).
+const NDJSON_STRUCTURED_IN_TOOL_RESULT: &str = r#"{"type":"system","subtype":"init","session_id":"s1"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"description":"Create acceptance tests"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"<structured-response content-type=\"application-json\">{\"goal\":\"acceptance-tests\",\"summary\":\"Created 2 tests.\",\"tests\":[{\"name\":\"test_a\",\"file\":\"tests/a.rs\",\"line\":1,\"status\":\"failing\"}]}</structured-response>"}]}}
+{"type":"result","subtype":"success","result":"","session_id":"s1","is_error":false}
+"#;
+
+#[test]
+fn process_ndjson_extracts_structured_response_from_tool_result() {
+    let cursor = Cursor::new(NDJSON_STRUCTURED_IN_TOOL_RESULT);
+    let result = process_ndjson_stream(cursor, |_| {}, |_| {}).expect("should process");
+
+    assert_eq!(result.session_id, "s1");
+    assert!(
+        result.result_text.contains("<structured-response"),
+        "should extract from user tool_result when result event is empty"
+    );
+    assert!(result.result_text.contains("acceptance-tests"));
+    assert!(result.result_text.contains("Created 2 tests"));
+}
+
 /// Sub-agent assistant events (parent_tool_use_id set) should NOT emit ToolUse.
 const NDJSON_SUBAGENT_TOOL_USE: &str = r#"{"type":"system","subtype":"init","session_id":"s1"}
 {"type":"system","subtype":"task_started","description":"Explore repo","task_id":"x"}

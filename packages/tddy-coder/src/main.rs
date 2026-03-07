@@ -37,6 +37,10 @@ struct Args {
     /// Extra tools to add to the goal's allowlist (comma-separated, e.g. "Bash(npm install)")
     #[arg(long, value_delimiter = ',')]
     allowed_tools: Option<Vec<String>>,
+
+    /// Print Claude CLI command and cwd before running (for debugging empty output)
+    #[arg(long)]
+    debug: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -82,6 +86,7 @@ fn main() -> anyhow::Result<()> {
                 agent_output: args.agent_output,
                 inherit_stdin,
                 allowed_tools_extras: args.allowed_tools.clone(),
+                debug: args.debug,
             };
             let result = workflow.acceptance_tests(plan_dir, answers.as_deref(), &options);
 
@@ -151,6 +156,7 @@ fn main() -> anyhow::Result<()> {
             agent_output: args.agent_output,
             inherit_stdin,
             allowed_tools_extras: args.allowed_tools.clone(),
+            debug: args.debug,
         };
         let result = workflow.plan(&input, &args.output_dir, answers.as_deref(), &options);
 
