@@ -6,7 +6,7 @@
 
 ## Summary
 
-The Planning Step is the first phase of the tddy-coder workflow. It accepts a user's goal description via stdin, invokes an LLM backend (Claude Code CLI) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `.session` (session ID for resumption). The **acceptance-tests** goal reads a completed plan, resumes the Claude session, creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail. The **red** goal reads PRD and acceptance-tests.md, creates skeleton production code and failing lower-level tests.
+The Planning Step is the first phase of the tddy-coder workflow. It accepts a user's goal description via stdin, invokes an LLM backend (Claude Code CLI) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `.session` (session ID for resumption). The **acceptance-tests** goal reads a completed plan, resumes the Claude session, creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
 
 ## Background
 
@@ -21,15 +21,14 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 1. Binary name: `tddy-coder`
 2. Accepts `--goal plan` to trigger the planning step
 3. Accepts `--goal acceptance-tests` to create failing acceptance tests from a completed plan
-4. Accepts `--goal red` to create skeleton code and failing lower-level tests from PRD and acceptance-tests.md
-5. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
-6. Accepts `--plan-dir <path>`: path to plan output directory (PRD.md, TODO.md, .session, acceptance-tests.md); required when `--goal acceptance-tests` or `--goal red`
-7. Accepts `--output-dir <path>` to configure where planning output is written (defaults to current directory)
-8. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
-9. Accepts `--agent-output` to print raw agent output to stderr in real time
-10. Accepts `--debug` to print Claude CLI command and cwd before running (for debugging empty output)
-11. Reads the feature description from stdin (supports piped input and interactive prompt)
-12. *Deferred*: `--list-models` to list available models (not needed for current scope)
+4. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
+5. Accepts `--plan-dir <path>`: path to plan output directory (PRD.md, TODO.md, .session, acceptance-tests.md); required when `--goal acceptance-tests`
+6. Accepts `--output-dir <path>` to configure where planning output is written (default: current directory)
+7. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
+8. Accepts `--agent-output` to print raw agent output to stderr in real time
+9. Accepts `--debug` to print Claude CLI command and cwd before running (for debugging empty output)
+10. Reads the feature description from stdin (supports piped input and interactive prompt)
+11. *Deferred*: `--list-models` to list available models (not needed for current scope)
 
 ### Planning Workflow
 
@@ -55,15 +54,6 @@ The PRD must include a **Testing Plan** section with: test level (E2E/Integratio
 8. Write `acceptance-tests.md` to the plan directory (structured list + rich descriptions for downstream goals)
 9. On successful exit, output a human-readable summary (test count, paths, failing status)
 
-### Red Workflow
-
-1. Read PRD.md and acceptance-tests.md from the plan directory specified by `--plan-dir`
-2. Start a fresh Claude session (does not resume; no `.session` required)
-3. Use `--permission-mode acceptEdits` with same allowlist as acceptance-tests
-4. System prompt instructs Claude to: plan implementation structure; create skeleton code that compiles; write failing lower-level tests; run `cargo test` to verify tests fail; emit structured response with tests and skeletons
-5. Parse Claude's output to extract summary, tests, and skeletons
-6. On successful exit, output summary, test list, and skeleton list
-
 ### LLM Backend Abstraction
 
 1. The system defines a Rust trait (`CodingBackend` or similar) for LLM interactions
@@ -77,7 +67,7 @@ The PRD must include a **Testing Plan** section with: test level (E2E/Integratio
 1. Invokes `claude` CLI binary (from PATH)
 2. **Print mode**: tddy-coder always uses `-p` (print mode) for non-interactive, single-query execution. In print mode, **stdin is not used for interactive permission prompts** — Claude Code handles permissions via `--permission-mode`, `--allowedTools`, or `--permission-prompt-tool`, not by reading user input from stdin.
 3. **Plan goal**: Uses `--permission-mode plan` (read-only analysis) plus a predefined allowlist (`Read`, `Glob`, `Grep`, `SemanticSearch`) passed as `--allowedTools`.
-4. **Acceptance-tests goal** and **Red goal**: Use `--permission-mode acceptEdits` plus a predefined allowlist (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash(cargo *)`, `SemanticSearch`) passed as `--allowedTools`.
+4. **Acceptance-tests goal**: Uses `--permission-mode acceptEdits` plus a predefined allowlist (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash(cargo *)`, `SemanticSearch`) passed as `--allowedTools`.
 5. **Hybrid permission policy**: Each goal has a built-in allowlist; tools matching the allowlist are auto-approved. Optional `--allowed-tools` CLI flag adds extra tools to the allowlist. Unexpected permission requests (not in the allowlist) are denied in non-interactive mode; interactive handling via embedded permission tool is available when enabled.
 6. **Model selection**: Passes `--model <name>` to the `claude` binary when the user specifies one via `--model` / `-m`. Default model when unspecified (e.g. `opus` or backend default).
 7. **Output format**: Uses `--output-format=stream-json` for NDJSON event stream (tool_use, result, task_progress).
@@ -109,30 +99,15 @@ The PRD must include a **Testing Plan** section with: test level (E2E/Integratio
 - **Prerequisite actions**: What to do before running tests; uses the cheapest approach (e.g. "None" when the test command already builds)
 - **How to run a single or selected tests**: Project-specific instructions (e.g. `cargo test <name>`, `pytest -k <pattern>`)
 - Structured list (test name, file, line, status) for machine parsing
-- Rich descriptions for LLM consumption in subsequent goals (e.g. red)
-
-#### red-output.md
-
-- Written by the red goal to the plan directory
-- **How to run tests**: Same as acceptance-tests.md
-- **Prerequisite actions**: Same as acceptance-tests.md
-- **How to run a single or selected tests**: Same as acceptance-tests.md
-- Lists failing tests and skeletons (trait, struct, method, function, module)
-
-#### progress.md
-
-- Written by the red goal to the plan directory
-- Unfilled milestones and checkboxes for failed tests and skeletons
-- Next goal uses this document to mark items as done, skipped, or failed
+- Rich descriptions for LLM consumption in subsequent goals
 
 ### State Machine
 
 1. The planning step is one state in the overall workflow state machine
 2. **Plan goal**: Transitions `Init` → `Planning` → `Planned` (or `Failed`)
 3. **Acceptance-tests goal**: Transitions `Init`/`Planned` → `AcceptanceTesting` → `AcceptanceTestsReady` (or `Failed`)
-4. **Red goal**: Transitions `Init`/`Planned`/`AcceptanceTestsReady` → `RedTesting` → `RedTestsReady` (or `Failed`)
-5. The state machine enforces that planning must complete before development begins
-6. State transitions are explicit and auditable
+4. The state machine enforces that planning must complete before development begins
+5. State transitions are explicit and auditable
 
 ### Exit Output
 
@@ -140,7 +115,6 @@ On successful completion, the program prints a goal-specific artifact path to st
 
 - **plan**: Path to `PRD.md` (e.g. `./2026-03-07-feature-slug/PRD.md`)
 - **acceptance-tests**: Summary of created tests and their failing status (requires `--plan-dir`)
-- **red**: Summary of created skeletons and failing tests (requires `--plan-dir`)
 
 This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt | xargs cat`).
 
@@ -172,17 +146,6 @@ This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt | 
 - [ ] Error handling: missing plan-dir, missing PRD.md, missing .session, session resume failure
 - [ ] `--model` and `--agent-output` flags work with the acceptance-tests goal
 - [ ] acceptance-tests goal writes acceptance-tests.md to the plan directory
-
-### Red Goal
-
-- [ ] `tddy-coder --goal red --plan-dir <path>` creates skeleton code and failing lower-level tests
-- [ ] Red goal reads PRD.md and acceptance-tests.md from plan directory
-- [ ] Red goal starts fresh session (no resume)
-- [ ] Red goal uses AcceptEdits permission mode and correct allowlist
-- [ ] Output prints summary, test list, and skeleton list
-- [ ] State machine transitions: Init/Planned/AcceptanceTestsReady → RedTesting → RedTestsReady
-- [ ] Error handling: missing plan-dir, missing PRD.md, missing acceptance-tests.md
-- [ ] `--model` and `--agent-output` flags work with the red goal
 
 ## Future Considerations (Not In Scope)
 

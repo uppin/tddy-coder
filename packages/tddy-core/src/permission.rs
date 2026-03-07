@@ -33,3 +33,9 @@ pub fn acceptance_tests_allowlist() -> Vec<String> {
 pub fn red_allowlist() -> Vec<String> {
     acceptance_tests_allowlist()
 }
+
+/// Allowlist for the green goal (same as red: file edits + cargo test).
+/// Complements --permission-mode acceptEdits.
+pub fn green_allowlist() -> Vec<String> {
+    acceptance_tests_allowlist()
+}
