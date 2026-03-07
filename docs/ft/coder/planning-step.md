@@ -2,7 +2,7 @@
 
 **Product Area**: Coder
 **Status**: Draft
-**Updated**: 2026-03-07 (goal-specific exit output)
+**Updated**: 2026-03-07
 
 ## Summary
 
@@ -22,8 +22,9 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 2. Accepts `--goal plan` to trigger the planning step
 3. Accepts `--output-dir <path>` to configure where planning output is written (defaults to current directory)
 4. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
-5. Reads the feature description from stdin (supports piped input and interactive prompt)
-6. *Deferred*: `--list-models` to list available models (not needed for current scope)
+5. Accepts `--agent-output` to print raw agent output to stderr in real time
+6. Reads the feature description from stdin (supports piped input and interactive prompt)
+7. *Deferred*: `--list-models` to list available models (not needed for current scope)
 
 ### Planning Workflow
 
@@ -48,8 +49,11 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 1. Invokes `claude` CLI binary (from PATH)
 2. Uses plan mode via `--permission-mode plan` (read-only analysis)
 3. **Model selection**: Passes `--model <name>` to the `claude` binary when the user specifies one via `--model` / `-m`. Default model when unspecified (e.g. `opus` or backend default).
-4. Supports **interactive Q&A**: Claude may ask clarifying questions during planning; the user provides answers. The invocation model must allow this exchange (e.g. multi-turn or interactive session).
-5. Passes a system prompt instructing Claude to produce PRD and TODO content in a parseable format, or to output clarifying questions in `---QUESTIONS_START---` / `---QUESTIONS_END---` delimiters
+4. **Output format**: Uses `--output-format=stream-json` for NDJSON event stream (tool_use, result, task_progress).
+5. **Session management**: First invoke uses `--session-id <uuid>`; Q&A followup uses `--resume <uuid>` so Claude retains context across the exchange.
+6. **Structured Q&A**: Clarifying questions come from `AskUserQuestion` tool events (header, question, options, multi_select). Presented via inquire Select/MultiSelect prompts.
+7. **Real-time progress**: Tool activity (Read, Glob, Bash, etc.) displayed while Claude works.
+8. **Output parsing**: System prompt instructs Claude to emit PRD and TODO in `<structured-response content-type="application-json">` format; parser also supports delimiter fallback.
 
 ### Output Artifacts
 
@@ -74,7 +78,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 3. The state machine enforces that planning must complete before development begins
 4. State transitions are explicit and auditable
 
-### Exit Output (Updated: 2026-03-07)
+### Exit Output
 
 On successful completion, the program prints a goal-specific artifact path to stdout (one line):
 
