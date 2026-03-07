@@ -30,6 +30,8 @@ impl MockBackend {
             exit_code: 0,
             session_id: String::new(),
             questions: vec![],
+            raw_stream: None,
+            stderr: None,
         }));
     }
 
@@ -50,6 +52,8 @@ impl MockBackend {
             exit_code: 0,
             session_id: session_id.into(),
             questions,
+            raw_stream: None,
+            stderr: None,
         }));
     }
 

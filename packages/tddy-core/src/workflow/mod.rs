@@ -11,6 +11,26 @@ use crate::output::{
 };
 use std::path::{Path, PathBuf};
 
+/// Options for the plan step.
+#[derive(Debug, Default)]
+pub struct PlanOptions {
+    pub model: Option<String>,
+    pub agent_output: bool,
+    pub inherit_stdin: bool,
+    pub allowed_tools_extras: Option<Vec<String>>,
+    pub debug: bool,
+}
+
+/// Options for the acceptance-tests step.
+#[derive(Debug, Default)]
+pub struct AcceptanceTestsOptions {
+    pub model: Option<String>,
+    pub agent_output: bool,
+    pub inherit_stdin: bool,
+    pub allowed_tools_extras: Option<Vec<String>>,
+    pub debug: bool,
+}
+
 /// Workflow state.
 #[derive(Debug, Clone)]
 pub enum WorkflowState {
@@ -51,17 +71,21 @@ impl<B: CodingBackend> Workflow<B> {
         &self.state
     }
 
+    /// Access the backend (e.g. for tests to inspect invocations).
+    pub fn backend(&self) -> &B {
+        &self.backend
+    }
+
     /// Run the planning step: read feature description, invoke backend, write artifacts.
     /// When `answers` is `None`, performs first invoke; when backend returns questions,
     /// returns `ClarificationNeeded`. Call again with `Some(answers)` to continue.
+    /// `options.allowed_tools_extras` is merged with the plan goal's built-in allowlist.
     pub fn plan(
         &mut self,
         input: &str,
         output_dir: &Path,
         answers: Option<&str>,
-        model: Option<String>,
-        agent_output: bool,
-        inherit_stdin: bool,
+        options: &PlanOptions,
     ) -> Result<PathBuf, WorkflowError> {
         let can_start = matches!(self.state, WorkflowState::Init);
         let can_continue = matches!(self.state, WorkflowState::Planning) && answers.is_some();
@@ -99,15 +123,25 @@ impl<B: CodingBackend> Workflow<B> {
             Some(sid) => (Some(sid.clone()), answers.is_some()),
         };
 
+        let mut allowed_tools = crate::permission::plan_allowlist();
+        if let Some(extras) = &options.allowed_tools_extras {
+            allowed_tools.extend(extras.iter().cloned());
+        }
+
         let request = crate::backend::InvokeRequest {
             prompt,
             system_prompt: Some(system_prompt),
             permission_mode: crate::backend::PermissionMode::Plan,
-            model,
+            model: options.model.clone(),
             session_id,
             is_resume,
-            agent_output,
-            inherit_stdin,
+            agent_output: options.agent_output,
+            inherit_stdin: options.inherit_stdin,
+            allowed_tools: Some(allowed_tools),
+            permission_prompt_tool: None,
+            mcp_config_path: None,
+            working_dir: Some(output_dir.to_path_buf()),
+            debug: options.debug,
         };
 
         let response = match self.backend.invoke(request) {
@@ -165,13 +199,12 @@ impl<B: CodingBackend> Workflow<B> {
     /// Run the acceptance-tests step: read plan from plan_dir, resume session, create failing tests.
     /// When `answers` is `None`, performs first invoke; when backend returns questions,
     /// returns `ClarificationNeeded`. Call again with `Some(answers)` to continue.
+    /// `options.allowed_tools_extras` is merged with the acceptance-tests goal's built-in allowlist.
     pub fn acceptance_tests(
         &mut self,
         plan_dir: &Path,
-        model: Option<String>,
-        agent_output: bool,
-        inherit_stdin: bool,
         answers: Option<&str>,
+        options: &AcceptanceTestsOptions,
     ) -> Result<crate::output::AcceptanceTestsOutput, WorkflowError> {
         let can_start = matches!(self.state, WorkflowState::Init)
             || matches!(self.state, WorkflowState::Planned { .. });
@@ -206,15 +239,25 @@ impl<B: CodingBackend> Workflow<B> {
             Some(a) => acceptance_tests::build_followup_prompt(&prd_content, a),
         };
 
+        let mut allowed_tools = crate::permission::acceptance_tests_allowlist();
+        if let Some(extras) = &options.allowed_tools_extras {
+            allowed_tools.extend(extras.iter().cloned());
+        }
+
         let request = crate::backend::InvokeRequest {
             prompt,
             system_prompt: Some(system_prompt),
             permission_mode: crate::backend::PermissionMode::AcceptEdits,
-            model,
+            model: options.model.clone(),
             session_id: Some(session_id.clone()),
             is_resume: true,
-            agent_output,
-            inherit_stdin,
+            agent_output: options.agent_output,
+            inherit_stdin: options.inherit_stdin,
+            allowed_tools: Some(allowed_tools),
+            permission_prompt_tool: None,
+            mcp_config_path: None,
+            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            debug: options.debug,
         };
 
         let response = match self.backend.invoke(request) {
@@ -245,7 +288,32 @@ impl<B: CodingBackend> Workflow<B> {
                     "--- Failed parse acceptance tests output (length {} bytes) ---",
                     response.output.len()
                 );
-                eprintln!("{}", response.output);
+                if response.output.is_empty() {
+                    eprintln!(
+                        "Hint: Empty output can mean Claude Code CLI produced no stream-json content, \
+                         or the result event had an empty result field (known bug: anthropics/claude-code#7124). \
+                         Ensure you have rebuilt with `cargo build -p tddy-coder` and that the plan directory \
+                         has a valid .session file from a prior plan run."
+                    );
+                } else {
+                    eprintln!("{}", response.output);
+                }
+                match &response.raw_stream {
+                    Some(raw) if !raw.is_empty() => {
+                        eprintln!("--- Raw stream from Claude CLI ({} lines) ---", raw.lines().count());
+                        eprintln!("{}", raw);
+                        eprintln!("--- End raw stream ---");
+                    }
+                    _ => {
+                        eprintln!("Raw stream: (empty - no NDJSON lines received from Claude CLI stdout)");
+                    }
+                }
+                eprintln!("Claude CLI exit code: {}", response.exit_code);
+                if let Some(ref stderr) = response.stderr {
+                    eprintln!("--- Claude CLI stderr ---");
+                    eprintln!("{}", stderr);
+                    eprintln!("--- End stderr ---");
+                }
                 eprintln!("--- End failed parse ---");
                 self.state = WorkflowState::Failed {
                     error: e.to_string(),

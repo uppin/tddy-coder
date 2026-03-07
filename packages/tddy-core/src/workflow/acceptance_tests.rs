@@ -8,15 +8,15 @@ You MUST:
 2. Run the project's test command to verify all new tests fail (Red state). Use the appropriate command for the project: `cargo test` for Rust, `npm test` or `npx jest` for Node/TypeScript, `pytest` for Python, etc.
 3. Delete or adjust any tests that pass - passing tests do not verify new behavior
 4. Do NOT ask for permission to write files - you have write access. Create the test files directly.
-5. Emit a structured-response block with your summary
+5. ALWAYS end your response with a structured-response block — REQUIRED even when summarizing existing work or when tests were already created in a previous turn.
 
-Use this exact format for your output:
+Your final output MUST include this exact block (replace placeholders with actual values):
 
 <structured-response content-type="application-json">
 {"goal": "acceptance-tests", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "failing"}]}
 </structured-response>
 
-The summary must describe what tests were created and confirm all are failing."#
+The summary must describe what tests exist and confirm all are failing. The tests array must list each acceptance test with name, file, line, and status."#
         .to_string()
 }
 

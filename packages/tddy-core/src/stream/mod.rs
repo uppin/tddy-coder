@@ -31,6 +31,8 @@ pub struct StreamResult {
     pub result_text: String,
     pub session_id: String,
     pub questions: Vec<ClarificationQuestion>,
+    /// Raw NDJSON lines from stdout, for debugging when parsing fails.
+    pub raw_lines: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,6 +152,54 @@ fn file_path_display(obj: &serde_json::Map<String, serde_json::Value>) -> Option
     })
 }
 
+/// Marker for structured output we need to parse (avoids pulling in Read/Bash noise).
+const STRUCTURED_RESPONSE_MARKER: &str = "<structured-response";
+
+/// Extract concatenated text from user event's tool_result content when it contains
+/// structured-response. Content can be a string or array of {"type":"text","text":"..."} blocks.
+/// Only returns content that contains the structured-response marker (avoids Read/Bash output).
+fn extract_tool_result_content_from_user_line(line: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let obj = v.as_object()?;
+    if obj.get("type")?.as_str()? != "user" {
+        return None;
+    }
+    let message = obj.get("message")?.as_object()?;
+    let content = message.get("content")?.as_array()?;
+    let mut out = String::new();
+    for block in content {
+        let block_obj = block.as_object()?;
+        if block_obj.get("type")?.as_str()? != "tool_result" {
+            continue;
+        }
+        let c = block_obj.get("content")?;
+        if let Some(s) = c.as_str() {
+            if s.contains(STRUCTURED_RESPONSE_MARKER) {
+                out.push_str(s);
+                if !s.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        } else if let Some(arr) = c.as_array() {
+            for item in arr {
+                if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                    if text.contains(STRUCTURED_RESPONSE_MARKER) {
+                        out.push_str(text);
+                        if !text.ends_with('\n') {
+                            out.push('\n');
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 /// Extract a short display detail from tool input (file_path, command, description, etc.).
 fn tool_use_detail(name: &str, input: &serde_json::Value) -> Option<String> {
     let obj = input.as_object()?;
@@ -199,6 +249,7 @@ where
     let mut session_id = String::new();
     let mut questions: Vec<ClarificationQuestion> = vec![];
     let mut seen_questions: HashSet<(String, String)> = HashSet::new();
+    let mut raw_lines: Vec<String> = vec![];
 
     for line in reader.lines() {
         let line = line?;
@@ -206,11 +257,29 @@ where
         if line.is_empty() {
             continue;
         }
+        raw_lines.push(line.to_string());
 
         let event: StreamEvent = match serde_json::from_str(line) {
             Ok(e) => e,
             Err(_) => continue,
         };
+
+        // Fallback: extract from user tool_result content (Agent tool return, etc.).
+        // Claude Code CLI has a known bug where result event can be empty (issue #7124).
+        if event.event_type == "user" {
+            if let Some(text) = extract_tool_result_content_from_user_line(line) {
+                if !text.is_empty() {
+                    result_text.push_str(&text);
+                    if !text.ends_with('\n') {
+                        result_text.push('\n');
+                    }
+                    on_raw_output(&text);
+                    if !text.ends_with('\n') {
+                        on_raw_output("\n");
+                    }
+                }
+            }
+        }
 
         match event.event_type.as_str() {
             "system" => {
@@ -286,5 +355,6 @@ where
         result_text: result_text.trim().to_string(),
         session_id,
         questions,
+        raw_lines,
     })
 }

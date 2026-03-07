@@ -24,8 +24,10 @@ pub fn build_claude_args(
     request: &InvokeRequest,
     system_prompt_path: Option<&std::path::Path>,
 ) -> Vec<String> {
+    // Prompt must come immediately after -p per CLI docs: claude -p "query"
     let mut args = vec![
         "-p".to_string(),
+        request.prompt.clone(),
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
@@ -65,7 +67,23 @@ pub fn build_claude_args(
         args.push(sys_prompt.clone());
     }
 
-    args.push(request.prompt.clone());
+    if let Some(ref tools) = request.allowed_tools {
+        for tool in tools {
+            args.push("--allowedTools".to_string());
+            args.push(tool.clone());
+        }
+    }
+
+    if let Some(ref tool_name) = request.permission_prompt_tool {
+        args.push("--permission-prompt-tool".to_string());
+        args.push(tool_name.clone());
+    }
+
+    if let Some(ref mcp_path) = request.mcp_config_path {
+        args.push("--mcp-config".to_string());
+        args.push(mcp_path.to_string_lossy().to_string());
+    }
+
     args
 }
 
@@ -158,9 +176,23 @@ impl super::CodingBackend for ClaudeCodeBackend {
 
         let args = build_claude_args(&request, system_prompt_path.as_deref());
         let mut cmd = Command::new(&self.binary_path);
+        if let Some(ref wd) = request.working_dir {
+            cmd.current_dir(wd);
+        }
         for arg in &args {
             cmd.arg(arg);
         }
+
+        if request.debug {
+            let cwd = request
+                .working_dir
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_else(|_| "(unknown)".into()));
+            eprintln!("[tddy-coder debug] cwd: {}", cwd);
+            eprintln!("[tddy-coder debug] cmd: {} {}", self.binary_path.display(), args.join(" "));
+        }
+
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.stdin(if request.inherit_stdin {
@@ -233,11 +265,25 @@ impl super::CodingBackend for ClaudeCodeBackend {
             return Err(BackendError::InvocationFailed(msg));
         }
 
+        let raw_stream = if stream_result.raw_lines.is_empty() {
+            None
+        } else {
+            Some(stream_result.raw_lines.join("\n"))
+        };
+
+        let stderr = if stream_result.raw_lines.is_empty() && !stderr_buf.trim().is_empty() {
+            Some(stderr_buf)
+        } else {
+            None
+        };
+
         Ok(InvokeResponse {
             output: stream_result.result_text,
             exit_code,
             session_id: stream_result.session_id,
             questions: stream_result.questions,
+            raw_stream,
+            stderr,
         })
     }
 }

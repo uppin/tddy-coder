@@ -24,7 +24,18 @@ pub struct InvokeRequest {
     pub agent_output: bool,
     /// When true, inherit stdin so the user can grant permission prompts interactively.
     pub inherit_stdin: bool,
+    /// Optional list of tools to auto-allow via --allowedTools (e.g. Read, Write, Bash(cargo *)).
+    pub allowed_tools: Option<Vec<String>>,
+    /// Optional permission prompt tool name for --permission-prompt-tool (e.g. approval_prompt).
+    pub permission_prompt_tool: Option<String>,
+    /// Optional path to MCP config for --mcp-config when using permission prompt tool.
+    pub mcp_config_path: Option<std::path::PathBuf>,
+    /// Working directory for the subprocess (default: inherit from parent).
+    pub working_dir: Option<std::path::PathBuf>,
+    /// When true, print the command and cwd to stderr before running.
+    pub debug: bool,
 }
+
 
 /// Permission mode for the backend (e.g. plan = read-only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +71,10 @@ pub struct InvokeResponse {
     pub exit_code: i32,
     pub session_id: String,
     pub questions: Vec<ClarificationQuestion>,
+    /// Raw NDJSON stream lines from Claude CLI stdout, for debugging when output parsing fails.
+    pub raw_stream: Option<String>,
+    /// Stderr from the subprocess, for debugging when output is empty.
+    pub stderr: Option<String>,
 }
 
 /// Trait for LLM-based coding backends.
