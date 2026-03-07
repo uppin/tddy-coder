@@ -31,6 +31,10 @@ struct Args {
     #[arg(long)]
     agent_output: bool,
 
+    /// Write entire agent conversation (raw bytes) to file
+    #[arg(long)]
+    conversation_output: Option<PathBuf>,
+
     /// Model name for Claude Code CLI (e.g. sonnet)
     #[arg(short, long)]
     model: Option<String>,
@@ -75,6 +79,7 @@ fn main() -> anyhow::Result<()> {
             let options = AcceptanceTestsOptions {
                 model: args.model.clone(),
                 agent_output: args.agent_output,
+                conversation_output_path: args.conversation_output.clone(),
                 inherit_stdin,
                 allowed_tools_extras: args.allowed_tools.clone(),
                 debug: args.debug,
@@ -128,6 +133,7 @@ fn main() -> anyhow::Result<()> {
             let options = GreenOptions {
                 model: args.model.clone(),
                 agent_output: args.agent_output,
+                conversation_output_path: args.conversation_output.clone(),
                 inherit_stdin,
                 allowed_tools_extras: args.allowed_tools.clone(),
                 debug: args.debug,
@@ -190,6 +196,7 @@ fn main() -> anyhow::Result<()> {
             let options = RedOptions {
                 model: args.model.clone(),
                 agent_output: args.agent_output,
+                conversation_output_path: args.conversation_output.clone(),
                 inherit_stdin,
                 allowed_tools_extras: args.allowed_tools.clone(),
                 debug: args.debug,
@@ -260,6 +267,7 @@ fn main() -> anyhow::Result<()> {
         let options = PlanOptions {
             model: args.model.clone(),
             agent_output: args.agent_output,
+            conversation_output_path: args.conversation_output.clone(),
             inherit_stdin,
             allowed_tools_extras: args.allowed_tools.clone(),
             debug: args.debug,
@@ -368,6 +376,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
         let plan_options = PlanOptions {
             model: args.model.clone(),
             agent_output: args.agent_output,
+            conversation_output_path: args.conversation_output.clone(),
             inherit_stdin,
             allowed_tools_extras: args.allowed_tools.clone(),
             debug: args.debug,
@@ -404,6 +413,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
         let at_options = AcceptanceTestsOptions {
             model: args.model.clone(),
             agent_output: args.agent_output,
+            conversation_output_path: args.conversation_output.clone(),
             inherit_stdin,
             allowed_tools_extras: args.allowed_tools.clone(),
             debug: args.debug,
@@ -425,6 +435,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
         let red_options = RedOptions {
             model: args.model.clone(),
             agent_output: args.agent_output,
+            conversation_output_path: args.conversation_output.clone(),
             inherit_stdin,
             allowed_tools_extras: args.allowed_tools.clone(),
             debug: args.debug,
@@ -445,6 +456,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
     let green_options = GreenOptions {
         model: args.model.clone(),
         agent_output: args.agent_output,
+        conversation_output_path: args.conversation_output.clone(),
         inherit_stdin,
         allowed_tools_extras: args.allowed_tools.clone(),
         debug: args.debug,

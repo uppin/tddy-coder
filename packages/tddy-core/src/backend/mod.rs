@@ -41,6 +41,7 @@ pub enum Goal {
     AcceptanceTests,
     Red,
     Green,
+    Validate,
 }
 
 /// Request to invoke the coding backend.
@@ -63,6 +64,8 @@ pub struct InvokeRequest {
     pub debug: bool,
     /// When true, print raw agent output to stderr in real-time.
     pub agent_output: bool,
+    /// When set, write entire agent conversation (raw bytes from stdout) to this file.
+    pub conversation_output_path: Option<PathBuf>,
     /// When true, inherit stdin so the user can grant permission prompts interactively.
     pub inherit_stdin: bool,
     /// Extra tools to add to the goal's allowlist (backends that support allowlists merge these).

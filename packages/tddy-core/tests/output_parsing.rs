@@ -2,6 +2,7 @@
 
 use tddy_core::output::{
     parse_acceptance_tests_response, parse_planning_output, parse_red_response,
+    parse_validate_response,
 };
 
 #[test]
@@ -81,4 +82,57 @@ fn markdown_cross_references_added() {
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// parse_validate_response() extracts summary, risk_level, issues, and build_results correctly.
+#[test]
+fn parse_validate_response_extracts_all_fields() {
+    let input = r#"<structured-response content-type="application-json">
+{"goal":"validate-changes","summary":"Analyzed 2 files. Risk: low.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[{"severity":"warning","category":"code_quality","file":"src/lib.rs","line":10,"description":"Magic number","suggestion":"Use a named constant"}],"changeset_sync":{"status":"synced","items_updated":1,"items_added":0},"files_analyzed":[{"file":"src/lib.rs","lines_changed":5,"changeset_item":"auth-login"}],"test_impact":{"tests_affected":1,"new_tests_needed":0}}
+</structured-response>"#;
+
+    let out = parse_validate_response(input).expect("parse_validate_response should succeed");
+    assert!(
+        out.summary.contains("Analyzed"),
+        "summary should contain 'Analyzed', got: {}",
+        out.summary
+    );
+    assert_eq!(out.risk_level, "low", "risk_level should be 'low'");
+    assert_eq!(out.build_results.len(), 1, "should have 1 build result");
+    assert_eq!(out.build_results[0].package, "tddy-core");
+    assert_eq!(out.build_results[0].status, "pass");
+    assert_eq!(out.issues.len(), 1, "should have 1 issue");
+    assert_eq!(out.issues[0].severity, "warning");
+    assert_eq!(out.issues[0].category, "code_quality");
+    assert_eq!(out.issues[0].file, "src/lib.rs");
+    assert_eq!(out.issues[0].line, Some(10));
+    assert_eq!(out.issues[0].description, "Magic number");
+    let sync = out
+        .changeset_sync
+        .as_ref()
+        .expect("changeset_sync should be present");
+    assert_eq!(sync.status, "synced");
+    assert_eq!(sync.items_updated, 1);
+    assert_eq!(out.files_analyzed.len(), 1);
+    assert_eq!(out.files_analyzed[0].file, "src/lib.rs");
+    let impact = out
+        .test_impact
+        .as_ref()
+        .expect("test_impact should be present");
+    assert_eq!(impact.tests_affected, 1);
+}
+
+/// parse_validate_response() returns ParseError::Malformed when the goal field is not "validate-changes".
+#[test]
+fn parse_validate_response_fails_on_wrong_goal_field() {
+    let input = r#"<structured-response content-type="application-json">
+{"goal":"plan","summary":"This is a plan, not a validation.","risk_level":"low","build_results":[],"issues":[],"changeset_sync":null,"files_analyzed":[],"test_impact":null}
+</structured-response>"#;
+
+    let err = parse_validate_response(input).expect_err("should fail on wrong goal");
+    assert!(
+        matches!(err, tddy_core::ParseError::Malformed(_)),
+        "expected ParseError::Malformed for wrong goal field, got: {:?}",
+        err
+    );
 }

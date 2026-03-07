@@ -4,8 +4,9 @@ mod acceptance_tests;
 mod green;
 mod planning;
 mod red;
+mod validate;
 
-use crate::backend::CodingBackend;
+use crate::backend::{CodingBackend, InvokeResponse};
 use crate::changeset::{
     append_session_and_update_state, clarification_qa_from_backend, get_session_for_tag,
     read_changeset, resolve_model, update_state, write_changeset, Changeset,
@@ -13,17 +14,55 @@ use crate::changeset::{
 use crate::error::WorkflowError;
 use crate::output::{
     parse_acceptance_tests_response, parse_green_response, parse_planning_response,
-    parse_red_response, slugify_directory_name, update_acceptance_tests_file, update_progress_file,
-    write_acceptance_tests_file, write_artifacts, write_demo_results_file, write_progress_file,
-    write_red_output_file,
+    parse_red_response, parse_validate_response, slugify_directory_name,
+    update_acceptance_tests_file, update_progress_file, write_acceptance_tests_file,
+    write_artifacts, write_demo_results_file, write_progress_file, write_red_output_file,
+    write_validation_report,
 };
 use std::path::{Path, PathBuf};
+
+/// Emit debug output when parsing agent response fails. Shows output, raw stream, exit code.
+fn emit_parse_failure_debug(response: &InvokeResponse, goal: &str, empty_hint: Option<&str>) {
+    eprintln!(
+        "--- Failed parse {} output (length {} bytes) ---",
+        goal,
+        response.output.len()
+    );
+    if response.output.is_empty() {
+        if let Some(hint) = empty_hint {
+            eprintln!("Hint: {}", hint);
+        }
+    } else {
+        eprintln!("{}", response.output);
+    }
+    match &response.raw_stream {
+        Some(raw) if !raw.is_empty() => {
+            eprintln!(
+                "--- Raw stream from agent CLI ({} lines) ---",
+                raw.lines().count()
+            );
+            eprintln!("{}", raw);
+            eprintln!("--- End raw stream ---");
+        }
+        _ => {
+            eprintln!("Raw stream: (empty - no NDJSON lines received from agent CLI stdout)");
+        }
+    }
+    eprintln!("Agent CLI exit code: {}", response.exit_code);
+    if let Some(ref stderr) = response.stderr {
+        eprintln!("--- Agent CLI stderr ---");
+        eprintln!("{}", stderr);
+        eprintln!("--- End stderr ---");
+    }
+    eprintln!("--- End failed parse ---");
+}
 
 /// Options for the plan step.
 #[derive(Debug, Default)]
 pub struct PlanOptions {
     pub model: Option<String>,
     pub agent_output: bool,
+    pub conversation_output_path: Option<PathBuf>,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
     pub debug: bool,
@@ -34,6 +73,7 @@ pub struct PlanOptions {
 pub struct AcceptanceTestsOptions {
     pub model: Option<String>,
     pub agent_output: bool,
+    pub conversation_output_path: Option<PathBuf>,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
     pub debug: bool,
@@ -44,6 +84,7 @@ pub struct AcceptanceTestsOptions {
 pub struct RedOptions {
     pub model: Option<String>,
     pub agent_output: bool,
+    pub conversation_output_path: Option<PathBuf>,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
     pub debug: bool,
@@ -54,6 +95,18 @@ pub struct RedOptions {
 pub struct GreenOptions {
     pub model: Option<String>,
     pub agent_output: bool,
+    pub conversation_output_path: Option<PathBuf>,
+    pub inherit_stdin: bool,
+    pub allowed_tools_extras: Option<Vec<String>>,
+    pub debug: bool,
+}
+
+/// Options for the validate-changes step.
+#[derive(Debug, Default)]
+pub struct ValidateOptions {
+    pub model: Option<String>,
+    pub agent_output: bool,
+    pub conversation_output_path: Option<PathBuf>,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
     pub debug: bool,
@@ -79,6 +132,10 @@ pub enum WorkflowState {
     GreenComplete {
         output: crate::output::GreenOutput,
     },
+    Validating,
+    Validated {
+        output: crate::output::ValidateOutput,
+    },
     Failed {
         error: String,
     },
@@ -97,6 +154,8 @@ impl WorkflowState {
             Self::RedTestsReady { .. } => "RedTestsReady",
             Self::GreenImplementing => "GreenImplementing",
             Self::GreenComplete { .. } => "GreenComplete",
+            Self::Validating => "Validating",
+            Self::Validated { .. } => "Validated",
             Self::Failed { .. } => "Failed",
         }
     }
@@ -247,6 +306,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: Some(output_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
@@ -388,6 +448,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
             debug: options.debug,
             agent_output: options.agent_output,
+            conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
@@ -436,42 +497,16 @@ impl<B: CodingBackend> Workflow<B> {
                 out
             }
             Err(e) => {
-                eprintln!(
-                    "--- Failed parse acceptance tests output (length {} bytes) ---",
-                    response.output.len()
-                );
-                if response.output.is_empty() {
-                    eprintln!(
-                        "Hint: Empty output can mean Claude Code CLI produced no stream-json content, \
+                emit_parse_failure_debug(
+                    &response,
+                    "acceptance-tests",
+                    Some(
+                        "Empty output can mean the agent produced no stream-json content, \
                          or the result event had an empty result field (known bug: anthropics/claude-code#7124). \
                          Ensure you have rebuilt with `cargo build -p tddy-coder` and that the plan directory \
-                         has a valid changeset.yaml from a prior plan run."
-                    );
-                } else {
-                    eprintln!("{}", response.output);
-                }
-                match &response.raw_stream {
-                    Some(raw) if !raw.is_empty() => {
-                        eprintln!(
-                            "--- Raw stream from Claude CLI ({} lines) ---",
-                            raw.lines().count()
-                        );
-                        eprintln!("{}", raw);
-                        eprintln!("--- End raw stream ---");
-                    }
-                    _ => {
-                        eprintln!(
-                            "Raw stream: (empty - no NDJSON lines received from Claude CLI stdout)"
-                        );
-                    }
-                }
-                eprintln!("Claude CLI exit code: {}", response.exit_code);
-                if let Some(ref stderr) = response.stderr {
-                    eprintln!("--- Claude CLI stderr ---");
-                    eprintln!("{}", stderr);
-                    eprintln!("--- End stderr ---");
-                }
-                eprintln!("--- End failed parse ---");
+                         has a valid changeset.yaml from a prior plan run.",
+                    ),
+                );
                 self.set_state(WorkflowState::Failed {
                     error: e.to_string(),
                 });
@@ -553,6 +588,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
             debug: options.debug,
             agent_output: options.agent_output,
+            conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
@@ -603,6 +639,14 @@ impl<B: CodingBackend> Workflow<B> {
                 out
             }
             Err(e) => {
+                emit_parse_failure_debug(
+                    &response,
+                    "red",
+                    Some(
+                        "The agent must output a <structured-response> block with goal:\"red\", summary, tests, skeletons. \
+                         Output must be exactly one valid JSON object — no numbers, arrays, or numbered lists.",
+                    ),
+                );
                 self.set_state(WorkflowState::Failed {
                     error: e.to_string(),
                 });
@@ -715,6 +759,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
             debug: options.debug,
             agent_output: options.agent_output,
+            conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
@@ -774,11 +819,111 @@ impl<B: CodingBackend> Workflow<B> {
                 }
             }
             Err(e) => {
+                emit_parse_failure_debug(
+                    &response,
+                    "green",
+                    Some(
+                        "The agent must output a <structured-response> block with goal:\"green\", summary, tests, implementations. \
+                         Output must be exactly one valid JSON object — no numbers, arrays, or numbered lists.",
+                    ),
+                );
                 self.set_state(WorkflowState::Failed {
                     error: e.to_string(),
                 });
                 Err(WorkflowError::ParseError(e))
             }
         }
+    }
+
+    /// Run the validate-changes step: analyze current git changes for risks.
+    /// Callable from Init state without a prior plan/red/green run (standalone).
+    /// When `plan_dir` is provided, reads changeset/PRD context and includes it in the prompt.
+    /// Always starts a fresh session (is_resume: false).
+    pub fn validate(
+        &mut self,
+        working_dir: &std::path::Path,
+        plan_dir: Option<&std::path::Path>,
+        _answers: Option<&str>,
+        options: &ValidateOptions,
+    ) -> Result<crate::output::ValidateOutput, WorkflowError> {
+        let can_start = matches!(self.state, WorkflowState::Init);
+        if !can_start {
+            return Err(WorkflowError::InvalidTransition(format!(
+                "cannot validate from {:?}",
+                self.state
+            )));
+        }
+
+        let prd_owned = plan_dir.and_then(|d| std::fs::read_to_string(d.join("PRD.md")).ok());
+        let changeset_owned =
+            plan_dir.and_then(|d| std::fs::read_to_string(d.join("changeset.yaml")).ok());
+        let prd_content = prd_owned.as_deref();
+        let changeset_content = changeset_owned.as_deref();
+
+        let system_prompt = validate::system_prompt();
+        let prompt = validate::build_prompt(prd_content, changeset_content);
+
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let model = options.model.clone();
+
+        let request = crate::backend::InvokeRequest {
+            prompt,
+            system_prompt: Some(system_prompt),
+            system_prompt_path: None,
+            goal: crate::backend::Goal::Validate,
+            model,
+            session_id: Some(session_id.clone()),
+            is_resume: false,
+            working_dir: Some(working_dir.to_path_buf()),
+            debug: options.debug,
+            agent_output: options.agent_output,
+            conversation_output_path: options.conversation_output_path.clone(),
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
+        };
+
+        let response = match self.backend.invoke(request) {
+            Ok(r) => r,
+            Err(e) => {
+                self.set_state(WorkflowState::Failed {
+                    error: e.to_string(),
+                });
+                return Err(WorkflowError::Backend(e));
+            }
+        };
+
+        if !response.questions.is_empty() {
+            return Err(WorkflowError::ClarificationNeeded {
+                questions: response.questions,
+                session_id: response.session_id.unwrap_or_default(),
+            });
+        }
+
+        let output = match parse_validate_response(&response.output) {
+            Ok(out) => {
+                let _ = write_validation_report(working_dir, &out);
+                out
+            }
+            Err(e) => {
+                emit_parse_failure_debug(
+                    &response,
+                    "validate",
+                    Some(
+                        "The agent must output a <structured-response> block with goal:\"validate-changes\", summary, risk_level, issues, build_results. \
+                         Output must be exactly one valid JSON object — no numbers, arrays, or numbered lists.",
+                    ),
+                );
+                self.set_state(WorkflowState::Failed {
+                    error: e.to_string(),
+                });
+                return Err(WorkflowError::ParseError(e));
+            }
+        };
+
+        self.set_state(WorkflowState::Validated {
+            output: output.clone(),
+        });
+
+        Ok(output)
     }
 }

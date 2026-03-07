@@ -46,6 +46,7 @@ exit 0
         working_dir: None,
         debug: false,
         agent_output: false,
+        conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
     };
@@ -132,6 +133,7 @@ exit 0
             working_dir: None,
             debug: false,
             agent_output: false,
+            conversation_output_path: None,
             inherit_stdin: false,
             extra_allowed_tools: None,
         };
@@ -184,6 +186,7 @@ exit 0
         working_dir: None,
         debug: false,
         agent_output: false,
+        conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
     };
@@ -262,6 +265,7 @@ exit 0
         working_dir: None,
         debug: false,
         agent_output: false,
+        conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
     };
@@ -320,6 +324,7 @@ exit 0
         working_dir: None,
         debug: false,
         agent_output: false,
+        conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
     };
@@ -378,6 +383,7 @@ exit 0
         working_dir: None,
         debug: false,
         agent_output: false,
+        conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
     };

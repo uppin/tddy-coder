@@ -28,10 +28,11 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 8. Accepts `--output-dir <path>` to configure where planning output is written (default: current directory)
 9. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
 10. Accepts `--agent-output` to print raw agent output to stderr in real time
-11. Accepts `--debug` to print CLI command and cwd before running (for debugging empty output)
-12. Accepts `--agent <name>` to select backend: `claude` (default) or `cursor`
-13. Reads the feature description from stdin (supports piped input and interactive prompt), or from `--prompt <text>` when provided
-14. *Deferred*: `--list-models` to list available models (not needed for current scope)
+11. Accepts `--conversation-output <path>` to log the entire agent conversation in raw bytes to a file (Updated: 2026-03-07)
+12. Accepts `--debug` to print CLI command and cwd before running (for debugging empty output)
+13. Accepts `--agent <name>` to select backend: `claude` (default) or `cursor`
+14. Reads the feature description from stdin (supports piped input and interactive prompt), or from `--prompt <text>` when provided
+15. *Deferred*: `--list-models` to list available models (not needed for current scope)
 
 ### Planning Workflow (Updated: 2026-03-07)
 

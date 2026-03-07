@@ -2,6 +2,18 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-07 — Validate-Changes Goal
+
+- **New goal**: `--goal validate-changes` analyzes current git changes for risks (build validity, test infrastructure, production code quality, security). Produces validation-report.md in working directory.
+- **Standalone**: Callable from Init without prior plan/red/green. Optional `--plan-dir` for changeset/PRD context. Uses fresh session (not resumed).
+- **Permission**: validate_allowlist permits Read, Glob, Grep, SemanticSearch, git diff/log, find, cargo build/check.
+- **State**: Init → Validating → Validated. Not in next_goal_for_state auto-sequence.
+- **CLI**: `--conversation-output <path>` writes raw agent bytes in real time (each line appended as received).
+
+## 2026-03-07 — Conversation Logging
+
+- **CLI**: `--conversation-output <path>` logs the entire agent conversation in raw bytes to the specified file. Each NDJSON line is written in real time as it is received, so you can tail the file during long runs.
+
 ## 2026-03-07 — Backend Abstraction (OCP)
 
 - **Backends**: Claude Code CLI and Cursor agent supported. Use `--agent claude` (default) or `--agent cursor`

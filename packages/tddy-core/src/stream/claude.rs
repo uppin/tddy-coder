@@ -158,11 +158,13 @@ fn tool_use_detail(name: &str, input: &serde_json::Value) -> Option<String> {
 
 /// Process NDJSON lines from Claude Code CLI stdout.
 /// Extracts result text, session_id, and AskUserQuestion events.
+/// When `on_conversation_line` is provided, calls it with each raw line for real-time logging.
 pub fn process_ndjson_stream<R, F, O>(
     reader: R,
     mut on_progress: F,
     mut on_raw_output: O,
     mut on_debug_line: Option<&mut dyn FnMut(&str)>,
+    mut on_conversation_line: Option<&mut dyn FnMut(&str)>,
 ) -> Result<StreamResult, Box<dyn std::error::Error + Send + Sync>>
 where
     R: BufRead,
@@ -183,6 +185,9 @@ where
         }
         raw_lines.push(line.to_string());
         if let Some(ref mut f) = on_debug_line {
+            f(line);
+        }
+        if let Some(ref mut f) = on_conversation_line {
             f(line);
         }
 

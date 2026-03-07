@@ -19,6 +19,7 @@ fn invoke_request_has_goal_not_permission_mode() {
         working_dir: None,
         debug: false,
         agent_output: false,
+        conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
     };
@@ -40,6 +41,7 @@ fn invoke_request_supports_all_goal_variants() {
             working_dir: None,
             debug: false,
             agent_output: false,
+            conversation_output_path: None,
             inherit_stdin: false,
             extra_allowed_tools: None,
         };

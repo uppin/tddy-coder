@@ -4,7 +4,7 @@ use super::{Goal, InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
 use crate::permission;
 use crate::stream;
-use std::io::BufReader;
+use std::io::{BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -113,6 +113,7 @@ fn goal_to_claude_config(request: &InvokeRequest) -> ClaudeInvokeConfig {
             PermissionMode::AcceptEdits,
             permission::acceptance_tests_allowlist(),
         ),
+        Goal::Validate => (PermissionMode::Plan, permission::validate_allowlist()),
     };
     if let Some(ref extras) = request.extra_allowed_tools {
         allowed_tools.extend(extras.iter().cloned());
@@ -297,6 +298,32 @@ impl super::CodingBackend for ClaudeCodeBackend {
             }
         };
 
+        let mut conv_file = if let Some(ref path) = request.conversation_output_path {
+            Some(
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(path)
+                    .map_err(|e| {
+                        BackendError::InvocationFailed(format!(
+                            "failed to open conversation output {}: {}",
+                            path.display(),
+                            e
+                        ))
+                    })?,
+            )
+        } else {
+            None
+        };
+
+        let mut on_conversation_line = |line: &str| {
+            if let Some(ref mut f) = conv_file {
+                let _ = writeln!(f, "{}", line);
+                let _ = f.flush();
+            }
+        };
+
         let reader = BufReader::new(stdout_handle);
         let stream_result = stream::process_ndjson_stream(
             reader,
@@ -304,6 +331,11 @@ impl super::CodingBackend for ClaudeCodeBackend {
             &mut on_raw_output,
             if request.debug {
                 Some(&mut on_debug_line)
+            } else {
+                None
+            },
+            if request.conversation_output_path.is_some() {
+                Some(&mut on_conversation_line)
             } else {
                 None
             },

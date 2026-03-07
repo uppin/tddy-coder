@@ -21,12 +21,17 @@ pub use changeset::{
 pub use error::{BackendError, ParseError, WorkflowError};
 pub use output::{
     parse_acceptance_tests_response, parse_green_response, parse_planning_output,
-    parse_red_response, read_session_file, write_acceptance_tests_file, write_artifacts,
-    write_session_file, AcceptanceTestInfo, AcceptanceTestsOutput, GreenOutput, GreenTestResult,
-    ImplementationInfo, PlanningOutput, RedOutput, RedTestInfo, SkeletonInfo,
+    parse_red_response, parse_validate_response, read_session_file, write_acceptance_tests_file,
+    write_artifacts, write_session_file, write_validation_report, AcceptanceTestInfo,
+    AcceptanceTestsOutput, GreenOutput, GreenTestResult, ImplementationInfo, PlanningOutput,
+    RedOutput, RedTestInfo, SkeletonInfo, ValidateBuildResult, ValidateChangesetSync,
+    ValidateFileAnalyzed, ValidateIssue, ValidateOutput, ValidateTestImpact,
 };
-pub use permission::{acceptance_tests_allowlist, green_allowlist, plan_allowlist, red_allowlist};
+pub use permission::{
+    acceptance_tests_allowlist, green_allowlist, plan_allowlist, red_allowlist, validate_allowlist,
+};
 pub use stream::ProgressEvent;
 pub use workflow::{
-    AcceptanceTestsOptions, GreenOptions, PlanOptions, RedOptions, Workflow, WorkflowState,
+    AcceptanceTestsOptions, GreenOptions, PlanOptions, RedOptions, ValidateOptions, Workflow,
+    WorkflowState,
 };
