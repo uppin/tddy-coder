@@ -26,8 +26,9 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 6. Accepts `--output-dir <path>` to configure where planning output is written (defaults to current directory)
 7. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
 8. Accepts `--agent-output` to print raw agent output to stderr in real time
-9. Reads the feature description from stdin (supports piped input and interactive prompt)
-10. *Deferred*: `--list-models` to list available models (not needed for current scope)
+9. Accepts `--debug` to print Claude CLI command and cwd before running (for debugging empty output)
+10. Reads the feature description from stdin (supports piped input and interactive prompt)
+11. *Deferred*: `--list-models` to list available models (not needed for current scope)
 
 ### Planning Workflow
 

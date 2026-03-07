@@ -9,7 +9,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 ### Backend (`backend/`)
 
 - **CodingBackend**: Trait for invoking LLM-based coders. Implementations include `ClaudeCodeBackend` (production) and `MockBackend` (testing).
-- **InvokeRequest/InvokeResponse**: Request and response types. Supports session_id, is_resume, agent_output.
+- **InvokeRequest/InvokeResponse**: Request and response types. Supports session_id, is_resume, agent_output, allowed_tools (goal allowlist for `--allowedTools`), permission_prompt_tool, mcp_config_path, working_dir, debug.
 - **ClarificationQuestion**: Structured question type from AskUserQuestion tool events (header, question, options, multi_select).
 - **PermissionMode**: Plan (read-only), AcceptEdits (auto-approve file edits), or Default.
 
@@ -19,6 +19,10 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **StreamResult**: result_text (accumulated assistant text + result), session_id, questions.
 - **ProgressEvent**: ToolUse, TaskStarted, TaskProgress for real-time display.
 - Extracts AskUserQuestion tool events for structured Q&A; deduplicates questions.
+
+### Permission (`permission.rs`)
+
+- **plan_allowlist / acceptance_tests_allowlist**: Goal-specific tool allowlists passed as `--allowedTools`. Plan: Read, Glob, Grep, SemanticSearch. Acceptance-tests: Read, Write, Edit, Glob, Grep, Bash(cargo *), SemanticSearch.
 
 ### Workflow (`workflow/`)
 
