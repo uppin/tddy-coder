@@ -188,9 +188,17 @@ impl super::CodingBackend for ClaudeCodeBackend {
                 .working_dir
                 .as_ref()
                 .map(|p| p.display().to_string())
-                .unwrap_or_else(|| std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_else(|_| "(unknown)".into()));
+                .unwrap_or_else(|| {
+                    std::env::current_dir()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| "(unknown)".into())
+                });
             eprintln!("[tddy-coder debug] cwd: {}", cwd);
-            eprintln!("[tddy-coder debug] cmd: {} {}", self.binary_path.display(), args.join(" "));
+            eprintln!(
+                "[tddy-coder debug] cmd: {} {}",
+                self.binary_path.display(),
+                args.join(" ")
+            );
         }
 
         cmd.stdout(Stdio::piped());

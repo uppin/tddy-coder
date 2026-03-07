@@ -78,8 +78,14 @@ fn user_prompt_follows_print_flag() {
     let args = build_claude_args(&req, None);
 
     // Per CLI docs (claude -p "query"), prompt must come immediately after -p
-    let p_idx = args.iter().position(|a| a == "-p").expect("-p should be present");
-    assert_eq!(args.get(p_idx + 1), Some(&"Create a PRD for: user auth".to_string()));
+    let p_idx = args
+        .iter()
+        .position(|a| a == "-p")
+        .expect("-p should be present");
+    assert_eq!(
+        args.get(p_idx + 1),
+        Some(&"Create a PRD for: user auth".to_string())
+    );
 }
 
 #[test]
@@ -100,7 +106,11 @@ fn system_prompt_and_user_prompt_are_separate_arguments() {
     );
 
     assert_eq!(args[sys_value_idx], sys);
-    assert_eq!(args.get(1).map(|s| s.as_str()), Some(user), "user prompt must follow -p");
+    assert_eq!(
+        args.get(1).map(|s| s.as_str()),
+        Some(user),
+        "user prompt must follow -p"
+    );
 }
 
 #[test]
@@ -134,7 +144,11 @@ fn append_system_prompt_receives_exactly_one_argument() {
         .expect("--append-system-prompt should be present");
     let value_idx = append_idx + 1;
     assert_eq!(args[value_idx], sys);
-    assert_eq!(args.get(1).map(|s| s.as_str()), Some(user), "user prompt must follow -p at args[1]");
+    assert_eq!(
+        args.get(1).map(|s| s.as_str()),
+        Some(user),
+        "user prompt must follow -p at args[1]"
+    );
 }
 
 #[test]
@@ -150,7 +164,11 @@ fn multiline_system_prompt_passed_as_single_arg() {
         .unwrap()
         + 1;
     assert_eq!(args[sys_idx], sys);
-    assert_eq!(args.get(1).map(|s| s.as_str()), Some(user), "user prompt must follow -p");
+    assert_eq!(
+        args.get(1).map(|s| s.as_str()),
+        Some(user),
+        "user prompt must follow -p"
+    );
 }
 
 #[test]
@@ -236,7 +254,11 @@ fn build_claude_args_includes_allowed_tools_when_set() {
         args.get(allowed_tools_indices[2] + 1),
         Some(&"Bash(cargo *)".to_string())
     );
-    assert_eq!(args.get(1), Some(&"User".to_string()), "user prompt must follow -p");
+    assert_eq!(
+        args.get(1),
+        Some(&"User".to_string()),
+        "user prompt must follow -p"
+    );
 }
 
 /// build_claude_args includes --permission-prompt-tool and --mcp-config when both are set.
@@ -268,7 +290,11 @@ fn build_claude_args_includes_permission_prompt_tool_and_mcp_config_when_set() {
         Some(&"/tmp/mcp.json".to_string()),
         "mcp-config path should be passed"
     );
-    assert_eq!(args.get(1), Some(&"User".to_string()), "user prompt must follow -p");
+    assert_eq!(
+        args.get(1),
+        Some(&"User".to_string()),
+        "user prompt must follow -p"
+    );
 }
 
 /// Invoke uses --append-system-prompt-file (not inline) when system prompt is present,

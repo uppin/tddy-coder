@@ -2,12 +2,14 @@
 
 mod acceptance_tests;
 mod planning;
+mod red;
 
 use crate::backend::CodingBackend;
 use crate::error::WorkflowError;
 use crate::output::{
-    parse_acceptance_tests_response, parse_planning_response, read_session_file,
-    slugify_directory_name, write_artifacts, write_session_file,
+    parse_acceptance_tests_response, parse_planning_response, parse_red_response,
+    read_session_file, slugify_directory_name, write_acceptance_tests_file, write_artifacts,
+    write_progress_file, write_red_output_file, write_session_file,
 };
 use std::path::{Path, PathBuf};
 
@@ -31,6 +33,16 @@ pub struct AcceptanceTestsOptions {
     pub debug: bool,
 }
 
+/// Options for the red step.
+#[derive(Debug, Default)]
+pub struct RedOptions {
+    pub model: Option<String>,
+    pub agent_output: bool,
+    pub inherit_stdin: bool,
+    pub allowed_tools_extras: Option<Vec<String>>,
+    pub debug: bool,
+}
+
 /// Workflow state.
 #[derive(Debug, Clone)]
 pub enum WorkflowState {
@@ -42,6 +54,10 @@ pub enum WorkflowState {
     AcceptanceTesting,
     AcceptanceTestsReady {
         output: crate::output::AcceptanceTestsOutput,
+    },
+    RedTesting,
+    RedTestsReady {
+        output: crate::output::RedOutput,
     },
     Failed {
         error: String,
@@ -282,7 +298,10 @@ impl<B: CodingBackend> Workflow<B> {
         }
 
         let output = match parse_acceptance_tests_response(&response.output) {
-            Ok(out) => out,
+            Ok(out) => {
+                write_acceptance_tests_file(plan_dir, &out)?;
+                out
+            }
             Err(e) => {
                 eprintln!(
                     "--- Failed parse acceptance tests output (length {} bytes) ---",
@@ -300,12 +319,17 @@ impl<B: CodingBackend> Workflow<B> {
                 }
                 match &response.raw_stream {
                     Some(raw) if !raw.is_empty() => {
-                        eprintln!("--- Raw stream from Claude CLI ({} lines) ---", raw.lines().count());
+                        eprintln!(
+                            "--- Raw stream from Claude CLI ({} lines) ---",
+                            raw.lines().count()
+                        );
                         eprintln!("{}", raw);
                         eprintln!("--- End raw stream ---");
                     }
                     _ => {
-                        eprintln!("Raw stream: (empty - no NDJSON lines received from Claude CLI stdout)");
+                        eprintln!(
+                            "Raw stream: (empty - no NDJSON lines received from Claude CLI stdout)"
+                        );
                     }
                 }
                 eprintln!("Claude CLI exit code: {}", response.exit_code);
@@ -323,6 +347,118 @@ impl<B: CodingBackend> Workflow<B> {
         };
 
         self.state = WorkflowState::AcceptanceTestsReady {
+            output: output.clone(),
+        };
+
+        Ok(output)
+    }
+
+    /// Run the red step: read PRD and acceptance-tests.md from plan_dir, create skeleton code and failing tests.
+    /// When `answers` is `None`, performs first invoke; when backend returns questions,
+    /// returns `ClarificationNeeded`. Call again with `Some(answers)` to continue.
+    /// Starts a fresh session (does not resume). Uses AcceptEdits permission mode.
+    pub fn red(
+        &mut self,
+        plan_dir: &Path,
+        answers: Option<&str>,
+        options: &RedOptions,
+    ) -> Result<crate::output::RedOutput, WorkflowError> {
+        let can_start = matches!(self.state, WorkflowState::Init)
+            || matches!(self.state, WorkflowState::Planned { .. })
+            || matches!(self.state, WorkflowState::AcceptanceTestsReady { .. });
+        let can_continue = matches!(self.state, WorkflowState::RedTesting) && answers.is_some();
+
+        if !can_start && !can_continue {
+            return Err(WorkflowError::InvalidTransition(format!(
+                "cannot run red from {:?}",
+                self.state
+            )));
+        }
+
+        let prd_path = plan_dir.join("PRD.md");
+        if !prd_path.exists() {
+            return Err(WorkflowError::PlanDirInvalid(
+                "PRD.md not found in plan directory".into(),
+            ));
+        }
+
+        let at_path = plan_dir.join("acceptance-tests.md");
+        if !at_path.exists() {
+            return Err(WorkflowError::PlanDirInvalid(
+                "acceptance-tests.md not found in plan directory".into(),
+            ));
+        }
+
+        let prd_content = std::fs::read_to_string(&prd_path)
+            .map_err(|e| WorkflowError::PlanDirInvalid(e.to_string()))?;
+        let acceptance_tests_content = std::fs::read_to_string(&at_path)
+            .map_err(|e| WorkflowError::PlanDirInvalid(e.to_string()))?;
+
+        if can_start {
+            self.state = WorkflowState::RedTesting;
+        }
+
+        let system_prompt = red::system_prompt();
+        let prompt = match answers {
+            None => red::build_prompt(&prd_content, &acceptance_tests_content),
+            Some(a) => red::build_followup_prompt(&prd_content, &acceptance_tests_content, a),
+        };
+
+        let session_id = uuid::Uuid::new_v4().to_string();
+
+        let mut allowed_tools = crate::permission::red_allowlist();
+        if let Some(extras) = &options.allowed_tools_extras {
+            allowed_tools.extend(extras.iter().cloned());
+        }
+
+        let request = crate::backend::InvokeRequest {
+            prompt,
+            system_prompt: Some(system_prompt),
+            permission_mode: crate::backend::PermissionMode::AcceptEdits,
+            model: options.model.clone(),
+            session_id: Some(session_id.clone()),
+            is_resume: false,
+            agent_output: options.agent_output,
+            inherit_stdin: options.inherit_stdin,
+            allowed_tools: Some(allowed_tools),
+            permission_prompt_tool: None,
+            mcp_config_path: None,
+            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            debug: options.debug,
+        };
+
+        let response = match self.backend.invoke(request) {
+            Ok(r) => r,
+            Err(e) => {
+                self.state = WorkflowState::Failed {
+                    error: e.to_string(),
+                };
+                return Err(WorkflowError::Backend(e));
+            }
+        };
+
+        if !response.questions.is_empty() {
+            return Err(WorkflowError::ClarificationNeeded {
+                questions: response.questions,
+                session_id: response.session_id,
+            });
+        }
+
+        let output = match parse_red_response(&response.output) {
+            Ok(out) => {
+                let _ = write_red_output_file(plan_dir, &out);
+                let _ = write_progress_file(plan_dir, &out);
+                out
+            }
+            Err(e) => {
+                self.state = WorkflowState::Failed {
+                    error: e.to_string(),
+                };
+                return Err(WorkflowError::ParseError(e));
+            }
+        };
+
+        self.state = WorkflowState::RedTestsReady {
             output: output.clone(),
         };
 

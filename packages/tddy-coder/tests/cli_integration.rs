@@ -261,3 +261,78 @@ fn cli_errors_when_plan_dir_missing_for_acceptance_tests_goal() {
         stderr
     );
 }
+
+/// Create a fake claude script that returns red goal structured output.
+fn create_fake_claude_red(dir: &Path) -> std::io::Result<()> {
+    let script = r###"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
+printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">{\"goal\":\"red\",\"summary\":\"Created 1 skeleton and 1 failing test.\",\"tests\":[{\"name\":\"test_foo\",\"file\":\"src/foo.rs\",\"line\":10,\"status\":\"failing\"}],\"skeletons\":[{\"name\":\"Foo\",\"file\":\"src/foo.rs\",\"line\":5,\"kind\":\"struct\"}]}</structured-response>","session_id":"fake-sess","is_error":false}'
+"###;
+    write_executable_script(dir, "claude", script)
+}
+
+#[test]
+#[cfg(unix)]
+fn cli_accepts_goal_red_with_plan_dir() {
+    let tmp = std::env::temp_dir().join("tddy-cli-red-goal-test");
+    let _ = std::fs::create_dir_all(&tmp);
+
+    create_fake_claude_red(&tmp).expect("create fake claude");
+
+    let plan_dir = tmp.join("plan-output");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    std::fs::write(
+        plan_dir.join("acceptance-tests.md"),
+        "# Acceptance Tests\n## Tests\n- test_foo",
+    )
+    .expect("write acceptance-tests.md");
+
+    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .env("PATH", tmp_path.to_str().unwrap())
+        .env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()),
+        )
+        .args(["--goal", "red", "--plan-dir", plan_dir.to_str().unwrap()]);
+
+    let output = cmd.output().expect("run tddy-coder");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "expected success: stderr={} stdout={}",
+        stderr,
+        stdout
+    );
+    assert!(
+        stdout.contains("skeleton") || stdout.contains("test_foo"),
+        "stdout should contain red output summary: {}",
+        stdout
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_errors_when_plan_dir_missing_for_red_goal() {
+    let mut cmd = tddy_coder_bin();
+    cmd.args(["--goal", "red"]);
+    // --plan-dir is NOT provided
+
+    let output = cmd.output().expect("run tddy-coder");
+
+    assert!(
+        !output.status.success(),
+        "should fail when --plan-dir missing for red goal"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("plan-dir") || stderr.contains("plan_dir"),
+        "error should mention plan-dir: {}",
+        stderr
+    );
+}

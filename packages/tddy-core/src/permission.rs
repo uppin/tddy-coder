@@ -27,3 +27,9 @@ pub fn acceptance_tests_allowlist() -> Vec<String> {
         "SemanticSearch".to_string(),
     ]
 }
+
+/// Allowlist for the red goal (same as acceptance-tests: file edits + cargo test).
+/// Complements --permission-mode acceptEdits.
+pub fn red_allowlist() -> Vec<String> {
+    acceptance_tests_allowlist()
+}

@@ -13,10 +13,14 @@ You MUST:
 Your final output MUST include this exact block (replace placeholders with actual values):
 
 <structured-response content-type="application-json">
-{"goal": "acceptance-tests", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "failing"}]}
+{"goal": "acceptance-tests", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "failing"}], "test_command": "<command to run tests, e.g. cargo test or npm test>", "prerequisite_actions": "<prereqs or None. Use cheapest way: if test command already builds/bundles, use None>", "run_single_or_selected_tests": "<how to run one or filtered tests, e.g. cargo test <name>, pytest -k <pattern>>"}
 </structured-response>
 
-The summary must describe what tests exist and confirm all are failing. The tests array must list each acceptance test with name, file, line, and status."#
+The summary must describe what tests exist and confirm all are failing. The tests array must list each acceptance test with name, file, line, and status.
+
+**test_command**: Derive from the project (Cargo.toml → cargo test, package.json → npm test, pytest.ini → pytest, etc.).
+**prerequisite_actions**: Suggest the cheapest approach. If the test command already compiles/builds (e.g. cargo test compiles first), use "None". Only suggest explicit build steps when needed (e.g. "npm install" before "npm test").
+**run_single_or_selected_tests**: How to run a single test or filter by name/pattern (e.g. `cargo test <name>`, `pytest -k <pattern>`, `npm test -- --testNamePattern=<pattern>`)."#
         .to_string()
 }
 
