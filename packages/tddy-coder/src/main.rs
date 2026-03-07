@@ -7,22 +7,22 @@ use std::io::{self, BufRead, IsTerminal, Read};
 use std::path::PathBuf;
 use tddy_core::{
     AcceptanceTestsOptions, ClarificationQuestion, ClaudeCodeBackend, PlanOptions, ProgressEvent,
-    Workflow, WorkflowError,
+    RedOptions, Workflow, WorkflowError,
 };
 
 #[derive(Parser, Debug)]
 #[command(name = "tddy-coder")]
 #[command(about = "TDD-driven coder for PRD-based development workflow")]
 struct Args {
-    /// Goal to execute: plan, acceptance-tests, etc.
-    #[arg(long, value_parser = ["plan", "acceptance-tests"])]
+    /// Goal to execute: plan, acceptance-tests, red, etc.
+    #[arg(long, value_parser = ["plan", "acceptance-tests", "red"])]
     goal: String,
 
     /// Output directory for planning artifacts (default: current directory)
     #[arg(long, default_value = ".")]
     output_dir: PathBuf,
 
-    /// Plan directory for acceptance-tests goal (required when goal is acceptance-tests)
+    /// Plan directory (required when goal is acceptance-tests or red)
     #[arg(long)]
     plan_dir: Option<PathBuf>,
 
@@ -101,6 +101,99 @@ fn main() -> anyhow::Result<()> {
                             t.line.unwrap_or(0),
                             t.status
                         );
+                    }
+                    if let Some(cmd) = &output.test_command {
+                        println!("\nHow to run tests: {}", cmd);
+                    }
+                    if let Some(prereq) = &output.prerequisite_actions {
+                        println!("Prerequisite actions: {}", prereq);
+                    }
+                    if let Some(single) = &output.run_single_or_selected_tests {
+                        println!("How to run a single or selected tests: {}", single);
+                    }
+                    return Ok(());
+                }
+                Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
+                    answers = Some(read_answers(&questions).context("read answers")?);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
+    if args.goal == "red" {
+        let plan_dir = args
+            .plan_dir
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for red goal"))?;
+
+        let backend = ClaudeCodeBackend::new().with_progress(|event| {
+            let dim = "\x1b[2m";
+            let reset = "\x1b[0m";
+            match event {
+                ProgressEvent::ToolUse {
+                    name,
+                    detail: Some(d),
+                } => eprintln!("  {}📎 {} {}...{}", dim, name, d, reset),
+                ProgressEvent::ToolUse { name, detail: None } => {
+                    eprintln!("  {}📎 {}...{}", dim, name, reset)
+                }
+                ProgressEvent::TaskStarted { description } => {
+                    eprintln!("  {}▶ {}...{}", dim, description, reset)
+                }
+                ProgressEvent::TaskProgress {
+                    description,
+                    last_tool: Some(tool),
+                } => eprintln!("  {}⏳ {} ({}){}", dim, description, tool, reset),
+                ProgressEvent::TaskProgress {
+                    description,
+                    last_tool: None,
+                } => eprintln!("  {}⏳ {}...{}", dim, description, reset),
+            }
+        });
+        let mut workflow = Workflow::new(backend);
+
+        let inherit_stdin = io::stdin().is_terminal();
+        let mut answers: Option<String> = None;
+        loop {
+            let options = RedOptions {
+                model: args.model.clone(),
+                agent_output: args.agent_output,
+                inherit_stdin,
+                allowed_tools_extras: args.allowed_tools.clone(),
+                debug: args.debug,
+            };
+            let result = workflow.red(plan_dir, answers.as_deref(), &options);
+
+            match result {
+                Ok(output) => {
+                    println!("{}", output.summary);
+                    for t in &output.tests {
+                        println!(
+                            "  - {} ({}:{}): {}",
+                            t.name,
+                            t.file,
+                            t.line.unwrap_or(0),
+                            t.status
+                        );
+                    }
+                    for s in &output.skeletons {
+                        println!(
+                            "  [skeleton] {} ({}:{}): {}",
+                            s.name,
+                            s.file,
+                            s.line.unwrap_or(0),
+                            s.kind
+                        );
+                    }
+                    if let Some(cmd) = &output.test_command {
+                        println!("\nHow to run tests: {}", cmd);
+                    }
+                    if let Some(prereq) = &output.prerequisite_actions {
+                        println!("Prerequisite actions: {}", prereq);
+                    }
+                    if let Some(single) = &output.run_single_or_selected_tests {
+                        println!("How to run a single or selected tests: {}", single);
                     }
                     return Ok(());
                 }

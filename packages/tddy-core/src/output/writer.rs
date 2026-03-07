@@ -1,7 +1,7 @@
 //! Write planning artifacts to the filesystem.
 
 use crate::error::WorkflowError;
-use crate::output::PlanningOutput;
+use crate::output::{AcceptanceTestsOutput, PlanningOutput, RedOutput};
 use std::fs;
 use std::path::Path;
 
@@ -54,5 +54,33 @@ pub fn write_artifacts(output_dir: &Path, planning: &PlanningOutput) -> Result<(
     let todo_path = output_dir.join("TODO.md");
     fs::write(&todo_path, &planning.todo).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
+    Ok(())
+}
+
+/// Write acceptance-tests.md to the plan directory.
+pub fn write_acceptance_tests_file(
+    plan_dir: &Path,
+    output: &AcceptanceTestsOutput,
+) -> Result<(), WorkflowError> {
+    let md_path = plan_dir.join("acceptance-tests.md");
+    let content = output.to_markdown();
+    fs::write(&md_path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    Ok(())
+}
+
+/// Write red-output.md to the plan directory.
+pub fn write_red_output_file(plan_dir: &Path, output: &RedOutput) -> Result<(), WorkflowError> {
+    let md_path = plan_dir.join("red-output.md");
+    let content = output.to_markdown();
+    fs::write(&md_path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    Ok(())
+}
+
+/// Write progress.md to the plan directory. Unfilled checkboxes for failed tests and skeletons.
+/// Next goal uses this to mark items as done, skipped, or failed.
+pub fn write_progress_file(plan_dir: &Path, output: &RedOutput) -> Result<(), WorkflowError> {
+    let md_path = plan_dir.join("progress.md");
+    let content = output.to_progress_markdown();
+    fs::write(&md_path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     Ok(())
 }

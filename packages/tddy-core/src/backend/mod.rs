@@ -36,7 +36,6 @@ pub struct InvokeRequest {
     pub debug: bool,
 }
 
-
 /// Permission mode for the backend (e.g. plan = read-only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionMode {

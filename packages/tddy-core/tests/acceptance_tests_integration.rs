@@ -211,6 +211,53 @@ fn plan_workflow_passes_goal_allowlist_to_invoke_request() {
     let _ = std::fs::remove_dir_all(&output_dir);
 }
 
+/// Acceptance-tests goal writes acceptance-tests.md to the plan directory after successful completion.
+#[test]
+fn acceptance_tests_workflow_writes_acceptance_tests_md_to_plan_dir() {
+    let plan_dir = std::env::temp_dir().join("tddy-at-writes-md");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    std::fs::write(plan_dir.join(".session"), "sess-writes-md").expect("write .session");
+
+    let backend = MockBackend::new();
+    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+
+    let mut workflow = Workflow::new(backend);
+    let options = AcceptanceTestsOptions::default();
+    let _ = workflow.acceptance_tests(&plan_dir, None, &options);
+
+    let md_path = plan_dir.join("acceptance-tests.md");
+    assert!(
+        md_path.exists(),
+        "acceptance-tests.md should be written to plan directory, path: {}",
+        md_path.display()
+    );
+    let content = std::fs::read_to_string(&md_path).expect("read acceptance-tests.md");
+    assert!(
+        content.contains("login_stores_session_token"),
+        "acceptance-tests.md should contain test names"
+    );
+    assert!(
+        content.contains("failing"),
+        "acceptance-tests.md should contain test status"
+    );
+    assert!(
+        content.contains("How to run tests"),
+        "acceptance-tests.md should contain How to run tests section"
+    );
+    assert!(
+        content.contains("Prerequisite actions"),
+        "acceptance-tests.md should contain Prerequisite actions section"
+    );
+    assert!(
+        content.contains("How to run a single or selected tests"),
+        "acceptance-tests.md should contain How to run a single or selected tests section"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
 #[test]
 fn plan_workflow_writes_session_file_to_output_directory() {
     let backend = MockBackend::new();

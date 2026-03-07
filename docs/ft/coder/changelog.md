@@ -2,6 +2,13 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-07 — Red Goal & Acceptance-Tests.md
+
+- **Red goal**: `--goal red --plan-dir <path>` reads PRD.md and acceptance-tests.md, creates skeleton production code and failing lower-level tests via Claude
+- **acceptance-tests.md**: acceptance-tests goal now writes acceptance-tests.md (structured list + rich descriptions) to the plan directory
+- **State machine**: New states RedTesting, RedTestsReady
+- **CLI**: `--goal red` requires `--plan-dir`
+
 ## 2026-03-07 — Permission Handling in Claude Code Print Mode
 
 - **Print mode constraint**: tddy-coder uses Claude Code in print mode (`-p`); stdin is not used for interactive permission prompts
