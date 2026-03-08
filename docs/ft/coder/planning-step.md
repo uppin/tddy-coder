@@ -27,11 +27,11 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 7. Accepts `--plan-dir <path>`: path to plan output directory; required when `--goal acceptance-tests`, `--goal red`, or `--goal green`; used for resume when running full workflow
 8. Accepts `--output-dir <path>` to configure where planning output is written (default: current directory)
 9. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
-10. Accepts `--agent-output` to print raw agent output to stderr in real time
-11. Accepts `--conversation-output <path>` to log the entire agent conversation in raw bytes to a file (Updated: 2026-03-07)
-12. Accepts `--debug` to print CLI command and cwd before running (for debugging empty output)
-13. Accepts `--agent <name>` to select backend: `claude` (default) or `cursor`
-14. Reads the feature description from stdin (supports piped input and interactive prompt), or from `--prompt <text>` when provided
+10. Accepts `--conversation-output <path>` to log the entire agent conversation in raw bytes to a file (Updated: 2026-03-07)
+11. Accepts `--debug` to print CLI command and cwd before running (for debugging empty output)
+12. Accepts `--agent <name>` to select backend: `claude` (default) or `cursor`
+13. Reads the feature description from stdin (supports piped input and interactive prompt), or from `--prompt <text>` when provided
+14. **TUI mode**: When both stdin and stderr are TTY, runs full TUI (activity log, status bar, prompt bar). Agent output is always visible. Piped/non-TTY uses plain linear output.
 15. *Deferred*: `--list-models` to list available models (not needed for current scope)
 
 ### Planning Workflow (Updated: 2026-03-07)
@@ -76,7 +76,7 @@ The PRD must include a **Testing Plan** section with: test level (E2E/Integratio
 6. **Model selection**: Passes `--model <name>` to the `claude` binary. Model comes from `changeset.yaml` when `--model` is not specified; CLI `--model` overrides.
 7. **Output format**: Uses `--output-format=stream-json` for NDJSON event stream (tool_use, result, task_progress).
 8. **Session management**: First invoke uses `--session-id <uuid>`; Q&A followup uses `--resume <uuid>` so Claude retains context across the exchange. Session IDs are persisted in `changeset.yaml`.
-9. **Structured Q&A**: Clarifying questions come from `AskUserQuestion` tool events (header, question, options, multi_select). Presented via inquire Select/MultiSelect prompts. Questions and answers are stored in `changeset.yaml` as `clarification_qa`.
+9. **Structured Q&A**: Clarifying questions come from `AskUserQuestion` tool events (header, question, options, multi_select). In TUI mode, presented via ratatui Select/MultiSelect widgets with "Other (type your own)" option. In plain mode, presented via stdin (one answer per line). Questions and answers are stored in `changeset.yaml` as `clarification_qa`.
 10. **Real-time progress**: Tool activity (Read, Glob, Bash, etc.) displayed while Claude works.
 11. **Output parsing**: System prompt instructs Claude to emit PRD and TODO in `<structured-response content-type="application-json">` format; parser also supports delimiter fallback.
 12. **Structured output validation**: Each goal's output is validated against a JSON Schema file before serde deserialization. Schemas are embedded in the binary via `include_dir`, written to `{plan-dir}/schemas/` for the agent to read via its Read tool. The agent's working directory is the plan directory, so `schemas/plan.schema.json` resolves to `{plan-dir}/schemas/plan.schema.json`. System prompts reference the schema path and instruct the agent to emit the `schema="..."` attribute on the `<structured-response>` tag. On validation failure, the session resumes with validation errors (1 retry); the retry prompt includes the schema path and error details. (Updated: 2026-03-08)
@@ -206,7 +206,7 @@ When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → 
 - [ ] Output prints a summary of created tests, their paths, and failing status
 - [ ] State machine transitions: Init/Planned → AcceptanceTesting → AcceptanceTestsReady
 - [ ] Error handling: missing plan-dir, missing PRD.md, missing changeset.yaml, session resume failure
-- [ ] `--model` and `--agent-output` flags work with the acceptance-tests goal
+- [ ] `--model` flag works with the acceptance-tests goal
 - [ ] acceptance-tests goal writes acceptance-tests.md to the plan directory
 
 ## Future Considerations (Not In Scope)

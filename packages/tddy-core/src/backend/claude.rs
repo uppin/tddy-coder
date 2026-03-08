@@ -260,12 +260,12 @@ impl super::CodingBackend for ClaudeCodeBackend {
 
         // Always log spawn for debugging backend/binary confusion (e.g. claude -> cursor)
         let resolved = which_binary(&self.binary_path);
-        eprintln!(
+        crate::debug_eprintln!(
             "[tddy-coder] Claude backend spawning: {} (resolved: {})",
             self.binary_path.display(),
             resolved
         );
-        eprintln!(
+        crate::debug_eprintln!(
             "[tddy-coder] cmd: {} {}",
             self.binary_path.display(),
             args.join(" ")
@@ -281,8 +281,8 @@ impl super::CodingBackend for ClaudeCodeBackend {
                         .map(|p| p.display().to_string())
                         .unwrap_or_else(|_| "(unknown)".into())
                 });
-            eprintln!("[tddy-coder debug] cwd: {}", cwd);
-            eprintln!(
+            crate::debug_eprintln!("[tddy-coder debug] cwd: {}", cwd);
+            crate::debug_eprintln!(
                 "[tddy-coder debug] cmd: {} {}",
                 self.binary_path.display(),
                 args.join(" ")
@@ -328,15 +328,24 @@ impl super::CodingBackend for ClaudeCodeBackend {
             }
         };
 
+        let skip_until_line = if request.is_resume {
+            request
+                .conversation_output_path
+                .as_ref()
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .map(|c| c.lines().filter(|l| !l.trim().is_empty()).count())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
         let mut on_raw_output = |s: &str| {
-            if request.agent_output {
-                eprint!("{}", s);
-            }
+            eprint!("{}", s);
         };
 
         let mut on_debug_line = |line: &str| {
             if request.debug {
-                eprintln!("[tddy-coder debug] {}", line);
+                crate::debug_eprintln!("[tddy-coder debug] {}", line);
             }
         };
 
@@ -367,7 +376,7 @@ impl super::CodingBackend for ClaudeCodeBackend {
                 } else {
                     line.to_string()
                 };
-                eprintln!("[tddy-coder] first stream line (format hint): {}", preview);
+                crate::debug_eprintln!("[tddy-coder] first stream line (format hint): {}", preview);
             }
             if let Some(ref mut f) = conv_file {
                 let _ = writeln!(f, "{}", line);
@@ -390,6 +399,7 @@ impl super::CodingBackend for ClaudeCodeBackend {
             } else {
                 None
             },
+            skip_until_line,
         )
         .map_err(|e| BackendError::InvocationFailed(format!("stream parse error: {}", e)))?;
 

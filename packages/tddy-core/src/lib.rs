@@ -1,6 +1,7 @@
 //! Core library for tddy-coder.
 
 pub mod backend;
+mod quiet;
 pub mod changeset;
 pub mod error;
 pub mod output;

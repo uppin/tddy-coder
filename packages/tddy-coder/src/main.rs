@@ -1,15 +1,23 @@
 //! tddy-coder CLI binary.
 
+mod plain;
+mod tui;
+
 use anyhow::Context;
 use clap::Parser;
-use inquire::{MultiSelect, Select, Text};
-use std::io::{self, BufRead, IsTerminal, Read};
+use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc;
+use std::thread;
 use tddy_core::{
-    next_goal_for_state, read_changeset, AcceptanceTestsOptions, AnyBackend, ClarificationQuestion,
-    ClaudeCodeBackend, CodingBackend, CursorBackend, GreenOptions, PlanOptions, ProgressEvent,
-    RedOptions, ValidateOptions, Workflow, WorkflowError, WorkflowState,
+    next_goal_for_state, read_changeset, AcceptanceTestsOptions, AnyBackend, ClaudeCodeBackend,
+    CodingBackend, CursorBackend, GreenOptions, PlanOptions, ProgressEvent, RedOptions,
+    ValidateOptions, Workflow, WorkflowError, WorkflowState,
 };
+
+use crate::tui::event::TuiEvent;
+use crate::tui::state::should_run_tui;
 
 #[derive(Parser, Debug)]
 #[command(name = "tddy-coder")]
@@ -26,10 +34,6 @@ struct Args {
     /// Plan directory (required when goal is acceptance-tests, red, or green)
     #[arg(long)]
     plan_dir: Option<PathBuf>,
-
-    /// Print raw agent output to stderr in real-time
-    #[arg(long)]
-    agent_output: bool,
 
     /// Write entire agent conversation (raw bytes) to file
     #[arg(long)]
@@ -64,9 +68,14 @@ fn main() -> anyhow::Result<()> {
     .expect("failed to set Ctrl+C handler");
 
     let args = Args::parse();
+    let shutdown = AtomicBool::new(false);
 
     if args.goal.is_none() {
-        return run_full_workflow(&args);
+        let use_tui = should_run_tui(io::stdin().is_terminal(), io::stderr().is_terminal());
+        if use_tui {
+            return run_full_workflow_tui(&args, &shutdown);
+        }
+        return run_full_workflow_plain(&args);
     }
 
     if args.goal.as_deref() == Some("acceptance-tests") {
@@ -75,16 +84,15 @@ fn main() -> anyhow::Result<()> {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for acceptance-tests goal"))?;
 
-        let model = args.model.as_deref().unwrap_or("sonnet");
         let mut workflow = create_workflow(&args.agent);
         eprintln!("agent: {}", workflow.backend().name());
-        eprintln!("model: {}", model);
+        eprintln!("model: {}", args.model.as_deref().unwrap_or("sonnet"));
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
         loop {
             let options = AcceptanceTestsOptions {
                 model: args.model.clone(),
-                agent_output: args.agent_output,
+                agent_output: true,
                 conversation_output_path: args.conversation_output.clone(),
                 inherit_stdin,
                 allowed_tools_extras: args.allowed_tools.clone(),
@@ -117,7 +125,7 @@ fn main() -> anyhow::Result<()> {
                     return Ok(());
                 }
                 Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
-                    answers = Some(read_answers(&questions).context("read answers")?);
+                    answers = Some(plain::read_answers_plain(&questions).context("read answers")?);
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -130,16 +138,15 @@ fn main() -> anyhow::Result<()> {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for green goal"))?;
 
-        let model = args.model.as_deref().unwrap_or("sonnet");
         let mut workflow = create_workflow(&args.agent);
         eprintln!("agent: {}", workflow.backend().name());
-        eprintln!("model: {}", model);
+        eprintln!("model: {}", args.model.as_deref().unwrap_or("sonnet"));
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
         loop {
             let options = GreenOptions {
                 model: args.model.clone(),
-                agent_output: args.agent_output,
+                agent_output: true,
                 conversation_output_path: args.conversation_output.clone(),
                 inherit_stdin,
                 allowed_tools_extras: args.allowed_tools.clone(),
@@ -181,7 +188,7 @@ fn main() -> anyhow::Result<()> {
                     return Ok(());
                 }
                 Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
-                    answers = Some(read_answers(&questions).context("read answers")?);
+                    answers = Some(plain::read_answers_plain(&questions).context("read answers")?);
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -198,7 +205,7 @@ fn main() -> anyhow::Result<()> {
         eprintln!("[tddy-coder] backend: {}", workflow.backend().name());
         let options = ValidateOptions {
             model: args.model.clone(),
-            agent_output: args.agent_output,
+            agent_output: true,
             conversation_output_path: args.conversation_output.clone(),
             inherit_stdin: io::stdin().is_terminal(),
             allowed_tools_extras: args.allowed_tools.clone(),
@@ -223,16 +230,15 @@ fn main() -> anyhow::Result<()> {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for red goal"))?;
 
-        let model = args.model.as_deref().unwrap_or("sonnet");
         let mut workflow = create_workflow(&args.agent);
         eprintln!("agent: {}", workflow.backend().name());
-        eprintln!("model: {}", model);
+        eprintln!("model: {}", args.model.as_deref().unwrap_or("sonnet"));
         let inherit_stdin = io::stdin().is_terminal();
         let mut answers: Option<String> = None;
         loop {
             let options = RedOptions {
                 model: args.model.clone(),
-                agent_output: args.agent_output,
+                agent_output: true,
                 conversation_output_path: args.conversation_output.clone(),
                 inherit_stdin,
                 allowed_tools_extras: args.allowed_tools.clone(),
@@ -274,7 +280,7 @@ fn main() -> anyhow::Result<()> {
                     return Ok(());
                 }
                 Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
-                    answers = Some(read_answers(&questions).context("read answers")?);
+                    answers = Some(plain::read_answers_plain(&questions).context("read answers")?);
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -294,17 +300,16 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("empty feature description");
     }
 
-    let model = args.model.as_deref().unwrap_or("opus");
     let mut workflow = create_workflow(&args.agent);
     eprintln!("agent: {}", workflow.backend().name());
-    eprintln!("model: {}", model);
+    eprintln!("model: {}", args.model.as_deref().unwrap_or("opus"));
 
     let inherit_stdin = io::stdin().is_terminal();
     let mut answers: Option<String> = None;
     loop {
         let options = PlanOptions {
             model: args.model.clone(),
-            agent_output: args.agent_output,
+            agent_output: true,
             conversation_output_path: args.conversation_output.clone(),
             inherit_stdin,
             allowed_tools_extras: args.allowed_tools.clone(),
@@ -318,7 +323,7 @@ fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
             Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
-                answers = Some(read_answers(&questions).context("read answers")?);
+                answers = Some(plain::read_answers_plain(&questions).context("read answers")?);
             }
             Err(e) => return Err(e.into()),
         }
@@ -328,7 +333,6 @@ fn main() -> anyhow::Result<()> {
 fn on_progress(event: &ProgressEvent) {
     let dim = "\x1b[2m";
     let reset = "\x1b[0m";
-    // Ensure progress lines start on a new line (agent_output may have printed text without newline).
     let prefix = "\n";
     match event {
         ProgressEvent::ToolUse {
@@ -360,7 +364,239 @@ fn create_workflow(agent: &str) -> Workflow<AnyBackend> {
     Workflow::new(backend).with_on_state_change(|from, to| eprintln!("State: {} → {}", from, to))
 }
 
-fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
+fn create_workflow_for_tui(agent: &str, event_tx: mpsc::Sender<TuiEvent>) -> Workflow<AnyBackend> {
+    let tx = event_tx.clone();
+    let progress = move |ev: &ProgressEvent| {
+        let _ = tx.send(TuiEvent::Progress(ev.clone()));
+    };
+    let tx2 = event_tx.clone();
+    let state_change = move |from: &str, to: &str| {
+        let _ = tx2.send(TuiEvent::StateChange {
+            from: from.to_string(),
+            to: to.to_string(),
+        });
+    };
+    let backend: AnyBackend = match agent {
+        "cursor" => AnyBackend::Cursor(CursorBackend::new().with_progress(progress)),
+        _ => AnyBackend::Claude(ClaudeCodeBackend::new().with_progress(progress)),
+    };
+    Workflow::new(backend).with_on_state_change(state_change)
+}
+
+struct WorkflowThreadArgs {
+    output_dir: PathBuf,
+    plan_dir: Option<PathBuf>,
+    conversation_output: Option<PathBuf>,
+    model: Option<String>,
+    allowed_tools: Option<Vec<String>>,
+    debug: bool,
+    agent: String,
+    prompt: Option<String>,
+}
+
+fn run_full_workflow_tui(args: &Args, shutdown: &AtomicBool) -> anyhow::Result<()> {
+    std::env::set_var("TDDY_QUIET", "1");
+    let (event_tx, event_rx) = mpsc::channel();
+    let (answer_tx, answer_rx) = mpsc::sync_channel(0);
+
+    let thread_args = WorkflowThreadArgs {
+        output_dir: args.output_dir.clone(),
+        plan_dir: args.plan_dir.clone(),
+        conversation_output: args.conversation_output.clone(),
+        model: args.model.clone(),
+        allowed_tools: args.allowed_tools.clone(),
+        debug: args.debug,
+        agent: args.agent.clone(),
+        prompt: args.prompt.clone(),
+    };
+
+    let event_tx_clone = event_tx.clone();
+    let workflow_handle = thread::spawn(move || {
+        run_workflow_thread(thread_args, event_tx_clone, answer_rx)
+    });
+
+    let result = tui::run::run_tui_event_loop(event_rx, answer_tx, shutdown);
+
+    let _ = workflow_handle.join();
+    result
+}
+
+fn run_workflow_thread(
+    args: WorkflowThreadArgs,
+    event_tx: mpsc::Sender<TuiEvent>,
+    answer_rx: mpsc::Receiver<String>,
+) {
+    let WorkflowThreadArgs {
+        output_dir,
+        plan_dir: plan_dir_arg,
+        conversation_output,
+        model,
+        allowed_tools,
+        debug,
+        agent,
+        prompt,
+    } = args;
+    let inherit_stdin = true;
+
+    let mut workflow = create_workflow_for_tui(&agent, event_tx.clone());
+    event_tx.send(TuiEvent::GoalStarted("plan".to_string())).ok();
+
+    let plan_dir = if let Some(ref plan_dir) = plan_dir_arg {
+        plan_dir.clone()
+    } else {
+        let input = if let Some(p) = prompt {
+            p
+        } else {
+            match answer_rx.recv() {
+                Ok(s) => s,
+                Err(_) => return,
+            }
+        };
+        let input = input.trim().to_string();
+        if input.is_empty() {
+            let _ = event_tx.send(TuiEvent::WorkflowComplete(Err("empty feature description".into())));
+            return;
+        }
+        let plan_options = PlanOptions {
+            model: model.clone(),
+            agent_output: true,
+            conversation_output_path: conversation_output.clone(),
+            inherit_stdin,
+            allowed_tools_extras: allowed_tools.clone(),
+            debug,
+        };
+        let mut answers: Option<String> = None;
+        loop {
+            let result = workflow.plan(&input, &output_dir, answers.as_deref(), &plan_options);
+            match result {
+                Ok(output_path) => break output_path,
+                Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
+                    let _ = event_tx.send(TuiEvent::ClarificationNeeded { questions });
+                    match answer_rx.recv() {
+                        Ok(a) => answers = Some(a),
+                        Err(_) => return,
+                    }
+                }
+                Err(e) => {
+                    let _ = event_tx.send(TuiEvent::WorkflowComplete(Err(e.to_string())));
+                    return;
+                }
+            }
+        }
+    };
+
+    let cs = read_changeset(&plan_dir).ok();
+    let start_goal = cs
+        .as_ref()
+        .and_then(|c| next_goal_for_state(&c.state.current))
+        .unwrap_or("plan");
+
+    let run_acceptance_tests = matches!(start_goal, "plan" | "acceptance-tests");
+    let run_red = matches!(start_goal, "plan" | "acceptance-tests" | "red");
+
+    if run_acceptance_tests {
+        if cs.as_ref().map(|c| c.state.current.as_str()) == Some("Planned") {
+            workflow.restore_state(WorkflowState::Planned {
+                output_dir: plan_dir.to_path_buf(),
+            });
+        }
+        event_tx.send(TuiEvent::GoalStarted("acceptance-tests".to_string())).ok();
+        let at_options = AcceptanceTestsOptions {
+            model: model.clone(),
+            agent_output: true,
+            conversation_output_path: conversation_output.clone(),
+            inherit_stdin,
+            allowed_tools_extras: allowed_tools.clone(),
+            debug,
+        };
+        let mut answers: Option<String> = None;
+        loop {
+            let result = workflow.acceptance_tests(&plan_dir, answers.as_deref(), &at_options);
+            match result {
+                Ok(_) => break,
+                Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
+                    let _ = event_tx.send(TuiEvent::ClarificationNeeded { questions });
+                    match answer_rx.recv() {
+                        Ok(a) => answers = Some(a),
+                        Err(_) => return,
+                    }
+                }
+                Err(e) => {
+                    let _ = event_tx.send(TuiEvent::WorkflowComplete(Err(e.to_string())));
+                    return;
+                }
+            }
+        }
+    }
+
+    if run_red {
+        event_tx.send(TuiEvent::GoalStarted("red".to_string())).ok();
+        let red_options = RedOptions {
+            model: model.clone(),
+            agent_output: true,
+            conversation_output_path: conversation_output.clone(),
+            inherit_stdin,
+            allowed_tools_extras: allowed_tools.clone(),
+            debug,
+        };
+        let mut answers: Option<String> = None;
+        loop {
+            let result = workflow.red(&plan_dir, answers.as_deref(), &red_options);
+            match result {
+                Ok(_) => break,
+                Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
+                    let _ = event_tx.send(TuiEvent::ClarificationNeeded { questions });
+                    match answer_rx.recv() {
+                        Ok(a) => answers = Some(a),
+                        Err(_) => return,
+                    }
+                }
+                Err(e) => {
+                    let _ = event_tx.send(TuiEvent::WorkflowComplete(Err(e.to_string())));
+                    return;
+                }
+            }
+        }
+    }
+
+    event_tx.send(TuiEvent::GoalStarted("green".to_string())).ok();
+    let green_options = GreenOptions {
+        model: model.clone(),
+        agent_output: true,
+        conversation_output_path: conversation_output.clone(),
+        inherit_stdin,
+        allowed_tools_extras: allowed_tools.clone(),
+        debug,
+    };
+    let mut answers: Option<String> = None;
+    loop {
+        let result = workflow.green(&plan_dir, answers.as_deref(), &green_options);
+        match result {
+            Ok(output) => {
+                let summary = format!(
+                    "{}\nPlan dir: {}",
+                    output.summary,
+                    plan_dir.display()
+                );
+                let _ = event_tx.send(TuiEvent::WorkflowComplete(Ok(summary)));
+                return;
+            }
+            Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
+                let _ = event_tx.send(TuiEvent::ClarificationNeeded { questions });
+                match answer_rx.recv() {
+                    Ok(a) => answers = Some(a),
+                    Err(_) => return,
+                }
+            }
+            Err(e) => {
+                let _ = event_tx.send(TuiEvent::WorkflowComplete(Err(e.to_string())));
+                return;
+            }
+        }
+    }
+}
+
+fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
     let model = args.model.as_deref().unwrap_or("opus");
     let workflow = create_workflow(&args.agent);
     eprintln!("agent: {}", workflow.backend().name());
@@ -379,7 +615,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
         let mut workflow = create_workflow(&args.agent);
         let plan_options = PlanOptions {
             model: args.model.clone(),
-            agent_output: args.agent_output,
+            agent_output: true,
             conversation_output_path: args.conversation_output.clone(),
             inherit_stdin,
             allowed_tools_extras: args.allowed_tools.clone(),
@@ -391,7 +627,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
             match result {
                 Ok(output_path) => break output_path,
                 Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
-                    answers = Some(read_answers(&questions).context("read answers")?);
+                    answers = Some(plain::read_answers_plain(&questions).context("read answers")?);
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -416,7 +652,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
         }
         let at_options = AcceptanceTestsOptions {
             model: args.model.clone(),
-            agent_output: args.agent_output,
+            agent_output: true,
             conversation_output_path: args.conversation_output.clone(),
             inherit_stdin,
             allowed_tools_extras: args.allowed_tools.clone(),
@@ -428,7 +664,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
             match result {
                 Ok(_) => break,
                 Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
-                    answers = Some(read_answers(&questions).context("read answers")?);
+                    answers = Some(plain::read_answers_plain(&questions).context("read answers")?);
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -438,7 +674,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
     if run_red {
         let red_options = RedOptions {
             model: args.model.clone(),
-            agent_output: args.agent_output,
+            agent_output: true,
             conversation_output_path: args.conversation_output.clone(),
             inherit_stdin,
             allowed_tools_extras: args.allowed_tools.clone(),
@@ -450,7 +686,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
             match result {
                 Ok(_) => break,
                 Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
-                    answers = Some(read_answers(&questions).context("read answers")?);
+                    answers = Some(plain::read_answers_plain(&questions).context("read answers")?);
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -459,7 +695,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
 
     let green_options = GreenOptions {
         model: args.model.clone(),
-        agent_output: args.agent_output,
+        agent_output: true,
         conversation_output_path: args.conversation_output.clone(),
         inherit_stdin,
         allowed_tools_extras: args.allowed_tools.clone(),
@@ -502,97 +738,19 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
                 return Ok(());
             }
             Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
-                answers = Some(read_answers(&questions).context("read answers")?);
+                answers = Some(plain::read_answers_plain(&questions).context("read answers")?);
             }
             Err(e) => return Err(e.into()),
         }
     }
 }
 
-/// Read feature description. Uses --prompt if set; otherwise stdin (interactive or piped).
+/// Read feature description. Uses --prompt if set; otherwise stdin.
 fn read_feature_input(args: &Args) -> anyhow::Result<String> {
     if let Some(ref p) = args.prompt {
         return Ok(p.clone());
     }
-    let stdin = io::stdin();
-    if stdin.is_terminal() {
-        Text::new("Feature description:")
-            .with_help_message("Describe what you want to build (e.g. 'Build a user auth system')")
-            .prompt()
-            .map_err(|e| anyhow::anyhow!("{}", e))
-    } else {
-        let mut buf = String::new();
-        stdin.lock().read_to_string(&mut buf)?;
-        Ok(buf)
-    }
-}
-
-/// Strip leading "N. " or "N) " from a question if present (LLM often numbers them).
-fn strip_leading_number(s: &str) -> String {
-    let s = s.trim();
-    let rest = s.trim_start_matches(|c: char| c.is_ascii_digit());
-    if rest != s
-        && (rest.starts_with(". ")
-            || rest.starts_with(") ")
-            || rest.starts_with('.')
-            || rest.starts_with(')'))
-    {
-        let rest = rest.trim_start_matches(['.', ')', ' ']);
-        return rest.to_string();
-    }
-    s.to_string()
-}
-
-/// Read answers to clarification questions. When interactive (TTY), uses inquire.
-/// Uses Select/MultiSelect for option-based questions, Text for free-form.
-/// When piped, reads line by line until EOF.
-fn read_answers(questions: &[ClarificationQuestion]) -> anyhow::Result<String> {
-    let stdin = io::stdin();
-    if stdin.is_terminal() {
-        let mut answers = Vec::with_capacity(questions.len());
-        for q in questions {
-            let prompt = strip_leading_number(&q.question);
-            let answer = if q.options.is_empty() {
-                Text::new(&prompt)
-                    .with_help_message("Press Enter to submit")
-                    .prompt()
-                    .map_err(|e| anyhow::anyhow!("{}", e))?
-            } else if q.multi_select {
-                let options: Vec<&str> = q.options.iter().map(|o| o.label.as_str()).collect();
-                let chosen = MultiSelect::new(&prompt, options)
-                    .with_help_message("Space to select, Enter to confirm")
-                    .prompt()
-                    .map_err(|e| anyhow::anyhow!("{}", e))?;
-                chosen.join(", ")
-            } else {
-                let options: Vec<&str> = q.options.iter().map(|o| o.label.as_str()).collect();
-                Select::new(&prompt, options)
-                    .prompt()
-                    .map_err(|e| anyhow::anyhow!("{}", e))?
-                    .to_string()
-            };
-            answers.push(answer);
-        }
-        Ok(answers.join("\n"))
-    } else {
-        println!("\nClarification needed:");
-        for (i, q) in questions.iter().enumerate() {
-            let prompt = strip_leading_number(&q.question);
-            println!("  {}. {}", i + 1, prompt);
-        }
-        println!("\nEnter answers (one per line):");
-        let mut lines = Vec::with_capacity(questions.len());
-        let mut lock = stdin.lock();
-        let mut buf = String::new();
-        for _ in questions {
-            buf.clear();
-            let n = lock.read_line(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            let line = buf.trim_end_matches('\n').trim_end_matches('\r');
-            lines.push(line.to_string());
-        }
-        Ok(lines.join("\n"))
-    }
+    let mut buf = String::new();
+    io::stdin().lock().read_to_string(&mut buf)?;
+    Ok(buf)
 }

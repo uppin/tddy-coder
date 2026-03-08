@@ -83,6 +83,11 @@ my-crate/
 - **serde** — Serialization/deserialization framework
 - **serde_json** — JSON support
 
+### Terminal UI (tddy-coder)
+
+- **ratatui** — TUI framework for terminal layout and widgets (activity log, status bar, prompt bar)
+- **crossterm** — Cross-platform terminal manipulation (raw mode, alternate screen, key events)
+
 ### Logging & Observability
 
 - **tracing** — Structured logging and instrumentation

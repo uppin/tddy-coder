@@ -25,7 +25,7 @@ const NDJSON_WITH_QUESTIONS: &str = r#"{"type":"system","subtype":"init","sessio
 #[test]
 fn process_ndjson_extracts_result_text_and_session_id() {
     let cursor = Cursor::new(NDJSON_WITH_RESULT);
-    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None, None).expect("should process");
+    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(result.session_id, "sess-123");
     assert!(result.result_text.contains("---PRD_START---"));
@@ -37,7 +37,7 @@ fn process_ndjson_extracts_result_text_and_session_id() {
 #[test]
 fn process_ndjson_extracts_ask_user_question_events() {
     let cursor = Cursor::new(NDJSON_WITH_QUESTIONS);
-    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None, None).expect("should process");
+    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(result.session_id, "sess-456");
     assert_eq!(result.questions.len(), 1);
@@ -59,7 +59,7 @@ const NDJSON_DUPLICATE_QUESTIONS: &str = r#"{"type":"system","subtype":"init","s
 #[test]
 fn process_ndjson_deduplicates_questions() {
     let cursor = Cursor::new(NDJSON_DUPLICATE_QUESTIONS);
-    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None, None).expect("should process");
+    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(
         result.questions.len(),
@@ -80,7 +80,7 @@ const NDJSON_TASK_EVENTS: &str = r#"{"type":"system","subtype":"task_started","d
 fn process_ndjson_emits_progress_events_for_tasks_and_tools() {
     let cursor = Cursor::new(NDJSON_TASK_EVENTS);
     let mut events = Vec::new();
-    let result = process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None)
+    let result = process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
     assert_eq!(result.result_text, "done");
@@ -107,7 +107,7 @@ const NDJSON_GLOB_WITH_PATTERN: &str = r#"{"type":"system","subtype":"init","ses
 fn process_ndjson_extracts_glob_pattern_as_detail() {
     let cursor = Cursor::new(NDJSON_GLOB_WITH_PATTERN);
     let mut events = Vec::new();
-    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None)
+    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
     assert_eq!(events.len(), 1);
@@ -127,7 +127,7 @@ const NDJSON_WRITE_WITH_PATH: &str = r#"{"type":"system","subtype":"init","sessi
 fn process_ndjson_extracts_write_file_path_as_detail() {
     let cursor = Cursor::new(NDJSON_WRITE_WITH_PATH);
     let mut events = Vec::new();
-    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None)
+    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
     assert_eq!(events.len(), 1);
@@ -147,7 +147,7 @@ const NDJSON_READ_WITH_PATH: &str = r#"{"type":"system","subtype":"init","sessio
 fn process_ndjson_extracts_tool_use_detail_from_input() {
     let cursor = Cursor::new(NDJSON_READ_WITH_PATH);
     let mut events = Vec::new();
-    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None)
+    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
     assert_eq!(events.len(), 1);
@@ -168,7 +168,7 @@ const NDJSON_STRUCTURED_IN_TOOL_RESULT: &str = r#"{"type":"system","subtype":"in
 #[test]
 fn process_ndjson_extracts_structured_response_from_tool_result() {
     let cursor = Cursor::new(NDJSON_STRUCTURED_IN_TOOL_RESULT);
-    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None, None).expect("should process");
+    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(result.session_id, "s1");
     assert!(
@@ -191,7 +191,7 @@ const NDJSON_SUBAGENT_TOOL_USE: &str = r#"{"type":"system","subtype":"init","ses
 fn process_ndjson_skips_tool_use_when_parent_tool_use_id_set() {
     let cursor = Cursor::new(NDJSON_SUBAGENT_TOOL_USE);
     let mut events = Vec::new();
-    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None)
+    process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
     assert_eq!(
@@ -221,7 +221,7 @@ fn cursor_partial_chunks_ndjson() -> String {
 fn process_cursor_stream_concatenates_partial_chunks_for_parsing() {
     let ndjson = cursor_partial_chunks_ndjson();
     let cursor = Cursor::new(ndjson);
-    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None, None).expect("should process");
+    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(result.session_id, "cursor-sess");
     assert!(
@@ -255,7 +255,7 @@ fn process_cursor_stream_emits_tool_use_with_detail_for_display() {
     let ndjson = cursor_tool_calls_with_detail_ndjson();
     let cursor = Cursor::new(ndjson);
     let mut events = Vec::new();
-    let _ = process_cursor_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None)
+    let _ = process_cursor_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
     assert_eq!(events.len(), 2, "should emit 2 ToolUse events");
@@ -284,7 +284,7 @@ fn cursor_ask_question_ndjson() -> String {
 fn process_cursor_stream_extracts_ask_user_question_for_qa() {
     let ndjson = cursor_ask_question_ndjson();
     let cursor = Cursor::new(ndjson);
-    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None, None).expect("should process");
+    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(result.questions.len(), 1, "should extract 1 question");
     assert_eq!(result.questions[0].header, "Tech Stack");
@@ -334,7 +334,7 @@ fn process_cursor_stream_falls_back_to_clarification_questions_block() {
     let line3 = r#"{"type":"result","result":"","session_id":"s3"}"#;
     let ndjson = format!("{}\n{}\n{}\n", line1, line2, line3);
     let cursor = Cursor::new(ndjson);
-    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None, None).expect("should process");
+    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(
         result.questions.len(),
@@ -354,7 +354,7 @@ fn process_cursor_stream_extracts_ask_question_tool_call() {
     let line3 = r#"{"type":"result","result":"","session_id":"s2"}"#;
     let ndjson = format!("{}\n{}\n{}\n", line1, line2, line3);
     let cursor = Cursor::new(ndjson);
-    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None, None).expect("should process");
+    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(result.questions.len(), 1);
     assert_eq!(result.questions[0].header, "Confirm");
