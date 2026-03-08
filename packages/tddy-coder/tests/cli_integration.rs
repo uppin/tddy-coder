@@ -144,9 +144,10 @@ fn cli_accepts_output_dir_flag() {
         "expected success: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let plan_dir = std::path::Path::new(stdout.trim());
     assert!(
-        stdout.trim().ends_with("PRD.md"),
-        "stdout should be path to PRD.md: {}",
+        plan_dir.is_dir() && plan_dir.join("PRD.md").exists(),
+        "stdout should be plan dir path with PRD.md: {}",
         stdout
     );
 
@@ -258,9 +259,10 @@ fn cli_accepts_prompt_flag_instead_of_stdin() {
         String::from_utf8_lossy(&output.stderr),
         stdout
     );
+    let plan_dir = std::path::Path::new(stdout.trim());
     assert!(
-        stdout.trim().ends_with("PRD.md"),
-        "stdout should be path to PRD.md: {}",
+        plan_dir.is_dir() && plan_dir.join("PRD.md").exists(),
+        "stdout should be plan dir path with PRD.md: {}",
         stdout
     );
 
@@ -356,9 +358,15 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
         "expected Q&A prompt in stdout: {}",
         stdout
     );
+    let last_line = stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .last()
+        .unwrap_or("");
+    let plan_dir = std::path::Path::new(last_line.trim());
     assert!(
-        stdout.trim().ends_with("PRD.md"),
-        "stdout should be path to PRD.md: {}",
+        plan_dir.is_dir() && plan_dir.join("PRD.md").exists(),
+        "stdout should end with plan dir path with PRD.md: {}",
         stdout
     );
 

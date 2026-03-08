@@ -391,6 +391,11 @@ impl<B: CodingBackend> Workflow<B> {
         std::fs::write(&system_prompt_path, &system_prompt)
             .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
+        // Canonicalize so path is absolute; backend runs with cwd=output_path, so relative paths
+        // would resolve incorrectly (e.g. ./plan-dir/system-prompt-plan.md → plan-dir/plan-dir/...).
+        let system_prompt_path = std::fs::canonicalize(&system_prompt_path)
+            .map_err(|e| WorkflowError::WriteFailed(format!("canonicalize system prompt path: {}", e)))?;
+
         let _ = crate::schema::write_all_schemas_to_dir(&output_path);
 
         let prompt = match answers {
@@ -493,6 +498,27 @@ impl<B: CodingBackend> Workflow<B> {
         };
 
         write_artifacts(&output_path, &planning)?;
+
+        // R1: If the agent supplied a valid plan_dir_suggestion, relocate the staging directory.
+        let output_path = if let Some(ref disc) = planning.discovery {
+            if let Some(ref suggestion) = disc.plan_dir_suggestion {
+                eprintln!("[plan] plan_dir_suggestion={:?}", suggestion);
+                match relocate_plan_dir(&output_path, suggestion, &dir_name, output_dir) {
+                    Ok(new_path) => {
+                        eprintln!("[plan] plan dir relocated to {:?}", new_path);
+                        new_path
+                    }
+                    Err(e) => {
+                        eprintln!("[plan] relocation failed (keeping staging): {}", e);
+                        output_path
+                    }
+                }
+            } else {
+                output_path
+            }
+        } else {
+            output_path
+        };
 
         if let Some(ref sid) = self.session_id {
             let clarification_qa = match (self.pending_clarification_questions.take(), answers) {
@@ -1417,5 +1443,288 @@ impl<B: CodingBackend> Workflow<B> {
         });
 
         Ok(output)
+    }
+}
+
+// ── Plan directory relocation helpers (R1, R2, R4) ───────────────────────────
+
+/// Walk up from `dir` looking for a `.git` directory.
+/// Falls back to `dir`'s parent if none found (or to `dir` itself if it has no parent).
+fn find_git_root(dir: &Path) -> PathBuf {
+    eprintln!(r#"{{"tddy":{{"marker_id":"M001","scope":"workflow::find_git_root","data":{{}}}}}}"#);
+    let mut current = dir.to_path_buf();
+    loop {
+        if current.join(".git").exists() {
+            eprintln!("[find_git_root] found .git at {:?}", current);
+            return current;
+        }
+        match current.parent() {
+            Some(parent) if parent != current => {
+                current = parent.to_path_buf();
+            }
+            _ => break,
+        }
+    }
+    // R2 fallback: return dir's immediate parent (or dir itself if no parent)
+    eprintln!("[find_git_root] no .git found, falling back to parent of {:?}", dir);
+    dir.parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| dir.to_path_buf())
+}
+
+/// Recursively copy `src` directory to `dst`. Used for cross-device moves (R4).
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Relocate the plan directory from the staging location to the path suggested by the agent.
+///
+/// # Arguments
+/// * `staging` – current (staging) path of the plan directory
+/// * `suggestion` – raw `plan_dir_suggestion` string from the agent
+/// * `dir_name` – the bare directory name (e.g. `"2026-03-08-my-feature"`)
+/// * `output_dir` – the original output directory (used to find the git root)
+///
+/// Returns the final path.  On any invalid suggestion the function falls back to `staging`
+/// and returns `Ok(staging.to_path_buf())` — it never returns `Err` for validation failures.
+fn relocate_plan_dir(
+    staging: &Path,
+    suggestion: &str,
+    dir_name: &str,
+    output_dir: &Path,
+) -> Result<PathBuf, WorkflowError> {
+    eprintln!(r#"{{"tddy":{{"marker_id":"M002","scope":"workflow::relocate_plan_dir","data":{{}}}}}}"#);
+
+    // R3: Reject empty / whitespace-only suggestions
+    let suggestion = suggestion.trim();
+    if suggestion.is_empty() {
+        eprintln!("[relocate_plan_dir] empty suggestion → falling back to staging");
+        return Ok(staging.to_path_buf());
+    }
+
+    // R3: Reject absolute paths
+    if std::path::Path::new(suggestion).is_absolute() {
+        eprintln!("[relocate_plan_dir] absolute path rejected: {}", suggestion);
+        return Ok(staging.to_path_buf());
+    }
+
+    // R3: Reject paths containing `..`
+    if suggestion.contains("..") {
+        eprintln!("[relocate_plan_dir] dotdot path rejected: {}", suggestion);
+        return Ok(staging.to_path_buf());
+    }
+
+    // R2: Find the git root relative to the output directory
+    let git_root = find_git_root(output_dir);
+    eprintln!("[relocate_plan_dir] git_root={:?}", git_root);
+
+    // Build the target: git_root / suggestion (stripped trailing slash) / dir_name
+    let target = git_root
+        .join(suggestion.trim_end_matches('/'))
+        .join(dir_name);
+    eprintln!("[relocate_plan_dir] staging={:?} target={:?}", staging, target);
+
+    // R3: If the suggestion resolves to the same path as staging → no-op
+    if target == staging {
+        eprintln!("[relocate_plan_dir] target == staging → no-op");
+        return Ok(staging.to_path_buf());
+    }
+
+    // R3: If target already exists → error with a clear message
+    if target.exists() {
+        return Err(WorkflowError::WriteFailed(format!(
+            "relocate_plan_dir: target directory already exists: {}",
+            target.display()
+        )));
+    }
+
+    // Create parent directories for the target
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            WorkflowError::WriteFailed(format!("create target parent dirs: {}", e))
+        })?;
+    }
+
+    // R4: Try a fast rename first; on cross-device failure fall back to copy+delete
+    if std::fs::rename(staging, &target).is_err() {
+        eprintln!("[relocate_plan_dir] rename failed (cross-device?), falling back to copy+delete");
+        copy_dir_recursive(staging, &target).map_err(|e| {
+            WorkflowError::WriteFailed(format!("copy staging dir: {}", e))
+        })?;
+        std::fs::remove_dir_all(staging).map_err(|e| {
+            WorkflowError::WriteFailed(format!("remove staging dir after copy: {}", e))
+        })?;
+    }
+
+    eprintln!("[relocate_plan_dir] relocated {:?} → {:?}", staging, target);
+    Ok(target)
+}
+
+#[cfg(test)]
+mod relocation_tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("tddy-wr-{}", label));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    // ── R4: valid suggestion moves directory ─────────────────────────────────
+
+    #[test]
+    fn test_relocate_valid_suggestion() {
+        let root = temp_dir("relocate-valid");
+        fs::create_dir_all(root.join(".git")).unwrap();
+
+        let output_dir = root.join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let dir_name = "2026-03-08-my-feature";
+        let staging = output_dir.join(dir_name);
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(staging.join("PRD.md"), "# PRD").unwrap();
+
+        let result = relocate_plan_dir(&staging, "docs/plans/", dir_name, &output_dir)
+            .expect("valid suggestion should succeed");
+
+        let expected = root.join("docs/plans").join(dir_name);
+        assert_eq!(result, expected, "final path should be at suggested location");
+        assert!(expected.exists(), "target directory should exist");
+        assert!(expected.join("PRD.md").exists(), "PRD.md should be present at target");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // ── R3: absolute-path suggestion falls back silently ──────────────────────
+
+    #[test]
+    fn test_relocate_invalid_absolute_path() {
+        let root = temp_dir("relocate-absolute");
+        let output_dir = root.join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let dir_name = "2026-03-08-my-feature";
+        let staging = output_dir.join(dir_name);
+        fs::create_dir_all(&staging).unwrap();
+
+        let result = relocate_plan_dir(&staging, "/tmp/evil", dir_name, &output_dir)
+            .expect("absolute path should fall back, not error");
+
+        assert_eq!(result, staging, "should fall back to staging path");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // ── R3: path traversal (dotdot) rejected ─────────────────────────────────
+
+    #[test]
+    fn test_relocate_dotdot_rejected() {
+        let root = temp_dir("relocate-dotdot");
+        let output_dir = root.join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let dir_name = "2026-03-08-my-feature";
+        let staging = output_dir.join(dir_name);
+        fs::create_dir_all(&staging).unwrap();
+
+        let result = relocate_plan_dir(&staging, "../../outside", dir_name, &output_dir)
+            .expect("dotdot path should fall back, not error");
+
+        assert_eq!(result, staging, "dotdot path should fall back to staging");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // ── R3: empty / whitespace suggestion falls back ──────────────────────────
+
+    #[test]
+    fn test_relocate_empty_suggestion() {
+        let root = temp_dir("relocate-empty");
+        let output_dir = root.join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let dir_name = "2026-03-08-my-feature";
+        let staging = output_dir.join(dir_name);
+        fs::create_dir_all(&staging).unwrap();
+
+        let result = relocate_plan_dir(&staging, "   ", dir_name, &output_dir)
+            .expect("whitespace suggestion should fall back, not error");
+
+        assert_eq!(result, staging, "whitespace-only suggestion should fall back");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // ── R3: suggestion resolves to same path → no-op ──────────────────────────
+
+    #[test]
+    fn test_relocate_same_path_noop() {
+        let root = temp_dir("relocate-same");
+        // No .git here → find_git_root falls back to output_dir.parent() == root.
+        // Suggestion "output/" → root / "output" / dir_name == staging → noop.
+        let output_dir = root.join("output");
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let dir_name = "2026-03-08-my-feature";
+        let staging = output_dir.join(dir_name);
+        fs::create_dir_all(&staging).unwrap();
+
+        let result = relocate_plan_dir(&staging, "output/", dir_name, &output_dir)
+            .expect("same-path suggestion should be a noop, not error");
+
+        assert_eq!(result, staging, "same-path should return staging unchanged");
+        assert!(staging.is_dir(), "staging directory should still exist as a real dir");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // ── R2: find_git_root locates .git ancestor ───────────────────────────────
+
+    #[test]
+    fn test_find_git_root_finds_dot_git() {
+        let root = temp_dir("git-root-find");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let nested = root.join("a/b/c");
+        fs::create_dir_all(&nested).unwrap();
+
+        let found = find_git_root(&nested);
+
+        assert_eq!(found, root, "should return the ancestor that contains .git");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // ── R2: find_git_root falls back to parent when no .git found ─────────────
+
+    #[test]
+    fn test_find_git_root_fallback() {
+        let root = temp_dir("git-root-fallback");
+        // `root` has no .git; temp dirs on supported platforms are outside any
+        // git repo, so walking up from `nested` will not find one.
+        let nested = root.join("a");
+        fs::create_dir_all(&nested).unwrap();
+
+        let found = find_git_root(&nested);
+
+        // Must not return `nested` itself — always walks at least one level up.
+        assert_ne!(found, nested, "must not return the input directory itself");
+        assert!(found.is_absolute(), "result must be an absolute path");
+        assert!(found.is_dir(), "result must be an existing directory");
+
+        let _ = fs::remove_dir_all(&root);
     }
 }
