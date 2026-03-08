@@ -391,7 +391,7 @@ impl<B: CodingBackend> Workflow<B> {
         std::fs::write(&system_prompt_path, &system_prompt)
             .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
-        let _ = write_schema_to_dir(&output_path, "plan");
+        let _ = crate::schema::write_all_schemas_to_dir(&output_path);
 
         let prompt = match answers {
             None => planning::build_prompt(input),
@@ -417,7 +417,7 @@ impl<B: CodingBackend> Workflow<B> {
             model,
             session_id,
             is_resume,
-            working_dir: Some(output_dir.to_path_buf()),
+            working_dir: Some(output_path.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
             conversation_output_path: options.conversation_output_path.clone(),
@@ -456,7 +456,7 @@ impl<B: CodingBackend> Workflow<B> {
             model: model_for_retry.clone(),
             session_id: session_id_for_retry.clone(),
             is_resume: true,
-            working_dir: Some(output_dir.to_path_buf()),
+            working_dir: Some(output_path.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
             conversation_output_path: options.conversation_output_path.clone(),
@@ -564,8 +564,6 @@ impl<B: CodingBackend> Workflow<B> {
             self.set_state(WorkflowState::AcceptanceTesting);
         }
 
-        let _ = write_schema_to_dir(plan_dir, "acceptance-tests");
-
         let system_prompt = acceptance_tests::system_prompt();
         let prompt = match answers {
             None => acceptance_tests::build_prompt(&prd_content),
@@ -586,7 +584,7 @@ impl<B: CodingBackend> Workflow<B> {
             model,
             session_id: Some(session_id.clone()),
             is_resume: true,
-            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
             conversation_output_path: options.conversation_output_path.clone(),
@@ -632,7 +630,7 @@ impl<B: CodingBackend> Workflow<B> {
             model: model_for_retry.clone(),
             session_id: session_id_for_retry.clone(),
             is_resume: true,
-            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
             conversation_output_path: options.conversation_output_path.clone(),
@@ -747,8 +745,6 @@ impl<B: CodingBackend> Workflow<B> {
 
         let session_id = uuid::Uuid::new_v4().to_string();
 
-        let _ = write_schema_to_dir(plan_dir, "red");
-
         let request = crate::backend::InvokeRequest {
             prompt,
             system_prompt: Some(system_prompt),
@@ -757,7 +753,7 @@ impl<B: CodingBackend> Workflow<B> {
             model: model.clone(),
             session_id: Some(session_id.clone()),
             is_resume: false,
-            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
             conversation_output_path: options.conversation_output_path.clone(),
@@ -791,7 +787,7 @@ impl<B: CodingBackend> Workflow<B> {
             model: model.clone(),
             session_id: session_id_for_retry.clone(),
             is_resume: true,
-            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
             conversation_output_path: options.conversation_output_path.clone(),
@@ -925,8 +921,6 @@ impl<B: CodingBackend> Workflow<B> {
             self.set_state(WorkflowState::GreenImplementing);
         }
 
-        let _ = write_schema_to_dir(plan_dir, "green");
-
         let system_prompt = green::system_prompt();
         let prompt = match answers {
             None => green::build_prompt(
@@ -950,7 +944,7 @@ impl<B: CodingBackend> Workflow<B> {
             model: model.clone(),
             session_id: Some(session_id.clone()),
             is_resume: true,
-            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
             conversation_output_path: options.conversation_output_path.clone(),
@@ -984,7 +978,7 @@ impl<B: CodingBackend> Workflow<B> {
             model: model.clone(),
             session_id: session_id_for_retry.clone(),
             is_resume: true,
-            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
             conversation_output_path: options.conversation_output_path.clone(),
@@ -1334,8 +1328,6 @@ impl<B: CodingBackend> Workflow<B> {
             "[tddy-core] validate_refactor: evaluation-report.md length={}",
             evaluation_report_content.len()
         );
-
-        let _ = write_schema_to_dir(plan_dir, "validate-refactor");
 
         let system_prompt = validate_refactor::system_prompt();
         let prompt = validate_refactor::build_prompt(&evaluation_report_content);

@@ -149,6 +149,16 @@ pub fn format_validation_errors(errors: &[SchemaError]) -> String {
     out
 }
 
+/// Writes all goal schemas and common schemas to the given directory.
+/// Creates a `schemas/` subdirectory. Call when the plan dir is created so schemas
+/// are available for all subsequent goals (acceptance-tests, red, green, validate-refactor).
+pub fn write_all_schemas_to_dir(dir: &Path) -> std::io::Result<()> {
+    for (goal, _) in GOAL_SCHEMA_FILES {
+        write_schema_to_dir(dir, goal)?;
+    }
+    Ok(())
+}
+
 /// Writes the goal schema and all common schemas to the given directory.
 /// Creates a `schemas/` subdirectory. Returns the path to the goal schema file.
 pub fn write_schema_to_dir(dir: &Path, goal: &str) -> std::io::Result<std::path::PathBuf> {

@@ -37,8 +37,8 @@ pub use permission::{
     validate_allowlist, validate_refactor_allowlist,
 };
 pub use schema::{
-    format_validation_errors, get_schema, schema_file_path, validate_output, write_schema_to_dir,
-    SchemaError,
+    format_validation_errors, get_schema, schema_file_path, validate_output, write_all_schemas_to_dir,
+    write_schema_to_dir, SchemaError,
 };
 pub use stream::ProgressEvent;
 pub use workflow::{

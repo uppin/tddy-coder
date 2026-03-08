@@ -27,7 +27,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 2. Read `changeset.yaml` for model and state; start a fresh Claude session (does not resume planning session)
 3. Use `--permission-mode acceptEdits` with same allowlist as acceptance-tests
 4. System prompt instructs Claude to: plan implementation structure; create skeleton code that compiles; write failing lower-level tests; run `cargo test` to verify tests fail; emit structured response with tests and skeletons
-5. Parse Claude's output to extract summary, tests, and skeletons (validated against `schemas/red.schema.json` before deserialization; on failure, session resumes with validation errors, 1 retry)
+5. Parse Claude's output to extract summary, tests, and skeletons (validated against `schemas/red.schema.json` before deserialization; on failure, session resumes with validation errors, 1 retry). Agent runs with working directory = plan_dir so `schemas/red.schema.json` resolves to `{plan-dir}/schemas/red.schema.json`. (Updated: 2026-03-08)
 6. Write `red-output.md` and `progress.md` to the plan directory
 7. Update `changeset.yaml` with new session entry for green to resume
 8. On successful exit, output summary, test list, and skeleton list
@@ -46,7 +46,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
    - After implementing, run the project's test command to verify tests pass
    - Run acceptance tests to verify end-to-end behavior
    - Emit structured response with implementation summary and test results
-7. Parse Claude's output to extract summary, test results (pass/fail per test), and implementation details (validated against `schemas/green.schema.json` before deserialization; on failure, session resumes with validation errors, 1 retry)
+7. Parse Claude's output to extract summary, test results (pass/fail per test), and implementation details (validated against `schemas/green.schema.json` before deserialization; on failure, session resumes with validation errors, 1 retry). Agent runs with working directory = plan_dir so `schemas/green.schema.json` resolves to `{plan-dir}/schemas/green.schema.json`. (Updated: 2026-03-08)
 8. Update `progress.md` in the plan directory: mark passing tests as `[x]`, mark implemented skeletons as `[x]`, mark still-failing tests with `[!]` and reason
 9. Update `acceptance-tests.md` in the plan directory: update test statuses from "failing" to "passing" for tests that now pass
 10. **Completion determination**:

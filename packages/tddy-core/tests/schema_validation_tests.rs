@@ -3,8 +3,8 @@
 use std::path::Path;
 use tddy_core::output::extract_last_structured_block;
 use tddy_core::schema::{
-    format_validation_errors, get_schema, schema_file_path, validate_output, write_schema_to_dir,
-    SchemaError,
+    format_validation_errors, get_schema, schema_file_path, validate_output, write_all_schemas_to_dir,
+    write_schema_to_dir, SchemaError,
 };
 
 const VALID_GOALS: &[&str] = &[
@@ -190,6 +190,33 @@ fn write_schema_to_dir_writes_files() {
         .join("common")
         .join("test-info.schema.json")
         .exists());
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn write_all_schemas_to_dir_writes_all_goal_schemas_when_plan_dir_created() {
+    let tmp = std::env::temp_dir().join("tddy_schema_all_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    let result = write_all_schemas_to_dir(Path::new(&tmp));
+    assert!(result.is_ok());
+
+    let schemas_dir = tmp.join("schemas");
+    let goals = [
+        "plan.schema.json",
+        "acceptance-tests.schema.json",
+        "red.schema.json",
+        "green.schema.json",
+        "validate.schema.json",
+        "evaluate.schema.json",
+        "validate-refactor.schema.json",
+    ];
+    for f in &goals {
+        assert!(schemas_dir.join(f).exists(), "{} should exist", f);
+    }
+    assert!(schemas_dir.join("common").join("test-info.schema.json").exists());
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

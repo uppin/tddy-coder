@@ -47,8 +47,8 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Schema (`schema/`)
 
-- **JSON Schema validation**: Formal schemas in `schemas/` (7 goals + common types). Embedded via `include_dir`, written to plan dir for agent Read. `validate_output(goal, json)` validates before serde. On failure: 1 retry with validation errors + schema path in prompt.
-- **get_schema / write_schema_to_dir / format_validation_errors**: Schema retrieval, directory write, error formatting for retry prompts.
+- **JSON Schema validation**: Formal schemas in `schemas/` (7 goals + common types). Embedded via `include_dir`, written to `{plan-dir}/schemas/` for agent Read. Agent's working directory is plan_dir (or working_dir for validate/evaluate), so `schemas/xxx.schema.json` resolves correctly. `validate_output(goal, json)` validates before serde. On failure: 1 retry with validation errors + schema path in prompt.
+- **get_schema / write_all_schemas_to_dir / write_schema_to_dir / format_validation_errors**: Schema retrieval. `write_all_schemas_to_dir` called when plan dir is created; writes all 7 goal schemas + common types so subsequent goals (acceptance-tests, red, green, validate-refactor) have schemas available. `write_schema_to_dir` used for validate/evaluate (working_dir may differ from plan_dir). Error formatting for retry prompts.
 
 ### Output (`output/`)
 
