@@ -43,3 +43,13 @@ pub fn read_answers_plain(questions: &[ClarificationQuestion]) -> anyhow::Result
     }
     Ok(lines.join("\n"))
 }
+
+/// Prompt user to Run or Skip the demo. Returns true for Run, false for Skip.
+/// Used in plain mode when demo-plan.md exists before the green goal.
+pub fn read_demo_choice_plain() -> anyhow::Result<bool> {
+    println!("\nRun demo? [r] Run  [s] Skip: ");
+    let mut buf = String::new();
+    io::stdin().lock().read_line(&mut buf)?;
+    let choice = buf.trim().trim_end_matches('\r');
+    Ok(choice.eq_ignore_ascii_case("r") || choice.eq_ignore_ascii_case("run"))
+}

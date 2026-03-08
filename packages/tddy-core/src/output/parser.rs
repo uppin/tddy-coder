@@ -899,9 +899,6 @@ struct ValidateTestImpactDe {
 /// Uses the last block (rfind) to skip tool results / system prompt examples that may appear earlier.
 /// Returns Malformed if the expected format is not found or goal != "validate-changes".
 pub fn parse_validate_response(s: &str) -> Result<ValidateOutput, ParseError> {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M007","scope":"output::parse_validate_response","data":{{}}}}}}"#
-    );
     let open = s
         .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
@@ -1158,9 +1155,6 @@ struct EvaluateAffectedTestDe {
 /// Uses rfind to skip any earlier blocks (e.g. system prompt examples).
 /// Returns Malformed if the expected format is not found or goal != "evaluate-changes".
 pub fn parse_evaluate_response(s: &str) -> Result<EvaluateOutput, ParseError> {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M013","scope":"output::parse_evaluate_response","data":{{}}}}}}"#
-    );
     let open = s
         .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
@@ -1321,9 +1315,6 @@ struct StructuredValidateRefactor {
 /// Uses rfind to skip earlier blocks (e.g. system prompt examples).
 /// Returns Malformed if the expected format is not found or goal != "validate-refactor".
 pub fn parse_validate_refactor_response(s: &str) -> Result<ValidateRefactorOutput, ParseError> {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M014","scope":"output::parse_validate_refactor_response","data":{{}}}}}}"#
-    );
     let open = s
         .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;

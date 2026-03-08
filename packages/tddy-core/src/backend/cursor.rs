@@ -76,7 +76,7 @@ impl super::CodingBackend for CursorBackend {
         // validate-refactor spawns subagents via the Agent tool which Cursor does not support.
         // Reject early before any spawn attempt so tests can distinguish this from BinaryNotFound.
         if request.goal == Goal::ValidateRefactor {
-            crate::debug_eprintln!(
+            log::debug!(
                 "[tddy-coder] CursorBackend: rejecting Goal::ValidateRefactor — not supported on Cursor"
             );
             return Err(BackendError::InvocationFailed(
@@ -128,12 +128,12 @@ impl super::CodingBackend for CursorBackend {
 
         // Always log spawn for debugging backend/binary confusion
         let resolved = super::claude::which_binary(&self.binary_path);
-        crate::debug_eprintln!(
+        log::debug!(
             "[tddy-coder] Cursor backend spawning: {} (resolved: {})",
             self.binary_path.display(),
             resolved
         );
-        crate::debug_eprintln!("[tddy-coder] cmd: cursor {}", args.join(" "));
+        log::debug!("[tddy-coder] cmd: cursor {}", args.join(" "));
 
         if request.debug {
             let cwd = request
@@ -145,8 +145,8 @@ impl super::CodingBackend for CursorBackend {
                         .map(|p| p.display().to_string())
                         .unwrap_or_else(|_| "(unknown)".into())
                 });
-            crate::debug_eprintln!("[tddy-coder debug] cwd: {}", cwd);
-            crate::debug_eprintln!(
+            log::debug!("[tddy-coder debug] cwd: {}", cwd);
+            log::debug!(
                 "[tddy-coder debug] cmd: {} {}",
                 self.binary_path.display(),
                 args.join(" ")
@@ -203,13 +203,21 @@ impl super::CodingBackend for CursorBackend {
             0
         };
 
-        let mut on_raw_output = |s: &str| {
-            eprint!("{}", s);
+        let agent_output = request.agent_output;
+        let agent_output_sink = request.agent_output_sink.clone();
+        let mut on_raw_output = move |s: &str| {
+            if agent_output {
+                if let Some(ref sink) = agent_output_sink {
+                    sink.emit(s);
+                } else if std::env::var("TDDY_QUIET").is_err() {
+                    eprint!("{}", s);
+                }
+            }
         };
 
         let mut on_debug_line = |line: &str| {
             if request.debug {
-                crate::debug_eprintln!("[tddy-coder debug] {}", line);
+                log::debug!("[tddy-coder debug] {}", line);
             }
         };
 

@@ -260,12 +260,12 @@ impl super::CodingBackend for ClaudeCodeBackend {
 
         // Always log spawn for debugging backend/binary confusion (e.g. claude -> cursor)
         let resolved = which_binary(&self.binary_path);
-        crate::debug_eprintln!(
+        log::debug!(
             "[tddy-coder] Claude backend spawning: {} (resolved: {})",
             self.binary_path.display(),
             resolved
         );
-        crate::debug_eprintln!(
+        log::debug!(
             "[tddy-coder] cmd: {} {}",
             self.binary_path.display(),
             args.join(" ")
@@ -281,8 +281,8 @@ impl super::CodingBackend for ClaudeCodeBackend {
                         .map(|p| p.display().to_string())
                         .unwrap_or_else(|_| "(unknown)".into())
                 });
-            crate::debug_eprintln!("[tddy-coder debug] cwd: {}", cwd);
-            crate::debug_eprintln!(
+            log::debug!("[tddy-coder debug] cwd: {}", cwd);
+            log::debug!(
                 "[tddy-coder debug] cmd: {} {}",
                 self.binary_path.display(),
                 args.join(" ")
@@ -339,13 +339,21 @@ impl super::CodingBackend for ClaudeCodeBackend {
             0
         };
 
-        let mut on_raw_output = |s: &str| {
-            eprint!("{}", s);
+        let agent_output = request.agent_output;
+        let agent_output_sink = request.agent_output_sink.clone();
+        let mut on_raw_output = move |s: &str| {
+            if agent_output {
+                if let Some(ref sink) = agent_output_sink {
+                    sink.emit(s);
+                } else if std::env::var("TDDY_QUIET").is_err() {
+                    eprint!("{}", s);
+                }
+            }
         };
 
         let mut on_debug_line = |line: &str| {
             if request.debug {
-                crate::debug_eprintln!("[tddy-coder debug] {}", line);
+                log::debug!("[tddy-coder debug] {}", line);
             }
         };
 
@@ -376,7 +384,7 @@ impl super::CodingBackend for ClaudeCodeBackend {
                 } else {
                     line.to_string()
                 };
-                crate::debug_eprintln!("[tddy-coder] first stream line (format hint): {}", preview);
+                log::debug!("[tddy-coder] first stream line (format hint): {}", preview);
             }
             if let Some(ref mut f) = conv_file {
                 let _ = writeln!(f, "{}", line);
@@ -414,16 +422,30 @@ impl super::CodingBackend for ClaudeCodeBackend {
         let exit_code = status.code().unwrap_or(-1);
 
         if exit_code != 0 {
-            let msg = if stderr_buf.trim().is_empty() {
-                format!("Claude Code CLI exited with code {}", exit_code)
+            // When plan goal produced valid structured output, treat exit 1 as non-fatal.
+            // CLI may exit 1 after session/ExitPlanMode issues despite successful output.
+            let has_plan_output = request.goal == Goal::Plan
+                && stream_result.result_text.contains("<structured-response");
+            if has_plan_output {
+                log::debug!(
+                    "[tddy-coder] CLI exited with code {} but plan output present; treating as success",
+                    exit_code
+                );
             } else {
-                format!(
-                    "Claude Code CLI exited with code {}: {}",
-                    exit_code,
-                    stderr_buf.trim()
-                )
-            };
-            return Err(BackendError::InvocationFailed(msg));
+                let detail = if !stream_result.stream_errors.is_empty() {
+                    stream_result.stream_errors.join("; ")
+                } else if !stderr_buf.trim().is_empty() {
+                    stderr_buf.trim().to_string()
+                } else {
+                    String::new()
+                };
+                let msg = if detail.is_empty() {
+                    format!("Claude Code CLI exited with code {}", exit_code)
+                } else {
+                    format!("Claude Code CLI exited with code {}: {}", exit_code, detail)
+                };
+                return Err(BackendError::InvocationFailed(msg));
+            }
         }
 
         let raw_stream = if stream_result.raw_lines.is_empty() {

@@ -32,6 +32,7 @@ fn mock_backend_writes_conversation_to_file_when_path_set() {
     let options = PlanOptions {
         model: Some("sonnet".into()),
         agent_output: false,
+        agent_output_sink: None,
         conversation_output_path: Some(output_file.clone()),
         inherit_stdin: false,
         allowed_tools_extras: None,
@@ -62,6 +63,7 @@ fn mock_backend_creates_no_file_when_path_not_set() {
     let options = PlanOptions {
         model: Some("sonnet".into()),
         agent_output: false,
+        agent_output_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         allowed_tools_extras: None,
@@ -118,6 +120,7 @@ exit 0
         working_dir: None,
         debug: false,
         agent_output: false,
+        agent_output_sink: None,
         conversation_output_path: Some(output_file.clone()),
         inherit_stdin: false,
         extra_allowed_tools: None,

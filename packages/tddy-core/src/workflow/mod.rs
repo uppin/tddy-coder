@@ -28,7 +28,11 @@ use crate::schema::{
 use std::path::{Path, PathBuf};
 
 /// Emit debug output when parsing agent response fails. Shows output, raw stream, exit code.
+/// Suppressed when TDDY_QUIET is set (TUI mode) to avoid corrupting the terminal.
 fn emit_parse_failure_debug(response: &InvokeResponse, goal: &str, empty_hint: Option<&str>) {
+    if std::env::var("TDDY_QUIET").is_ok() {
+        return;
+    }
     eprintln!(
         "--- Failed parse {} output (length {} bytes) ---",
         goal,
@@ -68,6 +72,7 @@ fn emit_parse_failure_debug(response: &InvokeResponse, goal: &str, empty_hint: O
 pub struct PlanOptions {
     pub model: Option<String>,
     pub agent_output: bool,
+    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
     pub conversation_output_path: Option<PathBuf>,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
@@ -79,6 +84,7 @@ pub struct PlanOptions {
 pub struct AcceptanceTestsOptions {
     pub model: Option<String>,
     pub agent_output: bool,
+    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
     pub conversation_output_path: Option<PathBuf>,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
@@ -90,6 +96,7 @@ pub struct AcceptanceTestsOptions {
 pub struct RedOptions {
     pub model: Option<String>,
     pub agent_output: bool,
+    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
     pub conversation_output_path: Option<PathBuf>,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
@@ -97,14 +104,32 @@ pub struct RedOptions {
 }
 
 /// Options for the green step.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct GreenOptions {
     pub model: Option<String>,
     pub agent_output: bool,
+    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
     pub conversation_output_path: Option<PathBuf>,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
     pub debug: bool,
+    /// When true and demo-plan.md exists, agent runs demo via pre-made shell script. When false, agent skips demo.
+    pub run_demo: bool,
+}
+
+impl Default for GreenOptions {
+    fn default() -> Self {
+        Self {
+            model: None,
+            agent_output: true,
+            agent_output_sink: None,
+            conversation_output_path: None,
+            inherit_stdin: true,
+            allowed_tools_extras: None,
+            debug: false,
+            run_demo: true,
+        }
+    }
 }
 
 /// Options for the validate-changes step.
@@ -112,6 +137,7 @@ pub struct GreenOptions {
 pub struct ValidateOptions {
     pub model: Option<String>,
     pub agent_output: bool,
+    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
     pub conversation_output_path: Option<PathBuf>,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
@@ -123,6 +149,7 @@ pub struct ValidateOptions {
 pub struct EvaluateOptions {
     pub model: Option<String>,
     pub agent_output: bool,
+    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
     pub conversation_output_path: Option<PathBuf>,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
@@ -134,6 +161,7 @@ pub struct EvaluateOptions {
 pub struct ValidateRefactorOptions {
     pub model: Option<String>,
     pub agent_output: bool,
+    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
     pub conversation_output_path: Option<PathBuf>,
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
@@ -404,6 +432,12 @@ impl<B: CodingBackend> Workflow<B> {
             Some(a) => planning::build_followup_prompt(input, a),
         };
         let prompt = prepend_context_header(prompt, Some(&output_path));
+        // Tell agent where schema lives when working_dir is project root (for discovery).
+        let schema_hint = format!(
+            "\n\nThe plan schema is at `{}/schemas/plan.schema.json` (relative to working directory).",
+            dir_name
+        );
+        let prompt = format!("{}{}", prompt, schema_hint);
 
         let (session_id, is_resume) = match &self.session_id {
             None => {
@@ -416,6 +450,8 @@ impl<B: CodingBackend> Workflow<B> {
 
         let model = options.model.clone();
 
+        // Use project root (output_dir) as working_dir so agent can discover Cargo.toml,
+        // packages/, etc. Sandbox blocks parent access when cwd is plan dir.
         let request = crate::backend::InvokeRequest {
             prompt,
             system_prompt: None,
@@ -424,9 +460,10 @@ impl<B: CodingBackend> Workflow<B> {
             model,
             session_id,
             is_resume,
-            working_dir: Some(output_path.to_path_buf()),
+            working_dir: Some(output_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
@@ -466,6 +503,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: Some(output_path.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
@@ -481,17 +519,19 @@ impl<B: CodingBackend> Workflow<B> {
         let planning = match parse_planning_response(&validated_response.output) {
             Ok(out) => out,
             Err(e) => {
-                eprintln!(
-                    "--- Failed parse input (length {} bytes) ---",
-                    validated_response.output.len()
-                );
-                eprintln!(
-                    "Hint: The agent must output a <structured-response> block with the actual PRD and TODO content. \
-                     Meta-commentary (e.g. 'I've created the PRD...') without the block causes this error. \
-                     See the system prompt for the required format."
-                );
-                eprintln!("{}", validated_response.output);
-                eprintln!("--- End failed parse input ---");
+                if std::env::var("TDDY_QUIET").is_err() {
+                    eprintln!(
+                        "--- Failed parse input (length {} bytes) ---",
+                        validated_response.output.len()
+                    );
+                    eprintln!(
+                        "Hint: The agent must output a <structured-response> block with the actual PRD and TODO content. \
+                         Meta-commentary (e.g. 'I've created the PRD...') without the block causes this error. \
+                         See the system prompt for the required format."
+                    );
+                    eprintln!("{}", validated_response.output);
+                    eprintln!("--- End failed parse input ---");
+                }
                 self.set_state(WorkflowState::Failed {
                     error: e.to_string(),
                 });
@@ -504,14 +544,14 @@ impl<B: CodingBackend> Workflow<B> {
         // R1: If the agent supplied a valid plan_dir_suggestion, relocate the staging directory.
         let output_path = if let Some(ref disc) = planning.discovery {
             if let Some(ref suggestion) = disc.plan_dir_suggestion {
-                eprintln!("[plan] plan_dir_suggestion={:?}", suggestion);
+                log::debug!("[plan] plan_dir_suggestion={:?}", suggestion);
                 match relocate_plan_dir(&output_path, suggestion, &dir_name, output_dir) {
                     Ok(new_path) => {
-                        eprintln!("[plan] plan dir relocated to {:?}", new_path);
+                        log::debug!("[plan] plan dir relocated to {:?}", new_path);
                         new_path
                     }
                     Err(e) => {
-                        eprintln!("[plan] relocation failed (keeping staging): {}", e);
+                        log::debug!("[plan] relocation failed (keeping staging): {}", e);
                         output_path
                     }
                 }
@@ -616,6 +656,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
@@ -662,6 +703,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
@@ -786,6 +828,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
@@ -820,6 +863,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
@@ -951,7 +995,7 @@ impl<B: CodingBackend> Workflow<B> {
             self.set_state(WorkflowState::GreenImplementing);
         }
 
-        let system_prompt = green::system_prompt();
+        let system_prompt = green::system_prompt(options.run_demo);
         let prompt = match answers {
             None => green::build_prompt(
                 &progress_content,
@@ -977,6 +1021,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
@@ -1002,7 +1047,7 @@ impl<B: CodingBackend> Workflow<B> {
         let session_id_for_retry = response.session_id.clone();
         let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
             prompt: retry_prompt.to_string(),
-            system_prompt: Some(green::system_prompt()),
+            system_prompt: Some(green::system_prompt(options.run_demo)),
             system_prompt_path: None,
             goal: crate::backend::Goal::Green,
             model: model.clone(),
@@ -1011,6 +1056,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
@@ -1027,7 +1073,7 @@ impl<B: CodingBackend> Workflow<B> {
                         update_state(&mut cs, "GreenComplete");
                         let _ = write_changeset(plan_dir, &cs);
                     }
-                    if plan_dir.join("demo-plan.md").exists() {
+                    if options.run_demo && plan_dir.join("demo-plan.md").exists() {
                         let (summary, steps) = out
                             .demo_results
                             .as_ref()
@@ -1073,16 +1119,22 @@ impl<B: CodingBackend> Workflow<B> {
     }
 
     /// Run the validate-changes step: analyze current git changes for risks.
-    /// Callable from Init state without a prior plan/red/green run (standalone).
-    /// When `plan_dir` is provided, reads changeset/PRD context and includes it in the prompt.
+    /// Requires plan_dir (or plan staging dir) for schemas and validation-report.md.
+    /// Reads changeset/PRD context from plan_dir and includes it in the prompt.
     /// Always starts a fresh session (is_resume: false).
     pub fn validate(
         &mut self,
-        working_dir: &std::path::Path,
+        _working_dir: &std::path::Path,
         plan_dir: Option<&std::path::Path>,
         _answers: Option<&str>,
         options: &ValidateOptions,
     ) -> Result<crate::output::ValidateOutput, WorkflowError> {
+        let plan_dir = plan_dir.ok_or_else(|| {
+            WorkflowError::PlanDirInvalid(
+                "validate-changes requires --plan-dir for schemas and validation-report.md".into(),
+            )
+        })?;
+
         let can_start = matches!(self.state, WorkflowState::Init);
         if !can_start {
             return Err(WorkflowError::InvalidTransition(format!(
@@ -1091,13 +1143,13 @@ impl<B: CodingBackend> Workflow<B> {
             )));
         }
 
-        let prd_owned = plan_dir.and_then(|d| std::fs::read_to_string(d.join("PRD.md")).ok());
-        let changeset_owned =
-            plan_dir.and_then(|d| std::fs::read_to_string(d.join("changeset.yaml")).ok());
+        let prd_owned = std::fs::read_to_string(plan_dir.join("PRD.md")).ok();
+        let changeset_owned = std::fs::read_to_string(plan_dir.join("changeset.yaml")).ok();
         let prd_content = prd_owned.as_deref();
         let changeset_content = changeset_owned.as_deref();
 
-        let _ = write_schema_to_dir(working_dir, "validate");
+        // Schemas and validation-report go to plan_dir
+        let _ = write_schema_to_dir(plan_dir, "validate");
 
         let system_prompt = validate::system_prompt();
         let prompt = validate::build_prompt(prd_content, changeset_content);
@@ -1113,9 +1165,10 @@ impl<B: CodingBackend> Workflow<B> {
             model: model.clone(),
             session_id: Some(session_id.clone()),
             is_resume: false,
-            working_dir: Some(working_dir.to_path_buf()),
+            working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
@@ -1147,24 +1200,20 @@ impl<B: CodingBackend> Workflow<B> {
             model: model.clone(),
             session_id: session_id_for_retry.clone(),
             is_resume: true,
-            working_dir: Some(working_dir.to_path_buf()),
+            working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
-        let validated_response = self.validate_and_retry(
-            "validate",
-            response,
-            working_dir,
-            false,
-            build_retry_request,
-        )?;
+        let validated_response =
+            self.validate_and_retry("validate", response, plan_dir, false, build_retry_request)?;
 
         let output = match parse_validate_response(&validated_response.output) {
             Ok(out) => {
-                let _ = write_validation_report(working_dir, &out);
+                let _ = write_validation_report(plan_dir, &out);
                 out
             }
             Err(e) => {
@@ -1196,15 +1245,11 @@ impl<B: CodingBackend> Workflow<B> {
     /// Always starts a fresh session (is_resume: false).
     pub fn evaluate(
         &mut self,
-        working_dir: &std::path::Path,
+        _working_dir: &std::path::Path,
         plan_dir: Option<&std::path::Path>,
         _answers: Option<&str>,
         options: &EvaluateOptions,
     ) -> Result<crate::output::EvaluateOutput, WorkflowError> {
-        eprintln!(
-            r#"{{"tddy":{{"marker_id":"M009","scope":"workflow::mod::evaluate","data":{{}}}}}}"#
-        );
-
         // plan_dir is required: evaluation-report.md is written there
         let plan_dir = plan_dir.ok_or_else(|| {
             WorkflowError::PlanDirInvalid(
@@ -1232,7 +1277,8 @@ impl<B: CodingBackend> Workflow<B> {
             changeset_content.is_some()
         );
 
-        let _ = write_schema_to_dir(working_dir, "evaluate");
+        // Schemas and agent cwd: plan_dir (evaluate always has plan_dir)
+        let _ = write_schema_to_dir(plan_dir, "evaluate");
 
         let system_prompt = evaluate::system_prompt();
         let prompt = evaluate::build_prompt(prd_content, changeset_content);
@@ -1248,9 +1294,10 @@ impl<B: CodingBackend> Workflow<B> {
             model: model.clone(),
             session_id: Some(session_id.clone()),
             is_resume: false,
-            working_dir: Some(working_dir.to_path_buf()),
+            working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
@@ -1282,20 +1329,16 @@ impl<B: CodingBackend> Workflow<B> {
             model: model.clone(),
             session_id: session_id_for_retry.clone(),
             is_resume: true,
-            working_dir: Some(working_dir.to_path_buf()),
+            working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
-        let validated_response = self.validate_and_retry(
-            "evaluate",
-            response,
-            working_dir,
-            false,
-            build_retry_request,
-        )?;
+        let validated_response =
+            self.validate_and_retry("evaluate", response, plan_dir, false, build_retry_request)?;
 
         let output = match parse_evaluate_response(&validated_response.output) {
             Ok(out) => {
@@ -1335,10 +1378,6 @@ impl<B: CodingBackend> Workflow<B> {
         _answers: Option<&str>,
         options: &ValidateRefactorOptions,
     ) -> Result<crate::output::ValidateRefactorOutput, WorkflowError> {
-        eprintln!(
-            r#"{{"tddy":{{"marker_id":"M010","scope":"workflow::mod::validate_refactor","data":{{}}}}}}"#
-        );
-
         // evaluation-report.md is required as input for the validate-refactor orchestrator
         let eval_report_path = plan_dir.join("evaluation-report.md");
         if !eval_report_path.exists() {
@@ -1376,6 +1415,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
@@ -1410,6 +1450,7 @@ impl<B: CodingBackend> Workflow<B> {
             working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
             agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
             conversation_output_path: options.conversation_output_path.clone(),
             inherit_stdin: options.inherit_stdin,
             extra_allowed_tools: options.allowed_tools_extras.clone(),
@@ -1455,11 +1496,10 @@ impl<B: CodingBackend> Workflow<B> {
 /// Walk up from `dir` looking for a `.git` directory.
 /// Falls back to `dir`'s parent if none found (or to `dir` itself if it has no parent).
 fn find_git_root(dir: &Path) -> PathBuf {
-    eprintln!(r#"{{"tddy":{{"marker_id":"M001","scope":"workflow::find_git_root","data":{{}}}}}}"#);
     let mut current = dir.to_path_buf();
     loop {
         if current.join(".git").exists() {
-            eprintln!("[find_git_root] found .git at {:?}", current);
+            log::debug!("[find_git_root] found .git at {:?}", current);
             return current;
         }
         match current.parent() {
@@ -1470,7 +1510,7 @@ fn find_git_root(dir: &Path) -> PathBuf {
         }
     }
     // R2 fallback: return dir's immediate parent (or dir itself if no parent)
-    eprintln!(
+    log::debug!(
         "[find_git_root] no .git found, falling back to parent of {:?}",
         dir
     );
@@ -1511,45 +1551,42 @@ fn relocate_plan_dir(
     dir_name: &str,
     output_dir: &Path,
 ) -> Result<PathBuf, WorkflowError> {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M002","scope":"workflow::relocate_plan_dir","data":{{}}}}}}"#
-    );
-
     // R3: Reject empty / whitespace-only suggestions
     let suggestion = suggestion.trim();
     if suggestion.is_empty() {
-        eprintln!("[relocate_plan_dir] empty suggestion → falling back to staging");
+        log::debug!("[relocate_plan_dir] empty suggestion → falling back to staging");
         return Ok(staging.to_path_buf());
     }
 
     // R3: Reject absolute paths
     if std::path::Path::new(suggestion).is_absolute() {
-        eprintln!("[relocate_plan_dir] absolute path rejected: {}", suggestion);
+        log::debug!("[relocate_plan_dir] absolute path rejected: {}", suggestion);
         return Ok(staging.to_path_buf());
     }
 
     // R3: Reject paths containing `..`
     if suggestion.contains("..") {
-        eprintln!("[relocate_plan_dir] dotdot path rejected: {}", suggestion);
+        log::debug!("[relocate_plan_dir] dotdot path rejected: {}", suggestion);
         return Ok(staging.to_path_buf());
     }
 
     // R2: Find the git root relative to the output directory
     let git_root = find_git_root(output_dir);
-    eprintln!("[relocate_plan_dir] git_root={:?}", git_root);
+    log::debug!("[relocate_plan_dir] git_root={:?}", git_root);
 
     // Build the target: git_root / suggestion (stripped trailing slash) / dir_name
     let target = git_root
         .join(suggestion.trim_end_matches('/'))
         .join(dir_name);
-    eprintln!(
+    log::debug!(
         "[relocate_plan_dir] staging={:?} target={:?}",
-        staging, target
+        staging,
+        target
     );
 
     // R3: If the suggestion resolves to the same path as staging → no-op
     if target == staging {
-        eprintln!("[relocate_plan_dir] target == staging → no-op");
+        log::debug!("[relocate_plan_dir] target == staging → no-op");
         return Ok(staging.to_path_buf());
     }
 
@@ -1569,7 +1606,9 @@ fn relocate_plan_dir(
 
     // R4: Try a fast rename first; on cross-device failure fall back to copy+delete
     if std::fs::rename(staging, &target).is_err() {
-        eprintln!("[relocate_plan_dir] rename failed (cross-device?), falling back to copy+delete");
+        log::debug!(
+            "[relocate_plan_dir] rename failed (cross-device?), falling back to copy+delete"
+        );
         copy_dir_recursive(staging, &target)
             .map_err(|e| WorkflowError::WriteFailed(format!("copy staging dir: {}", e)))?;
         std::fs::remove_dir_all(staging).map_err(|e| {
@@ -1577,7 +1616,7 @@ fn relocate_plan_dir(
         })?;
     }
 
-    eprintln!("[relocate_plan_dir] relocated {:?} → {:?}", staging, target);
+    log::debug!("[relocate_plan_dir] relocated {:?} → {:?}", staging, target);
     Ok(target)
 }
 
@@ -1599,20 +1638,20 @@ const KNOWN_ARTIFACTS: &[&str] = &[
 pub fn build_context_header(plan_dir: Option<&Path>) -> String {
     let dir = match plan_dir {
         None => {
-            crate::debug_eprintln!("[build_context_header] plan_dir is None — skipping header");
+            log::debug!("[build_context_header] plan_dir is None — skipping header");
             return String::new();
         }
         Some(d) => d,
     };
 
-    crate::debug_eprintln!("[build_context_header] scanning {:?} for artifacts", dir);
+    log::debug!("[build_context_header] scanning {:?} for artifacts", dir);
 
     let mut lines: Vec<String> = Vec::new();
     for artifact in KNOWN_ARTIFACTS {
         let path = dir.join(artifact);
         if path.exists() {
             let canonical = std::fs::canonicalize(&path).unwrap_or(path);
-            crate::debug_eprintln!(
+            log::debug!(
                 "[build_context_header] found artifact: {}",
                 canonical.display()
             );
@@ -1621,7 +1660,7 @@ pub fn build_context_header(plan_dir: Option<&Path>) -> String {
     }
 
     if lines.is_empty() {
-        crate::debug_eprintln!(
+        log::debug!(
             "[build_context_header] no artifacts found in {:?} — empty header",
             dir
         );
@@ -1633,7 +1672,7 @@ pub fn build_context_header(plan_dir: Option<&Path>) -> String {
         header.push_str(line);
         header.push('\n');
     }
-    crate::debug_eprintln!(
+    log::debug!(
         "[build_context_header] built header with {} artifact(s)",
         lines.len()
     );
@@ -1644,10 +1683,10 @@ pub fn build_context_header(plan_dir: Option<&Path>) -> String {
 pub fn prepend_context_header(prompt: String, plan_dir: Option<&Path>) -> String {
     let header = build_context_header(plan_dir);
     if header.is_empty() {
-        crate::debug_eprintln!("[prepend_context_header] no header — prompt unchanged");
+        log::debug!("[prepend_context_header] no header — prompt unchanged");
         return prompt;
     }
-    crate::debug_eprintln!("[prepend_context_header] prepending context header to prompt");
+    log::debug!("[prepend_context_header] prepending context header to prompt");
     format!(
         "<context-reminder>\n{}</context-reminder>\n\n{}",
         header, prompt

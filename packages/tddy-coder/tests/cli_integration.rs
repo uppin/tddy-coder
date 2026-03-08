@@ -448,6 +448,26 @@ artifacts: {}
 }
 
 #[test]
+fn cli_errors_when_plan_dir_missing_for_validate_changes_goal() {
+    let mut cmd = tddy_coder_bin();
+    cmd.args(["--goal", "validate-changes"]);
+    // --plan-dir is NOT provided
+
+    let output = cmd.output().expect("run tddy-coder");
+
+    assert!(
+        !output.status.success(),
+        "should fail when --plan-dir missing for validate-changes goal"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("plan-dir") || stderr.contains("plan_dir"),
+        "error should mention plan-dir: {}",
+        stderr
+    );
+}
+
+#[test]
 fn cli_errors_when_plan_dir_missing_for_acceptance_tests_goal() {
     let mut cmd = tddy_coder_bin();
     cmd.args(["--goal", "acceptance-tests"]);

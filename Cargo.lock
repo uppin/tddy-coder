@@ -1608,6 +1608,7 @@ dependencies = [
  "clap",
  "crossterm",
  "ctrlc",
+ "log",
  "ratatui",
  "tddy-core",
 ]
@@ -1620,6 +1621,8 @@ dependencies = [
  "include_dir",
  "jsonschema",
  "libc",
+ "log",
+ "once_cell",
  "serde",
  "serde_json",
  "serde_yaml",

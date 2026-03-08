@@ -90,6 +90,31 @@ pub enum Goal {
     ValidateRefactor,
 }
 
+/// Sink for routing agent output (e.g. to TUI instead of stderr).
+#[derive(Clone)]
+pub struct AgentOutputSink(std::sync::Arc<dyn Fn(&str) + Send + Sync>);
+
+impl std::fmt::Debug for AgentOutputSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<agent_output_sink>")
+    }
+}
+
+impl AgentOutputSink {
+    /// Create a sink from a closure.
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(&str) + Send + Sync + 'static,
+    {
+        Self(std::sync::Arc::new(f))
+    }
+
+    /// Invoke the sink with the given text.
+    pub fn emit(&self, s: &str) {
+        (self.0)(s);
+    }
+}
+
 /// Request to invoke the coding backend.
 #[derive(Debug, Clone)]
 pub struct InvokeRequest {
@@ -108,8 +133,10 @@ pub struct InvokeRequest {
     pub working_dir: Option<PathBuf>,
     /// When true, print the command and cwd to stderr before running.
     pub debug: bool,
-    /// When true, print raw agent output to stderr in real-time.
+    /// When true, emit raw agent output. If agent_output_sink is set, routes there; else prints to stderr.
     pub agent_output: bool,
+    /// When set and agent_output is true, routes output here instead of stderr (for TUI).
+    pub agent_output_sink: Option<AgentOutputSink>,
     /// When set, write entire agent conversation (raw bytes from stdout) to this file.
     pub conversation_output_path: Option<PathBuf>,
     /// When true, inherit stdin so the user can grant permission prompts interactively.

@@ -64,6 +64,14 @@ With **direnv**: `direnv allow` once; the shell loads automatically when you `cd
 
 **When claiming tests pass:** Run `./verify` (or have the user run it), then read `.verify-result.txt` to confirm. Do not claim success based on exit code alone when output is not visible.
 
+## Demo Plans (tddy-coder)
+
+When a feature includes a demo (e.g. `demo-plan.md`), the demo must run **via a pre-made shell script** that launches the app in its own terminal window.
+
+- **Do** create a `demo.sh` script in the plan directory that runs the app in a separate terminal (e.g. `open -a Terminal` on macOS, `gnome-terminal` on Linux).
+- **Do not** run interactive commands directly (e.g. `cargo run`) — that would share stdin/terminal with the parent and cause freezes.
+- When the user chooses Run, the agent executes the demo script using tools (Bash). The script handles launching the app in its own window.
+
 ## Cross-Cutting Guides
 
 - [Testing practices](docs/dev/guides/testing.md) — anti-patterns, unit/integration/production test guidelines

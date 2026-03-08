@@ -34,9 +34,6 @@ For build_results status use: "pass", "fail", or "not_run" (when build could not
 /// When neither is provided the prompt asks the agent to analyze git diff standalone.
 /// When plan context is provided it is embedded for changeset-sync analysis.
 pub fn build_prompt(prd_content: Option<&str>, changeset_content: Option<&str>) -> String {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M008b","scope":"workflow::evaluate::build_prompt","data":{{}}}}}}"#
-    );
     match (prd_content, changeset_content) {
         (Some(prd), Some(changeset)) => format!(
             r#"Analyze the current git changes for risks, changed files, affected tests, and validity. Use the following plan context for changeset-sync analysis:

@@ -25,7 +25,8 @@ const NDJSON_WITH_QUESTIONS: &str = r#"{"type":"system","subtype":"init","sessio
 #[test]
 fn process_ndjson_extracts_result_text_and_session_id() {
     let cursor = Cursor::new(NDJSON_WITH_RESULT);
-    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
+    let result =
+        process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(result.session_id, "sess-123");
     assert!(result.result_text.contains("---PRD_START---"));
@@ -37,7 +38,8 @@ fn process_ndjson_extracts_result_text_and_session_id() {
 #[test]
 fn process_ndjson_extracts_ask_user_question_events() {
     let cursor = Cursor::new(NDJSON_WITH_QUESTIONS);
-    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
+    let result =
+        process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(result.session_id, "sess-456");
     assert_eq!(result.questions.len(), 1);
@@ -59,7 +61,8 @@ const NDJSON_DUPLICATE_QUESTIONS: &str = r#"{"type":"system","subtype":"init","s
 #[test]
 fn process_ndjson_deduplicates_questions() {
     let cursor = Cursor::new(NDJSON_DUPLICATE_QUESTIONS);
-    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
+    let result =
+        process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(
         result.questions.len(),
@@ -67,6 +70,26 @@ fn process_ndjson_deduplicates_questions() {
         "duplicate questions should be deduplicated"
     );
     assert_eq!(result.questions[0].question, "Q1");
+}
+
+/// NDJSON with AskUserQuestion in permission_denials (tool was denied, questions in result event).
+const NDJSON_PERMISSION_DENIALS: &str = r#"{"type":"system","subtype":"init","session_id":"sess-denied"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"AskUserQuestion","input":{"questions":[{"question":"Activation method?","header":"Activation","options":[{"label":"Just type","description":"Start typing"},{"label":"Press i","description":"Vim-style"}],"multiSelect":false}]}}]}}
+{"type":"result","subtype":"success","result":"","session_id":"sess-denied","is_error":false,"permission_denials":[{"tool_name":"AskUserQuestion","tool_use_id":"t1","tool_input":{"questions":[{"question":"Activation method?","header":"Activation","options":[{"label":"Just type","description":"Start typing"},{"label":"Press i","description":"Vim-style"}],"multiSelect":false}]}}]}
+"#;
+
+#[test]
+fn process_ndjson_extracts_questions_from_permission_denials() {
+    let cursor = Cursor::new(NDJSON_PERMISSION_DENIALS);
+    let result =
+        process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
+
+    assert_eq!(result.session_id, "sess-denied");
+    assert_eq!(result.questions.len(), 1);
+    assert_eq!(result.questions[0].header, "Activation");
+    assert_eq!(result.questions[0].question, "Activation method?");
+    assert_eq!(result.questions[0].options.len(), 2);
+    assert_eq!(result.questions[0].options[0].label, "Just type");
 }
 
 /// NDJSON with task_started and task_progress system events.
@@ -168,7 +191,8 @@ const NDJSON_STRUCTURED_IN_TOOL_RESULT: &str = r#"{"type":"system","subtype":"in
 #[test]
 fn process_ndjson_extracts_structured_response_from_tool_result() {
     let cursor = Cursor::new(NDJSON_STRUCTURED_IN_TOOL_RESULT);
-    let result = process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
+    let result =
+        process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(result.session_id, "s1");
     assert!(
@@ -221,7 +245,8 @@ fn cursor_partial_chunks_ndjson() -> String {
 fn process_cursor_stream_concatenates_partial_chunks_for_parsing() {
     let ndjson = cursor_partial_chunks_ndjson();
     let cursor = Cursor::new(ndjson);
-    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
+    let result =
+        process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(result.session_id, "cursor-sess");
     assert!(
@@ -284,7 +309,8 @@ fn cursor_ask_question_ndjson() -> String {
 fn process_cursor_stream_extracts_ask_user_question_for_qa() {
     let ndjson = cursor_ask_question_ndjson();
     let cursor = Cursor::new(ndjson);
-    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
+    let result =
+        process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(result.questions.len(), 1, "should extract 1 question");
     assert_eq!(result.questions[0].header, "Tech Stack");
@@ -334,7 +360,8 @@ fn process_cursor_stream_falls_back_to_clarification_questions_block() {
     let line3 = r#"{"type":"result","result":"","session_id":"s3"}"#;
     let ndjson = format!("{}\n{}\n{}\n", line1, line2, line3);
     let cursor = Cursor::new(ndjson);
-    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
+    let result =
+        process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(
         result.questions.len(),
@@ -354,7 +381,8 @@ fn process_cursor_stream_extracts_ask_question_tool_call() {
     let line3 = r#"{"type":"result","result":"","session_id":"s2"}"#;
     let ndjson = format!("{}\n{}\n{}\n", line1, line2, line3);
     let cursor = Cursor::new(ndjson);
-    let result = process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
+    let result =
+        process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
     assert_eq!(result.questions.len(), 1);
     assert_eq!(result.questions[0].header, "Confirm");

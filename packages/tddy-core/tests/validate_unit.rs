@@ -158,9 +158,6 @@ fn write_validation_report_includes_build_results_in_output() {
 /// validate_allowlist() must include Bash(git log *) per PRD requirement 6.
 #[test]
 fn validate_allowlist_includes_git_log_entry() {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M001","scope":"permission::validate_allowlist","data":{{}}}}}}"#
-    );
     let allowlist = validate_allowlist();
     assert!(
         allowlist.iter().any(|t| t.contains("git log")),
@@ -172,9 +169,6 @@ fn validate_allowlist_includes_git_log_entry() {
 /// validate_allowlist() must include Bash(find *) per PRD requirement 6.
 #[test]
 fn validate_allowlist_includes_find_entry() {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M002","scope":"permission::validate_allowlist","data":{{}}}}}}"#
-    );
     let allowlist = validate_allowlist();
     assert!(
         allowlist.iter().any(|t| t.contains("find")),
@@ -186,9 +180,6 @@ fn validate_allowlist_includes_find_entry() {
 /// next_goal_for_state("Validated") must return None — validate-changes is not in auto-sequencing.
 #[test]
 fn next_goal_for_validated_state_returns_none() {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M003","scope":"changeset::next_goal_for_state","data":{{"state":"Validated"}}}}}}"#
-    );
     let result = next_goal_for_state("Validated");
     assert_eq!(
         result,
@@ -201,9 +192,6 @@ fn next_goal_for_validated_state_returns_none() {
 /// next_goal_for_state("Validating") must return None — validate-changes is not in auto-sequencing.
 #[test]
 fn next_goal_for_validating_state_returns_none() {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M004","scope":"changeset::next_goal_for_state","data":{{"state":"Validating"}}}}}}"#
-    );
     let result = next_goal_for_state("Validating");
     assert_eq!(
         result,

@@ -36,6 +36,8 @@ pub struct StreamResult {
     pub questions: Vec<ClarificationQuestion>,
     /// Raw NDJSON lines from stdout, for debugging when parsing fails.
     pub raw_lines: Vec<String>,
+    /// Error messages from result events (e.g. "No conversation found with session ID").
+    pub stream_errors: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

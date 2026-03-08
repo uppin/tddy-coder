@@ -281,10 +281,6 @@ pub fn write_evaluation_report(
     plan_dir: &Path,
     output: &EvaluateOutput,
 ) -> Result<(), WorkflowError> {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M015","scope":"output::writer::write_evaluation_report","data":{{}}}}}}"#
-    );
-
     let mut md = String::new();
     md.push_str("# Evaluation Report\n\n");
 

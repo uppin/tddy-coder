@@ -21,4 +21,10 @@ pub enum TuiEvent {
     },
     /// The workflow thread completed (Ok = summary message, Err = error).
     WorkflowComplete(Result<String, String>),
+    /// Demo-plan.md exists; user must choose Run or Skip before green goal.
+    DemoPrompt,
+    /// Raw agent output (assistant text, tool results). Routed to TUI instead of stderr.
+    AgentOutput(String),
+    /// Mouse/trackpad scroll (lines to scroll; positive = up/earlier, negative = down/later).
+    Scroll { delta: i32 },
 }

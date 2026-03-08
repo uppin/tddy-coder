@@ -258,5 +258,6 @@ where
         session_id,
         questions,
         raw_lines,
+        stream_errors: vec![],
     })
 }

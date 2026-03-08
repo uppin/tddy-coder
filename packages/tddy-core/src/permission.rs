@@ -3,7 +3,7 @@
 //! Each goal has a predefined list of tools that are auto-approved via --allowedTools.
 //! Unexpected requests go to the permission prompt tool (Phase 2) or are denied.
 
-/// Allowlist for the plan goal (read-only analysis).
+/// Allowlist for the plan goal (read-only analysis + clarification).
 /// Complements --permission-mode plan.
 pub fn plan_allowlist() -> Vec<String> {
     vec![
@@ -11,6 +11,8 @@ pub fn plan_allowlist() -> Vec<String> {
         "Glob".to_string(),
         "Grep".to_string(),
         "SemanticSearch".to_string(),
+        "AskUserQuestion".to_string(),
+        "ExitPlanMode".to_string(),
     ]
 }
 
@@ -43,9 +45,6 @@ pub fn green_allowlist() -> Vec<String> {
 /// Allowlist for the evaluate-changes goal (read-only + git diff/log/find + cargo check/build).
 /// Same tool surface as validate_allowlist; renamed to match the evaluate-changes goal.
 pub fn evaluate_allowlist() -> Vec<String> {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M011","scope":"permission::evaluate_allowlist","data":{{}}}}}}"#
-    );
     vec![
         "Read".to_string(),
         "Glob".to_string(),
@@ -63,9 +62,6 @@ pub fn evaluate_allowlist() -> Vec<String> {
 /// The orchestrator spawns 3 concurrent subagents (validate-tests, validate-prod-ready,
 /// analyze-clean-code) via the Agent tool, and each subagent writes its report via Write.
 pub fn validate_refactor_allowlist() -> Vec<String> {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M012","scope":"permission::validate_refactor_allowlist","data":{{}}}}}}"#
-    );
     vec![
         "Agent".to_string(),
         "Read".to_string(),
@@ -84,9 +80,6 @@ pub fn validate_refactor_allowlist() -> Vec<String> {
 /// Allowlist for the validate-changes goal (read-only + git diff/log/find + cargo check/build).
 /// Complements --permission-mode plan.
 pub fn validate_allowlist() -> Vec<String> {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M005","scope":"permission::validate_allowlist","data":{{}}}}}}"#
-    );
     vec![
         "Read".to_string(),
         "Glob".to_string(),
