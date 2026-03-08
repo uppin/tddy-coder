@@ -57,6 +57,12 @@ struct Args {
 }
 
 fn main() -> anyhow::Result<()> {
+    ctrlc::set_handler(|| {
+        tddy_core::kill_child_process();
+        std::process::exit(130);
+    })
+    .expect("failed to set Ctrl+C handler");
+
     let args = Args::parse();
 
     if args.goal.is_none() {
@@ -182,7 +188,10 @@ fn main() -> anyhow::Result<()> {
 
     if args.goal.as_deref() == Some("validate-changes") {
         let working_dir = &args.output_dir;
-        eprintln!("[tddy-coder] --agent={} (from CLI, default: claude)", args.agent);
+        eprintln!(
+            "[tddy-coder] --agent={} (from CLI, default: claude)",
+            args.agent
+        );
         let mut workflow = create_workflow(&args.agent);
         eprintln!("[tddy-coder] backend: {}", workflow.backend().name());
         let options = ValidateOptions {
@@ -193,12 +202,7 @@ fn main() -> anyhow::Result<()> {
             allowed_tools_extras: args.allowed_tools.clone(),
             debug: args.debug,
         };
-        let result = workflow.validate(
-            working_dir,
-            args.plan_dir.as_deref(),
-            None,
-            &options,
-        );
+        let result = workflow.validate(working_dir, args.plan_dir.as_deref(), None, &options);
         match result {
             Ok(output) => {
                 println!("{}", output.summary);

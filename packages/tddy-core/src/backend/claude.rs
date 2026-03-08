@@ -137,6 +137,11 @@ fn goal_to_claude_config(request: &InvokeRequest) -> ClaudeInvokeConfig {
             permission::acceptance_tests_allowlist(),
         ),
         Goal::Validate => (PermissionMode::Plan, permission::validate_allowlist()),
+        Goal::Evaluate => (PermissionMode::Plan, permission::evaluate_allowlist()),
+        Goal::ValidateRefactor => (
+            PermissionMode::Plan,
+            permission::validate_refactor_allowlist(),
+        ),
     };
     if let Some(ref extras) = request.extra_allowed_tools {
         allowed_tools.extend(extras.iter().cloned());
@@ -299,6 +304,7 @@ impl super::CodingBackend for ClaudeCodeBackend {
                 BackendError::InvocationFailed(e.to_string())
             }
         })?;
+        super::set_child_pid(child.id());
 
         let stdout_handle = child
             .stdout
@@ -338,8 +344,7 @@ impl super::CodingBackend for ClaudeCodeBackend {
             Some(
                 std::fs::OpenOptions::new()
                     .create(true)
-                    .write(true)
-                    .truncate(true)
+                    .append(true)
                     .open(path)
                     .map_err(|e| {
                         BackendError::InvocationFailed(format!(
@@ -395,6 +400,7 @@ impl super::CodingBackend for ClaudeCodeBackend {
         let status = child
             .wait()
             .map_err(|e| BackendError::InvocationFailed(e.to_string()))?;
+        super::clear_child_pid();
         let exit_code = status.code().unwrap_or(-1);
 
         if exit_code != 0 {

@@ -172,6 +172,7 @@ where
     O: FnMut(&str),
 {
     let mut result_text = String::new();
+    let mut tool_result_text = String::new();
     let mut session_id = String::new();
     let mut questions: Vec<ClarificationQuestion> = vec![];
     let mut seen_questions: HashSet<(String, String)> = HashSet::new();
@@ -198,10 +199,11 @@ where
 
         // Fallback: extract from user tool_result content (Agent tool return, etc.).
         // Claude Code CLI has a known bug where result event can be empty (issue #7124).
+        // Collected separately; merged into result_text only when primary sources lack structured-response.
         if event.event_type == "user" {
             if let Some(text) = extract_tool_result_content_from_user_line(line) {
                 if !text.is_empty() {
-                    result_text.push_str(&text);
+                    tool_result_text.push_str(&text);
                     on_raw_output(&text);
                 }
             }
@@ -267,10 +269,157 @@ where
         }
     }
 
+    // Use tool_result as fallback only when primary sources lack structured-response.
+    if !result_text.contains(STRUCTURED_RESPONSE_MARKER) && !tool_result_text.is_empty() {
+        result_text.push_str(&tool_result_text);
+    }
+
     Ok(StreamResult {
         result_text: result_text.trim().to_string(),
         session_id,
         questions,
         raw_lines,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn noop_progress(_: &ProgressEvent) {}
+    fn noop_output(_: &str) {}
+
+    fn make_user_tool_result(content: &str) -> String {
+        serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_abc",
+                    "content": content
+                }]
+            },
+            "session_id": "sess-1"
+        })
+        .to_string()
+    }
+
+    fn make_assistant_text(text: &str) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "text", "text": text}]
+            },
+            "session_id": "sess-1"
+        })
+        .to_string()
+    }
+
+    fn make_result_event(result: &str) -> String {
+        serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "result": result,
+            "session_id": "sess-1"
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn result_text_excludes_tool_result_file_reads_containing_structured_response() {
+        let file_content = concat!(
+            "pub fn system_prompt() {\n",
+            "<structured-response content-type=\"application-json\">\n",
+            r#"{"goal":"evaluate-changes","summary":"fake"}"#,
+            "\n",
+            "</structured-response>\n",
+            "}"
+        );
+        let real_response = concat!(
+            "Done.\n",
+            "<structured-response content-type=\"application-json\">\n",
+            r#"{"goal":"green","summary":"All passing","tests":[],"implementations":[]}"#,
+            "\n",
+            "</structured-response>"
+        );
+
+        let ndjson = format!(
+            "{}\n{}\n{}",
+            make_user_tool_result(file_content),
+            make_assistant_text(real_response),
+            make_result_event(real_response),
+        );
+
+        let reader = std::io::BufReader::new(ndjson.as_bytes());
+        let result = process_ndjson_stream(reader, noop_progress, noop_output, None, None).unwrap();
+
+        assert!(
+            !result.result_text.contains("evaluate-changes"),
+            "result_text must not contain file-read content with fake structured-response"
+        );
+        assert!(
+            result.result_text.contains(r#""goal":"green""#),
+            "result_text must contain the real green response"
+        );
+    }
+
+    #[test]
+    fn result_text_uses_tool_result_fallback_when_result_event_empty() {
+        let agent_return = concat!(
+            "<structured-response content-type=\"application-json\">\n",
+            r#"{"goal":"green","summary":"Implemented","tests":[],"implementations":[]}"#,
+            "\n",
+            "</structured-response>"
+        );
+
+        let ndjson = format!(
+            "{}\n{}",
+            make_user_tool_result(agent_return),
+            make_result_event(""),
+        );
+
+        let reader = std::io::BufReader::new(ndjson.as_bytes());
+        let result = process_ndjson_stream(reader, noop_progress, noop_output, None, None).unwrap();
+
+        assert!(
+            result.result_text.contains(r#""goal":"green""#),
+            "result_text should fall back to tool_result content when result event is empty"
+        );
+    }
+
+    #[test]
+    fn result_text_prefers_assistant_text_over_tool_result() {
+        let file_with_old_response = concat!(
+            "<structured-response content-type=\"application-json\">\n",
+            r#"{"goal":"red","summary":"Old red output","tests":[],"skeletons":[]}"#,
+            "\n",
+            "</structured-response>"
+        );
+        let real_green_text = concat!(
+            "<structured-response content-type=\"application-json\">\n",
+            r#"{"goal":"green","summary":"New green output","tests":[],"implementations":[]}"#,
+            "\n",
+            "</structured-response>"
+        );
+
+        let ndjson = format!(
+            "{}\n{}\n{}",
+            make_user_tool_result(file_with_old_response),
+            make_assistant_text(real_green_text),
+            make_result_event(""),
+        );
+
+        let reader = std::io::BufReader::new(ndjson.as_bytes());
+        let result = process_ndjson_stream(reader, noop_progress, noop_output, None, None).unwrap();
+
+        assert!(
+            !result.result_text.contains("Old red output"),
+            "result_text must not contain tool_result content when assistant text has structured-response"
+        );
+        assert!(
+            result.result_text.contains("New green output"),
+            "result_text must contain the assistant text"
+        );
+    }
 }

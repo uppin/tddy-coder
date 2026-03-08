@@ -40,6 +40,47 @@ pub fn green_allowlist() -> Vec<String> {
     acceptance_tests_allowlist()
 }
 
+/// Allowlist for the evaluate-changes goal (read-only + git diff/log/find + cargo check/build).
+/// Same tool surface as validate_allowlist; renamed to match the evaluate-changes goal.
+pub fn evaluate_allowlist() -> Vec<String> {
+    eprintln!(
+        r#"{{"tddy":{{"marker_id":"M011","scope":"permission::evaluate_allowlist","data":{{}}}}}}"#
+    );
+    vec![
+        "Read".to_string(),
+        "Glob".to_string(),
+        "Grep".to_string(),
+        "SemanticSearch".to_string(),
+        "Bash(git diff *)".to_string(),
+        "Bash(git log *)".to_string(),
+        "Bash(cargo build *)".to_string(),
+        "Bash(cargo check *)".to_string(),
+        "Bash(find *)".to_string(),
+    ]
+}
+
+/// Allowlist for the validate-refactor goal (evaluate tools + Agent for spawning subagents + Write).
+/// The orchestrator spawns 3 concurrent subagents (validate-tests, validate-prod-ready,
+/// analyze-clean-code) via the Agent tool, and each subagent writes its report via Write.
+pub fn validate_refactor_allowlist() -> Vec<String> {
+    eprintln!(
+        r#"{{"tddy":{{"marker_id":"M012","scope":"permission::validate_refactor_allowlist","data":{{}}}}}}"#
+    );
+    vec![
+        "Agent".to_string(),
+        "Read".to_string(),
+        "Write".to_string(),
+        "Edit".to_string(),
+        "Glob".to_string(),
+        "Grep".to_string(),
+        "SemanticSearch".to_string(),
+        "Bash(git diff *)".to_string(),
+        "Bash(cargo build *)".to_string(),
+        "Bash(cargo check *)".to_string(),
+        "Bash(cargo test *)".to_string(),
+    ]
+}
+
 /// Allowlist for the validate-changes goal (read-only + git diff/log/find + cargo check/build).
 /// Complements --permission-mode plan.
 pub fn validate_allowlist() -> Vec<String> {

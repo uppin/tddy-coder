@@ -236,7 +236,7 @@ struct AcceptanceTestInfoDe {
 /// Returns Malformed if the expected format is not found.
 pub fn parse_acceptance_tests_response(s: &str) -> Result<AcceptanceTestsOutput, ParseError> {
     let open = s
-        .find(STRUCTURED_OPEN)
+        .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
     let after_open = &s[open + STRUCTURED_OPEN.len()..];
     let gt = after_open
@@ -371,7 +371,7 @@ struct ImplementationInfoDe {
 /// Parse LLM green goal response from structured-response block.
 pub fn parse_green_response(s: &str) -> Result<GreenOutput, ParseError> {
     let open = s
-        .find(STRUCTURED_OPEN)
+        .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
     let after_open = &s[open + STRUCTURED_OPEN.len()..];
     let gt = after_open
@@ -1033,6 +1033,298 @@ impl RedOutput {
         }
         out
     }
+}
+
+// ── evaluate-changes output types ────────────────────────────────────────────
+
+/// A changed file entry in an evaluate-changes report.
+#[derive(Debug, Clone)]
+pub struct EvaluateChangedFile {
+    pub path: String,
+    pub change_type: String,
+    pub lines_added: i64,
+    pub lines_removed: i64,
+}
+
+/// An affected test entry in an evaluate-changes report.
+#[derive(Debug, Clone)]
+pub struct EvaluateAffectedTest {
+    pub path: String,
+    pub status: String,
+    pub description: String,
+}
+
+/// Parsed output from the evaluate-changes goal (superset of ValidateOutput).
+#[derive(Debug, Clone)]
+pub struct EvaluateOutput {
+    pub summary: String,
+    pub risk_level: String,
+    pub build_results: Vec<ValidateBuildResult>,
+    pub issues: Vec<ValidateIssue>,
+    pub changeset_sync: Option<ValidateChangesetSync>,
+    pub files_analyzed: Vec<ValidateFileAnalyzed>,
+    pub test_impact: Option<ValidateTestImpact>,
+    pub changed_files: Vec<EvaluateChangedFile>,
+    pub affected_tests: Vec<EvaluateAffectedTest>,
+    pub validity_assessment: String,
+}
+
+#[derive(serde::Deserialize)]
+struct StructuredEvaluate {
+    goal: Option<String>,
+    summary: Option<String>,
+    risk_level: Option<String>,
+    #[serde(default)]
+    build_results: Option<Vec<ValidateBuildResultDe>>,
+    #[serde(default)]
+    issues: Option<Vec<ValidateIssueDe>>,
+    #[serde(default)]
+    changeset_sync: Option<ValidateChangesetSyncDe>,
+    #[serde(default)]
+    files_analyzed: Option<Vec<ValidateFileAnalyzedDe>>,
+    #[serde(default)]
+    test_impact: Option<ValidateTestImpactDe>,
+    #[serde(default)]
+    changed_files: Option<Vec<EvaluateChangedFileDe>>,
+    #[serde(default)]
+    affected_tests: Option<Vec<EvaluateAffectedTestDe>>,
+    #[serde(default)]
+    validity_assessment: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct EvaluateChangedFileDe {
+    path: String,
+    change_type: String,
+    #[serde(default)]
+    lines_added: i64,
+    #[serde(default)]
+    lines_removed: i64,
+}
+
+#[derive(serde::Deserialize)]
+struct EvaluateAffectedTestDe {
+    path: String,
+    status: String,
+    #[serde(default)]
+    description: String,
+}
+
+/// Parse LLM evaluate-changes response from structured-response block.
+/// Uses rfind to skip any earlier blocks (e.g. system prompt examples).
+/// Returns Malformed if the expected format is not found or goal != "evaluate-changes".
+pub fn parse_evaluate_response(s: &str) -> Result<EvaluateOutput, ParseError> {
+    eprintln!(
+        r#"{{"tddy":{{"marker_id":"M013","scope":"output::parse_evaluate_response","data":{{}}}}}}"#
+    );
+    let open = s
+        .rfind(STRUCTURED_OPEN)
+        .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
+    let after_open = &s[open + STRUCTURED_OPEN.len()..];
+    let gt = after_open
+        .find('>')
+        .ok_or_else(|| ParseError::Malformed("structured-response malformed".into()))?;
+    let content = after_open[gt + 1..].trim();
+    let close = content
+        .find(STRUCTURED_CLOSE)
+        .ok_or_else(|| ParseError::Malformed("structured-response close not found".into()))?;
+    let json_str = content[..close].trim();
+    if json_str.is_empty() {
+        return Err(ParseError::Malformed(
+            "structured-response block is empty".into(),
+        ));
+    }
+    let parsed: StructuredEvaluate =
+        serde_json::from_str(json_str).map_err(|e| ParseError::Malformed(e.to_string()))?;
+
+    if parsed.goal.as_deref() != Some("evaluate-changes") {
+        return Err(ParseError::Malformed(format!(
+            "goal is not evaluate-changes, got: {:?}",
+            parsed.goal
+        )));
+    }
+
+    let summary = parsed
+        .summary
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "No summary provided.".to_string());
+
+    let risk_level = parsed
+        .risk_level
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let build_results = parsed
+        .build_results
+        .unwrap_or_default()
+        .into_iter()
+        .map(|b| ValidateBuildResult {
+            package: b.package,
+            status: b.status,
+            notes: b.notes,
+        })
+        .collect();
+
+    let issues = parsed
+        .issues
+        .unwrap_or_default()
+        .into_iter()
+        .map(|i| ValidateIssue {
+            severity: i.severity,
+            category: i.category,
+            file: i.file,
+            line: i.line,
+            description: i.description,
+            suggestion: i.suggestion,
+        })
+        .collect();
+
+    let changeset_sync = parsed.changeset_sync.map(|c| ValidateChangesetSync {
+        status: c.status,
+        items_updated: c.items_updated,
+        items_added: c.items_added,
+    });
+
+    let files_analyzed = parsed
+        .files_analyzed
+        .unwrap_or_default()
+        .into_iter()
+        .map(|f| ValidateFileAnalyzed {
+            file: f.file,
+            lines_changed: f.lines_changed,
+            changeset_item: f.changeset_item,
+        })
+        .collect();
+
+    let test_impact = parsed.test_impact.map(|t| ValidateTestImpact {
+        tests_affected: t.tests_affected,
+        new_tests_needed: t.new_tests_needed,
+    });
+
+    let changed_files: Vec<_> = parsed
+        .changed_files
+        .unwrap_or_default()
+        .into_iter()
+        .map(|f| EvaluateChangedFile {
+            path: f.path,
+            change_type: f.change_type,
+            lines_added: f.lines_added,
+            lines_removed: f.lines_removed,
+        })
+        .collect();
+
+    let affected_tests: Vec<_> = parsed
+        .affected_tests
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| EvaluateAffectedTest {
+            path: t.path,
+            status: t.status,
+            description: t.description,
+        })
+        .collect();
+
+    let validity_assessment = parsed
+        .validity_assessment
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default();
+
+    eprintln!(
+        "[tddy-core] parse_evaluate_response: parsed {} changed_files, {} affected_tests",
+        changed_files.len(),
+        affected_tests.len()
+    );
+
+    Ok(EvaluateOutput {
+        summary,
+        risk_level,
+        build_results,
+        issues,
+        changeset_sync,
+        files_analyzed,
+        test_impact,
+        changed_files,
+        affected_tests,
+        validity_assessment,
+    })
+}
+
+// ── validate-refactor output types ───────────────────────────────────────────
+
+/// Parsed output from the validate-refactor goal.
+#[derive(Debug, Clone)]
+pub struct ValidateRefactorOutput {
+    pub goal: String,
+    pub summary: String,
+    pub tests_report_written: bool,
+    pub prod_ready_report_written: bool,
+    pub clean_code_report_written: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct StructuredValidateRefactor {
+    goal: Option<String>,
+    summary: Option<String>,
+    #[serde(default)]
+    tests_report_written: Option<bool>,
+    #[serde(default)]
+    prod_ready_report_written: Option<bool>,
+    #[serde(default)]
+    clean_code_report_written: Option<bool>,
+}
+
+/// Parse LLM validate-refactor response from structured-response block.
+/// Uses rfind to skip earlier blocks (e.g. system prompt examples).
+/// Returns Malformed if the expected format is not found or goal != "validate-refactor".
+pub fn parse_validate_refactor_response(s: &str) -> Result<ValidateRefactorOutput, ParseError> {
+    eprintln!(
+        r#"{{"tddy":{{"marker_id":"M014","scope":"output::parse_validate_refactor_response","data":{{}}}}}}"#
+    );
+    let open = s
+        .rfind(STRUCTURED_OPEN)
+        .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
+    let after_open = &s[open + STRUCTURED_OPEN.len()..];
+    let gt = after_open
+        .find('>')
+        .ok_or_else(|| ParseError::Malformed("structured-response malformed".into()))?;
+    let content = after_open[gt + 1..].trim();
+    let close = content
+        .find(STRUCTURED_CLOSE)
+        .ok_or_else(|| ParseError::Malformed("structured-response close not found".into()))?;
+    let json_str = content[..close].trim();
+    if json_str.is_empty() {
+        return Err(ParseError::Malformed(
+            "structured-response block is empty".into(),
+        ));
+    }
+    let parsed: StructuredValidateRefactor =
+        serde_json::from_str(json_str).map_err(|e| ParseError::Malformed(e.to_string()))?;
+
+    if parsed.goal.as_deref() != Some("validate-refactor") {
+        return Err(ParseError::Malformed(format!(
+            "goal is not validate-refactor, got: {:?}",
+            parsed.goal
+        )));
+    }
+
+    let summary = parsed
+        .summary
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "No summary provided.".to_string());
+
+    eprintln!(
+        "[tddy-core] parse_validate_refactor_response: summary length={}, tests_written={:?}",
+        summary.len(),
+        parsed.tests_report_written
+    );
+
+    Ok(ValidateRefactorOutput {
+        goal: "validate-refactor".to_string(),
+        summary,
+        tests_report_written: parsed.tests_report_written.unwrap_or(false),
+        prod_ready_report_written: parsed.prod_ready_report_written.unwrap_or(false),
+        clean_code_report_written: parsed.clean_code_report_written.unwrap_or(false),
+    })
 }
 
 #[cfg(test)]
