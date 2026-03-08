@@ -2,8 +2,9 @@
 //!
 //! R4: Main thread runs ratatui event loop. When connected, main dispatches here.
 //!
-//! Crossterm is used for: terminal raw mode, alternate screen, mouse capture (main thread),
-//! and event reading (dedicated thread). Ratatui uses CrosstermBackend for drawing.
+//! Crossterm is used for: terminal raw mode, alternate screen, and event reading (dedicated
+//! thread). Mouse capture is disabled to allow terminal-native text selection. Ratatui uses
+//! CrosstermBackend for drawing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -11,11 +12,11 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::execute;
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
+use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
+
+use crate::tui::raw::{disable_raw_mode, enable_raw_mode_keep_sig};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
@@ -40,6 +41,8 @@ pub fn run_tui_event_loop(
     answer_tx: mpsc::Sender<String>,
     event_tx_crossterm: mpsc::Sender<TuiEvent>,
     shutdown: Arc<AtomicBool>,
+    agent: &str,
+    model: &str,
 ) -> anyhow::Result<()> {
     if shutdown.load(Ordering::Relaxed) {
         return Ok(());
@@ -52,9 +55,10 @@ pub fn run_tui_event_loop(
         original_hook(info);
     }));
 
-    enable_raw_mode()?;
+    enable_raw_mode_keep_sig()?;
     execute!(std::io::stdout(), EnterAlternateScreen)?;
-    execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
+    // Do NOT enable mouse capture: it prevents terminal-native text selection (click-drag to copy).
+    // Scroll via PageUp/PageDown instead.
 
     let shutdown_crossterm = Arc::clone(&shutdown);
     let crossterm_handle = thread::spawn(move || {
@@ -65,14 +69,6 @@ pub fn run_tui_event_loop(
                     let tui_ev = match ev {
                         Event::Key(key) => Some(TuiEvent::Key(key)),
                         Event::Resize(w, h) => Some(TuiEvent::Resize(w, h)),
-                        Event::Mouse(mouse) => {
-                            let delta = match mouse.kind {
-                                MouseEventKind::ScrollUp => 3,
-                                MouseEventKind::ScrollDown => -3,
-                                _ => continue,
-                            };
-                            Some(TuiEvent::Scroll { delta })
-                        }
                         _ => None,
                     };
                     if let Some(t) = tui_ev {
@@ -86,7 +82,7 @@ pub fn run_tui_event_loop(
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let mut state = AppState::new();
+    let mut state = AppState::new(agent, model);
     let mut result = Ok::<(), anyhow::Error>(());
     let mut final_output: Option<String> = None;
 
@@ -151,8 +147,7 @@ pub fn run_tui_event_loop(
 
     let _ = crossterm_handle.join();
 
-    execute!(std::io::stdout(), crossterm::event::DisableMouseCapture)?;
-    execute!(std::io::stdout(), LeaveAlternateScreen)?;
+    execute!(std::io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show)?;
     disable_raw_mode()?;
 
     if let Some(output) = final_output {

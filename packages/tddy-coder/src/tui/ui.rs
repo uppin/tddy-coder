@@ -27,10 +27,19 @@ pub fn format_elapsed(duration: Duration) -> String {
 
 /// Format the status bar line shown between the activity log and the prompt bar.
 ///
-/// Expected format: `"Goal: {goal} │ State: {state} │ {elapsed}"`
-pub fn format_status_bar(goal: &str, state: &str, elapsed: Duration) -> String {
+/// Expected format: `"Goal: {goal} │ State: {state} │ {elapsed} │ {agent} {model} │ PgUp/PgDn scroll"`
+pub fn format_status_bar(
+    goal: &str,
+    state: &str,
+    elapsed: Duration,
+    agent: &str,
+    model: &str,
+) -> String {
     let elapsed_str = format_elapsed(elapsed);
-    format!("Goal: {} │ State: {} │ {}", goal, state, elapsed_str)
+    format!(
+        "Goal: {} │ State: {} │ {} │ {} {} │ PgUp/PgDn scroll",
+        goal, state, elapsed_str, agent, model
+    )
 }
 
 /// Goal-specific background color for the status bar.
@@ -72,11 +81,11 @@ mod tests {
         assert_eq!(format_elapsed(Duration::from_secs(7384)), "2h 3m");
     }
 
-    /// AC2: Status bar contains goal, state, elapsed time, and │ separators.
+    /// AC2: Status bar contains goal, state, elapsed time, agent, model, and │ separators.
     #[test]
     fn test_status_bar_format() {
         let elapsed = Duration::from_secs(154); // "2m 34s"
-        let result = format_status_bar("plan", "Planning", elapsed);
+        let result = format_status_bar("plan", "Planning", elapsed, "claude", "opus");
 
         assert!(
             result.contains("Goal: plan"),
@@ -98,6 +107,10 @@ mod tests {
             "status bar must use │ as separator: {}",
             result
         );
+
+        // Verify agent and model appear
+        assert!(result.contains("claude"), "status bar must contain agent");
+        assert!(result.contains("opus"), "status bar must contain model");
 
         // Verify ordering: Goal appears before State, State before elapsed
         let goal_pos = result.find("Goal:").unwrap();

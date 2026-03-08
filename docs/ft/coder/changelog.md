@@ -2,6 +2,22 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-08 — TDD Workflow Restructure
+
+- **Full workflow**: plan → acceptance-tests → red → green → demo-prompt → evaluate (previously ended at green)
+- **Demo step**: Extracted from green into standalone goal; user prompted "Run demo? [r] Run [s] Skip" after green; Skip proceeds to evaluate
+- **CLI rename**: `--goal evaluate` replaces `--goal validate-changes`; `--goal demo` added for standalone demo
+- **Early changeset**: `changeset.yaml` written immediately after user enters prompt (before plan agent), so plan dir is resumable even if planning fails
+- **Single Workflow instance**: Plain full-run uses one Workflow instance throughout (like TUI path)
+- **State machine**: `DemoRunning`, `DemoComplete`, `DemoSkipped`; `next_goal_for_state`: GreenComplete → demo, DemoComplete/DemoSkipped → evaluate
+
+## 2026-03-08 — TUI UX, Plan Resume, Ctrl+C
+
+- **TUI scroll**: PageUp/PageDown for activity log; no mouse capture so terminal text selection works.
+- **Ctrl+C**: Raw mode with ISIG preserved; ctrlc handler restores LeaveAlternateScreen, cursor Show, disable_raw_mode.
+- **Plan resume**: When `--plan-dir` has Init state and no PRD.md, runs plan() to complete the plan.
+- **Debug area**: `--debug` enables TUI debug area and TDDY_QUIET bypass for debug output.
+
 ## 2026-03-08 — Agent Inbox
 
 - **Inbox queue**: During Running mode, users type prompts and press Enter to queue them. Queued items display between the activity log and status bar.

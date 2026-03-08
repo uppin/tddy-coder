@@ -21,7 +21,7 @@ echo "Build a user authentication system" | cargo run -p tddy-coder -- --goal pl
 
 ## Architecture
 
-CLI binary with goals: `plan`, `acceptance-tests`, `red`, `green`. Backends: `--agent claude` (default) or `--agent cursor`. Feature description from stdin or `--prompt`. Writes PRD.md, TODO.md, changeset.yaml to plan directory. Supports interactive Q&A (inquire Select/MultiSelect), real-time progress display, `--agent-output` for raw output.
+CLI binary with goals: `plan`, `acceptance-tests`, `red`, `green`. Backends: `--agent claude` (default) or `--agent cursor`. Feature description from stdin or `--prompt`. Writes PRD.md, TODO.md, changeset.yaml to plan directory. TUI (ratatui): scrollable activity log, inbox queue for prompts during Running (Up/Down, E edit, D delete), PageUp/PageDown scroll without mouse capture (text selection works), Ctrl+C restores terminal and cursor. Plan resume: when `--plan-dir` has Init state and no PRD.md, runs plan() to complete. `--agent-output` for raw output; `--debug` enables TUI debug area.
 
 ## Documentation
 

@@ -356,6 +356,15 @@ pub struct DemoResults {
     pub steps_completed: u32,
 }
 
+/// Parsed output from the standalone demo goal.
+#[derive(Debug, Clone)]
+pub struct DemoOutput {
+    pub summary: String,
+    pub demo_type: String,
+    pub steps_completed: u32,
+    pub verification: String,
+}
+
 /// Info about a single test result from the green goal.
 #[derive(Debug, Clone)]
 pub struct GreenTestResult {
@@ -1682,4 +1691,46 @@ The Red phase skeleton and tests are already in place.
         assert!(md.contains("timeout"));
         assert!(md.contains("- [x] Foo"));
     }
+}
+
+/// Parse the standalone demo goal structured response.
+pub fn parse_demo_response(s: &str) -> Result<DemoOutput, ParseError> {
+    eprintln!("{{\"tddy\":{{\"marker_id\":\"M001\",\"scope\":\"output::parse_demo_response\",\"data\":{{}}}}}}");
+    let block = extract_last_structured_block(s)?;
+    let parsed: StructuredDemo =
+        serde_json::from_str(block.json).map_err(|e| ParseError::Malformed(e.to_string()))?;
+
+    if parsed.goal.as_deref() != Some("demo") {
+        return Err(ParseError::Malformed(format!(
+            "goal is not demo, got: {:?}",
+            parsed.goal
+        )));
+    }
+
+    let summary = parsed
+        .summary
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+
+    eprintln!(
+        "[tddy-core] parse_demo_response: summary_len={}, steps={}",
+        summary.len(),
+        parsed.steps_completed.unwrap_or(0)
+    );
+
+    Ok(DemoOutput {
+        summary,
+        demo_type: parsed.demo_type.unwrap_or_else(|| "unknown".to_string()),
+        steps_completed: parsed.steps_completed.unwrap_or(0),
+        verification: parsed.verification.unwrap_or_default(),
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct StructuredDemo {
+    goal: Option<String>,
+    summary: Option<String>,
+    demo_type: Option<String>,
+    steps_completed: Option<u32>,
+    verification: Option<String>,
 }

@@ -141,6 +141,7 @@ fn default_models() -> BTreeMap<String, String> {
     m.insert("acceptance-tests".to_string(), "sonnet".to_string());
     m.insert("red".to_string(), "sonnet".to_string());
     m.insert("green".to_string(), "sonnet".to_string());
+    m.insert("demo".to_string(), "sonnet".to_string());
     m
 }
 
@@ -210,7 +211,9 @@ pub fn next_goal_for_state(state: &str) -> Option<&'static str> {
         "Planned" => Some("acceptance-tests"),
         "AcceptanceTestsReady" => Some("red"),
         "RedTestsReady" => Some("green"),
-        "GreenComplete" | "Failed" | "Validating" | "Validated" => None,
+        "GreenComplete" => Some("demo"),
+        "DemoComplete" | "DemoSkipped" => Some("evaluate"),
+        "Evaluated" | "Failed" | "Validating" | "Validated" => None,
         _ => Some("plan"),
     }
 }

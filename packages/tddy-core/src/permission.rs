@@ -42,6 +42,11 @@ pub fn green_allowlist() -> Vec<String> {
     acceptance_tests_allowlist()
 }
 
+/// Allowlist for the standalone demo goal (same as green: file edits + bash for demo script).
+pub fn demo_allowlist() -> Vec<String> {
+    green_allowlist()
+}
+
 /// Allowlist for the evaluate-changes goal (read-only + git diff/log/find + cargo check/build).
 /// Same tool surface as validate_allowlist; renamed to match the evaluate-changes goal.
 pub fn evaluate_allowlist() -> Vec<String> {

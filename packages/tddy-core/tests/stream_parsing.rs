@@ -92,6 +92,34 @@ fn process_ndjson_extracts_questions_from_permission_denials() {
     assert_eq!(result.questions[0].options[0].label, "Just type");
 }
 
+/// Real-world result event from Claude Code (workflow-fixes.txt) with permission_denials.
+/// Verifies parser handles extra fields (usage, modelUsage, etc.) and extracts questions.
+#[test]
+fn process_ndjson_extracts_questions_from_workflow_fixes_format() {
+    let ndjson = r#"{"type":"system","subtype":"init","session_id":"43c6980b-00c2-4de7-8bc5-5901bc3d85eb"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":103957,"result":"","stop_reason":"end_turn","session_id":"43c6980b-00c2-4de7-8bc5-5901bc3d85eb","total_cost_usd":0.579661,"usage":{"input_tokens":1217},"modelUsage":{"claude-opus-4-6":{"inputTokens":1217}},"permission_denials":[{"tool_name":"AskUserQuestion","tool_use_id":"t1","tool_input":{"questions":[{"question":"In point #2, what are the two goal names?","header":"Point #2","options":[{"label":"demo after green","description":"A separate demo goal after green"},{"label":"validate after green","description":"A separate validate goal after green"}],"multiSelect":false},{"question":"In point #4, what should validate-changes be renamed to?","header":"Point #4","options":[{"label":"validate","description":"Rename to validate"},{"label":"review","description":"Rename to review"}],"multiSelect":false}]}}]}"#;
+    let cursor = Cursor::new(ndjson);
+    let result =
+        process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
+
+    assert_eq!(result.session_id, "43c6980b-00c2-4de7-8bc5-5901bc3d85eb");
+    assert_eq!(
+        result.questions.len(),
+        2,
+        "should extract both questions from permission_denials"
+    );
+    assert_eq!(result.questions[0].header, "Point #2");
+    assert_eq!(
+        result.questions[0].question,
+        "In point #2, what are the two goal names?"
+    );
+    assert_eq!(result.questions[1].header, "Point #4");
+    assert_eq!(
+        result.questions[1].question,
+        "In point #4, what should validate-changes be renamed to?"
+    );
+}
+
 /// NDJSON with task_started and task_progress system events.
 const NDJSON_TASK_EVENTS: &str = r#"{"type":"system","subtype":"task_started","description":"Explore repo","task_id":"x"}
 {"type":"system","subtype":"task_progress","description":"Running find...","last_tool_name":"Bash"}

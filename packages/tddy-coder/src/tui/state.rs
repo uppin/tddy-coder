@@ -83,6 +83,8 @@ pub struct ActivityEntry {
 
 /// Top-level application state for the TUI event loop.
 pub struct AppState {
+    pub agent: String,
+    pub model: String,
     pub mode: AppMode,
     pub current_goal: Option<String>,
     pub current_state: Option<String>,
@@ -120,8 +122,10 @@ pub struct AppState {
 
 impl AppState {
     /// Create a new AppState in FeatureInput mode.
-    pub fn new() -> Self {
+    pub fn new(agent: impl Into<String>, model: impl Into<String>) -> Self {
         AppState {
+            agent: agent.into(),
+            model: model.into(),
             mode: AppMode::FeatureInput {
                 input: String::new(),
                 cursor: 0,
@@ -240,6 +244,20 @@ impl AppState {
 
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::KeyCode;
+
+        // Activity log scroll: PageUp/PageDown work in any mode
+        match key.code {
+            KeyCode::PageUp => {
+                self.handle_scroll(5);
+                return;
+            }
+            KeyCode::PageDown => {
+                self.handle_scroll(-5);
+                return;
+            }
+            _ => {}
+        }
+
         // Take ownership of mode to avoid borrow-checker conflicts when reassigning self.mode
         let current_mode = std::mem::replace(&mut self.mode, AppMode::Running);
         match current_mode {
@@ -549,7 +567,7 @@ mod tests {
     /// Running (on answering last question) → Done (on WorkflowComplete).
     #[test]
     fn test_app_state_transitions() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
 
         // Starts in FeatureInput mode
         assert!(
@@ -594,7 +612,7 @@ mod tests {
     /// AC3: ProgressEvent variants are appended to the activity log with correct text and kind.
     #[test]
     fn test_activity_log_from_progress_events() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         // Advance to Running mode first
         state.handle_event(TuiEvent::Key(char_key('t')));
         state.handle_event(TuiEvent::Key(enter_key()));
@@ -652,7 +670,7 @@ mod tests {
     /// Agent output chunks are coalesced; newlines only when \n is received in a chunk.
     #[test]
     fn test_agent_output_segments_no_line_break_without_newline() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.handle_event(TuiEvent::GoalStarted("plan".to_string()));
 
         // Chunks without newline: coalesce into one line
@@ -709,7 +727,7 @@ mod tests {
     /// The prompt is NOT sent to the agent (submitted_feature_input stays None).
     #[test]
     fn test_running_mode_input_adds_to_inbox() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = AppMode::Running;
 
         // Type "fix bug" and press Enter
@@ -745,7 +763,7 @@ mod tests {
     /// Cursor stays within bounds.
     #[test]
     fn test_inbox_navigation_up_down() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = AppMode::Running;
         state.inbox = vec![
             "first".to_string(),
@@ -792,7 +810,7 @@ mod tests {
     /// Enter saves the edit.
     #[test]
     fn test_inbox_edit_saves_on_enter() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = AppMode::Running;
         state.inbox = vec!["original text".to_string()];
         state.inbox_focus = InboxFocus::List;
@@ -829,7 +847,7 @@ mod tests {
     /// AC5: Pressing Esc during edit mode discards changes.
     #[test]
     fn test_inbox_edit_discards_on_esc() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = AppMode::Running;
         state.inbox = vec!["keep this".to_string()];
         state.inbox_focus = InboxFocus::List;
@@ -859,7 +877,7 @@ mod tests {
     /// AC6: Pressing D on a selected inbox item removes it from the queue.
     #[test]
     fn test_inbox_delete_removes_item() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = AppMode::Running;
         state.inbox = vec!["first".to_string(), "second".to_string()];
         state.inbox_focus = InboxFocus::List;
@@ -890,7 +908,7 @@ mod tests {
     /// and set as submitted_feature_input for dispatch.
     #[test]
     fn test_workflow_complete_dequeues_inbox() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = AppMode::Running;
         state.inbox = vec!["queued task 1".to_string(), "queued task 2".to_string()];
 
@@ -915,7 +933,7 @@ mod tests {
     /// Also verifies the inbox branch: first complete dequeues, second complete (empty inbox) goes to Done.
     #[test]
     fn test_workflow_complete_done_when_empty() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = AppMode::Running;
         state.inbox = vec!["only task".to_string()];
 
@@ -947,7 +965,7 @@ mod tests {
     /// that the items were queued.
     #[test]
     fn test_dequeued_prompt_has_instruction_prefix() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = AppMode::Running;
         state.inbox = vec!["fix the login bug".to_string()];
 
@@ -978,7 +996,7 @@ mod tests {
     /// Running mode: typing characters appends to running_input.
     #[test]
     fn test_running_mode_char_appends_to_running_input() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = AppMode::Running;
 
         state.handle_event(TuiEvent::Key(char_key('a')));
@@ -997,7 +1015,7 @@ mod tests {
     /// Running mode: Backspace removes last char from running_input.
     #[test]
     fn test_running_mode_backspace_removes_char() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = AppMode::Running;
         state.running_input = "abc".to_string();
         state.running_cursor = 3;
@@ -1015,7 +1033,7 @@ mod tests {
     /// Running mode: multiple Enter presses queue multiple items.
     #[test]
     fn test_running_mode_multiple_items_queued() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = AppMode::Running;
 
         for c in "task one".chars() {
@@ -1036,7 +1054,7 @@ mod tests {
     /// Delete last item at end of list: cursor adjusts to previous item.
     #[test]
     fn test_inbox_delete_adjusts_cursor_at_end() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = AppMode::Running;
         state.inbox = vec!["a".to_string(), "b".to_string(), "c".to_string()];
         state.inbox_focus = InboxFocus::List;
@@ -1055,7 +1073,7 @@ mod tests {
     /// all answers are collected and joined with '\n'.
     #[test]
     fn test_clarification_roundtrip_collects_all_answers() {
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         // Advance to Running
         state.handle_event(TuiEvent::Key(char_key('t')));
         state.handle_event(TuiEvent::Key(enter_key()));

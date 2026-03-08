@@ -6,7 +6,7 @@
 
 ## Summary
 
-The Implementation Step is the TDD Red-Green phase of the tddy-coder workflow. The **red** goal reads PRD.md and acceptance-tests.md from the plan directory, creates skeleton production code and failing lower-level tests, and persists its session to `changeset.yaml`. The **green** goal resumes the red session via `changeset.yaml`, reads progress.md (required) plus PRD.md and acceptance-tests.md (optional for context), implements production-grade code to make all failing tests pass, updates progress.md and acceptance-tests.md with results, verifies completion by running both unit and acceptance tests, and executes the demo plan when `demo-plan.md` exists.
+The Implementation Step is the TDD Red-Green phase of the tddy-coder workflow. The **red** goal reads PRD.md and acceptance-tests.md from the plan directory, creates skeleton production code and failing lower-level tests, and persists its session to `changeset.yaml`. The **green** goal resumes the red session via `changeset.yaml`, reads progress.md (required) plus PRD.md and acceptance-tests.md (optional for context), implements production-grade code to make all failing tests pass, updates progress.md and acceptance-tests.md with results, and verifies completion by running both unit and acceptance tests. The **demo** goal runs after green (prompted in full workflow); it executes the demo plan from `demo-plan.md` when present. The **evaluate** goal analyzes git changes for risks and produces `evaluation-report.md`.
 
 ## Background
 
@@ -18,7 +18,9 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 
 1. Accepts `--goal red` to create skeleton code and failing lower-level tests from PRD and acceptance-tests.md
 2. Accepts `--goal green` to implement production code that makes failing tests pass
-3. `--plan-dir <path>` is required when `--goal red` or `--goal green`
+3. Accepts `--goal demo` to run the demo plan (requires `demo-plan.md` in plan dir)
+4. Accepts `--goal evaluate` to analyze git changes for risks (replaces `--goal validate-changes`)
+5. `--plan-dir <path>` is required when `--goal red`, `--goal green`, `--goal demo`, or `--goal evaluate`
 4. `--model`, `--agent`, `--conversation-output`, `--allowed-tools`, `--debug` work with both goals (Updated: 2026-03-07)
 
 ### Red Workflow
@@ -52,7 +54,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 10. **Completion determination**:
     - If ALL unit tests AND ALL acceptance tests pass → state transitions to `GreenComplete`
     - If any test fails → state transitions to `Failed` with details of which tests failed
-11. **Demo execution**: When `demo-plan.md` exists, green goal executes the demo plan and writes `demo-results.md`
+11. Green does not run the demo; demo is a separate goal after green (prompted in full workflow)
 12. On successful exit, output a human-readable summary (tests passed/failed count, implementation summary)
 
 ### Output Artifacts
@@ -80,11 +82,30 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 
 1. **Red goal**: Transitions `Init`/`Planned`/`AcceptanceTestsReady` → `RedTesting` → `RedTestsReady` (or `Failed`)
 2. **Green goal**: Transitions `RedTestsReady` → `GreenImplementing` → `GreenComplete` (or `Failed`)
+3. **Demo goal**: Transitions `GreenComplete` → `DemoRunning` → `DemoComplete` (or `DemoSkipped` when user skips)
+4. **Evaluate goal**: Transitions `GreenComplete`/`DemoComplete`/`DemoSkipped` → `Evaluating` → `Evaluated`
+
+### Demo Workflow
+
+1. Runs after green in full workflow (user prompted: Run or Skip)
+2. Standalone `--goal demo --plan-dir <path>` runs demo against existing plan dir
+3. Requires `demo-plan.md` in plan directory
+4. Executes demo steps, writes `demo-results.md`
+5. State transitions: `GreenComplete` → `DemoRunning` → `DemoComplete` (or `DemoSkipped` when skipped)
+
+### Evaluate Workflow
+
+1. `--goal evaluate --plan-dir <path>` analyzes git changes for risks
+2. Produces `evaluation-report.md` in plan directory
+3. Accepts `GreenComplete`, `DemoComplete`, or `DemoSkipped` as starting state
+4. State transitions: → `Evaluating` → `Evaluated`
 
 ### Exit Output
 
 - **red**: Summary of created skeletons and failing tests (requires `--plan-dir`)
 - **green**: Summary of implementation results — tests passed/failed counts, implementation summary (requires `--plan-dir`)
+- **demo**: Summary and steps completed (requires `--plan-dir`)
+- **evaluate**: Summary, risk level, report path (requires `--plan-dir`)
 
 ## Acceptance Criteria
 
