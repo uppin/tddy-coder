@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tddy:goal/validate-refactor",
+  "title": "ValidateRefactorOutput",
+  "type": "object",
+  "required": ["goal"],
+  "properties": {
+    "goal": { "const": "validate-refactor" },
+    "summary": { "type": "string" },
+    "tests_report_written": { "type": "boolean" },
+    "prod_ready_report_written": { "type": "boolean" },
+    "clean_code_report_written": { "type": "boolean" }
+  }
+}

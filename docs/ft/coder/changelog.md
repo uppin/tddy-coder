@@ -2,6 +2,14 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-08 — JSON Schema Structured Output Validation
+
+- **Schema files**: Formal JSON Schema files for all 7 goals (plan, acceptance-tests, red, green, validate, evaluate, validate-refactor) with shared types via `$ref` in `schemas/common/`.
+- **Embedding**: Schemas embedded in binary via `include_dir`; written to plan directory for agent Read tool.
+- **Validation**: Agent output validated against schema before serde deserialization. On failure: 1 retry with validation errors and schema path in prompt.
+- **Explicit contract**: `<structured-response schema="schemas/red.schema.json">` attribute declares expected format. System prompts reference schema path and include `schema=` in examples.
+- **Tests**: Fixtures for valid and invalid JSON per goal; retry integration tests (invalid→valid succeeds; invalid twice→Failed).
+
 ## 2026-03-07 — Validate-Changes Goal
 
 - **New goal**: `--goal validate-changes` analyzes current git changes for risks (build validity, test infrastructure, production code quality, security). Produces validation-report.md in working directory.

@@ -79,6 +79,7 @@ The PRD must include a **Testing Plan** section with: test level (E2E/Integratio
 9. **Structured Q&A**: Clarifying questions come from `AskUserQuestion` tool events (header, question, options, multi_select). Presented via inquire Select/MultiSelect prompts. Questions and answers are stored in `changeset.yaml` as `clarification_qa`.
 10. **Real-time progress**: Tool activity (Read, Glob, Bash, etc.) displayed while Claude works.
 11. **Output parsing**: System prompt instructs Claude to emit PRD and TODO in `<structured-response content-type="application-json">` format; parser also supports delimiter fallback.
+12. **Structured output validation**: Each goal's output is validated against a JSON Schema file before serde deserialization. Schemas are embedded in the binary via `include_dir`, written to the plan directory for the agent to read via its Read tool. System prompts reference the schema path (e.g. `schemas/plan.schema.json`) and instruct the agent to emit the `schema="..."` attribute on the `<structured-response>` tag. On validation failure, the session resumes with validation errors (1 retry); the retry prompt includes the schema path and error details.
 
 ### Project Discovery (Plan Goal)
 

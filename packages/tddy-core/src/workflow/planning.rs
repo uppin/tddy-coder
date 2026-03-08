@@ -12,9 +12,9 @@ If you need clarification before creating the PRD, either use the AskUserQuestio
 {"questions":[{"header":"<section>","question":"<text>","options":[{"label":"<choice>","description":"<desc>"}],"multiSelect":false}]}
 </clarification-questions>
 
-Otherwise, you MUST include a structured-response block with your output. Use this exact format:
+Otherwise, you MUST include a structured-response block with your output. Read the JSON Schema file at `schemas/plan.schema.json` in the working directory for the exact output format specification. Use this exact format:
 
-<structured-response content-type="application-json">
+<structured-response content-type="application-json" schema="schemas/plan.schema.json">
 {"goal": "plan", "prd": "<PRD markdown content>", "todo": "<TODO markdown content>", "discovery": {"toolchain": {"<tool>": "<version>"}, "scripts": {"<name>": "<command>"}, "doc_locations": ["<path>"], "plan_dir_suggestion": "<path>", "relevant_code": [{"path": "<path>", "reason": "<why>"}], "test_infrastructure": {"runner": "<cmd>", "conventions": "<pattern>"}}, "demo_plan": {"demo_type": "cli|api|ui", "setup_instructions": "<text>", "steps": [{"description": "<text>", "command_or_action": "<cmd>", "expected_result": "<text>"}], "verification": "<text>"}}
 </structured-response>
 
@@ -58,6 +58,19 @@ mod tests {
         assert!(
             prompt.contains("Testing Plan") || prompt.to_lowercase().contains("testing plan"),
             "system prompt must require Testing Plan section in PRD"
+        );
+    }
+
+    #[test]
+    fn system_prompt_references_schema_and_includes_schema_attribute() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("schemas/plan.schema.json"),
+            "system prompt must reference plan schema file"
+        );
+        assert!(
+            prompt.contains("schema=\"schemas/plan.schema.json\""),
+            "system prompt example must include schema= attribute"
         );
     }
 }

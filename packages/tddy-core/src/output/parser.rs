@@ -11,6 +11,50 @@ use crate::error::ParseError;
 const STRUCTURED_OPEN: &str = "<structured-response";
 const STRUCTURED_CLOSE: &str = "</structured-response>";
 const PRD_START: &str = "---PRD_START---";
+
+/// Parsed structured-response block: JSON content and optional schema path.
+#[derive(Debug, Clone)]
+pub struct StructuredBlock<'a> {
+    pub json: &'a str,
+    pub schema: Option<&'a str>,
+}
+
+/// Extract the last <structured-response> block from output.
+/// Parses the schema="..." attribute from the opening tag.
+/// Returns the JSON string and optional schema path for validation.
+pub fn extract_last_structured_block(s: &str) -> Result<StructuredBlock<'_>, ParseError> {
+    let open = s
+        .rfind(STRUCTURED_OPEN)
+        .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
+    let after_open = &s[open + STRUCTURED_OPEN.len()..];
+    let gt = after_open
+        .find('>')
+        .ok_or_else(|| ParseError::Malformed("structured-response malformed".into()))?;
+    let tag_attrs = &after_open[..gt];
+    let content = after_open[gt + 1..].trim();
+    let close = content
+        .find(STRUCTURED_CLOSE)
+        .ok_or_else(|| ParseError::Malformed("structured-response close not found".into()))?;
+    let json_str = content[..close].trim();
+    if json_str.is_empty() {
+        return Err(ParseError::Malformed(
+            "structured-response block is empty".into(),
+        ));
+    }
+    let schema = tag_attrs
+        .find("schema=\"")
+        .and_then(|start| {
+            let value_start = start + "schema=\"".len();
+            let rest = &tag_attrs[value_start..];
+            rest.find('"').map(|end| &rest[..end])
+        })
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    Ok(StructuredBlock {
+        json: json_str,
+        schema,
+    })
+}
 const PRD_END: &str = "---PRD_END---";
 const TODO_START: &str = "---TODO_START---";
 const TODO_END: &str = "---TODO_END---";

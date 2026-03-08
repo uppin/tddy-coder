@@ -24,7 +24,9 @@ You MUST:
 
 **CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object starting with {"goal":"validate-refactor",...}.
 
-<structured-response content-type="application-json">
+Read the JSON Schema file at `schemas/validate-refactor.schema.json` in the working directory for the exact output format specification.
+
+<structured-response content-type="application-json" schema="schemas/validate-refactor.schema.json">
 {"goal":"validate-refactor","summary":"<human-readable summary of all 3 subagent results>","tests_report_written":<true|false>,"prod_ready_report_written":<true|false>,"clean_code_report_written":<true|false>}
 </structured-response>"#
     .to_string()
@@ -55,4 +57,22 @@ The evaluation report from the prior evaluate-changes run is provided below for 
 Spawn all 3 subagents concurrently. When all are done, report the summary and whether each report was written."#,
         evaluation_report = evaluation_report_content
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_prompt_references_schema_and_includes_schema_attribute() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("schemas/validate-refactor.schema.json"),
+            "system prompt must reference validate-refactor schema file"
+        );
+        assert!(
+            prompt.contains("schema=\"schemas/validate-refactor.schema.json\""),
+            "system prompt example must include schema= attribute"
+        );
+    }
 }

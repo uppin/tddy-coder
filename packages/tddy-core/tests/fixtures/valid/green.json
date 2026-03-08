@@ -1,0 +1,11 @@
+{
+  "goal": "green",
+  "summary": "Implemented 2 methods. All tests passing.",
+  "tests": [
+    {"name": "test_foo", "file": "src/foo.rs", "line": 10, "status": "passing"},
+    {"name": "test_bar", "file": "src/bar.rs", "line": 20, "status": "failing", "reason": "timeout"}
+  ],
+  "implementations": [
+    {"name": "AuthService::validate", "file": "src/service.rs", "line": 15, "kind": "method"}
+  ]
+}

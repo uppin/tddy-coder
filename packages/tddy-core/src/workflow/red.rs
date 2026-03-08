@@ -13,9 +13,9 @@ You MUST:
 
 **CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object. Do NOT output a number, array (e.g. [8, {...}]), numbered list items, or any text inside the block. The parser expects a single JSON object starting with {"goal":"red",...} — nothing else.
 
-Your final output MUST include this exact block (replace placeholders with actual values):
+Read the JSON Schema file at `schemas/red.schema.json` in the working directory for the exact output format specification. Your final output MUST include this exact block (replace placeholders with actual values):
 
-<structured-response content-type="application-json">
+<structured-response content-type="application-json" schema="schemas/red.schema.json">
 {"goal": "red", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "failing"}], "skeletons": [{"name": "<name>", "file": "<path>", "line": <number>, "kind": "<trait|struct|method|function|module>"}], "test_command": "<command>", "prerequisite_actions": "<prereqs or None>", "run_single_or_selected_tests": "<how to run one test>", "markers": [{"marker_id": "M001", "test_name": "<name>", "scope": "<code path>", "data": {}}], "marker_results": [{"marker_id": "M001", "test_name": "<name>", "scope": "<scope>", "collected": true, "investigation": null}], "test_output_file": "<path>", "sequential_command": "<optional>", "logging_command": "<optional>", "metric_hooks": "<optional>", "feedback_options": "<optional>"}
 </structured-response>
 
@@ -72,6 +72,19 @@ mod tests {
         assert!(
             prompt.contains("red") || prompt.contains("skeleton"),
             "system prompt must instruct Claude for red goal"
+        );
+    }
+
+    #[test]
+    fn system_prompt_references_schema_and_includes_schema_attribute() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("schemas/red.schema.json"),
+            "system prompt must reference red schema file"
+        );
+        assert!(
+            prompt.contains("schema=\"schemas/red.schema.json\""),
+            "system prompt example must include schema= attribute"
         );
     }
 }

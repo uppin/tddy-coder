@@ -16,9 +16,9 @@ You MUST:
 - Any text before or inside the JSON block
 The parser expects a single JSON object starting with {"goal":"acceptance-tests",...} — nothing else.
 
-Your final output MUST include this exact block (replace placeholders with actual values):
+Read the JSON Schema file at `schemas/acceptance-tests.schema.json` in the working directory for the exact output format specification. Your final output MUST include this exact block (replace placeholders with actual values):
 
-<structured-response content-type="application-json">
+<structured-response content-type="application-json" schema="schemas/acceptance-tests.schema.json">
 {"goal": "acceptance-tests", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "failing"}], "test_command": "<command>", "prerequisite_actions": "<prereqs or None>", "run_single_or_selected_tests": "<how to run one test>", "sequential_command": "<optional: run tests sequentially>", "logging_command": "<optional: run with verbose/logging>", "metric_hooks": "<optional: how to add perf/metric hooks>", "feedback_options": "<optional: CI/IDE feedback options>"}
 </structured-response>
 
@@ -66,6 +66,19 @@ mod tests {
         assert!(
             prompt.contains("Testing Plan") || prompt.contains("acceptance test"),
             "system prompt must instruct Claude to create tests and verify they fail"
+        );
+    }
+
+    #[test]
+    fn system_prompt_references_schema_and_includes_schema_attribute() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("schemas/acceptance-tests.schema.json"),
+            "system prompt must reference acceptance-tests schema file"
+        );
+        assert!(
+            prompt.contains("schema=\"schemas/acceptance-tests.schema.json\""),
+            "system prompt example must include schema= attribute"
         );
     }
 }

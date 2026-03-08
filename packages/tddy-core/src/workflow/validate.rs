@@ -15,10 +15,10 @@ You MUST:
 
 **CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object. Do NOT output a number, array, or numbered list items inside the block. The parser expects a single JSON object starting with {"goal":"validate-changes",...}.
 
-Your final output MUST include this exact block (replace placeholders with actual values).
+Read the JSON Schema file at `schemas/validate.schema.json` in the working directory for the exact output format specification. Your final output MUST include this exact block (replace placeholders with actual values).
 For build_results status use: "pass", "fail", or "not_run" (when build could not be executed).
 
-<structured-response content-type="application-json">
+<structured-response content-type="application-json" schema="schemas/validate.schema.json">
 {"goal":"validate-changes","summary":"<human-readable summary>","risk_level":"<low|medium|high|critical>","build_results":[{"package":"<name>","status":"<pass|fail|not_run>","notes":null}],"issues":[{"severity":"<info|warning|error>","category":"<code_quality|test_infrastructure|...>","file":"<path>","line":<number>,"description":"<text>","suggestion":"<optional>"}],"changeset_sync":{"status":"<synced|not_found|...>","items_updated":0,"items_added":0},"files_analyzed":[{"file":"<path>","lines_changed":<number>,"changeset_item":null}],"test_impact":{"tests_affected":0,"new_tests_needed":0}}
 </structured-response>"#
         .to_string()
@@ -72,5 +72,23 @@ Inspect the git diff, run the build, and produce a validation report with risk l
             changeset = changeset
         ),
         (None, None) => "Analyze the current git changes in this directory for risks and code quality. Inspect the git diff, run the build (e.g. cargo build or cargo check), and produce a validation report with risk level, issues, and build results.".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_prompt_references_schema_and_includes_schema_attribute() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("schemas/validate.schema.json"),
+            "system prompt must reference validate schema file"
+        );
+        assert!(
+            prompt.contains("schema=\"schemas/validate.schema.json\""),
+            "system prompt example must include schema= attribute"
+        );
     }
 }

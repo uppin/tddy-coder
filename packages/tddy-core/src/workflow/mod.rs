@@ -8,18 +8,22 @@ mod red;
 mod validate;
 mod validate_refactor;
 
-use crate::backend::{CodingBackend, InvokeResponse};
+use crate::backend::{CodingBackend, InvokeRequest, InvokeResponse};
 use crate::changeset::{
     append_session_and_update_state, clarification_qa_from_backend, get_session_for_tag,
     read_changeset, resolve_model, update_state, write_changeset, Changeset,
 };
 use crate::error::WorkflowError;
 use crate::output::{
-    parse_acceptance_tests_response, parse_evaluate_response, parse_green_response,
-    parse_planning_response, parse_red_response, parse_validate_refactor_response,
-    parse_validate_response, slugify_directory_name, update_acceptance_tests_file,
-    update_progress_file, write_acceptance_tests_file, write_artifacts, write_demo_results_file,
-    write_evaluation_report, write_progress_file, write_red_output_file, write_validation_report,
+    extract_last_structured_block, parse_acceptance_tests_response, parse_evaluate_response,
+    parse_green_response, parse_planning_response, parse_red_response,
+    parse_validate_refactor_response, parse_validate_response, slugify_directory_name,
+    update_acceptance_tests_file, update_progress_file, write_acceptance_tests_file,
+    write_artifacts, write_demo_results_file, write_evaluation_report, write_progress_file,
+    write_red_output_file, write_validation_report,
+};
+use crate::schema::{
+    format_validation_errors, schema_file_path, validate_output, write_schema_to_dir,
 };
 use std::path::{Path, PathBuf};
 
@@ -274,6 +278,77 @@ impl<B: CodingBackend> Workflow<B> {
         }
     }
 
+    /// Extract JSON from response, validate against schema, retry once on validation failure.
+    /// Returns the validated response (original or from retry).
+    /// When allow_no_block is true (e.g. plan with delimited fallback), returns Ok(response) if no structured block found.
+    fn validate_and_retry<F>(
+        &mut self,
+        goal_name: &str,
+        response: InvokeResponse,
+        _plan_dir: &Path,
+        allow_no_block: bool,
+        build_retry_request: F,
+    ) -> Result<InvokeResponse, WorkflowError>
+    where
+        F: FnOnce(&str) -> InvokeRequest,
+    {
+        let block = match extract_last_structured_block(&response.output) {
+            Ok(b) => b,
+            Err(e) => {
+                if allow_no_block {
+                    return Ok(response);
+                }
+                emit_parse_failure_debug(&response, goal_name, None);
+                return Err(WorkflowError::ParseError(e));
+            }
+        };
+
+        if let Err(errors) = validate_output(goal_name, block.json) {
+            let schema_path = schema_file_path(goal_name)
+                .unwrap_or_else(|| format!("schemas/{}.schema.json", goal_name));
+            let retry_prompt = format!(
+                "Your previous structured output failed JSON Schema validation against `{}`.\n\n\
+                 Read the schema file at `{}` and fix the following errors:\n\n{}\n\n\
+                 Output ONLY a corrected <structured-response> block with schema=\"{}\".",
+                schema_path,
+                schema_path,
+                format_validation_errors(&errors),
+                schema_path
+            );
+            let retry_request = build_retry_request(&retry_prompt);
+            let retry_response = self
+                .backend
+                .invoke(retry_request)
+                .map_err(WorkflowError::Backend)?;
+            let retry_block =
+                extract_last_structured_block(&retry_response.output).map_err(|e| {
+                    emit_parse_failure_debug(&retry_response, goal_name, None);
+                    WorkflowError::ParseError(e)
+                })?;
+            if let Err(retry_errors) = validate_output(goal_name, retry_block.json) {
+                emit_parse_failure_debug(
+                    &retry_response,
+                    goal_name,
+                    Some(&format!(
+                        "Retry also failed validation: {}",
+                        format_validation_errors(&retry_errors)
+                    )),
+                );
+                self.set_state(WorkflowState::Failed {
+                    error: format!(
+                        "JSON Schema validation failed after retry: {}",
+                        format_validation_errors(&retry_errors)
+                    ),
+                });
+                return Err(WorkflowError::ParseError(
+                    crate::error::ParseError::Malformed(format_validation_errors(&retry_errors)),
+                ));
+            }
+            return Ok(retry_response);
+        }
+        Ok(response)
+    }
+
     /// Run the planning step: read feature description, invoke backend, write artifacts.
     /// When `answers` is `None`, performs first invoke; when backend returns questions,
     /// returns `ClarificationNeeded`. Call again with `Some(answers)` to continue.
@@ -316,6 +391,8 @@ impl<B: CodingBackend> Workflow<B> {
         std::fs::write(&system_prompt_path, &system_prompt)
             .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
+        let _ = write_schema_to_dir(&output_path, "plan");
+
         let prompt = match answers {
             None => planning::build_prompt(input),
             Some(a) => planning::build_followup_prompt(input, a),
@@ -335,7 +412,7 @@ impl<B: CodingBackend> Workflow<B> {
         let request = crate::backend::InvokeRequest {
             prompt,
             system_prompt: None,
-            system_prompt_path: Some(system_prompt_path),
+            system_prompt_path: Some(system_prompt_path.clone()),
             goal: crate::backend::Goal::Plan,
             model,
             session_id,
@@ -369,19 +446,44 @@ impl<B: CodingBackend> Workflow<B> {
             });
         }
 
-        let planning = match parse_planning_response(&response.output) {
+        let session_id_for_retry = response.session_id.clone();
+        let model_for_retry = options.model.clone();
+        let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
+            prompt: retry_prompt.to_string(),
+            system_prompt: None,
+            system_prompt_path: Some(system_prompt_path.clone()),
+            goal: crate::backend::Goal::Plan,
+            model: model_for_retry.clone(),
+            session_id: session_id_for_retry.clone(),
+            is_resume: true,
+            working_dir: Some(output_dir.to_path_buf()),
+            debug: options.debug,
+            agent_output: options.agent_output,
+            conversation_output_path: options.conversation_output_path.clone(),
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
+        };
+        let validated_response = self.validate_and_retry(
+            "plan",
+            response,
+            &output_path,
+            true, // allow delimited fallback
+            build_retry_request,
+        )?;
+
+        let planning = match parse_planning_response(&validated_response.output) {
             Ok(out) => out,
             Err(e) => {
                 eprintln!(
                     "--- Failed parse input (length {} bytes) ---",
-                    response.output.len()
+                    validated_response.output.len()
                 );
                 eprintln!(
                     "Hint: The agent must output a <structured-response> block with the actual PRD and TODO content. \
                      Meta-commentary (e.g. 'I've created the PRD...') without the block causes this error. \
                      See the system prompt for the required format."
                 );
-                eprintln!("{}", response.output);
+                eprintln!("{}", validated_response.output);
                 eprintln!("--- End failed parse input ---");
                 self.set_state(WorkflowState::Failed {
                     error: e.to_string(),
@@ -462,6 +564,8 @@ impl<B: CodingBackend> Workflow<B> {
             self.set_state(WorkflowState::AcceptanceTesting);
         }
 
+        let _ = write_schema_to_dir(plan_dir, "acceptance-tests");
+
         let system_prompt = acceptance_tests::system_prompt();
         let prompt = match answers {
             None => acceptance_tests::build_prompt(&prd_content),
@@ -514,11 +618,40 @@ impl<B: CodingBackend> Workflow<B> {
             });
         }
 
-        let output = match parse_acceptance_tests_response(&response.output) {
+        let session_id_for_retry = response.session_id.clone();
+        let model_for_retry = resolve_model(
+            Some(&changeset),
+            "acceptance-tests",
+            options.model.as_deref(),
+        );
+        let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
+            prompt: retry_prompt.to_string(),
+            system_prompt: Some(acceptance_tests::system_prompt()),
+            system_prompt_path: None,
+            goal: crate::backend::Goal::AcceptanceTests,
+            model: model_for_retry.clone(),
+            session_id: session_id_for_retry.clone(),
+            is_resume: true,
+            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            debug: options.debug,
+            agent_output: options.agent_output,
+            conversation_output_path: options.conversation_output_path.clone(),
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
+        };
+        let validated_response = self.validate_and_retry(
+            "acceptance-tests",
+            response,
+            plan_dir,
+            false,
+            build_retry_request,
+        )?;
+
+        let output = match parse_acceptance_tests_response(&validated_response.output) {
             Ok(out) => {
                 write_acceptance_tests_file(plan_dir, &out)?;
                 let mut cs = read_changeset(plan_dir)?;
-                let at_session_id = response
+                let at_session_id = validated_response
                     .session_id
                     .clone()
                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -535,7 +668,7 @@ impl<B: CodingBackend> Workflow<B> {
             }
             Err(e) => {
                 emit_parse_failure_debug(
-                    &response,
+                    &validated_response,
                     "acceptance-tests",
                     Some(
                         "Empty output can mean the agent produced no stream-json content, \
@@ -614,12 +747,14 @@ impl<B: CodingBackend> Workflow<B> {
 
         let session_id = uuid::Uuid::new_v4().to_string();
 
+        let _ = write_schema_to_dir(plan_dir, "red");
+
         let request = crate::backend::InvokeRequest {
             prompt,
             system_prompt: Some(system_prompt),
             system_prompt_path: None,
             goal: crate::backend::Goal::Red,
-            model,
+            model: model.clone(),
             session_id: Some(session_id.clone()),
             is_resume: false,
             working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
@@ -647,7 +782,27 @@ impl<B: CodingBackend> Workflow<B> {
             });
         }
 
-        let output = match parse_red_response(&response.output) {
+        let session_id_for_retry = response.session_id.clone();
+        let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
+            prompt: retry_prompt.to_string(),
+            system_prompt: Some(red::system_prompt()),
+            system_prompt_path: None,
+            goal: crate::backend::Goal::Red,
+            model: model.clone(),
+            session_id: session_id_for_retry.clone(),
+            is_resume: true,
+            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            debug: options.debug,
+            agent_output: options.agent_output,
+            conversation_output_path: options.conversation_output_path.clone(),
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
+        };
+
+        let validated_response =
+            self.validate_and_retry("red", response, plan_dir, false, build_retry_request)?;
+
+        let output = match parse_red_response(&validated_response.output) {
             Ok(out) => {
                 let _ = write_red_output_file(plan_dir, &out);
                 let _ = write_progress_file(plan_dir, &out);
@@ -677,7 +832,7 @@ impl<B: CodingBackend> Workflow<B> {
             }
             Err(e) => {
                 emit_parse_failure_debug(
-                    &response,
+                    &validated_response,
                     "red",
                     Some(
                         "The agent must output a <structured-response> block with goal:\"red\", summary, tests, skeletons. \
@@ -770,6 +925,8 @@ impl<B: CodingBackend> Workflow<B> {
             self.set_state(WorkflowState::GreenImplementing);
         }
 
+        let _ = write_schema_to_dir(plan_dir, "green");
+
         let system_prompt = green::system_prompt();
         let prompt = match answers {
             None => green::build_prompt(
@@ -790,7 +947,7 @@ impl<B: CodingBackend> Workflow<B> {
             system_prompt: Some(system_prompt),
             system_prompt_path: None,
             goal: crate::backend::Goal::Green,
-            model,
+            model: model.clone(),
             session_id: Some(session_id.clone()),
             is_resume: true,
             working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
@@ -818,7 +975,26 @@ impl<B: CodingBackend> Workflow<B> {
             });
         }
 
-        match parse_green_response(&response.output) {
+        let session_id_for_retry = response.session_id.clone();
+        let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
+            prompt: retry_prompt.to_string(),
+            system_prompt: Some(green::system_prompt()),
+            system_prompt_path: None,
+            goal: crate::backend::Goal::Green,
+            model: model.clone(),
+            session_id: session_id_for_retry.clone(),
+            is_resume: true,
+            working_dir: plan_dir.parent().map(std::path::Path::to_path_buf),
+            debug: options.debug,
+            agent_output: options.agent_output,
+            conversation_output_path: options.conversation_output_path.clone(),
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
+        };
+        let validated_response =
+            self.validate_and_retry("green", response, plan_dir, false, build_retry_request)?;
+
+        match parse_green_response(&validated_response.output) {
             Ok(out) => {
                 let _ = update_progress_file(plan_dir, &out);
                 let _ = update_acceptance_tests_file(plan_dir, &out);
@@ -857,7 +1033,7 @@ impl<B: CodingBackend> Workflow<B> {
             }
             Err(e) => {
                 emit_parse_failure_debug(
-                    &response,
+                    &validated_response,
                     "green",
                     Some(
                         "The agent must output a <structured-response> block with goal:\"green\", summary, tests, implementations. \
@@ -897,6 +1073,8 @@ impl<B: CodingBackend> Workflow<B> {
         let prd_content = prd_owned.as_deref();
         let changeset_content = changeset_owned.as_deref();
 
+        let _ = write_schema_to_dir(working_dir, "validate");
+
         let system_prompt = validate::system_prompt();
         let prompt = validate::build_prompt(prd_content, changeset_content);
 
@@ -908,7 +1086,7 @@ impl<B: CodingBackend> Workflow<B> {
             system_prompt: Some(system_prompt),
             system_prompt_path: None,
             goal: crate::backend::Goal::Validate,
-            model,
+            model: model.clone(),
             session_id: Some(session_id.clone()),
             is_resume: false,
             working_dir: Some(working_dir.to_path_buf()),
@@ -936,14 +1114,38 @@ impl<B: CodingBackend> Workflow<B> {
             });
         }
 
-        let output = match parse_validate_response(&response.output) {
+        let session_id_for_retry = response.session_id.clone();
+        let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
+            prompt: retry_prompt.to_string(),
+            system_prompt: Some(validate::system_prompt()),
+            system_prompt_path: None,
+            goal: crate::backend::Goal::Validate,
+            model: model.clone(),
+            session_id: session_id_for_retry.clone(),
+            is_resume: true,
+            working_dir: Some(working_dir.to_path_buf()),
+            debug: options.debug,
+            agent_output: options.agent_output,
+            conversation_output_path: options.conversation_output_path.clone(),
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
+        };
+        let validated_response = self.validate_and_retry(
+            "validate",
+            response,
+            working_dir,
+            false,
+            build_retry_request,
+        )?;
+
+        let output = match parse_validate_response(&validated_response.output) {
             Ok(out) => {
                 let _ = write_validation_report(working_dir, &out);
                 out
             }
             Err(e) => {
                 emit_parse_failure_debug(
-                    &response,
+                    &validated_response,
                     "validate",
                     Some(
                         "The agent must output a <structured-response> block with goal:\"validate-changes\", summary, risk_level, issues, build_results. \
@@ -1006,6 +1208,8 @@ impl<B: CodingBackend> Workflow<B> {
             changeset_content.is_some()
         );
 
+        let _ = write_schema_to_dir(working_dir, "evaluate");
+
         let system_prompt = evaluate::system_prompt();
         let prompt = evaluate::build_prompt(prd_content, changeset_content);
 
@@ -1017,8 +1221,8 @@ impl<B: CodingBackend> Workflow<B> {
             system_prompt: Some(system_prompt),
             system_prompt_path: None,
             goal: crate::backend::Goal::Evaluate,
-            model,
-            session_id: Some(session_id),
+            model: model.clone(),
+            session_id: Some(session_id.clone()),
             is_resume: false,
             working_dir: Some(working_dir.to_path_buf()),
             debug: options.debug,
@@ -1045,14 +1249,38 @@ impl<B: CodingBackend> Workflow<B> {
             });
         }
 
-        let output = match parse_evaluate_response(&response.output) {
+        let session_id_for_retry = response.session_id.clone();
+        let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
+            prompt: retry_prompt.to_string(),
+            system_prompt: Some(evaluate::system_prompt()),
+            system_prompt_path: None,
+            goal: crate::backend::Goal::Evaluate,
+            model: model.clone(),
+            session_id: session_id_for_retry.clone(),
+            is_resume: true,
+            working_dir: Some(working_dir.to_path_buf()),
+            debug: options.debug,
+            agent_output: options.agent_output,
+            conversation_output_path: options.conversation_output_path.clone(),
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
+        };
+        let validated_response = self.validate_and_retry(
+            "evaluate",
+            response,
+            working_dir,
+            false,
+            build_retry_request,
+        )?;
+
+        let output = match parse_evaluate_response(&validated_response.output) {
             Ok(out) => {
                 let _ = write_evaluation_report(plan_dir, &out);
                 out
             }
             Err(e) => {
                 emit_parse_failure_debug(
-                    &response,
+                    &validated_response,
                     "evaluate",
                     Some(
                         "The agent must output a <structured-response> block with goal:\"evaluate-changes\", \
@@ -1107,6 +1335,8 @@ impl<B: CodingBackend> Workflow<B> {
             evaluation_report_content.len()
         );
 
+        let _ = write_schema_to_dir(plan_dir, "validate-refactor");
+
         let system_prompt = validate_refactor::system_prompt();
         let prompt = validate_refactor::build_prompt(&evaluation_report_content);
 
@@ -1118,8 +1348,8 @@ impl<B: CodingBackend> Workflow<B> {
             system_prompt: Some(system_prompt),
             system_prompt_path: None,
             goal: crate::backend::Goal::ValidateRefactor,
-            model,
-            session_id: Some(session_id),
+            model: model.clone(),
+            session_id: Some(session_id.clone()),
             is_resume: false,
             working_dir: Some(plan_dir.to_path_buf()),
             debug: options.debug,
@@ -1146,11 +1376,35 @@ impl<B: CodingBackend> Workflow<B> {
             });
         }
 
-        let output = match parse_validate_refactor_response(&response.output) {
+        let session_id_for_retry = response.session_id.clone();
+        let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
+            prompt: retry_prompt.to_string(),
+            system_prompt: Some(validate_refactor::system_prompt()),
+            system_prompt_path: None,
+            goal: crate::backend::Goal::ValidateRefactor,
+            model: model.clone(),
+            session_id: session_id_for_retry.clone(),
+            is_resume: true,
+            working_dir: Some(plan_dir.to_path_buf()),
+            debug: options.debug,
+            agent_output: options.agent_output,
+            conversation_output_path: options.conversation_output_path.clone(),
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
+        };
+        let validated_response = self.validate_and_retry(
+            "validate-refactor",
+            response,
+            plan_dir,
+            false,
+            build_retry_request,
+        )?;
+
+        let output = match parse_validate_refactor_response(&validated_response.output) {
             Ok(out) => out,
             Err(e) => {
                 emit_parse_failure_debug(
-                    &response,
+                    &validated_response,
                     "validate-refactor",
                     Some(
                         "The agent must output a <structured-response> block with \
