@@ -381,7 +381,8 @@ fn session_object_has_system_prompt_file() {
     use tddy_core::changeset::read_changeset;
 
     let backend = MockBackend::new();
-    backend.push_ok(PLANNING_WITH_DISCOVERY);
+    // Plan writes changeset only when session_id is Some; use push_ok_with_questions to provide it.
+    backend.push_ok_with_questions(PLANNING_WITH_DISCOVERY, "sess-plan-123", vec![]);
 
     let mut workflow = Workflow::new(backend);
     let output_dir = std::env::temp_dir().join("tddy-session-system-prompt");

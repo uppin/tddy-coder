@@ -159,12 +159,14 @@ fn tool_use_detail(name: &str, input: &serde_json::Value) -> Option<String> {
 /// Process NDJSON lines from Claude Code CLI stdout.
 /// Extracts result text, session_id, and AskUserQuestion events.
 /// When `on_conversation_line` is provided, calls it with each raw line for real-time logging.
+/// When `skip_until_line` > 0 (resume), skips calling `on_raw_output` for the first `skip_until_line` lines.
 pub fn process_ndjson_stream<R, F, O>(
     reader: R,
     mut on_progress: F,
     mut on_raw_output: O,
     mut on_debug_line: Option<&mut dyn FnMut(&str)>,
     mut on_conversation_line: Option<&mut dyn FnMut(&str)>,
+    skip_until_line: usize,
 ) -> Result<StreamResult, Box<dyn std::error::Error + Send + Sync>>
 where
     R: BufRead,
@@ -177,6 +179,7 @@ where
     let mut questions: Vec<ClarificationQuestion> = vec![];
     let mut seen_questions: HashSet<(String, String)> = HashSet::new();
     let mut raw_lines: Vec<String> = vec![];
+    let mut line_index: usize = 0;
 
     for line in reader.lines() {
         let line = line?;
@@ -185,6 +188,9 @@ where
             continue;
         }
         raw_lines.push(line.to_string());
+        line_index += 1;
+        let should_echo = line_index > skip_until_line;
+
         if let Some(ref mut f) = on_debug_line {
             f(line);
         }
@@ -204,7 +210,9 @@ where
             if let Some(text) = extract_tool_result_content_from_user_line(line) {
                 if !text.is_empty() {
                     tool_result_text.push_str(&text);
-                    on_raw_output(&text);
+                    if should_echo {
+                        on_raw_output(&text);
+                    }
                 }
             }
         }
@@ -236,7 +244,9 @@ where
                         match block {
                             ContentBlock::Text { text } if !text.is_empty() => {
                                 result_text.push_str(&text);
-                                on_raw_output(&text);
+                                if should_echo {
+                                    on_raw_output(&text);
+                                }
                             }
                             ContentBlock::ToolUse { name, input } => {
                                 if name == "AskUserQuestion" {
@@ -262,7 +272,9 @@ where
                 }
                 if !event.result.is_empty() {
                     result_text.push_str(&event.result);
-                    on_raw_output(&event.result);
+                    if should_echo {
+                        on_raw_output(&event.result);
+                    }
                 }
             }
             _ => {}
@@ -352,7 +364,7 @@ mod tests {
         );
 
         let reader = std::io::BufReader::new(ndjson.as_bytes());
-        let result = process_ndjson_stream(reader, noop_progress, noop_output, None, None).unwrap();
+        let result = process_ndjson_stream(reader, noop_progress, noop_output, None, None, 0).unwrap();
 
         assert!(
             !result.result_text.contains("evaluate-changes"),
@@ -380,7 +392,7 @@ mod tests {
         );
 
         let reader = std::io::BufReader::new(ndjson.as_bytes());
-        let result = process_ndjson_stream(reader, noop_progress, noop_output, None, None).unwrap();
+        let result = process_ndjson_stream(reader, noop_progress, noop_output, None, None, 0).unwrap();
 
         assert!(
             result.result_text.contains(r#""goal":"green""#),
@@ -411,7 +423,7 @@ mod tests {
         );
 
         let reader = std::io::BufReader::new(ndjson.as_bytes());
-        let result = process_ndjson_stream(reader, noop_progress, noop_output, None, None).unwrap();
+        let result = process_ndjson_stream(reader, noop_progress, noop_output, None, None, 0).unwrap();
 
         assert!(
             !result.result_text.contains("Old red output"),

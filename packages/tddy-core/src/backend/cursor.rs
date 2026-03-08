@@ -76,7 +76,7 @@ impl super::CodingBackend for CursorBackend {
         // validate-refactor spawns subagents via the Agent tool which Cursor does not support.
         // Reject early before any spawn attempt so tests can distinguish this from BinaryNotFound.
         if request.goal == Goal::ValidateRefactor {
-            eprintln!(
+            crate::debug_eprintln!(
                 "[tddy-coder] CursorBackend: rejecting Goal::ValidateRefactor — not supported on Cursor"
             );
             return Err(BackendError::InvocationFailed(
@@ -128,12 +128,12 @@ impl super::CodingBackend for CursorBackend {
 
         // Always log spawn for debugging backend/binary confusion
         let resolved = super::claude::which_binary(&self.binary_path);
-        eprintln!(
+        crate::debug_eprintln!(
             "[tddy-coder] Cursor backend spawning: {} (resolved: {})",
             self.binary_path.display(),
             resolved
         );
-        eprintln!("[tddy-coder] cmd: cursor {}", args.join(" "));
+        crate::debug_eprintln!("[tddy-coder] cmd: cursor {}", args.join(" "));
 
         if request.debug {
             let cwd = request
@@ -145,8 +145,8 @@ impl super::CodingBackend for CursorBackend {
                         .map(|p| p.display().to_string())
                         .unwrap_or_else(|_| "(unknown)".into())
                 });
-            eprintln!("[tddy-coder debug] cwd: {}", cwd);
-            eprintln!(
+            crate::debug_eprintln!("[tddy-coder debug] cwd: {}", cwd);
+            crate::debug_eprintln!(
                 "[tddy-coder debug] cmd: {} {}",
                 self.binary_path.display(),
                 args.join(" ")
@@ -192,15 +192,24 @@ impl super::CodingBackend for CursorBackend {
             }
         };
 
+        let skip_until_line = if request.is_resume {
+            request
+                .conversation_output_path
+                .as_ref()
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .map(|c| c.lines().filter(|l| !l.trim().is_empty()).count())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
         let mut on_raw_output = |s: &str| {
-            if request.agent_output {
-                eprint!("{}", s);
-            }
+            eprint!("{}", s);
         };
 
         let mut on_debug_line = |line: &str| {
             if request.debug {
-                eprintln!("[tddy-coder debug] {}", line);
+                crate::debug_eprintln!("[tddy-coder debug] {}", line);
             }
         };
 
@@ -244,6 +253,7 @@ impl super::CodingBackend for CursorBackend {
             } else {
                 None
             },
+            skip_until_line,
         )
         .map_err(|e| BackendError::InvocationFailed(format!("stream parse error: {}", e)))?;
 

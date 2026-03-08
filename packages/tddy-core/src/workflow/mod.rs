@@ -1599,20 +1599,20 @@ const KNOWN_ARTIFACTS: &[&str] = &[
 pub fn build_context_header(plan_dir: Option<&Path>) -> String {
     let dir = match plan_dir {
         None => {
-            eprintln!("[build_context_header] plan_dir is None — skipping header");
+            crate::debug_eprintln!("[build_context_header] plan_dir is None — skipping header");
             return String::new();
         }
         Some(d) => d,
     };
 
-    eprintln!("[build_context_header] scanning {:?} for artifacts", dir);
+    crate::debug_eprintln!("[build_context_header] scanning {:?} for artifacts", dir);
 
     let mut lines: Vec<String> = Vec::new();
     for artifact in KNOWN_ARTIFACTS {
         let path = dir.join(artifact);
         if path.exists() {
             let canonical = std::fs::canonicalize(&path).unwrap_or(path);
-            eprintln!(
+            crate::debug_eprintln!(
                 "[build_context_header] found artifact: {}",
                 canonical.display()
             );
@@ -1621,7 +1621,7 @@ pub fn build_context_header(plan_dir: Option<&Path>) -> String {
     }
 
     if lines.is_empty() {
-        eprintln!(
+        crate::debug_eprintln!(
             "[build_context_header] no artifacts found in {:?} — empty header",
             dir
         );
@@ -1633,7 +1633,7 @@ pub fn build_context_header(plan_dir: Option<&Path>) -> String {
         header.push_str(line);
         header.push('\n');
     }
-    eprintln!(
+    crate::debug_eprintln!(
         "[build_context_header] built header with {} artifact(s)",
         lines.len()
     );
@@ -1644,10 +1644,10 @@ pub fn build_context_header(plan_dir: Option<&Path>) -> String {
 pub fn prepend_context_header(prompt: String, plan_dir: Option<&Path>) -> String {
     let header = build_context_header(plan_dir);
     if header.is_empty() {
-        eprintln!("[prepend_context_header] no header — prompt unchanged");
+        crate::debug_eprintln!("[prepend_context_header] no header — prompt unchanged");
         return prompt;
     }
-    eprintln!("[prepend_context_header] prepending context header to prompt");
+    crate::debug_eprintln!("[prepend_context_header] prepending context header to prompt");
     format!(
         "<context-reminder>\n{}</context-reminder>\n\n{}",
         header, prompt

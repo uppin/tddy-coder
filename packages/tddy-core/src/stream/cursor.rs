@@ -120,12 +120,14 @@ fn extract_tool_call_name_and_detail(
 /// Process NDJSON lines from Cursor agent stdout.
 /// When `on_debug_line` is provided, calls it with each raw NDJSON line (for --debug).
 /// When `on_conversation_line` is provided, calls it with each raw line for real-time logging.
+/// When `skip_until_line` > 0 (resume), skips calling `on_raw_output` for the first `skip_until_line` lines.
 pub fn process_cursor_stream<R, F, O>(
     reader: R,
     mut on_progress: F,
     mut on_raw_output: O,
     mut on_debug_line: Option<&mut dyn FnMut(&str)>,
     mut on_conversation_line: Option<&mut dyn FnMut(&str)>,
+    skip_until_line: usize,
 ) -> Result<StreamResult, Box<dyn std::error::Error + Send + Sync>>
 where
     R: BufRead,
@@ -137,6 +139,7 @@ where
     let mut questions: Vec<ClarificationQuestion> = vec![];
     let mut seen_questions: HashSet<(String, String)> = HashSet::new();
     let mut raw_lines: Vec<String> = vec![];
+    let mut line_index: usize = 0;
 
     for line in reader.lines() {
         let line = line?;
@@ -145,6 +148,9 @@ where
             continue;
         }
         raw_lines.push(line.to_string());
+        line_index += 1;
+        let should_echo = line_index > skip_until_line;
+
         if let Some(ref mut f) = on_debug_line {
             f(line);
         }
@@ -158,7 +164,9 @@ where
                 // Not valid JSON — treat as plain text
                 if !line.is_empty() {
                     result_text.push_str(line);
-                    on_raw_output(line);
+                    if should_echo {
+                        on_raw_output(line);
+                    }
                 }
                 continue;
             }
@@ -181,7 +189,9 @@ where
                         if let CursorContentBlock::Text { text } = block {
                             if !text.is_empty() {
                                 result_text.push_str(&text);
-                                on_raw_output(&text);
+                                if should_echo {
+                                    on_raw_output(&text);
+                                }
                             }
                         }
                     }
@@ -219,7 +229,9 @@ where
                 }
                 if !event.result.is_empty() {
                     result_text.push_str(&event.result);
-                    on_raw_output(&event.result);
+                    if should_echo {
+                        on_raw_output(&event.result);
+                    }
                 }
             }
             "system" => {

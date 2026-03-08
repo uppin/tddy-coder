@@ -2,6 +2,16 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-08 — TUI with ratatui
+
+- **TUI layout**: Scrollable activity log (top), status bar (middle), prompt bar (bottom). Uses ratatui + crossterm with alternate screen buffer.
+- **Status bar**: Displays Goal, State, elapsed time. Goal-specific background colors (plan: yellow, acceptance-tests: orange, red: red, green: green, evaluate/validate: blue). Bold white text. Blank line before status bar.
+- **Prompt bar**: Fixed at bottom with "> " prefix. Placeholder when empty: "> Type your feature description and press Enter..."
+- **"Other" option**: Select and MultiSelect clarification prompts include "Other (type your own)" as last choice. Selecting it enables free-text input.
+- **Piped mode**: When stdin or stderr is not a TTY, TUI is skipped; plain mode uses linear eprintln output.
+- **Agent output**: Always visible. On resume (Claude/Cursor --resume) with `--conversation-output`, replayed output is skipped; only new output is echoed.
+- **inquire removed**: Replaced entirely by custom ratatui widgets.
+
 ## 2026-03-08 — Context Header for Agent Prompts
 
 - **Context reminder**: Plan, acceptance-tests, and red prompts are prepended with a `<context-reminder>` block listing absolute paths to existing .md artifacts (PRD.md, TODO.md, acceptance-tests.md, etc.) when the plan directory contains them.
@@ -93,7 +103,7 @@ Release note history for the Coder product area.
 
 - **Output format**: Switched from plain text to NDJSON stream (`--output-format=stream-json`)
 - **Session management**: `--session-id` on first call, `--resume` on Q&A followup for context continuity
-- **Structured Q&A**: Questions from `AskUserQuestion` tool events; inquire Select/MultiSelect prompts
+- **Structured Q&A**: Questions from `AskUserQuestion` tool events; TUI mode uses ratatui Select/MultiSelect with "Other" option; plain mode uses stdin (one answer per line)
 - **Real-time progress**: Tool activity display (Read, Glob, Bash, etc.)
 - **Output parsing**: Structured-response format (`<structured-response content-type="application-json">`) with delimiter fallback
-- **CLI**: `--agent-output` flag for raw agent output to stderr; goal-specific exit prints PRD path to stdout
+- **Agent output**: Always visible; on resume with `--conversation-output`, replayed output is skipped

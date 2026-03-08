@@ -19,7 +19,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 1. Accepts `--goal red` to create skeleton code and failing lower-level tests from PRD and acceptance-tests.md
 2. Accepts `--goal green` to implement production code that makes failing tests pass
 3. `--plan-dir <path>` is required when `--goal red` or `--goal green`
-4. `--model`, `--agent`, `--agent-output`, `--conversation-output`, `--allowed-tools`, `--debug` work with both goals (Updated: 2026-03-07)
+4. `--model`, `--agent`, `--conversation-output`, `--allowed-tools`, `--debug` work with both goals (Updated: 2026-03-07)
 
 ### Red Workflow
 
@@ -98,7 +98,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 - [x] Output prints summary, test list, and skeleton list
 - [x] State machine transitions: Init/Planned/AcceptanceTestsReady → RedTesting → RedTestsReady
 - [x] Error handling: missing plan-dir, missing PRD.md, missing acceptance-tests.md
-- [x] `--model` and `--agent-output` flags work with the red goal
+- [x] `--model` flag works with the red goal
 
 ### Green Goal
 
@@ -114,6 +114,6 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 - [x] Green goal updates `acceptance-tests.md`: changes test statuses from "failing" to "passing" where applicable
 - [x] State machine transitions: `RedTestsReady` → `GreenImplementing` → `GreenComplete` (or `Failed`)
 - [x] Error handling: missing plan-dir, missing progress.md, missing changeset.yaml
-- [x] `--model` and `--agent-output` flags work with the green goal
+- [x] `--model` flag works with the green goal
 - [x] Output prints implementation summary with test pass/fail counts
 - [x] Structured response format consistent with other goals (`<structured-response>` JSON block)
