@@ -1,0 +1,11 @@
+{
+  "goal": "red",
+  "summary": "Created 2 skeletons and 1 failing test.",
+  "tests": [
+    {"name": "test_foo", "file": "src/foo.rs", "line": 10, "status": "failing"}
+  ],
+  "skeletons": [
+    {"name": "Foo", "file": "src/foo.rs", "line": 5, "kind": "struct"},
+    {"name": "bar", "file": "src/foo.rs", "line": 8, "kind": "method"}
+  ]
+}

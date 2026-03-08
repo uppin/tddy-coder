@@ -1,6 +1,6 @@
 //! Integration tests for the red workflow with MockBackend.
 
-use tddy_core::{MockBackend, RedOptions, Workflow};
+use tddy_core::{InvokeResponse, MockBackend, RedOptions, Workflow};
 
 const RED_OUTPUT: &str = r#"Created skeleton code and failing tests.
 
@@ -8,6 +8,14 @@ const RED_OUTPUT: &str = r#"Created skeleton code and failing tests.
 {"goal":"red","summary":"Created 2 skeleton methods and 3 failing unit tests. All tests failing as expected.","tests":[{"name":"auth_service_validates_email","file":"packages/auth/src/service.rs","line":42,"status":"failing"},{"name":"auth_service_rejects_empty_email","file":"packages/auth/src/service.rs","line":55,"status":"failing"},{"name":"session_store_persists_token","file":"packages/auth/tests/session_it.rs","line":22,"status":"failing"}],"skeletons":[{"name":"AuthService","file":"packages/auth/src/service.rs","line":10,"kind":"struct"},{"name":"validate_email","file":"packages/auth/src/service.rs","line":25,"kind":"method"}]}
 </structured-response>
 "#;
+
+const RED_OUTPUT_VALID: &str = r#"<structured-response content-type="application-json" schema="schemas/red.schema.json">
+{"goal":"red","summary":"Created 2 skeletons and 1 failing test.","tests":[{"name":"test_foo","file":"src/foo.rs","line":10,"status":"failing"}],"skeletons":[{"name":"Foo","file":"src/foo.rs","line":5,"kind":"struct"},{"name":"bar","file":"src/foo.rs","line":8,"kind":"method"}]}
+</structured-response>"#;
+
+const RED_OUTPUT_INVALID: &str = r#"<structured-response content-type="application-json" schema="schemas/red.schema.json">
+{"goal":"red","summary":"Created skeletons.","tests":[{"name":"test_foo","file":"src/foo.rs","line":"ten","status":"failing"}],"skeletons":[]}
+</structured-response>"#;
 
 #[test]
 fn red_workflow_reads_prd_and_acceptance_tests_md_invokes_backend() {
@@ -208,6 +216,86 @@ fn red_workflow_passes_goal_allowlist_to_invoke_request() {
         req.goal,
         tddy_core::Goal::Red,
         "InvokeRequest should have goal Red for red workflow"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// Schema validation retry: when first response fails validation, workflow retries once and succeeds.
+#[test]
+fn red_workflow_retries_on_schema_validation_failure_and_succeeds() {
+    let plan_dir = std::env::temp_dir().join("tddy-red-retry-ok");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    std::fs::write(plan_dir.join("acceptance-tests.md"), "# Acceptance Tests")
+        .expect("write acceptance-tests.md");
+
+    let backend = MockBackend::new();
+    backend.push_response(Ok(InvokeResponse {
+        output: RED_OUTPUT_INVALID.to_string(),
+        exit_code: 0,
+        session_id: Some("retry-session".to_string()),
+        questions: vec![],
+        raw_stream: None,
+        stderr: None,
+    }));
+    backend.push_ok(RED_OUTPUT_VALID);
+
+    let mut workflow = Workflow::new(backend);
+    let options = RedOptions::default();
+    let result = workflow.red(&plan_dir, None, &options);
+
+    let output = result.expect("red should succeed after retry");
+    assert!(output.summary.contains("Created 2 skeletons"));
+    assert_eq!(output.tests.len(), 1);
+    assert_eq!(output.tests[0].name, "test_foo");
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// Schema validation retry exhaustion: when both attempts fail validation, workflow transitions to Failed.
+#[test]
+fn red_workflow_transitions_to_failed_when_retry_also_fails_validation() {
+    let plan_dir = std::env::temp_dir().join("tddy-red-retry-fail");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    std::fs::write(plan_dir.join("acceptance-tests.md"), "# Acceptance Tests")
+        .expect("write acceptance-tests.md");
+
+    let backend = MockBackend::new();
+    backend.push_response(Ok(InvokeResponse {
+        output: RED_OUTPUT_INVALID.to_string(),
+        exit_code: 0,
+        session_id: Some("retry-session".to_string()),
+        questions: vec![],
+        raw_stream: None,
+        stderr: None,
+    }));
+    backend.push_response(Ok(InvokeResponse {
+        output: RED_OUTPUT_INVALID.to_string(),
+        exit_code: 0,
+        session_id: Some("retry-session".to_string()),
+        questions: vec![],
+        raw_stream: None,
+        stderr: None,
+    }));
+
+    let mut workflow = Workflow::new(backend);
+    let options = RedOptions::default();
+    let result = workflow.red(&plan_dir, None, &options);
+
+    assert!(result.is_err());
+    assert!(
+        matches!(result, Err(tddy_core::WorkflowError::ParseError(_))),
+        "expected ParseError when retry also fails validation, got {:?}",
+        result
+    );
+    assert!(
+        matches!(workflow.state(), tddy_core::WorkflowState::Failed { .. }),
+        "workflow should transition to Failed, got {:?}",
+        workflow.state()
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);

@@ -13,9 +13,9 @@ You MUST:
 
 **CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object. Do NOT output a number, array, numbered list items, or any text inside the block. The parser expects a single JSON object starting with {"goal":"green",...} — nothing else.
 
-Your final output MUST include this exact block (replace placeholders with actual values):
+Read the JSON Schema file at `schemas/green.schema.json` in the working directory for the exact output format specification. Your final output MUST include this exact block (replace placeholders with actual values):
 
-<structured-response content-type="application-json">
+<structured-response content-type="application-json" schema="schemas/green.schema.json">
 {"goal": "green", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "passing|failing", "reason": "<optional reason if failing>"}], "implementations": [{"name": "<name>", "file": "<path>", "line": <number>, "kind": "<struct|method|function|trait|module>"}], "test_command": "<command>", "prerequisite_actions": "<prereqs or None>", "run_single_or_selected_tests": "<how to run one test>", "demo_results": {"summary": "<text>", "steps_completed": <number>}}
 </structured-response>
 
@@ -84,6 +84,19 @@ mod tests {
         assert!(
             prompt.contains("green") || prompt.contains("Implement"),
             "system prompt must instruct Claude for green goal"
+        );
+    }
+
+    #[test]
+    fn system_prompt_references_schema_and_includes_schema_attribute() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("schemas/green.schema.json"),
+            "system prompt must reference green schema file"
+        );
+        assert!(
+            prompt.contains("schema=\"schemas/green.schema.json\""),
+            "system prompt example must include schema= attribute"
         );
     }
 }

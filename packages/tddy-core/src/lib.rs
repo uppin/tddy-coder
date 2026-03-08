@@ -5,6 +5,7 @@ pub mod changeset;
 pub mod error;
 pub mod output;
 pub mod permission;
+pub mod schema;
 pub mod stream;
 pub mod workflow;
 
@@ -21,18 +22,23 @@ pub use changeset::{
 };
 pub use error::{BackendError, ParseError, WorkflowError};
 pub use output::{
-    parse_acceptance_tests_response, parse_evaluate_response, parse_green_response,
-    parse_planning_output, parse_red_response, parse_validate_refactor_response,
-    parse_validate_response, read_session_file, write_acceptance_tests_file, write_artifacts,
-    write_evaluation_report, write_session_file, write_validation_report, AcceptanceTestInfo,
-    AcceptanceTestsOutput, EvaluateAffectedTest, EvaluateChangedFile, EvaluateOutput, GreenOutput,
-    GreenTestResult, ImplementationInfo, PlanningOutput, RedOutput, RedTestInfo, SkeletonInfo,
-    ValidateBuildResult, ValidateChangesetSync, ValidateFileAnalyzed, ValidateIssue,
-    ValidateOutput, ValidateRefactorOutput, ValidateTestImpact,
+    extract_last_structured_block, parse_acceptance_tests_response, parse_evaluate_response,
+    parse_green_response, parse_planning_output, parse_red_response,
+    parse_validate_refactor_response, parse_validate_response, read_session_file,
+    write_acceptance_tests_file, write_artifacts, write_evaluation_report, write_session_file,
+    write_validation_report, AcceptanceTestInfo, AcceptanceTestsOutput, EvaluateAffectedTest,
+    EvaluateChangedFile, EvaluateOutput, GreenOutput, GreenTestResult, ImplementationInfo,
+    PlanningOutput, RedOutput, RedTestInfo, SkeletonInfo, StructuredBlock, ValidateBuildResult,
+    ValidateChangesetSync, ValidateFileAnalyzed, ValidateIssue, ValidateOutput,
+    ValidateRefactorOutput, ValidateTestImpact,
 };
 pub use permission::{
     acceptance_tests_allowlist, evaluate_allowlist, green_allowlist, plan_allowlist, red_allowlist,
     validate_allowlist, validate_refactor_allowlist,
+};
+pub use schema::{
+    format_validation_errors, get_schema, schema_file_path, validate_output, write_all_schemas_to_dir,
+    write_schema_to_dir, SchemaError,
 };
 pub use stream::ProgressEvent;
 pub use workflow::{

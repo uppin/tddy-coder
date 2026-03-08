@@ -17,10 +17,10 @@ You MUST:
 
 **CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object. Do NOT output a number, array, or numbered list items inside the block. The parser expects a single JSON object starting with {"goal":"evaluate-changes",...}.
 
-Your final output MUST include this exact block (replace placeholders with actual values).
+Read the JSON Schema file at `schemas/evaluate.schema.json` in the working directory for the exact output format specification. Your final output MUST include this exact block (replace placeholders with actual values).
 For build_results status use: "pass", "fail", or "not_run" (when build could not be executed).
 
-<structured-response content-type="application-json">
+<structured-response content-type="application-json" schema="schemas/evaluate.schema.json">
 {"goal":"evaluate-changes","summary":"<human-readable summary>","risk_level":"<low|medium|high|critical>","build_results":[{"package":"<name>","status":"<pass|fail|not_run>","notes":null}],"issues":[{"severity":"<info|warning|error>","category":"<code_quality|test_infrastructure|...>","file":"<path>","line":<number>,"description":"<text>","suggestion":"<optional>"}],"changeset_sync":{"status":"<synced|not_found|...>","items_updated":0,"items_added":0},"files_analyzed":[{"file":"<path>","lines_changed":<number>,"changeset_item":null}],"test_impact":{"tests_affected":0,"new_tests_needed":0},"changed_files":[{"path":"<path>","change_type":"<modified|added|removed>","lines_added":0,"lines_removed":0}],"affected_tests":[{"path":"<path>","status":"<created|updated|removed|skipped>","description":"<text>"}],"validity_assessment":"<detailed assessment of whether the change is valid for the intended use-case>"}
 </structured-response>"#
     .to_string()
@@ -74,5 +74,23 @@ Inspect the git diff, run the build, list all changed files and affected tests, 
             changeset = changeset
         ),
         (None, None) => "Analyze the current git changes in this directory for risks and code quality. Inspect the git diff, run the build (e.g. cargo build or cargo check), list all changed files and affected tests, and produce an evaluation report with risk level, issues, changed files, affected tests, and validity assessment.".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_prompt_references_schema_and_includes_schema_attribute() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("schemas/evaluate.schema.json"),
+            "system prompt must reference evaluate schema file"
+        );
+        assert!(
+            prompt.contains("schema=\"schemas/evaluate.schema.json\""),
+            "system prompt example must include schema= attribute"
+        );
     }
 }

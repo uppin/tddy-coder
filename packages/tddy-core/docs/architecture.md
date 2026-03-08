@@ -36,7 +36,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 ### Workflow (`workflow/`)
 
 - **WorkflowState**: Init, Planning, Planned, AcceptanceTesting, AcceptanceTestsReady, RedTesting, RedTestsReady, GreenImplementing, GreenComplete, Validating, Validated, Evaluating, Evaluated, ValidateRefactorComplete, Failed.
-- **Workflow**: Orchestrates plan, acceptance-tests, red, green, evaluate, and validate-refactor steps with session continuity for Q&A followup.
+- **Workflow**: Orchestrates plan, acceptance-tests, red, green, evaluate, and validate-refactor steps with session continuity for Q&A followup. Each goal calls `validate_and_retry` after invoke: validates JSON against schema, retries once with validation errors on failure.
 - **planning**: System prompt (structured-response format) and user prompt construction. Writes system prompt to plan dir; stores initial_prompt and clarification_qa in changeset. Persists questions when ClarificationNeeded; pairs with answers on follow-up.
 - **acceptance_tests**: System prompt for test creation and verification; parses test summary and run instructions; writes acceptance-tests.md; appends session to changeset.
 - **red**: System prompt for skeleton code and failing lower-level tests; parses RedOutput; writes red-output.md and progress.md; appends impl session to changeset.
@@ -45,8 +45,14 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **evaluate**: Analyzes git changes for risks, changed files, affected tests, and validity. Requires plan_dir; writes evaluation-report.md. Reads optional PRD.md and changeset.yaml for context. EvaluateOptions: model, agent_output, conversation_output_path, inherit_stdin, allowed_tools_extras, debug. State: Evaluating → Evaluated.
 - **validate_refactor**: Orchestrates validate-tests, validate-prod-ready, and analyze-clean-code subagents via the Agent tool. Requires evaluation-report.md in plan_dir (from prior evaluate run). Claude-only (CursorBackend rejects). ValidateRefactorOptions: model, agent_output, conversation_output_path, inherit_stdin, allowed_tools_extras, debug. State: → ValidateRefactorComplete.
 
+### Schema (`schema/`)
+
+- **JSON Schema validation**: Formal schemas in `schemas/` (7 goals + common types). Embedded via `include_dir`, written to `{plan-dir}/schemas/` for agent Read. Agent's working directory is plan_dir (or working_dir for validate/evaluate), so `schemas/xxx.schema.json` resolves correctly. `validate_output(goal, json)` validates before serde. On failure: 1 retry with validation errors + schema path in prompt.
+- **get_schema / write_all_schemas_to_dir / write_schema_to_dir / format_validation_errors**: Schema retrieval. `write_all_schemas_to_dir` called when plan dir is created; writes all 7 goal schemas + common types so subsequent goals (acceptance-tests, red, green, validate-refactor) have schemas available. `write_schema_to_dir` used for validate/evaluate (working_dir may differ from plan_dir). Error formatting for retry prompts.
+
 ### Output (`output/`)
 
+- **extract_last_structured_block**: Extracts last `<structured-response>` block and optional `schema="..."` attribute. Used for validation before parsing.
 - **parse_planning_response**: Extracts PRD and TODO from structured-response or delimited text. Tries each structured-response block until one parses (handles system prompt example before model output).
 - **parse_acceptance_tests_response**: Extracts test summary, test_command, prerequisite_actions, run_single_or_selected_tests from acceptance-tests response.
 - **parse_red_response**: Extracts RedOutput (summary, tests, skeletons, markers, marker_results, run instructions) from red goal response. Uses last structured-response block (handles system prompt example before model output).

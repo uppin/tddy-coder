@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tddy:goal/plan",
+  "title": "PlanOutput",
+  "type": "object",
+  "required": ["goal", "prd", "todo"],
+  "properties": {
+    "goal": { "const": "plan" },
+    "name": { "type": "string" },
+    "prd": { "type": "string" },
+    "todo": { "type": "string" },
+    "discovery": {
+      "type": "object",
+      "properties": {
+        "toolchain": { "type": "object", "additionalProperties": { "type": "string" } },
+        "scripts": { "type": "object", "additionalProperties": { "type": "string" } },
+        "doc_locations": { "type": "array", "items": { "type": "string" } },
+        "plan_dir_suggestion": { "type": "string" },
+        "relevant_code": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "reason"],
+            "properties": {
+              "path": { "type": "string" },
+              "reason": { "type": "string" }
+            }
+          }
+        },
+        "test_infrastructure": {
+          "type": "object",
+          "properties": {
+            "runner": { "type": "string" },
+            "conventions": { "type": "string" }
+          }
+        }
+      }
+    },
+    "demo_plan": {
+      "type": "object",
+      "required": ["demo_type", "setup_instructions", "steps", "verification"],
+      "properties": {
+        "demo_type": { "type": "string" },
+        "setup_instructions": { "type": "string" },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["description", "command_or_action", "expected_result"],
+            "properties": {
+              "description": { "type": "string" },
+              "command_or_action": { "type": "string" },
+              "expected_result": { "type": "string" }
+            }
+          }
+        },
+        "verification": { "type": "string" }
+      }
+    }
+  }
+}
