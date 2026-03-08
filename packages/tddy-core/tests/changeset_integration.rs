@@ -579,3 +579,100 @@ fn changeset_yaml_sessions_array_tracks_all_sessions() {
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
+
+// ── Acceptance test for TDD Workflow Restructure PRD: R5 ──────────────────────
+
+/// AC5: changeset.yaml exists on disk immediately after the user enters their prompt,
+/// before the plan agent runs.
+///
+/// This test verifies that:
+/// - changeset.yaml is written with state "Init" before the plan backend is invoked
+/// - The initial_prompt is populated in the changeset
+///
+/// This test will fail until:
+/// - workflow.plan() writes a minimal changeset.yaml (state: Init) before invoking the backend
+/// - The changeset contains the initial_prompt field before the plan agent runs
+#[test]
+fn changeset_written_before_plan_agent() {
+    use std::sync::{Arc, Mutex};
+    use tddy_core::changeset::read_changeset;
+    use tddy_core::{BackendError, CodingBackend, InvokeRequest, InvokeResponse};
+
+    /// A backend that checks disk state when invoke() is called (before returning).
+    #[derive(Debug)]
+    struct CheckingBackend {
+        plan_dir_captured: Arc<Mutex<Option<std::path::PathBuf>>>,
+        changeset_state_at_invoke: Arc<Mutex<Option<String>>>,
+        initial_prompt_at_invoke: Arc<Mutex<Option<String>>>,
+    }
+
+    impl CodingBackend for CheckingBackend {
+        fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+            if let Some(ref wd) = request.working_dir {
+                if let Ok(entries) = std::fs::read_dir(wd) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() && path.join("changeset.yaml").exists() {
+                            *self.plan_dir_captured.lock().unwrap() = Some(path.clone());
+                            if let Ok(cs) = read_changeset(&path) {
+                                *self.changeset_state_at_invoke.lock().unwrap() =
+                                    Some(cs.state.current.clone());
+                                *self.initial_prompt_at_invoke.lock().unwrap() =
+                                    cs.initial_prompt.clone();
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(InvokeResponse {
+                output: DELIMITED_OUTPUT.to_string(),
+                exit_code: 0,
+                session_id: Some("sess-check-123".to_string()),
+                questions: vec![],
+                raw_stream: None,
+                stderr: None,
+            })
+        }
+
+        fn name(&self) -> &str {
+            "checking-mock"
+        }
+    }
+
+    let output_dir = std::env::temp_dir().join("tddy-changeset-before-plan");
+    let _ = std::fs::remove_dir_all(&output_dir);
+    std::fs::create_dir_all(&output_dir).expect("create output dir");
+
+    let changeset_state = Arc::new(Mutex::new(None));
+    let initial_prompt = Arc::new(Mutex::new(None));
+    let plan_dir_captured = Arc::new(Mutex::new(None));
+
+    let backend = CheckingBackend {
+        plan_dir_captured: plan_dir_captured.clone(),
+        changeset_state_at_invoke: changeset_state.clone(),
+        initial_prompt_at_invoke: initial_prompt.clone(),
+    };
+
+    let mut workflow = Workflow::new(backend);
+    let input = "Build auth with early changeset";
+    let _ = workflow.plan(input, &output_dir, None, &PlanOptions::default());
+
+    let captured_state = changeset_state.lock().unwrap().clone();
+    assert_eq!(
+        captured_state,
+        Some("Init".to_string()),
+        "changeset.yaml should exist with state 'Init' before plan agent is invoked, got: {:?}",
+        captured_state
+    );
+
+    let captured_prompt = initial_prompt.lock().unwrap().clone();
+    assert_eq!(
+        captured_prompt,
+        Some(input.to_string()),
+        "changeset.yaml should have initial_prompt populated before plan agent runs, got: {:?}",
+        captured_prompt
+    );
+
+    let _ = std::fs::remove_dir_all(&output_dir);
+}

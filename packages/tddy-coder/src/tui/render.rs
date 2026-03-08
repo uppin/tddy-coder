@@ -63,9 +63,12 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         let text = match (&state.current_goal, &state.current_state) {
             (Some(goal), Some(s)) => {
                 let elapsed = state.goal_start_time.elapsed();
-                format_status_bar(goal, s, elapsed)
+                format_status_bar(goal, s, elapsed, &state.agent, &state.model)
             }
-            _ => "Goal: — │ State: — │ Ready".to_string(),
+            _ => format!(
+                "Goal: — │ State: — │ Ready │ {} {} │ PgUp/PgDn scroll",
+                state.agent, state.model
+            ),
         };
         let style = status_bar_style_for_goal(state.current_goal.as_deref());
         let widget = Paragraph::new(text).style(style);
@@ -150,7 +153,7 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).expect("create terminal");
 
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.current_goal = Some("plan".to_string());
         state.current_state = Some("Planning".to_string());
 
@@ -190,7 +193,7 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).expect("create terminal");
 
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = crate::tui::state::AppMode::Running;
         state.inbox = vec![
             "Fix the login bug".to_string(),
@@ -238,7 +241,7 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).expect("create terminal");
 
-        let mut state = AppState::new();
+        let mut state = AppState::new("claude", "opus");
         state.mode = crate::tui::state::AppMode::Running;
         state.running_input = "fix bug".to_string();
         state.current_goal = Some("plan".to_string());
@@ -270,7 +273,7 @@ mod tests {
     fn test_draw_renders_prompt_bar_at_bottom() {
         let backend = TestBackend::new(60, 20);
         let mut terminal = Terminal::new(backend).expect("create terminal");
-        let state = AppState::new();
+        let state = AppState::new("claude", "opus");
 
         terminal.draw(|f| draw(f, &state)).expect("draw");
 

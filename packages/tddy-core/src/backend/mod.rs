@@ -84,6 +84,8 @@ pub enum Goal {
     Red,
     Green,
     Validate,
+    /// Standalone demo execution step.
+    Demo,
     /// Renamed/replacement for Validate: analyze git changes and produce an evaluation report.
     Evaluate,
     /// Orchestrate validate-tests, validate-prod-ready, and analyze-clean-code subagents.

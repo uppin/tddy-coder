@@ -39,6 +39,7 @@ With **direnv**: `direnv allow` once; the shell loads automatically when you `cd
 
 **NEVER**
 - Add fallbacks without explicit developer consent — fallbacks make the system unsafe
+- Use direct stdout/stderr (e.g. `println!`, `eprintln!`) in code paths that run under the TUI — it corrupts the ratatui display
 - Create code branches in production code that only work in test environment
 - Use `--no-verify` flag when committing or pushing
 - Commit secrets, tokens, or `.env` files

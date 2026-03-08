@@ -113,8 +113,6 @@ pub struct GreenOptions {
     pub inherit_stdin: bool,
     pub allowed_tools_extras: Option<Vec<String>>,
     pub debug: bool,
-    /// When true and demo-plan.md exists, agent runs demo via pre-made shell script. When false, agent skips demo.
-    pub run_demo: bool,
 }
 
 impl Default for GreenOptions {
@@ -127,9 +125,20 @@ impl Default for GreenOptions {
             inherit_stdin: true,
             allowed_tools_extras: None,
             debug: false,
-            run_demo: true,
         }
     }
+}
+
+/// Options for the standalone demo step.
+#[derive(Debug, Default)]
+pub struct DemoOptions {
+    pub model: Option<String>,
+    pub agent_output: bool,
+    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
+    pub conversation_output_path: Option<PathBuf>,
+    pub inherit_stdin: bool,
+    pub allowed_tools_extras: Option<Vec<String>>,
+    pub debug: bool,
 }
 
 /// Options for the validate-changes step.
@@ -192,6 +201,14 @@ pub enum WorkflowState {
     Validated {
         output: crate::output::ValidateOutput,
     },
+    /// In-progress state for the demo step.
+    DemoRunning,
+    /// Terminal state after demo finishes successfully.
+    DemoComplete {
+        output: crate::output::DemoOutput,
+    },
+    /// When user chooses to skip demo.
+    DemoSkipped,
     /// In-progress state for the evaluate-changes step.
     Evaluating,
     /// Terminal state after a successful evaluate-changes run.
@@ -222,6 +239,9 @@ impl WorkflowState {
             Self::GreenComplete { .. } => "GreenComplete",
             Self::Validating => "Validating",
             Self::Validated { .. } => "Validated",
+            Self::DemoRunning => "DemoRunning",
+            Self::DemoComplete { .. } => "DemoComplete",
+            Self::DemoSkipped => "DemoSkipped",
             Self::Evaluating => "Evaluating",
             Self::Evaluated { .. } => "Evaluated",
             Self::ValidateRefactorComplete { .. } => "ValidateRefactorComplete",
@@ -447,6 +467,20 @@ impl<B: CodingBackend> Workflow<B> {
             }
             Some(sid) => (Some(sid.clone()), answers.is_some()),
         };
+
+        // R5: Write a minimal changeset.yaml with state Init before invoking the backend,
+        // so if the agent crashes the user's prompt is preserved and the plan dir is resumable.
+        if !is_resume {
+            let init_changeset = Changeset {
+                initial_prompt: Some(input.to_string()),
+                ..Changeset::default()
+            };
+            eprintln!(
+                "[tddy-core] plan: writing initial changeset.yaml to {:?} (state=Init)",
+                output_path
+            );
+            let _ = write_changeset(&output_path, &init_changeset);
+        }
 
         let model = options.model.clone();
 
@@ -995,7 +1029,7 @@ impl<B: CodingBackend> Workflow<B> {
             self.set_state(WorkflowState::GreenImplementing);
         }
 
-        let system_prompt = green::system_prompt(options.run_demo);
+        let system_prompt = green::system_prompt(false);
         let prompt = match answers {
             None => green::build_prompt(
                 &progress_content,
@@ -1047,7 +1081,7 @@ impl<B: CodingBackend> Workflow<B> {
         let session_id_for_retry = response.session_id.clone();
         let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
             prompt: retry_prompt.to_string(),
-            system_prompt: Some(green::system_prompt(options.run_demo)),
+            system_prompt: Some(green::system_prompt(false)),
             system_prompt_path: None,
             goal: crate::backend::Goal::Green,
             model: model.clone(),
@@ -1068,18 +1102,13 @@ impl<B: CodingBackend> Workflow<B> {
             Ok(out) => {
                 let _ = update_progress_file(plan_dir, &out);
                 let _ = update_acceptance_tests_file(plan_dir, &out);
+                if let Some(ref demo) = out.demo_results {
+                    let _ = write_demo_results_file(plan_dir, &demo.summary, demo.steps_completed);
+                }
                 if out.all_tests_passing() {
                     if let Some(mut cs) = changeset {
                         update_state(&mut cs, "GreenComplete");
                         let _ = write_changeset(plan_dir, &cs);
-                    }
-                    if options.run_demo && plan_dir.join("demo-plan.md").exists() {
-                        let (summary, steps) = out
-                            .demo_results
-                            .as_ref()
-                            .map(|dr| (dr.summary.as_str(), dr.steps_completed))
-                            .unwrap_or(("Demo verified with implementation.", 1));
-                        let _ = write_demo_results_file(plan_dir, summary, steps);
                     }
                     self.set_state(WorkflowState::GreenComplete {
                         output: out.clone(),
@@ -1116,6 +1145,100 @@ impl<B: CodingBackend> Workflow<B> {
                 Err(WorkflowError::ParseError(e))
             }
         }
+    }
+
+    /// Run the standalone demo step: execute demo against plan_dir.
+    /// Requires demo-plan.md in plan_dir.
+    /// Can start from GreenComplete or Init (standalone mode with plan_dir).
+    pub fn demo(
+        &mut self,
+        plan_dir: &Path,
+        _answers: Option<&str>,
+        options: &DemoOptions,
+    ) -> Result<crate::output::DemoOutput, WorkflowError> {
+        eprintln!(
+            "{{\"tddy\":{{\"marker_id\":\"M002\",\"scope\":\"workflow::demo\",\"data\":{{}}}}}}"
+        );
+
+        let can_start = matches!(self.state, WorkflowState::GreenComplete { .. })
+            || matches!(self.state, WorkflowState::Init);
+
+        if !can_start {
+            return Err(WorkflowError::InvalidTransition(format!(
+                "cannot run demo from {:?}",
+                self.state
+            )));
+        }
+
+        let demo_plan_path = plan_dir.join("demo-plan.md");
+        if !demo_plan_path.exists() {
+            return Err(WorkflowError::PlanDirInvalid(
+                "demo-plan.md not found in plan directory".into(),
+            ));
+        }
+
+        self.set_state(WorkflowState::DemoRunning);
+
+        let _changeset = read_changeset(plan_dir).ok();
+        let model = options.model.clone();
+        let session_id = uuid::Uuid::new_v4().to_string();
+
+        let demo_plan_content = std::fs::read_to_string(&demo_plan_path)
+            .map_err(|e| WorkflowError::PlanDirInvalid(e.to_string()))?;
+
+        let prompt = format!(
+            "Execute the demo described in demo-plan.md:\n\n{}",
+            demo_plan_content
+        );
+
+        let request = crate::backend::InvokeRequest {
+            prompt,
+            system_prompt: None,
+            system_prompt_path: None,
+            goal: crate::backend::Goal::Demo,
+            model,
+            session_id: Some(session_id),
+            is_resume: false,
+            working_dir: Some(plan_dir.to_path_buf()),
+            debug: options.debug,
+            agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
+            conversation_output_path: options.conversation_output_path.clone(),
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
+        };
+
+        let response = match self.backend.invoke(request) {
+            Ok(r) => r,
+            Err(e) => {
+                self.set_state(WorkflowState::Failed {
+                    error: e.to_string(),
+                });
+                return Err(WorkflowError::Backend(e));
+            }
+        };
+
+        let output = match crate::output::parse_demo_response(&response.output) {
+            Ok(out) => out,
+            Err(e) => {
+                self.set_state(WorkflowState::Failed {
+                    error: e.to_string(),
+                });
+                return Err(WorkflowError::ParseError(e));
+            }
+        };
+
+        self.set_state(WorkflowState::DemoComplete {
+            output: output.clone(),
+        });
+
+        Ok(output)
+    }
+
+    /// Skip the demo step. Transitions from GreenComplete to DemoSkipped.
+    pub fn skip_demo(&mut self) {
+        eprintln!("{{\"tddy\":{{\"marker_id\":\"M003\",\"scope\":\"workflow::skip_demo\",\"data\":{{}}}}}}");
+        self.set_state(WorkflowState::DemoSkipped);
     }
 
     /// Run the validate-changes step: analyze current git changes for risks.
@@ -1257,7 +1380,13 @@ impl<B: CodingBackend> Workflow<B> {
             )
         })?;
 
-        let can_start = matches!(self.state, WorkflowState::Init);
+        let can_start = matches!(
+            self.state,
+            WorkflowState::Init
+                | WorkflowState::GreenComplete { .. }
+                | WorkflowState::DemoComplete { .. }
+                | WorkflowState::DemoSkipped
+        );
         if !can_start {
             return Err(WorkflowError::InvalidTransition(format!(
                 "cannot evaluate from {:?}",

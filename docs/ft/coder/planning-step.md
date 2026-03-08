@@ -19,12 +19,12 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 ### CLI Interface (Updated: 2026-03-07)
 
 1. Binary name: `tddy-coder`
-2. When `--goal` is omitted, runs the full workflow (plan → acceptance-tests → red → green) with auto-resume from `changeset.yaml` state
+2. When `--goal` is omitted, runs the full workflow (plan → acceptance-tests → red → green → demo-prompt → evaluate) with auto-resume from `changeset.yaml` state
 3. Accepts `--goal plan` to trigger the planning step
 4. Accepts `--goal acceptance-tests` to create failing acceptance tests from a completed plan
-5. Accepts `--goal red` and `--goal green` for the implementation phase
+5. Accepts `--goal red`, `--goal green`, `--goal demo`, and `--goal evaluate` for the implementation and evaluation phases
 6. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
-7. Accepts `--plan-dir <path>`: path to plan output directory; required when `--goal acceptance-tests`, `--goal red`, or `--goal green`; used for resume when running full workflow
+7. Accepts `--plan-dir <path>`: path to plan output directory; required when `--goal acceptance-tests`, `--goal red`, `--goal green`, `--goal demo`, or `--goal evaluate`; used for resume when running full workflow
 8. Accepts `--output-dir <path>` to configure where planning output is written (default: current directory)
 9. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
 10. Accepts `--conversation-output <path>` to log the entire agent conversation in raw bytes to a file (Updated: 2026-03-07)
@@ -171,16 +171,18 @@ This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt` o
 
 ### Full Workflow (No --goal)
 
-When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → green in sequence. Resume requires `--plan-dir`: if interrupted, re-run with `--plan-dir <path>` to skip completed steps (reads `changeset.yaml.state.current`). Without `--plan-dir`, a new plan is started. When state is `GreenComplete`, re-running exits with a summary.
+When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → green → demo-prompt → evaluate in sequence. After green completes, the user is prompted "Run demo? [r] Run [s] Skip"; Run executes the demo step, Skip proceeds directly to evaluate. Resume requires `--plan-dir`: if interrupted, re-run with `--plan-dir <path>` to skip completed steps (reads `changeset.yaml.state.current`). Without `--plan-dir`, a new plan is started. When state is `Evaluated`, re-running exits with a summary. `changeset.yaml` is written immediately after the user enters their prompt (before the plan agent runs), so the plan dir is resumable even if planning fails.
 
 ## Acceptance Criteria
 
 ### Full Workflow (No --goal)
 
-- [x] `tddy-coder` (no `--goal`) reads from stdin and runs plan → acceptance-tests → red → green
-- [x] Full workflow prints green step output on success
+- [x] `tddy-coder` (no `--goal`) reads from stdin and runs plan → acceptance-tests → red → green → demo-prompt → evaluate
+- [x] After green completes, user is prompted to run or skip demo; Skip proceeds to evaluate
+- [x] Full workflow prints evaluate step output on success
 - [x] Full workflow supports resume via `--plan-dir` (required; no auto-detect)
-- [x] When state is GreenComplete, re-running exits with summary
+- [x] When state is Evaluated, re-running exits with summary
+- [x] `changeset.yaml` exists on disk immediately after user enters prompt, before plan agent runs
 
 ### Plan Goal
 
