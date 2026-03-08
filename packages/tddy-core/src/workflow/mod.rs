@@ -393,8 +393,9 @@ impl<B: CodingBackend> Workflow<B> {
 
         // Canonicalize so path is absolute; backend runs with cwd=output_path, so relative paths
         // would resolve incorrectly (e.g. ./plan-dir/system-prompt-plan.md → plan-dir/plan-dir/...).
-        let system_prompt_path = std::fs::canonicalize(&system_prompt_path)
-            .map_err(|e| WorkflowError::WriteFailed(format!("canonicalize system prompt path: {}", e)))?;
+        let system_prompt_path = std::fs::canonicalize(&system_prompt_path).map_err(|e| {
+            WorkflowError::WriteFailed(format!("canonicalize system prompt path: {}", e))
+        })?;
 
         let _ = crate::schema::write_all_schemas_to_dir(&output_path);
 
@@ -402,6 +403,7 @@ impl<B: CodingBackend> Workflow<B> {
             None => planning::build_prompt(input),
             Some(a) => planning::build_followup_prompt(input, a),
         };
+        let prompt = prepend_context_header(prompt, Some(&output_path));
 
         let (session_id, is_resume) = match &self.session_id {
             None => {
@@ -595,6 +597,7 @@ impl<B: CodingBackend> Workflow<B> {
             None => acceptance_tests::build_prompt(&prd_content),
             Some(a) => acceptance_tests::build_followup_prompt(&prd_content, a),
         };
+        let prompt = prepend_context_header(prompt, Some(plan_dir));
 
         let model = resolve_model(
             Some(&changeset),
@@ -768,6 +771,7 @@ impl<B: CodingBackend> Workflow<B> {
             None => red::build_prompt(&prd_content, &acceptance_tests_content),
             Some(a) => red::build_followup_prompt(&prd_content, &acceptance_tests_content, a),
         };
+        let prompt = prepend_context_header(prompt, Some(plan_dir));
 
         let session_id = uuid::Uuid::new_v4().to_string();
 
@@ -1466,7 +1470,10 @@ fn find_git_root(dir: &Path) -> PathBuf {
         }
     }
     // R2 fallback: return dir's immediate parent (or dir itself if no parent)
-    eprintln!("[find_git_root] no .git found, falling back to parent of {:?}", dir);
+    eprintln!(
+        "[find_git_root] no .git found, falling back to parent of {:?}",
+        dir
+    );
     dir.parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| dir.to_path_buf())
@@ -1504,7 +1511,9 @@ fn relocate_plan_dir(
     dir_name: &str,
     output_dir: &Path,
 ) -> Result<PathBuf, WorkflowError> {
-    eprintln!(r#"{{"tddy":{{"marker_id":"M002","scope":"workflow::relocate_plan_dir","data":{{}}}}}}"#);
+    eprintln!(
+        r#"{{"tddy":{{"marker_id":"M002","scope":"workflow::relocate_plan_dir","data":{{}}}}}}"#
+    );
 
     // R3: Reject empty / whitespace-only suggestions
     let suggestion = suggestion.trim();
@@ -1533,7 +1542,10 @@ fn relocate_plan_dir(
     let target = git_root
         .join(suggestion.trim_end_matches('/'))
         .join(dir_name);
-    eprintln!("[relocate_plan_dir] staging={:?} target={:?}", staging, target);
+    eprintln!(
+        "[relocate_plan_dir] staging={:?} target={:?}",
+        staging, target
+    );
 
     // R3: If the suggestion resolves to the same path as staging → no-op
     if target == staging {
@@ -1551,17 +1563,15 @@ fn relocate_plan_dir(
 
     // Create parent directories for the target
     if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            WorkflowError::WriteFailed(format!("create target parent dirs: {}", e))
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| WorkflowError::WriteFailed(format!("create target parent dirs: {}", e)))?;
     }
 
     // R4: Try a fast rename first; on cross-device failure fall back to copy+delete
     if std::fs::rename(staging, &target).is_err() {
         eprintln!("[relocate_plan_dir] rename failed (cross-device?), falling back to copy+delete");
-        copy_dir_recursive(staging, &target).map_err(|e| {
-            WorkflowError::WriteFailed(format!("copy staging dir: {}", e))
-        })?;
+        copy_dir_recursive(staging, &target)
+            .map_err(|e| WorkflowError::WriteFailed(format!("copy staging dir: {}", e)))?;
         std::fs::remove_dir_all(staging).map_err(|e| {
             WorkflowError::WriteFailed(format!("remove staging dir after copy: {}", e))
         })?;
@@ -1569,6 +1579,79 @@ fn relocate_plan_dir(
 
     eprintln!("[relocate_plan_dir] relocated {:?} → {:?}", staging, target);
     Ok(target)
+}
+
+/// Known artifact filenames to include in the context header.
+const KNOWN_ARTIFACTS: &[&str] = &[
+    "PRD.md",
+    "TODO.md",
+    "acceptance-tests.md",
+    "progress.md",
+    "evaluation-report.md",
+    "demo-plan.md",
+    "validate-tests-report.md",
+    "validate-prod-ready-report.md",
+    "analyze-clean-code-report.md",
+];
+
+/// Build the context header string listing absolute paths to existing `.md` artifacts
+/// in `plan_dir`. Returns an empty string when `plan_dir` is `None` or no files exist.
+pub fn build_context_header(plan_dir: Option<&Path>) -> String {
+    let dir = match plan_dir {
+        None => {
+            eprintln!("[build_context_header] plan_dir is None — skipping header");
+            return String::new();
+        }
+        Some(d) => d,
+    };
+
+    eprintln!("[build_context_header] scanning {:?} for artifacts", dir);
+
+    let mut lines: Vec<String> = Vec::new();
+    for artifact in KNOWN_ARTIFACTS {
+        let path = dir.join(artifact);
+        if path.exists() {
+            let canonical = std::fs::canonicalize(&path).unwrap_or(path);
+            eprintln!(
+                "[build_context_header] found artifact: {}",
+                canonical.display()
+            );
+            lines.push(format!("{}: {}", artifact, canonical.display()));
+        }
+    }
+
+    if lines.is_empty() {
+        eprintln!(
+            "[build_context_header] no artifacts found in {:?} — empty header",
+            dir
+        );
+        return String::new();
+    }
+
+    let mut header = String::from("**CRITICAL FOR CONTEXT AND SUMMARY**\n");
+    for line in &lines {
+        header.push_str(line);
+        header.push('\n');
+    }
+    eprintln!(
+        "[build_context_header] built header with {} artifact(s)",
+        lines.len()
+    );
+    header
+}
+
+/// Prepend the context header to `prompt`. When the header is empty, returns `prompt` unchanged.
+pub fn prepend_context_header(prompt: String, plan_dir: Option<&Path>) -> String {
+    let header = build_context_header(plan_dir);
+    if header.is_empty() {
+        eprintln!("[prepend_context_header] no header — prompt unchanged");
+        return prompt;
+    }
+    eprintln!("[prepend_context_header] prepending context header to prompt");
+    format!(
+        "<context-reminder>\n{}</context-reminder>\n\n{}",
+        header, prompt
+    )
 }
 
 #[cfg(test)]
@@ -1602,9 +1685,15 @@ mod relocation_tests {
             .expect("valid suggestion should succeed");
 
         let expected = root.join("docs/plans").join(dir_name);
-        assert_eq!(result, expected, "final path should be at suggested location");
+        assert_eq!(
+            result, expected,
+            "final path should be at suggested location"
+        );
         assert!(expected.exists(), "target directory should exist");
-        assert!(expected.join("PRD.md").exists(), "PRD.md should be present at target");
+        assert!(
+            expected.join("PRD.md").exists(),
+            "PRD.md should be present at target"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -1664,7 +1753,10 @@ mod relocation_tests {
         let result = relocate_plan_dir(&staging, "   ", dir_name, &output_dir)
             .expect("whitespace suggestion should fall back, not error");
 
-        assert_eq!(result, staging, "whitespace-only suggestion should fall back");
+        assert_eq!(
+            result, staging,
+            "whitespace-only suggestion should fall back"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -1687,7 +1779,10 @@ mod relocation_tests {
             .expect("same-path suggestion should be a noop, not error");
 
         assert_eq!(result, staging, "same-path should return staging unchanged");
-        assert!(staging.is_dir(), "staging directory should still exist as a real dir");
+        assert!(
+            staging.is_dir(),
+            "staging directory should still exist as a real dir"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -1726,5 +1821,201 @@ mod relocation_tests {
         assert!(found.is_dir(), "result must be an existing directory");
 
         let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod context_header_tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("tddy-ch-{}", label));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    // ── AC1: header lists existing .md files ─────────────────────────────────
+
+    #[test]
+    fn test_context_header_lists_existing_md_files() {
+        let dir = temp_dir("lists-existing");
+        fs::write(dir.join("PRD.md"), "# PRD").unwrap();
+        fs::write(dir.join("TODO.md"), "- [ ] Task").unwrap();
+
+        let header = build_context_header(Some(&dir));
+
+        assert!(
+            header.starts_with("**CRITICAL FOR CONTEXT AND SUMMARY**\n"),
+            "header must start with the marker line, got: {:?}",
+            &header[..header.len().min(200)]
+        );
+        assert!(header.contains("PRD.md:"), "header must list PRD.md");
+        assert!(header.contains("TODO.md:"), "header must list TODO.md");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── AC3: missing artifacts are silently omitted ───────────────────────────
+
+    #[test]
+    fn test_context_header_omits_missing_files() {
+        let dir = temp_dir("omits-missing");
+        fs::write(dir.join("PRD.md"), "# PRD").unwrap();
+        // TODO.md and acceptance-tests.md are NOT created
+
+        let header = build_context_header(Some(&dir));
+
+        assert!(header.contains("PRD.md:"), "should list PRD.md");
+        assert!(
+            !header.contains("TODO.md:"),
+            "must not list missing TODO.md"
+        );
+        assert!(
+            !header.contains("acceptance-tests.md:"),
+            "must not list missing acceptance-tests.md"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── AC2: empty plan directory → no header ────────────────────────────────
+
+    #[test]
+    fn test_context_header_empty_for_no_md_files() {
+        let dir = temp_dir("empty-dir");
+        // No .md files
+
+        let header = build_context_header(Some(&dir));
+
+        assert!(
+            header.is_empty(),
+            "header must be empty when no md files exist, got: {:?}",
+            header
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── AC2: None plan_dir → no header ───────────────────────────────────────
+
+    #[test]
+    fn test_context_header_empty_for_none_plan_dir() {
+        let header = build_context_header(None);
+
+        assert!(
+            header.is_empty(),
+            "header must be empty when plan_dir is None"
+        );
+    }
+
+    // ── AC4: paths are absolute ───────────────────────────────────────────────
+
+    #[test]
+    fn test_context_header_uses_absolute_paths() {
+        let dir = temp_dir("abs-paths");
+        fs::write(dir.join("PRD.md"), "# PRD").unwrap();
+
+        let header = build_context_header(Some(&dir));
+
+        let prd_line = header
+            .lines()
+            .find(|l| l.starts_with("PRD.md:"))
+            .expect("header must contain a PRD.md line");
+        let path_str = prd_line.trim_start_matches("PRD.md:").trim();
+
+        assert!(
+            std::path::Path::new(path_str).is_absolute(),
+            "PRD.md path must be absolute, got: {}",
+            path_str
+        );
+        assert!(
+            std::path::Path::new(path_str).exists(),
+            "listed path must exist on disk: {}",
+            path_str
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── AC6: original prompt appears after header ─────────────────────────────
+
+    #[test]
+    fn test_prepend_adds_header_before_prompt() {
+        let dir = temp_dir("prepend-adds");
+        fs::write(dir.join("PRD.md"), "# PRD").unwrap();
+
+        let original = "Do the task.".to_string();
+        let result = prepend_context_header(original.clone(), Some(&dir));
+
+        assert!(
+            result.starts_with("<context-reminder>"),
+            "result must start with context-reminder tag"
+        );
+        assert!(
+            result.contains("**CRITICAL FOR CONTEXT AND SUMMARY**"),
+            "result must contain header marker inside context-reminder"
+        );
+        assert!(
+            result.contains("</context-reminder>"),
+            "result must contain closing context-reminder tag"
+        );
+
+        let close_tag = "</context-reminder>";
+        let close_pos = result.find(close_tag).expect("must find closing tag");
+        let after_tag = &result[close_pos + close_tag.len()..];
+        let body = after_tag.trim_start_matches('\n');
+        assert_eq!(
+            body, original,
+            "original prompt must appear verbatim after the context-reminder block"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── context-reminder tags wrap the header block ────────────────────────────
+
+    #[test]
+    fn test_prepend_wraps_header_in_context_reminder_tags() {
+        let dir = temp_dir("wrap-tags");
+        fs::write(dir.join("PRD.md"), "# PRD").unwrap();
+
+        let result = prepend_context_header("Task.".to_string(), Some(&dir));
+
+        assert!(
+            result.starts_with("<context-reminder>\n"),
+            "header block must start with <context-reminder> and newline"
+        );
+        let inner_start = "<context-reminder>\n".len();
+        let inner = &result[inner_start..];
+        assert!(
+            inner.starts_with("**CRITICAL FOR CONTEXT AND SUMMARY**"),
+            "first line inside tags must be the marker"
+        );
+        assert!(
+            result.contains("\n</context-reminder>\n"),
+            "closing tag must be followed by newline before prompt body"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── AC7: no-op when header is empty ──────────────────────────────────────
+
+    #[test]
+    fn test_prepend_returns_original_when_no_header() {
+        let dir = temp_dir("prepend-noop");
+        // No .md files → build_context_header returns ""
+
+        let original = "Do the task.".to_string();
+        let result = prepend_context_header(original.clone(), Some(&dir));
+
+        assert_eq!(
+            result, original,
+            "prompt must be unchanged when no header is needed"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
