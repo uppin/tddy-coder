@@ -9,9 +9,6 @@ use tddy_core::{evaluate_allowlist, parse_evaluate_response};
 /// Fails in Red because evaluate_allowlist calls todo!().
 #[test]
 fn evaluate_allowlist_returns_non_empty_list() {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M016","scope":"tests::evaluate_unit::evaluate_allowlist_returns_non_empty_list","data":{{}}}}}}"#
-    );
     let list = evaluate_allowlist();
     assert!(!list.is_empty(), "evaluate_allowlist must return tools");
 }
@@ -20,9 +17,6 @@ fn evaluate_allowlist_returns_non_empty_list() {
 /// Fails in Red because evaluate_allowlist calls todo!().
 #[test]
 fn evaluate_allowlist_includes_read() {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M017","scope":"tests::evaluate_unit::evaluate_allowlist_includes_read","data":{{}}}}}}"#
-    );
     let list = evaluate_allowlist();
     assert!(
         list.iter().any(|t| t == "Read"),
@@ -35,9 +29,6 @@ fn evaluate_allowlist_includes_read() {
 /// Fails in Red because evaluate_allowlist calls todo!().
 #[test]
 fn evaluate_allowlist_includes_git_diff() {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M018","scope":"tests::evaluate_unit::evaluate_allowlist_includes_git_diff","data":{{}}}}}}"#
-    );
     let list = evaluate_allowlist();
     assert!(
         list.iter().any(|t| t.contains("git diff")),
@@ -50,9 +41,6 @@ fn evaluate_allowlist_includes_git_diff() {
 /// Fails in Red because parse_evaluate_response calls todo!().
 #[test]
 fn parse_evaluate_response_fails_on_empty_input() {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M019","scope":"tests::evaluate_unit::parse_evaluate_response_fails_on_empty_input","data":{{}}}}}}"#
-    );
     let result = parse_evaluate_response("");
     assert!(
         result.is_err(),
@@ -64,9 +52,6 @@ fn parse_evaluate_response_fails_on_empty_input() {
 /// Fails in Red because parse_evaluate_response calls todo!().
 #[test]
 fn parse_evaluate_response_fails_on_missing_block() {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M020","scope":"tests::evaluate_unit::parse_evaluate_response_fails_on_missing_block","data":{{}}}}}}"#
-    );
     let result = parse_evaluate_response("no structured response here");
     assert!(
         result.is_err(),

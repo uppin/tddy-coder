@@ -31,7 +31,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Permission (`permission.rs`)
 
-- **plan_allowlist / acceptance_tests_allowlist / red_allowlist / green_allowlist / validate_allowlist / evaluate_allowlist / validate_refactor_allowlist**: Goal-specific tool allowlists passed as `--allowedTools`. Plan: Read, Glob, Grep, SemanticSearch. Acceptance-tests, Red, Green: Read, Write, Edit, Glob, Grep, Bash(cargo *), SemanticSearch. Validate, Evaluate: Read, Glob, Grep, SemanticSearch, Bash(git diff/log/find/cargo build/check *). ValidateRefactor: Agent, Read, Write, Edit, Glob, Grep, SemanticSearch, Bash(git diff/cargo build/check/test *).
+- **plan_allowlist / acceptance_tests_allowlist / red_allowlist / green_allowlist / validate_allowlist / evaluate_allowlist / validate_refactor_allowlist**: Goal-specific tool allowlists passed as `--allowedTools`. Plan: Read, Glob, Grep, SemanticSearch, AskUserQuestion, ExitPlanMode. Acceptance-tests, Red, Green: Read, Write, Edit, Glob, Grep, Bash(cargo *), SemanticSearch. Validate, Evaluate: Read, Glob, Grep, SemanticSearch, Bash(git diff/log/find/cargo build/check *). ValidateRefactor: Agent, Read, Write, Edit, Glob, Grep, SemanticSearch, Bash(git diff/cargo build/check/test *).
 
 ### Workflow (`workflow/`)
 

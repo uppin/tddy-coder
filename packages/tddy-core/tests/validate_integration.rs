@@ -13,15 +13,18 @@ const VALIDATE_OUTPUT: &str = r#"Analysis complete.
 #[test]
 fn validate_workflow_invokes_backend_with_validate_goal() {
     let working_dir = std::env::temp_dir().join("tddy-validate-goal-test");
+    let plan_dir = std::env::temp_dir().join("tddy-validate-goal-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
     let backend = MockBackend::new();
     backend.push_ok(VALIDATE_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
     let options = ValidateOptions::default();
-    let result = workflow.validate(&working_dir, None, None, &options);
+    let result = workflow.validate(&working_dir, Some(&plan_dir), None, &options);
 
     assert!(result.is_ok(), "validate should succeed, got: {:?}", result);
 
@@ -35,21 +38,25 @@ fn validate_workflow_invokes_backend_with_validate_goal() {
     );
 
     let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
 /// validate() transitions workflow to Validated state on success.
 #[test]
 fn validate_workflow_transitions_to_validated_state() {
     let working_dir = std::env::temp_dir().join("tddy-validate-state-test");
+    let plan_dir = std::env::temp_dir().join("tddy-validate-state-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
     let backend = MockBackend::new();
     backend.push_ok(VALIDATE_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
     let options = ValidateOptions::default();
-    let _ = workflow.validate(&working_dir, None, None, &options);
+    let _ = workflow.validate(&working_dir, Some(&plan_dir), None, &options);
 
     let state = workflow.state();
     assert!(
@@ -59,26 +66,30 @@ fn validate_workflow_transitions_to_validated_state() {
     );
 
     let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// validate() writes validation-report.md to the working directory.
+/// validate() writes validation-report.md to the plan directory.
 #[test]
 fn validate_workflow_writes_validation_report_md() {
     let working_dir = std::env::temp_dir().join("tddy-validate-writes-md");
+    let plan_dir = std::env::temp_dir().join("tddy-validate-writes-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
     let backend = MockBackend::new();
     backend.push_ok(VALIDATE_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
     let options = ValidateOptions::default();
-    let _ = workflow.validate(&working_dir, None, None, &options);
+    let _ = workflow.validate(&working_dir, Some(&plan_dir), None, &options);
 
-    let report_path = working_dir.join("validation-report.md");
+    let report_path = plan_dir.join("validation-report.md");
     assert!(
         report_path.exists(),
-        "validation-report.md should be written to working directory: {}",
+        "validation-report.md should be written to plan directory: {}",
         report_path.display()
     );
     let content = std::fs::read_to_string(&report_path).expect("read validation-report.md");
@@ -94,11 +105,12 @@ fn validate_workflow_writes_validation_report_md() {
     );
 
     let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// validate() works from Init state when no plan_dir is provided (standalone mode).
+/// validate() returns PlanDirInvalid when plan_dir is None.
 #[test]
-fn validate_workflow_works_without_plan_dir() {
+fn validate_workflow_requires_plan_dir() {
     let working_dir = std::env::temp_dir().join("tddy-validate-no-plan-dir");
     let _ = std::fs::remove_dir_all(&working_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
@@ -108,12 +120,16 @@ fn validate_workflow_works_without_plan_dir() {
 
     let mut workflow = Workflow::new(backend);
     let options = ValidateOptions::default();
-    // plan_dir is None — standalone mode, no changeset context
     let result = workflow.validate(&working_dir, None, None, &options);
 
     assert!(
-        result.is_ok(),
-        "validate without plan_dir should succeed, got: {:?}",
+        result.is_err(),
+        "validate without plan_dir should fail, got: {:?}",
+        result
+    );
+    assert!(
+        matches!(result, Err(tddy_core::WorkflowError::PlanDirInvalid(_))),
+        "expected PlanDirInvalid, got: {:?}",
         result
     );
 
@@ -147,6 +163,14 @@ fn validate_workflow_includes_plan_dir_context_when_provided() {
         result
     );
 
+    // When plan_dir is provided, validation-report.md goes to plan_dir
+    let report_in_plan = plan_dir.join("validation-report.md");
+    assert!(
+        report_in_plan.exists(),
+        "validation-report.md should be in plan_dir when provided, not found at: {}",
+        report_in_plan.display()
+    );
+
     let invocations = workflow.backend().invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
@@ -167,15 +191,18 @@ fn validate_workflow_includes_plan_dir_context_when_provided() {
 #[test]
 fn validate_workflow_uses_fresh_session_not_resume() {
     let working_dir = std::env::temp_dir().join("tddy-validate-fresh-session");
+    let plan_dir = std::env::temp_dir().join("tddy-validate-fresh-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
     let backend = MockBackend::new();
     backend.push_ok(VALIDATE_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
     let options = ValidateOptions::default();
-    let _ = workflow.validate(&working_dir, None, None, &options);
+    let _ = workflow.validate(&working_dir, Some(&plan_dir), None, &options);
 
     let invocations = workflow.backend().invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
@@ -186,14 +213,18 @@ fn validate_workflow_uses_fresh_session_not_resume() {
     );
 
     let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
 /// validate() returns ParseError when backend returns a response with no structured-response block.
 #[test]
 fn validate_workflow_returns_parse_error_on_malformed_response() {
     let working_dir = std::env::temp_dir().join("tddy-validate-parse-error");
+    let plan_dir = std::env::temp_dir().join("tddy-validate-parse-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
     let backend = MockBackend::new();
     // No structured-response block — parser should fail
@@ -201,7 +232,7 @@ fn validate_workflow_returns_parse_error_on_malformed_response() {
 
     let mut workflow = Workflow::new(backend);
     let options = ValidateOptions::default();
-    let result = workflow.validate(&working_dir, None, None, &options);
+    let result = workflow.validate(&working_dir, Some(&plan_dir), None, &options);
 
     assert!(
         result.is_err(),
@@ -214,6 +245,7 @@ fn validate_workflow_returns_parse_error_on_malformed_response() {
     );
 
     let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
 /// validate_allowlist() contains required read and bash tools for git and cargo.

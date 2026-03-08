@@ -205,9 +205,6 @@ pub fn resolve_model(
 /// NOTE: validate-changes states ("Validating", "Validated") return None —
 /// validate-changes is a standalone goal, not part of the auto-sequence.
 pub fn next_goal_for_state(state: &str) -> Option<&'static str> {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M006","scope":"changeset::next_goal_for_state","data":{{}}}}}}"#
-    );
     match state {
         "Init" => Some("plan"),
         "Planned" => Some("acceptance-tests"),

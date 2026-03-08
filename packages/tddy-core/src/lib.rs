@@ -1,9 +1,9 @@
 //! Core library for tddy-coder.
 
 pub mod backend;
-mod quiet;
 pub mod changeset;
 pub mod error;
+pub mod log_backend;
 pub mod output;
 pub mod permission;
 pub mod schema;
@@ -12,8 +12,8 @@ pub mod workflow;
 
 pub use backend::{
     build_claude_args, clear_child_pid, get_child_pid, kill_child_process, set_child_pid,
-    AnyBackend, ClarificationQuestion, ClaudeCodeBackend, ClaudeInvokeConfig, CodingBackend,
-    CursorBackend, Goal, InvokeRequest, InvokeResponse, MockBackend, PermissionMode,
+    AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeCodeBackend, ClaudeInvokeConfig,
+    CodingBackend, CursorBackend, Goal, InvokeRequest, InvokeResponse, MockBackend, PermissionMode,
     QuestionOption,
 };
 pub use changeset::{
@@ -22,6 +22,7 @@ pub use changeset::{
     ClarificationQuestionForQa, DiscoveryData, QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use error::{BackendError, ParseError, WorkflowError};
+pub use log_backend::{get_buffered_logs, init_tddy_logger, take_buffered_logs};
 pub use output::{
     extract_last_structured_block, parse_acceptance_tests_response, parse_evaluate_response,
     parse_green_response, parse_planning_output, parse_red_response,

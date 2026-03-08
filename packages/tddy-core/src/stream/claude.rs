@@ -10,6 +10,14 @@ use std::collections::HashSet;
 use std::io::BufRead;
 
 #[derive(Debug, Deserialize)]
+struct PermissionDenial {
+    #[serde(default, rename = "tool_name")]
+    tool_name: String,
+    #[serde(default, rename = "tool_input")]
+    tool_input: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
 struct StreamEvent {
     #[serde(rename = "type")]
     event_type: String,
@@ -28,6 +36,12 @@ struct StreamEvent {
     /// When set, this assistant message is from a sub-agent; skip ToolUse (task_progress covers it).
     #[serde(default, rename = "parent_tool_use_id")]
     parent_tool_use_id: Option<String>,
+    /// When AskUserQuestion is permission-denied, questions appear here instead of tool_use.
+    #[serde(default, rename = "permission_denials")]
+    permission_denials: Vec<PermissionDenial>,
+    /// When subtype is error_during_execution, CLI error messages (e.g. "No conversation found with session ID").
+    #[serde(default)]
+    errors: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -179,6 +193,7 @@ where
     let mut questions: Vec<ClarificationQuestion> = vec![];
     let mut seen_questions: HashSet<(String, String)> = HashSet::new();
     let mut raw_lines: Vec<String> = vec![];
+    let mut stream_errors: Vec<String> = vec![];
     let mut line_index: usize = 0;
 
     for line in reader.lines() {
@@ -276,6 +291,25 @@ where
                         on_raw_output(&event.result);
                     }
                 }
+                // When AskUserQuestion is permission-denied, extract questions from permission_denials.
+                for denial in &event.permission_denials {
+                    if denial.tool_name == "AskUserQuestion" {
+                        if let Some(ref input) = denial.tool_input {
+                            for q in parse_ask_user_question(input) {
+                                let key = (q.header.clone(), q.question.clone());
+                                if seen_questions.insert(key) {
+                                    questions.push(q);
+                                }
+                            }
+                        }
+                    }
+                }
+                // Collect CLI error messages (e.g. "No conversation found with session ID").
+                for err in &event.errors {
+                    if !err.is_empty() && !stream_errors.contains(err) {
+                        stream_errors.push(err.clone());
+                    }
+                }
             }
             _ => {}
         }
@@ -291,6 +325,7 @@ where
         session_id,
         questions,
         raw_lines,
+        stream_errors,
     })
 }
 
@@ -364,7 +399,8 @@ mod tests {
         );
 
         let reader = std::io::BufReader::new(ndjson.as_bytes());
-        let result = process_ndjson_stream(reader, noop_progress, noop_output, None, None, 0).unwrap();
+        let result =
+            process_ndjson_stream(reader, noop_progress, noop_output, None, None, 0).unwrap();
 
         assert!(
             !result.result_text.contains("evaluate-changes"),
@@ -392,7 +428,8 @@ mod tests {
         );
 
         let reader = std::io::BufReader::new(ndjson.as_bytes());
-        let result = process_ndjson_stream(reader, noop_progress, noop_output, None, None, 0).unwrap();
+        let result =
+            process_ndjson_stream(reader, noop_progress, noop_output, None, None, 0).unwrap();
 
         assert!(
             result.result_text.contains(r#""goal":"green""#),
@@ -423,7 +460,8 @@ mod tests {
         );
 
         let reader = std::io::BufReader::new(ndjson.as_bytes());
-        let result = process_ndjson_stream(reader, noop_progress, noop_output, None, None, 0).unwrap();
+        let result =
+            process_ndjson_stream(reader, noop_progress, noop_output, None, None, 0).unwrap();
 
         assert!(
             !result.result_text.contains("Old red output"),

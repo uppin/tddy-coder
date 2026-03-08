@@ -1,7 +1,18 @@
 //! Green goal prompt and system prompt construction.
 
-pub fn system_prompt() -> String {
-    r#"You are a TDD Green phase assistant. Read the progress.md file to understand which tests fail and which skeletons need implementation. Implement production-grade code to make all failing tests pass.
+/// Build the green goal system prompt.
+///
+/// When `run_demo` is true and demo-plan.md exists, the agent runs the demo by executing
+/// a pre-made shell script (e.g. demo.sh) in the plan directory using tools. The script
+/// must launch the app in its own terminal window. See AGENTS.md.
+pub fn system_prompt(run_demo: bool) -> String {
+    let demo_instruction = if run_demo {
+        "**demo_results** (required when demo-plan.md exists): Run the demo by executing the pre-made shell script in the plan directory (e.g. ./demo.sh or bash demo.sh). The script must launch the app in its own terminal window. Use tools (Bash) to run it. Report summary and steps_completed in demo_results."
+    } else {
+        "**demo_results**: The user chose to skip the demo. Do NOT run demo steps. Omit demo_results from your output."
+    };
+    format!(
+        r#"You are a TDD Green phase assistant. Read the progress.md file to understand which tests fail and which skeletons need implementation. Implement production-grade code to make all failing tests pass.
 
 You MUST:
 1. Read progress.md for the list of failing tests and skeleton implementations
@@ -11,18 +22,19 @@ You MUST:
 5. Run acceptance tests to verify end-to-end behavior
 6. ALWAYS end your response with a structured-response block — REQUIRED.
 
-**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object. Do NOT output a number, array, numbered list items, or any text inside the block. The parser expects a single JSON object starting with {"goal":"green",...} — nothing else.
+**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object. Do NOT output a number, array, numbered list items, or any text inside the block. The parser expects a single JSON object starting with {{"goal":"green",...}} — nothing else.
 
 Read the JSON Schema file at `schemas/green.schema.json` in the working directory for the exact output format specification. Your final output MUST include this exact block (replace placeholders with actual values):
 
 <structured-response content-type="application-json" schema="schemas/green.schema.json">
-{"goal": "green", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "passing|failing", "reason": "<optional reason if failing>"}], "implementations": [{"name": "<name>", "file": "<path>", "line": <number>, "kind": "<struct|method|function|trait|module>"}], "test_command": "<command>", "prerequisite_actions": "<prereqs or None>", "run_single_or_selected_tests": "<how to run one test>", "demo_results": {"summary": "<text>", "steps_completed": <number>}}
+{{"goal": "green", "summary": "<human-readable summary>", "tests": [{{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "passing|failing", "reason": "<optional reason if failing>"}}], "implementations": [{{"name": "<name>", "file": "<path>", "line": <number>, "kind": "<struct|method|function|trait|module>"}}], "test_command": "<command>", "prerequisite_actions": "<prereqs or None>", "run_single_or_selected_tests": "<how to run one test>", "demo_results": {{"summary": "<text>", "steps_completed": <number>}}}}
 </structured-response>
 
 The summary must describe what was implemented and confirm test results. The tests array lists each test with status "passing" or "failing"; include "reason" for failing tests. The implementations array lists each implemented item (struct, method, etc.).
 
-**demo_results** (required when demo-plan.md exists): If the plan directory contains demo-plan.md, after all tests pass run the demo steps from demo-plan.md. Report summary and steps_completed in demo_results."#
-        .to_string()
+{}"#,
+        demo_instruction
+    )
 }
 
 pub fn build_prompt(
@@ -80,7 +92,7 @@ mod tests {
 
     #[test]
     fn system_prompt_includes_green_goal_instructions() {
-        let prompt = system_prompt();
+        let prompt = system_prompt(true);
         assert!(
             prompt.contains("green") || prompt.contains("Implement"),
             "system prompt must instruct Claude for green goal"
@@ -89,7 +101,7 @@ mod tests {
 
     #[test]
     fn system_prompt_references_schema_and_includes_schema_attribute() {
-        let prompt = system_prompt();
+        let prompt = system_prompt(true);
         assert!(
             prompt.contains("schemas/green.schema.json"),
             "system prompt must reference green schema file"

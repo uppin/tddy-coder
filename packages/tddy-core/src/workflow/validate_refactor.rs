@@ -38,9 +38,6 @@ Read the JSON Schema file at `schemas/validate-refactor.schema.json` in the work
 ///
 /// The prompt instructs the agent to orchestrate the 3 validation subagents.
 pub fn build_prompt(evaluation_report_content: &str) -> String {
-    eprintln!(
-        r#"{{"tddy":{{"marker_id":"M008c","scope":"workflow::validate_refactor::build_prompt","data":{{}}}}}}"#
-    );
     format!(
         r#"Orchestrate a full refactor validation. Use the Agent tool to spawn 3 concurrent validation subagents:
 

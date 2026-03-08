@@ -110,6 +110,7 @@ fn validate_refactor_rejects_cursor_backend() {
         working_dir: None,
         debug: false,
         agent_output: false,
+        agent_output_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,

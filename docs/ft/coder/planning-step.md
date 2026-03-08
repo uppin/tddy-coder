@@ -31,7 +31,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 11. Accepts `--debug` to print CLI command and cwd before running (for debugging empty output)
 12. Accepts `--agent <name>` to select backend: `claude` (default) or `cursor`
 13. Reads the feature description from stdin (supports piped input and interactive prompt), or from `--prompt <text>` when provided
-14. **TUI mode**: When both stdin and stderr are TTY, runs full TUI (activity log, status bar, prompt bar). Agent output is always visible. Piped/non-TTY uses plain linear output.
+14. **TUI mode**: When both stdin and stderr are TTY, runs full TUI (activity log, inbox when Running, status bar, prompt bar). Agent output is always visible. During Running mode, users can queue prompts in the inbox; queued items are displayed, navigable (Up/Down), editable (E), and deletable (D); on workflow completion the first item is auto-dequeued and sent. Piped/non-TTY uses plain linear output.
 15. *Deferred*: `--list-models` to list available models (not needed for current scope)
 
 ### Planning Workflow (Updated: 2026-03-07)
