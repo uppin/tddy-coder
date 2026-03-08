@@ -94,7 +94,7 @@ Discovery is persisted in `changeset.yaml` for downstream goals.
 
 ### Plan Directory Relocation
 
-When the agent returns `plan_dir_suggestion` in discovery, the workflow relocates the plan directory from its staging location (e.g. `output_dir/2026-03-08-feature/`) to the suggested path relative to the git root (e.g. `git_root/docs/dev/1-WIP/2026-03-08-feature/`). The agent runs in a staging directory first (with schemas available); after artifacts are written, the directory is moved. Invalid suggestions (absolute paths, `..`, empty) fall back to the staging location. Cross-device moves use copy-then-delete when rename fails.
+When the agent returns `plan_dir_suggestion` in discovery, the workflow relocates the plan directory from its staging location (e.g. `output_dir/2026-03-08-feature/`) to the suggested path relative to the git root (e.g. `git_root/docs/dev/1-WIP/2026-03-08-feature/`). The agent runs in the staging directory first (with schemas available); after artifacts are written, the directory is moved. Invalid suggestions (absolute paths, `..`, empty) fall back to the staging location. Cross-device moves use copy-then-delete when rename fails.
 
 ### Demo Planning (Plan Goal)
 

@@ -1588,7 +1588,6 @@ mod relocation_tests {
     #[test]
     fn test_relocate_valid_suggestion() {
         let root = temp_dir("relocate-valid");
-        // Mark git root so find_git_root() returns `root`.
         fs::create_dir_all(root.join(".git")).unwrap();
 
         let output_dir = root.join("output");
