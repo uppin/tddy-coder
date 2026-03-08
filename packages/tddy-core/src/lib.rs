@@ -9,8 +9,9 @@ pub mod stream;
 pub mod workflow;
 
 pub use backend::{
-    build_claude_args, AnyBackend, ClarificationQuestion, ClaudeCodeBackend, ClaudeInvokeConfig,
-    CodingBackend, CursorBackend, Goal, InvokeRequest, InvokeResponse, MockBackend, PermissionMode,
+    build_claude_args, clear_child_pid, get_child_pid, kill_child_process, set_child_pid,
+    AnyBackend, ClarificationQuestion, ClaudeCodeBackend, ClaudeInvokeConfig, CodingBackend,
+    CursorBackend, Goal, InvokeRequest, InvokeResponse, MockBackend, PermissionMode,
     QuestionOption,
 };
 pub use changeset::{
@@ -20,18 +21,21 @@ pub use changeset::{
 };
 pub use error::{BackendError, ParseError, WorkflowError};
 pub use output::{
-    parse_acceptance_tests_response, parse_green_response, parse_planning_output,
-    parse_red_response, parse_validate_response, read_session_file, write_acceptance_tests_file,
-    write_artifacts, write_session_file, write_validation_report, AcceptanceTestInfo,
-    AcceptanceTestsOutput, GreenOutput, GreenTestResult, ImplementationInfo, PlanningOutput,
-    RedOutput, RedTestInfo, SkeletonInfo, ValidateBuildResult, ValidateChangesetSync,
-    ValidateFileAnalyzed, ValidateIssue, ValidateOutput, ValidateTestImpact,
+    parse_acceptance_tests_response, parse_evaluate_response, parse_green_response,
+    parse_planning_output, parse_red_response, parse_validate_refactor_response,
+    parse_validate_response, read_session_file, write_acceptance_tests_file, write_artifacts,
+    write_evaluation_report, write_session_file, write_validation_report, AcceptanceTestInfo,
+    AcceptanceTestsOutput, EvaluateAffectedTest, EvaluateChangedFile, EvaluateOutput, GreenOutput,
+    GreenTestResult, ImplementationInfo, PlanningOutput, RedOutput, RedTestInfo, SkeletonInfo,
+    ValidateBuildResult, ValidateChangesetSync, ValidateFileAnalyzed, ValidateIssue,
+    ValidateOutput, ValidateRefactorOutput, ValidateTestImpact,
 };
 pub use permission::{
-    acceptance_tests_allowlist, green_allowlist, plan_allowlist, red_allowlist, validate_allowlist,
+    acceptance_tests_allowlist, evaluate_allowlist, green_allowlist, plan_allowlist, red_allowlist,
+    validate_allowlist, validate_refactor_allowlist,
 };
 pub use stream::ProgressEvent;
 pub use workflow::{
-    AcceptanceTestsOptions, GreenOptions, PlanOptions, RedOptions, ValidateOptions, Workflow,
-    WorkflowState,
+    AcceptanceTestsOptions, EvaluateOptions, GreenOptions, PlanOptions, RedOptions,
+    ValidateOptions, ValidateRefactorOptions, Workflow, WorkflowState,
 };

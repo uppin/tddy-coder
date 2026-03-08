@@ -33,6 +33,48 @@ impl CodingBackend for AnyBackend {
 
 use crate::error::BackendError;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static CHILD_PID: AtomicU32 = AtomicU32::new(0);
+
+/// Record the PID of a spawned child process so the SIGINT handler can kill it.
+pub fn set_child_pid(pid: u32) {
+    CHILD_PID.store(pid, Ordering::SeqCst);
+}
+
+/// Clear the child PID after the child has exited.
+pub fn clear_child_pid() {
+    CHILD_PID.store(0, Ordering::SeqCst);
+}
+
+/// Return the currently tracked child PID, or 0 if none.
+pub fn get_child_pid() -> u32 {
+    CHILD_PID.load(Ordering::SeqCst)
+}
+
+/// Kill the tracked child process. Returns true if the kill signal was delivered.
+#[cfg(unix)]
+pub fn kill_child_process() -> bool {
+    let pid = CHILD_PID.swap(0, Ordering::SeqCst);
+    if pid == 0 {
+        return false;
+    }
+    unsafe { libc::kill(pid as i32, libc::SIGKILL) == 0 }
+}
+
+/// Non-unix stub: clears the tracked PID but cannot actually kill the process.
+#[cfg(not(unix))]
+pub fn kill_child_process() -> bool {
+    let pid = CHILD_PID.swap(0, Ordering::SeqCst);
+    if pid == 0 {
+        return false;
+    }
+    eprintln!(
+        "[tddy-core] kill_child_process: cannot kill pid {} on non-unix platform",
+        pid
+    );
+    false
+}
 
 /// Workflow goal; backends map this to their own permission/session model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +84,10 @@ pub enum Goal {
     Red,
     Green,
     Validate,
+    /// Renamed/replacement for Validate: analyze git changes and produce an evaluation report.
+    Evaluate,
+    /// Orchestrate validate-tests, validate-prod-ready, and analyze-clean-code subagents.
+    ValidateRefactor,
 }
 
 /// Request to invoke the coding backend.
@@ -107,4 +153,60 @@ pub trait CodingBackend: Send + Sync {
     fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError>;
     /// Backend identifier (e.g. "claude", "cursor", "mock") for changeset and display.
     fn name(&self) -> &str;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // Serialize tests that mutate global CHILD_PID.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_and_reset() -> std::sync::MutexGuard<'static, ()> {
+        let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        CHILD_PID.store(0, Ordering::SeqCst);
+        guard
+    }
+
+    #[test]
+    fn set_child_pid_stores_pid() {
+        let _lock = lock_and_reset();
+        set_child_pid(12345);
+        assert_eq!(get_child_pid(), 12345);
+    }
+
+    #[test]
+    fn clear_child_pid_resets_to_zero() {
+        let _lock = lock_and_reset();
+        set_child_pid(99999);
+        clear_child_pid();
+        assert_eq!(get_child_pid(), 0);
+    }
+
+    #[test]
+    fn kill_child_process_returns_false_when_no_child() {
+        let _lock = lock_and_reset();
+        assert!(!kill_child_process());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_child_process_kills_running_child() {
+        let _lock = lock_and_reset();
+
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("failed to spawn sleep");
+        let pid = child.id();
+        set_child_pid(pid);
+
+        assert!(kill_child_process());
+        assert_eq!(get_child_pid(), 0);
+
+        // Reap the child so it doesn't remain a zombie, then verify it was killed.
+        let status = child.wait().expect("failed to wait on child");
+        assert!(!status.success());
+    }
 }

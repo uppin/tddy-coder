@@ -2,7 +2,8 @@
 
 use crate::error::WorkflowError;
 use crate::output::{
-    AcceptanceTestsOutput, DemoPlan, GreenOutput, PlanningOutput, RedOutput, ValidateOutput,
+    AcceptanceTestsOutput, DemoPlan, EvaluateOutput, GreenOutput, PlanningOutput, RedOutput,
+    ValidateOutput,
 };
 use std::fs;
 use std::path::Path;
@@ -272,4 +273,98 @@ fn output_to_validation_report_md(output: &ValidateOutput) -> String {
     }
 
     md
+}
+
+/// Write evaluation-report.md to plan_dir (not working_dir).
+/// Called by the evaluate-changes workflow after a successful backend invocation.
+pub fn write_evaluation_report(
+    plan_dir: &Path,
+    output: &EvaluateOutput,
+) -> Result<(), WorkflowError> {
+    eprintln!(
+        r#"{{"tddy":{{"marker_id":"M015","scope":"output::writer::write_evaluation_report","data":{{}}}}}}"#
+    );
+
+    let mut md = String::new();
+    md.push_str("# Evaluation Report\n\n");
+
+    md.push_str("## Summary\n\n");
+    md.push_str(&output.summary);
+    md.push_str("\n\n");
+
+    md.push_str("## Risk Level\n\n");
+    md.push_str(&output.risk_level);
+    md.push_str("\n\n");
+
+    if !output.changed_files.is_empty() {
+        md.push_str("## Changed Files\n\n");
+        for f in &output.changed_files {
+            md.push_str(&format!(
+                "- {} ({}, +{}/−{})\n",
+                f.path, f.change_type, f.lines_added, f.lines_removed
+            ));
+        }
+        md.push('\n');
+    }
+
+    if !output.affected_tests.is_empty() {
+        md.push_str("## Affected Tests\n\n");
+        for t in &output.affected_tests {
+            md.push_str(&format!("- {}: {}\n", t.path, t.status));
+            if !t.description.is_empty() {
+                md.push_str(&format!("  {}\n", t.description));
+            }
+        }
+        md.push('\n');
+    }
+
+    if !output.validity_assessment.is_empty() {
+        md.push_str("## Validity Assessment\n\n");
+        md.push_str(&output.validity_assessment);
+        md.push_str("\n\n");
+    }
+
+    if !output.build_results.is_empty() {
+        md.push_str("## Build Results\n\n");
+        for b in &output.build_results {
+            let notes = b.notes.as_deref().unwrap_or("");
+            md.push_str(&format!(
+                "- {}: {}{}\n",
+                b.package,
+                b.status,
+                if notes.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", notes)
+                }
+            ));
+        }
+        md.push('\n');
+    }
+
+    if !output.issues.is_empty() {
+        md.push_str("## Issues\n\n");
+        for i in &output.issues {
+            let loc = i.line.map(|l| format!(":{}", l)).unwrap_or_default();
+            md.push_str(&format!(
+                "- [{}/{}] {}{}: {}\n",
+                i.severity, i.category, i.file, loc, i.description
+            ));
+            if let Some(ref sug) = i.suggestion {
+                md.push_str(&format!("  Suggestion: {}\n", sug));
+            }
+        }
+        md.push('\n');
+    }
+
+    eprintln!(
+        "[tddy-core] write_evaluation_report: writing {} bytes to {}",
+        md.len(),
+        plan_dir.join("evaluation-report.md").display()
+    );
+
+    fs::write(plan_dir.join("evaluation-report.md"), md)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+
+    Ok(())
 }

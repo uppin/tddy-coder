@@ -73,6 +73,17 @@ impl CursorBackend {
 
 impl super::CodingBackend for CursorBackend {
     fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        // validate-refactor spawns subagents via the Agent tool which Cursor does not support.
+        // Reject early before any spawn attempt so tests can distinguish this from BinaryNotFound.
+        if request.goal == Goal::ValidateRefactor {
+            eprintln!(
+                "[tddy-coder] CursorBackend: rejecting Goal::ValidateRefactor — not supported on Cursor"
+            );
+            return Err(BackendError::InvocationFailed(
+                "validate-refactor is not supported on the Cursor backend".to_string(),
+            ));
+        }
+
         // Cursor CLI has no --system-prompt; prepend system content to user prompt.
         let system_content: Option<String> = if let Some(ref path) = request.system_prompt_path {
             Some(std::fs::read_to_string(path).map_err(|e| {
@@ -157,6 +168,7 @@ impl super::CodingBackend for CursorBackend {
                 BackendError::InvocationFailed(e.to_string())
             }
         })?;
+        super::set_child_pid(child.id());
 
         let stdout_handle = child
             .stdout
@@ -196,8 +208,7 @@ impl super::CodingBackend for CursorBackend {
             Some(
                 std::fs::OpenOptions::new()
                     .create(true)
-                    .write(true)
-                    .truncate(true)
+                    .append(true)
                     .open(path)
                     .map_err(|e| {
                         BackendError::InvocationFailed(format!(
@@ -243,6 +254,7 @@ impl super::CodingBackend for CursorBackend {
         let status = child
             .wait()
             .map_err(|e| BackendError::InvocationFailed(e.to_string()))?;
+        super::clear_child_pid();
         let exit_code = status.code().unwrap_or(-1);
 
         if exit_code != 0 {
