@@ -86,11 +86,15 @@ The PRD must include a **Testing Plan** section with: test level (E2E/Integratio
 The plan goal performs read-only discovery before producing the PRD:
 - Parse `Cargo.toml`, `package.json`, `Makefile`, `flake.nix`, `.nvmrc`, `.tool-versions`, `.python-version`, `AGENTS.md` for tool/SDK versions and scripts
 - Identify documentation locations (`docs/`, `packages/*/docs/`, README files)
-- Discover the best location for the plan directory based on repo conventions
+- Discover the best location for the plan directory based on repo conventions (`plan_dir_suggestion` in discovery)
 - Reveal relevant code areas (modules, traits, key files)
 - Capture test infrastructure (runners, conventions, CI scripts)
 
 Discovery is persisted in `changeset.yaml` for downstream goals.
+
+### Plan Directory Relocation
+
+When the agent returns `plan_dir_suggestion` in discovery, the workflow relocates the plan directory from its staging location (e.g. `output_dir/2026-03-08-feature/`) to the suggested path relative to the git root (e.g. `git_root/docs/dev/1-WIP/2026-03-08-feature/`). The agent runs in a staging directory first (with schemas available); after artifacts are written, the directory is moved. Invalid suggestions (absolute paths, `..`, empty) fall back to the staging location. Cross-device moves use copy-then-delete when rename fails.
 
 ### Demo Planning (Plan Goal)
 
@@ -158,16 +162,16 @@ System prompts are written to the plan directory (e.g. `system-prompt-plan.md`) 
 
 On successful completion, the program prints goal-specific output to stdout:
 
-- **Full workflow** (no `--goal`): Green step output (summary, tests, implementations)
-- **plan**: Path to `PRD.md` (e.g. `./2026-03-07-feature-slug/PRD.md`)
-- **acceptance-tests**: Summary of created tests and their failing status (requires `--plan-dir`)
-- **red**, **green**: Summary of created tests/skeletons or implementations
+- **Full workflow** (no `--goal`): Green step output (summary, tests, implementations); prints plan dir path at end
+- **plan**: Plan directory path (e.g. `./2026-03-07-feature-slug/` or relocated path)
+- **acceptance-tests**: Summary of created tests and their failing status; prints plan dir path (requires `--plan-dir`)
+- **red**, **green**: Summary of created tests/skeletons or implementations; prints plan dir path
 
-This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt | xargs cat`).
+This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt` outputs the plan dir path).
 
 ### Full Workflow (No --goal)
 
-When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → green in sequence. Resume is supported: if interrupted, re-running (with the same `--output-dir` or explicit `--plan-dir`) skips completed steps by reading `changeset.yaml.state.current`. When state is `GreenComplete`, re-running exits with a summary.
+When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → green in sequence. Resume requires `--plan-dir`: if interrupted, re-run with `--plan-dir <path>` to skip completed steps (reads `changeset.yaml.state.current`). Without `--plan-dir`, a new plan is started. When state is `GreenComplete`, re-running exits with a summary.
 
 ## Acceptance Criteria
 
@@ -175,7 +179,7 @@ When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → 
 
 - [x] `tddy-coder` (no `--goal`) reads from stdin and runs plan → acceptance-tests → red → green
 - [x] Full workflow prints green step output on success
-- [x] Full workflow supports resume via `--plan-dir` or auto-detect from `--output-dir`
+- [x] Full workflow supports resume via `--plan-dir` (required; no auto-detect)
 - [x] When state is GreenComplete, re-running exits with summary
 
 ### Plan Goal
@@ -192,7 +196,7 @@ When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → 
 - [ ] Tests use a fake/mock backend to verify the planning workflow end-to-end
 - [ ] Error cases handled: empty input, Claude Code not found, malformed LLM output
 - [ ] State machine enforces valid transitions
-- [ ] On successful plan completion, stdout prints the path to `PRD.md` (goal-specific exit output)
+- [ ] On successful plan completion, stdout prints the plan directory path (goal-specific exit output)
 
 ### Acceptance-Tests Goal
 

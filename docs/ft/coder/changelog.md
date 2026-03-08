@@ -2,6 +2,13 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-08 — Plan Directory Relocation (plan_dir_suggestion)
+
+- **Agent-decided location**: When the plan agent returns `plan_dir_suggestion` in discovery, the workflow relocates the plan directory from staging to the suggested path relative to the git root (e.g. `docs/dev/1-WIP/2026-03-08-feature/`).
+- **Exit output**: On successful exit, tddy-coder prints the plan directory path (plan, acceptance-tests, red, green goals and full workflow).
+- **Resume**: Full workflow resume requires `--plan-dir`; automatic discovery removed.
+- **Validation**: Invalid suggestions (absolute paths, `..`, empty) fall back to staging location. Cross-device moves use copy-then-delete when rename fails.
+
 ## 2026-03-08 — JSON Schema Structured Output Validation
 
 - **Schema files**: Formal JSON Schema files for all 7 goals (plan, acceptance-tests, red, green, validate, evaluate, validate-refactor) with shared types via `$ref` in `schemas/common/`.

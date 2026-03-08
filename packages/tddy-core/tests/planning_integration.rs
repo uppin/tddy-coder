@@ -248,3 +248,56 @@ fn planning_workflow_produces_prd_after_clarification_answers() {
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
+
+// ── plan_dir_suggestion: R1 + R3 (valid suggestion) ──────────────────────────
+
+/// A valid structured-response that includes discovery.plan_dir_suggestion.
+/// PRD and TODO are non-empty, so schema validation passes.
+const PLAN_WITH_SUGGESTION: &str = concat!(
+    r#"<structured-response content-type="application-json" schema="schemas/plan.schema.json">"#,
+    r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nTest relocation feature.","todo":"- [ ] Implement","discovery":{"plan_dir_suggestion":"custom-plans/"}}"##,
+    "</structured-response>"
+);
+
+#[test]
+#[cfg(unix)]
+fn test_plan_with_discovery_relocates_directory() {
+    // Build a temp directory tree that has a .git marker so the workflow can
+    // find the project root and resolve the suggestion relative to it.
+    let root = std::env::temp_dir().join("tddy-plan-relocate-int");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+
+    let output_dir = root.join("output");
+    std::fs::create_dir_all(&output_dir).unwrap();
+
+    let backend = MockBackend::new();
+    backend.push_ok(PLAN_WITH_SUGGESTION);
+
+    let mut workflow = Workflow::new(backend);
+    let result = workflow.plan(
+        "test feature with suggestion",
+        &output_dir,
+        None,
+        &PlanOptions::default(),
+    );
+
+    let output_path = result.expect("plan should succeed");
+
+    // ── assertion 1: plan dir is under git_root/custom-plans/ ────────────────
+    let expected_base = root.join("custom-plans");
+    assert!(
+        output_path.starts_with(&expected_base),
+        "plan dir should be under {} but was {}",
+        expected_base.display(),
+        output_path.display()
+    );
+
+    // ── assertion 2: PRD.md exists at the relocated path ─────────────────────
+    assert!(
+        output_path.join("PRD.md").exists(),
+        "PRD.md should exist at the relocated path"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}

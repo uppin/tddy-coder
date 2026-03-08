@@ -4,7 +4,7 @@ use anyhow::Context;
 use clap::Parser;
 use inquire::{MultiSelect, Select, Text};
 use std::io::{self, BufRead, IsTerminal, Read};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tddy_core::{
     next_goal_for_state, read_changeset, AcceptanceTestsOptions, AnyBackend, ClarificationQuestion,
     ClaudeCodeBackend, CodingBackend, CursorBackend, GreenOptions, PlanOptions, ProgressEvent,
@@ -113,6 +113,7 @@ fn main() -> anyhow::Result<()> {
                     if let Some(single) = &output.run_single_or_selected_tests {
                         println!("How to run a single or selected tests: {}", single);
                     }
+                    println!("\nPlan dir: {}", plan_dir.display());
                     return Ok(());
                 }
                 Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
@@ -176,6 +177,7 @@ fn main() -> anyhow::Result<()> {
                     if let Some(single) = &output.run_single_or_selected_tests {
                         println!("How to run a single or selected tests: {}", single);
                     }
+                    println!("\nPlan dir: {}", plan_dir.display());
                     return Ok(());
                 }
                 Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
@@ -268,6 +270,7 @@ fn main() -> anyhow::Result<()> {
                     if let Some(single) = &output.run_single_or_selected_tests {
                         println!("How to run a single or selected tests: {}", single);
                     }
+                    println!("\nPlan dir: {}", plan_dir.display());
                     return Ok(());
                 }
                 Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
@@ -311,8 +314,7 @@ fn main() -> anyhow::Result<()> {
 
         match result {
             Ok(output_path) => {
-                let prd_path = output_path.join("PRD.md");
-                println!("{}", prd_path.display());
+                println!("{}", output_path.display());
                 return Ok(());
             }
             Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
@@ -358,27 +360,6 @@ fn create_workflow(agent: &str) -> Workflow<AnyBackend> {
     Workflow::new(backend).with_on_state_change(|from, to| eprintln!("State: {} → {}", from, to))
 }
 
-/// Scan output_dir for the most recently modified subdirectory containing changeset.yaml.
-fn find_resumable_plan_dir(output_dir: &Path) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(output_dir).ok()?;
-    let mut candidates: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            let changeset_path = path.join("changeset.yaml");
-            if changeset_path.exists() {
-                if let Ok(meta) = path.metadata() {
-                    if let Ok(modified) = meta.modified() {
-                        candidates.push((path, modified));
-                    }
-                }
-            }
-        }
-    }
-    candidates.sort_by(|a, b| b.1.cmp(&a.1));
-    candidates.into_iter().next().map(|(p, _)| p)
-}
-
 fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
     let model = args.model.as_deref().unwrap_or("opus");
     let workflow = create_workflow(&args.agent);
@@ -389,18 +370,6 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
 
     let plan_dir = if let Some(ref plan_dir) = args.plan_dir {
         plan_dir.clone()
-    } else if let Some(resumable) = find_resumable_plan_dir(&args.output_dir) {
-        if let Ok(cs) = read_changeset(&resumable) {
-            let state = cs.state.current.as_str();
-            if next_goal_for_state(state).is_none() {
-                eprintln!(
-                    "Workflow already complete (state: {}). Nothing to do.",
-                    state
-                );
-                return Ok(());
-            }
-        }
-        resumable
     } else {
         let mut input = read_feature_input(args).context("read feature description")?;
         input = input.trim().to_string();
@@ -529,6 +498,7 @@ fn run_full_workflow(args: &Args) -> anyhow::Result<()> {
                 if let Some(single) = &output.run_single_or_selected_tests {
                     println!("How to run a single or selected tests: {}", single);
                 }
+                println!("\nPlan dir: {}", plan_dir.display());
                 return Ok(());
             }
             Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
