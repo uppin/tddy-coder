@@ -9,7 +9,7 @@ Release note history for the Coder product area.
 - **CLI rename**: `--goal evaluate` replaces `--goal validate-changes`; `--goal demo` added for standalone demo
 - **Early changeset**: `changeset.yaml` written immediately after user enters prompt (before plan agent), so plan dir is resumable even if planning fails
 - **Single Workflow instance**: Plain full-run uses one Workflow instance throughout (like TUI path)
-- **State machine**: `DemoRunning`, `DemoComplete`, `DemoSkipped`; `next_goal_for_state`: GreenComplete → demo, DemoComplete/DemoSkipped → evaluate
+- **State machine**: `DemoRunning`, `DemoComplete`; `next_goal_for_state`: GreenComplete → demo, DemoComplete → evaluate; when demo skipped, evaluate runs directly from GreenComplete
 
 ## 2026-03-08 — TUI UX, Plan Resume, Ctrl+C
 
@@ -59,11 +59,11 @@ Release note history for the Coder product area.
 - **Explicit contract**: `<structured-response schema="schemas/red.schema.json">` attribute declares expected format. System prompts reference schema path and include `schema=` in examples.
 - **Tests**: Fixtures for valid and invalid JSON per goal; retry integration tests (invalid→valid succeeds; invalid twice→Failed).
 
-## 2026-03-07 — Validate-Changes Goal
+## 2026-03-07 — Validate-Changes Goal (removed 2026-03-08, superseded by evaluate)
 
-- **New goal**: `--goal validate-changes` analyzes current git changes for risks (build validity, test infrastructure, production code quality, security). Produces validation-report.md in working directory.
-- **Standalone**: Callable from Init without prior plan/red/green. Optional `--plan-dir` for changeset/PRD context. Uses fresh session (not resumed).
-- **Permission**: validate_allowlist permits Read, Glob, Grep, SemanticSearch, git diff/log, find, cargo build/check.
+- **New goal**: `--goal validate-changes` analyzed current git changes for risks (build validity, test infrastructure, production code quality, security). Produced validation-report.md in working directory.
+- **Standalone**: Callable from Init without prior plan/red/green. Optional `--plan-dir` for changeset/PRD context. Used a fresh session (not resumed).
+- **Permission**: validate_allowlist permitted Read, Glob, Grep, SemanticSearch, git diff/log, find, cargo build/check.
 - **State**: Init → Validating → Validated. Not in next_goal_for_state auto-sequence.
 - **CLI**: `--conversation-output <path>` writes raw agent bytes in real time (each line appended as received).
 

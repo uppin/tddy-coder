@@ -82,8 +82,8 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 
 1. **Red goal**: Transitions `Init`/`Planned`/`AcceptanceTestsReady` → `RedTesting` → `RedTestsReady` (or `Failed`)
 2. **Green goal**: Transitions `RedTestsReady` → `GreenImplementing` → `GreenComplete` (or `Failed`)
-3. **Demo goal**: Transitions `GreenComplete` → `DemoRunning` → `DemoComplete` (or `DemoSkipped` when user skips)
-4. **Evaluate goal**: Transitions `GreenComplete`/`DemoComplete`/`DemoSkipped` → `Evaluating` → `Evaluated`
+3. **Demo goal**: Transitions `GreenComplete` → `DemoRunning` → `DemoComplete`
+4. **Evaluate goal**: Transitions `GreenComplete`/`DemoComplete` → `Evaluating` → `Evaluated` (when demo skipped, goes directly from GreenComplete)
 
 ### Demo Workflow
 
@@ -91,13 +91,13 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 2. Standalone `--goal demo --plan-dir <path>` runs demo against existing plan dir
 3. Requires `demo-plan.md` in plan directory
 4. Executes demo steps, writes `demo-results.md`
-5. State transitions: `GreenComplete` → `DemoRunning` → `DemoComplete` (or `DemoSkipped` when skipped)
+5. State transitions: `GreenComplete` → `DemoRunning` → `DemoComplete`
 
 ### Evaluate Workflow
 
 1. `--goal evaluate --plan-dir <path>` analyzes git changes for risks
 2. Produces `evaluation-report.md` in plan directory
-3. Accepts `GreenComplete`, `DemoComplete`, or `DemoSkipped` as starting state
+3. Accepts `GreenComplete` or `DemoComplete` as starting state (when demo skipped, goes directly from GreenComplete)
 4. State transitions: → `Evaluating` → `Evaluated`
 
 ### Exit Output

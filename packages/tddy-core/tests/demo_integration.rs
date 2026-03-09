@@ -1,6 +1,6 @@
 //! Integration tests for the standalone demo goal (TDD Workflow Restructure PRD).
 //!
-//! These tests verify the new demo() and skip_demo() methods, DemoOptions struct,
+//! These tests verify the demo() method, DemoOptions struct,
 //! Goal::Demo variant, parse_demo_response, and state transitions for the demo step.
 //! All tests are expected to FAIL in the Red phase.
 
@@ -176,19 +176,6 @@ fn next_goal_demo_complete_maps_to_evaluate() {
     );
 }
 
-/// next_goal_for_state: DemoSkipped should map to "evaluate".
-#[test]
-fn next_goal_demo_skipped_maps_to_evaluate() {
-    eprintln!("{{\"tddy\":{{\"marker_id\":\"M008\",\"scope\":\"demo_integration::next_goal_demo_skipped_maps_to_evaluate\",\"data\":{{}}}}}}");
-    let result = tddy_core::next_goal_for_state("DemoSkipped");
-    assert_eq!(
-        result,
-        Some("evaluate"),
-        "DemoSkipped should map to Some(\"evaluate\"), got {:?}",
-        result
-    );
-}
-
 /// default_models() should include a "demo" key.
 #[test]
 fn default_models_includes_demo() {
@@ -254,34 +241,6 @@ fn evaluate_accepts_demo_complete_state() {
     assert!(
         result.is_ok(),
         "evaluate should accept DemoComplete state, got {:?}",
-        result
-    );
-
-    let _ = std::fs::remove_dir_all(&plan_dir);
-}
-
-/// evaluate() should accept DemoSkipped state (needed for full workflow when demo is skipped).
-#[test]
-fn evaluate_accepts_demo_skipped_state() {
-    eprintln!("{{\"tddy\":{{\"marker_id\":\"M012\",\"scope\":\"demo_integration::evaluate_accepts_demo_skipped_state\",\"data\":{{}}}}}}");
-    let backend = MockBackend::new();
-    backend.push_ok(EVALUATE_OUTPUT);
-    let mut workflow = Workflow::new(backend);
-    workflow.restore_state(WorkflowState::DemoSkipped);
-
-    let plan_dir = std::env::temp_dir().join("tddy-demo-eval-accepts-ds");
-    let _ = std::fs::remove_dir_all(&plan_dir);
-    std::fs::create_dir_all(&plan_dir).expect("create dir");
-
-    let result = workflow.evaluate(
-        &std::path::Path::new("."),
-        Some(&plan_dir),
-        None,
-        &tddy_core::EvaluateOptions::default(),
-    );
-    assert!(
-        result.is_ok(),
-        "evaluate should accept DemoSkipped state, got {:?}",
         result
     );
 

@@ -6,7 +6,6 @@ mod green;
 mod planning;
 mod red;
 mod refactor;
-mod validate;
 mod validate_subagents;
 
 use crate::backend::{CodingBackend, InvokeRequest, InvokeResponse};
@@ -17,10 +16,10 @@ use crate::changeset::{
 use crate::error::WorkflowError;
 use crate::output::{
     extract_last_structured_block, parse_acceptance_tests_response, parse_evaluate_response,
-    parse_green_response, parse_planning_response, parse_red_response, parse_validate_response,
+    parse_green_response, parse_planning_response, parse_red_response,
     parse_validate_subagents_response, slugify_directory_name, update_acceptance_tests_file,
     update_progress_file, write_acceptance_tests_file, write_artifacts, write_demo_results_file,
-    write_evaluation_report, write_progress_file, write_red_output_file, write_validation_report,
+    write_evaluation_report, write_progress_file, write_red_output_file,
 };
 use crate::schema::{
     format_validation_errors, schema_file_path, validate_output, write_schema_to_dir,
@@ -138,19 +137,7 @@ pub struct DemoOptions {
     pub debug: bool,
 }
 
-/// Options for the validate-changes step.
-#[derive(Debug, Default)]
-pub struct ValidateChangesOptions {
-    pub model: Option<String>,
-    pub agent_output: bool,
-    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
-    pub conversation_output_path: Option<PathBuf>,
-    pub inherit_stdin: bool,
-    pub allowed_tools_extras: Option<Vec<String>>,
-    pub debug: bool,
-}
-
-/// Options for the evaluate-changes step (renamed from ValidateOptions).
+/// Options for the evaluate-changes step.
 #[derive(Debug, Default)]
 pub struct EvaluateOptions {
     pub model: Option<String>,
@@ -206,18 +193,12 @@ pub enum WorkflowState {
     GreenComplete {
         output: crate::output::GreenOutput,
     },
-    ValidatingChanges,
-    ValidateChangesComplete {
-        output: crate::output::ValidateOutput,
-    },
     /// In-progress state for the demo step.
     DemoRunning,
     /// Terminal state after demo finishes successfully.
     DemoComplete {
         output: crate::output::DemoOutput,
     },
-    /// When user chooses to skip demo.
-    DemoSkipped,
     /// In-progress state for the evaluate-changes step.
     Evaluating,
     /// Terminal state after a successful evaluate-changes run.
@@ -252,11 +233,8 @@ impl WorkflowState {
             Self::RedTestsReady { .. } => "RedTestsReady",
             Self::GreenImplementing => "GreenImplementing",
             Self::GreenComplete { .. } => "GreenComplete",
-            Self::ValidatingChanges => "ValidatingChanges",
-            Self::ValidateChangesComplete { .. } => "ValidateChangesComplete",
             Self::DemoRunning => "DemoRunning",
             Self::DemoComplete { .. } => "DemoComplete",
-            Self::DemoSkipped => "DemoSkipped",
             Self::Evaluating => "Evaluating",
             Self::Evaluated { .. } => "Evaluated",
             Self::ValidateComplete { .. } => "ValidateComplete",
@@ -1246,132 +1224,6 @@ impl<B: CodingBackend> Workflow<B> {
         Ok(output)
     }
 
-    /// Skip the demo step. Transitions from GreenComplete to DemoSkipped.
-    pub fn skip_demo(&mut self) {
-        self.set_state(WorkflowState::DemoSkipped);
-    }
-
-    /// Run the validate-changes step: analyze current git changes for risks.
-    /// Requires plan_dir (or plan staging dir) for schemas and validation-report.md.
-    /// Reads changeset/PRD context from plan_dir and includes it in the prompt.
-    /// Always starts a fresh session (is_resume: false).
-    pub fn validate_changes(
-        &mut self,
-        _working_dir: &std::path::Path,
-        plan_dir: Option<&std::path::Path>,
-        _answers: Option<&str>,
-        options: &ValidateChangesOptions,
-    ) -> Result<crate::output::ValidateOutput, WorkflowError> {
-        let plan_dir = plan_dir.ok_or_else(|| {
-            WorkflowError::PlanDirInvalid(
-                "validate-changes requires --plan-dir for schemas and validation-report.md".into(),
-            )
-        })?;
-
-        let can_start = matches!(self.state, WorkflowState::Init);
-        if !can_start {
-            return Err(WorkflowError::InvalidTransition(format!(
-                "cannot validate from {:?}",
-                self.state
-            )));
-        }
-
-        let prd_owned = std::fs::read_to_string(plan_dir.join("PRD.md")).ok();
-        let changeset_owned = std::fs::read_to_string(plan_dir.join("changeset.yaml")).ok();
-        let prd_content = prd_owned.as_deref();
-        let changeset_content = changeset_owned.as_deref();
-
-        // Schemas and validation-report go to plan_dir
-        let _ = write_schema_to_dir(plan_dir, "validate");
-
-        let system_prompt = validate::system_prompt();
-        let prompt = validate::build_prompt(prd_content, changeset_content);
-
-        let session_id = uuid::Uuid::new_v4().to_string();
-        let model = options.model.clone();
-
-        let request = crate::backend::InvokeRequest {
-            prompt,
-            system_prompt: Some(system_prompt),
-            system_prompt_path: None,
-            goal: crate::backend::Goal::ValidateChanges,
-            model: model.clone(),
-            session_id: Some(session_id.clone()),
-            is_resume: false,
-            working_dir: Some(plan_dir.to_path_buf()),
-            debug: options.debug,
-            agent_output: options.agent_output,
-            agent_output_sink: options.agent_output_sink.clone(),
-            conversation_output_path: options.conversation_output_path.clone(),
-            inherit_stdin: options.inherit_stdin,
-            extra_allowed_tools: options.allowed_tools_extras.clone(),
-        };
-
-        let response = match self.backend.invoke(request) {
-            Ok(r) => r,
-            Err(e) => {
-                self.set_state(WorkflowState::Failed {
-                    error: e.to_string(),
-                });
-                return Err(WorkflowError::Backend(e));
-            }
-        };
-
-        if !response.questions.is_empty() {
-            return Err(WorkflowError::ClarificationNeeded {
-                questions: response.questions,
-                session_id: response.session_id.unwrap_or_default(),
-            });
-        }
-
-        let session_id_for_retry = response.session_id.clone();
-        let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
-            prompt: retry_prompt.to_string(),
-            system_prompt: Some(validate::system_prompt()),
-            system_prompt_path: None,
-            goal: crate::backend::Goal::ValidateChanges,
-            model: model.clone(),
-            session_id: session_id_for_retry.clone(),
-            is_resume: true,
-            working_dir: Some(plan_dir.to_path_buf()),
-            debug: options.debug,
-            agent_output: options.agent_output,
-            agent_output_sink: options.agent_output_sink.clone(),
-            conversation_output_path: options.conversation_output_path.clone(),
-            inherit_stdin: options.inherit_stdin,
-            extra_allowed_tools: options.allowed_tools_extras.clone(),
-        };
-        let validated_response =
-            self.validate_and_retry("validate", response, plan_dir, false, build_retry_request)?;
-
-        let output = match parse_validate_response(&validated_response.output) {
-            Ok(out) => {
-                let _ = write_validation_report(plan_dir, &out);
-                out
-            }
-            Err(e) => {
-                emit_parse_failure_debug(
-                    &validated_response,
-                    "validate",
-                    Some(
-                        "The agent must output a <structured-response> block with goal:\"validate-changes\", summary, risk_level, issues, build_results. \
-                         Output must be exactly one valid JSON object — no numbers, arrays, or numbered lists.",
-                    ),
-                );
-                self.set_state(WorkflowState::Failed {
-                    error: e.to_string(),
-                });
-                return Err(WorkflowError::ParseError(e));
-            }
-        };
-
-        self.set_state(WorkflowState::ValidateChangesComplete {
-            output: output.clone(),
-        });
-
-        Ok(output)
-    }
-
     /// Run the evaluate-changes step: analyze current git changes for risks, changed files,
     /// affected tests, and validity. Writes evaluation-report.md to plan_dir.
     /// plan_dir is required — unlike validate() which allows None.
@@ -1395,7 +1247,6 @@ impl<B: CodingBackend> Workflow<B> {
             WorkflowState::Init
                 | WorkflowState::GreenComplete { .. }
                 | WorkflowState::DemoComplete { .. }
-                | WorkflowState::DemoSkipped
         );
         if !can_start {
             return Err(WorkflowError::InvalidTransition(format!(

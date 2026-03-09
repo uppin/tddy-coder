@@ -83,8 +83,6 @@ pub enum Goal {
     AcceptanceTests,
     Red,
     Green,
-    /// validate-changes goal (standalone risk analysis).
-    ValidateChanges,
     /// Standalone demo execution step.
     Demo,
     /// Renamed/replacement for Validate: analyze git changes and produce an evaluation report.

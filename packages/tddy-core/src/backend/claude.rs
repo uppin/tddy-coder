@@ -137,7 +137,6 @@ fn goal_to_claude_config(request: &InvokeRequest) -> ClaudeInvokeConfig {
             permission::acceptance_tests_allowlist(),
         ),
         Goal::Demo => (PermissionMode::AcceptEdits, permission::demo_allowlist()),
-        Goal::ValidateChanges => (PermissionMode::Plan, permission::validate_allowlist()),
         Goal::Evaluate => (PermissionMode::Plan, permission::evaluate_allowlist()),
         Goal::Validate => (
             PermissionMode::Plan,

@@ -48,7 +48,6 @@ pub fn demo_allowlist() -> Vec<String> {
 }
 
 /// Allowlist for the evaluate-changes goal (read-only + git diff/log/find + cargo check/build).
-/// Same tool surface as validate_allowlist; renamed to match the evaluate-changes goal.
 pub fn evaluate_allowlist() -> Vec<String> {
     vec![
         "Read".to_string(),
@@ -94,21 +93,5 @@ pub fn refactor_allowlist() -> Vec<String> {
         "SemanticSearch".to_string(),
         "Bash(cargo *)".to_string(),
         "Bash(git diff *)".to_string(),
-    ]
-}
-
-/// Allowlist for the validate-changes goal (read-only + git diff/log/find + cargo check/build).
-/// Complements --permission-mode plan.
-pub fn validate_allowlist() -> Vec<String> {
-    vec![
-        "Read".to_string(),
-        "Glob".to_string(),
-        "Grep".to_string(),
-        "SemanticSearch".to_string(),
-        "Bash(git diff *)".to_string(),
-        "Bash(git log *)".to_string(),
-        "Bash(cargo build *)".to_string(),
-        "Bash(cargo check *)".to_string(),
-        "Bash(find *)".to_string(),
     ]
 }

@@ -241,7 +241,7 @@ const DEMO_OUTPUT: &str = r#"Demo executed successfully.
 /// with MockBackend. All 6+ goals invoked in order; final state is Evaluated.
 ///
 /// This test will fail until:
-/// - DemoComplete/DemoSkipped/DemoRunning states are added to WorkflowState
+/// - DemoComplete/DemoRunning states are in WorkflowState
 /// - workflow.demo() method is implemented
 /// - next_goal_for_state maps GreenComplete → "demo" and DemoComplete → "evaluate"
 /// - evaluate can run from GreenComplete/DemoComplete state (not just Init)
@@ -342,12 +342,7 @@ fn full_workflow_includes_demo_and_evaluate() {
 }
 
 /// AC2, AC3: Full workflow where demo is skipped proceeds green → evaluate.
-/// When user skips demo, workflow should go directly to evaluate.
-///
-/// This test will fail until:
-/// - DemoSkipped state is added to WorkflowState
-/// - next_goal_for_state maps DemoSkipped → "evaluate"
-/// - evaluate can run from DemoSkipped state
+/// When user skips demo, workflow goes directly from GreenComplete to evaluate.
 #[test]
 fn full_workflow_skip_demo_goes_to_evaluate() {
     let output_dir = std::env::temp_dir().join("tddy-full-wf-skip-demo");
@@ -359,7 +354,6 @@ fn full_workflow_skip_demo_goes_to_evaluate() {
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
-    // No demo output pushed — demo is skipped
     backend.push_ok(EVALUATE_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
@@ -380,17 +374,7 @@ fn full_workflow_skip_demo_goes_to_evaluate() {
         .green(&plan_dir, None, &GreenOptions::default())
         .expect("green should succeed");
 
-    // Skip demo — requires workflow.skip_demo() or equivalent
-    workflow.skip_demo();
-
-    // After skip, state should be DemoSkipped
-    assert!(
-        matches!(workflow.state(), WorkflowState::DemoSkipped),
-        "after skip_demo, state should be DemoSkipped, got {:?}",
-        workflow.state()
-    );
-
-    // Evaluate should work from DemoSkipped state
+    // Skip demo: go directly from GreenComplete to evaluate (no DemoSkipped state)
     let eval_result = workflow.evaluate(
         &std::path::Path::new("."),
         Some(&plan_dir),
@@ -399,7 +383,7 @@ fn full_workflow_skip_demo_goes_to_evaluate() {
     );
     assert!(
         eval_result.is_ok(),
-        "evaluate should succeed after skip_demo, got {:?}",
+        "evaluate should succeed when demo is skipped, got {:?}",
         eval_result
     );
 
@@ -409,22 +393,17 @@ fn full_workflow_skip_demo_goes_to_evaluate() {
         workflow.state()
     );
 
-    // Demo was skipped, so only 5 backend invocations
     assert_eq!(
         workflow.backend().invocations().len(),
         5,
-        "5 goals should be invoked when demo is skipped: plan, acceptance-tests, red, green, evaluate"
+        "5 goals when demo skipped: plan, acceptance-tests, red, green, evaluate"
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
 
-/// AC7, AC8, AC9: Unit test for updated next_goal_for_state mapping.
-/// GreenComplete → "demo"; DemoComplete → "evaluate"; DemoSkipped → "evaluate"; Evaluated → None.
-///
-/// This test will fail until:
-/// - next_goal_for_state is updated to return Some("demo") for GreenComplete
-/// - DemoComplete and DemoSkipped states are handled
+/// AC7, AC8, AC9: Unit test for next_goal_for_state mapping.
+/// GreenComplete → "demo"; DemoComplete → "evaluate"; Evaluated → "validate".
 #[test]
 fn next_goal_for_state_includes_demo_and_evaluate() {
     assert_eq!(
@@ -436,11 +415,6 @@ fn next_goal_for_state_includes_demo_and_evaluate() {
         next_goal_for_state("DemoComplete"),
         Some("evaluate"),
         "DemoComplete should map to evaluate"
-    );
-    assert_eq!(
-        next_goal_for_state("DemoSkipped"),
-        Some("evaluate"),
-        "DemoSkipped should map to evaluate"
     );
     assert_eq!(
         next_goal_for_state("Evaluated"),
@@ -597,27 +571,6 @@ fn plain_full_workflow_uses_single_workflow_instance() {
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);
-}
-
-// ── Phase 1: next_goal_for_state with renamed state names ───────────────────
-
-/// After Phase 1 rename, "ValidatingChanges" and "ValidateChangesComplete"
-/// are the validate-changes states. They are standalone (not part of auto-sequence)
-/// and should return None.
-///
-/// This test will fail until next_goal_for_state handles the renamed state names.
-#[test]
-fn next_goal_for_renamed_validate_changes_states_return_none() {
-    assert_eq!(
-        next_goal_for_state("ValidatingChanges"),
-        None,
-        "ValidatingChanges (renamed from Validating) should return None — standalone goal"
-    );
-    assert_eq!(
-        next_goal_for_state("ValidateChangesComplete"),
-        None,
-        "ValidateChangesComplete (renamed from Validated) should return None — standalone goal"
-    );
 }
 
 // ── Phase 5: Full workflow chains all 8 steps ───────────────────────────────
@@ -794,8 +747,6 @@ fn full_workflow_skip_demo_includes_validate_and_refactor() {
     let _ = workflow.acceptance_tests(&plan_dir, None, &AcceptanceTestsOptions::default());
     let _ = workflow.red(&plan_dir, None, &RedOptions::default());
     let _ = workflow.green(&plan_dir, None, &GreenOptions::default());
-
-    workflow.skip_demo();
 
     let _ = workflow
         .evaluate(

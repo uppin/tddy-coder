@@ -3,7 +3,6 @@
 use crate::error::WorkflowError;
 use crate::output::{
     AcceptanceTestsOutput, DemoPlan, EvaluateOutput, GreenOutput, PlanningOutput, RedOutput,
-    ValidateOutput,
 };
 use std::fs;
 use std::path::Path;
@@ -202,77 +201,6 @@ pub fn update_acceptance_tests_file(
     let updated = output.update_acceptance_tests_content(&content);
     fs::write(&md_path, updated).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     Ok(())
-}
-
-/// Write `validation-report.md` to `working_dir` from a `ValidateOutput`.
-///
-/// The report contains the summary, risk level, issues, and build results.
-pub fn write_validation_report(
-    working_dir: &Path,
-    output: &ValidateOutput,
-) -> Result<(), WorkflowError> {
-    let content = output_to_validation_report_md(output);
-    let report_path = working_dir.join("validation-report.md");
-    fs::write(&report_path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
-    Ok(())
-}
-
-fn output_to_validation_report_md(output: &ValidateOutput) -> String {
-    let mut md = String::from("# Validation Report\n\n");
-    md.push_str("## Summary\n\n");
-    md.push_str(&output.summary);
-    md.push_str("\n\n## Risk Level\n\n");
-    md.push_str(&output.risk_level);
-    md.push_str("\n\n");
-
-    if !output.build_results.is_empty() {
-        md.push_str("## Build Results\n\n");
-        for b in &output.build_results {
-            md.push_str(&format!("- **{}**: {}\n", b.package, b.status));
-            if let Some(ref notes) = b.notes {
-                if !notes.is_empty() {
-                    md.push_str(&format!("  - {}\n", notes));
-                }
-            }
-        }
-        md.push('\n');
-    }
-
-    if !output.issues.is_empty() {
-        md.push_str("## Issues\n\n");
-        for i in &output.issues {
-            let loc = i
-                .line
-                .map(|l| format!("{}:{}", i.file, l))
-                .unwrap_or_else(|| i.file.clone());
-            md.push_str(&format!(
-                "- **{}** [{}] {}: {}\n",
-                i.severity, i.category, loc, i.description
-            ));
-            if let Some(ref s) = i.suggestion {
-                md.push_str(&format!("  - Suggestion: {}\n", s));
-            }
-        }
-        md.push('\n');
-    }
-
-    if let Some(ref sync) = output.changeset_sync {
-        md.push_str("## Changeset Sync\n\n");
-        md.push_str(&format!(
-            "- Status: {}\n- Items updated: {}\n- Items added: {}\n\n",
-            sync.status, sync.items_updated, sync.items_added
-        ));
-    }
-
-    if let Some(ref impact) = output.test_impact {
-        md.push_str("## Test Impact\n\n");
-        md.push_str(&format!(
-            "- Tests affected: {}\n- New tests needed: {}\n",
-            impact.tests_affected, impact.new_tests_needed
-        ));
-    }
-
-    md
 }
 
 /// Write evaluation-report.md to plan_dir (not working_dir).

@@ -796,29 +796,17 @@ pub fn parse_red_response(s: &str) -> Result<RedOutput, ParseError> {
     })
 }
 
-/// Parsed validate-changes goal output.
+/// Build result entry from evaluate-changes output.
 #[derive(Debug, Clone)]
-pub struct ValidateOutput {
-    pub summary: String,
-    pub risk_level: String,
-    pub build_results: Vec<ValidateBuildResult>,
-    pub issues: Vec<ValidateIssue>,
-    pub changeset_sync: Option<ValidateChangesetSync>,
-    pub files_analyzed: Vec<ValidateFileAnalyzed>,
-    pub test_impact: Option<ValidateTestImpact>,
-}
-
-/// Build result entry from validate-changes output.
-#[derive(Debug, Clone)]
-pub struct ValidateBuildResult {
+pub struct EvaluateBuildResult {
     pub package: String,
     pub status: String,
     pub notes: Option<String>,
 }
 
-/// An issue found during validation.
+/// An issue found during evaluation.
 #[derive(Debug, Clone)]
-pub struct ValidateIssue {
+pub struct EvaluateIssue {
     pub severity: String,
     pub category: String,
     pub file: String,
@@ -827,55 +815,38 @@ pub struct ValidateIssue {
     pub suggestion: Option<String>,
 }
 
-/// Changeset sync status from validate-changes output.
+/// Changeset sync status from evaluate-changes output.
 #[derive(Debug, Clone)]
-pub struct ValidateChangesetSync {
+pub struct EvaluateChangesetSync {
     pub status: String,
     pub items_updated: u32,
     pub items_added: u32,
 }
 
-/// File analyzed entry from validate-changes output.
+/// File analyzed entry from evaluate-changes output.
 #[derive(Debug, Clone)]
-pub struct ValidateFileAnalyzed {
+pub struct EvaluateFileAnalyzed {
     pub file: String,
     pub lines_changed: Option<u32>,
     pub changeset_item: Option<String>,
 }
 
-/// Test impact summary from validate-changes output.
+/// Test impact summary from evaluate-changes output.
 #[derive(Debug, Clone)]
-pub struct ValidateTestImpact {
+pub struct EvaluateTestImpact {
     pub tests_affected: u32,
     pub new_tests_needed: u32,
 }
 
 #[derive(serde::Deserialize)]
-struct StructuredValidate {
-    goal: Option<String>,
-    summary: Option<String>,
-    risk_level: Option<String>,
-    #[serde(default)]
-    build_results: Option<Vec<ValidateBuildResultDe>>,
-    #[serde(default)]
-    issues: Option<Vec<ValidateIssueDe>>,
-    #[serde(default)]
-    changeset_sync: Option<ValidateChangesetSyncDe>,
-    #[serde(default)]
-    files_analyzed: Option<Vec<ValidateFileAnalyzedDe>>,
-    #[serde(default)]
-    test_impact: Option<ValidateTestImpactDe>,
-}
-
-#[derive(serde::Deserialize)]
-struct ValidateBuildResultDe {
+struct EvaluateBuildResultDe {
     package: String,
     status: String,
     notes: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
-struct ValidateIssueDe {
+struct EvaluateIssueDe {
     severity: String,
     category: String,
     file: String,
@@ -885,120 +856,23 @@ struct ValidateIssueDe {
 }
 
 #[derive(serde::Deserialize)]
-struct ValidateChangesetSyncDe {
+struct EvaluateChangesetSyncDe {
     status: String,
     items_updated: u32,
     items_added: u32,
 }
 
 #[derive(serde::Deserialize)]
-struct ValidateFileAnalyzedDe {
+struct EvaluateFileAnalyzedDe {
     file: String,
     lines_changed: Option<u32>,
     changeset_item: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
-struct ValidateTestImpactDe {
+struct EvaluateTestImpactDe {
     tests_affected: u32,
     new_tests_needed: u32,
-}
-
-/// Parse LLM validate-changes response from structured-response block.
-/// Uses the last block (rfind) to skip tool results / system prompt examples that may appear earlier.
-/// Returns Malformed if the expected format is not found or goal != "validate-changes".
-pub fn parse_validate_response(s: &str) -> Result<ValidateOutput, ParseError> {
-    let open = s
-        .rfind(STRUCTURED_OPEN)
-        .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
-    let after_open = &s[open + STRUCTURED_OPEN.len()..];
-    let gt = after_open
-        .find('>')
-        .ok_or_else(|| ParseError::Malformed("structured-response malformed".into()))?;
-    let content = after_open[gt + 1..].trim();
-    let close = content
-        .find(STRUCTURED_CLOSE)
-        .ok_or_else(|| ParseError::Malformed("structured-response close not found".into()))?;
-    let json_str = content[..close].trim();
-    if json_str.is_empty() {
-        return Err(ParseError::Malformed(
-            "structured-response block is empty — agent must output valid JSON between the tags"
-                .into(),
-        ));
-    }
-    let parsed: StructuredValidate =
-        serde_json::from_str(json_str).map_err(|e| ParseError::Malformed(e.to_string()))?;
-
-    if parsed.goal.as_deref() != Some("validate-changes") {
-        return Err(ParseError::Malformed("goal is not validate-changes".into()));
-    }
-
-    let summary = parsed
-        .summary
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "No summary provided.".to_string());
-
-    let risk_level = parsed
-        .risk_level
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown".to_string());
-
-    let build_results = parsed
-        .build_results
-        .unwrap_or_default()
-        .into_iter()
-        .map(|b| ValidateBuildResult {
-            package: b.package,
-            status: b.status,
-            notes: b.notes,
-        })
-        .collect();
-
-    let issues = parsed
-        .issues
-        .unwrap_or_default()
-        .into_iter()
-        .map(|i| ValidateIssue {
-            severity: i.severity,
-            category: i.category,
-            file: i.file,
-            line: i.line,
-            description: i.description,
-            suggestion: i.suggestion,
-        })
-        .collect();
-
-    let changeset_sync = parsed.changeset_sync.map(|c| ValidateChangesetSync {
-        status: c.status,
-        items_updated: c.items_updated,
-        items_added: c.items_added,
-    });
-
-    let files_analyzed = parsed
-        .files_analyzed
-        .unwrap_or_default()
-        .into_iter()
-        .map(|f| ValidateFileAnalyzed {
-            file: f.file,
-            lines_changed: f.lines_changed,
-            changeset_item: f.changeset_item,
-        })
-        .collect();
-
-    let test_impact = parsed.test_impact.map(|t| ValidateTestImpact {
-        tests_affected: t.tests_affected,
-        new_tests_needed: t.new_tests_needed,
-    });
-
-    Ok(ValidateOutput {
-        summary,
-        risk_level,
-        build_results,
-        issues,
-        changeset_sync,
-        files_analyzed,
-        test_impact,
-    })
 }
 
 impl RedOutput {
@@ -1104,16 +978,16 @@ pub struct EvaluateAffectedTest {
     pub description: String,
 }
 
-/// Parsed output from the evaluate-changes goal (superset of ValidateOutput).
+/// Parsed output from the evaluate-changes goal.
 #[derive(Debug, Clone)]
 pub struct EvaluateOutput {
     pub summary: String,
     pub risk_level: String,
-    pub build_results: Vec<ValidateBuildResult>,
-    pub issues: Vec<ValidateIssue>,
-    pub changeset_sync: Option<ValidateChangesetSync>,
-    pub files_analyzed: Vec<ValidateFileAnalyzed>,
-    pub test_impact: Option<ValidateTestImpact>,
+    pub build_results: Vec<EvaluateBuildResult>,
+    pub issues: Vec<EvaluateIssue>,
+    pub changeset_sync: Option<EvaluateChangesetSync>,
+    pub files_analyzed: Vec<EvaluateFileAnalyzed>,
+    pub test_impact: Option<EvaluateTestImpact>,
     pub changed_files: Vec<EvaluateChangedFile>,
     pub affected_tests: Vec<EvaluateAffectedTest>,
     pub validity_assessment: String,
@@ -1125,15 +999,15 @@ struct StructuredEvaluate {
     summary: Option<String>,
     risk_level: Option<String>,
     #[serde(default)]
-    build_results: Option<Vec<ValidateBuildResultDe>>,
+    build_results: Option<Vec<EvaluateBuildResultDe>>,
     #[serde(default)]
-    issues: Option<Vec<ValidateIssueDe>>,
+    issues: Option<Vec<EvaluateIssueDe>>,
     #[serde(default)]
-    changeset_sync: Option<ValidateChangesetSyncDe>,
+    changeset_sync: Option<EvaluateChangesetSyncDe>,
     #[serde(default)]
-    files_analyzed: Option<Vec<ValidateFileAnalyzedDe>>,
+    files_analyzed: Option<Vec<EvaluateFileAnalyzedDe>>,
     #[serde(default)]
-    test_impact: Option<ValidateTestImpactDe>,
+    test_impact: Option<EvaluateTestImpactDe>,
     #[serde(default)]
     changed_files: Option<Vec<EvaluateChangedFileDe>>,
     #[serde(default)]
@@ -1205,7 +1079,7 @@ pub fn parse_evaluate_response(s: &str) -> Result<EvaluateOutput, ParseError> {
         .build_results
         .unwrap_or_default()
         .into_iter()
-        .map(|b| ValidateBuildResult {
+        .map(|b| EvaluateBuildResult {
             package: b.package,
             status: b.status,
             notes: b.notes,
@@ -1216,7 +1090,7 @@ pub fn parse_evaluate_response(s: &str) -> Result<EvaluateOutput, ParseError> {
         .issues
         .unwrap_or_default()
         .into_iter()
-        .map(|i| ValidateIssue {
+        .map(|i| EvaluateIssue {
             severity: i.severity,
             category: i.category,
             file: i.file,
@@ -1226,7 +1100,7 @@ pub fn parse_evaluate_response(s: &str) -> Result<EvaluateOutput, ParseError> {
         })
         .collect();
 
-    let changeset_sync = parsed.changeset_sync.map(|c| ValidateChangesetSync {
+    let changeset_sync = parsed.changeset_sync.map(|c| EvaluateChangesetSync {
         status: c.status,
         items_updated: c.items_updated,
         items_added: c.items_added,
@@ -1236,14 +1110,14 @@ pub fn parse_evaluate_response(s: &str) -> Result<EvaluateOutput, ParseError> {
         .files_analyzed
         .unwrap_or_default()
         .into_iter()
-        .map(|f| ValidateFileAnalyzed {
+        .map(|f| EvaluateFileAnalyzed {
             file: f.file,
             lines_changed: f.lines_changed,
             changeset_item: f.changeset_item,
         })
         .collect();
 
-    let test_impact = parsed.test_impact.map(|t| ValidateTestImpact {
+    let test_impact = parsed.test_impact.map(|t| EvaluateTestImpact {
         tests_affected: t.tests_affected,
         new_tests_needed: t.new_tests_needed,
     });

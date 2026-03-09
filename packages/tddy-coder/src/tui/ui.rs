@@ -51,10 +51,7 @@ pub fn status_bar_style_for_goal(goal: Option<&str>) -> Style {
         Some("acceptance-tests") => Color::Rgb(255, 165, 0),
         Some("red") => Color::Red,
         Some("green") => Color::Green,
-        Some("evaluate")
-        | Some("validate")
-        | Some("validate-changes")
-        | Some("validate-refactor") => Color::Blue,
+        Some("evaluate") | Some("validate") => Color::Blue,
         _ => Color::DarkGray,
     };
     Style::default()

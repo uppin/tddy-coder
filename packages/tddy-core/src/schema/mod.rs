@@ -15,7 +15,6 @@ const GOAL_SCHEMA_FILES: &[(&str, &str)] = &[
     ("acceptance-tests", "acceptance-tests.schema.json"),
     ("red", "red.schema.json"),
     ("green", "green.schema.json"),
-    ("validate", "validate.schema.json"),
     ("evaluate", "evaluate.schema.json"),
     ("validate-subagents", "validate-subagents.schema.json"),
     ("refactor", "refactor.schema.json"),

@@ -763,8 +763,6 @@ fn run_workflow_thread(
                             return;
                         }
                     }
-                } else {
-                    workflow.skip_demo();
                 }
                 event_tx
                     .send(TuiEvent::GoalStarted("evaluate".to_string()))
@@ -1016,8 +1014,6 @@ fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
                     && plain::read_demo_choice_plain().context("read demo choice")?;
                 if run_demo {
                     workflow.demo(&plan_dir, None, &DemoOptions::default())?;
-                } else {
-                    workflow.skip_demo();
                 }
                 let eval_options = EvaluateOptions {
                     model: args.model.clone(),

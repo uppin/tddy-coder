@@ -1,7 +1,0 @@
-{
-  "goal": "validate-changes",
-  "summary": "Validated changes.",
-  "risk_level": "low",
-  "build_results": [{"package": "tddy-core", "status": "ok"}],
-  "issues": []
-}
