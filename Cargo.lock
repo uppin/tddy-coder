@@ -1636,8 +1636,8 @@ dependencies = [
  "ctrlc",
  "libc",
  "log",
- "ratatui",
  "tddy-core",
+ "tddy-tui",
  "tokio",
  "uuid",
 ]
@@ -1683,6 +1683,18 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "tddy-tui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossterm",
+ "libc",
+ "log",
+ "ratatui",
+ "tddy-core",
 ]
 
 [[package]]

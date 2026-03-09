@@ -12,6 +12,17 @@ use tddy_coder::{disable_raw_mode, run_with_args, Args, DemoArgs};
 use tddy_core::init_tddy_logger;
 
 fn main() {
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = crossterm::execute!(
+            std::io::stderr(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show,
+        );
+        let _ = tddy_coder::disable_raw_mode();
+        original_hook(info);
+    }));
+
     let mut cli_args: Vec<String> = env::args().collect();
     // Inject --agent stub if not already specified
     let has_agent = cli_args

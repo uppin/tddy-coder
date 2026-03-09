@@ -1,8 +1,4 @@
 //! Raw terminal mode with ISIG preserved so Ctrl+C generates SIGINT.
-//!
-//! Crossterm's enable_raw_mode() clears ISIG, so Ctrl+C is delivered as a key event
-//! instead of SIGINT. When the child shares stdin, it can consume Ctrl+C before the
-//! TUI, making it impossible to quit. Keeping ISIG ensures the ctrlc handler runs.
 
 #[cfg(unix)]
 mod unix {
@@ -21,7 +17,6 @@ mod unix {
         *SAVED_TERMIOS.lock().unwrap_or_else(|e| e.into_inner()) = Some(termios);
 
         let mut raw = termios;
-        // Disable canonical mode, echo, etc. but KEEP ISIG so Ctrl+C generates SIGINT.
         raw.c_lflag &=
             !(libc::ICANON | libc::ECHO | libc::ECHOE | libc::ECHOK | libc::ECHONL | libc::IEXTEN);
         raw.c_iflag &= !(libc::BRKINT | libc::ICRNL | libc::INPCK | libc::ISTRIP | libc::IXON);

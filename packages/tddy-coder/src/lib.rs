@@ -1,9 +1,11 @@
 //! tddy-coder library — shared by tddy-coder and tddy-demo binaries.
 
 pub mod plain;
-pub mod tui;
-
 mod run;
+mod tty;
 
 pub use run::{run_plan_via_flow_runner, run_with_args, Args, CoderArgs, DemoArgs};
-pub use tui::raw::disable_raw_mode;
+pub use tddy_core::{
+    ActivityEntry, ActivityKind, AppMode, Presenter, PresenterState, PresenterView, UserIntent,
+};
+pub use tddy_tui::disable_raw_mode;

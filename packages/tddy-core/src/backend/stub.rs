@@ -246,7 +246,10 @@ impl CodingBackend for StubBackend {
             ));
         }
 
-        if prompt.contains(CLARIFY) && !prompt.contains("Answers:") {
+        if prompt.contains(CLARIFY)
+            && !prompt.contains("ANSWERS:")
+            && !prompt.contains("HERE ARE THE USER'S ANSWERS")
+        {
             let mut resp = self.response_for_goal(request.goal);
             resp.questions = Self::clarify_questions();
             return Ok(resp);

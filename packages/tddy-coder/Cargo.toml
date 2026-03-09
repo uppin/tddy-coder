@@ -19,9 +19,9 @@ anyhow = "1"
 tokio = { version = "1", features = ["rt", "macros", "fs", "sync"] }
 uuid = { version = "1", features = ["v4"] }
 ctrlc = { version = "3", features = ["termination"] }
-ratatui = "0.29"
 crossterm = "0.28"
 tddy-core = { path = "../tddy-core" }
+tddy-tui = { path = "../tddy-tui" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
