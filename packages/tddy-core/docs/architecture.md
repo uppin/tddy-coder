@@ -6,6 +6,14 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ## Components
 
+### Presenter (`presenter/`)
+
+- **Presenter**: Orchestrates workflow and owns application state. Receives abstract `UserIntent` (no KeyEvents). Spawns workflow thread; polls `WorkflowEvent`; forwards to `PresenterView` callbacks.
+- **UserIntent**: SubmitFeatureInput, AnswerSelect, AnswerMultiSelect, AnswerText, QueuePrompt, DemoChoice, etc.
+- **PresenterState**: agent, model, mode (AppMode), activity_log, inbox, should_quit.
+- **PresenterView**: Trait with callbacks: on_mode_changed, on_activity_logged, on_goal_started, on_state_changed, on_workflow_complete, on_agent_output, on_inbox_changed.
+- **workflow_runner**: Runs full TDD workflow in background thread; sends events via mpsc; receives answers for clarification. Writes refactoring-plan.md when StubBackend (validate does not write files).
+
 ### Backend (`backend/`)
 
 - **CodingBackend**: Async trait for invoking LLM-based coders. Implementations: `ClaudeCodeBackend`, `CursorBackend` (production), `MockBackend`, `StubBackend` (testing/demo). `AnyBackend` enum for CLI dispatch. `SharedBackend` wraps `Arc<dyn CodingBackend>`; backend created once per run.

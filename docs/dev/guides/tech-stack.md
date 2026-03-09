@@ -35,8 +35,11 @@ tddy-coder/
 ├── Cargo.lock              # Shared lockfile
 ├── flake.nix               # Nix development shell (rustc, cargo, clippy, rust-analyzer)
 ├── packages/
-│   ├── tddy-core/          # Rust library crate
-│   └── tddy-coder/         # CLI binary crate
+│   ├── tddy-core/          # Core library (Presenter, Workflow, backends, changeset)
+│   ├── tddy-tui/            # TUI View layer (ratatui, key_map, event_loop)
+│   ├── tddy-coder/         # CLI binary (shared run logic with tddy-demo)
+│   ├── tddy-demo/           # Demo binary (StubBackend, same TUI as tddy-coder)
+│   └── tddy-permission/    # Permission MCP server
 ```
 
 - **Build from root**: `cargo build` (all crates) or `cargo build -p tddy-core` (single crate)
@@ -83,10 +86,11 @@ my-crate/
 - **serde** — Serialization/deserialization framework
 - **serde_json** — JSON support
 
-### Terminal UI (tddy-coder)
+### Terminal UI (tddy-tui)
 
 - **ratatui** — TUI framework for terminal layout and widgets (activity log, status bar, prompt bar)
 - **crossterm** — Cross-platform terminal manipulation (raw mode, alternate screen, key events)
+- **tddy-tui** — Separate package implementing `PresenterView`; maps keys to `UserIntent`, holds view-local state; tddy-coder and tddy-demo depend on it for TUI mode
 
 ### Logging & Observability
 

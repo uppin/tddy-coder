@@ -1,0 +1,19 @@
+[package]
+name = "tddy-tui"
+version = "0.1.0"
+edition = "2021"
+description = "Ratatui View layer for tddy-coder (MVP architecture)"
+
+[lib]
+name = "tddy_tui"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-core = { path = "../tddy-core" }
+ratatui = "0.29"
+crossterm = "0.28"
+log = "0.4"
+anyhow = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

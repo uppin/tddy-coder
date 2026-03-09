@@ -6,6 +6,7 @@ pub mod error;
 pub mod log_backend;
 pub mod output;
 pub mod permission;
+pub mod presenter;
 pub mod schema;
 pub mod stream;
 pub mod workflow;
@@ -37,6 +38,9 @@ pub use output::{
 pub use permission::{
     acceptance_tests_allowlist, demo_allowlist, evaluate_allowlist, green_allowlist,
     plan_allowlist, red_allowlist, refactor_allowlist, validate_subagents_allowlist,
+};
+pub use presenter::{
+    ActivityEntry, ActivityKind, AppMode, Presenter, PresenterState, PresenterView, UserIntent,
 };
 pub use schema::{
     format_validation_errors, get_schema, schema_file_path, validate_output,
