@@ -5,7 +5,7 @@
 
 use tddy_core::{
     next_goal_for_state, AcceptanceTestsOptions, DemoOptions, EvaluateOptions, MockBackend,
-    PlanOptions, RedOptions, Workflow,
+    PlanOptions, RedOptions, RefactorOptions, ValidateOptions, Workflow,
 };
 use tddy_core::{GreenOptions, WorkflowState};
 
@@ -444,8 +444,8 @@ fn next_goal_for_state_includes_demo_and_evaluate() {
     );
     assert_eq!(
         next_goal_for_state("Evaluated"),
-        None,
-        "Evaluated should be terminal (None)"
+        Some("validate"),
+        "Evaluated should map to validate"
     );
 }
 
@@ -475,6 +475,48 @@ fn green_options_no_run_demo_field() {
     assert!(
         options.model.is_none(),
         "GreenOptions::default() model should be None"
+    );
+}
+
+/// AC (R6): next_goal_for_state("Evaluated") returns Some("validate").
+///
+/// This test will fail until:
+/// - next_goal_for_state is updated to return Some("validate") for "Evaluated"
+///   (currently returns None)
+#[test]
+fn next_goal_evaluated_returns_validate() {
+    assert_eq!(
+        next_goal_for_state("Evaluated"),
+        Some("validate"),
+        "Evaluated should map to validate"
+    );
+}
+
+/// AC (R6): next_goal_for_state("ValidateComplete") returns Some("refactor").
+///
+/// This test will fail until:
+/// - "ValidateComplete" state is handled in next_goal_for_state
+/// - It returns Some("refactor")
+#[test]
+fn next_goal_validate_complete_returns_refactor() {
+    assert_eq!(
+        next_goal_for_state("ValidateComplete"),
+        Some("refactor"),
+        "ValidateComplete should map to refactor"
+    );
+}
+
+/// AC (R6): next_goal_for_state("RefactorComplete") returns None (terminal).
+///
+/// This test will fail until:
+/// - "RefactorComplete" state is handled in next_goal_for_state
+/// - It returns None
+#[test]
+fn next_goal_refactor_complete_returns_none() {
+    assert_eq!(
+        next_goal_for_state("RefactorComplete"),
+        None,
+        "RefactorComplete should be terminal (None)"
     );
 }
 
@@ -552,6 +594,246 @@ fn plain_full_workflow_uses_single_workflow_instance() {
         goals[5],
         tddy_core::Goal::Evaluate,
         "sixth goal should be Evaluate"
+    );
+
+    let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+// ── Phase 1: next_goal_for_state with renamed state names ───────────────────
+
+/// After Phase 1 rename, "ValidatingChanges" and "ValidateChangesComplete"
+/// are the validate-changes states. They are standalone (not part of auto-sequence)
+/// and should return None.
+///
+/// This test will fail until next_goal_for_state handles the renamed state names.
+#[test]
+fn next_goal_for_renamed_validate_changes_states_return_none() {
+    assert_eq!(
+        next_goal_for_state("ValidatingChanges"),
+        None,
+        "ValidatingChanges (renamed from Validating) should return None — standalone goal"
+    );
+    assert_eq!(
+        next_goal_for_state("ValidateChangesComplete"),
+        None,
+        "ValidateChangesComplete (renamed from Validated) should return None — standalone goal"
+    );
+}
+
+// ── Phase 5: Full workflow chains all 8 steps ───────────────────────────────
+
+const VALIDATE_SUBAGENTS_OUTPUT: &str = r#"All 3 subagents completed. Reports and refactoring plan written.
+
+<structured-response content-type="application-json">
+{"goal":"validate","summary":"All 3 subagents completed. Reports and refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
+</structured-response>
+"#;
+
+const REFACTOR_OUTPUT_COMPLETE: &str = r#"All refactoring tasks completed. Tests passing.
+
+<structured-response content-type="application-json">
+{"goal":"refactor","summary":"Completed 5 refactoring tasks. All tests passing.","tasks_completed":5,"tests_passing":true}
+</structured-response>
+"#;
+
+/// Phase 5 / PRD R7: Full workflow chains all 8 steps:
+/// plan → acceptance-tests → red → green → demo → evaluate → validate → refactor.
+/// Final state should be RefactorComplete. 8 backend invocations total.
+#[test]
+fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
+    let output_dir = std::env::temp_dir().join("tddy-full-wf-8-steps");
+    let _ = std::fs::remove_dir_all(&output_dir);
+    std::fs::create_dir_all(&output_dir).expect("create output dir");
+
+    let backend = MockBackend::new();
+    backend.push_ok(PLAN_OUTPUT);
+    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+    backend.push_ok(RED_OUTPUT);
+    backend.push_ok(GREEN_OUTPUT_ALL_PASS);
+    backend.push_ok(DEMO_OUTPUT);
+    backend.push_ok(EVALUATE_OUTPUT);
+    backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+
+    let mut workflow = Workflow::new(backend);
+
+    // 1. Plan
+    let plan_dir = workflow
+        .plan("Build auth", &output_dir, None, &PlanOptions::default())
+        .expect("plan should succeed");
+
+    // Write demo-plan.md so demo goal can find it
+    std::fs::write(
+        plan_dir.join("demo-plan.md"),
+        "# Demo\n## Steps\n- Run CLI\n## Verification\nCLI runs.",
+    )
+    .expect("write demo-plan.md");
+
+    // 2. Acceptance tests
+    let _ = workflow
+        .acceptance_tests(&plan_dir, None, &AcceptanceTestsOptions::default())
+        .expect("acceptance_tests should succeed");
+
+    // 3. Red
+    let _ = workflow
+        .red(&plan_dir, None, &RedOptions::default())
+        .expect("red should succeed");
+
+    // 4. Green
+    let _ = workflow
+        .green(&plan_dir, None, &GreenOptions::default())
+        .expect("green should succeed");
+
+    // 5. Demo
+    let _ = workflow
+        .demo(&plan_dir, None, &DemoOptions::default())
+        .expect("demo should succeed");
+
+    // 6. Evaluate (writes evaluation-report.md to plan_dir)
+    let _ = workflow
+        .evaluate(
+            &std::path::Path::new("."),
+            Some(&plan_dir),
+            None,
+            &EvaluateOptions::default(),
+        )
+        .expect("evaluate should succeed");
+
+    assert!(
+        matches!(workflow.state(), WorkflowState::Evaluated { .. }),
+        "after evaluate, state should be Evaluated, got {:?}",
+        workflow.state()
+    );
+
+    // 7. Validate (subagent-based, requires evaluation-report.md)
+    let validate_result = workflow.validate(&plan_dir, None, &ValidateOptions::default());
+    assert!(
+        validate_result.is_ok(),
+        "validate (subagent) should succeed, got: {:?}",
+        validate_result
+    );
+
+    assert!(
+        matches!(workflow.state(), WorkflowState::ValidateComplete { .. }),
+        "after validate, state should be ValidateComplete, got {:?}",
+        workflow.state()
+    );
+
+    // Write refactoring-plan.md (MockBackend doesn't write files; in production
+    // the validate agent writes this via Write tool)
+    std::fs::write(
+        plan_dir.join("refactoring-plan.md"),
+        "# Refactoring Plan\n## Tasks\n1. Extract shared workflow helper\n2. Add error context\n3. Remove magic strings\n4. Add doc comments\n5. Consolidate duplicated test setup",
+    )
+    .expect("write refactoring-plan.md");
+
+    // 8. Refactor (requires refactoring-plan.md)
+    let refactor_result = workflow.refactor(&plan_dir, None, &RefactorOptions::default());
+    assert!(
+        refactor_result.is_ok(),
+        "refactor should succeed, got: {:?}",
+        refactor_result
+    );
+
+    assert!(
+        matches!(workflow.state(), WorkflowState::RefactorComplete { .. }),
+        "final state should be RefactorComplete, got {:?}",
+        workflow.state()
+    );
+
+    // All 8 goals should have been invoked
+    assert_eq!(
+        workflow.backend().invocations().len(),
+        8,
+        "all 8 goals should be invoked: plan, at, red, green, demo, evaluate, validate, refactor"
+    );
+
+    // Verify goal order
+    let goals: Vec<_> = workflow
+        .backend()
+        .invocations()
+        .iter()
+        .map(|inv| inv.goal)
+        .collect();
+    assert_eq!(goals[0], tddy_core::Goal::Plan);
+    assert_eq!(goals[1], tddy_core::Goal::AcceptanceTests);
+    assert_eq!(goals[2], tddy_core::Goal::Red);
+    assert_eq!(goals[3], tddy_core::Goal::Green);
+    assert_eq!(goals[4], tddy_core::Goal::Demo);
+    assert_eq!(goals[5], tddy_core::Goal::Evaluate);
+    assert_eq!(goals[6], tddy_core::Goal::Validate);
+    assert_eq!(goals[7], tddy_core::Goal::Refactor);
+
+    let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+/// Phase 5: Full workflow with skipped demo still includes validate and refactor.
+/// plan → at → red → green → (skip demo) → evaluate → validate → refactor.
+#[test]
+fn full_workflow_skip_demo_includes_validate_and_refactor() {
+    let output_dir = std::env::temp_dir().join("tddy-full-wf-skip-demo-8");
+    let _ = std::fs::remove_dir_all(&output_dir);
+    std::fs::create_dir_all(&output_dir).expect("create output dir");
+
+    let backend = MockBackend::new();
+    backend.push_ok(PLAN_OUTPUT);
+    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+    backend.push_ok(RED_OUTPUT);
+    backend.push_ok(GREEN_OUTPUT_ALL_PASS);
+    // No demo output — demo is skipped
+    backend.push_ok(EVALUATE_OUTPUT);
+    backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+
+    let mut workflow = Workflow::new(backend);
+
+    let plan_dir = workflow
+        .plan("Build auth", &output_dir, None, &PlanOptions::default())
+        .expect("plan");
+
+    let _ = workflow.acceptance_tests(&plan_dir, None, &AcceptanceTestsOptions::default());
+    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
+    let _ = workflow.green(&plan_dir, None, &GreenOptions::default());
+
+    workflow.skip_demo();
+
+    let _ = workflow
+        .evaluate(
+            &std::path::Path::new("."),
+            Some(&plan_dir),
+            None,
+            &EvaluateOptions::default(),
+        )
+        .expect("evaluate should succeed");
+
+    let _ = workflow
+        .validate(&plan_dir, None, &ValidateOptions::default())
+        .expect("validate should succeed");
+
+    std::fs::write(
+        plan_dir.join("refactoring-plan.md"),
+        "# Refactoring Plan\n## Tasks\n1. Fix issues",
+    )
+    .expect("write refactoring-plan.md");
+
+    let refactor_result = workflow.refactor(&plan_dir, None, &RefactorOptions::default());
+    assert!(
+        refactor_result.is_ok(),
+        "refactor should succeed after skip-demo workflow: {:?}",
+        refactor_result
+    );
+
+    assert!(
+        matches!(workflow.state(), WorkflowState::RefactorComplete { .. }),
+        "final state should be RefactorComplete, got {:?}",
+        workflow.state()
+    );
+
+    // 7 backend invocations (demo skipped)
+    assert_eq!(
+        workflow.backend().invocations().len(),
+        7,
+        "7 goals should be invoked when demo is skipped"
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);

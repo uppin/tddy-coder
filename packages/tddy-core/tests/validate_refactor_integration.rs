@@ -1,24 +1,18 @@
-//! Integration tests for the validate-refactor workflow with MockBackend and CursorBackend.
+//! Integration tests for the validate workflow (subagent-based) with MockBackend and CursorBackend.
 //!
-//! All tests reference types and methods introduced by the validate-refactor goal:
-//! - `Goal::ValidateRefactor` (new variant)
-//! - `ValidateRefactorOptions` (new struct)
-//! - `WorkflowState::ValidateRefactorComplete` (new state)
-//! - `workflow.validate_refactor()` method (new method)
-//! - `validate_refactor_allowlist()` (new allowlist including Agent tool)
+//! Tests cover types and methods for the validate goal:
+//! - `Goal::Validate`, `ValidateOptions`, `WorkflowState::ValidateComplete`
+//! - `workflow.validate()`, `validate_subagents_allowlist()`
 //!
-//! Additional test: CursorBackend must reject Goal::ValidateRefactor immediately
-//! with an "unsupported" error, before attempting to spawn the cursor process.
-//!
-//! These tests are in Red state — they fail to compile because the production
-//! code has not been implemented yet.
+//! CursorBackend must reject Goal::Validate immediately with an "unsupported" error,
+//! before attempting to spawn the cursor process.
 
 use tddy_core::{
-    validate_refactor_allowlist, BackendError, CodingBackend, CursorBackend, Goal, InvokeRequest,
-    MockBackend, ValidateRefactorOptions, Workflow, WorkflowState,
+    validate_subagents_allowlist, BackendError, CodingBackend, CursorBackend, Goal, InvokeRequest,
+    MockBackend, ValidateOptions, Workflow, WorkflowState,
 };
 
-/// Minimal validate-refactor structured response.
+/// Minimal validate (subagent) structured response.
 const VALIDATE_REFACTOR_OUTPUT: &str = r#"All 3 subagents have completed their analysis.
 
 validate-tests-report.md written.
@@ -26,13 +20,13 @@ validate-prod-ready-report.md written.
 analyze-clean-code-report.md written.
 
 <structured-response content-type="application-json">
-{"goal":"validate-refactor","summary":"All 3 subagents completed. Reports written to plan-dir. Tests: 2 issues found. Production readiness: 1 blocker. Clean code score: 7/10.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true}
+{"goal":"validate","summary":"All 3 subagents completed. Reports written to plan-dir. Tests: 2 issues found. Production readiness: 1 blocker. Clean code score: 7/10.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true}
 </structured-response>
 "#;
 
-/// validate_refactor() invokes backend with Goal::ValidateRefactor.
+/// validate() invokes backend with Goal::Validate.
 #[test]
-fn validate_refactor_invokes_backend_with_validate_refactor_goal() {
+fn validate_invokes_backend_with_validate_goal() {
     let plan_dir = std::env::temp_dir().join("tddy-vr-goal-plan");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -42,60 +36,56 @@ fn validate_refactor_invokes_backend_with_validate_refactor_goal() {
     backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
-    let options = ValidateRefactorOptions::default();
-    let result = workflow.validate_refactor(&plan_dir, None, &options);
+    let options = ValidateOptions::default();
+    let result = workflow.validate(&plan_dir, None, &options);
 
-    assert!(
-        result.is_ok(),
-        "validate_refactor should succeed, got: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "validate should succeed, got: {:?}", result);
 
     let invocations = workflow.backend().invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
     assert_eq!(
         req.goal,
-        Goal::ValidateRefactor,
-        "InvokeRequest must have goal ValidateRefactor"
+        Goal::Validate,
+        "InvokeRequest must have goal Validate"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// validate_refactor() requires plan_dir — returns an error when plan_dir does not exist
+/// validate() requires plan_dir — returns an error when plan_dir does not exist
 /// or the working directory contains no evaluation-report.md.
 #[test]
-fn validate_refactor_requires_plan_dir_with_evaluation_report() {
+fn validate_requires_plan_dir_with_evaluation_report() {
     let plan_dir = std::env::temp_dir().join("tddy-vr-no-plan");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
-    // Deliberately do NOT write evaluation-report.md — validate-refactor should fail
+    // Deliberately do NOT write evaluation-report.md — validate should fail
 
     let backend = MockBackend::new();
     backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
-    let options = ValidateRefactorOptions::default();
-    let result = workflow.validate_refactor(&plan_dir, None, &options);
+    let options = ValidateOptions::default();
+    let result = workflow.validate(&plan_dir, None, &options);
 
     assert!(
         result.is_err(),
-        "validate_refactor should fail when plan_dir has no evaluation-report.md — \
-         validate-refactor depends on evaluation-report.md from a prior evaluate-changes run"
+        "validate should fail when plan_dir has no evaluation-report.md — \
+         validate depends on evaluation-report.md from a prior evaluate-changes run"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// CursorBackend must reject Goal::ValidateRefactor with an "unsupported" error
+/// CursorBackend must reject Goal::Validate with an "unsupported" error
 /// before spawning the cursor process.
 ///
 /// The backend pointed at a nonexistent binary: if the early return works, we get
 /// an InvocationFailed("not supported") error, NOT a BinaryNotFound error.
 /// If early return is not implemented, the test fails (BinaryNotFound ≠ unsupported).
 #[test]
-fn validate_refactor_rejects_cursor_backend() {
+fn validate_rejects_cursor_backend() {
     // Point at a nonexistent binary so any spawn attempt would produce BinaryNotFound.
     // The rejection must happen BEFORE spawning.
     let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/cursor"));
@@ -103,7 +93,7 @@ fn validate_refactor_rejects_cursor_backend() {
         prompt: "validate refactor".to_string(),
         system_prompt: None,
         system_prompt_path: None,
-        goal: Goal::ValidateRefactor,
+        goal: Goal::Validate,
         model: None,
         session_id: None,
         is_resume: false,
@@ -120,7 +110,7 @@ fn validate_refactor_rejects_cursor_backend() {
 
     assert!(
         result.is_err(),
-        "CursorBackend must return an error for Goal::ValidateRefactor"
+        "CursorBackend must return an error for Goal::Validate"
     );
 
     match result {
@@ -129,14 +119,14 @@ fn validate_refactor_rejects_cursor_backend() {
             assert!(
                 msg_lower.contains("not supported")
                     || msg_lower.contains("cursor")
-                    || msg_lower.contains("validate-refactor"),
+                    || msg_lower.contains("validate"),
                 "error message should indicate the feature is unsupported on Cursor, got: {}",
                 msg
             );
         }
         Err(BackendError::BinaryNotFound(_)) => {
             panic!(
-                "CursorBackend must reject Goal::ValidateRefactor BEFORE spawning the cursor process. \
+                "CursorBackend must reject Goal::Validate BEFORE spawning the cursor process. \
                  Got BinaryNotFound, which means the early rejection is not implemented."
             );
         }
@@ -147,13 +137,13 @@ fn validate_refactor_rejects_cursor_backend() {
                 e
             );
         }
-        Ok(_) => panic!("Expected error, CursorBackend must not accept Goal::ValidateRefactor"),
+        Ok(_) => panic!("Expected error, CursorBackend must not accept Goal::Validate"),
     }
 }
 
-/// validate_refactor() transitions workflow to ValidateRefactorComplete state on success.
+/// validate() transitions workflow to ValidateComplete state on success.
 #[test]
-fn validate_refactor_transitions_to_complete_state() {
+fn validate_transitions_to_complete_state() {
     let plan_dir = std::env::temp_dir().join("tddy-vr-state-plan");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -163,22 +153,22 @@ fn validate_refactor_transitions_to_complete_state() {
     backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
-    let options = ValidateRefactorOptions::default();
-    let _ = workflow.validate_refactor(&plan_dir, None, &options);
+    let options = ValidateOptions::default();
+    let _ = workflow.validate(&plan_dir, None, &options);
 
     let state = workflow.state();
     assert!(
-        matches!(state, WorkflowState::ValidateRefactorComplete { .. }),
-        "workflow should transition to ValidateRefactorComplete, got {:?}",
+        matches!(state, WorkflowState::ValidateComplete { .. }),
+        "workflow should transition to ValidateComplete, got {:?}",
         state
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// validate_refactor() correctly parses a structured response with tests/prod/clean-code flags.
+/// validate() correctly parses a structured response with tests/prod/clean-code flags.
 #[test]
-fn validate_refactor_parses_structured_response() {
+fn validate_parses_structured_response() {
     let plan_dir = std::env::temp_dir().join("tddy-vr-parse-plan");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -188,14 +178,10 @@ fn validate_refactor_parses_structured_response() {
     backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
-    let options = ValidateRefactorOptions::default();
-    let result = workflow.validate_refactor(&plan_dir, None, &options);
+    let options = ValidateOptions::default();
+    let result = workflow.validate(&plan_dir, None, &options);
 
-    assert!(
-        result.is_ok(),
-        "validate_refactor should succeed, got: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "validate should succeed, got: {:?}", result);
     let output = result.unwrap();
 
     assert!(
@@ -222,14 +208,14 @@ fn validate_refactor_parses_structured_response() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// validate_refactor_allowlist() must include the Agent tool for spawning subagents.
+/// validate_subagents_allowlist() must include the Agent tool for spawning subagents.
 #[test]
-fn validate_refactor_allowlist_includes_agent_tool() {
-    let allowlist = validate_refactor_allowlist();
+fn validate_subagents_allowlist_includes_agent_tool() {
+    let allowlist = validate_subagents_allowlist();
 
     assert!(
         allowlist.iter().any(|t| t == "Agent"),
-        "validate_refactor_allowlist must include Agent tool — \
+        "validate_subagents_allowlist must include Agent tool — \
          the orchestrator spawns 3 concurrent subagents via the Agent tool, got: {:?}",
         allowlist
     );
@@ -237,24 +223,124 @@ fn validate_refactor_allowlist_includes_agent_tool() {
     // Also must retain the read-only analysis tools from evaluate_allowlist
     assert!(
         allowlist.iter().any(|t| t == "Read"),
-        "validate_refactor_allowlist must include Read, got: {:?}",
+        "validate_subagents_allowlist must include Read, got: {:?}",
         allowlist
     );
     assert!(
         allowlist.iter().any(|t| t == "Glob"),
-        "validate_refactor_allowlist must include Glob, got: {:?}",
+        "validate_subagents_allowlist must include Glob, got: {:?}",
         allowlist
     );
     assert!(
         allowlist.iter().any(|t| t == "Write"),
-        "validate_refactor_allowlist must include Write — subagents need to write their report MDs, got: {:?}",
+        "validate_subagents_allowlist must include Write — subagents need to write their report MDs, got: {:?}",
         allowlist
     );
 }
 
+// ── validate goal acceptance tests ─────────────────────────────────────────────
+
+/// validate() produces response with goal="validate".
+#[test]
+fn validate_response_has_validate_goal() {
+    use tddy_core::{MockBackend, Workflow};
+
+    let plan_dir = std::env::temp_dir().join("tddy-validate-renamed-goal");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    write_evaluation_report_to_plan_dir(&plan_dir);
+
+    let validate_output_with_plan = r#"All 3 subagents completed. Refactoring plan synthesized.
+
+<structured-response content-type="application-json">
+{"goal":"validate","summary":"All 3 subagents completed. Reports and refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
+</structured-response>
+"#;
+
+    let backend = MockBackend::new();
+    backend.push_ok(validate_output_with_plan);
+
+    let mut workflow = Workflow::new(backend);
+    let options = ValidateOptions::default();
+    let result = workflow.validate(&plan_dir, None, &options);
+
+    assert!(result.is_ok(), "validate should succeed, got: {:?}", result);
+
+    let invocations = workflow.backend().invocations();
+    assert!(!invocations.is_empty(), "backend should have been invoked");
+    let _req = invocations.last().unwrap();
+
+    let output = result.unwrap();
+    assert_eq!(
+        output.goal, "validate",
+        "validate goal response should have goal='validate'"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// validate produces structured response with refactoring_plan_written field.
+#[test]
+fn validate_produces_refactoring_plan() {
+    let plan_dir = std::env::temp_dir().join("tddy-validate-refactoring-plan");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    write_evaluation_report_to_plan_dir(&plan_dir);
+
+    let validate_output = r#"All 3 subagents completed. Refactoring plan synthesized.
+
+<structured-response content-type="application-json">
+{"goal":"validate","summary":"All 3 subagents completed. Refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
+</structured-response>
+"#;
+
+    let backend = MockBackend::new();
+    backend.push_ok(validate_output);
+
+    let mut workflow = Workflow::new(backend);
+    let options = ValidateOptions::default();
+    let result = workflow.validate(&plan_dir, None, &options);
+
+    assert!(result.is_ok(), "validate should succeed, got: {:?}", result);
+    let output = result.unwrap();
+
+    assert!(
+        output.refactoring_plan_written,
+        "structured response must include refactoring_plan_written: true"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// validate transitions to ValidateComplete state.
+#[test]
+fn validate_transitions_to_validate_complete() {
+    let plan_dir = std::env::temp_dir().join("tddy-validate-complete-state");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    write_evaluation_report_to_plan_dir(&plan_dir);
+
+    let backend = MockBackend::new();
+    backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
+
+    let mut workflow = Workflow::new(backend);
+    let options = ValidateOptions::default();
+    let _ = workflow.validate(&plan_dir, None, &options);
+
+    let state = workflow.state();
+    // Will fail until ValidateRefactorComplete is renamed to ValidateComplete
+    assert!(
+        matches!(state, WorkflowState::ValidateComplete { .. }),
+        "workflow should transition to ValidateComplete (renamed from ValidateRefactorComplete), got {:?}",
+        state
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-/// Write a minimal evaluation-report.md to plan_dir to satisfy validate_refactor's prerequisite.
+/// Write a minimal evaluation-report.md to plan_dir to satisfy validate's prerequisite.
 fn write_evaluation_report_to_plan_dir(plan_dir: &std::path::Path) {
     let content = r#"# Evaluation Report
 

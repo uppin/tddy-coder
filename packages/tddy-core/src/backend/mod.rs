@@ -69,7 +69,7 @@ pub fn kill_child_process() -> bool {
     if pid == 0 {
         return false;
     }
-    eprintln!(
+    log::warn!(
         "[tddy-core] kill_child_process: cannot kill pid {} on non-unix platform",
         pid
     );
@@ -83,13 +83,16 @@ pub enum Goal {
     AcceptanceTests,
     Red,
     Green,
-    Validate,
+    /// validate-changes goal (standalone risk analysis).
+    ValidateChanges,
     /// Standalone demo execution step.
     Demo,
     /// Renamed/replacement for Validate: analyze git changes and produce an evaluation report.
     Evaluate,
     /// Orchestrate validate-tests, validate-prod-ready, and analyze-clean-code subagents.
-    ValidateRefactor,
+    Validate,
+    /// Execute refactoring plan from refactoring-plan.md.
+    Refactor,
 }
 
 /// Sink for routing agent output (e.g. to TUI instead of stderr).

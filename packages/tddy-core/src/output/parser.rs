@@ -1276,7 +1276,7 @@ pub fn parse_evaluate_response(s: &str) -> Result<EvaluateOutput, ParseError> {
         .filter(|s| !s.is_empty())
         .unwrap_or_default();
 
-    eprintln!(
+    log::debug!(
         "[tddy-core] parse_evaluate_response: parsed {} changed_files, {} affected_tests",
         changed_files.len(),
         affected_tests.len()
@@ -1296,16 +1296,17 @@ pub fn parse_evaluate_response(s: &str) -> Result<EvaluateOutput, ParseError> {
     })
 }
 
-// ── validate-refactor output types ───────────────────────────────────────────
+// ── validate (subagents) output types ─────────────────────────────────────────
 
-/// Parsed output from the validate-refactor goal.
+/// Parsed output from the validate goal (subagent-based).
 #[derive(Debug, Clone)]
-pub struct ValidateRefactorOutput {
+pub struct ValidateSubagentsOutput {
     pub goal: String,
     pub summary: String,
     pub tests_report_written: bool,
     pub prod_ready_report_written: bool,
     pub clean_code_report_written: bool,
+    pub refactoring_plan_written: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -1318,12 +1319,14 @@ struct StructuredValidateRefactor {
     prod_ready_report_written: Option<bool>,
     #[serde(default)]
     clean_code_report_written: Option<bool>,
+    #[serde(default)]
+    refactoring_plan_written: Option<bool>,
 }
 
-/// Parse LLM validate-refactor response from structured-response block.
+/// Parse LLM validate (subagent) response from structured-response block.
 /// Uses rfind to skip earlier blocks (e.g. system prompt examples).
-/// Returns Malformed if the expected format is not found or goal != "validate-refactor".
-pub fn parse_validate_refactor_response(s: &str) -> Result<ValidateRefactorOutput, ParseError> {
+/// Returns Malformed if the expected format is not found or goal != "validate".
+pub fn parse_validate_subagents_response(s: &str) -> Result<ValidateSubagentsOutput, ParseError> {
     let open = s
         .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
@@ -1344,9 +1347,10 @@ pub fn parse_validate_refactor_response(s: &str) -> Result<ValidateRefactorOutpu
     let parsed: StructuredValidateRefactor =
         serde_json::from_str(json_str).map_err(|e| ParseError::Malformed(e.to_string()))?;
 
-    if parsed.goal.as_deref() != Some("validate-refactor") {
+    let goal_str = parsed.goal.as_deref();
+    if goal_str != Some("validate") {
         return Err(ParseError::Malformed(format!(
-            "goal is not validate-refactor, got: {:?}",
+            "goal must be validate, got: {:?}",
             parsed.goal
         )));
     }
@@ -1356,18 +1360,19 @@ pub fn parse_validate_refactor_response(s: &str) -> Result<ValidateRefactorOutpu
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "No summary provided.".to_string());
 
-    eprintln!(
-        "[tddy-core] parse_validate_refactor_response: summary length={}, tests_written={:?}",
+    log::debug!(
+        "[tddy-core] parse_validate_subagents_response: summary length={}, tests_written={:?}",
         summary.len(),
         parsed.tests_report_written
     );
 
-    Ok(ValidateRefactorOutput {
-        goal: "validate-refactor".to_string(),
+    Ok(ValidateSubagentsOutput {
+        goal: goal_str.unwrap_or("validate").to_string(),
         summary,
         tests_report_written: parsed.tests_report_written.unwrap_or(false),
         prod_ready_report_written: parsed.prod_ready_report_written.unwrap_or(false),
         clean_code_report_written: parsed.clean_code_report_written.unwrap_or(false),
+        refactoring_plan_written: parsed.refactoring_plan_written.unwrap_or(false),
     })
 }
 
@@ -1695,7 +1700,6 @@ The Red phase skeleton and tests are already in place.
 
 /// Parse the standalone demo goal structured response.
 pub fn parse_demo_response(s: &str) -> Result<DemoOutput, ParseError> {
-    eprintln!("{{\"tddy\":{{\"marker_id\":\"M001\",\"scope\":\"output::parse_demo_response\",\"data\":{{}}}}}}");
     let block = extract_last_structured_block(s)?;
     let parsed: StructuredDemo =
         serde_json::from_str(block.json).map_err(|e| ParseError::Malformed(e.to_string()))?;
@@ -1712,7 +1716,7 @@ pub fn parse_demo_response(s: &str) -> Result<DemoOutput, ParseError> {
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
 
-    eprintln!(
+    log::debug!(
         "[tddy-core] parse_demo_response: summary_len={}, steps={}",
         summary.len(),
         parsed.steps_completed.unwrap_or(0)
@@ -1723,6 +1727,51 @@ pub fn parse_demo_response(s: &str) -> Result<DemoOutput, ParseError> {
         demo_type: parsed.demo_type.unwrap_or_else(|| "unknown".to_string()),
         steps_completed: parsed.steps_completed.unwrap_or(0),
         verification: parsed.verification.unwrap_or_default(),
+    })
+}
+
+// ── refactor output types ────────────────────────────────────────────────────
+
+/// Parsed output from the refactor goal.
+#[derive(Debug, Clone)]
+pub struct RefactorOutput {
+    pub summary: String,
+    pub tasks_completed: u32,
+    pub tests_passing: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct StructuredRefactor {
+    goal: Option<String>,
+    summary: Option<String>,
+    #[serde(default)]
+    tasks_completed: Option<u32>,
+    #[serde(default)]
+    tests_passing: Option<bool>,
+}
+
+/// Parse LLM refactor response from structured-response block.
+pub fn parse_refactor_response(s: &str) -> Result<RefactorOutput, ParseError> {
+    let block = extract_last_structured_block(s)?;
+    let parsed: StructuredRefactor =
+        serde_json::from_str(block.json).map_err(|e| ParseError::Malformed(e.to_string()))?;
+
+    if parsed.goal.as_deref() != Some("refactor") {
+        return Err(ParseError::Malformed(format!(
+            "goal is not refactor, got: {:?}",
+            parsed.goal
+        )));
+    }
+
+    let summary = parsed
+        .summary
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+
+    Ok(RefactorOutput {
+        summary,
+        tasks_completed: parsed.tasks_completed.unwrap_or(0),
+        tests_passing: parsed.tests_passing.unwrap_or(false),
     })
 }
 

@@ -1,6 +1,6 @@
 //! Integration tests for the validate-changes workflow with MockBackend.
 
-use tddy_core::{Goal, MockBackend, ValidateOptions, Workflow, WorkflowState};
+use tddy_core::{Goal, MockBackend, ValidateChangesOptions, Workflow, WorkflowState};
 
 const VALIDATE_OUTPUT: &str = r#"Analysis complete.
 
@@ -9,7 +9,7 @@ const VALIDATE_OUTPUT: &str = r#"Analysis complete.
 </structured-response>
 "#;
 
-/// validate() invokes backend with Goal::Validate.
+/// validate_changes() invokes backend with Goal::ValidateChanges.
 #[test]
 fn validate_workflow_invokes_backend_with_validate_goal() {
     let working_dir = std::env::temp_dir().join("tddy-validate-goal-test");
@@ -23,25 +23,29 @@ fn validate_workflow_invokes_backend_with_validate_goal() {
     backend.push_ok(VALIDATE_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let result = workflow.validate(&working_dir, Some(&plan_dir), None, &options);
+    let options = ValidateChangesOptions::default();
+    let result = workflow.validate_changes(&working_dir, Some(&plan_dir), None, &options);
 
-    assert!(result.is_ok(), "validate should succeed, got: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "validate_changes should succeed, got: {:?}",
+        result
+    );
 
     let invocations = workflow.backend().invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
     assert_eq!(
         req.goal,
-        Goal::Validate,
-        "InvokeRequest should have goal Validate"
+        Goal::ValidateChanges,
+        "InvokeRequest should have goal ValidateChanges"
     );
 
     let _ = std::fs::remove_dir_all(&working_dir);
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// validate() transitions workflow to Validated state on success.
+/// validate_changes() transitions workflow to ValidateChangesComplete state on success.
 #[test]
 fn validate_workflow_transitions_to_validated_state() {
     let working_dir = std::env::temp_dir().join("tddy-validate-state-test");
@@ -55,13 +59,13 @@ fn validate_workflow_transitions_to_validated_state() {
     backend.push_ok(VALIDATE_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let _ = workflow.validate(&working_dir, Some(&plan_dir), None, &options);
+    let options = ValidateChangesOptions::default();
+    let _ = workflow.validate_changes(&working_dir, Some(&plan_dir), None, &options);
 
     let state = workflow.state();
     assert!(
-        matches!(state, WorkflowState::Validated { .. }),
-        "workflow should transition to Validated, got {:?}",
+        matches!(state, WorkflowState::ValidateChangesComplete { .. }),
+        "workflow should transition to ValidateChangesComplete, got {:?}",
         state
     );
 
@@ -69,7 +73,7 @@ fn validate_workflow_transitions_to_validated_state() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// validate() writes validation-report.md to the plan directory.
+/// validate_changes() writes validation-report.md to the plan directory.
 #[test]
 fn validate_workflow_writes_validation_report_md() {
     let working_dir = std::env::temp_dir().join("tddy-validate-writes-md");
@@ -83,8 +87,8 @@ fn validate_workflow_writes_validation_report_md() {
     backend.push_ok(VALIDATE_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let _ = workflow.validate(&working_dir, Some(&plan_dir), None, &options);
+    let options = ValidateChangesOptions::default();
+    let _ = workflow.validate_changes(&working_dir, Some(&plan_dir), None, &options);
 
     let report_path = plan_dir.join("validation-report.md");
     assert!(
@@ -108,7 +112,7 @@ fn validate_workflow_writes_validation_report_md() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// validate() returns PlanDirInvalid when plan_dir is None.
+/// validate_changes() returns PlanDirInvalid when plan_dir is None.
 #[test]
 fn validate_workflow_requires_plan_dir() {
     let working_dir = std::env::temp_dir().join("tddy-validate-no-plan-dir");
@@ -119,12 +123,12 @@ fn validate_workflow_requires_plan_dir() {
     backend.push_ok(VALIDATE_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let result = workflow.validate(&working_dir, None, None, &options);
+    let options = ValidateChangesOptions::default();
+    let result = workflow.validate_changes(&working_dir, None, None, &options);
 
     assert!(
         result.is_err(),
-        "validate without plan_dir should fail, got: {:?}",
+        "validate_changes without plan_dir should fail, got: {:?}",
         result
     );
     assert!(
@@ -136,7 +140,7 @@ fn validate_workflow_requires_plan_dir() {
     let _ = std::fs::remove_dir_all(&working_dir);
 }
 
-/// validate() includes changeset/PRD context in prompt when plan_dir is provided.
+/// validate_changes() includes changeset/PRD context in prompt when plan_dir is provided.
 #[test]
 fn validate_workflow_includes_plan_dir_context_when_provided() {
     let working_dir = std::env::temp_dir().join("tddy-validate-with-plan-dir");
@@ -154,12 +158,12 @@ fn validate_workflow_includes_plan_dir_context_when_provided() {
     backend.push_ok(VALIDATE_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let result = workflow.validate(&working_dir, Some(&plan_dir), None, &options);
+    let options = ValidateChangesOptions::default();
+    let result = workflow.validate_changes(&working_dir, Some(&plan_dir), None, &options);
 
     assert!(
         result.is_ok(),
-        "validate with plan_dir should succeed, got: {:?}",
+        "validate_changes with plan_dir should succeed, got: {:?}",
         result
     );
 
@@ -187,7 +191,7 @@ fn validate_workflow_includes_plan_dir_context_when_provided() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// validate() uses is_resume: false (fresh session, not resumed from prior run).
+/// validate_changes() uses is_resume: false (fresh session, not resumed from prior run).
 #[test]
 fn validate_workflow_uses_fresh_session_not_resume() {
     let working_dir = std::env::temp_dir().join("tddy-validate-fresh-session");
@@ -201,22 +205,22 @@ fn validate_workflow_uses_fresh_session_not_resume() {
     backend.push_ok(VALIDATE_OUTPUT);
 
     let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let _ = workflow.validate(&working_dir, Some(&plan_dir), None, &options);
+    let options = ValidateChangesOptions::default();
+    let _ = workflow.validate_changes(&working_dir, Some(&plan_dir), None, &options);
 
     let invocations = workflow.backend().invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
     assert!(
         !req.is_resume,
-        "validate should use a fresh session (is_resume: false), not resume a prior session"
+        "validate_changes should use a fresh session (is_resume: false), not resume a prior session"
     );
 
     let _ = std::fs::remove_dir_all(&working_dir);
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// validate() returns ParseError when backend returns a response with no structured-response block.
+/// validate_changes() returns ParseError when backend returns a response with no structured-response block.
 #[test]
 fn validate_workflow_returns_parse_error_on_malformed_response() {
     let working_dir = std::env::temp_dir().join("tddy-validate-parse-error");
@@ -231,12 +235,12 @@ fn validate_workflow_returns_parse_error_on_malformed_response() {
     backend.push_ok("I analyzed the changes and they look fine. No issues found.");
 
     let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let result = workflow.validate(&working_dir, Some(&plan_dir), None, &options);
+    let options = ValidateChangesOptions::default();
+    let result = workflow.validate_changes(&working_dir, Some(&plan_dir), None, &options);
 
     assert!(
         result.is_err(),
-        "validate should fail on malformed response"
+        "validate_changes should fail on malformed response"
     );
     assert!(
         matches!(result, Err(tddy_core::WorkflowError::ParseError(_))),

@@ -1,6 +1,8 @@
-//! Validate-refactor goal prompt and system prompt construction.
+//! Validate-subagents goal prompt and system prompt construction.
+//!
+//! Orchestrates validate-tests, validate-prod-ready, and analyze-clean-code subagents via the Agent tool.
 
-/// Return the system prompt for the validate-refactor goal.
+/// Return the system prompt for the validate goal (subagent-based).
 pub fn system_prompt() -> String {
     r#"You are a refactor validation orchestrator. Using the Agent tool, spawn 3 concurrent subagents to analyze the codebase:
 
@@ -22,17 +24,17 @@ You MUST:
 4. Report whether each report was written
 5. ALWAYS end your response with a structured-response block — REQUIRED.
 
-**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object starting with {"goal":"validate-refactor",...}.
+**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object starting with {"goal":"validate",...}.
 
-Read the JSON Schema file at `schemas/validate-refactor.schema.json` in the working directory for the exact output format specification.
+Read the JSON Schema file at `schemas/validate-subagents.schema.json` in the working directory for the exact output format specification.
 
-<structured-response content-type="application-json" schema="schemas/validate-refactor.schema.json">
-{"goal":"validate-refactor","summary":"<human-readable summary of all 3 subagent results>","tests_report_written":<true|false>,"prod_ready_report_written":<true|false>,"clean_code_report_written":<true|false>}
+<structured-response content-type="application-json" schema="schemas/validate-subagents.schema.json">
+{"goal":"validate","summary":"<human-readable summary of all 3 subagent results>","tests_report_written":<true|false>,"prod_ready_report_written":<true|false>,"clean_code_report_written":<true|false>}
 </structured-response>"#
     .to_string()
 }
 
-/// Build the user-facing prompt for validate-refactor.
+/// Build the user-facing prompt for the validate goal (subagent-based).
 ///
 /// - `evaluation_report_content`: content of evaluation-report.md from plan_dir
 ///
@@ -64,11 +66,11 @@ mod tests {
     fn system_prompt_references_schema_and_includes_schema_attribute() {
         let prompt = system_prompt();
         assert!(
-            prompt.contains("schemas/validate-refactor.schema.json"),
-            "system prompt must reference validate-refactor schema file"
+            prompt.contains("schemas/validate-subagents.schema.json"),
+            "system prompt must reference validate-subagents schema file"
         );
         assert!(
-            prompt.contains("schema=\"schemas/validate-refactor.schema.json\""),
+            prompt.contains("schema=\"schemas/validate-subagents.schema.json\""),
             "system prompt example must include schema= attribute"
         );
     }

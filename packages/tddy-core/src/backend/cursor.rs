@@ -73,14 +73,23 @@ impl CursorBackend {
 
 impl super::CodingBackend for CursorBackend {
     fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
-        // validate-refactor spawns subagents via the Agent tool which Cursor does not support.
+        // validate spawns subagents via the Agent tool which Cursor does not support.
         // Reject early before any spawn attempt so tests can distinguish this from BinaryNotFound.
-        if request.goal == Goal::ValidateRefactor {
+        if request.goal == Goal::Validate {
             log::debug!(
-                "[tddy-coder] CursorBackend: rejecting Goal::ValidateRefactor — not supported on Cursor"
+                "[tddy-coder] CursorBackend: rejecting Goal::Validate — not supported on Cursor"
             );
             return Err(BackendError::InvocationFailed(
-                "validate-refactor is not supported on the Cursor backend".to_string(),
+                "validate is not supported on the Cursor backend".to_string(),
+            ));
+        }
+
+        if request.goal == Goal::Refactor {
+            log::debug!(
+                "[tddy-coder] CursorBackend: rejecting Goal::Refactor — not supported on Cursor"
+            );
+            return Err(BackendError::InvocationFailed(
+                "refactor is not supported on the Cursor backend".to_string(),
             ));
         }
 

@@ -353,7 +353,7 @@ pub fn write_evaluation_report(
         md.push('\n');
     }
 
-    eprintln!(
+    log::debug!(
         "[tddy-core] write_evaluation_report: writing {} bytes to {}",
         md.len(),
         plan_dir.join("evaluation-report.md").display()

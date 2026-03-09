@@ -213,7 +213,12 @@ pub fn next_goal_for_state(state: &str) -> Option<&'static str> {
         "RedTestsReady" => Some("green"),
         "GreenComplete" => Some("demo"),
         "DemoComplete" | "DemoSkipped" => Some("evaluate"),
-        "Evaluated" | "Failed" | "Validating" | "Validated" => None,
+        "Evaluated" => Some("validate"),
+        "ValidateComplete" | "ValidateRefactorComplete" => Some("refactor"),
+        "RefactorComplete" => None,
+        "Failed" | "Validating" | "Validated" | "ValidatingChanges" | "ValidateChangesComplete" => {
+            None
+        }
         _ => Some("plan"),
     }
 }

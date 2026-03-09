@@ -147,7 +147,11 @@ pub fn run_tui_event_loop(
 
     let _ = crossterm_handle.join();
 
-    execute!(std::io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show)?;
+    execute!(
+        std::io::stdout(),
+        LeaveAlternateScreen,
+        crossterm::cursor::Show
+    )?;
     disable_raw_mode()?;
 
     if let Some(output) = final_output {
