@@ -7,6 +7,7 @@ use std::thread;
 use crate::{ClarificationQuestion, SharedBackend};
 
 use crate::presenter::intent::UserIntent;
+use crate::presenter::presenter_events::PresenterEvent;
 use crate::presenter::state::{ActivityEntry, ActivityKind, AppMode, PresenterState};
 use crate::presenter::view::PresenterView;
 use crate::presenter::workflow_runner;
@@ -31,6 +32,8 @@ pub struct Presenter<V: PresenterView> {
     collected_answers: Vec<String>,
     agent_output_buffer: String,
     workflow_handle: Option<thread::JoinHandle<()>>,
+    /// When set, events are broadcast for gRPC subscribers.
+    broadcast_tx: Option<tokio::sync::broadcast::Sender<PresenterEvent>>,
 }
 
 impl<V: PresenterView> Presenter<V> {
@@ -60,11 +63,25 @@ impl<V: PresenterView> Presenter<V> {
             collected_answers: Vec::new(),
             agent_output_buffer: String::new(),
             workflow_handle: None,
+            broadcast_tx: None,
+        }
+    }
+
+    /// Enable broadcast of PresenterEvents (for gRPC subscribers).
+    pub fn with_broadcast(mut self, tx: tokio::sync::broadcast::Sender<PresenterEvent>) -> Self {
+        self.broadcast_tx = Some(tx);
+        self
+    }
+
+    fn broadcast(&self, event: PresenterEvent) {
+        if let Some(ref tx) = self.broadcast_tx {
+            let _ = tx.send(event);
         }
     }
 
     /// Handle a user intent. Updates state and may send answers to workflow.
     pub fn handle_intent(&mut self, intent: UserIntent) {
+        self.broadcast(PresenterEvent::IntentReceived(intent.clone()));
         match intent {
             UserIntent::SubmitFeatureInput(text) => {
                 if !text.is_empty() {
@@ -131,18 +148,21 @@ impl<V: PresenterView> Presenter<V> {
                 if !text.is_empty() {
                     self.state.inbox.push(text);
                     self.view.on_inbox_changed(&self.state.inbox);
+                    self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
                 }
             }
             UserIntent::EditInboxItem { index, text } => {
                 if index < self.state.inbox.len() {
                     self.state.inbox[index] = text;
                     self.view.on_inbox_changed(&self.state.inbox);
+                    self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
                 }
             }
             UserIntent::DeleteInboxItem(index) => {
                 if index < self.state.inbox.len() {
                     self.state.inbox.remove(index);
                     self.view.on_inbox_changed(&self.state.inbox);
+                    self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
                 }
             }
             UserIntent::DemoChoice(run) => {
@@ -155,6 +175,7 @@ impl<V: PresenterView> Presenter<V> {
                 }
                 self.state.mode = AppMode::Running;
                 self.view.on_mode_changed(&self.state.mode);
+                self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
             }
             UserIntent::Scroll(_) => {
                 // View-local; no-op in Presenter
@@ -179,6 +200,7 @@ impl<V: PresenterView> Presenter<V> {
         if self.current_question_index >= self.pending_questions.len() {
             self.state.mode = AppMode::Running;
             self.view.on_mode_changed(&self.state.mode);
+            self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
         } else {
             let q = self.pending_questions[self.current_question_index].clone();
             let total = self.pending_questions.len();
@@ -196,6 +218,7 @@ impl<V: PresenterView> Presenter<V> {
                 };
             }
             self.view.on_mode_changed(&self.state.mode);
+            self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
         }
     }
 
@@ -208,6 +231,7 @@ impl<V: PresenterView> Presenter<V> {
             };
             self.state.activity_log.push(entry.clone());
             self.view.on_activity_logged(&entry);
+            self.broadcast(PresenterEvent::ActivityLogged(entry));
         }
     }
 
@@ -249,6 +273,7 @@ impl<V: PresenterView> Presenter<V> {
                     };
                     self.state.activity_log.push(entry.clone());
                     self.view.on_activity_logged(&entry);
+                    self.broadcast(PresenterEvent::ActivityLogged(entry));
                 }
                 WorkflowEvent::StateChange { from, to } => {
                     self.state.current_state = Some(to.clone());
@@ -259,6 +284,11 @@ impl<V: PresenterView> Presenter<V> {
                     self.state.activity_log.push(entry.clone());
                     self.view.on_activity_logged(&entry);
                     self.view.on_state_changed(&from, &to);
+                    self.broadcast(PresenterEvent::ActivityLogged(entry));
+                    self.broadcast(PresenterEvent::StateChanged {
+                        from: from.clone(),
+                        to: to.clone(),
+                    });
                 }
                 WorkflowEvent::GoalStarted(goal) => {
                     self.state.current_goal = Some(goal.clone());
@@ -266,8 +296,10 @@ impl<V: PresenterView> Presenter<V> {
                     if matches!(self.state.mode, AppMode::FeatureInput) {
                         self.state.mode = AppMode::Running;
                         self.view.on_mode_changed(&self.state.mode);
+                        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                     }
                     self.view.on_goal_started(&goal);
+                    self.broadcast(PresenterEvent::GoalStarted(goal.clone()));
                 }
                 WorkflowEvent::ClarificationNeeded { questions } => {
                     self.flush_agent_output_buffer();
@@ -280,12 +312,15 @@ impl<V: PresenterView> Presenter<V> {
                     self.flush_agent_output_buffer();
                     self.workflow_result = Some(result.clone());
                     self.view.on_workflow_complete(&result);
+                    self.broadcast(PresenterEvent::WorkflowComplete(result.clone()));
                     if result.is_ok() && !self.state.inbox.is_empty() {
                         let item = self.state.inbox.remove(0);
                         let prefixed = format!("{}{}", QUEUED_INSTRUCTION_PREFIX, item);
                         self.view.on_inbox_changed(&self.state.inbox);
+                        self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
                         self.state.mode = AppMode::Running;
                         self.view.on_mode_changed(&self.state.mode);
+                        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                         // Workflow thread has exited; restart with dequeued prompt
                         if let (Some(backend), Some(output_dir)) = (
                             self.workflow_backend.clone(),
@@ -299,12 +334,14 @@ impl<V: PresenterView> Presenter<V> {
                     } else {
                         self.state.mode = AppMode::Done;
                         self.view.on_mode_changed(&self.state.mode);
+                        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                     }
                 }
                 WorkflowEvent::DemoPrompt => {
                     self.flush_agent_output_buffer();
                     self.state.mode = AppMode::DemoPrompt;
                     self.view.on_mode_changed(&self.state.mode);
+                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
                 WorkflowEvent::AgentOutput(text) => {
                     for part in text.split_inclusive('\n') {
@@ -319,12 +356,14 @@ impl<V: PresenterView> Presenter<V> {
                                 };
                                 self.state.activity_log.push(entry.clone());
                                 self.view.on_activity_logged(&entry);
+                                self.broadcast(PresenterEvent::ActivityLogged(entry));
                             }
                         } else {
                             self.agent_output_buffer.push_str(part);
                         }
                     }
                     self.view.on_agent_output(&text);
+                    self.broadcast(PresenterEvent::AgentOutput(text.clone()));
                 }
             }
         }

@@ -34,6 +34,8 @@ pub struct Args {
     pub debug_output: Option<PathBuf>,
     pub agent: String,
     pub prompt: Option<String>,
+    /// When Some(port), gRPC server runs alongside TUI on the given port.
+    pub grpc: Option<u16>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -80,6 +82,10 @@ pub struct CoderArgs {
     /// Feature description (alternative to stdin). When set, skips interactive/piped input.
     #[arg(long)]
     pub prompt: Option<String>,
+
+    /// Start gRPC server alongside TUI for programmatic remote control (e.g. --grpc 50052)
+    #[arg(long, value_name = "PORT", default_missing_value = "50051")]
+    pub grpc: Option<u16>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -126,6 +132,10 @@ pub struct DemoArgs {
     /// Feature description (alternative to stdin). When set, skips interactive/piped input.
     #[arg(long)]
     pub prompt: Option<String>,
+
+    /// Start gRPC server alongside TUI for programmatic remote control (e.g. --grpc 50052)
+    #[arg(long, value_name = "PORT", default_missing_value = "50051")]
+    pub grpc: Option<u16>,
 }
 
 impl From<CoderArgs> for Args {
@@ -141,6 +151,7 @@ impl From<CoderArgs> for Args {
             debug_output: a.debug_output,
             agent: a.agent,
             prompt: a.prompt,
+            grpc: a.grpc,
         }
     }
 }
@@ -158,6 +169,7 @@ impl From<DemoArgs> for Args {
             debug_output: a.debug_output,
             agent: a.agent,
             prompt: a.prompt,
+            grpc: a.grpc,
         }
     }
 }
@@ -620,10 +632,48 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     let view = tddy_tui::TuiView::new();
     let mut presenter = Presenter::new(view, &args.agent, args.model.as_deref().unwrap_or("opus"));
 
+    let external_intent_rx = if let Some(port) = args.grpc {
+        let (event_tx, _) = tokio::sync::broadcast::channel(256);
+        let (intent_tx, intent_rx) = std::sync::mpsc::channel();
+        let handle = tddy_core::PresenterHandle {
+            event_tx: event_tx.clone(),
+            intent_tx: intent_tx.clone(),
+        };
+        presenter = presenter.with_broadcast(event_tx);
+        let service = tddy_grpc::TddyRemoteService::new(handle);
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            let result: anyhow::Result<()> = rt.block_on(async move {
+                let addr: std::net::SocketAddr = ([0, 0, 0, 0], port).into();
+                let listener = tokio::net::TcpListener::bind(addr).await?;
+                log::info!("gRPC server listening on port {}", port);
+                tonic::transport::Server::builder()
+                    .add_service(tddy_grpc::gen::tddy_remote_server::TddyRemoteServer::new(
+                        service,
+                    ))
+                    .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                    .await
+                    .map_err(anyhow::Error::from)
+            });
+            result.expect("gRPC server failed")
+        });
+        Some(intent_rx)
+    } else {
+        None
+    };
+
     let initial_prompt = args.prompt.clone();
     presenter.start_workflow(backend, args.output_dir.clone(), initial_prompt);
 
-    tddy_tui::run_event_loop(&mut presenter, shutdown.as_ref())?;
+    tddy_tui::run_event_loop(
+        &mut presenter,
+        shutdown.as_ref(),
+        external_intent_rx,
+        args.debug,
+    )?;
 
     if let Some(result) = presenter.take_workflow_result() {
         match &result {

@@ -40,7 +40,8 @@ pub use permission::{
     plan_allowlist, red_allowlist, refactor_allowlist, validate_subagents_allowlist,
 };
 pub use presenter::{
-    ActivityEntry, ActivityKind, AppMode, Presenter, PresenterState, PresenterView, UserIntent,
+    ActivityEntry, ActivityKind, AppMode, Presenter, PresenterEvent, PresenterHandle,
+    PresenterState, PresenterView, UserIntent,
 };
 pub use schema::{
     format_validation_errors, get_schema, schema_file_path, validate_output,

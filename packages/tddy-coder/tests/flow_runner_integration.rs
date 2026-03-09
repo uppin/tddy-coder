@@ -29,6 +29,7 @@ fn run_plan_via_flow_runner_produces_plan_directory() {
         debug_output: None,
         agent: "stub".to_string(),
         prompt: Some("Add user authentication".to_string()),
+        grpc: None,
     };
 
     let backend: SharedBackend =

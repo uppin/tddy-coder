@@ -10,10 +10,15 @@ use crate::ui::{format_status_bar, status_bar_style_for_goal};
 use crate::view_state::{InboxFocus, ViewState};
 
 /// Draw the TUI layout: activity log, status bar, prompt bar.
-pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &ViewState) {
+/// When `debug` is true, the debug log area is shown; otherwise it is hidden.
+pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &ViewState, debug: bool) {
     let is_running = matches!(state.mode, AppMode::Running);
     let inbox_h = inbox_height(state.inbox.len(), is_running);
-    let debug_logs = tddy_core::get_buffered_logs();
+    let debug_logs = if debug {
+        tddy_core::get_buffered_logs()
+    } else {
+        vec![]
+    };
     let debug_h = debug_log_height(debug_logs.len());
 
     let (activity_log, _status_spacer, inbox_area, status_bar, debug_log, prompt_bar) =

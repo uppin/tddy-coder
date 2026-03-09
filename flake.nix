@@ -23,6 +23,8 @@
           packages = [
             rustToolchain
             pkgs.rust-analyzer
+            pkgs.buf
+            pkgs.protobuf
           ];
           shellHook = ''
             echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer"
