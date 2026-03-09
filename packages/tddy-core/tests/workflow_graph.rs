@@ -153,6 +153,34 @@ async fn stub_backend_green_returns_valid_response() {
     assert!(!parsed.summary.is_empty());
 }
 
+/// CLARIFY with "Here are the user's answers" in prompt skips clarification (returns normal response).
+#[tokio::test]
+async fn stub_backend_clarify_with_answers_skips_questions() {
+    let backend = StubBackend::new();
+    let req = tddy_core::backend::InvokeRequest {
+        prompt: "Here are the user's answers to your questions:\n\nEmail/password\n\nNow create the PRD for: CLARIFY test".to_string(),
+        system_prompt: None,
+        system_prompt_path: None,
+        goal: tddy_core::backend::Goal::Plan,
+        model: None,
+        session_id: None,
+        is_resume: false,
+        working_dir: None,
+        debug: false,
+        agent_output: false,
+        agent_output_sink: None,
+        conversation_output_path: None,
+        inherit_stdin: false,
+        extra_allowed_tools: None,
+    };
+
+    let resp = backend.invoke(req).await.unwrap();
+    assert!(
+        resp.questions.is_empty(),
+        "stub should skip clarification when answers in prompt"
+    );
+}
+
 /// CLARIFY magic word returns clarification questions.
 #[tokio::test]
 async fn stub_backend_clarify_returns_questions() {
@@ -309,7 +337,7 @@ async fn plan_task_run_writes_prd_to_output_dir() {
     let task = PlanTask::new(backend);
 
     let ctx = Context::new();
-    ctx.set_sync("feature_input", "Add user auth");
+    ctx.set_sync("feature_input", "Add user auth SKIP_QUESTIONS");
     ctx.set_sync("output_dir", output_dir.clone());
 
     let result = task.run(ctx).await.expect("PlanTask should succeed");
@@ -343,7 +371,9 @@ async fn flow_runner_tdd_full_sequence_completes() {
         "tdd_workflow".to_string(),
         "plan".to_string(),
     );
-    session.context.set_sync("feature_input", "Add a feature");
+    session
+        .context
+        .set_sync("feature_input", "Add a feature SKIP_QUESTIONS");
     session.context.set_sync("output_dir", plan_dir);
     storage.save(&session).await.unwrap();
 
@@ -352,7 +382,7 @@ async fn flow_runner_tdd_full_sequence_completes() {
     let mut result = runner.run("full1").await.unwrap();
     while !matches!(result.status, ExecutionStatus::Completed) {
         if matches!(result.status, ExecutionStatus::WaitingForInput { .. }) {
-            panic!("FlowRunner should not block on WaitForInput with StubBackend (no CLARIFY)");
+            panic!("FlowRunner should not block on WaitForInput (use SKIP_QUESTIONS in prompt)");
         }
         result = runner.run("full1").await.unwrap();
     }

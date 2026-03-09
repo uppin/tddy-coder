@@ -33,12 +33,14 @@ fn clarification_questions() -> Vec<ClarificationQuestion> {
             question: "What is the target audience?".to_string(),
             options: vec![],
             multi_select: false,
+            allow_other: true,
         },
         ClarificationQuestion {
             header: "Timeline".to_string(),
             question: "What is the expected timeline?".to_string(),
             options: vec![],
             multi_select: false,
+            allow_other: true,
         },
     ]
 }
@@ -119,9 +121,24 @@ fn planning_workflow_with_stub_backend_transitions_to_planned() {
     let output_dir = std::env::temp_dir().join("tddy-planning-stub-test");
     let _ = std::fs::remove_dir_all(&output_dir);
 
-    let result = workflow.plan("Add a feature", &output_dir, None, &PlanOptions::default());
+    // StubBackend always asks clarification first; answer then proceed.
+    let first = workflow.plan("Add a feature", &output_dir, None, &PlanOptions::default());
+    assert!(
+        matches!(
+            first,
+            Err(tddy_core::WorkflowError::ClarificationNeeded { .. })
+        ),
+        "first call should return ClarificationNeeded"
+    );
 
-    let output_path = result.expect("StubBackend plan should succeed");
+    let output_path = workflow
+        .plan(
+            "Add a feature",
+            &output_dir,
+            Some("Email/password"),
+            &PlanOptions::default(),
+        )
+        .expect("second call with answers should succeed");
     assert!(output_path.join("PRD.md").exists(), "PRD.md should exist");
     assert!(output_path.join("TODO.md").exists(), "TODO.md should exist");
 
@@ -199,12 +216,14 @@ fn planning_workflow_returns_clarification_needed_with_structured_questions() {
                     },
                 ],
                 multi_select: false,
+                allow_other: true,
             },
             ClarificationQuestion {
                 header: "Timeline".to_string(),
                 question: "What is the expected timeline?".to_string(),
                 options: vec![],
                 multi_select: false,
+                allow_other: true,
             },
         ],
     );
@@ -270,6 +289,40 @@ fn planning_workflow_produces_prd_after_clarification_answers() {
 
     let prd_content = std::fs::read_to_string(output_path.join("PRD.md")).expect("read PRD");
     assert!(prd_content.contains("User authentication"));
+
+    let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+/// Workflow + StubBackend: always asks clarification; second call with answers succeeds.
+#[test]
+fn planning_workflow_stub_backend_clarification_roundtrip() {
+    let backend = StubBackend::new();
+    let mut workflow = Workflow::new(backend);
+    let output_dir = std::env::temp_dir().join("tddy-planning-stub-clarify");
+    let _ = std::fs::remove_dir_all(&output_dir);
+
+    let first = workflow.plan("test feature", &output_dir, None, &PlanOptions::default());
+    assert!(
+        matches!(
+            first,
+            Err(tddy_core::WorkflowError::ClarificationNeeded { .. })
+        ),
+        "first call should return ClarificationNeeded, got {:?}",
+        first
+    );
+
+    let answers = "Email/password";
+    let second = workflow.plan(
+        "test feature",
+        &output_dir,
+        Some(answers),
+        &PlanOptions::default(),
+    );
+
+    let output_path = second.expect("second call with answers should succeed");
+    assert!(output_path.is_dir());
+    assert!(output_path.join("PRD.md").exists());
+    assert!(output_path.join("TODO.md").exists());
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }

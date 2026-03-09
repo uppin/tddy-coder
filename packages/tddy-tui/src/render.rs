@@ -5,7 +5,7 @@ use ratatui::Frame;
 
 use tddy_core::{ActivityEntry, AppMode, PresenterState};
 
-use crate::layout::{debug_log_height, inbox_height, layout_chunks_with_inbox};
+use crate::layout::{debug_log_height, inbox_height, layout_chunks_with_inbox, question_height};
 use crate::ui::{format_status_bar, status_bar_style_for_goal};
 use crate::view_state::{InboxFocus, ViewState};
 
@@ -14,6 +14,8 @@ use crate::view_state::{InboxFocus, ViewState};
 pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &ViewState, debug: bool) {
     let is_running = matches!(state.mode, AppMode::Running);
     let inbox_h = inbox_height(state.inbox.len(), is_running);
+    let question_h = question_height(&state.mode);
+    let dynamic_h = question_h.max(inbox_h);
     let debug_logs = if debug {
         tddy_core::get_buffered_logs()
     } else {
@@ -21,8 +23,8 @@ pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &ViewState, d
     };
     let debug_h = debug_log_height(debug_logs.len());
 
-    let (activity_log, _status_spacer, inbox_area, status_bar, debug_log, prompt_bar) =
-        layout_chunks_with_inbox(frame.area(), inbox_h, debug_h);
+    let (activity_log, _status_spacer, dynamic_area, status_bar, debug_log, prompt_bar) =
+        layout_chunks_with_inbox(frame.area(), dynamic_h, debug_h);
 
     if activity_log.height > 0 {
         let content = state
@@ -43,8 +45,15 @@ pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &ViewState, d
         frame.render_widget(widget, activity_log);
     }
 
-    if inbox_area.height > 0 {
-        render_inbox(frame, state, view_state, inbox_area);
+    if dynamic_area.height > 0 {
+        match &state.mode {
+            AppMode::Select { .. } | AppMode::MultiSelect { .. } | AppMode::TextInput { .. } => {
+                render_question(frame, state, view_state, dynamic_area);
+            }
+            _ => {
+                render_inbox(frame, state, view_state, dynamic_area);
+            }
+        }
     }
 
     if debug_log.height > 0 && !debug_logs.is_empty() {
@@ -95,13 +104,189 @@ pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &ViewState, d
                     format!("> {}", view_state.running_input)
                 }
             }
-            AppMode::DemoPrompt => "> Run demo? [r] Run  [s] Skip".to_string(),
             AppMode::Done => "> Workflow complete. Press Enter to exit.".to_string(),
-            _ => String::new(),
+            AppMode::Select { .. } => {
+                if view_state.select_typing_other {
+                    if view_state.select_other_text.is_empty() {
+                        "> Type your answer and press Enter...".to_string()
+                    } else {
+                        format!("> {}", view_state.select_other_text)
+                    }
+                } else {
+                    "Up/Down navigate  Enter select".to_string()
+                }
+            }
+            AppMode::MultiSelect { .. } => {
+                if view_state.multiselect_typing_other {
+                    if view_state.multiselect_other_text.is_empty() {
+                        "> Type your answer and press Enter...".to_string()
+                    } else {
+                        format!("> {}", view_state.multiselect_other_text)
+                    }
+                } else {
+                    "Up/Down navigate  Space toggle  Enter submit".to_string()
+                }
+            }
+            AppMode::TextInput { .. } => {
+                if view_state.text_input.is_empty() {
+                    "> Type your answer and press Enter...".to_string()
+                } else {
+                    format!("> {}", view_state.text_input)
+                }
+            }
         };
         let widget = Paragraph::new(text);
         frame.render_widget(widget, prompt_bar);
     }
+}
+
+/// Render clarification question (Select, MultiSelect, or TextInput mode).
+fn render_question(
+    frame: &mut Frame,
+    state: &PresenterState,
+    view_state: &ViewState,
+    area: ratatui::layout::Rect,
+) {
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+
+    if area.height == 0 {
+        return;
+    }
+
+    let lines: Vec<Line> = match &state.mode {
+        AppMode::Select {
+            question,
+            question_index,
+            total_questions: _,
+        } => {
+            let header = format!(
+                "[{}] {}: {}",
+                question_index + 1,
+                question.header,
+                question.question
+            );
+            let mut result = vec![Line::from(Span::styled(
+                header,
+                Style::default().add_modifier(Modifier::BOLD),
+            ))];
+            let other_idx = question.options.len();
+            for (i, opt) in question.options.iter().enumerate() {
+                let prefix = if view_state.select_selected == i {
+                    "> "
+                } else {
+                    "  "
+                };
+                let text = format!("{}{} -- {}", prefix, opt.label, opt.description);
+                let style = if view_state.select_selected == i {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                result.push(Line::from(Span::styled(text, style)));
+            }
+            if question.allow_other {
+                let other_prefix = if view_state.select_selected == other_idx {
+                    "> "
+                } else {
+                    "  "
+                };
+                let other_text = if view_state.select_typing_other {
+                    format!("{}Other: {}", other_prefix, view_state.select_other_text)
+                } else {
+                    format!("{}Other (type your own)", other_prefix)
+                };
+                let other_style = if view_state.select_selected == other_idx {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                result.push(Line::from(Span::styled(other_text, other_style)));
+            }
+            result
+        }
+        AppMode::MultiSelect {
+            question,
+            question_index,
+            total_questions: _,
+        } => {
+            let header = format!(
+                "[{}] {}: {}",
+                question_index + 1,
+                question.header,
+                question.question
+            );
+            let mut result = vec![Line::from(Span::styled(
+                header,
+                Style::default().add_modifier(Modifier::BOLD),
+            ))];
+            let other_idx = question.options.len();
+            for (i, opt) in question.options.iter().enumerate() {
+                let checked = view_state
+                    .multiselect_checked
+                    .get(i)
+                    .copied()
+                    .unwrap_or(false);
+                let checkbox = if checked { "[x]" } else { "[ ]" };
+                let prefix = if view_state.multiselect_cursor == i {
+                    "> "
+                } else {
+                    "  "
+                };
+                let text = format!(
+                    "{}{} {} -- {}",
+                    prefix, checkbox, opt.label, opt.description
+                );
+                let style = if view_state.multiselect_cursor == i {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                result.push(Line::from(Span::styled(text, style)));
+            }
+            if question.allow_other {
+                let other_checked = view_state
+                    .multiselect_checked
+                    .get(other_idx)
+                    .copied()
+                    .unwrap_or(false);
+                let other_cb = if other_checked { "[x]" } else { "[ ]" };
+                let other_prefix = if view_state.multiselect_cursor == other_idx {
+                    "> "
+                } else {
+                    "  "
+                };
+                let other_text = if view_state.multiselect_typing_other {
+                    format!(
+                        "{}{} Other: {}",
+                        other_prefix, other_cb, view_state.multiselect_other_text
+                    )
+                } else {
+                    format!("{}{} Other (type your own)", other_prefix, other_cb)
+                };
+                let other_style = if view_state.multiselect_cursor == other_idx {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                result.push(Line::from(Span::styled(other_text, other_style)));
+            }
+            result
+        }
+        AppMode::TextInput { prompt } => {
+            vec![
+                Line::from(Span::styled(
+                    prompt.as_str(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::raw("")),
+            ]
+        }
+        _ => return,
+    };
+
+    let widget = Paragraph::new(lines);
+    frame.render_widget(widget, area);
 }
 
 /// Render inbox items.

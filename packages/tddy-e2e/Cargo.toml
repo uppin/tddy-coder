@@ -1,0 +1,20 @@
+[package]
+name = "tddy-e2e"
+version = "0.1.0"
+edition = "2021"
+description = "E2E tests for tddy-coder TUI using gRPC and PTY"
+
+[lib]
+name = "tddy_e2e"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-core = { path = "../tddy-core" }
+tddy-grpc = { path = "../tddy-grpc" }
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+async-stream = "0.3"
+termwright = "0.2"
+anyhow = "1"

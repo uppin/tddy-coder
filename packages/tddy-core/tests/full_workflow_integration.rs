@@ -6,6 +6,7 @@
 use tddy_core::{
     next_goal_for_state, AcceptanceTestsOptions, DemoOptions, EvaluateOptions, MockBackend,
     PlanOptions, RedOptions, RefactorOptions, StubBackend, ValidateOptions, Workflow,
+    WorkflowError,
 };
 use tddy_core::{GreenOptions, WorkflowState};
 
@@ -124,6 +125,7 @@ fn full_workflow_chains_all_steps() {
 }
 
 /// Full workflow with StubBackend reaches GreenComplete (tddy-demo flow).
+/// StubBackend always asks clarification (plan) and permission (acceptance-tests).
 #[test]
 fn full_workflow_with_stub_backend_reaches_green_complete() {
     let output_dir = std::env::temp_dir().join("tddy-full-workflow-stub");
@@ -133,14 +135,29 @@ fn full_workflow_with_stub_backend_reaches_green_complete() {
     let backend = StubBackend::new();
     let mut workflow = Workflow::new(backend);
     let plan_options = PlanOptions::default();
+    let first = workflow.plan("Add a feature", &output_dir, None, &plan_options);
+    assert!(
+        matches!(first, Err(WorkflowError::ClarificationNeeded { .. })),
+        "plan should ask clarification first"
+    );
     let plan_dir = workflow
-        .plan("Add a feature", &output_dir, None, &plan_options)
-        .expect("plan should succeed");
+        .plan(
+            "Add a feature",
+            &output_dir,
+            Some("Email/password"),
+            &plan_options,
+        )
+        .expect("plan should succeed with clarification answer");
 
     let at_options = AcceptanceTestsOptions::default();
+    let at_first = workflow.acceptance_tests(&plan_dir, None, &at_options);
+    assert!(
+        matches!(at_first, Err(WorkflowError::ClarificationNeeded { .. })),
+        "acceptance_tests should ask permission first"
+    );
     let _ = workflow
-        .acceptance_tests(&plan_dir, None, &at_options)
-        .expect("acceptance_tests should succeed");
+        .acceptance_tests(&plan_dir, Some("Yes"), &at_options)
+        .expect("acceptance_tests should succeed with permission answer");
 
     let red_options = RedOptions::default();
     let _ = workflow

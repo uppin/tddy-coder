@@ -46,6 +46,10 @@ struct AskUserQuestionInput {
     questions: Vec<AskQuestionItem>,
 }
 
+fn default_allow_other() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize)]
 struct AskQuestionItem {
     #[serde(default)]
@@ -56,6 +60,8 @@ struct AskQuestionItem {
     options: Vec<AskOptionItem>,
     #[serde(default, rename = "multiSelect")]
     multi_select: bool,
+    #[serde(default = "default_allow_other", rename = "allowOther")]
+    allow_other: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,6 +120,7 @@ pub(crate) fn parse_ask_user_question(input: &serde_json::Value) -> Vec<Clarific
                 })
                 .collect(),
             multi_select: q.multi_select,
+            allow_other: q.allow_other,
         })
         .collect()
 }

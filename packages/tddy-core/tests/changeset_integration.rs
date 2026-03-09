@@ -469,12 +469,14 @@ fn changeset_contains_clarification_qa() {
                 },
             ],
             multi_select: false,
+            allow_other: true,
         },
         ClarificationQuestion {
             header: "Timeline".to_string(),
             question: "What is the expected timeline?".to_string(),
             options: vec![],
             multi_select: false,
+            allow_other: true,
         },
     ];
     backend.push_ok_with_questions("", "sess-qa", questions);

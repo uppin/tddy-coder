@@ -4,11 +4,11 @@ use tddy_core::{ActivityKind, AppMode, PresenterEvent, UserIntent};
 
 use crate::gen::{
     app_mode_proto, client_message, server_message, ActivityLogged, AgentOutput, AnswerMultiSelect,
-    AnswerOther, AnswerSelect, AnswerText, AppModeDemoPrompt, AppModeDone, AppModeFeatureInput,
-    AppModeMultiSelect, AppModeProto, AppModeRunning, AppModeSelect, AppModeTextInput,
-    ClarificationQuestionProto, ClientMessage, DeleteInboxItem, DemoChoice, EditInboxItem,
-    GoalStarted, InboxChanged, IntentReceived, ModeChanged, QuestionOptionProto, QueuePrompt, Quit,
-    Scroll, ServerMessage, StateChanged, SubmitFeatureInput, WorkflowComplete,
+    AnswerOther, AnswerSelect, AnswerText, AppModeDone, AppModeFeatureInput, AppModeMultiSelect,
+    AppModeProto, AppModeRunning, AppModeSelect, AppModeTextInput, ClarificationQuestionProto,
+    ClientMessage, DeleteInboxItem, EditInboxItem, GoalStarted, InboxChanged, IntentReceived,
+    ModeChanged, QuestionOptionProto, QueuePrompt, Quit, Scroll, ServerMessage, StateChanged,
+    SubmitFeatureInput, WorkflowComplete,
 };
 
 /// Convert ClientMessage to UserIntent. Returns None if the message has no intent.
@@ -38,7 +38,6 @@ pub fn client_message_to_intent(msg: ClientMessage) -> Option<UserIntent> {
         Intent::DeleteInboxItem(DeleteInboxItem { index }) => {
             Some(UserIntent::DeleteInboxItem(index as usize))
         }
-        Intent::DemoChoice(DemoChoice { run }) => Some(UserIntent::DemoChoice(run)),
         Intent::Scroll(Scroll { delta }) => Some(UserIntent::Scroll(delta)),
         Intent::Quit(Quit {}) => Some(UserIntent::Quit),
     }
@@ -117,7 +116,6 @@ fn app_mode_to_proto(mode: &AppMode) -> AppModeProto {
         AppMode::TextInput { prompt } => app_mode_proto::Variant::TextInput(AppModeTextInput {
             prompt: prompt.clone(),
         }),
-        AppMode::DemoPrompt => app_mode_proto::Variant::DemoPrompt(AppModeDemoPrompt {}),
         AppMode::Done => app_mode_proto::Variant::Done(AppModeDone {}),
     };
     AppModeProto {
@@ -175,7 +173,6 @@ fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
         UserIntent::DeleteInboxItem(index) => Intent::DeleteInboxItem(DeleteInboxItem {
             index: *index as u32,
         }),
-        UserIntent::DemoChoice(run) => Intent::DemoChoice(DemoChoice { run: *run }),
         UserIntent::Scroll(delta) => Intent::Scroll(Scroll { delta: *delta }),
         UserIntent::Quit => Intent::Quit(Quit {}),
     };

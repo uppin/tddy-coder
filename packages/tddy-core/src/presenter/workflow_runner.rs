@@ -5,11 +5,31 @@ use std::sync::mpsc;
 
 use crate::{
     get_session_for_tag, next_goal_for_state, read_changeset, AcceptanceTestsOptions,
-    AgentOutputSink, EvaluateOptions, GreenOptions, PlanOptions, RedOptions, RefactorOptions,
-    SharedBackend, ValidateOptions, Workflow, WorkflowError, WorkflowState,
+    AgentOutputSink, ClarificationQuestion, EvaluateOptions, GreenOptions, PlanOptions,
+    QuestionOption, RedOptions, RefactorOptions, SharedBackend, ValidateOptions, Workflow,
+    WorkflowError, WorkflowState,
 };
 
 use super::WorkflowEvent;
+
+fn demo_question() -> ClarificationQuestion {
+    ClarificationQuestion {
+        header: "Demo".to_string(),
+        question: "Create & run a demo?".to_string(),
+        options: vec![
+            QuestionOption {
+                label: "Create & run".to_string(),
+                description: "Create and run the demo script".to_string(),
+            },
+            QuestionOption {
+                label: "Skip".to_string(),
+                description: "Skip demo".to_string(),
+            },
+        ],
+        multi_select: false,
+        allow_other: false,
+    }
+}
 
 /// Run the full workflow in a blocking thread. Sends events to event_tx, receives answers from answer_rx.
 pub fn run_workflow(
@@ -243,9 +263,11 @@ pub fn run_workflow(
         match result {
             Ok(output) => {
                 let run_demo = if plan_dir.join("demo-plan.md").exists() {
-                    event_tx.send(WorkflowEvent::DemoPrompt).ok();
+                    let _ = event_tx.send(WorkflowEvent::ClarificationNeeded {
+                        questions: vec![demo_question()],
+                    });
                     match answer_rx.recv() {
-                        Ok(choice) => choice.eq_ignore_ascii_case("run"),
+                        Ok(choice) => !choice.eq_ignore_ascii_case("skip"),
                         Err(_) => return,
                     }
                 } else {

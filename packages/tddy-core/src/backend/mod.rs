@@ -189,6 +189,10 @@ pub struct InvokeRequest {
     pub extra_allowed_tools: Option<Vec<String>>,
 }
 
+fn default_allow_other() -> bool {
+    true
+}
+
 /// Structured clarification question from AskUserQuestion tool.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClarificationQuestion {
@@ -196,6 +200,9 @@ pub struct ClarificationQuestion {
     pub question: String,
     pub options: Vec<QuestionOption>,
     pub multi_select: bool,
+    /// When false, omit "Other (type your own)" — e.g. for binary permission (Yes/No).
+    #[serde(default = "default_allow_other")]
+    pub allow_other: bool,
 }
 
 /// Option for a clarification question.

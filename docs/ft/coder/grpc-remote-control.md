@@ -71,6 +71,14 @@ Replace the single `V: PresenterView` generic with a broadcast channel pattern:
 5. Tests in `tddy-grpc` verify bidirectional event flow using an in-process gRPC client connected to a test Presenter instance
 6. `cargo test -p tddy-grpc` passes with all acceptance tests
 
+### E2E Testing
+
+The `tddy-e2e` package provides end-to-end tests using this gRPC interface:
+
+- **gRPC-driven tests**: Connect as a client, send intents, assert on presenter events (e.g. `grpc_clarification`, `grpc_full_workflow`)
+- **PTY tests**: Spawn the binary in a pseudo-terminal, assert on rendered screen output (`pty_clarification` with termwright, run with `--ignored`)
+- Uses `tddy-demo` with StubBackend for deterministic, fast tests
+
 ## Affected Features
 
 - [planning-step.md](planning-step.md) — Presenter architecture changes (event bus)

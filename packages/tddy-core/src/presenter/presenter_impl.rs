@@ -165,18 +165,6 @@ impl<V: PresenterView> Presenter<V> {
                     self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
                 }
             }
-            UserIntent::DemoChoice(run) => {
-                if let Some(ref tx) = self.answer_tx {
-                    let _ = tx.send(if run {
-                        "run".to_string()
-                    } else {
-                        "skip".to_string()
-                    });
-                }
-                self.state.mode = AppMode::Running;
-                self.view.on_mode_changed(&self.state.mode);
-                self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
-            }
             UserIntent::Scroll(_) => {
                 // View-local; no-op in Presenter
             }
@@ -336,12 +324,6 @@ impl<V: PresenterView> Presenter<V> {
                         self.view.on_mode_changed(&self.state.mode);
                         self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                     }
-                }
-                WorkflowEvent::DemoPrompt => {
-                    self.flush_agent_output_buffer();
-                    self.state.mode = AppMode::DemoPrompt;
-                    self.view.on_mode_changed(&self.state.mode);
-                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
                 WorkflowEvent::AgentOutput(text) => {
                     for part in text.split_inclusive('\n') {

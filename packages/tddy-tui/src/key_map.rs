@@ -31,7 +31,6 @@ pub fn key_event_to_intent(
         AppMode::Select { question, .. } => select_key(key, question, view_state),
         AppMode::MultiSelect { question, .. } => multiselect_key(key, question, view_state),
         AppMode::TextInput { .. } => text_input_key(key, view_state),
-        AppMode::DemoPrompt => demo_key(key),
         AppMode::Done => done_key(key),
     }
 }
@@ -151,24 +150,12 @@ fn text_input_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
     }
 }
 
-fn demo_key(key: KeyEvent) -> Option<UserIntent> {
-    match key.code {
-        KeyCode::Char('r') | KeyCode::Char('R') => Some(UserIntent::DemoChoice(true)),
-        KeyCode::Char('s') | KeyCode::Char('S') => Some(UserIntent::DemoChoice(false)),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn enter_key() -> KeyEvent {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())
-    }
-
-    fn char_key(c: char) -> KeyEvent {
-        KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty())
     }
 
     #[test]
@@ -187,19 +174,5 @@ mod tests {
         let vs = ViewState::new();
         let intent = key_event_to_intent(enter_key(), &AppMode::FeatureInput, &vs);
         assert!(intent.is_none());
-    }
-
-    #[test]
-    fn demo_r_returns_run() {
-        let vs = ViewState::new();
-        let intent = key_event_to_intent(char_key('r'), &AppMode::DemoPrompt, &vs);
-        assert!(matches!(intent, Some(UserIntent::DemoChoice(true))));
-    }
-
-    #[test]
-    fn demo_s_returns_skip() {
-        let vs = ViewState::new();
-        let intent = key_event_to_intent(char_key('s'), &AppMode::DemoPrompt, &vs);
-        assert!(matches!(intent, Some(UserIntent::DemoChoice(false))));
     }
 }
