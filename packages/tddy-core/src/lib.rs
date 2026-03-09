@@ -26,17 +26,17 @@ pub use log_backend::{get_buffered_logs, init_tddy_logger, take_buffered_logs};
 pub use output::{
     extract_last_structured_block, parse_acceptance_tests_response, parse_demo_response,
     parse_evaluate_response, parse_green_response, parse_planning_output, parse_red_response,
-    parse_validate_refactor_response, parse_validate_response, read_session_file,
+    parse_refactor_response, parse_validate_subagents_response, read_session_file,
     write_acceptance_tests_file, write_artifacts, write_evaluation_report, write_session_file,
-    write_validation_report, AcceptanceTestInfo, AcceptanceTestsOutput, DemoOutput,
-    EvaluateAffectedTest, EvaluateChangedFile, EvaluateOutput, GreenOutput, GreenTestResult,
-    ImplementationInfo, PlanningOutput, RedOutput, RedTestInfo, SkeletonInfo, StructuredBlock,
-    ValidateBuildResult, ValidateChangesetSync, ValidateFileAnalyzed, ValidateIssue,
-    ValidateOutput, ValidateRefactorOutput, ValidateTestImpact,
+    AcceptanceTestInfo, AcceptanceTestsOutput, DemoOutput, EvaluateAffectedTest,
+    EvaluateBuildResult, EvaluateChangedFile, EvaluateChangesetSync, EvaluateFileAnalyzed,
+    EvaluateIssue, EvaluateOutput, EvaluateTestImpact, GreenOutput, GreenTestResult,
+    ImplementationInfo, PlanningOutput, RedOutput, RedTestInfo, RefactorOutput, SkeletonInfo,
+    StructuredBlock, ValidateSubagentsOutput,
 };
 pub use permission::{
     acceptance_tests_allowlist, demo_allowlist, evaluate_allowlist, green_allowlist,
-    plan_allowlist, red_allowlist, validate_allowlist, validate_refactor_allowlist,
+    plan_allowlist, red_allowlist, refactor_allowlist, validate_subagents_allowlist,
 };
 pub use schema::{
     format_validation_errors, get_schema, schema_file_path, validate_output,
@@ -45,5 +45,5 @@ pub use schema::{
 pub use stream::ProgressEvent;
 pub use workflow::{
     AcceptanceTestsOptions, DemoOptions, EvaluateOptions, GreenOptions, PlanOptions, RedOptions,
-    ValidateOptions, ValidateRefactorOptions, Workflow, WorkflowState,
+    RefactorOptions, ValidateOptions, Workflow, WorkflowState,
 };

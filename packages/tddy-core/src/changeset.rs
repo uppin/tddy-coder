@@ -203,8 +203,6 @@ pub fn resolve_model(
 
 /// Map changeset state to the next goal to execute in the full workflow.
 /// Returns `None` when workflow is complete (GreenComplete) or failed.
-/// NOTE: validate-changes states ("Validating", "Validated") return None —
-/// validate-changes is a standalone goal, not part of the auto-sequence.
 pub fn next_goal_for_state(state: &str) -> Option<&'static str> {
     match state {
         "Init" => Some("plan"),
@@ -212,8 +210,11 @@ pub fn next_goal_for_state(state: &str) -> Option<&'static str> {
         "AcceptanceTestsReady" => Some("red"),
         "RedTestsReady" => Some("green"),
         "GreenComplete" => Some("demo"),
-        "DemoComplete" | "DemoSkipped" => Some("evaluate"),
-        "Evaluated" | "Failed" | "Validating" | "Validated" => None,
+        "DemoComplete" => Some("evaluate"),
+        "Evaluated" => Some("validate"),
+        "ValidateComplete" | "ValidateRefactorComplete" => Some("refactor"),
+        "RefactorComplete" => None,
+        "Failed" => None,
         _ => Some("plan"),
     }
 }

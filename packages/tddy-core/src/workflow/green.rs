@@ -17,7 +17,7 @@ pub fn system_prompt(run_demo: bool) -> String {
 You MUST:
 1. Read progress.md for the list of failing tests and skeleton implementations
 2. Implement production-grade code (not stubs or workarounds) to make each failing test pass
-3. Add detailed logging (log::debug!, log::info!, eprintln!) to reveal flows and system state during development — these will be cleaned in later phases
+3. Add detailed logging (log::debug!, log::info!) to reveal flows and system state during development — these will be cleaned in later phases
 4. After implementing, run the project's test command (e.g. cargo test) to verify all tests pass
 5. Run acceptance tests to verify end-to-end behavior
 6. ALWAYS end your response with a structured-response block — REQUIRED.

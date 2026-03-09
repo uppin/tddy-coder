@@ -48,7 +48,6 @@ pub fn demo_allowlist() -> Vec<String> {
 }
 
 /// Allowlist for the evaluate-changes goal (read-only + git diff/log/find + cargo check/build).
-/// Same tool surface as validate_allowlist; renamed to match the evaluate-changes goal.
 pub fn evaluate_allowlist() -> Vec<String> {
     vec![
         "Read".to_string(),
@@ -63,10 +62,10 @@ pub fn evaluate_allowlist() -> Vec<String> {
     ]
 }
 
-/// Allowlist for the validate-refactor goal (evaluate tools + Agent for spawning subagents + Write).
+/// Allowlist for the validate goal (subagent-based): evaluate tools + Agent for spawning subagents + Write.
 /// The orchestrator spawns 3 concurrent subagents (validate-tests, validate-prod-ready,
 /// analyze-clean-code) via the Agent tool, and each subagent writes its report via Write.
-pub fn validate_refactor_allowlist() -> Vec<String> {
+pub fn validate_subagents_allowlist() -> Vec<String> {
     vec![
         "Agent".to_string(),
         "Read".to_string(),
@@ -82,18 +81,17 @@ pub fn validate_refactor_allowlist() -> Vec<String> {
     ]
 }
 
-/// Allowlist for the validate-changes goal (read-only + git diff/log/find + cargo check/build).
-/// Complements --permission-mode plan.
-pub fn validate_allowlist() -> Vec<String> {
+/// Allowlist for the refactor goal (full tool access for executing refactoring tasks).
+/// Complements --permission-mode acceptEdits.
+pub fn refactor_allowlist() -> Vec<String> {
     vec![
         "Read".to_string(),
+        "Write".to_string(),
+        "Edit".to_string(),
         "Glob".to_string(),
         "Grep".to_string(),
         "SemanticSearch".to_string(),
+        "Bash(cargo *)".to_string(),
         "Bash(git diff *)".to_string(),
-        "Bash(git log *)".to_string(),
-        "Bash(cargo build *)".to_string(),
-        "Bash(cargo check *)".to_string(),
-        "Bash(find *)".to_string(),
     ]
 }

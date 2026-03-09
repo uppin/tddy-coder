@@ -12,9 +12,9 @@ const VALID_GOALS: &[&str] = &[
     "acceptance-tests",
     "red",
     "green",
-    "validate",
     "evaluate",
-    "validate-refactor",
+    "validate-subagents",
+    "refactor",
 ];
 
 #[test]
@@ -60,21 +60,21 @@ fn valid_green_passes_schema_validation() {
 }
 
 #[test]
-fn valid_validate_passes_schema_validation() {
-    let json = include_str!("fixtures/valid/validate.json");
-    assert!(validate_output("validate", json).is_ok());
-}
-
-#[test]
 fn valid_evaluate_passes_schema_validation() {
     let json = include_str!("fixtures/valid/evaluate.json");
     assert!(validate_output("evaluate", json).is_ok());
 }
 
 #[test]
-fn valid_validate_refactor_passes_schema_validation() {
-    let json = include_str!("fixtures/valid/validate-refactor.json");
-    assert!(validate_output("validate-refactor", json).is_ok());
+fn valid_validate_subagents_passes_schema_validation() {
+    let json = include_str!("fixtures/valid/validate-subagents.json");
+    assert!(validate_output("validate-subagents", json).is_ok());
+}
+
+#[test]
+fn valid_refactor_passes_schema_validation() {
+    let json = r#"{"goal":"refactor","summary":"Completed 3 tasks.","tasks_completed":3,"tests_passing":true}"#;
+    assert!(validate_output("refactor", json).is_ok());
 }
 
 #[test]
@@ -131,9 +131,9 @@ fn invalid_acceptance_tests_missing_summary_fails() {
 }
 
 #[test]
-fn invalid_validate_refactor_wrong_goal_fails() {
-    let json = include_str!("fixtures/invalid/validate-refactor-wrong-goal.json");
-    let err = validate_output("validate-refactor", json).unwrap_err();
+fn invalid_validate_subagents_wrong_goal_fails() {
+    let json = include_str!("fixtures/invalid/validate-subagents-wrong-goal.json");
+    let err = validate_output("validate-subagents", json).unwrap_err();
     assert!(!err.is_empty());
 }
 
@@ -209,9 +209,9 @@ fn write_all_schemas_to_dir_writes_all_goal_schemas_when_plan_dir_created() {
         "acceptance-tests.schema.json",
         "red.schema.json",
         "green.schema.json",
-        "validate.schema.json",
         "evaluate.schema.json",
-        "validate-refactor.schema.json",
+        "validate-subagents.schema.json",
+        "refactor.schema.json",
     ];
     for f in &goals {
         assert!(schemas_dir.join(f).exists(), "{} should exist", f);

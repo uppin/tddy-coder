@@ -1,5 +1,5 @@
 {
-  "goal": "validate-refactor",
+  "goal": "validate",
   "summary": "Completed validation and refactoring.",
   "tests_report_written": true,
   "prod_ready_report_written": true,

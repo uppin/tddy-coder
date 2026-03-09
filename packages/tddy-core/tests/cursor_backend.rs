@@ -4,7 +4,7 @@
 //! parses Cursor's stream-json output, and captures thread_id for --resume.
 
 use std::fs;
-use tddy_core::{CodingBackend, CursorBackend, Goal, InvokeRequest};
+use tddy_core::{CodingBackend, CursorBackend, Goal, InvokeRequest, PlanOptions, Workflow};
 
 /// CursorBackend spawns cursor agent with -p, --output-format stream-json, --force, --trust.
 #[test]
@@ -408,4 +408,56 @@ exit 0
         "prompt should not use system_prompt when path is set, got: {}",
         prompt
     );
+}
+
+/// CursorBackend plan workflow returns ClarificationNeeded when stream contains
+/// clarification-questions block in result event (real-world tddy-coder format).
+#[test]
+#[cfg(unix)]
+fn cursor_backend_plan_returns_clarification_needed_when_stream_has_questions() {
+    let tmp = std::env::temp_dir().join("tddy-cursor-clarification-plan");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).expect("create tmp");
+
+    let result_content = "Before I produce the PRD, I have a few clarification points.\n\n<clarification-questions content-type=\"application-json\">\n{\"questions\":[{\"header\":\"Validate goal scope\",\"question\":\"Replace or merge?\",\"options\":[{\"label\":\"Replace only\",\"description\":\"validate = renamed validate-refactor\"},{\"label\":\"Merge both\",\"description\":\"validate replaces both\"}],\"multiSelect\":false},{\"header\":\"Refactor behavior\",\"question\":\"TDD or direct?\",\"options\":[{\"label\":\"TDD\",\"description\":\"red→green\"},{\"label\":\"Direct\",\"description\":\"direct apply\"}],\"multiSelect\":false}]}\n</clarification-questions>";
+    let ndjson = format!(
+        r#"{{"type":"system","subtype":"init","session_id":"cursor-sess"}}
+{{"type":"result","subtype":"success","is_error":false,"result":{},"session_id":"cursor-sess"}}"#,
+        serde_json::to_string(result_content).expect("escape")
+    );
+    let stream_path = tmp.join("stream.ndjson");
+    fs::write(&stream_path, ndjson).expect("write stream");
+
+    let script = r#"#!/bin/sh
+cat stream.ndjson
+exit 0
+"#;
+    let script_path = tmp.join("cursor");
+    fs::write(&script_path, script).expect("write script");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms).unwrap();
+    }
+
+    let backend = CursorBackend::with_path(script_path.into());
+    let mut workflow = Workflow::new(backend);
+    let result = workflow.plan("Feature X", &tmp, None, &PlanOptions::default());
+
+    match &result {
+        Err(tddy_core::WorkflowError::ClarificationNeeded {
+            questions,
+            session_id,
+        }) => {
+            assert_eq!(session_id, "cursor-sess");
+            assert_eq!(questions.len(), 2, "should extract 2 questions from stream");
+            assert_eq!(questions[0].header, "Validate goal scope");
+            assert_eq!(questions[1].header, "Refactor behavior");
+        }
+        Ok(path) => panic!("expected ClarificationNeeded, got Ok({:?})", path),
+        Err(e) => panic!("expected ClarificationNeeded, got {:?}", e),
+    }
+
+    let _ = std::fs::remove_dir_all(&tmp);
 }

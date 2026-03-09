@@ -401,6 +401,45 @@ fn process_cursor_stream_falls_back_to_clarification_questions_block() {
     assert_eq!(result.questions[0].options[0].label, "Yes");
 }
 
+/// Cursor stream with real-world tddy-coder plan output: streaming chunks + full assistant
+/// message + result event with full content. Reproduces format from refactoring.txt (lines 986-988).
+/// The result event contains the full concatenated output including the clarification block.
+#[test]
+fn process_cursor_stream_extracts_clarification_from_result_event_with_full_content() {
+    let line1 =
+        r#"{"type":"system","subtype":"init","session_id":"ee4e2182-c133-4a06-b51d-0c3db571bbc3"}"#;
+    let line2 = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I'll start by exploring."}]},"session_id":"ee4e2182-c133-4a06-b51d-0c3db571bbc3"}"#;
+    let line3 = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"\n</clarification-questions>"}]},"session_id":"ee4e2182-c133-4a06-b51d-0c3db571bbc3"}"#;
+    let line4 = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Now I have comprehensive understanding. Before I produce the PRD, I have a few clarification points.\n\n<clarification-questions content-type=\"application-json\">\n{\"questions\":[{\"header\":\"Validate goal scope\",\"question\":\"When you say the new validate goal should produce refactoring-plan.md: should validate keep existing validate-refactor behavior AND add synthesis? Or replace both?\",\"options\":[{\"label\":\"Replace validate-refactor only\",\"description\":\"validate = renamed validate-refactor.\"},{\"label\":\"Merge both into one goal\",\"description\":\"validate replaces both.\"}],\"multiSelect\":false},{\"header\":\"Refactor goal behavior\",\"question\":\"For the new refactor goal: TDD cycle or direct execution?\",\"options\":[{\"label\":\"TDD cycle\",\"description\":\"mini red→green for each item\"},{\"label\":\"Direct execution\",\"description\":\"directly apply changes\"},{\"label\":\"Plan mode only\",\"description\":\"user manually applies\"}],\"multiSelect\":false},{\"header\":\"Full workflow chain\",\"question\":\"Where should validate and refactor fit?\",\"options\":[{\"label\":\"After evaluate\",\"description\":\"plan → ... → evaluate → validate → refactor\"},{\"label\":\"Standalone only\",\"description\":\"standalone goals only\"},{\"label\":\"Replace evaluate\",\"description\":\"validate replaces evaluate\"}],\"multiSelect\":false}]}\n</clarification-questions>"}]},"session_id":"ee4e2182-c133-4a06-b51d-0c3db571bbc3"}"#;
+    let result_content = "I'll start by exploring.Now I have comprehensive understanding. Before I produce the PRD, I have a few clarification points.\n\n<clarification-questions content-type=\"application-json\">\n{\"questions\":[{\"header\":\"Validate goal scope\",\"question\":\"When you say the new validate goal should produce refactoring-plan.md: should validate keep existing validate-refactor behavior AND add synthesis? Or replace both?\",\"options\":[{\"label\":\"Replace validate-refactor only\",\"description\":\"validate = renamed validate-refactor.\"},{\"label\":\"Merge both into one goal\",\"description\":\"validate replaces both.\"}],\"multiSelect\":false},{\"header\":\"Refactor goal behavior\",\"question\":\"For the new refactor goal: TDD cycle or direct execution?\",\"options\":[{\"label\":\"TDD cycle\",\"description\":\"mini red→green for each item\"},{\"label\":\"Direct execution\",\"description\":\"directly apply changes\"},{\"label\":\"Plan mode only\",\"description\":\"user manually applies\"}],\"multiSelect\":false},{\"header\":\"Full workflow chain\",\"question\":\"Where should validate and refactor fit?\",\"options\":[{\"label\":\"After evaluate\",\"description\":\"plan → ... → evaluate → validate → refactor\"},{\"label\":\"Standalone only\",\"description\":\"standalone goals only\"},{\"label\":\"Replace evaluate\",\"description\":\"validate replaces evaluate\"}],\"multiSelect\":false}]}\n</clarification-questions>";
+    let line5 = format!(
+        r#"{{"type":"result","subtype":"success","duration_ms":121950,"is_error":false,"result":{},"session_id":"ee4e2182-c133-4a06-b51d-0c3db571bbc3"}}"#,
+        serde_json::to_string(result_content).expect("escape result")
+    );
+    let ndjson = format!("{}\n{}\n{}\n{}\n{}\n", line1, line2, line3, line4, line5);
+    let cursor = Cursor::new(ndjson);
+    let result =
+        process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
+
+    assert_eq!(
+        result.session_id, "ee4e2182-c133-4a06-b51d-0c3db571bbc3",
+        "should capture session_id from result event"
+    );
+    assert_eq!(
+        result.questions.len(),
+        3,
+        "should extract 3 clarification questions from result event with full content; got: {:?}",
+        result
+            .questions
+            .iter()
+            .map(|q| &q.header)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(result.questions[0].header, "Validate goal scope");
+    assert_eq!(result.questions[1].header, "Refactor goal behavior");
+    assert_eq!(result.questions[2].header, "Full workflow chain");
+}
+
 /// Cursor askQuestionToolCall (alternative name) should also extract questions.
 #[test]
 fn process_cursor_stream_extracts_ask_question_tool_call() {

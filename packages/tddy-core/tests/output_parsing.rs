@@ -1,8 +1,8 @@
 //! Integration tests for output parser and writer.
 
 use tddy_core::output::{
-    parse_acceptance_tests_response, parse_planning_output, parse_red_response,
-    parse_validate_response,
+    parse_acceptance_tests_response, parse_evaluate_response, parse_planning_output,
+    parse_red_response,
 };
 
 #[test]
@@ -84,14 +84,14 @@ fn markdown_cross_references_added() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// parse_validate_response() extracts summary, risk_level, issues, and build_results correctly.
+/// parse_evaluate_response() extracts summary, risk_level, issues, and build_results correctly.
 #[test]
-fn parse_validate_response_extracts_all_fields() {
+fn parse_evaluate_response_extracts_all_fields() {
     let input = r#"<structured-response content-type="application-json">
-{"goal":"validate-changes","summary":"Analyzed 2 files. Risk: low.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[{"severity":"warning","category":"code_quality","file":"src/lib.rs","line":10,"description":"Magic number","suggestion":"Use a named constant"}],"changeset_sync":{"status":"synced","items_updated":1,"items_added":0},"files_analyzed":[{"file":"src/lib.rs","lines_changed":5,"changeset_item":"auth-login"}],"test_impact":{"tests_affected":1,"new_tests_needed":0}}
+{"goal":"evaluate-changes","summary":"Analyzed 2 files. Risk: low.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[{"severity":"warning","category":"code_quality","file":"src/lib.rs","line":10,"description":"Magic number","suggestion":"Use a named constant"}],"changeset_sync":{"status":"synced","items_updated":1,"items_added":0},"files_analyzed":[{"file":"src/lib.rs","lines_changed":5,"changeset_item":"auth-login"}],"test_impact":{"tests_affected":1,"new_tests_needed":0},"changed_files":[],"affected_tests":[],"validity_assessment":"Ready"}
 </structured-response>"#;
 
-    let out = parse_validate_response(input).expect("parse_validate_response should succeed");
+    let out = parse_evaluate_response(input).expect("parse_evaluate_response should succeed");
     assert!(
         out.summary.contains("Analyzed"),
         "summary should contain 'Analyzed', got: {}",
@@ -122,10 +122,9 @@ fn parse_validate_response_extracts_all_fields() {
     assert_eq!(impact.tests_affected, 1);
 }
 
-/// parse_validate_response() uses the last structured-response block, skipping tool results.
+/// parse_evaluate_response() uses the last structured-response block, skipping tool results.
 #[test]
-fn parse_validate_response_skips_tool_result_block() {
-    // Simulates Cursor stream: tool result with usage JSON before agent's validate response.
+fn parse_evaluate_response_skips_tool_result_block() {
     let input = r#"Tool result from earlier in stream:
 <structured-response content-type="application-json">
 {"inputTokens":760,"outputTokens":42,"cacheReadInputTokens":100}
@@ -133,22 +132,22 @@ fn parse_validate_response_skips_tool_result_block() {
 
 Agent's actual response:
 <structured-response content-type="application-json">
-{"goal":"validate-changes","summary":"Analyzed 1 file.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"not_found","items_updated":0,"items_added":0},"files_analyzed":[{"file":"src/main.rs","lines_changed":5,"changeset_item":null}],"test_impact":{"tests_affected":0,"new_tests_needed":0}}
+{"goal":"evaluate-changes","summary":"Analyzed 1 file.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"not_found","items_updated":0,"items_added":0},"files_analyzed":[{"file":"src/main.rs","lines_changed":5,"changeset_item":null}],"test_impact":{"tests_affected":0,"new_tests_needed":0},"changed_files":[],"affected_tests":[],"validity_assessment":"Ready"}
 </structured-response>"#;
 
-    let out = parse_validate_response(input).expect("parse_validate_response should succeed");
+    let out = parse_evaluate_response(input).expect("parse_evaluate_response should succeed");
     assert_eq!(out.summary, "Analyzed 1 file.");
     assert_eq!(out.risk_level, "low");
 }
 
-/// parse_validate_response() returns ParseError::Malformed when the goal field is not "validate-changes".
+/// parse_evaluate_response() returns ParseError::Malformed when the goal field is not "evaluate-changes".
 #[test]
-fn parse_validate_response_fails_on_wrong_goal_field() {
+fn parse_evaluate_response_fails_on_wrong_goal_field() {
     let input = r#"<structured-response content-type="application-json">
-{"goal":"plan","summary":"This is a plan, not a validation.","risk_level":"low","build_results":[],"issues":[],"changeset_sync":null,"files_analyzed":[],"test_impact":null}
+{"goal":"plan","summary":"This is a plan, not an evaluation.","risk_level":"low","build_results":[],"issues":[],"changeset_sync":null,"files_analyzed":[],"test_impact":null,"changed_files":[],"affected_tests":[],"validity_assessment":""}
 </structured-response>"#;
 
-    let err = parse_validate_response(input).expect_err("should fail on wrong goal");
+    let err = parse_evaluate_response(input).expect_err("should fail on wrong goal");
     assert!(
         matches!(err, tddy_core::ParseError::Malformed(_)),
         "expected ParseError::Malformed for wrong goal field, got: {:?}",

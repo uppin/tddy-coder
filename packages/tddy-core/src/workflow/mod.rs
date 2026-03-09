@@ -5,8 +5,8 @@ mod evaluate;
 mod green;
 mod planning;
 mod red;
-mod validate;
-mod validate_refactor;
+mod refactor;
+mod validate_subagents;
 
 use crate::backend::{CodingBackend, InvokeRequest, InvokeResponse};
 use crate::changeset::{
@@ -17,10 +17,9 @@ use crate::error::WorkflowError;
 use crate::output::{
     extract_last_structured_block, parse_acceptance_tests_response, parse_evaluate_response,
     parse_green_response, parse_planning_response, parse_red_response,
-    parse_validate_refactor_response, parse_validate_response, slugify_directory_name,
-    update_acceptance_tests_file, update_progress_file, write_acceptance_tests_file,
-    write_artifacts, write_demo_results_file, write_evaluation_report, write_progress_file,
-    write_red_output_file, write_validation_report,
+    parse_validate_subagents_response, slugify_directory_name, update_acceptance_tests_file,
+    update_progress_file, write_acceptance_tests_file, write_artifacts, write_demo_results_file,
+    write_evaluation_report, write_progress_file, write_red_output_file,
 };
 use crate::schema::{
     format_validation_errors, schema_file_path, validate_output, write_schema_to_dir,
@@ -28,43 +27,40 @@ use crate::schema::{
 use std::path::{Path, PathBuf};
 
 /// Emit debug output when parsing agent response fails. Shows output, raw stream, exit code.
-/// Suppressed when TDDY_QUIET is set (TUI mode) to avoid corrupting the terminal.
+/// Uses log::debug! so output goes through log backend (buffered when TDDY_QUIET, stderr otherwise).
 fn emit_parse_failure_debug(response: &InvokeResponse, goal: &str, empty_hint: Option<&str>) {
-    if std::env::var("TDDY_QUIET").is_ok() {
-        return;
-    }
-    eprintln!(
+    log::debug!(
         "--- Failed parse {} output (length {} bytes) ---",
         goal,
         response.output.len()
     );
     if response.output.is_empty() {
         if let Some(hint) = empty_hint {
-            eprintln!("Hint: {}", hint);
+            log::debug!("Hint: {}", hint);
         }
     } else {
-        eprintln!("{}", response.output);
+        log::debug!("{}", response.output);
     }
     match &response.raw_stream {
         Some(raw) if !raw.is_empty() => {
-            eprintln!(
+            log::debug!(
                 "--- Raw stream from agent CLI ({} lines) ---",
                 raw.lines().count()
             );
-            eprintln!("{}", raw);
-            eprintln!("--- End raw stream ---");
+            log::debug!("{}", raw);
+            log::debug!("--- End raw stream ---");
         }
         _ => {
-            eprintln!("Raw stream: (empty - no NDJSON lines received from agent CLI stdout)");
+            log::debug!("Raw stream: (empty - no NDJSON lines received from agent CLI stdout)");
         }
     }
-    eprintln!("Agent CLI exit code: {}", response.exit_code);
+    log::debug!("Agent CLI exit code: {}", response.exit_code);
     if let Some(ref stderr) = response.stderr {
-        eprintln!("--- Agent CLI stderr ---");
-        eprintln!("{}", stderr);
-        eprintln!("--- End stderr ---");
+        log::debug!("--- Agent CLI stderr ---");
+        log::debug!("{}", stderr);
+        log::debug!("--- End stderr ---");
     }
-    eprintln!("--- End failed parse ---");
+    log::debug!("--- End failed parse ---");
 }
 
 /// Options for the plan step.
@@ -141,19 +137,7 @@ pub struct DemoOptions {
     pub debug: bool,
 }
 
-/// Options for the validate-changes step.
-#[derive(Debug, Default)]
-pub struct ValidateOptions {
-    pub model: Option<String>,
-    pub agent_output: bool,
-    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
-    pub conversation_output_path: Option<PathBuf>,
-    pub inherit_stdin: bool,
-    pub allowed_tools_extras: Option<Vec<String>>,
-    pub debug: bool,
-}
-
-/// Options for the evaluate-changes step (renamed from ValidateOptions).
+/// Options for the evaluate-changes step.
 #[derive(Debug, Default)]
 pub struct EvaluateOptions {
     pub model: Option<String>,
@@ -165,9 +149,21 @@ pub struct EvaluateOptions {
     pub debug: bool,
 }
 
-/// Options for the validate-refactor step.
+/// Options for the refactor step.
 #[derive(Debug, Default)]
-pub struct ValidateRefactorOptions {
+pub struct RefactorOptions {
+    pub model: Option<String>,
+    pub agent_output: bool,
+    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
+    pub conversation_output_path: Option<PathBuf>,
+    pub inherit_stdin: bool,
+    pub allowed_tools_extras: Option<Vec<String>>,
+    pub debug: bool,
+}
+
+/// Options for the validate step (subagent-based).
+#[derive(Debug, Default)]
+pub struct ValidateOptions {
     pub model: Option<String>,
     pub agent_output: bool,
     pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
@@ -197,27 +193,27 @@ pub enum WorkflowState {
     GreenComplete {
         output: crate::output::GreenOutput,
     },
-    Validating,
-    Validated {
-        output: crate::output::ValidateOutput,
-    },
     /// In-progress state for the demo step.
     DemoRunning,
     /// Terminal state after demo finishes successfully.
     DemoComplete {
         output: crate::output::DemoOutput,
     },
-    /// When user chooses to skip demo.
-    DemoSkipped,
     /// In-progress state for the evaluate-changes step.
     Evaluating,
     /// Terminal state after a successful evaluate-changes run.
     Evaluated {
         output: crate::output::EvaluateOutput,
     },
-    /// Terminal state after a successful validate-refactor run.
-    ValidateRefactorComplete {
-        output: crate::output::ValidateRefactorOutput,
+    /// Terminal state after a successful validate (subagent) run.
+    ValidateComplete {
+        output: crate::output::ValidateSubagentsOutput,
+    },
+    /// In-progress state for the refactor step.
+    Refactoring,
+    /// Terminal state after a successful refactor run.
+    RefactorComplete {
+        output: crate::output::RefactorOutput,
     },
     Failed {
         error: String,
@@ -237,14 +233,13 @@ impl WorkflowState {
             Self::RedTestsReady { .. } => "RedTestsReady",
             Self::GreenImplementing => "GreenImplementing",
             Self::GreenComplete { .. } => "GreenComplete",
-            Self::Validating => "Validating",
-            Self::Validated { .. } => "Validated",
             Self::DemoRunning => "DemoRunning",
             Self::DemoComplete { .. } => "DemoComplete",
-            Self::DemoSkipped => "DemoSkipped",
             Self::Evaluating => "Evaluating",
             Self::Evaluated { .. } => "Evaluated",
-            Self::ValidateRefactorComplete { .. } => "ValidateRefactorComplete",
+            Self::ValidateComplete { .. } => "ValidateComplete",
+            Self::Refactoring => "Refactoring",
+            Self::RefactorComplete { .. } => "RefactorComplete",
             Self::Failed { .. } => "Failed",
         }
     }
@@ -475,7 +470,7 @@ impl<B: CodingBackend> Workflow<B> {
                 initial_prompt: Some(input.to_string()),
                 ..Changeset::default()
             };
-            eprintln!(
+            log::debug!(
                 "[tddy-core] plan: writing initial changeset.yaml to {:?} (state=Init)",
                 output_path
             );
@@ -553,19 +548,17 @@ impl<B: CodingBackend> Workflow<B> {
         let planning = match parse_planning_response(&validated_response.output) {
             Ok(out) => out,
             Err(e) => {
-                if std::env::var("TDDY_QUIET").is_err() {
-                    eprintln!(
-                        "--- Failed parse input (length {} bytes) ---",
-                        validated_response.output.len()
-                    );
-                    eprintln!(
-                        "Hint: The agent must output a <structured-response> block with the actual PRD and TODO content. \
-                         Meta-commentary (e.g. 'I've created the PRD...') without the block causes this error. \
-                         See the system prompt for the required format."
-                    );
-                    eprintln!("{}", validated_response.output);
-                    eprintln!("--- End failed parse input ---");
-                }
+                log::debug!(
+                    "--- Failed parse input (length {} bytes) ---",
+                    validated_response.output.len()
+                );
+                log::debug!(
+                    "Hint: The agent must output a <structured-response> block with the actual PRD and TODO content. \
+                     Meta-commentary (e.g. 'I've created the PRD...') without the block causes this error. \
+                     See the system prompt for the required format."
+                );
+                log::debug!("{}", validated_response.output);
+                log::debug!("--- End failed parse input ---");
                 self.set_state(WorkflowState::Failed {
                     error: e.to_string(),
                 });
@@ -1156,10 +1149,6 @@ impl<B: CodingBackend> Workflow<B> {
         _answers: Option<&str>,
         options: &DemoOptions,
     ) -> Result<crate::output::DemoOutput, WorkflowError> {
-        eprintln!(
-            "{{\"tddy\":{{\"marker_id\":\"M002\",\"scope\":\"workflow::demo\",\"data\":{{}}}}}}"
-        );
-
         let can_start = matches!(self.state, WorkflowState::GreenComplete { .. })
             || matches!(self.state, WorkflowState::Init);
 
@@ -1235,133 +1224,6 @@ impl<B: CodingBackend> Workflow<B> {
         Ok(output)
     }
 
-    /// Skip the demo step. Transitions from GreenComplete to DemoSkipped.
-    pub fn skip_demo(&mut self) {
-        eprintln!("{{\"tddy\":{{\"marker_id\":\"M003\",\"scope\":\"workflow::skip_demo\",\"data\":{{}}}}}}");
-        self.set_state(WorkflowState::DemoSkipped);
-    }
-
-    /// Run the validate-changes step: analyze current git changes for risks.
-    /// Requires plan_dir (or plan staging dir) for schemas and validation-report.md.
-    /// Reads changeset/PRD context from plan_dir and includes it in the prompt.
-    /// Always starts a fresh session (is_resume: false).
-    pub fn validate(
-        &mut self,
-        _working_dir: &std::path::Path,
-        plan_dir: Option<&std::path::Path>,
-        _answers: Option<&str>,
-        options: &ValidateOptions,
-    ) -> Result<crate::output::ValidateOutput, WorkflowError> {
-        let plan_dir = plan_dir.ok_or_else(|| {
-            WorkflowError::PlanDirInvalid(
-                "validate-changes requires --plan-dir for schemas and validation-report.md".into(),
-            )
-        })?;
-
-        let can_start = matches!(self.state, WorkflowState::Init);
-        if !can_start {
-            return Err(WorkflowError::InvalidTransition(format!(
-                "cannot validate from {:?}",
-                self.state
-            )));
-        }
-
-        let prd_owned = std::fs::read_to_string(plan_dir.join("PRD.md")).ok();
-        let changeset_owned = std::fs::read_to_string(plan_dir.join("changeset.yaml")).ok();
-        let prd_content = prd_owned.as_deref();
-        let changeset_content = changeset_owned.as_deref();
-
-        // Schemas and validation-report go to plan_dir
-        let _ = write_schema_to_dir(plan_dir, "validate");
-
-        let system_prompt = validate::system_prompt();
-        let prompt = validate::build_prompt(prd_content, changeset_content);
-
-        let session_id = uuid::Uuid::new_v4().to_string();
-        let model = options.model.clone();
-
-        let request = crate::backend::InvokeRequest {
-            prompt,
-            system_prompt: Some(system_prompt),
-            system_prompt_path: None,
-            goal: crate::backend::Goal::Validate,
-            model: model.clone(),
-            session_id: Some(session_id.clone()),
-            is_resume: false,
-            working_dir: Some(plan_dir.to_path_buf()),
-            debug: options.debug,
-            agent_output: options.agent_output,
-            agent_output_sink: options.agent_output_sink.clone(),
-            conversation_output_path: options.conversation_output_path.clone(),
-            inherit_stdin: options.inherit_stdin,
-            extra_allowed_tools: options.allowed_tools_extras.clone(),
-        };
-
-        let response = match self.backend.invoke(request) {
-            Ok(r) => r,
-            Err(e) => {
-                self.set_state(WorkflowState::Failed {
-                    error: e.to_string(),
-                });
-                return Err(WorkflowError::Backend(e));
-            }
-        };
-
-        if !response.questions.is_empty() {
-            return Err(WorkflowError::ClarificationNeeded {
-                questions: response.questions,
-                session_id: response.session_id.unwrap_or_default(),
-            });
-        }
-
-        let session_id_for_retry = response.session_id.clone();
-        let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
-            prompt: retry_prompt.to_string(),
-            system_prompt: Some(validate::system_prompt()),
-            system_prompt_path: None,
-            goal: crate::backend::Goal::Validate,
-            model: model.clone(),
-            session_id: session_id_for_retry.clone(),
-            is_resume: true,
-            working_dir: Some(plan_dir.to_path_buf()),
-            debug: options.debug,
-            agent_output: options.agent_output,
-            agent_output_sink: options.agent_output_sink.clone(),
-            conversation_output_path: options.conversation_output_path.clone(),
-            inherit_stdin: options.inherit_stdin,
-            extra_allowed_tools: options.allowed_tools_extras.clone(),
-        };
-        let validated_response =
-            self.validate_and_retry("validate", response, plan_dir, false, build_retry_request)?;
-
-        let output = match parse_validate_response(&validated_response.output) {
-            Ok(out) => {
-                let _ = write_validation_report(plan_dir, &out);
-                out
-            }
-            Err(e) => {
-                emit_parse_failure_debug(
-                    &validated_response,
-                    "validate",
-                    Some(
-                        "The agent must output a <structured-response> block with goal:\"validate-changes\", summary, risk_level, issues, build_results. \
-                         Output must be exactly one valid JSON object — no numbers, arrays, or numbered lists.",
-                    ),
-                );
-                self.set_state(WorkflowState::Failed {
-                    error: e.to_string(),
-                });
-                return Err(WorkflowError::ParseError(e));
-            }
-        };
-
-        self.set_state(WorkflowState::Validated {
-            output: output.clone(),
-        });
-
-        Ok(output)
-    }
-
     /// Run the evaluate-changes step: analyze current git changes for risks, changed files,
     /// affected tests, and validity. Writes evaluation-report.md to plan_dir.
     /// plan_dir is required — unlike validate() which allows None.
@@ -1385,7 +1247,6 @@ impl<B: CodingBackend> Workflow<B> {
             WorkflowState::Init
                 | WorkflowState::GreenComplete { .. }
                 | WorkflowState::DemoComplete { .. }
-                | WorkflowState::DemoSkipped
         );
         if !can_start {
             return Err(WorkflowError::InvalidTransition(format!(
@@ -1400,7 +1261,7 @@ impl<B: CodingBackend> Workflow<B> {
         let prd_content = prd_owned.as_deref();
         let changeset_content = changeset_owned.as_deref();
 
-        eprintln!(
+        log::debug!(
             "[tddy-core] evaluate: prd={}, changeset={}",
             prd_content.is_some(),
             changeset_content.is_some()
@@ -1498,20 +1359,20 @@ impl<B: CodingBackend> Workflow<B> {
         Ok(output)
     }
 
-    /// Run the validate-refactor step: orchestrate validate-tests, validate-prod-ready,
+    /// Run the validate step: orchestrate validate-tests, validate-prod-ready,
     /// and analyze-clean-code subagents via the Agent tool.
     /// Requires plan_dir to contain evaluation-report.md from a prior evaluate-changes run.
-    pub fn validate_refactor(
+    pub fn validate(
         &mut self,
         plan_dir: &std::path::Path,
         _answers: Option<&str>,
-        options: &ValidateRefactorOptions,
-    ) -> Result<crate::output::ValidateRefactorOutput, WorkflowError> {
-        // evaluation-report.md is required as input for the validate-refactor orchestrator
+        options: &ValidateOptions,
+    ) -> Result<crate::output::ValidateSubagentsOutput, WorkflowError> {
+        // evaluation-report.md is required as input for the validate orchestrator
         let eval_report_path = plan_dir.join("evaluation-report.md");
         if !eval_report_path.exists() {
             return Err(WorkflowError::PlanDirInvalid(
-                "validate-refactor requires evaluation-report.md in plan_dir — \
+                "validate requires evaluation-report.md in plan_dir — \
                  run evaluate-changes first to generate it"
                     .into(),
             ));
@@ -1522,13 +1383,13 @@ impl<B: CodingBackend> Workflow<B> {
                 WorkflowError::PlanDirInvalid(format!("failed to read evaluation-report.md: {}", e))
             })?;
 
-        eprintln!(
-            "[tddy-core] validate_refactor: evaluation-report.md length={}",
+        log::debug!(
+            "[tddy-core] validate: evaluation-report.md length={}",
             evaluation_report_content.len()
         );
 
-        let system_prompt = validate_refactor::system_prompt();
-        let prompt = validate_refactor::build_prompt(&evaluation_report_content);
+        let system_prompt = validate_subagents::system_prompt();
+        let prompt = validate_subagents::build_prompt(&evaluation_report_content);
 
         let session_id = uuid::Uuid::new_v4().to_string();
         let model = options.model.clone();
@@ -1537,7 +1398,7 @@ impl<B: CodingBackend> Workflow<B> {
             prompt,
             system_prompt: Some(system_prompt),
             system_prompt_path: None,
-            goal: crate::backend::Goal::ValidateRefactor,
+            goal: crate::backend::Goal::Validate,
             model: model.clone(),
             session_id: Some(session_id.clone()),
             is_resume: false,
@@ -1570,9 +1431,9 @@ impl<B: CodingBackend> Workflow<B> {
         let session_id_for_retry = response.session_id.clone();
         let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
             prompt: retry_prompt.to_string(),
-            system_prompt: Some(validate_refactor::system_prompt()),
+            system_prompt: Some(validate_subagents::system_prompt()),
             system_prompt_path: None,
-            goal: crate::backend::Goal::ValidateRefactor,
+            goal: crate::backend::Goal::Validate,
             model: model.clone(),
             session_id: session_id_for_retry.clone(),
             is_resume: true,
@@ -1585,22 +1446,22 @@ impl<B: CodingBackend> Workflow<B> {
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
         let validated_response = self.validate_and_retry(
-            "validate-refactor",
+            "validate-subagents",
             response,
             plan_dir,
             false,
             build_retry_request,
         )?;
 
-        let output = match parse_validate_refactor_response(&validated_response.output) {
+        let output = match parse_validate_subagents_response(&validated_response.output) {
             Ok(out) => out,
             Err(e) => {
                 emit_parse_failure_debug(
                     &validated_response,
-                    "validate-refactor",
+                    "validate",
                     Some(
                         "The agent must output a <structured-response> block with \
-                         goal:\"validate-refactor\", summary, tests_report_written, \
+                         goal:\"validate\", summary, tests_report_written, \
                          prod_ready_report_written, clean_code_report_written. \
                          Output must be exactly one valid JSON object.",
                     ),
@@ -1612,7 +1473,117 @@ impl<B: CodingBackend> Workflow<B> {
             }
         };
 
-        self.set_state(WorkflowState::ValidateRefactorComplete {
+        self.set_state(WorkflowState::ValidateComplete {
+            output: output.clone(),
+        });
+
+        Ok(output)
+    }
+
+    /// Run the refactor step: read refactoring-plan.md from plan_dir and execute refactoring tasks.
+    /// Requires refactoring-plan.md in plan_dir (produced by the validate goal).
+    pub fn refactor(
+        &mut self,
+        plan_dir: &std::path::Path,
+        _answers: Option<&str>,
+        options: &RefactorOptions,
+    ) -> Result<crate::output::RefactorOutput, WorkflowError> {
+        let refactoring_plan_path = plan_dir.join("refactoring-plan.md");
+        if !refactoring_plan_path.exists() {
+            return Err(WorkflowError::PlanDirInvalid(
+                "refactor requires refactoring-plan.md in plan_dir — \
+                 run validate first to generate it"
+                    .into(),
+            ));
+        }
+
+        let refactoring_plan_content =
+            std::fs::read_to_string(&refactoring_plan_path).map_err(|e| {
+                WorkflowError::PlanDirInvalid(format!("failed to read refactoring-plan.md: {}", e))
+            })?;
+
+        self.set_state(WorkflowState::Refactoring);
+
+        let system_prompt = refactor::system_prompt();
+        let prompt = refactor::build_prompt(&refactoring_plan_content);
+
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let model = options.model.clone();
+
+        let request = crate::backend::InvokeRequest {
+            prompt,
+            system_prompt: Some(system_prompt),
+            system_prompt_path: None,
+            goal: crate::backend::Goal::Refactor,
+            model: model.clone(),
+            session_id: Some(session_id.clone()),
+            is_resume: false,
+            working_dir: Some(plan_dir.to_path_buf()),
+            debug: options.debug,
+            agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
+            conversation_output_path: options.conversation_output_path.clone(),
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
+        };
+
+        let response = match self.backend.invoke(request) {
+            Ok(r) => r,
+            Err(e) => {
+                self.set_state(WorkflowState::Failed {
+                    error: e.to_string(),
+                });
+                return Err(WorkflowError::Backend(e));
+            }
+        };
+
+        if !response.questions.is_empty() {
+            return Err(WorkflowError::ClarificationNeeded {
+                questions: response.questions,
+                session_id: response.session_id.unwrap_or_default(),
+            });
+        }
+
+        let session_id_for_retry = response.session_id.clone();
+        let build_retry_request = |retry_prompt: &str| crate::backend::InvokeRequest {
+            prompt: retry_prompt.to_string(),
+            system_prompt: Some(refactor::system_prompt()),
+            system_prompt_path: None,
+            goal: crate::backend::Goal::Refactor,
+            model: model.clone(),
+            session_id: session_id_for_retry.clone(),
+            is_resume: true,
+            working_dir: Some(plan_dir.to_path_buf()),
+            debug: options.debug,
+            agent_output: options.agent_output,
+            agent_output_sink: options.agent_output_sink.clone(),
+            conversation_output_path: options.conversation_output_path.clone(),
+            inherit_stdin: options.inherit_stdin,
+            extra_allowed_tools: options.allowed_tools_extras.clone(),
+        };
+        let validated_response =
+            self.validate_and_retry("refactor", response, plan_dir, false, build_retry_request)?;
+
+        let output = match crate::output::parse_refactor_response(&validated_response.output) {
+            Ok(out) => out,
+            Err(e) => {
+                emit_parse_failure_debug(
+                    &validated_response,
+                    "refactor",
+                    Some(
+                        "The agent must output a <structured-response> block with \
+                             goal:\"refactor\", summary, tasks_completed, tests_passing. \
+                             Output must be exactly one valid JSON object.",
+                    ),
+                );
+                self.set_state(WorkflowState::Failed {
+                    error: e.to_string(),
+                });
+                return Err(WorkflowError::ParseError(e));
+            }
+        };
+
+        self.set_state(WorkflowState::RefactorComplete {
             output: output.clone(),
         });
 
@@ -1760,6 +1731,7 @@ const KNOWN_ARTIFACTS: &[&str] = &[
     "validate-tests-report.md",
     "validate-prod-ready-report.md",
     "analyze-clean-code-report.md",
+    "refactoring-plan.md",
 ];
 
 /// Build the context header string listing absolute paths to existing `.md` artifacts
@@ -2164,6 +2136,29 @@ mod context_header_tests {
         assert!(
             result.contains("\n</context-reminder>\n"),
             "closing tag must be followed by newline before prompt body"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── AC (R9): KNOWN_ARTIFACTS includes refactoring-plan.md ───────────────
+
+    #[test]
+    fn test_context_header_includes_refactoring_plan() {
+        let dir = temp_dir("includes-refactoring-plan");
+        fs::write(
+            dir.join("refactoring-plan.md"),
+            "# Refactoring Plan\n## Tasks\n- Rename",
+        )
+        .unwrap();
+
+        let header = build_context_header(Some(&dir));
+
+        assert!(
+            header.contains("refactoring-plan.md:"),
+            "KNOWN_ARTIFACTS must include refactoring-plan.md so it appears in context headers, \
+             got header: {:?}",
+            header
         );
 
         let _ = fs::remove_dir_all(&dir);

@@ -5,7 +5,7 @@
 //! - `EvaluateOptions` (renamed from ValidateOptions)
 //! - `WorkflowState::Evaluated` (renamed from WorkflowState::Validated)
 //! - `workflow.evaluate()` method (renamed from workflow.validate())
-//! - `evaluate_allowlist()` (renamed from validate_allowlist())
+//! - `evaluate_allowlist()` for the evaluate goal
 //! - `evaluation-report.md` written to plan_dir (not working_dir)
 //! - New report fields: changed_files, affected_tests, validity_assessment
 //!

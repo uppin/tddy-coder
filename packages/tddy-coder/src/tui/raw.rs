@@ -22,7 +22,8 @@ mod unix {
 
         let mut raw = termios;
         // Disable canonical mode, echo, etc. but KEEP ISIG so Ctrl+C generates SIGINT.
-        raw.c_lflag &= !(libc::ICANON | libc::ECHO | libc::ECHOE | libc::ECHOK | libc::ECHONL | libc::IEXTEN);
+        raw.c_lflag &=
+            !(libc::ICANON | libc::ECHO | libc::ECHOE | libc::ECHOK | libc::ECHONL | libc::IEXTEN);
         raw.c_iflag &= !(libc::BRKINT | libc::ICRNL | libc::INPCK | libc::ISTRIP | libc::IXON);
         raw.c_oflag &= !(libc::OPOST);
         raw.c_cflag &= libc::CSIZE;
@@ -38,7 +39,11 @@ mod unix {
 
     pub fn disable_raw_mode() -> io::Result<()> {
         let fd = std::io::stdin().as_raw_fd();
-        if let Some(termios) = SAVED_TERMIOS.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        if let Some(termios) = SAVED_TERMIOS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
             if unsafe { libc::tcsetattr(fd, libc::TCSAFLUSH, &termios) } != 0 {
                 return Err(io::Error::last_os_error());
             }

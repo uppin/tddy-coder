@@ -13,9 +13,9 @@ use std::sync::Arc;
 use std::thread;
 use tddy_core::{
     get_session_for_tag, init_tddy_logger, next_goal_for_state, read_changeset,
-    AcceptanceTestsOptions, AgentOutputSink, AnyBackend, ClaudeCodeBackend,
-    CursorBackend, DemoOptions, EvaluateOptions, GreenOptions, PlanOptions, ProgressEvent,
-    RedOptions, Workflow, WorkflowError, WorkflowState,
+    AcceptanceTestsOptions, AgentOutputSink, AnyBackend, ClaudeCodeBackend, CursorBackend,
+    DemoOptions, EvaluateOptions, GreenOptions, PlanOptions, ProgressEvent, RedOptions,
+    RefactorOptions, ValidateOptions, Workflow, WorkflowError, WorkflowState,
 };
 
 use crate::tui::event::TuiEvent;
@@ -25,8 +25,8 @@ use crate::tui::state::should_run_tui;
 #[command(name = "tddy-coder")]
 #[command(about = "TDD-driven coder for PRD-based development workflow")]
 struct Args {
-    /// Goal to execute: plan, acceptance-tests, red, green, demo, evaluate. Omit to run full workflow.
-    #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "demo", "evaluate"])]
+    /// Goal to execute: plan, acceptance-tests, red, green, demo, evaluate, validate, refactor. Omit to run full workflow.
+    #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor"])]
     goal: Option<String>,
 
     /// Output directory for planning artifacts (default: current directory)
@@ -53,6 +53,10 @@ struct Args {
     #[arg(long)]
     debug: bool,
 
+    /// Enable debug logging and redirect to file (avoids stderr/TUI corruption)
+    #[arg(long)]
+    debug_output: Option<PathBuf>,
+
     /// Agent backend: claude or cursor (default: claude)
     #[arg(long, default_value = "claude", value_parser = ["claude", "cursor"])]
     agent: String,
@@ -64,7 +68,7 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    init_tddy_logger(args.debug);
+    init_tddy_logger(args.debug, args.debug_output.as_deref());
 
     ctrlc::set_handler(|| {
         tddy_core::kill_child_process();
@@ -95,6 +99,13 @@ fn run(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         }
         return run_full_workflow_plain(args);
     }
+
+    log::debug!(
+        "[tddy-coder] goal: {}, agent: {}, model: {}",
+        args.goal.as_deref().unwrap_or("(none)"),
+        args.agent,
+        args.model.as_deref().unwrap_or("(default)")
+    );
 
     if args.goal.as_deref() == Some("acceptance-tests") {
         let plan_dir = args
@@ -328,6 +339,60 @@ fn run(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         }
     }
 
+    if args.goal.as_deref() == Some("validate") {
+        let plan_dir = args
+            .plan_dir
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for validate goal"))?;
+        let mut workflow = create_workflow(&args.agent);
+        let options = tddy_core::ValidateOptions {
+            model: args.model.clone(),
+            agent_output: true,
+            agent_output_sink: None,
+            conversation_output_path: args.conversation_output.clone(),
+            inherit_stdin: io::stdin().is_terminal(),
+            allowed_tools_extras: args.allowed_tools.clone(),
+            debug: args.debug,
+        };
+        let result = workflow.validate(plan_dir, None, &options);
+        match result {
+            Ok(output) => {
+                println!("{}", output.summary);
+                println!("Plan dir: {}", plan_dir.display());
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    if args.goal.as_deref() == Some("refactor") {
+        let plan_dir = args
+            .plan_dir
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for refactor goal"))?;
+        let mut workflow = create_workflow(&args.agent);
+        let options = tddy_core::RefactorOptions {
+            model: args.model.clone(),
+            agent_output: true,
+            agent_output_sink: None,
+            conversation_output_path: args.conversation_output.clone(),
+            inherit_stdin: io::stdin().is_terminal(),
+            allowed_tools_extras: args.allowed_tools.clone(),
+            debug: args.debug,
+        };
+        let result = workflow.refactor(plan_dir, None, &options);
+        match result {
+            Ok(output) => {
+                println!("{}", output.summary);
+                println!("Tasks completed: {}", output.tasks_completed);
+                println!("Tests passing: {}", output.tests_passing);
+                println!("Plan dir: {}", plan_dir.display());
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+
     if args.goal.as_deref() != Some("plan") {
         anyhow::bail!(
             "unsupported goal: {}",
@@ -375,11 +440,14 @@ fn on_progress(_event: &ProgressEvent) {
 }
 
 fn create_workflow(agent: &str) -> Workflow<AnyBackend> {
+    log::debug!("[tddy-coder] using agent: {}", agent);
     let backend: AnyBackend = match agent {
         "cursor" => AnyBackend::Cursor(CursorBackend::new().with_progress(on_progress)),
         _ => AnyBackend::Claude(ClaudeCodeBackend::new().with_progress(on_progress)),
     };
-    Workflow::new(backend).with_on_state_change(|_from, _to| {})
+    Workflow::new(backend).with_on_state_change(|from, to| {
+        log::debug!("[tddy-coder] state: {} → {}", from, to);
+    })
 }
 
 fn create_workflow_for_tui(agent: &str, event_tx: mpsc::Sender<TuiEvent>) -> Workflow<AnyBackend> {
@@ -435,8 +503,14 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
 
     let agent = args.agent.as_str();
     let model = args.model.as_deref().unwrap_or("opus");
-    let result =
-        tui::run::run_tui_event_loop(event_rx, answer_tx, event_tx_crossterm, shutdown, agent, model);
+    let result = tui::run::run_tui_event_loop(
+        event_rx,
+        answer_tx,
+        event_tx_crossterm,
+        shutdown,
+        agent,
+        model,
+    );
 
     let _ = workflow_handle.join();
     result
@@ -679,7 +753,9 @@ fn run_workflow_thread(
                     false
                 };
                 if run_demo {
-                    event_tx.send(TuiEvent::GoalStarted("demo".to_string())).ok();
+                    event_tx
+                        .send(TuiEvent::GoalStarted("demo".to_string()))
+                        .ok();
                     match workflow.demo(&plan_dir, None, &DemoOptions::default()) {
                         Ok(_) => {}
                         Err(e) => {
@@ -687,10 +763,10 @@ fn run_workflow_thread(
                             return;
                         }
                     }
-                } else {
-                    workflow.skip_demo();
                 }
-                event_tx.send(TuiEvent::GoalStarted("evaluate".to_string())).ok();
+                event_tx
+                    .send(TuiEvent::GoalStarted("evaluate".to_string()))
+                    .ok();
                 let eval_options = EvaluateOptions {
                     model: model.clone(),
                     agent_output: true,
@@ -702,13 +778,58 @@ fn run_workflow_thread(
                 };
                 match workflow.evaluate(&output_dir, Some(&plan_dir), None, &eval_options) {
                     Ok(eval_out) => {
-                        let summary = format!(
-                            "{}\nPlan dir: {}\nEvaluation: {}",
-                            output.summary,
-                            plan_dir.display(),
-                            eval_out.summary
-                        );
-                        let _ = event_tx.send(TuiEvent::WorkflowComplete(Ok(summary)));
+                        event_tx
+                            .send(TuiEvent::GoalStarted("validate".to_string()))
+                            .ok();
+                        let validate_options = ValidateOptions {
+                            model: model.clone(),
+                            agent_output: true,
+                            agent_output_sink: Some(agent_output_sink.clone()),
+                            conversation_output_path: conversation_output.clone(),
+                            inherit_stdin,
+                            allowed_tools_extras: allowed_tools.clone(),
+                            debug,
+                        };
+                        match workflow.validate(&plan_dir, None, &validate_options) {
+                            Ok(validate_out) => {
+                                event_tx
+                                    .send(TuiEvent::GoalStarted("refactor".to_string()))
+                                    .ok();
+                                let refactor_options = RefactorOptions {
+                                    model: model.clone(),
+                                    agent_output: true,
+                                    agent_output_sink: Some(agent_output_sink.clone()),
+                                    conversation_output_path: conversation_output.clone(),
+                                    inherit_stdin,
+                                    allowed_tools_extras: allowed_tools.clone(),
+                                    debug,
+                                };
+                                match workflow.refactor(&plan_dir, None, &refactor_options) {
+                                    Ok(refactor_out) => {
+                                        let summary = format!(
+                                            "{}\nPlan dir: {}\nEvaluation: {}\n{}\n{}\nTasks completed: {}\nTests passing: {}",
+                                            output.summary,
+                                            plan_dir.display(),
+                                            eval_out.summary,
+                                            validate_out.summary,
+                                            refactor_out.summary,
+                                            refactor_out.tasks_completed,
+                                            refactor_out.tests_passing
+                                        );
+                                        let _ =
+                                            event_tx.send(TuiEvent::WorkflowComplete(Ok(summary)));
+                                    }
+                                    Err(e) => {
+                                        let _ = event_tx
+                                            .send(TuiEvent::WorkflowComplete(Err(e.to_string())));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let _ =
+                                    event_tx.send(TuiEvent::WorkflowComplete(Err(e.to_string())));
+                            }
+                        }
                     }
                     Err(e) => {
                         let _ = event_tx.send(TuiEvent::WorkflowComplete(Err(e.to_string())));
@@ -804,7 +925,8 @@ fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
                         break;
                     }
                     Err(WorkflowError::ClarificationNeeded { questions, .. }) => {
-                        answers = Some(plain::read_answers_plain(&questions).context("read answers")?);
+                        answers =
+                            Some(plain::read_answers_plain(&questions).context("read answers")?);
                     }
                     Err(e) => return Err(e.into()),
                 }
@@ -892,8 +1014,6 @@ fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
                     && plain::read_demo_choice_plain().context("read demo choice")?;
                 if run_demo {
                     workflow.demo(&plan_dir, None, &DemoOptions::default())?;
-                } else {
-                    workflow.skip_demo();
                 }
                 let eval_options = EvaluateOptions {
                     model: args.model.clone(),
@@ -906,6 +1026,28 @@ fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
                 };
                 let eval_out =
                     workflow.evaluate(&args.output_dir, Some(&plan_dir), None, &eval_options)?;
+
+                let validate_options = ValidateOptions {
+                    model: args.model.clone(),
+                    agent_output: true,
+                    agent_output_sink: None,
+                    conversation_output_path: args.conversation_output.clone(),
+                    inherit_stdin,
+                    allowed_tools_extras: args.allowed_tools.clone(),
+                    debug: args.debug,
+                };
+                let validate_out = workflow.validate(&plan_dir, None, &validate_options)?;
+
+                let refactor_options = RefactorOptions {
+                    model: args.model.clone(),
+                    agent_output: true,
+                    agent_output_sink: None,
+                    conversation_output_path: args.conversation_output.clone(),
+                    inherit_stdin,
+                    allowed_tools_extras: args.allowed_tools.clone(),
+                    debug: args.debug,
+                };
+                let refactor_out = workflow.refactor(&plan_dir, None, &refactor_options)?;
 
                 println!("{}", output.summary);
                 for t in &output.tests {
@@ -936,6 +1078,10 @@ fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
                     println!("How to run a single or selected tests: {}", single);
                 }
                 println!("\nEvaluation: {}", eval_out.summary);
+                println!("{}", validate_out.summary);
+                println!("{}", refactor_out.summary);
+                println!("Tasks completed: {}", refactor_out.tasks_completed);
+                println!("Tests passing: {}", refactor_out.tests_passing);
                 println!("\nPlan dir: {}", plan_dir.display());
                 return Ok(());
             }

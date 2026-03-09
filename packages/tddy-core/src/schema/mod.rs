@@ -15,9 +15,9 @@ const GOAL_SCHEMA_FILES: &[(&str, &str)] = &[
     ("acceptance-tests", "acceptance-tests.schema.json"),
     ("red", "red.schema.json"),
     ("green", "green.schema.json"),
-    ("validate", "validate.schema.json"),
     ("evaluate", "evaluate.schema.json"),
-    ("validate-refactor", "validate-refactor.schema.json"),
+    ("validate-subagents", "validate-subagents.schema.json"),
+    ("refactor", "refactor.schema.json"),
 ];
 
 /// Common schema files (in common/ subdir) with their $id URIs.
@@ -151,7 +151,7 @@ pub fn format_validation_errors(errors: &[SchemaError]) -> String {
 
 /// Writes all goal schemas and common schemas to the given directory.
 /// Creates a `schemas/` subdirectory. Call when the plan dir is created so schemas
-/// are available for all subsequent goals (acceptance-tests, red, green, validate-refactor).
+/// are available for all subsequent goals (acceptance-tests, red, green, validate-subagents).
 pub fn write_all_schemas_to_dir(dir: &Path) -> std::io::Result<()> {
     for (goal, _) in GOAL_SCHEMA_FILES {
         write_schema_to_dir(dir, goal)?;
