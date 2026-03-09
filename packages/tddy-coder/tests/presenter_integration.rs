@@ -99,8 +99,6 @@ fn full_workflow_completes_with_stub_backend() {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
             presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
-        } else if matches!(presenter.state().mode, AppMode::DemoPrompt) {
-            presenter.handle_intent(UserIntent::DemoChoice(false));
         }
         iterations += 1;
         std::thread::sleep(Duration::from_millis(10));
@@ -149,8 +147,6 @@ fn clarification_roundtrip_sends_answers() {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
             presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
-        } else if matches!(presenter.state().mode, AppMode::DemoPrompt) {
-            presenter.handle_intent(UserIntent::DemoChoice(false));
         }
         iterations += 1;
         std::thread::sleep(Duration::from_millis(10));
@@ -164,6 +160,14 @@ fn clarification_roundtrip_sends_answers() {
             .any(|e| matches!(e, TestEvent::ModeChanged(AppMode::Select { .. }))),
         "expected Select mode during clarification: {:?}",
         events
+    );
+    let result = presenter
+        .take_workflow_result()
+        .expect("should have result");
+    assert!(
+        result.is_ok(),
+        "expected workflow to complete successfully, got: {:?}",
+        result
     );
 }
 
@@ -191,8 +195,6 @@ fn inbox_queue_and_dequeue() {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
-        } else if matches!(presenter.state().mode, AppMode::DemoPrompt) {
-            presenter.handle_intent(UserIntent::DemoChoice(false));
         }
         iterations += 1;
         std::thread::sleep(Duration::from_millis(10));

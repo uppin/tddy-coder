@@ -2,6 +2,8 @@
 //!
 //! Verifies run_plan_via_flow_runner exists and produces plan output when CLI/TUI
 //! migrates from Workflow to FlowRunner.
+//!
+//! Uses SKIP_QUESTIONS in prompt because FlowRunner does not support clarification input.
 
 use std::path::PathBuf;
 use tddy_coder::{run_plan_via_flow_runner, Args};
@@ -28,7 +30,7 @@ fn run_plan_via_flow_runner_produces_plan_directory() {
         debug: false,
         debug_output: None,
         agent: "stub".to_string(),
-        prompt: Some("Add user authentication".to_string()),
+        prompt: Some("Add user authentication SKIP_QUESTIONS".to_string()),
         grpc: None,
     };
 

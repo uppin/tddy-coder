@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["packages/tddy-core", "packages/tddy-coder", "packages/tddy-tui", "packages/tddy-demo", "packages/tddy-permission", "packages/tddy-grpc"]
+members = ["packages/tddy-core", "packages/tddy-coder", "packages/tddy-tui", "packages/tddy-demo", "packages/tddy-permission", "packages/tddy-grpc", "packages/tddy-e2e"]

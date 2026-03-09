@@ -76,7 +76,7 @@ impl ViewState {
                 self.select_typing_other = false;
             }
             AppMode::MultiSelect { question, .. } => {
-                let len = question.options.len() + 1; // +1 for Other
+                let len = question.options.len() + if question.allow_other { 1 } else { 0 };
                 self.multiselect_cursor = 0;
                 self.multiselect_checked = vec![false; len];
                 self.multiselect_other_text.clear();
@@ -91,7 +91,7 @@ impl ViewState {
                 self.running_cursor = 0;
                 self.inbox_focus = InboxFocus::None;
             }
-            AppMode::DemoPrompt | AppMode::Done => {}
+            AppMode::Done => {}
         }
     }
 
@@ -116,7 +116,6 @@ impl ViewState {
                 self.handle_multiselect_key_view_local(key, question)
             }
             AppMode::TextInput { .. } => self.handle_text_input_key_view_local(key),
-            AppMode::DemoPrompt => false,
             AppMode::Done => self.handle_done_key_view_local(key),
         }
     }
@@ -259,6 +258,11 @@ impl ViewState {
     ) -> bool {
         let option_count = question.options.len();
         let other_idx = option_count;
+        let max_idx = if question.allow_other {
+            other_idx
+        } else {
+            option_count.saturating_sub(1)
+        };
 
         match key.code {
             KeyCode::Up => {
@@ -266,7 +270,7 @@ impl ViewState {
                     false
                 } else {
                     self.select_selected = if self.select_selected == 0 {
-                        other_idx
+                        max_idx
                     } else {
                         self.select_selected - 1
                     };
@@ -277,7 +281,7 @@ impl ViewState {
                 if self.select_typing_other {
                     false
                 } else {
-                    self.select_selected = if self.select_selected >= other_idx {
+                    self.select_selected = if self.select_selected >= max_idx {
                         0
                     } else {
                         self.select_selected + 1
@@ -289,11 +293,26 @@ impl ViewState {
                 self.select_other_text.push(c);
                 true
             }
+            KeyCode::Char(c)
+                if question.allow_other
+                    && !c.is_control()
+                    && self.select_selected == other_idx
+                    && !self.select_typing_other =>
+            {
+                // Start typing immediately when user types on "Other" — no need to press Enter first
+                self.select_typing_other = true;
+                self.select_other_text.push(c);
+                true
+            }
             KeyCode::Backspace if self.select_typing_other => {
                 self.select_other_text.pop();
                 true
             }
-            KeyCode::Enter if self.select_selected == other_idx && !self.select_typing_other => {
+            KeyCode::Enter
+                if question.allow_other
+                    && self.select_selected == other_idx
+                    && !self.select_typing_other =>
+            {
                 self.select_typing_other = true;
                 true
             }
@@ -307,12 +326,17 @@ impl ViewState {
         question: &ClarificationQuestion,
     ) -> bool {
         let other_idx = question.options.len();
+        let max_idx = if question.allow_other {
+            other_idx
+        } else {
+            question.options.len().saturating_sub(1)
+        };
 
         match key.code {
             KeyCode::Up => {
                 if !self.multiselect_typing_other {
                     self.multiselect_cursor = if self.multiselect_cursor == 0 {
-                        other_idx
+                        max_idx
                     } else {
                         self.multiselect_cursor - 1
                     };
@@ -323,7 +347,7 @@ impl ViewState {
             }
             KeyCode::Down => {
                 if !self.multiselect_typing_other {
-                    self.multiselect_cursor = if self.multiselect_cursor >= other_idx {
+                    self.multiselect_cursor = if self.multiselect_cursor >= max_idx {
                         0
                     } else {
                         self.multiselect_cursor + 1
@@ -334,18 +358,33 @@ impl ViewState {
                 }
             }
             KeyCode::Char(' ') if !self.multiselect_typing_other => {
-                if let Some(c) = self.multiselect_checked.get_mut(self.multiselect_cursor) {
-                    *c = !*c;
+                if self.multiselect_cursor < other_idx {
+                    if let Some(c) = self.multiselect_checked.get_mut(self.multiselect_cursor) {
+                        *c = !*c;
+                    }
                 }
                 true
             }
             KeyCode::Enter
-                if self.multiselect_cursor == other_idx && !self.multiselect_typing_other =>
+                if question.allow_other
+                    && self.multiselect_cursor == other_idx
+                    && !self.multiselect_typing_other =>
             {
                 self.multiselect_typing_other = true;
                 true
             }
             KeyCode::Char(c) if self.multiselect_typing_other => {
+                self.multiselect_other_text.push(c);
+                true
+            }
+            KeyCode::Char(c)
+                if question.allow_other
+                    && !c.is_control()
+                    && self.multiselect_cursor == other_idx
+                    && !self.multiselect_typing_other =>
+            {
+                // Start typing immediately when user types on "Other" — no need to press Enter first
+                self.multiselect_typing_other = true;
                 self.multiselect_other_text.push(c);
                 true
             }

@@ -19,7 +19,6 @@ message ClientMessage {
     QueuePrompt queue_prompt = 6;
     EditInboxItem edit_inbox_item = 7;
     DeleteInboxItem delete_inbox_item = 8;
-    DemoChoice demo_choice = 9;
     Scroll scroll = 10;
     Quit quit = 11;
   }
@@ -59,10 +58,6 @@ message DeleteInboxItem {
   uint32 index = 1;
 }
 
-message DemoChoice {
-  bool run = 1;
-}
-
 message Scroll {
   int32 delta = 1;
 }
@@ -95,7 +90,6 @@ message AppModeProto {
     AppModeSelect select = 3;
     AppModeMultiSelect multi_select = 4;
     AppModeTextInput text_input = 5;
-    AppModeDemoPrompt demo_prompt = 6;
     AppModeDone done = 7;
   }
 }
@@ -115,7 +109,6 @@ message AppModeMultiSelect {
 message AppModeTextInput {
   string prompt = 1;
 }
-message AppModeDemoPrompt {}
 message AppModeDone {}
 
 message ClarificationQuestionProto {

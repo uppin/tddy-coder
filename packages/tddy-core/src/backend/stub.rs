@@ -21,17 +21,30 @@ fn escape_json_string(s: &str) -> String {
         .replace('\t', "\\t")
 }
 
-/// Magic catch-words in the prompt (case-sensitive).
-const CLARIFY: &str = "CLARIFY";
+/// Magic catch-words in the prompt (uppercased before check).
+const SKIP_QUESTIONS: &str = "SKIP_QUESTIONS";
 const FAIL_PARSE: &str = "FAIL_PARSE";
 const FAIL_SCHEMA: &str = "FAIL_SCHEMA";
 const FAIL_INVOKE: &str = "FAIL_INVOKE";
 const SLOW: &str = "SLOW";
 
 /// Stub backend for demo and workflow tests.
-#[derive(Debug, Default)]
+///
+/// All interactions (clarification, permission, demo approval) rise from the stub:
+/// - Plan: always asks clarification; when answered, proceeds.
+/// - AcceptanceTests: always asks permission (like Claude) before creating files.
+/// - Plan includes demo_plan so demo approval is requested after green.
+#[derive(Debug)]
 pub struct StubBackend {
     invocation_count: AtomicU32,
+}
+
+impl Default for StubBackend {
+    fn default() -> Self {
+        Self {
+            invocation_count: AtomicU32::new(0),
+        }
+    }
 }
 
 impl StubBackend {
@@ -51,7 +64,7 @@ impl StubBackend {
     }
 
     fn plan_response(&self) -> InvokeResponse {
-        // Omit discovery and demo_plan to pass schema validation (null fails for type:object).
+        // Omit discovery when not demo_mode (null fails for type:object). demo_plan only in demo_mode.
         // PRD includes TDD flow instructions so the demo covers the entire flow.
         let prd = r#"# PRD — Stub Feature
 
@@ -73,10 +86,12 @@ After planning, run each step (or omit `--goal` to run the full flow interactive
 
 Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI."#;
         let todo = "- [ ] Run acceptance-tests\n- [ ] Run red\n- [ ] Run green\n- [ ] Run demo\n- [ ] Run evaluate\n- [ ] Run validate\n- [ ] Run refactor";
+        let demo_plan = r#","demo_plan":{"demo_type":"cli","setup_instructions":"Run cargo build","steps":[{"description":"Run the CLI","command_or_action":"cargo run","expected_result":"See output"}],"verification":"CLI runs without error"}"#;
         let json = format!(
-            r#"{{"goal":"plan","name":"Stub Feature","prd":"{}","todo":"{}"}}"#,
+            r#"{{"goal":"plan","name":"Stub Feature","prd":"{}","todo":"{}"{}}}"#,
             escape_json_string(prd),
-            escape_json_string(todo)
+            escape_json_string(todo),
+            demo_plan
         );
         InvokeResponse {
             output: Self::wrap_structured(&json),
@@ -204,6 +219,28 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI."
                 },
             ],
             multi_select: false,
+            allow_other: true,
+        }]
+    }
+
+    /// Permission question for acceptance-tests (demo mode): like Claude would ask before creating files.
+    /// Binary Yes/No — no "Other (type your own)".
+    fn permission_questions() -> Vec<ClarificationQuestion> {
+        vec![ClarificationQuestion {
+            header: "Permission".to_string(),
+            question: "Allow creating test files (tests/auth.it.rs)?".to_string(),
+            options: vec![
+                QuestionOption {
+                    label: "Yes".to_string(),
+                    description: "Proceed with creating test files".to_string(),
+                },
+                QuestionOption {
+                    label: "No".to_string(),
+                    description: "Skip creating test files".to_string(),
+                },
+            ],
+            multi_select: false,
+            allow_other: false,
         }]
     }
 
@@ -239,20 +276,12 @@ impl CodingBackend for StubBackend {
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         self.invocation_count.fetch_add(1, Ordering::SeqCst);
         let prompt = request.prompt.to_uppercase();
+        let has_answers = prompt.contains("HERE ARE THE USER'S ANSWERS");
 
         if prompt.contains(FAIL_INVOKE) {
             return Err(BackendError::InvocationFailed(
                 "StubBackend: FAIL_INVOKE".to_string(),
             ));
-        }
-
-        if prompt.contains(CLARIFY)
-            && !prompt.contains("ANSWERS:")
-            && !prompt.contains("HERE ARE THE USER'S ANSWERS")
-        {
-            let mut resp = self.response_for_goal(request.goal);
-            resp.questions = Self::clarify_questions();
-            return Ok(resp);
         }
 
         if prompt.contains(FAIL_PARSE) {
@@ -261,6 +290,22 @@ impl CodingBackend for StubBackend {
 
         if prompt.contains(FAIL_SCHEMA) {
             return Ok(self.fail_schema_response(request.goal));
+        }
+
+        // Plan: always clarify; when answered (HERE ARE THE USER'S ANSWERS), proceed.
+        // SKIP_QUESTIONS: for tests (e.g. FlowRunner) that cannot provide clarification input.
+        if request.goal == Goal::Plan && !has_answers && !prompt.contains(SKIP_QUESTIONS) {
+            let mut resp = self.response_for_goal(request.goal);
+            resp.questions = Self::clarify_questions();
+            return Ok(resp);
+        }
+
+        // AcceptanceTests: always ask permission (like Claude) before creating files.
+        if request.goal == Goal::AcceptanceTests && !has_answers && !prompt.contains(SKIP_QUESTIONS)
+        {
+            let mut resp = self.response_for_goal(request.goal);
+            resp.questions = Self::permission_questions();
+            return Ok(resp);
         }
 
         if prompt.contains(SLOW) {

@@ -42,8 +42,6 @@ pub enum AppMode {
     },
     /// Free-form text input (question with no predefined options).
     TextInput { prompt: String },
-    /// User must choose Run or Skip for demo.
-    DemoPrompt,
     /// Workflow complete.
     Done,
 }

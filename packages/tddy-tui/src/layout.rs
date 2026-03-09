@@ -2,6 +2,21 @@
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
+use tddy_core::AppMode;
+
+/// Compute the height (in lines) for the question display region.
+/// Used when in Select, MultiSelect, or TextInput mode.
+pub fn question_height(mode: &AppMode) -> u16 {
+    match mode {
+        AppMode::Select { question, .. } | AppMode::MultiSelect { question, .. } => {
+            // header(1) + question(1) + options + Other(1) when allow_other
+            2 + question.options.len() as u16 + if question.allow_other { 1 } else { 0 }
+        }
+        AppMode::TextInput { .. } => 2, // prompt + blank
+        _ => 0,
+    }
+}
+
 /// Split the terminal area into four regions.
 pub fn layout_chunks(area: Rect) -> (Rect, Rect, Rect, Rect) {
     let chunks = Layout::default()
@@ -59,6 +74,47 @@ pub fn layout_chunks_with_inbox(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tddy_core::{ClarificationQuestion, QuestionOption};
+
+    #[test]
+    fn test_question_height_select_mode() {
+        let q = ClarificationQuestion {
+            header: "Scope".to_string(),
+            question: "Which authentication?".to_string(),
+            options: vec![
+                QuestionOption {
+                    label: "A".to_string(),
+                    description: "opt A".to_string(),
+                },
+                QuestionOption {
+                    label: "B".to_string(),
+                    description: "opt B".to_string(),
+                },
+            ],
+            multi_select: false,
+            allow_other: true,
+        };
+        let mode = AppMode::Select {
+            question: q,
+            question_index: 0,
+            total_questions: 1,
+        };
+        assert_eq!(question_height(&mode), 5); // 2 (header+question) + 2 options + 1 Other
+    }
+
+    #[test]
+    fn test_question_height_text_input_mode() {
+        let mode = AppMode::TextInput {
+            prompt: "Type your answer".to_string(),
+        };
+        assert_eq!(question_height(&mode), 2);
+    }
+
+    #[test]
+    fn test_question_height_running_mode() {
+        let mode = AppMode::Running;
+        assert_eq!(question_height(&mode), 0);
+    }
 
     #[test]
     fn test_layout_chunks_returns_four_regions() {

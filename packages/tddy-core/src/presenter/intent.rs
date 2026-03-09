@@ -19,8 +19,6 @@ pub enum UserIntent {
     EditInboxItem { index: usize, text: String },
     /// User deleted inbox item at index.
     DeleteInboxItem(usize),
-    /// User chose Run (true) or Skip (false) for demo prompt.
-    DemoChoice(bool),
     /// User scrolled activity log (delta lines).
     Scroll(i32),
     /// User requested quit.
@@ -47,11 +45,5 @@ mod tests {
     fn user_intent_queue_prompt() {
         let intent = UserIntent::QueuePrompt("fix bug".to_string());
         assert!(matches!(intent, UserIntent::QueuePrompt(s) if s == "fix bug"));
-    }
-
-    #[test]
-    fn user_intent_demo_choice() {
-        let intent = UserIntent::DemoChoice(true);
-        assert!(matches!(intent, UserIntent::DemoChoice(true)));
     }
 }

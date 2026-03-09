@@ -16,6 +16,5 @@ pub enum WorkflowEvent {
         questions: Vec<ClarificationQuestion>,
     },
     WorkflowComplete(Result<String, String>),
-    DemoPrompt,
     AgentOutput(String),
 }
