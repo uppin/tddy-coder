@@ -1,16 +1,17 @@
 //! Main TUI event loop: crossterm events, Presenter polling, rendering.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::time::Duration;
 
+use crossterm::cursor::Show;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
-use crossterm::cursor::Show;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use tddy_core::Presenter;
+use tddy_core::{Presenter, UserIntent};
 
 use crate::key_map::key_event_to_intent;
 use crate::raw::{disable_raw_mode, enable_raw_mode_keep_sig};
@@ -19,9 +20,14 @@ use crate::tui_view::TuiView;
 
 /// Run the TUI event loop with the given Presenter.
 /// The Presenter must have been started (start_workflow called) before this runs.
+/// When `external_intents` is Some, intents from that channel are drained and applied
+/// (e.g. from gRPC clients when --grpc is used).
+/// When `debug` is true, the debug log area is shown; otherwise it is hidden.
 pub fn run_event_loop(
     presenter: &mut Presenter<TuiView>,
     shutdown: &AtomicBool,
+    external_intents: Option<mpsc::Receiver<UserIntent>>,
+    debug: bool,
 ) -> anyhow::Result<()> {
     if shutdown.load(Ordering::Relaxed) {
         return Ok(());
@@ -48,7 +54,7 @@ pub fn run_event_loop(
         {
             let state = presenter.state();
             let view = presenter.view();
-            terminal.draw(|f| draw(f, state, view.view_state()))?;
+            terminal.draw(|f| draw(f, state, view.view_state(), debug))?;
 
             if state.should_quit {
                 break;
@@ -56,6 +62,13 @@ pub fn run_event_loop(
 
             // When Done, stay in loop until user presses Enter/Q (sets should_quit).
             // Do not break here — let user review the workflow output first.
+        }
+
+        // Drain external intents (e.g. from gRPC clients)
+        if let Some(ref rx) = external_intents {
+            while let Ok(intent) = rx.try_recv() {
+                presenter.handle_intent(intent);
+            }
         }
 
         // Poll crossterm for key events

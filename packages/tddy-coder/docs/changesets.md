@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-03-09** [Feature] gRPC Remote Control — Single `--grpc [PORT]` option (default 50051). Creates broadcast + mpsc channels, Presenter with with_broadcast, spawns tonic gRPC server in thread, passes intent_rx to run_event_loop. Dependencies: tonic, tokio-stream. (tddy-coder)
 - **2026-03-09** [Feature] MVP Architecture — Removed tui/ module. run_full_workflow_tui uses Presenter + tddy_tui::TuiView + tddy_tui::run_event_loop. Added tty module (should_run_tui). Re-export presenter types from tddy-core; disable_raw_mode from tddy-tui. presenter_integration.rs tests with TestView + StubBackend. (tddy-coder)
 - **2026-03-09** [Feature] Async Workflow Engine — `run_plan_via_flow_runner()` for FlowRunner-based plan execution. tddy-coder lib exports Args, run_with_args, run_plan_via_flow_runner. tddy-demo binary uses StubBackend (--agent stub). Dependencies: tokio, uuid. (tddy-coder)
 - **2026-03-08** [Feature] Rename validate-refactor to validate and Add refactor Goal — CLI: `--goal validate` invokes subagent validation (replaces `--goal validate-refactor`); `--goal validate-refactor` rejected. `--goal refactor --plan-dir <path>` executes refactoring plan. Full workflow (no `--goal`) chains all 8 steps: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor. Both `run_full_workflow_plain` and `run_workflow_thread` (TUI) include validate and refactor after evaluate. (tddy-coder)

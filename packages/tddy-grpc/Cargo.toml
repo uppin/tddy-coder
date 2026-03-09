@@ -1,0 +1,22 @@
+[package]
+name = "tddy-grpc"
+version = "0.1.0"
+edition = "2021"
+description = "gRPC remote control for tddy-coder (TddyRemote service)"
+
+[lib]
+name = "tddy_grpc"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-core = { path = "../tddy-core" }
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net"] }
+tokio-stream = "0.1"
+
+[build-dependencies]
+tonic-build = "0.12"
+
+[dev-dependencies]
+async-stream = "0.3"

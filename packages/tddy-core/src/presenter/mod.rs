@@ -2,6 +2,7 @@
 
 mod events;
 mod intent;
+mod presenter_events;
 mod presenter_impl;
 mod state;
 mod view;
@@ -10,6 +11,7 @@ mod workflow_runner;
 pub(crate) use events::WorkflowEvent;
 
 pub use intent::UserIntent;
+pub use presenter_events::{PresenterEvent, PresenterHandle};
 pub use presenter_impl::Presenter;
 pub use state::{ActivityEntry, ActivityKind, AppMode, PresenterState};
 pub use view::PresenterView;
