@@ -3179,6 +3179,7 @@ dependencies = [
  "ctrlc",
  "libc",
  "log",
+ "serde_json",
  "tddy-core",
  "tddy-grpc",
  "tddy-tui",

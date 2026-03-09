@@ -230,123 +230,123 @@ impl<V: PresenterView> Presenter<V> {
             None => return,
         };
 
-        let mut events = Vec::new();
-        while let Ok(ev) = rx.try_recv() {
-            events.push(ev);
-        }
+        // Process one event per poll so the main loop can react (e.g. queue prompt when Running)
+        // before the next event (e.g. ClarificationNeeded) changes the mode.
+        let ev = match rx.try_recv() {
+            Ok(e) => e,
+            Err(_) => return,
+        };
 
-        for ev in events {
-            match ev {
-                WorkflowEvent::Progress(pev) => {
-                    let entry = match &pev {
-                        crate::ProgressEvent::ToolUse {
-                            name,
-                            detail: Some(d),
-                        } => ActivityEntry {
-                            text: format!("Tool: {} {}", name, d),
-                            kind: ActivityKind::ToolUse,
-                        },
-                        crate::ProgressEvent::ToolUse { name, detail: None } => ActivityEntry {
-                            text: format!("Tool: {}", name),
-                            kind: ActivityKind::ToolUse,
-                        },
-                        crate::ProgressEvent::TaskStarted { description } => ActivityEntry {
-                            text: description.clone(),
-                            kind: ActivityKind::TaskStarted,
-                        },
-                        crate::ProgressEvent::TaskProgress { description, .. } => ActivityEntry {
-                            text: description.clone(),
-                            kind: ActivityKind::TaskProgress,
-                        },
-                    };
-                    self.state.activity_log.push(entry.clone());
-                    self.view.on_activity_logged(&entry);
-                    self.broadcast(PresenterEvent::ActivityLogged(entry));
+        match ev {
+            WorkflowEvent::Progress(pev) => {
+                let entry = match &pev {
+                    crate::ProgressEvent::ToolUse {
+                        name,
+                        detail: Some(d),
+                    } => ActivityEntry {
+                        text: format!("Tool: {} {}", name, d),
+                        kind: ActivityKind::ToolUse,
+                    },
+                    crate::ProgressEvent::ToolUse { name, detail: None } => ActivityEntry {
+                        text: format!("Tool: {}", name),
+                        kind: ActivityKind::ToolUse,
+                    },
+                    crate::ProgressEvent::TaskStarted { description } => ActivityEntry {
+                        text: description.clone(),
+                        kind: ActivityKind::TaskStarted,
+                    },
+                    crate::ProgressEvent::TaskProgress { description, .. } => ActivityEntry {
+                        text: description.clone(),
+                        kind: ActivityKind::TaskProgress,
+                    },
+                };
+                self.state.activity_log.push(entry.clone());
+                self.view.on_activity_logged(&entry);
+                self.broadcast(PresenterEvent::ActivityLogged(entry));
+            }
+            WorkflowEvent::StateChange { from, to } => {
+                self.state.current_state = Some(to.clone());
+                let entry = ActivityEntry {
+                    text: format!("State: {} → {}", from, to),
+                    kind: ActivityKind::StateChange,
+                };
+                self.state.activity_log.push(entry.clone());
+                self.view.on_activity_logged(&entry);
+                self.view.on_state_changed(&from, &to);
+                self.broadcast(PresenterEvent::ActivityLogged(entry));
+                self.broadcast(PresenterEvent::StateChanged {
+                    from: from.clone(),
+                    to: to.clone(),
+                });
+            }
+            WorkflowEvent::GoalStarted(goal) => {
+                self.state.current_goal = Some(goal.clone());
+                self.state.goal_start_time = std::time::Instant::now();
+                if matches!(self.state.mode, AppMode::FeatureInput) {
+                    self.state.mode = AppMode::Running;
+                    self.view.on_mode_changed(&self.state.mode);
+                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
-                WorkflowEvent::StateChange { from, to } => {
-                    self.state.current_state = Some(to.clone());
-                    let entry = ActivityEntry {
-                        text: format!("State: {} → {}", from, to),
-                        kind: ActivityKind::StateChange,
-                    };
-                    self.state.activity_log.push(entry.clone());
-                    self.view.on_activity_logged(&entry);
-                    self.view.on_state_changed(&from, &to);
-                    self.broadcast(PresenterEvent::ActivityLogged(entry));
-                    self.broadcast(PresenterEvent::StateChanged {
-                        from: from.clone(),
-                        to: to.clone(),
-                    });
-                }
-                WorkflowEvent::GoalStarted(goal) => {
-                    self.state.current_goal = Some(goal.clone());
-                    self.state.goal_start_time = std::time::Instant::now();
-                    if matches!(self.state.mode, AppMode::FeatureInput) {
-                        self.state.mode = AppMode::Running;
-                        self.view.on_mode_changed(&self.state.mode);
-                        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                self.view.on_goal_started(&goal);
+                self.broadcast(PresenterEvent::GoalStarted(goal.clone()));
+            }
+            WorkflowEvent::ClarificationNeeded { questions } => {
+                self.flush_agent_output_buffer();
+                self.pending_questions = questions;
+                self.current_question_index = 0;
+                self.collected_answers.clear();
+                self.advance_to_next_question();
+            }
+            WorkflowEvent::WorkflowComplete(result) => {
+                self.flush_agent_output_buffer();
+                self.workflow_result = Some(result.clone());
+                self.view.on_workflow_complete(&result);
+                self.broadcast(PresenterEvent::WorkflowComplete(result.clone()));
+                if result.is_ok() && !self.state.inbox.is_empty() {
+                    let item = self.state.inbox.remove(0);
+                    let prefixed = format!("{}{}", QUEUED_INSTRUCTION_PREFIX, item);
+                    self.view.on_inbox_changed(&self.state.inbox);
+                    self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
+                    self.state.mode = AppMode::Running;
+                    self.view.on_mode_changed(&self.state.mode);
+                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                    // Workflow thread has exited; restart with dequeued prompt
+                    if let (Some(backend), Some(output_dir)) = (
+                        self.workflow_backend.clone(),
+                        self.workflow_output_dir.clone(),
+                    ) {
+                        if let Some(h) = self.workflow_handle.take() {
+                            let _ = h.join();
+                        }
+                        self.spawn_workflow(backend, output_dir, Some(prefixed));
                     }
-                    self.view.on_goal_started(&goal);
-                    self.broadcast(PresenterEvent::GoalStarted(goal.clone()));
+                } else {
+                    self.state.mode = AppMode::Done;
+                    self.view.on_mode_changed(&self.state.mode);
+                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
-                WorkflowEvent::ClarificationNeeded { questions } => {
-                    self.flush_agent_output_buffer();
-                    self.pending_questions = questions;
-                    self.current_question_index = 0;
-                    self.collected_answers.clear();
-                    self.advance_to_next_question();
-                }
-                WorkflowEvent::WorkflowComplete(result) => {
-                    self.flush_agent_output_buffer();
-                    self.workflow_result = Some(result.clone());
-                    self.view.on_workflow_complete(&result);
-                    self.broadcast(PresenterEvent::WorkflowComplete(result.clone()));
-                    if result.is_ok() && !self.state.inbox.is_empty() {
-                        let item = self.state.inbox.remove(0);
-                        let prefixed = format!("{}{}", QUEUED_INSTRUCTION_PREFIX, item);
-                        self.view.on_inbox_changed(&self.state.inbox);
-                        self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
-                        self.state.mode = AppMode::Running;
-                        self.view.on_mode_changed(&self.state.mode);
-                        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
-                        // Workflow thread has exited; restart with dequeued prompt
-                        if let (Some(backend), Some(output_dir)) = (
-                            self.workflow_backend.clone(),
-                            self.workflow_output_dir.clone(),
-                        ) {
-                            if let Some(h) = self.workflow_handle.take() {
-                                let _ = h.join();
-                            }
-                            self.spawn_workflow(backend, output_dir, Some(prefixed));
+            }
+            WorkflowEvent::AgentOutput(text) => {
+                for part in text.split_inclusive('\n') {
+                    if part.ends_with('\n') {
+                        self.agent_output_buffer
+                            .push_str(part.trim_end_matches('\n'));
+                        let line = std::mem::take(&mut self.agent_output_buffer);
+                        if !line.is_empty() {
+                            let entry = ActivityEntry {
+                                text: line,
+                                kind: ActivityKind::AgentOutput,
+                            };
+                            self.state.activity_log.push(entry.clone());
+                            self.view.on_activity_logged(&entry);
+                            self.broadcast(PresenterEvent::ActivityLogged(entry));
                         }
                     } else {
-                        self.state.mode = AppMode::Done;
-                        self.view.on_mode_changed(&self.state.mode);
-                        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                        self.agent_output_buffer.push_str(part);
                     }
                 }
-                WorkflowEvent::AgentOutput(text) => {
-                    for part in text.split_inclusive('\n') {
-                        if part.ends_with('\n') {
-                            self.agent_output_buffer
-                                .push_str(part.trim_end_matches('\n'));
-                            let line = std::mem::take(&mut self.agent_output_buffer);
-                            if !line.is_empty() {
-                                let entry = ActivityEntry {
-                                    text: line,
-                                    kind: ActivityKind::AgentOutput,
-                                };
-                                self.state.activity_log.push(entry.clone());
-                                self.view.on_activity_logged(&entry);
-                                self.broadcast(PresenterEvent::ActivityLogged(entry));
-                            }
-                        } else {
-                            self.agent_output_buffer.push_str(part);
-                        }
-                    }
-                    self.view.on_agent_output(&text);
-                    self.broadcast(PresenterEvent::AgentOutput(text.clone()));
-                }
+                self.view.on_agent_output(&text);
+                self.broadcast(PresenterEvent::AgentOutput(text.clone()));
             }
         }
     }

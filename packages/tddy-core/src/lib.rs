@@ -49,6 +49,8 @@ pub use schema::{
 };
 pub use stream::ProgressEvent;
 pub use workflow::{
+    engine::WorkflowEngine,
+    graph::{ExecutionResult, ExecutionStatus},
     AcceptanceTestsOptions, DemoOptions, EvaluateOptions, GreenOptions, PlanOptions, RedOptions,
-    RefactorOptions, ValidateOptions, Workflow, WorkflowState,
+    RefactorOptions, ValidateOptions,
 };

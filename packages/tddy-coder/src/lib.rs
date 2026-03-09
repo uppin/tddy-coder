@@ -4,7 +4,7 @@ pub mod plain;
 mod run;
 mod tty;
 
-pub use run::{run_plan_via_flow_runner, run_with_args, Args, CoderArgs, DemoArgs};
+pub use run::{run_with_args, Args, CoderArgs, DemoArgs};
 pub use tddy_core::{
     ActivityEntry, ActivityKind, AppMode, Presenter, PresenterState, PresenterView, UserIntent,
 };

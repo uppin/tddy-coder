@@ -47,6 +47,11 @@ impl SharedBackend {
         Self(std::sync::Arc::new(backend))
     }
 
+    /// Create SharedBackend from an Arc<dyn CodingBackend> (e.g. for MockBackend in tests).
+    pub fn from_arc(inner: std::sync::Arc<dyn CodingBackend>) -> Self {
+        Self(inner)
+    }
+
     /// Get the inner Arc for use with graph builders that require Arc<dyn CodingBackend>.
     pub fn as_arc(&self) -> std::sync::Arc<dyn CodingBackend> {
         self.0.clone()

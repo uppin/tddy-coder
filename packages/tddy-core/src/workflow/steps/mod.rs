@@ -5,7 +5,7 @@
 
 use crate::backend::{CodingBackend, Goal, InvokeRequest};
 use crate::error::{BackendError, ParseError, WorkflowError};
-use crate::output::{parse_planning_response, write_artifacts};
+use crate::output::parse_planning_response;
 use crate::workflow::context::Context;
 use crate::workflow::planning;
 use crate::workflow::task::{NextAction, Task, TaskResult};
@@ -51,24 +51,30 @@ impl Task for PlanTask {
         std::fs::create_dir_all(&output_dir)
             .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
+        let answers: Option<String> = context.get_sync("answers");
+        let is_resume = answers.is_some();
+        let prompt = match &answers {
+            Some(a) => planning::build_followup_prompt(feature_input, a),
+            None => planning::build_prompt(feature_input),
+        };
+
         let system_prompt = planning::system_prompt();
-        let prompt = planning::build_prompt(feature_input);
 
         let request = InvokeRequest {
             prompt,
             system_prompt: Some(system_prompt),
             system_prompt_path: None,
             goal: Goal::Plan,
-            model: None,
+            model: context.get_sync("model"),
             session_id: context.get_sync("session_id"),
-            is_resume: false,
+            is_resume,
             working_dir: Some(output_dir.clone()),
-            debug: false,
-            agent_output: false,
-            agent_output_sink: None,
-            conversation_output_path: None,
-            inherit_stdin: false,
-            extra_allowed_tools: None,
+            debug: context.get_sync::<bool>("debug").unwrap_or(false),
+            agent_output: context.get_sync::<bool>("agent_output").unwrap_or(false),
+            agent_output_sink: None, // agent_output_sink from context not supported (not serializable)
+            conversation_output_path: context.get_sync("conversation_output_path"),
+            inherit_stdin: context.get_sync::<bool>("inherit_stdin").unwrap_or(false),
+            extra_allowed_tools: context.get_sync("allowed_tools"),
         };
 
         let response = self.backend.invoke(request).await.map_err(
@@ -76,6 +82,8 @@ impl Task for PlanTask {
                 Box::new(WorkflowError::Backend(e))
             },
         )?;
+
+        context.set_sync("output", response.output.clone());
 
         if !response.questions.is_empty() {
             context.set_sync("pending_questions", response.questions.clone());
@@ -91,15 +99,14 @@ impl Task for PlanTask {
             Box::new(WorkflowError::ParseError(e)) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
-        write_artifacts(&output_dir, &planning)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-
+        context.set_sync("parsed_planning", planning);
+        context.set_sync("plan_dir", output_dir.clone());
         if let Some(sid) = &response.session_id {
             context.set_sync("session_id", sid.clone());
         }
 
         Ok(TaskResult {
-            response: format!("PRD and TODO written to {}", output_dir.display()),
+            response: format!("Plan complete for {}", output_dir.display()),
             next_action: NextAction::Continue,
             task_id: "plan".to_string(),
             status_message: Some("Plan complete".to_string()),

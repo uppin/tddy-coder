@@ -1,8 +1,16 @@
 //! Integration tests verifying that every agent prompt is prepended with a
 //! context header wrapped in `<context-reminder>` when .md artifacts exist
 //! in the plan directory.
+//!
+//! Migrated from Workflow to WorkflowEngine.
 
-use tddy_core::{AcceptanceTestsOptions, MockBackend, PlanOptions, RedOptions, Workflow};
+mod common;
+
+use std::sync::Arc;
+use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
+use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
+
+use common::{ctx_acceptance_tests, ctx_red, run_plan, write_changeset_for_plan_session};
 
 const ACCEPTANCE_TESTS_OUTPUT: &str = r#"<structured-response content-type="application-json">
 {"goal":"acceptance-tests","summary":"Created 1 test. Failing.","tests":[{"name":"test_foo","file":"src/foo.rs","line":1,"status":"failing"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test test_foo"}
@@ -27,44 +35,32 @@ A feature.
 - [ ] Task
 ---TODO_END---"#;
 
-fn write_changeset_for_plan_session(plan_dir: &std::path::Path, session_id: &str) {
-    let changeset = format!(
-        r#"version: 1
-models: {{}}
-sessions:
-  - id: "{}"
-    agent: claude
-    tag: plan
-    created_at: "2026-03-07T10:00:00Z"
-state:
-  current: Planned
-  updated_at: "2026-03-07T10:00:00Z"
-  history: []
-artifacts: {{}}
-"#,
-        session_id
-    );
-    std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
-}
-
 // ── AC1: prompt starts with marker when artifacts exist ───────────────────────
 
 /// Acceptance-tests prompt must start with the context header when PRD.md exists.
-#[test]
-fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
+#[tokio::test]
+async fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
     let plan_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-prd");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-ctx-hdr-1");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.acceptance_tests(&plan_dir, None, &AcceptanceTestsOptions::default());
+    let storage_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let invocations = workflow.backend().invocations();
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let _ = engine.run_goal("acceptance-tests", ctx).await.unwrap();
+
+    let invocations = backend.invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let prompt = &invocations[0].prompt;
 
@@ -84,21 +80,29 @@ fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
 // ── AC4: paths in header are absolute ─────────────────────────────────────────
 
 /// Context header must list PRD.md with an absolute path.
-#[test]
-fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
+#[tokio::test]
+async fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
     let plan_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-abs");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-ctx-hdr-2");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.acceptance_tests(&plan_dir, None, &AcceptanceTestsOptions::default());
+    let storage_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-abs-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let invocations = workflow.backend().invocations();
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let _ = engine.run_goal("acceptance-tests", ctx).await.unwrap();
+
+    let invocations = backend.invocations();
     let prompt = &invocations[0].prompt;
 
     assert!(
@@ -129,22 +133,29 @@ fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
 // ── AC3: missing artifacts not listed ─────────────────────────────────────────
 
 /// Context header must NOT mention artifacts that don't exist yet.
-#[test]
-fn acceptance_tests_prompt_header_omits_missing_artifacts() {
+#[tokio::test]
+async fn acceptance_tests_prompt_header_omits_missing_artifacts() {
     let plan_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-omit");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
-    // TODO.md and acceptance-tests.md are NOT written
     write_changeset_for_plan_session(&plan_dir, "sess-ctx-hdr-3");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.acceptance_tests(&plan_dir, None, &AcceptanceTestsOptions::default());
+    let storage_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-omit-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let invocations = workflow.backend().invocations();
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let _ = engine.run_goal("acceptance-tests", ctx).await.unwrap();
+
+    let invocations = backend.invocations();
     let prompt = &invocations[0].prompt;
 
     assert!(
@@ -162,21 +173,29 @@ fn acceptance_tests_prompt_header_omits_missing_artifacts() {
 // ── header format: blank line separates header from prompt body ───────────────
 
 /// Header block must be followed by a blank line before the original prompt content.
-#[test]
-fn acceptance_tests_prompt_header_separated_from_body_by_blank_line() {
+#[tokio::test]
+async fn acceptance_tests_prompt_header_separated_from_body_by_blank_line() {
     let plan_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-blank");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-ctx-hdr-blank");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.acceptance_tests(&plan_dir, None, &AcceptanceTestsOptions::default());
+    let storage_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-blank-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let invocations = workflow.backend().invocations();
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let _ = engine.run_goal("acceptance-tests", ctx).await.unwrap();
+
+    let invocations = backend.invocations();
     let prompt = &invocations[0].prompt;
 
     assert!(
@@ -207,8 +226,8 @@ fn acceptance_tests_prompt_header_separated_from_body_by_blank_line() {
 // ── AC1: red phase prompt includes header with multiple artifacts ─────────────
 
 /// Red phase prompt must include context header listing PRD.md and acceptance-tests.md.
-#[test]
-fn red_prompt_includes_context_header_with_multiple_artifacts() {
+#[tokio::test]
+async fn red_prompt_includes_context_header_with_multiple_artifacts() {
     let plan_dir = std::env::temp_dir().join("tddy-ctx-hdr-red");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -216,13 +235,21 @@ fn red_prompt_includes_context_header_with_multiple_artifacts() {
     std::fs::write(plan_dir.join("acceptance-tests.md"), "# Acceptance Tests")
         .expect("write acceptance-tests.md");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
+    let storage_dir = std::env::temp_dir().join("tddy-ctx-hdr-red-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let invocations = workflow.backend().invocations();
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let _ = engine.run_goal("red", ctx).await.unwrap();
+
+    let invocations = backend.invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let prompt = &invocations[0].prompt;
 
@@ -250,18 +277,27 @@ fn red_prompt_includes_context_header_with_multiple_artifacts() {
 
 /// Plan prompt with a fresh (empty) output dir must NOT have a context header,
 /// since no .md artifacts exist at prompt-construction time.
-#[test]
-fn plan_prompt_has_no_context_header_for_empty_output_dir() {
+#[tokio::test]
+async fn plan_prompt_has_no_context_header_for_empty_output_dir() {
     let output_dir = std::env::temp_dir().join("tddy-ctx-hdr-plan-empty");
     let _ = std::fs::remove_dir_all(&output_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.plan("A feature", &output_dir, None, &PlanOptions::default());
+    let storage_dir = std::env::temp_dir().join("tddy-ctx-hdr-plan-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let invocations = workflow.backend().invocations();
+    let _ = run_plan(&engine, "A feature", &output_dir, None)
+        .await
+        .expect("plan should succeed");
+
+    let invocations = backend.invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let prompt = &invocations[0].prompt;
 

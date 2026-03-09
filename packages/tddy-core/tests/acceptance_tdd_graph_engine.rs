@@ -3,14 +3,16 @@
 //! These tests define the expected behavior of Task, Context, Graph, SessionStorage, and FlowRunner.
 //! They verify the workflow engine can be used end-to-end.
 
+use std::collections::HashMap;
 use std::sync::Arc;
-use tddy_core::backend::MockBackend;
+use tddy_core::backend::{MockBackend, StubBackend};
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::{ExecutionStatus, GraphBuilder};
 use tddy_core::workflow::runner::FlowRunner;
 use tddy_core::workflow::session::{FileSessionStorage, Session, SessionStorage};
 use tddy_core::workflow::task::{EchoTask, NextAction, Task};
 use tddy_core::workflow::tdd_graph::build_tdd_workflow_graph;
+use tddy_core::{AnyBackend, SharedBackend, WorkflowEngine};
 
 #[tokio::test]
 async fn context_stores_and_retrieves_values() {
@@ -205,4 +207,70 @@ async fn build_tdd_workflow_graph_creates_graph() {
         Some("red".to_string())
     );
     assert_eq!(graph.next_task_id("red", &ctx), Some("green".to_string()));
+}
+
+#[tokio::test]
+async fn workflow_engine_run_goal_plan_completes() {
+    let storage_dir = std::env::temp_dir().join("tddy-engine-plan-test");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let output_dir = storage_dir.join("plan-output");
+    std::fs::create_dir_all(&output_dir).unwrap();
+
+    let backend: SharedBackend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+    let hooks = Arc::new(tddy_core::workflow::tdd_hooks::TddWorkflowHooks::new());
+    let engine = WorkflowEngine::new(backend, storage_dir.clone(), Some(hooks));
+
+    let mut context_values = HashMap::new();
+    context_values.insert(
+        "feature_input".to_string(),
+        serde_json::json!("SKIP_QUESTIONS feature"),
+    );
+    context_values.insert(
+        "output_dir".to_string(),
+        serde_json::to_value(output_dir.clone()).unwrap(),
+    );
+
+    let result = engine.run_goal("plan", context_values).await.unwrap();
+
+    assert_eq!(result.session_id.len(), 36);
+    assert!(matches!(
+        result.status,
+        ExecutionStatus::Paused { .. } | ExecutionStatus::Completed
+    ));
+    assert!(output_dir.join("PRD.md").exists());
+    assert!(output_dir.join("TODO.md").exists());
+
+    let _ = std::fs::remove_dir_all(&storage_dir);
+}
+
+#[tokio::test]
+async fn workflow_engine_run_full_workflow_completes_with_stub() {
+    let storage_dir = std::env::temp_dir().join("tddy-engine-full-test");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let output_dir = storage_dir.join("plan-output");
+    std::fs::create_dir_all(&output_dir).unwrap();
+
+    let backend: SharedBackend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+    let hooks = Arc::new(tddy_core::workflow::tdd_hooks::TddWorkflowHooks::new());
+    let engine = WorkflowEngine::new(backend, storage_dir.clone(), Some(hooks));
+
+    let mut context_values = HashMap::new();
+    context_values.insert(
+        "feature_input".to_string(),
+        serde_json::json!("SKIP_QUESTIONS feature"),
+    );
+    context_values.insert(
+        "output_dir".to_string(),
+        serde_json::to_value(output_dir.clone()).unwrap(),
+    );
+    context_values.insert("run_demo".to_string(), serde_json::json!(false));
+
+    let result = engine.run_full_workflow(context_values).await.unwrap();
+
+    assert!(matches!(
+        result.status,
+        ExecutionStatus::Completed | ExecutionStatus::Paused { .. }
+    ));
+
+    let _ = std::fs::remove_dir_all(&storage_dir);
 }

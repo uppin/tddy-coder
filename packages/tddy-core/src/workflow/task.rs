@@ -5,6 +5,7 @@
 use crate::backend::{CodingBackend, Goal, InvokeRequest};
 use crate::workflow::context::Context;
 use async_trait::async_trait;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Next action after a task completes.
@@ -77,6 +78,32 @@ impl Task for EchoTask {
     }
 }
 
+/// Task that always fails. Used for testing error propagation and on_error hooks.
+#[derive(Clone)]
+pub struct FailingTask {
+    id: String,
+}
+
+impl FailingTask {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self { id: id.into() }
+    }
+}
+
+#[async_trait]
+impl Task for FailingTask {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    async fn run(
+        &self,
+        _context: Context,
+    ) -> Result<TaskResult, Box<dyn std::error::Error + Send + Sync>> {
+        Err("FailingTask always fails".into())
+    }
+}
+
 /// Task that signals workflow completion.
 #[derive(Clone)]
 pub struct EndTask {
@@ -141,21 +168,27 @@ impl Task for BackendInvokeTask {
             .or_else(|| context.get_sync("prompt"))
             .unwrap_or_else(|| "Add a feature".to_string());
 
+        let plan_dir: Option<PathBuf> = context.get_sync("plan_dir");
+        let working_dir = plan_dir
+            .or_else(|| context.get_sync::<PathBuf>("output_dir"))
+            .clone();
+        let is_resume = context.get_sync::<String>("answers").is_some();
+
         let request = InvokeRequest {
             prompt: prompt.clone(),
-            system_prompt: None,
+            system_prompt: context.get_sync("system_prompt"),
             system_prompt_path: None,
             goal: self.goal,
-            model: None,
+            model: context.get_sync("model"),
             session_id: context.get_sync("session_id"),
-            is_resume: false,
-            working_dir: None,
-            debug: false,
-            agent_output: false,
+            is_resume,
+            working_dir,
+            debug: context.get_sync::<bool>("debug").unwrap_or(false),
+            agent_output: context.get_sync::<bool>("agent_output").unwrap_or(false),
             agent_output_sink: None,
-            conversation_output_path: None,
-            inherit_stdin: false,
-            extra_allowed_tools: None,
+            conversation_output_path: context.get_sync("conversation_output_path"),
+            inherit_stdin: context.get_sync::<bool>("inherit_stdin").unwrap_or(false),
+            extra_allowed_tools: context.get_sync("allowed_tools"),
         };
 
         let response = self

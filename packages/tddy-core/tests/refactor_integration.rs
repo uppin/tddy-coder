@@ -1,18 +1,19 @@
 //! Integration tests for the new refactor goal.
 //!
-//! All tests are Red state — they fail to compile because the production
-//! types and methods do not exist yet:
-//! - `Goal::Refactor`
-//! - `RefactorOptions`
-//! - `WorkflowState::Refactoring` and `WorkflowState::RefactorComplete`
-//! - `workflow.refactor()` method
-//! - `RefactorOutput` struct
-//! - `parse_refactor_response()` parser
-//! - `refactor_allowlist()` permission function
+//! Migrated from Workflow to WorkflowEngine.
 
+mod common;
+
+use std::sync::Arc;
+use tddy_core::changeset::read_changeset;
+use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{
-    BackendError, CodingBackend, CursorBackend, Goal, InvokeRequest, MockBackend, Workflow,
-    WorkflowState,
+    BackendError, CodingBackend, CursorBackend, Goal, InvokeRequest, MockBackend, SharedBackend,
+    WorkflowEngine,
+};
+
+use common::{
+    ctx_refactor, run_goal_until_done, write_changeset_with_state, write_refactoring_plan,
 };
 
 /// Minimal refactor structured response for MockBackend.
@@ -24,25 +25,30 @@ const REFACTOR_OUTPUT: &str = r#"Refactoring complete. All tasks from refactorin
 "#;
 
 /// refactor() invokes backend with Goal::Refactor.
-///
-/// Fails to compile until Goal::Refactor exists and workflow.refactor() is implemented.
-#[test]
-fn refactor_invokes_backend_with_refactor_goal() {
+#[tokio::test]
+async fn refactor_invokes_backend_with_refactor_goal() {
     let plan_dir = std::env::temp_dir().join("tddy-refactor-goal-test");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_refactoring_plan(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = tddy_core::RefactorOptions::default();
-    let result = workflow.refactor(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-refactor-goal-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_refactor(plan_dir.clone());
+    let result = run_goal_until_done(&engine, "refactor", ctx).await;
 
     assert!(result.is_ok(), "refactor should succeed, got: {:?}", result);
 
-    let invocations = workflow.backend().invocations();
+    let invocations = backend.invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
     assert_eq!(
@@ -55,21 +61,26 @@ fn refactor_invokes_backend_with_refactor_goal() {
 }
 
 /// refactor() requires refactoring-plan.md in plan_dir.
-///
-/// Fails to compile until workflow.refactor() is implemented.
-#[test]
-fn refactor_requires_refactoring_plan() {
+#[tokio::test]
+async fn refactor_requires_refactoring_plan() {
     let plan_dir = std::env::temp_dir().join("tddy-refactor-no-plan");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     // Deliberately do NOT write refactoring-plan.md
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = tddy_core::RefactorOptions::default();
-    let result = workflow.refactor(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-refactor-no-plan-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_refactor(plan_dir.clone());
+    let result = run_goal_until_done(&engine, "refactor", ctx).await;
 
     assert!(
         result.is_err(),
@@ -80,51 +91,67 @@ fn refactor_requires_refactoring_plan() {
 }
 
 /// refactor() transitions workflow to RefactorComplete state on success.
-///
-/// Fails to compile until WorkflowState::RefactorComplete exists.
-#[test]
-fn refactor_transitions_to_refactor_complete() {
+#[tokio::test]
+async fn refactor_transitions_to_refactor_complete() {
     let plan_dir = std::env::temp_dir().join("tddy-refactor-state-test");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_refactoring_plan(&plan_dir);
+    write_changeset_with_state(&plan_dir, "ValidateComplete", "sess-validate-1");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = tddy_core::RefactorOptions::default();
-    let _ = workflow.refactor(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-refactor-state-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let state = workflow.state();
-    assert!(
-        matches!(state, WorkflowState::RefactorComplete { .. }),
-        "workflow should transition to RefactorComplete, got {:?}",
-        state
+    let ctx = ctx_refactor(plan_dir.clone());
+    let _ = run_goal_until_done(&engine, "refactor", ctx).await.unwrap();
+
+    let changeset = read_changeset(&plan_dir).expect("changeset");
+    assert_eq!(
+        changeset.state.current, "RefactorComplete",
+        "workflow should transition to RefactorComplete, got {}",
+        changeset.state.current
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
 /// refactor() parses structured response with summary, tasks_completed, tests_passing.
-///
-/// Fails to compile until RefactorOutput and parse_refactor_response() exist.
-#[test]
-fn refactor_parses_structured_response() {
+#[tokio::test]
+async fn refactor_parses_structured_response() {
     let plan_dir = std::env::temp_dir().join("tddy-refactor-parse-test");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_refactoring_plan(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = tddy_core::RefactorOptions::default();
-    let result = workflow.refactor(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-refactor-parse-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    assert!(result.is_ok(), "refactor should succeed, got: {:?}", result);
-    let output = result.unwrap();
+    let ctx = ctx_refactor(plan_dir.clone());
+    let result = run_goal_until_done(&engine, "refactor", ctx).await.unwrap();
+
+    let session = engine
+        .get_session(&result.session_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let output_str: String = session.context.get_sync("output").unwrap();
+    let output = tddy_core::output::parse_refactor_response(&output_str).expect("parse output");
 
     assert!(!output.summary.is_empty(), "summary must not be empty");
     assert_eq!(output.tasks_completed, 5, "tasks_completed should be 5");
@@ -134,10 +161,8 @@ fn refactor_parses_structured_response() {
 }
 
 /// CursorBackend must reject Goal::Refactor with an "unsupported" error.
-///
-/// Fails to compile until Goal::Refactor exists and CursorBackend rejection is implemented.
-#[test]
-fn refactor_rejects_cursor_backend() {
+#[tokio::test]
+async fn refactor_rejects_cursor_backend() {
     let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/cursor"));
     let req = InvokeRequest {
         prompt: "refactor".to_string(),
@@ -156,9 +181,7 @@ fn refactor_rejects_cursor_backend() {
         extra_allowed_tools: None,
     };
 
-    let result = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(backend.invoke(req));
+    let result = backend.invoke(req).await;
 
     assert!(
         result.is_err(),
@@ -185,41 +208,4 @@ fn refactor_rejects_cursor_backend() {
         Err(e) => panic!("Expected InvocationFailed, got: {:?}", e),
         Ok(_) => panic!("Expected error, not Ok"),
     }
-}
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-fn write_refactoring_plan(plan_dir: &std::path::Path) {
-    let content = r#"# Refactoring Plan
-
-## Priority: Critical
-
-1. **Rename Goal::ValidateRefactor to Goal::Validate** (from: validate-tests-report, validate-prod-ready-report)
-   - Scope: backend/mod.rs, workflow/mod.rs
-   - Estimated effort: small
-
-## Priority: High
-
-2. **Rename internal types** (from: validate-tests-report, analyze-clean-code-report)
-   - ValidateRefactorOptions → ValidateOptions
-   - WorkflowState::ValidateRefactorComplete → ValidateComplete
-   - Scope: workflow/mod.rs, lib.rs
-   - Estimated effort: medium
-
-## Priority: Medium
-
-3. **Add refactoring-plan.md to KNOWN_ARTIFACTS** (from: analyze-clean-code-report)
-   - Scope: workflow/mod.rs
-   - Estimated effort: small
-
-4. **Update validate schema** (from: validate-prod-ready-report)
-   - Rename validate-refactor.schema.json → validate.schema.json
-   - Estimated effort: small
-
-5. **Add refactor goal types** (from: validate-tests-report)
-   - Goal::Refactor, RefactorOptions, RefactorOutput
-   - Estimated effort: medium
-"#;
-    std::fs::write(plan_dir.join("refactoring-plan.md"), content)
-        .expect("write refactoring-plan.md");
 }

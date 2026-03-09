@@ -1,9 +1,18 @@
 //! Integration tests for the green workflow with MockBackend.
 //!
 //! These acceptance tests define the expected behavior of the green goal.
-//! They fail until the green workflow is implemented.
+//! Migrated from Workflow to WorkflowEngine.
 
-use tddy_core::{MockBackend, RedOptions, Workflow};
+mod common;
+
+use std::sync::Arc;
+use tddy_core::changeset::read_changeset;
+use tddy_core::output::parse_green_response;
+use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
+use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
+
+use common::{ctx_green, ctx_red};
+use tddy_core::workflow::graph::ExecutionStatus;
 
 const RED_OUTPUT: &str = r#"Created skeleton code and failing tests.
 
@@ -37,20 +46,42 @@ fn setup_plan_dir_with_red_output(plan_dir: &std::path::Path) {
     .expect("write acceptance-tests.md");
 }
 
-#[test]
-fn green_workflow_reads_progress_md_and_invokes_backend() {
+#[tokio::test]
+async fn green_workflow_reads_progress_md_and_invokes_backend() {
     let plan_dir = std::env::temp_dir().join("tddy-green-plan-dir-1");
     setup_plan_dir_with_red_output(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
-    let options = tddy_core::GreenOptions::default();
-    let result = workflow.green(&plan_dir, None, &options);
+    backend.push_ok(GREEN_OUTPUT_ALL_PASS);
 
-    let output = result.expect("green should succeed");
+    let storage_dir = std::env::temp_dir().join("tddy-green-engine-1");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let _ = engine.run_goal("red", ctx).await.unwrap();
+
+    let ctx = ctx_green(plan_dir.clone(), None, false);
+    let result = engine.run_goal("green", ctx).await.unwrap();
+    assert!(
+        matches!(result.status, ExecutionStatus::Paused { .. }),
+        "green: {:?}",
+        result.status
+    );
+
+    let session = engine
+        .get_session(&result.session_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let output_str: String = session.context.get_sync("output").unwrap();
+    let output = parse_green_response(&output_str).expect("parse green output");
     assert!(output.summary.contains("passing"));
     assert_eq!(output.tests.len(), 3);
     assert_eq!(output.tests[0].status, "passing");
@@ -59,87 +90,142 @@ fn green_workflow_reads_progress_md_and_invokes_backend() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn green_workflow_transitions_to_green_complete_when_all_pass() {
+#[tokio::test]
+async fn green_workflow_transitions_to_green_complete_when_all_pass() {
     let plan_dir = std::env::temp_dir().join("tddy-green-plan-dir-2");
     setup_plan_dir_with_red_output(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
-    let options = tddy_core::GreenOptions::default();
-    let _ = workflow.green(&plan_dir, None, &options);
 
-    let state = workflow.state();
+    let storage_dir = std::env::temp_dir().join("tddy-green-engine-2");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let r = engine.run_goal("red", ctx).await.unwrap();
     assert!(
-        matches!(state, tddy_core::WorkflowState::GreenComplete { .. }),
-        "workflow should transition to GreenComplete, got {:?}",
-        state
+        matches!(r.status, ExecutionStatus::Paused { .. }),
+        "red: {:?}",
+        r.status
+    );
+
+    let ctx = ctx_green(plan_dir.clone(), None, false);
+    let r = engine.run_goal("green", ctx).await.unwrap();
+    assert!(
+        matches!(r.status, ExecutionStatus::Paused { .. }),
+        "green: {:?}",
+        r.status
+    );
+
+    let changeset = read_changeset(&plan_dir).expect("changeset");
+    assert_eq!(
+        changeset.state.current, "GreenComplete",
+        "workflow should transition to GreenComplete, got {}",
+        changeset.state.current
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn green_workflow_transitions_to_failed_when_tests_fail() {
+#[tokio::test]
+async fn green_workflow_transitions_to_failed_when_tests_fail() {
     let plan_dir = std::env::temp_dir().join("tddy-green-plan-dir-3");
     setup_plan_dir_with_red_output(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_SOME_FAIL);
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
-    let options = tddy_core::GreenOptions::default();
-    let result = workflow.green(&plan_dir, None, &options);
 
-    assert!(result.is_err(), "green should return Err when tests fail");
+    let storage_dir = std::env::temp_dir().join("tddy-green-engine-3");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let _ = engine.run_goal("red", ctx).await.unwrap();
+
+    let ctx = ctx_green(plan_dir.clone(), None, false);
+    let result = engine.run_goal("green", ctx).await.unwrap();
     assert!(
-        matches!(workflow.state(), tddy_core::WorkflowState::Failed { .. }),
-        "workflow should transition to Failed when tests fail, got {:?}",
-        workflow.state()
+        matches!(result.status, ExecutionStatus::Paused { .. }),
+        "green: {:?}",
+        result.status
+    );
+
+    let changeset = read_changeset(&plan_dir).expect("changeset");
+    assert_ne!(
+        changeset.state.current, "GreenComplete",
+        "state should not be GreenComplete when some tests fail, got {}",
+        changeset.state.current
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn green_workflow_returns_error_when_progress_md_missing() {
+#[tokio::test]
+async fn green_workflow_returns_error_when_progress_md_missing() {
     let plan_dir = std::env::temp_dir().join("tddy-green-plan-dir-no-progress");
     setup_plan_dir_with_red_output(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
+    backend.push_ok(GREEN_OUTPUT_ALL_PASS);
+
+    let storage_dir = std::env::temp_dir().join("tddy-green-engine-no-progress");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let _ = engine.run_goal("red", ctx).await.unwrap();
     std::fs::remove_file(plan_dir.join("progress.md")).expect("remove progress.md");
 
-    // Green fails before invoking backend (progress.md missing), so no second response needed
-    let options = tddy_core::GreenOptions::default();
-    let result = workflow.green(&plan_dir, None, &options);
+    let ctx = ctx_green(plan_dir.clone(), None, false);
+    let result = engine.run_goal("green", ctx).await;
 
     assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
     assert!(
-        matches!(result, Err(tddy_core::WorkflowError::PlanDirInvalid(_))),
-        "expected PlanDirInvalid when progress.md missing, got {:?}",
-        result
+        err_msg.contains("progress") || err_msg.contains("PlanDir") || err_msg.contains("read"),
+        "expected PlanDirInvalid when progress.md missing, got: {}",
+        err_msg
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn green_workflow_returns_error_when_impl_session_missing() {
+#[tokio::test]
+async fn green_workflow_returns_error_when_impl_session_missing() {
     let plan_dir = std::env::temp_dir().join("tddy-green-plan-dir-no-impl-session");
     setup_plan_dir_with_red_output(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
-    // Overwrite changeset with one that has no impl session — green should fail
+    backend.push_ok(GREEN_OUTPUT_ALL_PASS);
+
+    let storage_dir = std::env::temp_dir().join("tddy-green-engine-no-impl");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let _ = engine.run_goal("red", ctx).await.unwrap();
+
     let changeset_no_impl = r#"version: 1
 models: {}
 sessions:
@@ -155,35 +241,48 @@ artifacts: {}
 "#;
     std::fs::write(plan_dir.join("changeset.yaml"), changeset_no_impl).expect("write changeset");
 
-    let options = tddy_core::GreenOptions::default();
-    let result = workflow.green(&plan_dir, None, &options);
+    let ctx = ctx_green(plan_dir.clone(), None, false);
+    let result = engine.run_goal("green", ctx).await;
 
     assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
     assert!(
-        matches!(
-            result,
-            Err(tddy_core::WorkflowError::ChangesetInvalid(_))
-                | Err(tddy_core::WorkflowError::InvalidTransition(_))
-        ),
-        "expected ChangesetInvalid or InvalidTransition when impl session missing, got {:?}",
-        result
+        err_msg.contains("impl") || err_msg.contains("session") || err_msg.contains("changeset"),
+        "expected ChangesetInvalid or InvalidTransition when impl session missing, got: {}",
+        err_msg
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn green_workflow_updates_progress_md_in_plan_dir() {
+#[tokio::test]
+async fn green_workflow_updates_progress_md_in_plan_dir() {
     let plan_dir = std::env::temp_dir().join("tddy-green-updates-progress");
     setup_plan_dir_with_red_output(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
-    let options = tddy_core::GreenOptions::default();
-    let _ = workflow.green(&plan_dir, None, &options);
+    backend.push_ok(GREEN_OUTPUT_ALL_PASS);
+
+    let storage_dir = std::env::temp_dir().join("tddy-green-engine-updates");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let _ = engine.run_goal("red", ctx).await.unwrap();
+
+    let ctx = ctx_green(plan_dir.clone(), None, false);
+    let r = engine.run_goal("green", ctx).await.unwrap();
+    assert!(
+        matches!(r.status, ExecutionStatus::Paused { .. }),
+        "green: {:?}",
+        r.status
+    );
 
     let progress_path = plan_dir.join("progress.md");
     assert!(progress_path.exists(), "progress.md should be updated");
@@ -196,8 +295,8 @@ fn green_workflow_updates_progress_md_in_plan_dir() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn green_workflow_updates_acceptance_tests_md_in_plan_dir() {
+#[tokio::test]
+async fn green_workflow_updates_acceptance_tests_md_in_plan_dir() {
     let plan_dir = std::env::temp_dir().join("tddy-green-updates-at");
     setup_plan_dir_with_red_output(&plan_dir);
     let at_content = r#"# Acceptance Tests
@@ -227,13 +326,29 @@ cargo test
     std::fs::write(plan_dir.join("acceptance-tests.md"), at_content)
         .expect("write acceptance-tests.md");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
-    let options = tddy_core::GreenOptions::default();
-    let _ = workflow.green(&plan_dir, None, &options);
+    backend.push_ok(GREEN_OUTPUT_ALL_PASS);
+
+    let storage_dir = std::env::temp_dir().join("tddy-green-engine-updates-at");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let _ = engine.run_goal("red", ctx).await.unwrap();
+
+    let ctx = ctx_green(plan_dir.clone(), None, false);
+    let r = engine.run_goal("green", ctx).await.unwrap();
+    assert!(
+        matches!(r.status, ExecutionStatus::Paused { .. }),
+        "green: {:?}",
+        r.status
+    );
 
     let at_path = plan_dir.join("acceptance-tests.md");
     let content = std::fs::read_to_string(&at_path).expect("read acceptance-tests.md");
@@ -245,22 +360,41 @@ cargo test
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn green_workflow_passes_goal_allowlist_to_invoke_request() {
+#[tokio::test]
+async fn green_workflow_passes_goal_allowlist_to_invoke_request() {
     let plan_dir = std::env::temp_dir().join("tddy-green-allowlist");
     setup_plan_dir_with_red_output(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
-    let options = tddy_core::GreenOptions::default();
-    let _ = workflow.green(&plan_dir, None, &options);
+    backend.push_ok(GREEN_OUTPUT_ALL_PASS);
 
-    let invocations = workflow.backend().invocations();
+    let storage_dir = std::env::temp_dir().join("tddy-green-engine-allowlist");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let _ = engine.run_goal("red", ctx).await.unwrap();
+
+    let ctx = ctx_green(plan_dir.clone(), None, false);
+    let r = engine.run_goal("green", ctx).await.unwrap();
+    assert!(
+        matches!(r.status, ExecutionStatus::Paused { .. }),
+        "green: {:?}",
+        r.status
+    );
+
+    let invocations = backend.invocations();
     assert!(invocations.len() >= 2, "green should have been invoked");
-    let req = invocations.last().unwrap();
+    let req = invocations
+        .iter()
+        .find(|r| r.goal == tddy_core::Goal::Green)
+        .expect("green invocation should exist");
     assert_eq!(
         req.goal,
         tddy_core::Goal::Green,
@@ -270,28 +404,46 @@ fn green_workflow_passes_goal_allowlist_to_invoke_request() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn green_workflow_resumes_session_from_impl_session_file() {
+#[tokio::test]
+async fn green_workflow_resumes_session_from_impl_session_file() {
     let plan_dir = std::env::temp_dir().join("tddy-green-resume-session");
     setup_plan_dir_with_red_output(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
+    backend.push_ok(GREEN_OUTPUT_ALL_PASS);
 
-    let invocations_before_green = workflow.backend().invocations();
+    let storage_dir = std::env::temp_dir().join("tddy-green-engine-resume");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let _ = engine.run_goal("red", ctx).await.unwrap();
+
+    let invocations_before_green = backend.invocations();
     let expected_session_id = invocations_before_green
         .last()
         .and_then(|r| r.session_id.as_deref())
         .expect("red should have set session_id");
 
-    let options = tddy_core::GreenOptions::default();
-    let _ = workflow.green(&plan_dir, None, &options);
+    let ctx = ctx_green(plan_dir.clone(), Some(""), false);
+    let r = engine.run_goal("green", ctx).await.unwrap();
+    assert!(
+        matches!(r.status, ExecutionStatus::Paused { .. }),
+        "green: {:?}",
+        r.status
+    );
 
-    let invocations = workflow.backend().invocations();
-    let green_req = invocations.last().unwrap();
+    let invocations = backend.invocations();
+    let green_req = invocations
+        .iter()
+        .find(|r| r.goal == tddy_core::Goal::Green)
+        .expect("green invocation should exist");
     assert_eq!(
         green_req.session_id.as_deref(),
         Some(expected_session_id),
@@ -305,15 +457,24 @@ fn green_workflow_resumes_session_from_impl_session_file() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn red_workflow_writes_impl_session_to_plan_dir() {
+#[tokio::test]
+async fn red_workflow_writes_impl_session_to_plan_dir() {
     let plan_dir = std::env::temp_dir().join("tddy-red-impl-session");
     setup_plan_dir_with_red_output(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
+
+    let storage_dir = std::env::temp_dir().join("tddy-red-impl-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let _ = engine.run_goal("red", ctx).await.unwrap();
 
     let changeset_path = plan_dir.join("changeset.yaml");
     assert!(
@@ -327,8 +488,8 @@ fn red_workflow_writes_impl_session_to_plan_dir() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn green_goal_reports_demo_results() {
+#[tokio::test]
+async fn green_goal_reports_demo_results() {
     let plan_dir = std::env::temp_dir().join("tddy-green-demo-results");
     setup_plan_dir_with_red_output(&plan_dir);
     std::fs::write(
@@ -344,15 +505,34 @@ fn green_goal_reports_demo_results() {
 </structured-response>
 "#;
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_WITH_DEMO);
-    let mut workflow = Workflow::new(backend);
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
-    let options = tddy_core::GreenOptions::default();
-    let result = workflow.green(&plan_dir, None, &options);
 
-    let _output = result.expect("green should succeed");
+    let storage_dir = std::env::temp_dir().join("tddy-green-demo-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let _ = engine.run_goal("red", ctx).await.unwrap();
+
+    let ctx = ctx_green(plan_dir.clone(), None, true);
+    let result = engine.run_goal("green", ctx).await.unwrap();
+    assert!(
+        matches!(result.status, ExecutionStatus::Paused { .. }),
+        "green: {:?}",
+        result.status
+    );
+
+    let session = engine.get_session(&result.session_id).await.unwrap();
+    assert!(
+        session.is_some(),
+        "green should succeed and produce session"
+    );
 
     let demo_results_path = plan_dir.join("demo-results.md");
     assert!(

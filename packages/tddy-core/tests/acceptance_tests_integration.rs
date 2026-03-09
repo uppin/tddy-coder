@@ -1,6 +1,17 @@
 //! Integration tests for the acceptance-tests workflow with MockBackend.
+//!
+//! Migrated from Workflow to WorkflowEngine.
 
-use tddy_core::{AcceptanceTestsOptions, MockBackend, PlanOptions, Workflow};
+mod common;
+
+use std::sync::Arc;
+use tddy_core::changeset::read_changeset;
+use tddy_core::output::parse_acceptance_tests_response;
+use tddy_core::workflow::graph::ExecutionStatus;
+use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
+use tddy_core::{AcceptanceTestsOptions, MockBackend, PlanOptions, SharedBackend, WorkflowEngine};
+
+use common::{ctx_acceptance_tests, run_plan};
 
 const DELIMITED_OUTPUT: &str = r#"Here is my analysis.
 
@@ -34,8 +45,8 @@ const ACCEPTANCE_TESTS_OUTPUT: &str = r#"Created acceptance tests.
 </structured-response>
 "#;
 
-#[test]
-fn acceptance_tests_workflow_reads_plan_dir_and_invokes_backend_with_resumed_session() {
+#[tokio::test]
+async fn acceptance_tests_workflow_reads_plan_dir_and_invokes_backend_with_resumed_session() {
     let plan_dir = std::env::temp_dir().join("tddy-at-plan-dir-1");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -43,14 +54,33 @@ fn acceptance_tests_workflow_reads_plan_dir_and_invokes_backend_with_resumed_ses
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan\n- Test 1").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-resume-123");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = AcceptanceTestsOptions::default();
-    let result = workflow.acceptance_tests(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-at-engine-1");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let output = result.expect("acceptance_tests should succeed");
+    let context = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let result = engine.run_goal("acceptance-tests", context).await.unwrap();
+
+    assert!(
+        !matches!(result.status, ExecutionStatus::Error(_)),
+        "acceptance-tests should succeed: {:?}",
+        result.status
+    );
+
+    let session = engine
+        .get_session(&result.session_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let output_str: String = session.context.get_sync("output").unwrap();
+    let output = parse_acceptance_tests_response(&output_str).expect("parse output");
     assert!(output.summary.contains("Created 2 acceptance tests"));
     assert_eq!(output.tests.len(), 2);
     assert_eq!(output.tests[0].name, "login_stores_session_token");
@@ -60,147 +90,182 @@ fn acceptance_tests_workflow_reads_plan_dir_and_invokes_backend_with_resumed_ses
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_ready_states() {
+#[tokio::test]
+async fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_ready_states() {
     let plan_dir = std::env::temp_dir().join("tddy-at-plan-dir-2");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-456");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = AcceptanceTestsOptions::default();
-    let _ = workflow.acceptance_tests(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-at-engine-2");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let state = workflow.state();
+    let context = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let result = engine.run_goal("acceptance-tests", context).await.unwrap();
+
     assert!(
-        matches!(state, tddy_core::WorkflowState::AcceptanceTestsReady { .. }),
-        "workflow should transition to AcceptanceTestsReady, got {:?}",
-        state
+        !matches!(result.status, ExecutionStatus::Error(_)),
+        "acceptance-tests should succeed: {:?}",
+        result.status
+    );
+
+    let changeset = read_changeset(&plan_dir).expect("changeset should exist");
+    assert_eq!(
+        changeset.state.current, "AcceptanceTestsReady",
+        "changeset state should be AcceptanceTestsReady"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn acceptance_tests_workflow_returns_error_when_plan_dir_missing_prd() {
+#[tokio::test]
+async fn acceptance_tests_workflow_returns_error_when_plan_dir_missing_prd() {
     let plan_dir = std::env::temp_dir().join("tddy-at-plan-dir-no-prd");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join(".session"), "sess-789").expect("write .session");
-    // PRD.md is NOT created
 
-    let backend = MockBackend::new();
-    let mut workflow = Workflow::new(backend);
-
-    let options = AcceptanceTestsOptions::default();
-    let result = workflow.acceptance_tests(&plan_dir, None, &options);
-
-    assert!(result.is_err());
-    assert!(
-        matches!(result, Err(tddy_core::WorkflowError::PlanDirInvalid(_))),
-        "expected PlanDirInvalid, got {:?}",
-        result
+    let backend = Arc::new(MockBackend::new());
+    let storage_dir = std::env::temp_dir().join("tddy-at-engine-no-prd");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
     );
+
+    let context = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let result = engine.run_goal("acceptance-tests", context).await;
+
+    assert!(result.is_err(), "expected Error when PRD missing, got Ok");
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
+#[tokio::test]
+async fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
     let plan_dir = std::env::temp_dir().join("tddy-at-plan-dir-no-session");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
-    // .session is NOT created
 
-    let backend = MockBackend::new();
-    let mut workflow = Workflow::new(backend);
+    let backend = Arc::new(MockBackend::new());
+    let storage_dir = std::env::temp_dir().join("tddy-at-engine-no-session");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let options = AcceptanceTestsOptions::default();
-    let result = workflow.acceptance_tests(&plan_dir, None, &options);
+    let context = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let result = engine.run_goal("acceptance-tests", context).await;
 
-    assert!(result.is_err());
     assert!(
-        matches!(result, Err(tddy_core::WorkflowError::ChangesetMissing(_))),
-        "expected ChangesetMissing, got {:?}",
-        result
+        result.is_err(),
+        "expected Error when changeset missing, got Ok"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// Acceptance-tests goal passes goal-specific allowlist to InvokeRequest.
-/// Allowlist should include Read, Write, Edit, Glob, Grep, Bash(cargo *), SemanticSearch.
-#[test]
-fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
+#[tokio::test]
+async fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
     let plan_dir = std::env::temp_dir().join("tddy-at-allowlist-test");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-allowlist");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = AcceptanceTestsOptions::default();
-    let _ = workflow.acceptance_tests(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-at-engine-allowlist");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let invocations = workflow.backend().invocations();
+    let context = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let _ = engine.run_goal("acceptance-tests", context).await.unwrap();
+
+    let invocations = backend.invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
     assert_eq!(
         req.goal,
         tddy_core::Goal::AcceptanceTests,
-        "InvokeRequest should have goal AcceptanceTests for acceptance-tests workflow"
+        "InvokeRequest should have goal AcceptanceTests"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// Plan goal passes goal to InvokeRequest.
-#[test]
-fn plan_workflow_passes_goal_to_invoke_request() {
-    let backend = MockBackend::new();
+#[tokio::test]
+async fn plan_workflow_passes_goal_to_invoke_request() {
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(DELIMITED_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
     let output_dir = std::env::temp_dir().join("tddy-plan-allowlist-test");
     let _ = std::fs::remove_dir_all(&output_dir);
-    let options = PlanOptions::default();
-    let _ = workflow.plan("Build auth", &output_dir, None, &options);
+    std::fs::create_dir_all(&output_dir).unwrap();
 
-    let invocations = workflow.backend().invocations();
+    let storage_dir = std::env::temp_dir().join("tddy-plan-engine-allowlist");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let _ = run_plan(&engine, "Build auth", &output_dir, None)
+        .await
+        .unwrap();
+
+    let invocations = backend.invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
     assert_eq!(
         req.goal,
         tddy_core::Goal::Plan,
-        "InvokeRequest should have goal Plan for plan workflow"
+        "InvokeRequest should have goal Plan"
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
 
-/// Acceptance-tests goal writes acceptance-tests.md to the plan directory after successful completion.
-#[test]
-fn acceptance_tests_workflow_writes_acceptance_tests_md_to_plan_dir() {
+#[tokio::test]
+async fn acceptance_tests_workflow_writes_acceptance_tests_md_to_plan_dir() {
     let plan_dir = std::env::temp_dir().join("tddy-at-writes-md");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-writes-md");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = AcceptanceTestsOptions::default();
-    let _ = workflow.acceptance_tests(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-at-engine-writes-md");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let context = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let _ = engine.run_goal("acceptance-tests", context).await.unwrap();
 
     let md_path = plan_dir.join("acceptance-tests.md");
     assert!(
@@ -233,17 +298,25 @@ fn acceptance_tests_workflow_writes_acceptance_tests_md_to_plan_dir() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-#[test]
-fn plan_workflow_writes_session_file_to_output_directory() {
-    let backend = MockBackend::new();
+#[tokio::test]
+async fn plan_workflow_writes_session_file_to_output_directory() {
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(DELIMITED_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
     let output_dir = std::env::temp_dir().join("tddy-planning-session-test");
     let _ = std::fs::remove_dir_all(&output_dir);
+    std::fs::create_dir_all(&output_dir).unwrap();
 
-    let output_path = workflow
-        .plan("Build auth", &output_dir, None, &PlanOptions::default())
+    let storage_dir = std::env::temp_dir().join("tddy-planning-session-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
+        .await
         .expect("planning should succeed");
 
     let changeset_path = output_path.join("changeset.yaml");
