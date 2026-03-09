@@ -1,0 +1,158 @@
+//! Full step Tasks — PlanTask, RedTask, GreenTask, etc.
+//!
+//! These replace BackendInvokeTask with Tasks that perform file I/O, parsing,
+//! and changeset updates. Currently stubbed for TDD red phase.
+
+use crate::backend::{CodingBackend, Goal, InvokeRequest};
+use crate::error::{BackendError, ParseError, WorkflowError};
+use crate::output::{parse_planning_response, write_artifacts};
+use crate::workflow::context::Context;
+use crate::workflow::planning;
+use crate::workflow::task::{NextAction, Task, TaskResult};
+use async_trait::async_trait;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+/// Plan step Task: invokes backend, parses response, writes PRD.md and TODO.md.
+pub struct PlanTask {
+    backend: Arc<dyn CodingBackend>,
+}
+
+impl PlanTask {
+    pub fn new(backend: Arc<dyn CodingBackend>) -> Self {
+        Self { backend }
+    }
+}
+
+#[async_trait]
+impl Task for PlanTask {
+    fn id(&self) -> &str {
+        "plan"
+    }
+
+    async fn run(
+        &self,
+        context: Context,
+    ) -> Result<TaskResult, Box<dyn std::error::Error + Send + Sync>> {
+        let feature_input: String = context
+            .get_sync("feature_input")
+            .or_else(|| context.get_sync("prompt"))
+            .ok_or("PlanTask requires feature_input or prompt in context")?;
+
+        let output_dir: PathBuf = context
+            .get_sync("output_dir")
+            .ok_or("PlanTask requires output_dir in context")?;
+
+        let feature_input = feature_input.trim();
+        if feature_input.is_empty() {
+            return Err("empty feature description".into());
+        }
+
+        std::fs::create_dir_all(&output_dir)
+            .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+
+        let system_prompt = planning::system_prompt();
+        let prompt = planning::build_prompt(feature_input);
+
+        let request = InvokeRequest {
+            prompt,
+            system_prompt: Some(system_prompt),
+            system_prompt_path: None,
+            goal: Goal::Plan,
+            model: None,
+            session_id: context.get_sync("session_id"),
+            is_resume: false,
+            working_dir: Some(output_dir.clone()),
+            debug: false,
+            agent_output: false,
+            agent_output_sink: None,
+            conversation_output_path: None,
+            inherit_stdin: false,
+            extra_allowed_tools: None,
+        };
+
+        let response = self.backend.invoke(request).await.map_err(
+            |e: BackendError| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(WorkflowError::Backend(e))
+            },
+        )?;
+
+        if !response.questions.is_empty() {
+            context.set_sync("pending_questions", response.questions.clone());
+            return Ok(TaskResult {
+                response: response.output,
+                next_action: NextAction::WaitForInput,
+                task_id: "plan".to_string(),
+                status_message: Some("Clarification needed".to_string()),
+            });
+        }
+
+        let planning = parse_planning_response(&response.output).map_err(|e: ParseError| {
+            Box::new(WorkflowError::ParseError(e)) as Box<dyn std::error::Error + Send + Sync>
+        })?;
+
+        write_artifacts(&output_dir, &planning)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+
+        if let Some(sid) = &response.session_id {
+            context.set_sync("session_id", sid.clone());
+        }
+
+        Ok(TaskResult {
+            response: format!("PRD and TODO written to {}", output_dir.display()),
+            next_action: NextAction::Continue,
+            task_id: "plan".to_string(),
+            status_message: Some("Plan complete".to_string()),
+        })
+    }
+}
+
+/// Red step Task: creates skeleton code and failing tests.
+pub struct RedTask {
+    _backend: Arc<dyn CodingBackend>,
+}
+
+impl RedTask {
+    pub fn new(backend: Arc<dyn CodingBackend>) -> Self {
+        Self { _backend: backend }
+    }
+}
+
+#[async_trait]
+impl Task for RedTask {
+    fn id(&self) -> &str {
+        "red"
+    }
+
+    async fn run(
+        &self,
+        _context: Context,
+    ) -> Result<TaskResult, Box<dyn std::error::Error + Send + Sync>> {
+        Err("RedTask not implemented".into())
+    }
+}
+
+/// Green step Task: implements production code to make tests pass.
+pub struct GreenTask {
+    _backend: Arc<dyn CodingBackend>,
+}
+
+impl GreenTask {
+    pub fn new(backend: Arc<dyn CodingBackend>) -> Self {
+        Self { _backend: backend }
+    }
+}
+
+#[async_trait]
+impl Task for GreenTask {
+    fn id(&self) -> &str {
+        "green"
+    }
+
+    async fn run(
+        &self,
+        _context: Context,
+    ) -> Result<TaskResult, Box<dyn std::error::Error + Send + Sync>> {
+        Err("GreenTask not implemented".into())
+    }
+}

@@ -3,23 +3,63 @@
 mod claude;
 mod cursor;
 mod mock;
+mod stub;
 
 pub use claude::{build_claude_args, ClaudeCodeBackend, ClaudeInvokeConfig, PermissionMode};
 pub use cursor::CursorBackend;
 pub use mock::MockBackend;
+pub use stub::StubBackend;
 
 /// Enum dispatch for CLI backend selection (avoids trait object overhead).
+/// tddy-coder uses claude/cursor only. tddy-demo uses stub (via lib, not CLI).
 #[derive(Debug)]
 pub enum AnyBackend {
     Claude(ClaudeCodeBackend),
     Cursor(CursorBackend),
+    Stub(StubBackend),
 }
 
+/// Shared backend wrapper for "create once at startup" pattern.
+/// Wraps `Arc<dyn CodingBackend>` so the same backend can be reused across multiple Workflows.
+#[derive(Clone)]
+pub struct SharedBackend(std::sync::Arc<dyn CodingBackend>);
+
+impl std::fmt::Debug for SharedBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SharedBackend({})", self.0.name())
+    }
+}
+
+#[async_trait::async_trait]
+impl CodingBackend for SharedBackend {
+    async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        self.0.invoke(request).await
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+}
+
+impl SharedBackend {
+    /// Create a SharedBackend from an AnyBackend (or any CodingBackend).
+    pub fn from_any(backend: AnyBackend) -> Self {
+        Self(std::sync::Arc::new(backend))
+    }
+
+    /// Get the inner Arc for use with graph builders that require Arc<dyn CodingBackend>.
+    pub fn as_arc(&self) -> std::sync::Arc<dyn CodingBackend> {
+        self.0.clone()
+    }
+}
+
+#[async_trait::async_trait]
 impl CodingBackend for AnyBackend {
-    fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+    async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         match self {
-            AnyBackend::Claude(b) => b.invoke(request),
-            AnyBackend::Cursor(b) => b.invoke(request),
+            AnyBackend::Claude(b) => b.invoke(request).await,
+            AnyBackend::Cursor(b) => b.invoke(request).await,
+            AnyBackend::Stub(b) => b.invoke(request).await,
         }
     }
 
@@ -27,6 +67,7 @@ impl CodingBackend for AnyBackend {
         match self {
             AnyBackend::Claude(b) => b.name(),
             AnyBackend::Cursor(b) => b.name(),
+            AnyBackend::Stub(b) => b.name(),
         }
     }
 }
@@ -149,7 +190,7 @@ pub struct InvokeRequest {
 }
 
 /// Structured clarification question from AskUserQuestion tool.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClarificationQuestion {
     pub header: String,
     pub question: String,
@@ -158,7 +199,7 @@ pub struct ClarificationQuestion {
 }
 
 /// Option for a clarification question.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuestionOption {
     pub label: String,
     pub description: String,
@@ -179,8 +220,9 @@ pub struct InvokeResponse {
 }
 
 /// Trait for LLM-based coding backends.
+#[async_trait::async_trait]
 pub trait CodingBackend: Send + Sync {
-    fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError>;
+    async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError>;
     /// Backend identifier (e.g. "claude", "cursor", "mock") for changeset and display.
     fn name(&self) -> &str;
 }

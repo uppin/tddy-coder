@@ -106,7 +106,9 @@ fn validate_rejects_cursor_backend() {
         extra_allowed_tools: None,
     };
 
-    let result = backend.invoke(req);
+    let result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req));
 
     assert!(
         result.is_err(),

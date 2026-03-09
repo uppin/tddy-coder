@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "TDD-driven coder CLI for PRD-based development workflow"
 
+[lib]
+name = "tddy_coder"
+path = "src/lib.rs"
+
 [[bin]]
 name = "tddy-coder"
 path = "src/main.rs"
@@ -12,6 +16,8 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 log = "0.4"
 anyhow = "1"
+tokio = { version = "1", features = ["rt", "macros", "fs", "sync"] }
+uuid = { version = "1", features = ["v4"] }
 ctrlc = { version = "3", features = ["termination"] }
 ratatui = "0.29"
 crossterm = "0.28"

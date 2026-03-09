@@ -52,7 +52,10 @@ exit 0
         extra_allowed_tools: None,
     };
 
-    let result = backend.invoke(req).expect("invoke should succeed");
+    let result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req))
+        .expect("invoke should succeed");
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.output, "output");
     assert_eq!(result.session_id.as_deref(), Some("cursor-thread-abc"));
@@ -139,7 +142,10 @@ exit 0
             inherit_stdin: false,
             extra_allowed_tools: None,
         };
-        let _ = backend.invoke(req).expect("invoke should succeed");
+        let _ = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(backend.invoke(req))
+            .expect("invoke should succeed");
         let captured = fs::read_to_string(&args_file).expect("read captured args");
         assert!(
             !captured.contains("--plan"),
@@ -194,7 +200,10 @@ exit 0
         extra_allowed_tools: None,
     };
 
-    let _ = backend.invoke(req).expect("invoke should succeed");
+    let _ = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req))
+        .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
     assert!(
@@ -274,7 +283,10 @@ exit 0
         extra_allowed_tools: None,
     };
 
-    let _ = backend.invoke(req).expect("invoke should succeed");
+    let _ = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req))
+        .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
     let prompt = prompt_from_captured_args(&captured).expect("prompt should be present after -p");
@@ -334,7 +346,10 @@ exit 0
         extra_allowed_tools: None,
     };
 
-    let _ = backend.invoke(req).expect("invoke should succeed");
+    let _ = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req))
+        .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
     let prompt = prompt_from_captured_args(&captured).expect("prompt should be present after -p");
@@ -394,7 +409,10 @@ exit 0
         extra_allowed_tools: None,
     };
 
-    let _ = backend.invoke(req).expect("invoke should succeed");
+    let _ = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req))
+        .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
     let prompt = prompt_from_captured_args(&captured).expect("prompt should be present after -p");

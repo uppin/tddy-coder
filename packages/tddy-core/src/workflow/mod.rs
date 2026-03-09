@@ -1,11 +1,18 @@
 //! Workflow state machine for tddy-coder.
 
 mod acceptance_tests;
+pub mod context;
 mod evaluate;
+pub mod graph;
 mod green;
 mod planning;
 mod red;
 mod refactor;
+pub mod runner;
+pub mod session;
+pub mod steps;
+pub mod task;
+pub mod tdd_graph;
 mod validate_subagents;
 
 use crate::backend::{CodingBackend, InvokeRequest, InvokeResponse};
@@ -13,6 +20,7 @@ use crate::changeset::{
     append_session_and_update_state, clarification_qa_from_backend, get_session_for_tag,
     read_changeset, resolve_model, update_state, write_changeset, Changeset,
 };
+use crate::error::BackendError;
 use crate::error::WorkflowError;
 use crate::output::{
     extract_last_structured_block, parse_acceptance_tests_response, parse_evaluate_response,
@@ -205,6 +213,8 @@ pub enum WorkflowState {
     Evaluated {
         output: crate::output::EvaluateOutput,
     },
+    /// In-progress state for the validate (subagents) step.
+    Validating,
     /// Terminal state after a successful validate (subagent) run.
     ValidateComplete {
         output: crate::output::ValidateSubagentsOutput,
@@ -237,6 +247,7 @@ impl WorkflowState {
             Self::DemoComplete { .. } => "DemoComplete",
             Self::Evaluating => "Evaluating",
             Self::Evaluated { .. } => "Evaluated",
+            Self::Validating => "Validating",
             Self::ValidateComplete { .. } => "ValidateComplete",
             Self::Refactoring => "Refactoring",
             Self::RefactorComplete { .. } => "RefactorComplete",
@@ -286,6 +297,14 @@ impl<B: CodingBackend> Workflow<B> {
             on_state_change: None,
             pending_clarification_questions: None,
         }
+    }
+
+    fn block_on_invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("create tokio runtime");
+        rt.block_on(self.backend.invoke(request))
     }
 
     /// Set callback invoked on each state transition.
@@ -360,8 +379,7 @@ impl<B: CodingBackend> Workflow<B> {
             );
             let retry_request = build_retry_request(&retry_prompt);
             let retry_response = self
-                .backend
-                .invoke(retry_request)
+                .block_on_invoke(retry_request)
                 .map_err(WorkflowError::Backend)?;
             let retry_block =
                 extract_last_structured_block(&retry_response.output).map_err(|e| {
@@ -498,7 +516,7 @@ impl<B: CodingBackend> Workflow<B> {
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
 
-        let response = match self.backend.invoke(request) {
+        let response = match self.block_on_invoke(request) {
             Ok(r) => r,
             Err(e) => {
                 self.set_state(WorkflowState::Failed {
@@ -689,7 +707,7 @@ impl<B: CodingBackend> Workflow<B> {
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
 
-        let response = match self.backend.invoke(request) {
+        let response = match self.block_on_invoke(request) {
             Ok(r) => r,
             Err(e) => {
                 self.set_state(WorkflowState::Failed {
@@ -861,7 +879,7 @@ impl<B: CodingBackend> Workflow<B> {
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
 
-        let response = match self.backend.invoke(request) {
+        let response = match self.block_on_invoke(request) {
             Ok(r) => r,
             Err(e) => {
                 self.set_state(WorkflowState::Failed {
@@ -1054,7 +1072,7 @@ impl<B: CodingBackend> Workflow<B> {
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
 
-        let response = match self.backend.invoke(request) {
+        let response = match self.block_on_invoke(request) {
             Ok(r) => r,
             Err(e) => {
                 self.set_state(WorkflowState::Failed {
@@ -1197,7 +1215,7 @@ impl<B: CodingBackend> Workflow<B> {
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
 
-        let response = match self.backend.invoke(request) {
+        let response = match self.block_on_invoke(request) {
             Ok(r) => r,
             Err(e) => {
                 self.set_state(WorkflowState::Failed {
@@ -1267,6 +1285,8 @@ impl<B: CodingBackend> Workflow<B> {
             changeset_content.is_some()
         );
 
+        self.set_state(WorkflowState::Evaluating);
+
         // Schemas and agent cwd: plan_dir (evaluate always has plan_dir)
         let _ = write_schema_to_dir(plan_dir, "evaluate");
 
@@ -1293,7 +1313,7 @@ impl<B: CodingBackend> Workflow<B> {
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
 
-        let response = match self.backend.invoke(request) {
+        let response = match self.block_on_invoke(request) {
             Ok(r) => r,
             Err(e) => {
                 self.set_state(WorkflowState::Failed {
@@ -1388,6 +1408,8 @@ impl<B: CodingBackend> Workflow<B> {
             evaluation_report_content.len()
         );
 
+        self.set_state(WorkflowState::Validating);
+
         let system_prompt = validate_subagents::system_prompt();
         let prompt = validate_subagents::build_prompt(&evaluation_report_content);
 
@@ -1411,7 +1433,7 @@ impl<B: CodingBackend> Workflow<B> {
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
 
-        let response = match self.backend.invoke(request) {
+        let response = match self.block_on_invoke(request) {
             Ok(r) => r,
             Err(e) => {
                 self.set_state(WorkflowState::Failed {
@@ -1527,7 +1549,7 @@ impl<B: CodingBackend> Workflow<B> {
             extra_allowed_tools: options.allowed_tools_extras.clone(),
         };
 
-        let response = match self.backend.invoke(request) {
+        let response = match self.block_on_invoke(request) {
             Ok(r) => r,
             Err(e) => {
                 self.set_state(WorkflowState::Failed {

@@ -36,6 +36,15 @@ impl std::fmt::Debug for CursorBackend {
     }
 }
 
+impl Clone for CursorBackend {
+    fn clone(&self) -> Self {
+        Self {
+            binary_path: self.binary_path.clone(),
+            progress_callback: self.progress_callback.clone(),
+        }
+    }
+}
+
 impl Default for CursorBackend {
     fn default() -> Self {
         Self::new()
@@ -71,8 +80,22 @@ impl CursorBackend {
     }
 }
 
+#[async_trait::async_trait]
 impl super::CodingBackend for CursorBackend {
-    fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+    async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        let self_clone = self.clone();
+        tokio::task::spawn_blocking(move || self_clone.invoke_sync(request))
+            .await
+            .map_err(|e| BackendError::InvocationFailed(e.to_string()))?
+    }
+
+    fn name(&self) -> &str {
+        "cursor"
+    }
+}
+
+impl CursorBackend {
+    fn invoke_sync(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         // validate spawns subagents via the Agent tool which Cursor does not support.
         // Reject early before any spawn attempt so tests can distinguish this from BinaryNotFound.
         if request.goal == Goal::Validate {
@@ -321,9 +344,5 @@ impl super::CodingBackend for CursorBackend {
             raw_stream,
             stderr,
         })
-    }
-
-    fn name(&self) -> &str {
-        "cursor"
     }
 }

@@ -126,7 +126,9 @@ exit 0
         extra_allowed_tools: None,
     };
 
-    let result = backend.invoke(req);
+    let result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req));
     assert!(result.is_ok(), "invoke should succeed: {:?}", result);
 
     let content = fs::read_to_string(&output_file).expect("conversation file should exist");

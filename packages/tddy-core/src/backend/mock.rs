@@ -79,8 +79,9 @@ impl MockBackend {
     }
 }
 
+#[async_trait::async_trait]
 impl CodingBackend for MockBackend {
-    fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+    async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         self.invocations.write().unwrap().push(request.clone());
 
         let response = self
@@ -92,13 +93,15 @@ impl CodingBackend for MockBackend {
 
         if let Some(ref path) = request.conversation_output_path {
             let bytes = response.raw_stream.as_deref().unwrap_or(&response.output);
-            std::fs::write(path, bytes.as_bytes()).map_err(|e| {
-                BackendError::InvocationFailed(format!(
-                    "failed to write conversation output to {}: {}",
-                    path.display(),
-                    e
-                ))
-            })?;
+            tokio::fs::write(path, bytes.as_bytes())
+                .await
+                .map_err(|e| {
+                    BackendError::InvocationFailed(format!(
+                        "failed to write conversation output to {}: {}",
+                        path.display(),
+                        e
+                    ))
+                })?;
         }
 
         Ok(response)

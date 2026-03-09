@@ -183,6 +183,15 @@ impl std::fmt::Debug for ClaudeCodeBackend {
     }
 }
 
+impl Clone for ClaudeCodeBackend {
+    fn clone(&self) -> Self {
+        Self {
+            binary_path: self.binary_path.clone(),
+            progress_callback: self.progress_callback.clone(),
+        }
+    }
+}
+
 impl Default for ClaudeCodeBackend {
     fn default() -> Self {
         Self::new()
@@ -218,8 +227,22 @@ impl ClaudeCodeBackend {
     }
 }
 
+#[async_trait::async_trait]
 impl super::CodingBackend for ClaudeCodeBackend {
-    fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+    async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        let self_clone = self.clone();
+        tokio::task::spawn_blocking(move || self_clone.invoke_sync(request))
+            .await
+            .map_err(|e| BackendError::InvocationFailed(e.to_string()))?
+    }
+
+    fn name(&self) -> &str {
+        "claude"
+    }
+}
+
+impl ClaudeCodeBackend {
+    fn invoke_sync(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         let (system_prompt_path, cleanup_temp) = if let Some(ref path) = request.system_prompt_path
         {
             (Some(path.clone()), false)
@@ -483,9 +506,5 @@ impl super::CodingBackend for ClaudeCodeBackend {
             raw_stream,
             stderr,
         })
-    }
-
-    fn name(&self) -> &str {
-        "claude"
     }
 }
