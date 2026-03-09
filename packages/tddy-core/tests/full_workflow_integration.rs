@@ -5,7 +5,7 @@
 
 use tddy_core::{
     next_goal_for_state, AcceptanceTestsOptions, DemoOptions, EvaluateOptions, MockBackend,
-    PlanOptions, RedOptions, RefactorOptions, ValidateOptions, Workflow,
+    PlanOptions, RedOptions, RefactorOptions, StubBackend, ValidateOptions, Workflow,
 };
 use tddy_core::{GreenOptions, WorkflowState};
 
@@ -117,6 +117,50 @@ fn full_workflow_chains_all_steps() {
     assert!(
         matches!(state, WorkflowState::GreenComplete { .. }),
         "workflow should end in GreenComplete, got {:?}",
+        state
+    );
+
+    let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+/// Full workflow with StubBackend reaches GreenComplete (tddy-demo flow).
+#[test]
+fn full_workflow_with_stub_backend_reaches_green_complete() {
+    let output_dir = std::env::temp_dir().join("tddy-full-workflow-stub");
+    let _ = std::fs::remove_dir_all(&output_dir);
+    std::fs::create_dir_all(&output_dir).expect("create output dir");
+
+    let backend = StubBackend::new();
+    let mut workflow = Workflow::new(backend);
+    let plan_options = PlanOptions::default();
+    let plan_dir = workflow
+        .plan("Add a feature", &output_dir, None, &plan_options)
+        .expect("plan should succeed");
+
+    let at_options = AcceptanceTestsOptions::default();
+    let _ = workflow
+        .acceptance_tests(&plan_dir, None, &at_options)
+        .expect("acceptance_tests should succeed");
+
+    let red_options = RedOptions::default();
+    let _ = workflow
+        .red(&plan_dir, None, &red_options)
+        .expect("red should succeed");
+
+    let green_options = GreenOptions::default();
+    let green_output = workflow
+        .green(&plan_dir, None, &green_options)
+        .expect("green should succeed");
+
+    assert!(
+        green_output.summary.contains("pass"),
+        "summary should mention pass: {}",
+        green_output.summary
+    );
+    let state = workflow.state();
+    assert!(
+        matches!(state, WorkflowState::GreenComplete { .. }),
+        "workflow should end in GreenComplete with StubBackend, got {:?}",
         state
     );
 

@@ -1,6 +1,8 @@
-//! Integration tests for the planning workflow with MockBackend.
+//! Integration tests for the planning workflow with MockBackend and StubBackend.
 
-use tddy_core::{ClarificationQuestion, MockBackend, PlanOptions, QuestionOption, Workflow};
+use tddy_core::{
+    ClarificationQuestion, MockBackend, PlanOptions, QuestionOption, StubBackend, Workflow,
+};
 
 const DELIMITED_OUTPUT: &str = r#"Here is my analysis.
 
@@ -105,6 +107,29 @@ fn planning_workflow_invokes_backend_with_plan_permission_mode() {
     assert!(
         matches!(state, tddy_core::WorkflowState::Planned { .. }),
         "workflow should transition to Planned"
+    );
+
+    let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+#[test]
+fn planning_workflow_with_stub_backend_transitions_to_planned() {
+    let backend = StubBackend::new();
+    let mut workflow = Workflow::new(backend);
+    let output_dir = std::env::temp_dir().join("tddy-planning-stub-test");
+    let _ = std::fs::remove_dir_all(&output_dir);
+
+    let result = workflow.plan("Add a feature", &output_dir, None, &PlanOptions::default());
+
+    let output_path = result.expect("StubBackend plan should succeed");
+    assert!(output_path.join("PRD.md").exists(), "PRD.md should exist");
+    assert!(output_path.join("TODO.md").exists(), "TODO.md should exist");
+
+    let state = workflow.state();
+    assert!(
+        matches!(state, tddy_core::WorkflowState::Planned { .. }),
+        "workflow should transition to Planned with StubBackend, got {:?}",
+        state
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);

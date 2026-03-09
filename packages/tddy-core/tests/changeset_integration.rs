@@ -606,8 +606,9 @@ fn changeset_written_before_plan_agent() {
         initial_prompt_at_invoke: Arc<Mutex<Option<String>>>,
     }
 
+    #[async_trait::async_trait]
     impl CodingBackend for CheckingBackend {
-        fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
+        async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
             if let Some(ref wd) = request.working_dir {
                 if let Ok(entries) = std::fs::read_dir(wd) {
                     for entry in entries.flatten() {

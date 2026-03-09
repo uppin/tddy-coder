@@ -1,0 +1,16 @@
+[package]
+name = "tddy-demo"
+version = "0.1.0"
+edition = "2021"
+description = "Same app as tddy-coder with StubBackend — runs tddy-coder --agent stub"
+
+[[bin]]
+name = "tddy-demo"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tddy-coder = { path = "../tddy-coder" }
+tddy-core = { path = "../tddy-core" }
+ctrlc = { version = "3", features = ["termination"] }
+crossterm = "0.28"

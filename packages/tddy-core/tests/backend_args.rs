@@ -370,7 +370,10 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n---PRD_END---
         extra_allowed_tools: None,
     };
 
-    let _ = backend.invoke(req).expect("invoke should succeed");
+    let _ = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req))
+        .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
     assert!(

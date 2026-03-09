@@ -14,7 +14,7 @@ pub use backend::{
     build_claude_args, clear_child_pid, get_child_pid, kill_child_process, set_child_pid,
     AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeCodeBackend, ClaudeInvokeConfig,
     CodingBackend, CursorBackend, Goal, InvokeRequest, InvokeResponse, MockBackend, PermissionMode,
-    QuestionOption,
+    QuestionOption, SharedBackend, StubBackend,
 };
 pub use changeset::{
     append_session_and_update_state, get_session_for_tag, next_goal_for_state, read_changeset,
