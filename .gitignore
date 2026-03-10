@@ -14,3 +14,4 @@ target/
 
 # tddy-coder session artifacts (when run without --output-dir, sessions go to ~/.tddy)
 changeset.yaml
+.vscode/settings.json
