@@ -52,7 +52,10 @@ impl PresenterView for TuiView {
         // No-op
     }
 
-    fn on_workflow_complete(&mut self, _result: &Result<String, String>) {
+    fn on_workflow_complete(
+        &mut self,
+        _result: &Result<tddy_core::WorkflowCompletePayload, String>,
+    ) {
         // No-op
     }
 

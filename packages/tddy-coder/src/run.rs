@@ -7,7 +7,7 @@ use anyhow::Context;
 use clap::Parser;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
@@ -21,7 +21,57 @@ use crate::plain;
 use crate::tty::should_run_tui;
 use tddy_core::Presenter;
 
+use crate::disable_raw_mode;
+
+/// Shared main entry: panic hook, Ctrl+C handler, run_with_args, exit logic.
+/// Use from both tddy-coder and tddy-demo binaries.
+pub fn run_main(mut args: Args) {
+    args.session_id = Some(uuid::Uuid::now_v7().to_string());
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = crossterm::execute!(
+            std::io::stderr(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show,
+        );
+        let _ = disable_raw_mode();
+        original_hook(info);
+    }));
+
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let ctrlc_pressed = Arc::new(AtomicBool::new(false));
+    let shutdown_for_handler = shutdown.clone();
+    let ctrlc_pressed_for_handler = ctrlc_pressed.clone();
+
+    ctrlc::set_handler(move || {
+        tddy_core::kill_child_process();
+        ctrlc_pressed_for_handler.store(true, Ordering::Relaxed);
+        shutdown_for_handler.store(true, Ordering::Relaxed);
+        let _ = crossterm::execute!(
+            std::io::stderr(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show,
+        );
+        let _ = disable_raw_mode();
+        let _ = std::io::stderr().flush();
+    })
+    .expect("failed to set Ctrl+C handler");
+
+    match run_with_args(&args, shutdown) {
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+        Ok(()) => {
+            if ctrlc_pressed.load(Ordering::Relaxed) {
+                std::process::exit(130);
+            }
+        }
+    }
+}
+
 /// Common runtime args. Use CoderArgs or DemoArgs for CLI parsing, then convert via From.
+/// session_id is set at program start (in run_main) and used across the workflow.
 #[derive(Debug, Clone)]
 pub struct Args {
     pub goal: Option<String>,
@@ -36,6 +86,8 @@ pub struct Args {
     pub prompt: Option<String>,
     /// When Some(port), gRPC server runs alongside TUI on the given port.
     pub grpc: Option<u16>,
+    /// Session ID set at program start; used for exit output when no plan_dir.
+    pub session_id: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -152,6 +204,7 @@ impl From<CoderArgs> for Args {
             agent: a.agent,
             prompt: a.prompt,
             grpc: a.grpc,
+            session_id: None,
         }
     }
 }
@@ -170,6 +223,7 @@ impl From<DemoArgs> for Args {
             agent: a.agent,
             prompt: a.prompt,
             grpc: a.grpc,
+            session_id: None,
         }
     }
 }
@@ -181,7 +235,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         if use_tui {
             return run_full_workflow_tui(args, shutdown);
         }
-        return run_full_workflow_plain(args);
+        return run_full_workflow_plain(args, shutdown);
     }
 
     log::debug!(
@@ -198,8 +252,9 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .plan_dir
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for acceptance-tests goal"))?;
-        let ctx = build_goal_context(args, Some(plan_dir), |_| {});
-        return run_goal_plain(args, backend, "acceptance-tests", ctx, true);
+        let conv = resolve_log_defaults(args, plan_dir);
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        return run_goal_plain(args, backend, "acceptance-tests", ctx, true, &shutdown);
     }
 
     if args.goal.as_deref() == Some("green") {
@@ -207,10 +262,11 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .plan_dir
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for green goal"))?;
-        let ctx = build_goal_context(args, Some(plan_dir), |c| {
+        let conv = resolve_log_defaults(args, plan_dir);
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, |c| {
             c.insert("run_demo".to_string(), serde_json::json!(false));
         });
-        return run_goal_plain(args, backend, "green", ctx, true);
+        return run_goal_plain(args, backend, "green", ctx, true, &shutdown);
     }
 
     if args.goal.as_deref() == Some("evaluate") {
@@ -218,13 +274,14 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .plan_dir
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for evaluate"))?;
-        let ctx = build_goal_context(args, Some(plan_dir), |c| {
+        let conv = resolve_log_defaults(args, plan_dir);
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, |c| {
             c.insert(
                 "output_dir".to_string(),
                 serde_json::to_value(args.output_dir.clone()).unwrap(),
             );
         });
-        return run_goal_plain(args, backend, "evaluate", ctx, true);
+        return run_goal_plain(args, backend, "evaluate", ctx, true, &shutdown);
     }
 
     if args.goal.as_deref() == Some("demo") {
@@ -232,8 +289,9 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .plan_dir
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for demo goal"))?;
-        let ctx = build_goal_context(args, Some(plan_dir), |_| {});
-        return run_goal_plain(args, backend, "demo", ctx, true);
+        let conv = resolve_log_defaults(args, plan_dir);
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        return run_goal_plain(args, backend, "demo", ctx, true, &shutdown);
     }
 
     if args.goal.as_deref() == Some("red") {
@@ -241,8 +299,9 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .plan_dir
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for red goal"))?;
-        let ctx = build_goal_context(args, Some(plan_dir), |_| {});
-        return run_goal_plain(args, backend, "red", ctx, true);
+        let conv = resolve_log_defaults(args, plan_dir);
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        return run_goal_plain(args, backend, "red", ctx, true, &shutdown);
     }
 
     if args.goal.as_deref() == Some("validate") {
@@ -250,8 +309,9 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .plan_dir
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for validate goal"))?;
-        let ctx = build_goal_context(args, Some(plan_dir), |_| {});
-        return run_goal_plain(args, backend, "validate", ctx, true);
+        let conv = resolve_log_defaults(args, plan_dir);
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        return run_goal_plain(args, backend, "validate", ctx, true, &shutdown);
     }
 
     if args.goal.as_deref() == Some("refactor") {
@@ -259,8 +319,9 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .plan_dir
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for refactor goal"))?;
-        let ctx = build_goal_context(args, Some(plan_dir), |_| {});
-        return run_goal_plain(args, backend, "refactor", ctx, true);
+        let conv = resolve_log_defaults(args, plan_dir);
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        return run_goal_plain(args, backend, "refactor", ctx, true, &shutdown);
     }
 
     if args.goal.as_deref() != Some("plan") {
@@ -304,7 +365,8 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         (plan_dir, args.output_dir.clone())
     };
 
-    let ctx = build_goal_context(args, None, |c| {
+    let conv = resolve_log_defaults(args, &plan_dir);
+    let ctx = build_goal_context(args, None, &conv, |c| {
         c.insert("feature_input".to_string(), serde_json::json!(input));
         c.insert(
             "output_dir".to_string(),
@@ -315,11 +377,48 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             serde_json::to_value(plan_dir.clone()).unwrap(),
         );
     });
-    run_goal_plain(args, backend, "plan", ctx, true)
+    run_goal_plain(args, backend, "plan", ctx, true, &shutdown)
 }
 
 fn on_progress(_event: &ProgressEvent) {
     // Plain mode: progress is not displayed (no stdout/stderr per AGENTS.md)
+}
+
+/// Print session id and plan dir to stderr on program exit.
+fn print_session_info_on_exit(plan_dir: &Path) {
+    let session_id = plan_dir
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| plan_dir.display().to_string());
+    eprintln!("Session: {}", session_id);
+    eprintln!("Plan dir: {}", plan_dir.display());
+    let _ = std::io::stderr().flush();
+}
+
+/// Print session id and session dir path (when no plan_dir; uses startup session_id).
+fn print_session_id_on_exit(session_id: &str, session_dir: &Path) {
+    eprintln!("Session: {}", session_id);
+    eprintln!("Plan dir: {}", session_dir.display());
+    let _ = std::io::stderr().flush();
+}
+
+/// Compute session dir path from args (base/sessions/{session_id}/).
+fn session_dir_path(args: &Args) -> Option<PathBuf> {
+    let sid = args.session_id.as_deref()?;
+    let base = if args.output_dir == Path::new(".") {
+        #[cfg(unix)]
+        {
+            let home = std::env::var("HOME").ok()?;
+            PathBuf::from(home).join(".tddy")
+        }
+        #[cfg(not(unix))]
+        {
+            return None;
+        }
+    } else {
+        args.output_dir.clone()
+    };
+    Some(base.join(tddy_core::output::SESSIONS_SUBDIR).join(sid))
 }
 
 /// Create backend once at startup (plain mode, no progress events).
@@ -333,10 +432,21 @@ fn create_backend(agent: &str) -> SharedBackend {
     SharedBackend::from_any(backend)
 }
 
+/// Resolve conversation_output and debug_output defaults to plan_dir/logs/ when not set.
+/// Returns the resolved conversation output path for use in context.
+fn resolve_log_defaults(args: &Args, plan_dir: &Path) -> Option<PathBuf> {
+    tddy_core::resolve_log_defaults(
+        args.conversation_output.clone(),
+        args.debug_output.as_ref(),
+        plan_dir,
+    )
+}
+
 /// Build context_values for a goal from args and plan_dir.
 fn build_goal_context(
     args: &Args,
     plan_dir: Option<&PathBuf>,
+    conversation_output: &Option<PathBuf>,
     extra: impl FnOnce(&mut std::collections::HashMap<String, serde_json::Value>),
 ) -> std::collections::HashMap<String, serde_json::Value> {
     let inherit_stdin = io::stdin().is_terminal();
@@ -348,7 +458,7 @@ fn build_goal_context(
     ctx.insert("agent_output".to_string(), serde_json::json!(true));
     ctx.insert(
         "conversation_output_path".to_string(),
-        serde_json::to_value(args.conversation_output.clone()).unwrap(),
+        serde_json::to_value(conversation_output.clone()).unwrap(),
     );
     ctx.insert(
         "inherit_stdin".to_string(),
@@ -371,12 +481,14 @@ fn build_goal_context(
 }
 
 /// Run a single goal via WorkflowEngine with clarification loop. Prints output on success unless print_output is false.
+/// When shutdown is set during plan approval (e.g. by SIGINT handler), prints "Session: (workflow did not complete)" and returns Ok.
 fn run_goal_plain(
     args: &Args,
     backend: SharedBackend,
     goal: &str,
     context_values: std::collections::HashMap<String, serde_json::Value>,
     print_output: bool,
+    shutdown: &AtomicBool,
 ) -> anyhow::Result<()> {
     let storage_dir = std::env::temp_dir().join("tddy-flowrunner-session");
     std::fs::create_dir_all(&storage_dir).context("create session storage dir")?;
@@ -417,6 +529,7 @@ fn run_goal_plain(
                 if print_output {
                     print_goal_output(goal, output.as_deref(), &plan_dir)?;
                 }
+                print_session_info_on_exit(&plan_dir);
                 return Ok(());
             }
             ExecutionStatus::ElicitationNeeded { ref event } => {
@@ -438,8 +551,24 @@ fn run_goal_plain(
                     tddy_core::ElicitationEvent::PlanApproval { ref prd_content } => {
                         let mut current_prd = prd_content.clone();
                         loop {
-                            let answer = plain::read_plan_approval_plain(&current_prd)
-                                .context("plan approval")?;
+                            let answer = match plain::read_plan_approval_plain(&current_prd) {
+                                Ok(a) => a,
+                                Err(e) => {
+                                    if e.downcast_ref::<std::io::Error>()
+                                        .is_some_and(|io| io.kind() == io::ErrorKind::Interrupted)
+                                        && shutdown.load(Ordering::Relaxed)
+                                    {
+                                        if let Some(sid) = args.session_id.as_ref() {
+                                            let dir = session_dir_path(args).unwrap_or_else(|| {
+                                                PathBuf::from("(session dir not created)")
+                                            });
+                                            print_session_id_on_exit(sid, &dir);
+                                        }
+                                        return Ok(());
+                                    }
+                                    return Err(e.context("plan approval"));
+                                }
+                            };
                             if answer.eq_ignore_ascii_case("approve") {
                                 break;
                             }
@@ -459,6 +588,7 @@ fn run_goal_plain(
                         .and_then(|s| s.context.get_sync("output"));
                     print_goal_output(goal, output.as_deref(), &plan_dir)?;
                 }
+                print_session_info_on_exit(&plan_dir);
                 return Ok(());
             }
             ExecutionStatus::WaitingForInput { .. } => {
@@ -665,7 +795,9 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         args.output_dir.clone(),
         initial_prompt,
         args.conversation_output.clone(),
+        args.debug_output.clone(),
         args.debug,
+        args.session_id.clone(),
     );
 
     tddy_tui::run_event_loop(
@@ -677,27 +809,36 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
 
     if let Some(result) = presenter.take_workflow_result() {
         match &result {
-            Ok(summary) => {
-                println!("{}", summary);
+            Ok(payload) => {
+                println!("{}", payload.summary);
                 let _ = std::io::stdout().flush();
+                if let Some(ref plan_dir) = payload.plan_dir {
+                    print_session_info_on_exit(plan_dir);
+                }
             }
             Err(e) => {
                 eprintln!("Workflow error: {}", e);
                 let _ = std::io::stderr().flush();
             }
         }
+    } else {
+        if let Some(sid) = args.session_id.as_ref() {
+            let dir = session_dir_path(args)
+                .unwrap_or_else(|| PathBuf::from("(session dir not created)"));
+            print_session_id_on_exit(sid, &dir);
+        }
     }
 
     Ok(())
 }
 
-fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
+fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     let backend = create_backend(&args.agent);
 
     let mut plan_dir = if let Some(ref p) = args.plan_dir {
         p.clone()
     } else {
-        run_plan_to_get_dir(args, backend.clone())?
+        run_plan_to_get_dir(args, backend.clone(), &shutdown)?
     };
 
     // When resuming with --plan-dir: if state is Init and plan is incomplete, run plan to complete it.
@@ -714,7 +855,7 @@ fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
             .trim()
             .to_string();
         if !input.is_empty() {
-            plan_dir = run_plan_to_complete(args, backend.clone(), &input, &plan_dir)?;
+            plan_dir = run_plan_to_complete(args, backend.clone(), &input, &plan_dir, &shutdown)?;
         }
     }
 
@@ -740,7 +881,8 @@ fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
         .unwrap_or("feature")
         .trim()
         .to_string();
-    let context_values = build_goal_context(args, Some(&plan_dir), |c| {
+    let conv = resolve_log_defaults(args, &plan_dir);
+    let context_values = build_goal_context(args, Some(&plan_dir), &conv, |c| {
         c.insert(
             "feature_input".to_string(),
             serde_json::json!(feature_input),
@@ -796,6 +938,7 @@ fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
                     }
                 }
                 println!("\nPlan dir: {}", plan_dir_final.display());
+                print_session_info_on_exit(&plan_dir_final);
                 return Ok(());
             }
             ExecutionStatus::WaitingForInput { .. } => {
@@ -847,7 +990,11 @@ fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
     }
 }
 
-fn run_plan_to_get_dir(args: &Args, backend: SharedBackend) -> anyhow::Result<PathBuf> {
+fn run_plan_to_get_dir(
+    args: &Args,
+    backend: SharedBackend,
+    shutdown: &AtomicBool,
+) -> anyhow::Result<PathBuf> {
     let input = read_feature_input(args).context("read feature description")?;
     let input = input.trim().to_string();
     if input.is_empty() {
@@ -857,7 +1004,8 @@ fn run_plan_to_get_dir(args: &Args, backend: SharedBackend) -> anyhow::Result<Pa
         .output_dir
         .join(tddy_core::output::slugify_directory_name(&input));
     std::fs::create_dir_all(&plan_dir).context("create plan directory")?;
-    let ctx = build_goal_context(args, None, |c| {
+    let conv = resolve_log_defaults(args, &plan_dir);
+    let ctx = build_goal_context(args, None, &conv, |c| {
         c.insert("feature_input".to_string(), serde_json::json!(input));
         c.insert(
             "output_dir".to_string(),
@@ -868,7 +1016,7 @@ fn run_plan_to_get_dir(args: &Args, backend: SharedBackend) -> anyhow::Result<Pa
             serde_json::to_value(plan_dir.clone()).unwrap(),
         );
     });
-    run_goal_plain(args, backend, "plan", ctx, false)?;
+    run_goal_plain(args, backend, "plan", ctx, false, shutdown)?;
     Ok(plan_dir)
 }
 
@@ -877,19 +1025,21 @@ fn run_plan_to_complete(
     backend: SharedBackend,
     input: &str,
     plan_dir: &PathBuf,
+    shutdown: &AtomicBool,
 ) -> anyhow::Result<PathBuf> {
     let output_dir = plan_dir
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| plan_dir.clone());
-    let ctx = build_goal_context(args, Some(plan_dir), |c| {
+    let conv = resolve_log_defaults(args, plan_dir);
+    let ctx = build_goal_context(args, Some(plan_dir), &conv, |c| {
         c.insert("feature_input".to_string(), serde_json::json!(input));
         c.insert(
             "output_dir".to_string(),
             serde_json::to_value(output_dir).unwrap(),
         );
     });
-    run_goal_plain(args, backend, "plan", ctx, false)?;
+    run_goal_plain(args, backend, "plan", ctx, false, shutdown)?;
     Ok(plan_dir.clone())
 }
 
@@ -917,7 +1067,8 @@ fn run_plan_refinement(
     let refine_hooks = std::sync::Arc::new(tddy_core::workflow::tdd_hooks::TddWorkflowHooks::new());
     let refine_engine = WorkflowEngine::new(backend.clone(), refine_storage, Some(refine_hooks));
     let plan_dir_buf = plan_dir.to_path_buf();
-    let mut refine_ctx = build_goal_context(args, Some(&plan_dir_buf), |c| {
+    let conv = resolve_log_defaults(args, &plan_dir_buf);
+    let mut refine_ctx = build_goal_context(args, Some(&plan_dir_buf), &conv, |c| {
         c.insert(
             "feature_input".to_string(),
             serde_json::json!(feature_input),

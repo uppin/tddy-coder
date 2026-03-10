@@ -14,7 +14,7 @@ pub enum PresenterEvent {
     ActivityLogged(ActivityEntry),
     GoalStarted(String),
     StateChanged { from: String, to: String },
-    WorkflowComplete(Result<String, String>),
+    WorkflowComplete(Result<crate::presenter::WorkflowCompletePayload, String>),
     AgentOutput(String),
     InboxChanged(Vec<String>),
     IntentReceived(UserIntent),

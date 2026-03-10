@@ -300,8 +300,13 @@ pub const SESSIONS_SUBDIR: &str = "sessions";
 pub fn create_session_dir_in(base: &Path) -> Result<PathBuf, WorkflowError> {
     use uuid::Uuid;
     let id = Uuid::new_v4();
+    create_session_dir_with_id(base, &id.to_string())
+}
+
+/// Create a session directory at `{base}/sessions/{id}/` using the given session id.
+pub fn create_session_dir_with_id(base: &Path, session_id: &str) -> Result<PathBuf, WorkflowError> {
     let sessions_dir = base.join(SESSIONS_SUBDIR);
-    let session_dir = sessions_dir.join(id.to_string());
+    let session_dir = sessions_dir.join(session_id);
     fs::create_dir_all(&session_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     Ok(session_dir)
 }

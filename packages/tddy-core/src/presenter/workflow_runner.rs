@@ -14,7 +14,7 @@ use crate::{
     ClarificationQuestion, SharedBackend, WorkflowEngine,
 };
 
-use super::WorkflowEvent;
+use super::{WorkflowCompletePayload, WorkflowEvent};
 
 /// Context for elicitation (plan approval, refinement). Groups parameters passed to handle_elicitation.
 struct ElicitationContext<'a> {
@@ -245,8 +245,10 @@ fn run_plan_without_output_dir(
     answer_rx: &mpsc::Receiver<String>,
     output_dir: &Path,
     input: &str,
+    session_id: Option<&str>,
     model: &Option<String>,
     conversation_output_path: &Option<PathBuf>,
+    debug_output_path: Option<&Path>,
     debug: bool,
 ) -> Option<PathBuf> {
     let inherit_stdin = true;
@@ -272,6 +274,8 @@ fn run_plan_without_output_dir(
             )));
             return None;
         }
+    } else if session_id.is_some() {
+        (output_dir.to_path_buf(), Some(output_dir.to_path_buf()))
     } else {
         (output_dir.to_path_buf(), None)
     };
@@ -293,6 +297,9 @@ fn run_plan_without_output_dir(
             "session_base".to_string(),
             serde_json::to_value(base).unwrap(),
         );
+    }
+    if let Some(sid) = session_id {
+        context_values.insert("session_id".to_string(), serde_json::json!(sid));
     }
     context_values.insert(
         "model".to_string(),
@@ -335,6 +342,12 @@ fn run_plan_without_output_dir(
         .and_then(|s| s.context.get_sync::<PathBuf>("plan_dir"))
         .unwrap_or_else(|| output_dir.join(crate::output::slugify_directory_name(input)));
 
+    let conversation_output_resolved = crate::resolve_log_defaults(
+        conversation_output_path.clone(),
+        debug_output_path,
+        &plan_dir,
+    );
+
     if let ExecutionStatus::ElicitationNeeded { ref event } = result.status {
         let elicitation_ctx = ElicitationContext {
             event_tx,
@@ -343,7 +356,7 @@ fn run_plan_without_output_dir(
             backend,
             model,
             inherit_stdin,
-            conversation_output_path,
+            conversation_output_path: &conversation_output_resolved,
             debug,
         };
         if !handle_elicitation(event, &plan_dir, &elicitation_ctx) {
@@ -362,9 +375,11 @@ pub fn run_workflow(
     answer_rx: mpsc::Receiver<String>,
     output_dir: PathBuf,
     plan_dir: Option<PathBuf>,
+    session_id: Option<String>,
     model: Option<String>,
     initial_prompt: Option<String>,
     conversation_output_path: Option<PathBuf>,
+    debug_output_path: Option<PathBuf>,
     debug: bool,
 ) {
     let inherit_stdin = true;
@@ -392,8 +407,10 @@ pub fn run_workflow(
                 &answer_rx,
                 &output_dir,
                 &input,
+                session_id.as_deref(),
                 &model,
                 &conversation_output_path,
+                debug_output_path.as_deref(),
                 debug,
             ) {
                 Some(p) => p,
@@ -401,6 +418,9 @@ pub fn run_workflow(
             }
         }
     };
+
+    let conversation_output_path =
+        crate::resolve_log_defaults(conversation_output_path, debug_output_path, &plan_dir);
 
     let cs_pre = read_changeset(&plan_dir).ok();
     let plan_needs_completion = cs_pre.as_ref().is_some_and(|c| {
@@ -566,7 +586,11 @@ pub fn run_workflow(
                         )
                     })
                     .unwrap_or_else(|| format!("Plan dir: {}", plan_dir.display()));
-                let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Ok(summary)));
+                let payload = WorkflowCompletePayload {
+                    summary,
+                    plan_dir: Some(plan_dir.clone()),
+                };
+                let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Ok(payload)));
                 return;
             }
             ExecutionStatus::ElicitationNeeded { ref event } => {

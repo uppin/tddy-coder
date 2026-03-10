@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-03-10** [Feature] Session ID at Startup, SIGINT Graceful Shutdown — `run_main(args)`: panic hook, ctrlc handler (graceful shutdown, no exit in handler), run_with_args, exit(130) after return. Args.session_id (UUID v7 at startup). `session_dir_path(args)`, `print_session_id_on_exit(session_id, path)`. Session info printed on exit (TUI and plain). SIGINT integration test: tddy_demo_sigint_prints_session_info_to_stderr. (tddy-coder)
 - **2026-03-10** [Feature] Stable Session Directory — When `--output-dir` omitted, run.rs uses `$HOME/.tddy` and `create_session_dir_in`; agent working_dir = current_dir(). Plan goal creates session under `$HOME/.tddy/sessions/{uuid}/`. (tddy-coder)
 - **2026-03-10** [Feature] Hook-Triggered Elicitation — run.rs handles ElicitationNeeded in run_goal_plain and run_full_workflow_plain; removed manual plan approval loop. run_plan_refinement helper. (tddy-coder)
 - **2026-03-10** [Feature] Plan Approval Gate — plain.rs read_plan_approval_plain (v/a/r); run.rs plan approval loop in run_goal_plain when goal is plan and PRD exists; refinement loop with run_goal("plan", ctx). (tddy-coder)

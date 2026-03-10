@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use tddy_coder::{ActivityEntry, AppMode, Presenter, PresenterView, UserIntent};
-use tddy_core::{AnyBackend, SharedBackend, StubBackend};
+use tddy_core::{AnyBackend, SharedBackend, StubBackend, WorkflowCompletePayload};
 
 /// Events collected by TestView for assertions.
 #[derive(Debug, Clone)]
@@ -14,7 +14,7 @@ pub enum TestEvent {
     ActivityLogged(ActivityEntry),
     GoalStarted(String),
     StateChanged { from: String, to: String },
-    WorkflowComplete(Result<String, String>),
+    WorkflowComplete(Result<WorkflowCompletePayload, String>),
     AgentOutput(String),
     InboxChanged(Vec<String>),
 }
@@ -60,7 +60,7 @@ impl PresenterView for TestView {
         });
     }
 
-    fn on_workflow_complete(&mut self, result: &Result<String, String>) {
+    fn on_workflow_complete(&mut self, result: &Result<WorkflowCompletePayload, String>) {
         self.events
             .push(TestEvent::WorkflowComplete(result.clone()));
     }
@@ -92,7 +92,9 @@ fn full_workflow_completes_with_stub_backend() {
         output_dir,
         Some("Build auth".to_string()),
         None,
+        None,
         false,
+        None,
     );
 
     let mut iterations = 0;
@@ -148,7 +150,9 @@ fn clarification_roundtrip_sends_answers() {
         output_dir,
         Some("CLARIFY test".to_string()),
         None,
+        None,
         false,
+        None,
     );
 
     let mut iterations = 0;
@@ -202,7 +206,9 @@ fn inbox_queue_and_dequeue() {
         output_dir,
         Some("Build auth".to_string()),
         None,
+        None,
         false,
+        None,
     );
 
     let mut iterations = 0;
@@ -256,7 +262,9 @@ fn plan_approval_approve_proceeds_to_next_step() {
         output_dir,
         Some("Build auth".to_string()),
         None,
+        None,
         false,
+        None,
     );
 
     let mut iterations = 0;
@@ -312,7 +320,9 @@ fn plan_approval_view_then_approve() {
         output_dir,
         Some("Build auth".to_string()),
         None,
+        None,
         false,
+        None,
     );
 
     let mut iterations = 0;
@@ -371,7 +381,9 @@ fn plan_approval_refine_re_shows_approval() {
         output_dir,
         Some("Build auth".to_string()),
         None,
+        None,
         false,
+        None,
     );
 
     let mut iterations = 0;
@@ -426,7 +438,9 @@ fn workflow_error_propagates() {
         output_dir,
         Some("FAIL_INVOKE test".to_string()),
         None,
+        None,
         false,
+        None,
     );
 
     let mut iterations = 0;
