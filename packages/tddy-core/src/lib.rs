@@ -32,17 +32,18 @@ pub use log_backend::{
 pub use output::{
     extract_last_structured_block, parse_acceptance_tests_response, parse_demo_response,
     parse_evaluate_response, parse_green_response, parse_planning_output, parse_red_response,
-    parse_refactor_response, parse_validate_subagents_response, read_session_file,
-    write_acceptance_tests_file, write_artifacts, write_evaluation_report, write_session_file,
-    AcceptanceTestInfo, AcceptanceTestsOutput, DemoOutput, EvaluateAffectedTest,
-    EvaluateBuildResult, EvaluateChangedFile, EvaluateChangesetSync, EvaluateFileAnalyzed,
-    EvaluateIssue, EvaluateOutput, EvaluateTestImpact, GreenOutput, GreenTestResult,
-    ImplementationInfo, PlanningOutput, RedOutput, RedTestInfo, RefactorOutput, SkeletonInfo,
-    StructuredBlock, ValidateSubagentsOutput,
+    parse_refactor_response, parse_update_docs_response, parse_validate_subagents_response,
+    read_session_file, write_acceptance_tests_file, write_artifacts, write_evaluation_report,
+    write_session_file, AcceptanceTestInfo, AcceptanceTestsOutput, DemoOutput,
+    EvaluateAffectedTest, EvaluateBuildResult, EvaluateChangedFile, EvaluateChangesetSync,
+    EvaluateFileAnalyzed, EvaluateIssue, EvaluateOutput, EvaluateTestImpact, GreenOutput,
+    GreenTestResult, ImplementationInfo, PlanningOutput, RedOutput, RedTestInfo, RefactorOutput,
+    SkeletonInfo, StructuredBlock, UpdateDocsOutput, ValidateSubagentsOutput,
 };
 pub use permission::{
     acceptance_tests_allowlist, demo_allowlist, evaluate_allowlist, green_allowlist,
-    plan_allowlist, red_allowlist, refactor_allowlist, validate_subagents_allowlist,
+    plan_allowlist, red_allowlist, refactor_allowlist, update_docs_allowlist,
+    validate_subagents_allowlist,
 };
 pub use presenter::{
     ActivityEntry, ActivityKind, AppMode, Presenter, PresenterEvent, PresenterHandle,
@@ -55,7 +56,8 @@ pub use schema::{
 pub use stream::ProgressEvent;
 pub use workflow::{
     engine::WorkflowEngine,
+    find_git_root,
     graph::{ElicitationEvent, ExecutionResult, ExecutionStatus},
     AcceptanceTestsOptions, DemoOptions, EvaluateOptions, GreenOptions, PlanOptions, RedOptions,
-    RefactorOptions, ValidateOptions,
+    RefactorOptions, UpdateDocsOptions, ValidateOptions,
 };

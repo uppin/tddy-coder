@@ -24,6 +24,13 @@ const REFACTOR_OUTPUT: &str = r#"Refactoring complete. All tasks from refactorin
 </structured-response>
 "#;
 
+const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
+
+<structured-response content-type="application-json">
+{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}
+</structured-response>
+"#;
+
 /// refactor() invokes backend with Goal::Refactor.
 #[tokio::test]
 async fn refactor_invokes_backend_with_refactor_goal() {
@@ -34,6 +41,7 @@ async fn refactor_invokes_backend_with_refactor_goal() {
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-refactor-goal-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -50,7 +58,10 @@ async fn refactor_invokes_backend_with_refactor_goal() {
 
     let invocations = backend.invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
-    let req = invocations.last().unwrap();
+    let req = invocations
+        .iter()
+        .find(|r| r.goal == Goal::Refactor)
+        .expect("refactor invocation should exist");
     assert_eq!(
         req.goal,
         Goal::Refactor,
@@ -101,6 +112,7 @@ async fn refactor_transitions_to_refactor_complete() {
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-refactor-state-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -115,8 +127,8 @@ async fn refactor_transitions_to_refactor_complete() {
 
     let changeset = read_changeset(&plan_dir).expect("changeset");
     assert_eq!(
-        changeset.state.current, "RefactorComplete",
-        "workflow should transition to RefactorComplete, got {}",
+        changeset.state.current, "DocsUpdated",
+        "workflow should transition to DocsUpdated (refactor -> update-docs), got {}",
         changeset.state.current
     );
 
@@ -143,7 +155,7 @@ async fn refactor_parses_structured_response() {
     );
 
     let ctx = ctx_refactor(plan_dir.clone());
-    let result = run_goal_until_done(&engine, "refactor", ctx).await.unwrap();
+    let result = engine.run_goal("refactor", ctx).await.unwrap();
 
     let session = engine
         .get_session(&result.session_id)

@@ -139,6 +139,8 @@ pub enum Goal {
     Validate,
     /// Execute refactoring plan from refactoring-plan.md.
     Refactor,
+    /// Update repo documentation from PRD, changeset, progress per repo guidelines.
+    UpdateDocs,
 }
 
 impl Goal {
@@ -153,6 +155,7 @@ impl Goal {
             Goal::Evaluate => "evaluate-changes",
             Goal::Validate => "validate",
             Goal::Refactor => "refactor",
+            Goal::UpdateDocs => "update-docs",
         }
     }
 }

@@ -88,6 +88,13 @@ const REFACTOR_OUTPUT: &str = r#"Refactoring complete.
 </structured-response>
 "#;
 
+const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
+
+<structured-response content-type="application-json">
+{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}
+</structured-response>
+"#;
+
 async fn setup_plan_dir_with_green_complete(
     label: &str,
 ) -> (std::path::PathBuf, WorkflowEngine, Arc<MockBackend>) {
@@ -258,6 +265,7 @@ async fn evaluate_accepts_green_complete_state() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let ctx = ctx_evaluate(
         plan_dir.clone(),
@@ -288,6 +296,7 @@ async fn evaluate_accepts_demo_complete_state() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-demo-eval-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);

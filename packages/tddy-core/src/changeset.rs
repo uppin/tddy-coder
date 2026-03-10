@@ -211,7 +211,8 @@ pub fn next_goal_for_state(state: &str) -> Option<&'static str> {
         "DemoComplete" => Some("evaluate"),
         "Evaluated" => Some("validate"),
         "ValidateComplete" | "ValidateRefactorComplete" => Some("refactor"),
-        "RefactorComplete" => None,
+        "RefactorComplete" => Some("update-docs"),
+        "DocsUpdated" => None,
         "Failed" => None,
         _ => Some("plan"),
     }

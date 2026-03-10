@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use tddy_core::backend::{CodingBackend, StubBackend};
 use tddy_core::output::{
     parse_acceptance_tests_response, parse_green_response, parse_planning_response,
-    parse_red_response,
+    parse_red_response, parse_update_docs_response,
 };
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::{ExecutionStatus, GraphBuilder};
@@ -74,6 +74,10 @@ async fn full_graph_topology_includes_all_goals() {
         task_ids.contains(&"refactor".to_string()),
         "must have refactor"
     );
+    assert!(
+        task_ids.contains(&"update-docs".to_string()),
+        "must have update-docs"
+    );
     assert!(task_ids.contains(&"end".to_string()), "must have end");
 }
 
@@ -121,6 +125,10 @@ async fn full_graph_conditional_demo_edge() {
     );
     assert_eq!(
         graph.next_task_id("refactor", &ctx_default),
+        Some("update-docs".to_string())
+    );
+    assert_eq!(
+        graph.next_task_id("update-docs", &ctx_default),
         Some("end".to_string())
     );
 }
@@ -216,6 +224,35 @@ async fn stub_backend_red_returns_valid_response() {
         .expect("stub stores red via tool executor");
     let parsed = parse_red_response(&output).expect("should parse");
     assert!(!parsed.summary.is_empty());
+}
+
+/// StubBackend returns valid update-docs output.
+#[tokio::test]
+async fn stub_backend_update_docs_returns_valid_response() {
+    let backend = StubBackend::new();
+    let req = tddy_core::backend::InvokeRequest {
+        prompt: "update docs".to_string(),
+        system_prompt: None,
+        system_prompt_path: None,
+        goal: tddy_core::backend::Goal::UpdateDocs,
+        model: None,
+        session_id: None,
+        is_resume: false,
+        working_dir: None,
+        debug: false,
+        agent_output: false,
+        agent_output_sink: None,
+        progress_sink: None,
+        conversation_output_path: None,
+        inherit_stdin: false,
+        extra_allowed_tools: None,
+        socket_path: None,
+    };
+
+    let resp = backend.invoke(req).await.unwrap();
+    let parsed = parse_update_docs_response(&resp.output).expect("should parse");
+    assert!(!parsed.summary.is_empty());
+    assert_eq!(parsed.docs_updated, 3);
 }
 
 /// StubBackend returns valid green output via tool executor.

@@ -2,7 +2,7 @@
 
 use tddy_core::output::{
     parse_acceptance_tests_response, parse_evaluate_response, parse_planning_output,
-    parse_red_response,
+    parse_red_response, parse_update_docs_response,
 };
 
 #[test]
@@ -37,6 +37,30 @@ fn errors_on_missing_todo() {
     let input = "---PRD_START---\n# PRD\n---PRD_END---";
     let err = parse_planning_output(input).unwrap_err();
     assert!(matches!(err, tddy_core::ParseError::MissingTodo));
+}
+
+#[test]
+fn parse_update_docs_response_extracts_valid_output() {
+    let input = r#"Documentation updated.
+<structured-response content-type="application-json">
+{"goal":"update-docs","summary":"Updated 3 docs.","docs_updated":3}
+</structured-response>"#;
+    let out = parse_update_docs_response(input).expect("should parse");
+    assert_eq!(out.summary, "Updated 3 docs.");
+    assert_eq!(out.docs_updated, 3);
+}
+
+#[test]
+fn parse_update_docs_response_rejects_wrong_goal() {
+    let input = r#"<structured-response content-type="application-json">
+{"goal":"refactor","summary":"Updated docs.","docs_updated":2}
+</structured-response>"#;
+    let err = parse_update_docs_response(input).unwrap_err();
+    assert!(
+        err.to_string().contains("goal") || err.to_string().contains("update-docs"),
+        "expected goal-related error, got: {}",
+        err
+    );
 }
 
 /// Acceptance-tests and red outputs include sequential_command, logging_command when provided.

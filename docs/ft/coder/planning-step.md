@@ -6,7 +6,7 @@
 
 ## Summary
 
-The Planning Step is the first phase of the tddy-coder workflow. When `--goal` is omitted, tddy-coder runs the full workflow (plan → acceptance-tests → red → green) in a single invocation, with auto-resume from `changeset.yaml` state. When a specific goal is given, it executes that step only. The **plan** goal accepts a user's goal description via stdin or `--prompt`, invokes an LLM backend (Claude or Cursor per `--agent`) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, resumes the Claude session, creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
+The Planning Step is the first phase of the tddy-coder workflow. When `--goal` is omitted, tddy-coder runs the full workflow (plan → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs) in a single invocation, with auto-resume from `changeset.yaml` state. When a specific goal is given, it executes that step only. The **plan** goal accepts a user's goal description via stdin or `--prompt`, invokes an LLM backend (Claude or Cursor per `--agent`) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, resumes the Claude session, creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
 
 ## Background
 
@@ -19,12 +19,12 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 ### CLI Interface (Updated: 2026-03-07)
 
 1. Binary name: `tddy-coder`
-2. When `--goal` is omitted, runs the full workflow (plan → acceptance-tests → red → green → demo-prompt → evaluate) with auto-resume from `changeset.yaml` state
+2. When `--goal` is omitted, runs the full workflow (plan → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs) with auto-resume from `changeset.yaml` state
 3. Accepts `--goal plan` to trigger the planning step
 4. Accepts `--goal acceptance-tests` to create failing acceptance tests from a completed plan
-5. Accepts `--goal red`, `--goal green`, `--goal demo`, and `--goal evaluate` for the implementation and evaluation phases
+5. Accepts `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, and `--goal update-docs` for the implementation and evaluation phases
 6. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
-7. Accepts `--plan-dir <path>`: path to plan output directory; required when `--goal acceptance-tests`, `--goal red`, `--goal green`, `--goal demo`, or `--goal evaluate`; used for resume when running full workflow
+7. Accepts `--plan-dir <path>`: path to plan output directory; required when `--goal acceptance-tests`, `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, or `--goal update-docs`; used for resume when running full workflow
 8. Accepts `--output-dir <path>` to configure where planning output is written. When omitted, output goes to `$HOME/.tddy/sessions/{uuid}/` (stable session directory). When provided, output goes to `{path}/YYYY-MM-DD-slug/`
 9. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
 10. Accepts `--conversation-output <path>` to log the entire agent conversation in raw bytes to a file (Updated: 2026-03-07)
@@ -189,7 +189,7 @@ This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt` o
 
 ### Full Workflow (No --goal)
 
-When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → green → demo-prompt → evaluate in sequence. After green completes, the user is prompted "Run demo? [r] Run [s] Skip"; Run executes the demo step, Skip proceeds directly to evaluate. Resume requires `--plan-dir`: if interrupted, re-run with `--plan-dir <path>` to skip completed steps (reads `changeset.yaml.state.current`). Without `--plan-dir`, a new plan is started. When state is `Evaluated`, re-running exits with a summary. `changeset.yaml` is written immediately after the user enters their prompt (before the plan agent runs), so the plan dir is resumable even if planning fails.
+When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs in sequence. After green completes, the user is prompted "Run demo? [r] Run [s] Skip"; Run executes the demo step, Skip proceeds directly to evaluate. Resume requires `--plan-dir`: if interrupted, re-run with `--plan-dir <path>` to skip completed steps (reads `changeset.yaml.state.current`). Without `--plan-dir`, a new plan is started. When state is `Evaluated`, re-running exits with a summary. `changeset.yaml` is written immediately after the user enters their prompt (before the plan agent runs), so the plan dir is resumable even if planning fails.
 
 ## Acceptance Criteria
 

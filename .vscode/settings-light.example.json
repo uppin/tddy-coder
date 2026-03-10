@@ -1,0 +1,43 @@
+{
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "files.exclude": {
+    "**/.git": true,
+    "**/.DS_Store": true,
+    ".tmp": true,
+    "coverage": true,
+    "maven": true,
+    "**/reference.ts": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/target": true,
+    "**/serverless": true,
+    "**/storybook-static": true,
+    "**/coverage": true
+  },
+  "files.associations": {
+    "*.vm": "html",
+    "*.ejs": "html",
+    "*.json.erb": "json"
+  },
+  "editor.tabSize": 2,
+  "html.format.indentInnerHtml": true,
+  "html.format.extraLiners": "",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "javascript.validate.enable": false,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.validate": [
+    "javascript",
+    "typescript",
+    "javascriptreact",
+    "typescriptreact"
+  ],
+  "files.watcherExclude": {
+    "**/target": true
+  }
+}

@@ -12,6 +12,13 @@ use crate::error::BackendError;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+fn wrap_structured(json: &str) -> String {
+    format!(
+        r#"<structured-response content-type="application-json">{}</structured-response>"#,
+        json
+    )
+}
+
 fn escape_json_string(s: &str) -> String {
     s.replace('\\', "\\\\")
         .replace('"', "\\\"")
@@ -159,6 +166,18 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI."
         self.submit_and_respond("refactor", json, None)
     }
 
+    fn update_docs_response(&self) -> InvokeResponse {
+        let json = r#"{"goal":"update-docs","summary":"Documentation updated.","docs_updated":3}"#;
+        InvokeResponse {
+            output: wrap_structured(json),
+            exit_code: 0,
+            session_id: None,
+            questions: vec![],
+            raw_stream: None,
+            stderr: None,
+        }
+    }
+
     fn response_for_goal(&self, goal: Goal) -> InvokeResponse {
         match goal {
             Goal::Plan => self.plan_response(),
@@ -169,6 +188,7 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI."
             Goal::Evaluate => self.evaluate_response(),
             Goal::Validate => self.validate_response(),
             Goal::Refactor => self.refactor_response(),
+            Goal::UpdateDocs => self.update_docs_response(),
         }
     }
 

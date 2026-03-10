@@ -100,3 +100,16 @@ pub fn refactor_allowlist() -> Vec<String> {
         "Bash(tddy-tools *)".to_string(),
     ]
 }
+
+/// Allowlist for the update-docs goal (read PRD/changeset/progress, update feature/dev docs).
+/// Complements --permission-mode acceptEdits.
+pub fn update_docs_allowlist() -> Vec<String> {
+    vec![
+        "Read".to_string(),
+        "Write".to_string(),
+        "Edit".to_string(),
+        "Glob".to_string(),
+        "Grep".to_string(),
+        "SemanticSearch".to_string(),
+    ]
+}

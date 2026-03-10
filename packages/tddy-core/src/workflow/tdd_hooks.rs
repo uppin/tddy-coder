@@ -12,9 +12,9 @@ use crate::error::WorkflowError;
 use crate::output::{
     parse_acceptance_tests_response, parse_evaluate_response, parse_green_response,
     parse_planning_response, parse_red_response, parse_refactor_response,
-    parse_validate_subagents_response, update_acceptance_tests_file, update_progress_file,
-    write_acceptance_tests_file, write_artifacts, write_demo_results_file, write_evaluation_report,
-    write_progress_file, write_red_output_file, PlanningOutput,
+    parse_update_docs_response, parse_validate_subagents_response, update_acceptance_tests_file,
+    update_progress_file, write_acceptance_tests_file, write_artifacts, write_demo_results_file,
+    write_evaluation_report, write_progress_file, write_red_output_file, PlanningOutput,
 };
 use crate::presenter::WorkflowEvent;
 use crate::schema::write_schema_to_dir;
@@ -24,7 +24,8 @@ use crate::workflow::graph::ElicitationEvent;
 use crate::workflow::hooks::RunnerHooks;
 use crate::workflow::task::TaskResult;
 use crate::workflow::{
-    acceptance_tests, evaluate, green, prepend_context_header, red, refactor, validate_subagents,
+    acceptance_tests, evaluate, green, prepend_context_header, red, refactor, update_docs,
+    validate_subagents,
 };
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -204,6 +205,36 @@ fn before_refactor(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Err
     Ok(())
 }
 
+fn before_update_docs(
+    plan_dir: &Path,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let mut artifacts = Vec::new();
+    for (name, path) in [
+        ("PRD.md", "PRD.md"),
+        ("progress.md", "progress.md"),
+        ("changeset.yaml", "changeset.yaml"),
+        ("acceptance-tests.md", "acceptance-tests.md"),
+        ("evaluation-report.md", "evaluation-report.md"),
+        ("refactoring-plan.md", "refactoring-plan.md"),
+    ] {
+        if plan_dir.join(path).exists() {
+            artifacts.push(format!("- {}: available", name));
+        }
+    }
+    let artifacts_summary = if artifacts.is_empty() {
+        "No artifacts found.".to_string()
+    } else {
+        artifacts.join("\n")
+    };
+    let prompt = update_docs::build_prompt(&artifacts_summary);
+    context.set_sync("prompt", prompt);
+    context.set_sync("system_prompt", update_docs::system_prompt());
+    context.set_sync("plan_dir", plan_dir.to_path_buf());
+    let _ = write_schema_to_dir(plan_dir, "update-docs");
+    Ok(())
+}
+
 fn after_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
     let planning: PlanningOutput = context
         .get_sync("parsed_planning")
@@ -342,6 +373,15 @@ fn after_refactor(plan_dir: &Path, output: &str) -> Result<(), Box<dyn Error + S
     Ok(())
 }
 
+fn after_update_docs(plan_dir: &Path, output: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let _ = parse_update_docs_response(output).map_err(WorkflowError::ParseError)?;
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "DocsUpdated");
+        let _ = write_changeset(plan_dir, &cs);
+    }
+    Ok(())
+}
+
 fn after_demo(plan_dir: &Path) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Ok(mut cs) = read_changeset(plan_dir) {
         update_state(&mut cs, "DemoComplete");
@@ -395,6 +435,7 @@ impl RunnerHooks for TddWorkflowHooks {
             "evaluate" => before_evaluate(&plan_dir, context)?,
             "validate" => before_validate(&plan_dir, context)?,
             "refactor" => before_refactor(&plan_dir, context)?,
+            "update-docs" => before_update_docs(&plan_dir, context)?,
             _ => {}
         }
         // Emit transitional state (e.g. RedTesting, GreenImplementing) when starting a goal.
@@ -414,6 +455,7 @@ impl RunnerHooks for TddWorkflowHooks {
                     "evaluate" => Some("Evaluating"),
                     "validate" => Some("Validating"),
                     "refactor" => Some("Refactoring"),
+                    "update-docs" => Some("UpdatingDocs"),
                     _ => None,
                 };
                 if let Some(to) = to_transitional {
@@ -449,6 +491,7 @@ impl RunnerHooks for TddWorkflowHooks {
                 "evaluate" => ("Evaluating", "Evaluated"),
                 "validate" => ("Validating", "ValidateComplete"),
                 "refactor" => ("Refactoring", "RefactorComplete"),
+                "update-docs" => ("UpdatingDocs", "DocsUpdated"),
                 _ => (current.as_str(), current.as_str()),
             };
             if to != from {
@@ -487,7 +530,7 @@ impl RunnerHooks for TddWorkflowHooks {
                     _ => {}
                 }
             }
-            "validate" | "refactor" | "demo" => {
+            "validate" | "refactor" | "update-docs" | "demo" => {
                 let output: Option<String> = context.get_sync("output");
                 let plan_dir: Option<PathBuf> = context
                     .get_sync("plan_dir")
@@ -496,6 +539,7 @@ impl RunnerHooks for TddWorkflowHooks {
                     match task_id {
                         "validate" => after_validate(plan_dir, output)?,
                         "refactor" => after_refactor(plan_dir, output)?,
+                        "update-docs" => after_update_docs(plan_dir, output)?,
                         "demo" => after_demo(plan_dir)?,
                         _ => {}
                     }

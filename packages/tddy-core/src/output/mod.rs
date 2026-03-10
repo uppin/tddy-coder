@@ -6,12 +6,13 @@ mod writer;
 pub use parser::{
     extract_last_structured_block, parse_acceptance_tests_response, parse_demo_response,
     parse_evaluate_response, parse_green_response, parse_planning_output, parse_planning_response,
-    parse_red_response, parse_refactor_response, parse_validate_subagents_response,
-    AcceptanceTestInfo, AcceptanceTestsOutput, DemoOutput, DemoPlan, DemoResults, DemoStep,
-    EvaluateAffectedTest, EvaluateBuildResult, EvaluateChangedFile, EvaluateChangesetSync,
-    EvaluateFileAnalyzed, EvaluateIssue, EvaluateOutput, EvaluateTestImpact, GreenOutput,
-    GreenTestResult, ImplementationInfo, MarkerInfo, MarkerResult, PlanningOutput, RedOutput,
-    RedTestInfo, RefactorOutput, SkeletonInfo, StructuredBlock, ValidateSubagentsOutput,
+    parse_red_response, parse_refactor_response, parse_update_docs_response,
+    parse_validate_subagents_response, AcceptanceTestInfo, AcceptanceTestsOutput, DemoOutput,
+    DemoPlan, DemoResults, DemoStep, EvaluateAffectedTest, EvaluateBuildResult,
+    EvaluateChangedFile, EvaluateChangesetSync, EvaluateFileAnalyzed, EvaluateIssue,
+    EvaluateOutput, EvaluateTestImpact, GreenOutput, GreenTestResult, ImplementationInfo,
+    MarkerInfo, MarkerResult, PlanningOutput, RedOutput, RedTestInfo, RefactorOutput, SkeletonInfo,
+    StructuredBlock, UpdateDocsOutput, ValidateSubagentsOutput,
 };
 pub use writer::{
     create_session_dir_in, create_session_dir_with_id, read_impl_session_file, read_session_file,

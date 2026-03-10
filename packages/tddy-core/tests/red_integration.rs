@@ -55,6 +55,13 @@ const REFACTOR_OUTPUT: &str = r#"Refactoring complete.
 </structured-response>
 "#;
 
+const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
+
+<structured-response content-type="application-json">
+{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}
+</structured-response>
+"#;
+
 fn setup_red_plan_dir(plan_dir: &std::path::Path) {
     let _ = std::fs::remove_dir_all(plan_dir);
     std::fs::create_dir_all(plan_dir).expect("create plan dir");
@@ -152,6 +159,7 @@ async fn red_workflow_writes_red_output_md_to_plan_dir() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-red-engine-writes");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -293,6 +301,7 @@ async fn red_workflow_passes_goal_allowlist_to_invoke_request() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-red-engine-allowlist");
     let _ = std::fs::remove_dir_all(&storage_dir);

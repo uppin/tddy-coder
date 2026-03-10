@@ -10,8 +10,8 @@ use std::sync::mpsc;
 
 use crate::workflow::graph::{ElicitationEvent, ExecutionResult, ExecutionStatus};
 use crate::{
-    get_session_for_tag, next_goal_for_state, parse_refactor_response, read_changeset,
-    ClarificationQuestion, SharedBackend, WorkflowEngine,
+    get_session_for_tag, next_goal_for_state, parse_refactor_response, parse_update_docs_response,
+    read_changeset, ClarificationQuestion, SharedBackend, WorkflowEngine,
 };
 
 use super::{WorkflowCompletePayload, WorkflowEvent};
@@ -594,14 +594,26 @@ pub fn run_workflow(
                     .and_then(|s| s.context.get_sync("output"));
                 let summary = output
                     .as_ref()
-                    .and_then(|o| parse_refactor_response(o).ok())
-                    .map(|r| {
-                        format!(
-                            "Plan dir: {}\nTasks completed: {}\nTests passing: {}",
-                            plan_dir.display(),
-                            r.tasks_completed,
-                            r.tests_passing
-                        )
+                    .and_then(|o| {
+                        parse_update_docs_response(o)
+                            .ok()
+                            .map(|r| {
+                                format!(
+                                    "Plan dir: {}\nDocs updated: {}",
+                                    plan_dir.display(),
+                                    r.docs_updated
+                                )
+                            })
+                            .or_else(|| {
+                                parse_refactor_response(o).ok().map(|r| {
+                                    format!(
+                                        "Plan dir: {}\nTasks completed: {}\nTests passing: {}",
+                                        plan_dir.display(),
+                                        r.tasks_completed,
+                                        r.tests_passing
+                                    )
+                                })
+                            })
                     })
                     .unwrap_or_else(|| format!("Plan dir: {}", plan_dir.display()));
                 let payload = WorkflowCompletePayload {

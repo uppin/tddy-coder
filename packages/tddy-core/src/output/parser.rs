@@ -1964,6 +1964,47 @@ pub fn parse_refactor_response(s: &str) -> Result<RefactorOutput, ParseError> {
     })
 }
 
+// ── update-docs output types ─────────────────────────────────────────────────
+
+/// Parsed output from the update-docs goal.
+#[derive(Debug, Clone)]
+pub struct UpdateDocsOutput {
+    pub summary: String,
+    pub docs_updated: u32,
+}
+
+#[derive(serde::Deserialize)]
+struct StructuredUpdateDocs {
+    goal: Option<String>,
+    summary: Option<String>,
+    #[serde(default)]
+    docs_updated: Option<u32>,
+}
+
+/// Parse LLM update-docs response from structured-response block.
+pub fn parse_update_docs_response(s: &str) -> Result<UpdateDocsOutput, ParseError> {
+    let block = extract_last_structured_block(s)?;
+    let parsed: StructuredUpdateDocs =
+        serde_json::from_str(block.json).map_err(|e| ParseError::Malformed(e.to_string()))?;
+
+    if parsed.goal.as_deref() != Some("update-docs") {
+        return Err(ParseError::Malformed(format!(
+            "goal is not update-docs, got: {:?}",
+            parsed.goal
+        )));
+    }
+
+    let summary = parsed
+        .summary
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+
+    Ok(UpdateDocsOutput {
+        summary,
+        docs_updated: parsed.docs_updated.unwrap_or(0),
+    })
+}
+
 #[derive(serde::Deserialize)]
 struct StructuredDemo {
     goal: Option<String>,

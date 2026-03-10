@@ -77,6 +77,11 @@ pub fn build_full_tdd_workflow_graph(backend: Arc<dyn CodingBackend>) -> Graph {
         Goal::Refactor,
         backend.clone(),
     ));
+    let update_docs = Arc::new(BackendInvokeTask::new(
+        "update-docs",
+        Goal::UpdateDocs,
+        backend.clone(),
+    ));
     let end = Arc::new(EndTask::new("end"));
 
     GraphBuilder::new("tdd_full_workflow")
@@ -88,6 +93,7 @@ pub fn build_full_tdd_workflow_graph(backend: Arc<dyn CodingBackend>) -> Graph {
         .add_task(evaluate.clone())
         .add_task(validate.clone())
         .add_task(refactor.clone())
+        .add_task(update_docs.clone())
         .add_task(end)
         .add_edge("plan", "acceptance-tests")
         .add_edge("acceptance-tests", "red")
@@ -101,6 +107,7 @@ pub fn build_full_tdd_workflow_graph(backend: Arc<dyn CodingBackend>) -> Graph {
         .add_edge("demo", "evaluate")
         .add_edge("evaluate", "validate")
         .add_edge("validate", "refactor")
-        .add_edge("refactor", "end")
+        .add_edge("refactor", "update-docs")
+        .add_edge("update-docs", "end")
         .build()
 }
