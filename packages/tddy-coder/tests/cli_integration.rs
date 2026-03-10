@@ -70,8 +70,13 @@ fn cli_runs_full_workflow_when_goal_omitted() {
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
-        .args(["--output-dir", tmp.to_str().unwrap()])
-        .write_stdin("Build auth");
+        .args([
+            "--output-dir",
+            tmp.to_str().unwrap(),
+            "--prompt",
+            "Build auth",
+        ])
+        .write_stdin("a\n");
 
     let output = cmd.output().expect("run tddy-coder");
 
@@ -103,8 +108,15 @@ fn cli_accepts_goal_plan() {
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
-        .args(["--goal", "plan", "--output-dir", tmp.to_str().unwrap()])
-        .write_stdin("Build feature X");
+        .args([
+            "--goal",
+            "plan",
+            "--output-dir",
+            tmp.to_str().unwrap(),
+            "--prompt",
+            "Build feature X",
+        ])
+        .write_stdin("a\n");
 
     let output = cmd.output().expect("run tddy-coder");
 
@@ -193,8 +205,15 @@ fn cli_accepts_output_dir_flag() {
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
-        .args(["--goal", "plan", "--output-dir", tmp.to_str().unwrap()])
-        .write_stdin("Build feature Y");
+        .args([
+            "--goal",
+            "plan",
+            "--output-dir",
+            tmp.to_str().unwrap(),
+            "--prompt",
+            "Build feature Y",
+        ])
+        .write_stdin("a\n");
 
     let output = cmd.output().expect("run tddy-coder");
 
@@ -205,10 +224,11 @@ fn cli_accepts_output_dir_flag() {
         "expected success: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let plan_dir = std::path::Path::new(stdout.trim());
+    let last_line = stdout.trim().lines().last().unwrap_or("").trim();
+    let plan_dir = std::path::Path::new(last_line);
     assert!(
         plan_dir.is_dir() && plan_dir.join("PRD.md").exists(),
-        "stdout should be plan dir path with PRD.md: {}",
+        "stdout should end with plan dir path with PRD.md: {}",
         stdout
     );
 
@@ -243,8 +263,10 @@ fn cli_displays_agent_and_model_before_goal_execution() {
             tmp.to_str().unwrap(),
             "--debug-output",
             log_file.to_str().unwrap(),
+            "--prompt",
+            "Build feature X",
         ])
-        .write_stdin("Build feature X");
+        .write_stdin("a\n");
 
     let output = cmd.output().expect("run tddy-coder");
     assert!(
@@ -296,8 +318,10 @@ fn cli_displays_state_transitions() {
             tmp.to_str().unwrap(),
             "--debug-output",
             log_file.to_str().unwrap(),
+            "--prompt",
+            "Build feature X",
         ])
-        .write_stdin("Build feature X");
+        .write_stdin("a\n");
 
     let output = cmd.output().expect("run tddy-coder");
     assert!(
@@ -344,8 +368,8 @@ fn cli_accepts_prompt_flag_instead_of_stdin() {
             tmp.to_str().unwrap(),
             "--prompt",
             "Build feature from CLI arg",
-        ]);
-    // No write_stdin — --prompt provides the description
+        ])
+        .write_stdin("a\n");
 
     let output = cmd.output().expect("run tddy-coder");
 
@@ -356,10 +380,11 @@ fn cli_accepts_prompt_flag_instead_of_stdin() {
         String::from_utf8_lossy(&output.stderr),
         stdout
     );
-    let plan_dir = std::path::Path::new(stdout.trim());
+    let last_line = stdout.trim().lines().last().unwrap_or("").trim();
+    let plan_dir = std::path::Path::new(last_line);
     assert!(
         plan_dir.is_dir() && plan_dir.join("PRD.md").exists(),
-        "stdout should be plan dir path with PRD.md: {}",
+        "stdout should end with plan dir path with PRD.md: {}",
         stdout
     );
 
@@ -437,8 +462,15 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
-        .args(["--goal", "plan", "--output-dir", tmp.to_str().unwrap()])
-        .write_stdin("Build auth\nDevelopers\nQ2 2025\n");
+        .args([
+            "--goal",
+            "plan",
+            "--output-dir",
+            tmp.to_str().unwrap(),
+            "--prompt",
+            "Build auth",
+        ])
+        .write_stdin("Developers\nQ2 2025\na\n");
 
     let output = cmd.output().expect("run tddy-coder");
 
