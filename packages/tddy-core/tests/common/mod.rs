@@ -181,7 +181,12 @@ pub async fn run_plan_with_conversation_output(
     let plan_dir = plan_dir_for_input(output_dir, input);
     std::fs::create_dir_all(&plan_dir)?;
 
-    let context = ctx_plan(input, output_dir.to_path_buf(), answers, conversation_output_path);
+    let context = ctx_plan(
+        input,
+        output_dir.to_path_buf(),
+        answers,
+        conversation_output_path,
+    );
     let result = engine.run_goal("plan", context).await?;
 
     match &result.status {

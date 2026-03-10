@@ -21,8 +21,17 @@ message ClientMessage {
     DeleteInboxItem delete_inbox_item = 8;
     Scroll scroll = 10;
     Quit quit = 11;
+    ApprovePlan approve_plan = 12;
+    ViewPlan view_plan = 13;
+    RefinePlan refine_plan = 14;
+    DismissViewer dismiss_viewer = 15;
   }
 }
+
+message ApprovePlan {}
+message ViewPlan {}
+message RefinePlan {}
+message DismissViewer {}
 
 message SubmitFeatureInput {
   string text = 1;
@@ -91,7 +100,16 @@ message AppModeProto {
     AppModeMultiSelect multi_select = 4;
     AppModeTextInput text_input = 5;
     AppModeDone done = 7;
+    AppModePlanReview plan_review = 8;
+    AppModeMarkdownViewer markdown_viewer = 9;
   }
+}
+
+message AppModePlanReview {
+  string prd_content = 1;
+}
+message AppModeMarkdownViewer {
+  string content = 1;
 }
 
 message AppModeFeatureInput {}

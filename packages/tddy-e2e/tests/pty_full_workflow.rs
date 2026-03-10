@@ -61,9 +61,11 @@ async fn pty_full_workflow_asserts_each_state_transition() {
 
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     tx.send(ClientMessage {
-        intent: Some(client_message::Intent::SubmitFeatureInput(SubmitFeatureInput {
-            text: "Build auth".to_string(),
-        })),
+        intent: Some(client_message::Intent::SubmitFeatureInput(
+            SubmitFeatureInput {
+                text: "Build auth".to_string(),
+            },
+        )),
     })
     .await
     .unwrap();
@@ -122,7 +124,8 @@ async fn pty_full_workflow_asserts_each_state_transition() {
                             let mut seen = false;
                             for _ in 0..50 {
                                 let screen = screen_buffer.lock().unwrap().clone();
-                                if screen.contains("Plan dir:") || screen.contains("Workflow complete")
+                                if screen.contains("Plan dir:")
+                                    || screen.contains("Workflow complete")
                                 {
                                     seen = true;
                                     break;
@@ -158,10 +161,7 @@ async fn pty_full_workflow_asserts_each_state_transition() {
         "Expected workflow to complete successfully (transitions: {:?})",
         state_transitions
     );
-    let expected = if state_transitions
-        .iter()
-        .any(|(_, to)| to == "DemoComplete")
-    {
+    let expected = if state_transitions.iter().any(|(_, to)| to == "DemoComplete") {
         EXPECTED_WITH_DEMO
     } else {
         EXPECTED_WITHOUT_DEMO

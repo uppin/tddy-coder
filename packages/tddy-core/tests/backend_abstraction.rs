@@ -44,7 +44,7 @@ fn invoke_request_supports_all_goal_variants() {
             debug: false,
             agent_output: false,
             agent_output_sink: None,
-        progress_sink: None,
+            progress_sink: None,
             conversation_output_path: None,
             inherit_stdin: false,
             extra_allowed_tools: None,

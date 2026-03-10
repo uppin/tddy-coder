@@ -118,6 +118,64 @@ fn cli_accepts_goal_plan() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+/// Plain mode plan approval: after plan completes, user must approve. Piping "a" approves.
+#[test]
+#[cfg(unix)]
+fn cli_plain_mode_plan_approval_approve_proceeds() {
+    let tmp = std::env::temp_dir().join("tddy-cli-plan-approval-test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).expect("create tmp");
+
+    create_fake_claude_prd_only(&tmp).expect("create fake claude");
+
+    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .env("PATH", tmp_path.to_str().unwrap())
+        .env(
+            "HOME",
+            std::env::var("HOME")
+                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
+        )
+        .args([
+            "--goal",
+            "plan",
+            "--output-dir",
+            tmp.to_str().unwrap(),
+            "--prompt",
+            "Build feature for approval test",
+        ])
+        .write_stdin("a\n");
+
+    let output = cmd.output().expect("run tddy-coder");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "expected success: stdout={} stderr={}",
+        stdout,
+        stderr
+    );
+    assert!(
+        stdout.contains("Plan generated") || stderr.contains("Plan generated"),
+        "expected plan approval prompt: stdout={} stderr={}",
+        stdout,
+        stderr
+    );
+    let last_line = stdout.trim().lines().last().unwrap_or("").trim();
+    let plan_dir = std::path::Path::new(last_line);
+    assert!(
+        plan_dir.is_dir() && plan_dir.join("PRD.md").exists(),
+        "stdout should end with plan dir path with PRD.md, last_line={} stdout={}",
+        last_line,
+        stdout
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
 #[test]
 #[cfg(unix)]
 fn cli_accepts_output_dir_flag() {
@@ -723,8 +781,11 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
 
     let plan_dir = output_dir.join(slugify_directory_name("Build auth system"));
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
-    std::fs::write(plan_dir.join("PRD.md"), "# Feature PRD\n## Summary\nAuth system.")
-        .expect("write PRD");
+    std::fs::write(
+        plan_dir.join("PRD.md"),
+        "# Feature PRD\n## Summary\nAuth system.",
+    )
+    .expect("write PRD");
     std::fs::write(plan_dir.join("TODO.md"), "- [ ] Task 1").expect("write TODO");
     let changeset = r#"version: 1
 models: {}
@@ -777,9 +838,18 @@ artifacts: {}
     );
 
     let mut ctx = HashMap::new();
-    ctx.insert("feature_input".to_string(), serde_json::json!("Build auth system"));
-    ctx.insert("plan_dir".to_string(), serde_json::to_value(plan_dir.clone()).unwrap());
-    ctx.insert("output_dir".to_string(), serde_json::to_value(output_dir.clone()).unwrap());
+    ctx.insert(
+        "feature_input".to_string(),
+        serde_json::json!("Build auth system"),
+    );
+    ctx.insert(
+        "plan_dir".to_string(),
+        serde_json::to_value(plan_dir.clone()).unwrap(),
+    );
+    ctx.insert(
+        "output_dir".to_string(),
+        serde_json::to_value(output_dir.clone()).unwrap(),
+    );
     ctx.insert("run_demo".to_string(), serde_json::json!(false));
 
     let result = engine
@@ -806,8 +876,7 @@ artifacts: {}
 
     let changeset = read_changeset(&plan_dir).expect("changeset");
     assert_eq!(
-        changeset.state.current,
-        "RefactorComplete",
+        changeset.state.current, "RefactorComplete",
         "state should be RefactorComplete after full workflow"
     );
 

@@ -292,9 +292,17 @@ impl CodingBackend for StubBackend {
             return Ok(self.fail_schema_response(request.goal));
         }
 
-        // Plan: always clarify; when answered (HERE ARE THE USER'S ANSWERS), proceed.
+        // Plan: always clarify; when answered (HERE ARE THE USER'S ANSWERS) or refinement, proceed.
         // SKIP_QUESTIONS: for tests (e.g. FlowRunner) that cannot provide clarification input.
-        if request.goal == Goal::Plan && !has_answers && !prompt.contains(SKIP_QUESTIONS) {
+        // Refinement: "The user has reviewed the plan and requested refinements" — skip questions.
+        // (prompt is uppercased above)
+        let is_refinement =
+            prompt.contains("THE USER HAS REVIEWED THE PLAN AND REQUESTED REFINEMENTS");
+        if request.goal == Goal::Plan
+            && !has_answers
+            && !prompt.contains(SKIP_QUESTIONS)
+            && !is_refinement
+        {
             let mut resp = self.response_for_goal(request.goal);
             resp.questions = Self::clarify_questions();
             return Ok(resp);

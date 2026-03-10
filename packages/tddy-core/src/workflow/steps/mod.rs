@@ -55,11 +55,12 @@ impl Task for PlanTask {
         std::fs::create_dir_all(&plan_dir)
             .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
+        let refinement_feedback: Option<String> = context.get_sync("refinement_feedback");
         let answers: Option<String> = context.get_sync("answers");
-        let is_resume = answers.is_some();
-        let prompt = match &answers {
-            Some(a) => planning::build_followup_prompt(feature_input, a),
-            None => planning::build_prompt(feature_input),
+        let (is_resume, prompt) = match (&refinement_feedback, &answers) {
+            (Some(fb), _) => (true, planning::build_refinement_prompt(feature_input, fb)),
+            (_, Some(a)) => (true, planning::build_followup_prompt(feature_input, a)),
+            (None, None) => (false, planning::build_prompt(feature_input)),
         };
 
         let system_prompt = planning::system_prompt();

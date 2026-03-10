@@ -44,6 +44,33 @@ pub fn read_answers_plain(questions: &[ClarificationQuestion]) -> anyhow::Result
     Ok(lines.join("\n"))
 }
 
+/// Plan approval gate: View (print PRD), Approve (proceed), or Refine (feedback).
+/// Returns "Approve" or the refinement feedback string.
+/// Used in plain mode after plan completes.
+pub fn read_plan_approval_plain(prd_content: &str) -> anyhow::Result<String> {
+    loop {
+        println!("\nPlan generated. Options: [v] View  [a] Approve  [r] Refine: ");
+        let mut buf = String::new();
+        io::stdin().lock().read_line(&mut buf)?;
+        let choice = buf.trim().trim_end_matches('\r');
+        match choice.to_lowercase().as_str() {
+            "v" | "view" => {
+                println!("\n--- PRD ---\n{}\n---", prd_content);
+            }
+            "a" | "approve" => return Ok("Approve".to_string()),
+            "r" | "refine" => {
+                println!("Enter refinement feedback: ");
+                let mut fb = String::new();
+                io::stdin().lock().read_line(&mut fb)?;
+                return Ok(fb.trim().trim_end_matches('\r').to_string());
+            }
+            _ => {
+                println!("Invalid choice. Use v, a, or r.");
+            }
+        }
+    }
+}
+
 /// Prompt user to Create & run or Skip the demo. Returns true for Create & run, false for Skip.
 /// Used in plain mode when demo-plan.md exists after the green goal.
 pub fn read_demo_choice_plain() -> anyhow::Result<bool> {

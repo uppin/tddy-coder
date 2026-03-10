@@ -237,7 +237,9 @@ async fn workflow_engine_run_goal_plan_completes() {
         result.status,
         ExecutionStatus::Paused { .. } | ExecutionStatus::Completed
     ));
-    let plan_dir = output_dir.join(tddy_core::output::slugify_directory_name("SKIP_QUESTIONS feature"));
+    let plan_dir = output_dir.join(tddy_core::output::slugify_directory_name(
+        "SKIP_QUESTIONS feature",
+    ));
     assert!(plan_dir.join("PRD.md").exists());
     assert!(plan_dir.join("TODO.md").exists());
 
