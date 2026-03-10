@@ -153,7 +153,7 @@ pub struct ValidateOptions {
 /// Walk up from `dir` looking for a `.git` directory.
 /// Falls back to `dir`'s parent if none found (or to `dir` itself if it has no parent).
 #[allow(dead_code)] // Used by relocation_tests; will be used when PlanTask implements plan_dir_suggestion
-fn find_git_root(dir: &Path) -> PathBuf {
+pub fn find_git_root(dir: &Path) -> PathBuf {
     let mut current = dir.to_path_buf();
     loop {
         if current.join(".git").exists() {

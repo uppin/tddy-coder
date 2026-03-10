@@ -1,0 +1,111 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Spawn Branch as Worktree",
+      "type": "shell",
+      "command": "bash -i ./.vscode/scripts/spawn-branch-worktree.sh '${input:branchName}'",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true,
+        "echo": true
+      }
+    },
+    {
+      "label": "Spawn New Branch from Current as Worktree",
+      "type": "shell",
+      "command": "bash -i ./.vscode/scripts/spawn-new-branch-from-current-worktree.sh '${input:branchName}'",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true,
+        "echo": true
+      }
+    },
+    {
+      "label": "Spawn Detached from Current Branch as Worktree",
+      "type": "shell",
+      "command": "bash -i ./.vscode/scripts/spawn-detached-from-current-worktree.sh '${input:worktreeName}'",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true,
+        "echo": true
+      }
+    },
+    {
+      "label": "Spawn Current Branch as Worktree and Switch to Master",
+      "type": "shell",
+      "command": "bash -i ./.vscode/scripts/spawn-current-branch-and-switch-to-master.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true,
+        "echo": true
+      }
+    },
+    {
+      "label": "Cleanup Worktrees",
+      "type": "shell",
+      "command": "bash -i ./.vscode/scripts/cleanup-agent-worktrees.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true,
+        "echo": true
+      },
+      "isBackground": false
+    },
+    {
+      "label": "Switch Worktree",
+      "type": "shell",
+      "command": "bash -i ./.vscode/scripts/switch-worktree.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true,
+        "echo": true
+      },
+      "isBackground": false
+    }
+  ],
+  "inputs": [
+    {
+      "id": "branchName",
+      "type": "promptString",
+      "description": "Branch name:",
+      "default": ""
+    },
+    {
+      "id": "worktreeName",
+      "type": "promptString",
+      "description": "Worktree name (press Enter for auto-generated):",
+      "default": ""
+    }
+  ]
+}

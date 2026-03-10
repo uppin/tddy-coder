@@ -54,6 +54,7 @@ pub use schema::{
 pub use stream::ProgressEvent;
 pub use workflow::{
     engine::WorkflowEngine,
+    find_git_root,
     graph::{ElicitationEvent, ExecutionResult, ExecutionStatus},
     AcceptanceTestsOptions, DemoOptions, EvaluateOptions, GreenOptions, PlanOptions, RedOptions,
     RefactorOptions, UpdateDocsOptions, ValidateOptions,

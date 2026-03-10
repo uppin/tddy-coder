@@ -1001,3 +1001,59 @@ fn test_plan_goal_cli_creates_session_under_home_tddy() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// `--output-dir` must not be the repository root; rejects with clear error.
+#[test]
+#[cfg(unix)]
+fn cli_rejects_output_dir_when_repo_root() {
+    let tmp = std::env::temp_dir().join("tddy-cli-repo-root-reject");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).expect("create tmp");
+
+    create_fake_claude_prd_only(&tmp).expect("create fake claude");
+
+    // Use a git repo (tddy-coder workspace root)
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::env::current_dir().unwrap());
+    let repo_root = repo_root.canonicalize().unwrap_or(repo_root);
+
+    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .env("PATH", tmp_path.to_str().unwrap())
+        .env(
+            "HOME",
+            std::env::var("HOME")
+                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
+        )
+        .current_dir(&repo_root)
+        .args([
+            "--goal",
+            "plan",
+            "--output-dir",
+            repo_root.to_str().unwrap(),
+            "--prompt",
+            "Build feature",
+        ])
+        .write_stdin("a\n");
+
+    let output = cmd.output().expect("run tddy-coder");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !output.status.success(),
+        "should reject --output-dir when it is repo root: stderr={}",
+        stderr
+    );
+    assert!(
+        stderr.contains("must not be the repository root")
+            || stderr.contains("--output-dir must not be"),
+        "stderr should explain repo root rejection: {}",
+        stderr
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

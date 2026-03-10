@@ -22,7 +22,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 4. Accepts `--goal evaluate` to analyze git changes for risks (replaces `--goal validate-changes`)
 5. Accepts `--goal update-docs` to update target repo documentation from planning artifacts
 6. `--plan-dir <path>` is required when `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, or `--goal update-docs`
-4. `--model`, `--agent`, `--conversation-output`, `--allowed-tools`, `--debug` work with both goals (Updated: 2026-03-07)
+7. `--model`, `--agent`, `--conversation-output`, `--allowed-tools`, `--debug` work with both goals (Updated: 2026-03-07)
 
 ### Red Workflow
 
