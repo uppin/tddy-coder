@@ -42,9 +42,24 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 4. Generate a deterministic directory name based on the feature (date-prefixed, slugified)
 5. Parse Claude Code's structured output into PRD, TODO, discovery, and demo plan artifacts
 6. Write `PRD.md`, `TODO.md`, and `changeset.yaml` (unified manifest: session ID, workflow state, discovery, models, initial_prompt, clarification_qa) to the output directory
-7. On successful exit, output the path to `PRD.md` (goal-specific exit output)
+7. **Plan approval gate**: After plan completes, the user is presented with three choices: View (full-screen PRD modal), Approve (proceed to acceptance-tests), or Refine (free-text feedback that resumes the LLM session). The approval loop continues until the user approves.
+8. On successful exit, output the path to `PRD.md` (goal-specific exit output)
 
 The PRD must include a **Testing Plan** section with: test level (E2E/Integration/Unit), list of acceptance tests, target test file paths, and strong assertions.
+
+### Plan Approval Gate (Updated: 2026-03-10)
+
+After the plan step produces PRD.md and TODO.md, the workflow presents an approval gate before proceeding to acceptance-tests:
+
+- **View**: Full-screen tui-markdown modal showing PRD.md. Keyboard scrolling (Up/Down, PageUp/PageDown). Q or Esc dismisses and returns to the approval menu.
+- **Approve**: Proceeds to acceptance-tests.
+- **Refine**: Text input mode for feedback. The workflow resumes the plan session with the feedback, re-runs plan, re-writes artifacts, and re-presents the approval gate.
+
+In plain mode (non-TTY): text prompt `[v] View  [a] Approve  [r] Refine`; read user choice from stdin.
+
+The approval gate applies to both the initial plan and plan resume/completion scenarios.
+
+**Dependencies**: `tui-markdown` crate in tddy-tui for markdown rendering.
 
 ### Acceptance-Tests Workflow
 
@@ -154,9 +169,10 @@ System prompts are written to the plan directory (e.g. `system-prompt-plan.md`) 
 
 1. The planning step is one state in the overall workflow state machine
 2. **Plan goal**: Transitions `Init` → `Planning` → `Planned` (or `Failed`)
-3. **Acceptance-tests goal**: Transitions `Init`/`Planned` → `AcceptanceTesting` → `AcceptanceTestsReady` (or `Failed`)
-4. The state machine enforces that planning must complete before development begins
-5. State transitions are explicit and auditable
+3. **Plan approval gate**: Between `Planned` and `AcceptanceTesting`, the user must approve (View/Approve/Refine). No new changeset states; the gate is a presenter/workflow-runner concern.
+4. **Acceptance-tests goal**: Transitions `Init`/`Planned` → `AcceptanceTesting` → `AcceptanceTestsReady` (or `Failed`)
+5. The state machine enforces that planning must complete before development begins
+6. State transitions are explicit and auditable
 
 ### Exit Output
 
