@@ -38,10 +38,16 @@ analyze-clean-code-report.md written.
 </structured-response>
 "#;
 
-/// For run_goal_until_done(validate): validate -> refactor chain.
+/// For run_goal_until_done(validate): validate -> refactor -> update-docs chain.
 const REFACTOR_OUTPUT: &str = r#"Refactoring complete.
 <structured-response content-type="application-json">
 {"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}
+</structured-response>
+"#;
+
+const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
+<structured-response content-type="application-json">
+{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}
 </structured-response>
 "#;
 
@@ -415,6 +421,7 @@ async fn validate_transitions_to_validate_complete() {
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-validate-complete-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -430,8 +437,9 @@ async fn validate_transitions_to_validate_complete() {
     let changeset = read_changeset(&plan_dir).expect("changeset");
     assert!(
         changeset.state.current == "ValidateComplete"
-            || changeset.state.current == "RefactorComplete",
-        "workflow should transition to ValidateComplete or RefactorComplete, got {}",
+            || changeset.state.current == "RefactorComplete"
+            || changeset.state.current == "DocsUpdated",
+        "workflow should transition to ValidateComplete, RefactorComplete, or DocsUpdated, got {}",
         changeset.state.current
     );
 

@@ -41,6 +41,12 @@ const REFACTOR_OUTPUT: &str = r#"Refactoring complete.
 </structured-response>
 "#;
 
+const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
+<structured-response content-type="application-json">
+{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}
+</structured-response>
+"#;
+
 /// evaluate() invokes backend with Goal::Evaluate (renamed from Goal::Validate).
 #[tokio::test]
 async fn evaluate_workflow_invokes_backend_with_evaluate_goal() {
@@ -131,6 +137,7 @@ async fn evaluate_workflow_writes_evaluation_report_to_plan_dir() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-evaluate-writes-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -209,6 +216,7 @@ async fn evaluate_workflow_includes_changed_files_in_report() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-evaluate-changed-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -250,6 +258,7 @@ async fn evaluate_workflow_includes_affected_tests_in_report() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-evaluate-affected-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -293,6 +302,7 @@ async fn evaluate_workflow_includes_validity_assessment() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-evaluate-validity-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);

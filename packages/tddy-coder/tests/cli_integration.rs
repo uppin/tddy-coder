@@ -500,10 +500,14 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
         stdout
     );
 
-    let has_artifacts = fs::read_dir(&tmp).unwrap().filter_map(|e| e.ok()).any(|e| {
-        e.path().is_dir() && e.path().join("PRD.md").exists()
-    });
-    assert!(has_artifacts, "expected PRD.md in output dir (TODO is merged into PRD)");
+    let has_artifacts = fs::read_dir(&tmp)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| e.path().is_dir() && e.path().join("PRD.md").exists());
+    assert!(
+        has_artifacts,
+        "expected PRD.md in output dir (TODO is merged into PRD)"
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -852,6 +856,9 @@ artifacts: {}
     const REFACTOR: &str = r#"<structured-response content-type="application-json">
 {"goal":"refactor","summary":"Refactoring complete.","tasks_completed":3,"tests_passing":true}
 </structured-response>"#;
+    const UPDATE_DOCS: &str = r#"<structured-response content-type="application-json">
+{"goal":"update-docs","summary":"Documentation updated.","docs_updated":2}
+</structured-response>"#;
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS);
@@ -860,6 +867,7 @@ artifacts: {}
     backend.push_ok(EVALUATE);
     backend.push_ok(VALIDATE);
     backend.push_ok(REFACTOR);
+    backend.push_ok(UPDATE_DOCS);
 
     let storage_dir = std::env::temp_dir().join("tddy-cli-full-wf-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -902,14 +910,14 @@ artifacts: {}
 
     assert_eq!(
         backend.invocations().len(),
-        6,
-        "should run acceptance-tests, red, green, evaluate, validate, refactor"
+        7,
+        "should run acceptance-tests, red, green, evaluate, validate, refactor, update-docs"
     );
 
     let changeset = read_changeset(&plan_dir).expect("changeset");
     assert_eq!(
-        changeset.state.current, "RefactorComplete",
-        "state should be RefactorComplete after full workflow"
+        changeset.state.current, "DocsUpdated",
+        "state should be DocsUpdated after full workflow"
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -989,6 +997,62 @@ fn test_plan_goal_cli_creates_session_under_home_tddy() {
         session_dir.join("changeset.yaml").exists(),
         "changeset.yaml should be in session dir: {}",
         session_dir.display()
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// `--output-dir` must not be the repository root; rejects with clear error.
+#[test]
+#[cfg(unix)]
+fn cli_rejects_output_dir_when_repo_root() {
+    let tmp = std::env::temp_dir().join("tddy-cli-repo-root-reject");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).expect("create tmp");
+
+    create_fake_claude_prd_only(&tmp).expect("create fake claude");
+
+    // Use a git repo (tddy-coder workspace root)
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::env::current_dir().unwrap());
+    let repo_root = repo_root.canonicalize().unwrap_or(repo_root);
+
+    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .env("PATH", tmp_path.to_str().unwrap())
+        .env(
+            "HOME",
+            std::env::var("HOME")
+                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
+        )
+        .current_dir(&repo_root)
+        .args([
+            "--goal",
+            "plan",
+            "--output-dir",
+            repo_root.to_str().unwrap(),
+            "--prompt",
+            "Build feature",
+        ])
+        .write_stdin("a\n");
+
+    let output = cmd.output().expect("run tddy-coder");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !output.status.success(),
+        "should reject --output-dir when it is repo root: stderr={}",
+        stderr
+    );
+    assert!(
+        stderr.contains("must not be the repository root")
+            || stderr.contains("--output-dir must not be"),
+        "stderr should explain repo root rejection: {}",
+        stderr
     );
 
     let _ = std::fs::remove_dir_all(&tmp);

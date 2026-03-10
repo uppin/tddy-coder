@@ -134,6 +134,16 @@ pub fn ctx_refactor(plan_dir: PathBuf) -> HashMap<String, serde_json::Value> {
     m
 }
 
+/// Build context for update-docs goal.
+pub fn ctx_update_docs(plan_dir: PathBuf) -> HashMap<String, serde_json::Value> {
+    let mut m = HashMap::new();
+    m.insert(
+        "plan_dir".to_string(),
+        serde_json::to_value(plan_dir).unwrap(),
+    );
+    m
+}
+
 /// Build context for demo goal.
 pub fn ctx_demo(plan_dir: PathBuf) -> HashMap<String, serde_json::Value> {
     let mut m = HashMap::new();

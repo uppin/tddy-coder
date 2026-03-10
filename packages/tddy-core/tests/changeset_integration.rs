@@ -286,6 +286,13 @@ const REFACTOR_OUTPUT: &str = r#"Refactoring complete.
 </structured-response>
 "#;
 
+const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
+
+<structured-response content-type="application-json">
+{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}
+</structured-response>
+"#;
+
 /// Each goal reads current state from changeset.yaml and writes updated state.
 /// Initial state is AcceptanceTestsReady; after red runs, state should become RedTestsReady.
 #[tokio::test]
@@ -319,7 +326,8 @@ artifacts: {}
     backend.push_ok(GREEN_OUTPUT);
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
-    backend.push_ok(REFACTOR_OUTPUT); // red -> green -> evaluate -> validate -> refactor
+    backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT); // red -> green -> evaluate -> validate -> refactor -> update-docs
 
     let storage_dir = std::env::temp_dir().join("tddy-changeset-state-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -373,6 +381,7 @@ artifacts: {}
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-changeset-model-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -421,6 +430,7 @@ async fn red_goal_adds_logging_markers() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-red-markers-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -621,7 +631,8 @@ async fn changeset_contains_clarification_qa() {
     backend.push_ok(GREEN_OUTPUT);
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
-    backend.push_ok(REFACTOR_OUTPUT); // plan -> at -> red -> green -> evaluate -> validate -> refactor
+    backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT); // plan -> at -> red -> green -> evaluate -> validate -> refactor -> update-docs
 
     let output_dir = std::env::temp_dir().join("tddy-changeset-clarification-qa");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -726,12 +737,14 @@ async fn changeset_yaml_sessions_array_tracks_all_sessions() {
     backend.push_ok(GREEN_OUTPUT);
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
-    backend.push_ok(REFACTOR_OUTPUT); // acceptance-tests -> red -> green -> ... -> refactor
+    backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT); // acceptance-tests -> red -> green -> ... -> refactor -> update-docs
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT);
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_OUTPUT);
-    backend.push_ok(REFACTOR_OUTPUT); // red goal -> green -> ... -> refactor
+    backend.push_ok(REFACTOR_OUTPUT);
+    backend.push_ok(UPDATE_DOCS_OUTPUT); // red goal -> green -> ... -> refactor -> update-docs
 
     let output_dir = std::env::temp_dir().join("tddy-changeset-sessions");
     let _ = std::fs::remove_dir_all(&output_dir);

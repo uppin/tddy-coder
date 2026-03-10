@@ -146,6 +146,10 @@ fn goal_to_claude_config(request: &InvokeRequest) -> ClaudeInvokeConfig {
             PermissionMode::AcceptEdits,
             permission::refactor_allowlist(),
         ),
+        Goal::UpdateDocs => (
+            PermissionMode::AcceptEdits,
+            permission::update_docs_allowlist(),
+        ),
     };
     if let Some(ref extras) = request.extra_allowed_tools {
         allowed_tools.extend(extras.iter().cloned());

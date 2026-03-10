@@ -17,6 +17,7 @@ pub mod steps;
 pub mod task;
 pub mod tdd_graph;
 pub mod tdd_hooks;
+mod update_docs;
 mod validate_subagents;
 
 use crate::error::WorkflowError;
@@ -111,6 +112,18 @@ pub struct EvaluateOptions {
     pub debug: bool,
 }
 
+/// Options for the update-docs step.
+#[derive(Debug, Default)]
+pub struct UpdateDocsOptions {
+    pub model: Option<String>,
+    pub agent_output: bool,
+    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
+    pub conversation_output_path: Option<PathBuf>,
+    pub inherit_stdin: bool,
+    pub allowed_tools_extras: Option<Vec<String>>,
+    pub debug: bool,
+}
+
 /// Options for the refactor step.
 #[derive(Debug, Default)]
 pub struct RefactorOptions {
@@ -140,7 +153,7 @@ pub struct ValidateOptions {
 /// Walk up from `dir` looking for a `.git` directory.
 /// Falls back to `dir`'s parent if none found (or to `dir` itself if it has no parent).
 #[allow(dead_code)] // Used by relocation_tests; will be used when PlanTask implements plan_dir_suggestion
-fn find_git_root(dir: &Path) -> PathBuf {
+pub fn find_git_root(dir: &Path) -> PathBuf {
     let mut current = dir.to_path_buf();
     loop {
         if current.join(".git").exists() {

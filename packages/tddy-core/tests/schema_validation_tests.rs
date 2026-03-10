@@ -15,6 +15,7 @@ const VALID_GOALS: &[&str] = &[
     "evaluate",
     "validate-subagents",
     "refactor",
+    "update-docs",
 ];
 
 #[test]
@@ -75,6 +76,19 @@ fn valid_validate_subagents_passes_schema_validation() {
 fn valid_refactor_passes_schema_validation() {
     let json = r#"{"goal":"refactor","summary":"Completed 3 tasks.","tasks_completed":3,"tests_passing":true}"#;
     assert!(validate_output("refactor", json).is_ok());
+}
+
+#[test]
+fn valid_update_docs_passes_schema_validation() {
+    let json = r#"{"goal":"update-docs","summary":"Updated 3 docs.","docs_updated":3}"#;
+    assert!(validate_output("update-docs", json).is_ok());
+}
+
+#[test]
+fn invalid_update_docs_wrong_goal_fails() {
+    let json = r#"{"goal":"refactor","summary":"Updated docs.","docs_updated":2}"#;
+    let err = validate_output("update-docs", json).unwrap_err();
+    assert!(!err.is_empty());
 }
 
 #[test]
@@ -212,6 +226,7 @@ fn write_all_schemas_to_dir_writes_all_goal_schemas_when_plan_dir_created() {
         "evaluate.schema.json",
         "validate-subagents.schema.json",
         "refactor.schema.json",
+        "update-docs.schema.json",
     ];
     for f in &goals {
         assert!(schemas_dir.join(f).exists(), "{} should exist", f);
