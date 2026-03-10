@@ -13,8 +13,8 @@ use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     get_session_for_tag, next_goal_for_state, parse_acceptance_tests_response,
     parse_evaluate_response, parse_green_response, parse_red_response, parse_refactor_response,
-    parse_validate_subagents_response, read_changeset, AnyBackend, ClaudeCodeBackend,
-    CursorBackend, ProgressEvent, SharedBackend, StubBackend, WorkflowEngine,
+    parse_update_docs_response, parse_validate_subagents_response, read_changeset, AnyBackend,
+    ClaudeCodeBackend, CursorBackend, ProgressEvent, SharedBackend, StubBackend, WorkflowEngine,
 };
 
 use crate::plain;
@@ -96,14 +96,14 @@ pub struct Args {
 #[command(about = "TDD-driven coder for PRD-based development workflow")]
 pub struct CoderArgs {
     /// Goal to execute: plan, acceptance-tests, red, green, demo, evaluate, validate, refactor. Omit to run full workflow.
-    #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor"])]
+    #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
     pub goal: Option<String>,
 
     /// Output directory for planning artifacts (default: current directory)
     #[arg(long, default_value = ".")]
     pub output_dir: PathBuf,
 
-    /// Plan directory (required when goal is acceptance-tests, red, or green)
+    /// Plan directory (required when goal is acceptance-tests, red, green, demo, validate, refactor, or update-docs)
     #[arg(long)]
     pub plan_dir: Option<PathBuf>,
 
@@ -146,14 +146,14 @@ pub struct CoderArgs {
 #[command(about = "Same app as tddy-coder with StubBackend (identical TUI, CLI, workflow)")]
 pub struct DemoArgs {
     /// Goal to execute: plan, acceptance-tests, red, green, demo, evaluate, validate, refactor. Omit to run full workflow.
-    #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor"])]
+    #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
     pub goal: Option<String>,
 
     /// Output directory for planning artifacts (default: current directory)
     #[arg(long, default_value = ".")]
     pub output_dir: PathBuf,
 
-    /// Plan directory (required when goal is acceptance-tests, red, or green)
+    /// Plan directory (required when goal is acceptance-tests, red, green, demo, validate, refactor, or update-docs)
     #[arg(long)]
     pub plan_dir: Option<PathBuf>,
 
@@ -322,6 +322,16 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         let conv = resolve_log_defaults(args, plan_dir);
         let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
         return run_goal_plain(args, backend, "refactor", ctx, true, &shutdown);
+    }
+
+    if args.goal.as_deref() == Some("update-docs") {
+        let plan_dir = args
+            .plan_dir
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for update-docs goal"))?;
+        let conv = resolve_log_defaults(args, plan_dir);
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        return run_goal_plain(args, backend, "update-docs", ctx, true, &shutdown);
     }
 
     if args.goal.as_deref() != Some("plan") {
@@ -742,6 +752,13 @@ fn print_goal_output(goal: &str, output: Option<&str>, plan_dir: &Path) -> anyho
             println!("{}", out.summary);
             println!("Tasks completed: {}", out.tasks_completed);
             println!("Tests passing: {}", out.tests_passing);
+        }
+        "update-docs" => {
+            let out = output
+                .and_then(|s| parse_update_docs_response(s).ok())
+                .ok_or_else(|| anyhow::anyhow!("no parseable update-docs output"))?;
+            println!("{}", out.summary);
+            println!("Docs updated: {}", out.docs_updated);
         }
         _ => {}
     }

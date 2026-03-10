@@ -137,6 +137,8 @@ pub enum Goal {
     Validate,
     /// Execute refactoring plan from refactoring-plan.md.
     Refactor,
+    /// Update repo documentation from PRD, changeset, progress per repo guidelines.
+    UpdateDocs,
 }
 
 /// Sink for routing agent output (e.g. to TUI instead of stderr).

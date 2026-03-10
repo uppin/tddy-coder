@@ -18,6 +18,7 @@ const GOAL_SCHEMA_FILES: &[(&str, &str)] = &[
     ("evaluate", "evaluate.schema.json"),
     ("validate-subagents", "validate-subagents.schema.json"),
     ("refactor", "refactor.schema.json"),
+    ("update-docs", "update-docs.schema.json"),
 ];
 
 /// Common schema files (in common/ subdir) with their $id URIs.

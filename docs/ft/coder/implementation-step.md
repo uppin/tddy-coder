@@ -20,7 +20,8 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 2. Accepts `--goal green` to implement production code that makes failing tests pass
 3. Accepts `--goal demo` to run the demo plan (requires `demo-plan.md` in plan dir)
 4. Accepts `--goal evaluate` to analyze git changes for risks (replaces `--goal validate-changes`)
-5. `--plan-dir <path>` is required when `--goal red`, `--goal green`, `--goal demo`, or `--goal evaluate`
+5. Accepts `--goal update-docs` to update target repo documentation from planning artifacts
+6. `--plan-dir <path>` is required when `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, or `--goal update-docs`
 4. `--model`, `--agent`, `--conversation-output`, `--allowed-tools`, `--debug` work with both goals (Updated: 2026-03-07)
 
 ### Red Workflow
@@ -100,12 +101,21 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 3. Accepts `GreenComplete` or `DemoComplete` as starting state (when demo skipped, goes directly from GreenComplete)
 4. State transitions: → `Evaluating` → `Evaluated`
 
+### Update Docs Workflow
+
+1. Runs after refactor in full workflow; `--goal update-docs --plan-dir <path>` runs standalone
+2. Reads planning artifacts (PRD.md, progress.md, changeset.yaml, acceptance-tests.md, evaluation-report.md, refactoring-plan.md)
+3. Updates target repo documentation (feature docs, dev docs, changelogs, READMEs) per repo guidelines
+4. State transitions: `RefactorComplete` → `UpdatingDocs` → `DocsUpdated`
+5. CursorBackend supports UpdateDocs (unlike Validate/Refactor which require Agent tool)
+
 ### Exit Output
 
 - **red**: Summary of created skeletons and failing tests (requires `--plan-dir`)
 - **green**: Summary of implementation results — tests passed/failed counts, implementation summary (requires `--plan-dir`)
 - **demo**: Summary and steps completed (requires `--plan-dir`)
 - **evaluate**: Summary, risk level, report path (requires `--plan-dir`)
+- **update-docs**: Summary and count of docs updated (requires `--plan-dir`)
 
 ## Acceptance Criteria
 

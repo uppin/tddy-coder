@@ -48,9 +48,10 @@ fn run_plan_via_flow_runner_produces_plan_directory() {
         prd_path.exists(),
         "PRD.md should exist in plan_dir {}; contents: {:?}",
         plan_dir.display(),
-        std::fs::read_dir(&plan_dir)
-            .ok()
-            .map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name()).collect::<Vec<_>>())
+        std::fs::read_dir(&plan_dir).ok().map(|d| d
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .collect::<Vec<_>>())
     );
     // TODO content is merged into PRD.md as last section; no separate TODO.md
     let prd_content = std::fs::read_to_string(&prd_path).expect("read PRD.md");

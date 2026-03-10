@@ -139,6 +139,8 @@ async fn full_workflow_asserts_each_state_transition() {
         ("Validating", "ValidateComplete"),
         ("ValidateComplete", "Refactoring"),
         ("Refactoring", "RefactorComplete"),
+        ("RefactorComplete", "UpdatingDocs"),
+        ("UpdatingDocs", "DocsUpdated"),
     ];
     const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
         ("Init", "Planning"),
@@ -157,6 +159,8 @@ async fn full_workflow_asserts_each_state_transition() {
         ("Validating", "ValidateComplete"),
         ("ValidateComplete", "Refactoring"),
         ("Refactoring", "RefactorComplete"),
+        ("RefactorComplete", "UpdatingDocs"),
+        ("UpdatingDocs", "DocsUpdated"),
     ];
 
     let (presenter_handle, port, shutdown) =

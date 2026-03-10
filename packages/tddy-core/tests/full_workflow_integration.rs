@@ -92,6 +92,7 @@ async fn full_workflow_chains_all_steps() {
     backend.push_ok(EVALUATE_OUTPUT_CHAIN);
     backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-full-chain-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -123,12 +124,12 @@ async fn full_workflow_chains_all_steps() {
 
     let inv_count = backend.invocations().len();
     assert_eq!(
-        inv_count, 7,
-        "plan+at+red+green+evaluate+validate+refactor (no demo), got {}",
+        inv_count, 8,
+        "plan+at+red+green+evaluate+validate+refactor+update-docs (no demo), got {}",
         inv_count
     );
     let changeset = read_changeset(&plan_dir).expect("changeset");
-    assert_eq!(changeset.state.current, "RefactorComplete");
+    assert_eq!(changeset.state.current, "DocsUpdated");
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
@@ -190,7 +191,7 @@ async fn full_workflow_with_stub_backend_reaches_green_complete() {
     assert!(
         matches!(
             changeset.state.current.as_str(),
-            "GreenComplete" | "Evaluated" | "ValidateComplete" | "RefactorComplete"
+            "GreenComplete" | "Evaluated" | "ValidateComplete" | "RefactorComplete" | "DocsUpdated"
         ),
         "StubBackend chain should reach GreenComplete or beyond, got {}",
         changeset.state.current
@@ -231,6 +232,7 @@ async fn full_workflow_resume_from_planned() {
     backend.push_ok(EVALUATE_OUTPUT_CHAIN);
     backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-resume-planned-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -248,14 +250,14 @@ async fn full_workflow_resume_from_planned() {
 
     assert_eq!(
         backend.invocations().len(),
-        6,
-        "plan skipped; at, red, green, evaluate, validate, refactor"
+        7,
+        "plan skipped; at, red, green, evaluate, validate, refactor, update-docs"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// Resume from AcceptanceTestsReady: skip plan and acceptance-tests, run red -> green -> evaluate -> validate -> refactor.
+/// Resume from AcceptanceTestsReady: skip plan and acceptance-tests, run red -> green -> evaluate -> validate -> refactor -> update-docs.
 #[tokio::test]
 async fn full_workflow_resume_from_acceptance_tests_ready() {
     let plan_dir = std::env::temp_dir().join("tddy-full-resume-at");
@@ -275,6 +277,7 @@ async fn full_workflow_resume_from_acceptance_tests_ready() {
     backend.push_ok(EVALUATE_OUTPUT_CHAIN);
     backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-resume-at-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -290,8 +293,8 @@ async fn full_workflow_resume_from_acceptance_tests_ready() {
 
     assert_eq!(
         backend.invocations().len(),
-        5,
-        "plan and at skipped; red, green, evaluate, validate, refactor"
+        6,
+        "plan and at skipped; red, green, evaluate, validate, refactor, update-docs"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
@@ -335,6 +338,7 @@ async fn full_workflow_includes_demo_and_evaluate() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-full-demo-eval-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -362,14 +366,14 @@ async fn full_workflow_includes_demo_and_evaluate() {
 
     assert_eq!(
         read_changeset(&plan_dir).unwrap().state.current,
-        "RefactorComplete"
+        "DocsUpdated"
     );
-    assert_eq!(backend.invocations().len(), 8);
+    assert_eq!(backend.invocations().len(), 9);
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
 
-/// AC2, AC3: Full workflow where demo is skipped proceeds green → evaluate → validate → refactor.
+/// AC2, AC3: Full workflow where demo is skipped proceeds green → evaluate → validate → refactor → update-docs.
 #[tokio::test]
 async fn full_workflow_skip_demo_goes_to_evaluate() {
     let output_dir = std::env::temp_dir().join("tddy-full-wf-skip-demo");
@@ -384,6 +388,7 @@ async fn full_workflow_skip_demo_goes_to_evaluate() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-skip-demo-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -405,9 +410,9 @@ async fn full_workflow_skip_demo_goes_to_evaluate() {
 
     assert_eq!(
         read_changeset(&plan_dir).unwrap().state.current,
-        "RefactorComplete"
+        "DocsUpdated"
     );
-    assert_eq!(backend.invocations().len(), 7);
+    assert_eq!(backend.invocations().len(), 8);
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
@@ -449,10 +454,16 @@ fn next_goal_validate_complete_returns_refactor() {
     assert_eq!(next_goal_for_state("ValidateComplete"), Some("refactor"));
 }
 
-/// AC (R6): next_goal_for_state("RefactorComplete") returns None (terminal).
+/// AC (R6): next_goal_for_state("RefactorComplete") returns Some("update-docs").
 #[test]
-fn next_goal_refactor_complete_returns_none() {
-    assert_eq!(next_goal_for_state("RefactorComplete"), None);
+fn next_goal_refactor_complete_returns_update_docs() {
+    assert_eq!(next_goal_for_state("RefactorComplete"), Some("update-docs"));
+}
+
+/// next_goal_for_state("DocsUpdated") returns None (terminal).
+#[test]
+fn next_goal_docs_updated_returns_none() {
+    assert_eq!(next_goal_for_state("DocsUpdated"), None);
 }
 
 /// AC10: plain full workflow uses a single WorkflowEngine instance.
@@ -472,6 +483,7 @@ async fn plain_full_workflow_uses_single_workflow_instance() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-single-instance-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -511,7 +523,7 @@ async fn plain_full_workflow_uses_single_workflow_instance() {
     }
 
     let invocations = backend.invocations();
-    assert_eq!(invocations.len(), 8);
+    assert_eq!(invocations.len(), 9);
 
     let goals: Vec<_> = invocations.iter().map(|inv| inv.goal).collect();
     assert_eq!(goals[0], tddy_core::Goal::Plan);
@@ -522,6 +534,7 @@ async fn plain_full_workflow_uses_single_workflow_instance() {
     assert_eq!(goals[5], tddy_core::Goal::Evaluate);
     assert_eq!(goals[6], tddy_core::Goal::Validate);
     assert_eq!(goals[7], tddy_core::Goal::Refactor);
+    assert_eq!(goals[8], tddy_core::Goal::UpdateDocs);
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
@@ -542,7 +555,14 @@ const REFACTOR_OUTPUT_COMPLETE: &str = r#"All refactoring tasks completed. Tests
 </structured-response>
 "#;
 
-/// Phase 5 / PRD R7: Full workflow chains all 8 steps.
+const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
+
+<structured-response content-type="application-json">
+{"goal":"update-docs","summary":"Updated 3 docs.","docs_updated":3}
+</structured-response>
+"#;
+
+/// Phase 5 / PRD R7: Full workflow chains all 9 steps (plan through update-docs).
 #[tokio::test]
 async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
     let output_dir = std::env::temp_dir().join("tddy-full-wf-8-steps");
@@ -558,8 +578,9 @@ async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
-    let storage_dir = std::env::temp_dir().join("tddy-full-8-steps-engine");
+    let storage_dir = std::env::temp_dir().join("tddy-full-9-steps-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
     let engine = WorkflowEngine::new(
         SharedBackend::from_arc(backend.clone()),
@@ -585,9 +606,9 @@ async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
 
     assert_eq!(
         read_changeset(&plan_dir).unwrap().state.current,
-        "RefactorComplete"
+        "DocsUpdated"
     );
-    assert_eq!(backend.invocations().len(), 8);
+    assert_eq!(backend.invocations().len(), 9);
 
     let goals: Vec<_> = backend.invocations().iter().map(|inv| inv.goal).collect();
     assert_eq!(goals[0], tddy_core::Goal::Plan);
@@ -598,6 +619,7 @@ async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
     assert_eq!(goals[5], tddy_core::Goal::Evaluate);
     assert_eq!(goals[6], tddy_core::Goal::Validate);
     assert_eq!(goals[7], tddy_core::Goal::Refactor);
+    assert_eq!(goals[8], tddy_core::Goal::UpdateDocs);
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
@@ -753,6 +775,7 @@ async fn full_workflow_resumes_after_elicitation_approval() {
     backend.push_ok(EVALUATE_OUTPUT_CHAIN);
     backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-full-elicit-resume-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -785,15 +808,15 @@ async fn full_workflow_resumes_after_elicitation_approval() {
 
     assert_eq!(
         backend.invocations().len(),
-        7,
-        "plan+at+red+green+evaluate+validate+refactor"
+        8,
+        "plan+at+red+green+evaluate+validate+refactor+update-docs"
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);
     let _ = std::fs::remove_dir_all(&storage_dir);
 }
 
-/// Phase 5: Full workflow with skipped demo still includes validate and refactor.
+/// Phase 5: Full workflow with skipped demo still includes validate, refactor, and update-docs.
 #[tokio::test]
 async fn full_workflow_skip_demo_includes_validate_and_refactor() {
     let output_dir = std::env::temp_dir().join("tddy-full-wf-skip-demo-8");
@@ -808,6 +831,7 @@ async fn full_workflow_skip_demo_includes_validate_and_refactor() {
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+    backend.push_ok(UPDATE_DOCS_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-skip-demo-8-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -829,9 +853,9 @@ async fn full_workflow_skip_demo_includes_validate_and_refactor() {
 
     assert_eq!(
         read_changeset(&plan_dir).unwrap().state.current,
-        "RefactorComplete"
+        "DocsUpdated"
     );
-    assert_eq!(backend.invocations().len(), 7);
+    assert_eq!(backend.invocations().len(), 8);
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }

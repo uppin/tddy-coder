@@ -17,6 +17,7 @@ pub mod steps;
 pub mod task;
 pub mod tdd_graph;
 pub mod tdd_hooks;
+mod update_docs;
 mod validate_subagents;
 
 use crate::error::WorkflowError;
@@ -102,6 +103,18 @@ pub struct DemoOptions {
 /// Options for the evaluate-changes step.
 #[derive(Debug, Default)]
 pub struct EvaluateOptions {
+    pub model: Option<String>,
+    pub agent_output: bool,
+    pub agent_output_sink: Option<crate::backend::AgentOutputSink>,
+    pub conversation_output_path: Option<PathBuf>,
+    pub inherit_stdin: bool,
+    pub allowed_tools_extras: Option<Vec<String>>,
+    pub debug: bool,
+}
+
+/// Options for the update-docs step.
+#[derive(Debug, Default)]
+pub struct UpdateDocsOptions {
     pub model: Option<String>,
     pub agent_output: bool,
     pub agent_output_sink: Option<crate::backend::AgentOutputSink>,

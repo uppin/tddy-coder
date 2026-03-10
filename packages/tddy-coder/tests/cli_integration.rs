@@ -500,10 +500,14 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
         stdout
     );
 
-    let has_artifacts = fs::read_dir(&tmp).unwrap().filter_map(|e| e.ok()).any(|e| {
-        e.path().is_dir() && e.path().join("PRD.md").exists()
-    });
-    assert!(has_artifacts, "expected PRD.md in output dir (TODO is merged into PRD)");
+    let has_artifacts = fs::read_dir(&tmp)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| e.path().is_dir() && e.path().join("PRD.md").exists());
+    assert!(
+        has_artifacts,
+        "expected PRD.md in output dir (TODO is merged into PRD)"
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -852,6 +856,9 @@ artifacts: {}
     const REFACTOR: &str = r#"<structured-response content-type="application-json">
 {"goal":"refactor","summary":"Refactoring complete.","tasks_completed":3,"tests_passing":true}
 </structured-response>"#;
+    const UPDATE_DOCS: &str = r#"<structured-response content-type="application-json">
+{"goal":"update-docs","summary":"Documentation updated.","docs_updated":2}
+</structured-response>"#;
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS);
@@ -860,6 +867,7 @@ artifacts: {}
     backend.push_ok(EVALUATE);
     backend.push_ok(VALIDATE);
     backend.push_ok(REFACTOR);
+    backend.push_ok(UPDATE_DOCS);
 
     let storage_dir = std::env::temp_dir().join("tddy-cli-full-wf-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -902,14 +910,14 @@ artifacts: {}
 
     assert_eq!(
         backend.invocations().len(),
-        6,
-        "should run acceptance-tests, red, green, evaluate, validate, refactor"
+        7,
+        "should run acceptance-tests, red, green, evaluate, validate, refactor, update-docs"
     );
 
     let changeset = read_changeset(&plan_dir).expect("changeset");
     assert_eq!(
-        changeset.state.current, "RefactorComplete",
-        "state should be RefactorComplete after full workflow"
+        changeset.state.current, "DocsUpdated",
+        "state should be DocsUpdated after full workflow"
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);

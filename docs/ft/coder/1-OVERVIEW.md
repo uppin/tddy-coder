@@ -6,7 +6,7 @@
 
 ## Summary
 
-tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Claude Code or Cursor) through a strict workflow: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor. It produces structured artifacts (PRD.md, TODO.md, acceptance-tests.md, progress.md, etc.) in a plan directory and maintains workflow state in changeset.yaml. The tool supports both TUI mode (interactive ratatui interface) and plain mode (linear output for piping and scripting).
+tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Claude Code or Cursor) through a strict workflow: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor → update-docs. It produces structured artifacts (PRD.md, TODO.md, acceptance-tests.md, progress.md, etc.) in a plan directory and maintains workflow state in changeset.yaml. The tool supports both TUI mode (interactive ratatui interface) and plain mode (linear output for piping and scripting).
 
 ## Target Users
 
@@ -26,6 +26,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 | **Evaluate** | Analyzes git changes for risks; produces evaluation-report.md |
 | **Validate** | Subagent-driven validation (tests, prod-ready, clean code) |
 | **Refactor** | Executes refactoring plan from validate phase |
+| **Update Docs** | Reads planning artifacts and updates target repo documentation per repo guidelines |
 | **TUI** | Full ratatui interface: activity log, status bar, inbox, clarification prompts, plan approval |
 | **gRPC** | `--grpc` exposes bidirectional streaming for programmatic control (E2E tests, automation) |
 

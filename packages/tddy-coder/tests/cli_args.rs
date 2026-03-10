@@ -121,6 +121,47 @@ fn cli_accepts_validate_goal() {
     );
 }
 
+/// `--goal update-docs --plan-dir <path>` is accepted by CLI.
+#[test]
+fn cli_accepts_update_docs_goal() {
+    let plan_dir = std::env::temp_dir().join("tddy-cli-update-docs-test");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+
+    let mut cmd = tddy_coder_bin();
+    cmd.args([
+        "--goal",
+        "update-docs",
+        "--plan-dir",
+        plan_dir.to_str().unwrap(),
+    ]);
+
+    let output = cmd.output().expect("run tddy-coder");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !stderr.contains("invalid value 'update-docs'")
+            && !stderr.contains("'update-docs' isn't a valid value"),
+        "--goal update-docs should be accepted by the CLI parser, stderr: {}",
+        stderr
+    );
+
+    // --goal update-docz should be rejected (typo)
+    let mut cmd2 = tddy_coder_bin();
+    cmd2.args(["--goal", "update-docz"]);
+
+    let output2 = cmd2.output().expect("run tddy-coder");
+    let stderr2 = String::from_utf8_lossy(&output2.stderr);
+
+    assert!(
+        stderr2.contains("invalid value") || stderr2.contains("isn't a valid value"),
+        "--goal update-docz should be rejected by the CLI parser, stderr: {}",
+        stderr2
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
 /// AC2: `--goal refactor --plan-dir <path>` is accepted by CLI.
 ///
 /// This test will fail until:

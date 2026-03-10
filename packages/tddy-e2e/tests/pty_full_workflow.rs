@@ -16,7 +16,7 @@ use tddy_grpc::gen::{
     client_message, AnswerSelect, ApprovePlan, ClientMessage, SubmitFeatureInput,
 };
 
-/// With demo: 18 transitions. Without demo: 16. Plan approval adds (Planned→Planning→Planned).
+/// With demo: 20 transitions. Without demo: 18. Plan approval adds (Planned→Planning→Planned).
 const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
     ("Init", "Planning"),
     ("Planning", "Planned"),
@@ -36,6 +36,8 @@ const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
     ("Validating", "ValidateComplete"),
     ("ValidateComplete", "Refactoring"),
     ("Refactoring", "RefactorComplete"),
+    ("RefactorComplete", "UpdatingDocs"),
+    ("UpdatingDocs", "DocsUpdated"),
 ];
 const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
     ("Init", "Planning"),
@@ -54,9 +56,11 @@ const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
     ("Validating", "ValidateComplete"),
     ("ValidateComplete", "Refactoring"),
     ("Refactoring", "RefactorComplete"),
+    ("RefactorComplete", "UpdatingDocs"),
+    ("UpdatingDocs", "DocsUpdated"),
 ];
 
-/// Full workflow: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor.
+/// Full workflow: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor → update-docs.
 /// gRPC events drive the flow; after each StateChanged, UI buffer is asserted.
 #[tokio::test]
 async fn pty_full_workflow_asserts_each_state_transition() {
@@ -147,7 +151,7 @@ async fn pty_full_workflow_asserts_each_state_transition() {
                                     || screen.contains("Workflow complete")
                                     || screen.contains("Tasks completed")
                                     || screen.contains("Tests passing")
-                                    || (screen.contains("RefactorComplete")
+                                    || (screen.contains("DocsUpdated")
                                         && screen.contains("Goal: end"))
                                 {
                                     seen = true;
