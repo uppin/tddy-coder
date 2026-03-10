@@ -4,11 +4,12 @@ use tddy_core::{ActivityKind, AppMode, PresenterEvent, UserIntent};
 
 use crate::gen::{
     app_mode_proto, client_message, server_message, ActivityLogged, AgentOutput, AnswerMultiSelect,
-    AnswerOther, AnswerSelect, AnswerText, AppModeDone, AppModeFeatureInput, AppModeMultiSelect,
-    AppModeProto, AppModeRunning, AppModeSelect, AppModeTextInput, ClarificationQuestionProto,
-    ClientMessage, DeleteInboxItem, EditInboxItem, GoalStarted, InboxChanged, IntentReceived,
-    ModeChanged, QuestionOptionProto, QueuePrompt, Quit, Scroll, ServerMessage, StateChanged,
-    SubmitFeatureInput, WorkflowComplete,
+    AnswerOther, AnswerSelect, AnswerText, AppModeDone, AppModeFeatureInput, AppModeMarkdownViewer,
+    AppModeMultiSelect, AppModePlanReview, AppModeProto, AppModeRunning, AppModeSelect,
+    AppModeTextInput, ApprovePlan, ClarificationQuestionProto, ClientMessage, DeleteInboxItem,
+    DismissViewer, EditInboxItem, GoalStarted, InboxChanged, IntentReceived, ModeChanged,
+    QuestionOptionProto, QueuePrompt, Quit, RefinePlan, Scroll, ServerMessage, StateChanged,
+    SubmitFeatureInput, ViewPlan, WorkflowComplete,
 };
 
 /// Convert ClientMessage to UserIntent. Returns None if the message has no intent.
@@ -40,6 +41,10 @@ pub fn client_message_to_intent(msg: ClientMessage) -> Option<UserIntent> {
         }
         Intent::Scroll(Scroll { delta }) => Some(UserIntent::Scroll(delta)),
         Intent::Quit(Quit {}) => Some(UserIntent::Quit),
+        Intent::ApprovePlan(ApprovePlan {}) => Some(UserIntent::ApprovePlan),
+        Intent::ViewPlan(ViewPlan {}) => Some(UserIntent::ViewPlan),
+        Intent::RefinePlan(RefinePlan {}) => Some(UserIntent::RefinePlan),
+        Intent::DismissViewer(DismissViewer {}) => Some(UserIntent::DismissViewer),
     }
 }
 
@@ -117,6 +122,16 @@ fn app_mode_to_proto(mode: &AppMode) -> AppModeProto {
             prompt: prompt.clone(),
         }),
         AppMode::Done => app_mode_proto::Variant::Done(AppModeDone {}),
+        AppMode::PlanReview { prd_content } => {
+            app_mode_proto::Variant::PlanReview(AppModePlanReview {
+                prd_content: prd_content.clone(),
+            })
+        }
+        AppMode::MarkdownViewer { content } => {
+            app_mode_proto::Variant::MarkdownViewer(AppModeMarkdownViewer {
+                content: content.clone(),
+            })
+        }
     };
     AppModeProto {
         variant: Some(variant),
@@ -175,6 +190,10 @@ fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
         }),
         UserIntent::Scroll(delta) => Intent::Scroll(Scroll { delta: *delta }),
         UserIntent::Quit => Intent::Quit(Quit {}),
+        UserIntent::ApprovePlan => Intent::ApprovePlan(ApprovePlan {}),
+        UserIntent::ViewPlan => Intent::ViewPlan(ViewPlan {}),
+        UserIntent::RefinePlan => Intent::RefinePlan(RefinePlan {}),
+        UserIntent::DismissViewer => Intent::DismissViewer(DismissViewer {}),
     };
     Some(ClientMessage {
         intent: Some(intent),

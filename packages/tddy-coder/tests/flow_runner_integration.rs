@@ -2,11 +2,11 @@
 //!
 //! Verifies plan goal produces plan output via WorkflowEngine (graph-flow path).
 //!
-//! Uses SKIP_QUESTIONS in prompt because the test does not provide clarification input.
+//! Uses tddy-demo (StubBackend) with SKIP_QUESTIONS so the test does not need clarification input.
+//! Runs as subprocess with piped stdin ("a\n" for plan approval) to avoid blocking.
 
+use assert_cmd::Command;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use tddy_coder::{run_with_args, Args};
 
 fn temp_output_dir() -> PathBuf {
     let dir = std::env::temp_dir().join("tddy-flowrunner-plan-test");
@@ -15,26 +15,25 @@ fn temp_output_dir() -> PathBuf {
     dir
 }
 
-/// Plan goal produces a plan directory when given feature input (via WorkflowEngine).
+/// Plan goal produces a plan directory when given feature input.
+/// Uses tddy-demo binary (StubBackend) with piped stdin for plan approval.
 #[test]
 fn run_plan_via_flow_runner_produces_plan_directory() {
     let output_dir = temp_output_dir();
-    let args = Args {
-        goal: Some("plan".to_string()),
-        output_dir: output_dir.clone(),
-        plan_dir: None,
-        conversation_output: None,
-        model: None,
-        allowed_tools: None,
-        debug: false,
-        debug_output: None,
-        agent: "stub".to_string(),
-        prompt: Some("Add user authentication SKIP_QUESTIONS".to_string()),
-        grpc: None,
-    };
+    let output_dir_str = output_dir.to_str().expect("path");
 
-    run_with_args(&args, std::sync::Arc::new(AtomicBool::new(false)))
-        .expect("run_with_args plan should succeed");
+    let mut cmd = Command::cargo_bin("tddy-demo").expect("tddy-demo binary");
+    cmd.args([
+        "--goal",
+        "plan",
+        "--output-dir",
+        output_dir_str,
+        "--prompt",
+        "Add user authentication SKIP_QUESTIONS",
+    ])
+    .write_stdin("a\n");
+
+    cmd.assert().success();
 
     let plan_dir_name =
         tddy_core::output::slugify_directory_name("Add user authentication SKIP_QUESTIONS");

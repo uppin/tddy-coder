@@ -20,7 +20,7 @@ anyhow = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net"] }
 uuid = { version = "1", features = ["v4"] }
 ctrlc = { version = "3", features = ["termination"] }
-crossterm = "0.28"
+crossterm = "0.29"
 tddy-core = { path = "../tddy-core" }
 tddy-tui = { path = "../tddy-tui" }
 tddy-grpc = { path = "../tddy-grpc" }

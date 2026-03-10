@@ -56,6 +56,10 @@ pub struct ViewState {
     pub inbox_focus: InboxFocus,
     /// Buffer for editing an inbox item in-place.
     pub inbox_edit_buffer: String,
+    /// Selected option in PlanReview mode (0=View, 1=Approve, 2=Refine).
+    pub plan_review_selected: usize,
+    /// Scroll offset for MarkdownViewer mode.
+    pub markdown_scroll_offset: usize,
 }
 
 impl ViewState {
@@ -91,6 +95,12 @@ impl ViewState {
                 self.running_cursor = 0;
                 self.inbox_focus = InboxFocus::None;
             }
+            AppMode::PlanReview { .. } => {
+                self.plan_review_selected = 0;
+            }
+            AppMode::MarkdownViewer { .. } => {
+                self.markdown_scroll_offset = 0;
+            }
             AppMode::Done => {}
         }
     }
@@ -111,6 +121,8 @@ impl ViewState {
         match mode {
             AppMode::FeatureInput => self.handle_feature_input_key(key),
             AppMode::Running => self.handle_running_key_view_local(key, inbox_len),
+            AppMode::PlanReview { .. } => self.handle_plan_review_key_view_local(key),
+            AppMode::MarkdownViewer { .. } => self.handle_markdown_viewer_key_view_local(key),
             AppMode::Select { question, .. } => self.handle_select_key_view_local(key, question),
             AppMode::MultiSelect { question, .. } => {
                 self.handle_multiselect_key_view_local(key, question)
@@ -128,6 +140,51 @@ impl ViewState {
             }
             KeyCode::PageDown => {
                 self.scroll_offset = self.scroll_offset.saturating_add(5);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_plan_review_key_view_local(&mut self, key: KeyEvent) -> bool {
+        const OPTIONS: usize = 3; // View, Approve, Refine
+        match key.code {
+            KeyCode::Up => {
+                self.plan_review_selected = if self.plan_review_selected == 0 {
+                    OPTIONS - 1
+                } else {
+                    self.plan_review_selected - 1
+                };
+                true
+            }
+            KeyCode::Down => {
+                self.plan_review_selected = if self.plan_review_selected >= OPTIONS - 1 {
+                    0
+                } else {
+                    self.plan_review_selected + 1
+                };
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_markdown_viewer_key_view_local(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::PageUp => {
+                self.markdown_scroll_offset = self.markdown_scroll_offset.saturating_sub(10);
+                true
+            }
+            KeyCode::PageDown => {
+                self.markdown_scroll_offset = self.markdown_scroll_offset.saturating_add(10);
+                true
+            }
+            KeyCode::Up => {
+                self.markdown_scroll_offset = self.markdown_scroll_offset.saturating_sub(1);
+                true
+            }
+            KeyCode::Down => {
+                self.markdown_scroll_offset = self.markdown_scroll_offset.saturating_add(1);
                 true
             }
             _ => false,

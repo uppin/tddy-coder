@@ -12,11 +12,15 @@ use tonic::Request;
 use tddy_e2e::{connect_grpc, spawn_presenter_with_grpc_and_tui};
 use tddy_grpc::gen::app_mode_proto;
 use tddy_grpc::gen::server_message;
-use tddy_grpc::gen::{client_message, AnswerSelect, ClientMessage, SubmitFeatureInput};
+use tddy_grpc::gen::{
+    client_message, AnswerSelect, ApprovePlan, ClientMessage, SubmitFeatureInput,
+};
 
-/// With demo: 16 transitions. Without demo (skip): 14 transitions (GreenComplete → Evaluating).
+/// With demo: 18 transitions. Without demo: 16. Plan approval adds (Planned→Planning→Planned).
 const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
     ("Init", "Planning"),
+    ("Planning", "Planned"),
+    ("Planned", "Planning"),
     ("Planning", "Planned"),
     ("Planned", "AcceptanceTesting"),
     ("AcceptanceTesting", "AcceptanceTestsReady"),
@@ -35,6 +39,8 @@ const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
 ];
 const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
     ("Init", "Planning"),
+    ("Planning", "Planned"),
+    ("Planned", "Planning"),
     ("Planning", "Planned"),
     ("Planned", "AcceptanceTesting"),
     ("AcceptanceTesting", "AcceptanceTestsReady"),
@@ -61,9 +67,11 @@ async fn pty_full_workflow_asserts_each_state_transition() {
 
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     tx.send(ClientMessage {
-        intent: Some(client_message::Intent::SubmitFeatureInput(SubmitFeatureInput {
-            text: "Build auth".to_string(),
-        })),
+        intent: Some(client_message::Intent::SubmitFeatureInput(
+            SubmitFeatureInput {
+                text: "Build auth".to_string(),
+            },
+        )),
     })
     .await
     .unwrap();
@@ -113,6 +121,16 @@ async fn pty_full_workflow_asserts_each_state_transition() {
                                     })
                                     .await
                                     .ok();
+                                } else if let Some(app_mode_proto::Variant::PlanReview(_)) =
+                                    &mode.variant
+                                {
+                                    tx.send(ClientMessage {
+                                        intent: Some(client_message::Intent::ApprovePlan(
+                                            ApprovePlan {},
+                                        )),
+                                    })
+                                    .await
+                                    .ok();
                                 }
                             }
                         }
@@ -122,7 +140,8 @@ async fn pty_full_workflow_asserts_each_state_transition() {
                             let mut seen = false;
                             for _ in 0..50 {
                                 let screen = screen_buffer.lock().unwrap().clone();
-                                if screen.contains("Plan dir:") || screen.contains("Workflow complete")
+                                if screen.contains("Plan dir:")
+                                    || screen.contains("Workflow complete")
                                 {
                                     seen = true;
                                     break;
@@ -158,10 +177,7 @@ async fn pty_full_workflow_asserts_each_state_transition() {
         "Expected workflow to complete successfully (transitions: {:?})",
         state_transitions
     );
-    let expected = if state_transitions
-        .iter()
-        .any(|(_, to)| to == "DemoComplete")
-    {
+    let expected = if state_transitions.iter().any(|(_, to)| to == "DemoComplete") {
         EXPECTED_WITH_DEMO
     } else {
         EXPECTED_WITHOUT_DEMO

@@ -93,7 +93,9 @@ fn full_workflow_completes_with_stub_backend() {
     let max_iterations = 500;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
-        if matches!(presenter.state().mode, AppMode::Select { .. }) {
+        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+            presenter.handle_intent(UserIntent::ApprovePlan);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
@@ -141,7 +143,9 @@ fn clarification_roundtrip_sends_answers() {
     let max_iterations = 500;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
-        if matches!(presenter.state().mode, AppMode::Select { .. }) {
+        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+            presenter.handle_intent(UserIntent::ApprovePlan);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
@@ -155,9 +159,10 @@ fn clarification_roundtrip_sends_answers() {
     assert!(presenter.is_done());
     let events = presenter.view_mut().events();
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, TestEvent::ModeChanged(AppMode::Select { .. }))),
+        events.iter().any(
+            |e| matches!(e, TestEvent::ModeChanged(AppMode::Select { .. }))
+                || matches!(e, TestEvent::ModeChanged(AppMode::PlanReview { .. }))
+        ),
         "expected Select mode during clarification: {:?}",
         events
     );
@@ -191,7 +196,9 @@ fn inbox_queue_and_dequeue() {
             presenter.handle_intent(UserIntent::QueuePrompt("fix the login bug".to_string()));
             queued = true;
         }
-        if matches!(presenter.state().mode, AppMode::Select { .. }) {
+        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+            presenter.handle_intent(UserIntent::ApprovePlan);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
@@ -212,6 +219,156 @@ fn inbox_queue_and_dequeue() {
             .any(|e| matches!(e, TestEvent::InboxChanged(inbox) if inbox.len() == 1)),
         "expected InboxChanged with 1 item: {:?}",
         events
+    );
+}
+
+/// Plan approval: After plan completes, PlanReview mode appears. ApprovePlan proceeds to next step.
+#[test]
+fn plan_approval_approve_proceeds_to_next_step() {
+    let view = TestView::new();
+    let mut presenter = Presenter::new(view, "stub", "default");
+    let backend = create_stub_backend();
+    let output_dir = std::env::temp_dir().join("tddy-presenter-test-plan-approve");
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
+    presenter.start_workflow(backend, output_dir, Some("Build auth".to_string()));
+
+    let mut iterations = 0;
+    let max_iterations = 500;
+    while !presenter.is_done() && iterations < max_iterations {
+        presenter.poll_workflow();
+        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+            presenter.handle_intent(UserIntent::ApprovePlan);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        presenter.is_done(),
+        "workflow should complete within {} iterations",
+        max_iterations
+    );
+    let events = presenter.view_mut().events();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, TestEvent::ModeChanged(AppMode::PlanReview { .. }))),
+        "expected PlanReview mode: {:?}",
+        events
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_)))),
+        "expected WorkflowComplete(Ok): {:?}",
+        events
+    );
+}
+
+/// Plan approval: ViewPlan opens MarkdownViewer, DismissViewer returns to PlanReview, ApprovePlan proceeds.
+#[test]
+fn plan_approval_view_then_approve() {
+    let view = TestView::new();
+    let mut presenter = Presenter::new(view, "stub", "default");
+    let backend = create_stub_backend();
+    let output_dir = std::env::temp_dir().join("tddy-presenter-test-plan-view");
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
+    presenter.start_workflow(backend, output_dir, Some("Build auth".to_string()));
+
+    let mut iterations = 0;
+    let max_iterations = 500;
+    let mut viewed = false;
+    while !presenter.is_done() && iterations < max_iterations {
+        presenter.poll_workflow();
+        if matches!(presenter.state().mode, AppMode::MarkdownViewer { .. }) {
+            if !viewed {
+                presenter.handle_intent(UserIntent::DismissViewer);
+                viewed = true;
+            }
+        } else if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+            if viewed {
+                presenter.handle_intent(UserIntent::ApprovePlan);
+            } else {
+                presenter.handle_intent(UserIntent::ViewPlan);
+            }
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        presenter.is_done(),
+        "workflow should complete within {} iterations",
+        max_iterations
+    );
+    let events = presenter.view_mut().events();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, TestEvent::ModeChanged(AppMode::MarkdownViewer { .. }))),
+        "expected MarkdownViewer mode: {:?}",
+        events
+    );
+}
+
+/// Plan approval: RefinePlan enters TextInput, AnswerText sends feedback, plan re-runs, approval re-appears.
+#[test]
+fn plan_approval_refine_re_shows_approval() {
+    let view = TestView::new();
+    let mut presenter = Presenter::new(view, "stub", "default");
+    let backend = create_stub_backend();
+    let output_dir = std::env::temp_dir().join("tddy-presenter-test-plan-refine");
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
+    presenter.start_workflow(backend, output_dir, Some("Build auth".to_string()));
+
+    let mut iterations = 0;
+    let max_iterations = 800;
+    let mut plan_review_count = 0;
+    while !presenter.is_done() && iterations < max_iterations {
+        presenter.poll_workflow();
+        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+            plan_review_count += 1;
+            if plan_review_count == 1 {
+                presenter.handle_intent(UserIntent::RefinePlan);
+            } else {
+                presenter.handle_intent(UserIntent::ApprovePlan);
+            }
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText(
+                "Add OAuth support to the plan".to_string(),
+            ));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        presenter.is_done(),
+        "workflow should complete within {} iterations",
+        max_iterations
+    );
+    assert!(
+        plan_review_count >= 2,
+        "expected PlanReview at least twice (initial + after refine)"
     );
 }
 

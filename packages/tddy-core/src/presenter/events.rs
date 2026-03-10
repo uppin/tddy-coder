@@ -15,6 +15,10 @@ pub enum WorkflowEvent {
     ClarificationNeeded {
         questions: Vec<ClarificationQuestion>,
     },
+    /// Plan approval gate: user must View, Approve, or Refine before proceeding.
+    PlanApprovalNeeded {
+        prd_content: String,
+    },
     WorkflowComplete(Result<String, String>),
     AgentOutput(String),
 }

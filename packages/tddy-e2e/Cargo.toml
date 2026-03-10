@@ -12,7 +12,7 @@ path = "src/lib.rs"
 tddy-core = { path = "../tddy-core" }
 tddy-grpc = { path = "../tddy-grpc" }
 tddy-tui = { path = "../tddy-tui" }
-ratatui = "0.29"
+ratatui = "0.30"
 tonic = "0.12"
 prost = "0.13"
 tokio = { version = "1", features = ["full"] }

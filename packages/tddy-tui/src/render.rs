@@ -27,28 +27,41 @@ pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &ViewState, d
         layout_chunks_with_inbox(frame.area(), dynamic_h, debug_h);
 
     if activity_log.height > 0 {
-        let content = state
-            .activity_log
-            .iter()
-            .map(|e: &ActivityEntry| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let line_count = state.activity_log.len();
-        let area_height = activity_log.height as usize;
-        let scroll_y = if line_count > area_height {
-            let max_scroll = line_count.saturating_sub(area_height);
-            (view_state.scroll_offset.min(max_scroll)) as u16
-        } else {
-            0
-        };
-        let widget = Paragraph::new(content).scroll((scroll_y, 0));
-        frame.render_widget(widget, activity_log);
+        match &state.mode {
+            AppMode::MarkdownViewer { content } => {
+                let text = tui_markdown::from_str(content);
+                let widget =
+                    Paragraph::new(text).scroll((view_state.markdown_scroll_offset as u16, 0));
+                frame.render_widget(widget, activity_log);
+            }
+            _ => {
+                let content = state
+                    .activity_log
+                    .iter()
+                    .map(|e: &ActivityEntry| e.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let line_count = state.activity_log.len();
+                let area_height = activity_log.height as usize;
+                let scroll_y = if line_count > area_height {
+                    let max_scroll = line_count.saturating_sub(area_height);
+                    (view_state.scroll_offset.min(max_scroll)) as u16
+                } else {
+                    0
+                };
+                let widget = Paragraph::new(content).scroll((scroll_y, 0));
+                frame.render_widget(widget, activity_log);
+            }
+        }
     }
 
     if dynamic_area.height > 0 {
         match &state.mode {
             AppMode::Select { .. } | AppMode::MultiSelect { .. } | AppMode::TextInput { .. } => {
                 render_question(frame, state, view_state, dynamic_area);
+            }
+            AppMode::PlanReview { .. } => {
+                render_plan_review(frame, state, view_state, dynamic_area);
             }
             _ => {
                 render_inbox(frame, state, view_state, dynamic_area);
@@ -134,6 +147,8 @@ pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &ViewState, d
                     format!("> {}", view_state.text_input)
                 }
             }
+            AppMode::PlanReview { .. } => "Up/Down navigate  Enter select".to_string(),
+            AppMode::MarkdownViewer { .. } => "Q or Esc to close".to_string(),
         };
         let widget = Paragraph::new(text);
         frame.render_widget(widget, prompt_bar);
@@ -285,6 +300,47 @@ fn render_question(
         _ => return,
     };
 
+    let widget = Paragraph::new(lines);
+    frame.render_widget(widget, area);
+}
+
+/// Render plan approval 3-option menu
+fn render_plan_review(
+    frame: &mut Frame,
+    _state: &PresenterState,
+    view_state: &ViewState,
+    area: ratatui::layout::Rect,
+) {
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+
+    if area.height == 0 {
+        return;
+    }
+
+    let options = [
+        ("View", "Open full-screen PRD viewer"),
+        ("Approve", "Proceed to next step"),
+        ("Refine", "Enter feedback for plan refinement"),
+    ];
+    let mut lines = vec![Line::from(Span::styled(
+        "Plan generated. Choose an action:",
+        Style::default().add_modifier(Modifier::BOLD),
+    ))];
+    for (i, (label, desc)) in options.iter().enumerate() {
+        let prefix = if view_state.plan_review_selected == i {
+            "> "
+        } else {
+            "  "
+        };
+        let text = format!("{}{} -- {}", prefix, label, desc);
+        let style = if view_state.plan_review_selected == i {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(Span::styled(text, style)));
+    }
     let widget = Paragraph::new(lines);
     frame.render_widget(widget, area);
 }

@@ -48,6 +48,19 @@ Now create the PRD and TODO for: {feature}"#,
     )
 }
 
+/// Build the prompt when the user has requested plan refinement (plan approval gate).
+pub fn build_refinement_prompt(feature: &str, feedback: &str) -> String {
+    format!(
+        r#"The user has reviewed the plan and requested refinements:
+
+{feedback}
+
+Please revise the PRD and TODO accordingly for: {feature}"#,
+        feedback = feedback.trim(),
+        feature = feature
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

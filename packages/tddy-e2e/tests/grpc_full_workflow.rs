@@ -11,7 +11,9 @@ use tonic::Request;
 use tddy_e2e::{connect_grpc, spawn_presenter_with_grpc};
 use tddy_grpc::gen::app_mode_proto;
 use tddy_grpc::gen::server_message;
-use tddy_grpc::gen::{client_message, AnswerSelect, ClientMessage, SubmitFeatureInput};
+use tddy_grpc::gen::{
+    client_message, AnswerSelect, ApprovePlan, ClientMessage, SubmitFeatureInput,
+};
 
 #[tokio::test]
 async fn full_workflow_with_clarification_completes() {
@@ -22,9 +24,11 @@ async fn full_workflow_with_clarification_completes() {
 
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     tx.send(ClientMessage {
-        intent: Some(client_message::Intent::SubmitFeatureInput(SubmitFeatureInput {
-            text: "Build auth".to_string(),
-        })),
+        intent: Some(client_message::Intent::SubmitFeatureInput(
+            SubmitFeatureInput {
+                text: "Build auth".to_string(),
+            },
+        )),
     })
     .await
     .unwrap();
@@ -52,6 +56,16 @@ async fn full_workflow_with_clarification_completes() {
                                     tx.send(ClientMessage {
                                         intent: Some(client_message::Intent::AnswerSelect(
                                             AnswerSelect { index: 0 },
+                                        )),
+                                    })
+                                    .await
+                                    .ok();
+                                } else if let Some(app_mode_proto::Variant::PlanReview(_)) =
+                                    &mode.variant
+                                {
+                                    tx.send(ClientMessage {
+                                        intent: Some(client_message::Intent::ApprovePlan(
+                                            ApprovePlan {},
                                         )),
                                     })
                                     .await
@@ -105,9 +119,11 @@ async fn full_workflow_with_clarification_completes() {
 /// and demo (Create & run). StubBackend plan includes demo_plan, so demo step runs.
 #[tokio::test]
 async fn full_workflow_asserts_each_state_transition() {
-    /// With demo: 16 transitions. Without demo: 14 (GreenComplete → Evaluating).
+    /// With demo: 18 transitions. Without demo: 16. Plan approval adds (Planned→Planning→Planned).
     const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
         ("Init", "Planning"),
+        ("Planning", "Planned"),
+        ("Planned", "Planning"),
         ("Planning", "Planned"),
         ("Planned", "AcceptanceTesting"),
         ("AcceptanceTesting", "AcceptanceTestsReady"),
@@ -126,6 +142,8 @@ async fn full_workflow_asserts_each_state_transition() {
     ];
     const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
         ("Init", "Planning"),
+        ("Planning", "Planned"),
+        ("Planned", "Planning"),
         ("Planning", "Planned"),
         ("Planned", "AcceptanceTesting"),
         ("AcceptanceTesting", "AcceptanceTestsReady"),
@@ -148,9 +166,11 @@ async fn full_workflow_asserts_each_state_transition() {
 
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     tx.send(ClientMessage {
-        intent: Some(client_message::Intent::SubmitFeatureInput(SubmitFeatureInput {
-            text: "Build auth".to_string(),
-        })),
+        intent: Some(client_message::Intent::SubmitFeatureInput(
+            SubmitFeatureInput {
+                text: "Build auth".to_string(),
+            },
+        )),
     })
     .await
     .unwrap();
@@ -180,6 +200,16 @@ async fn full_workflow_asserts_each_state_transition() {
                                     tx.send(ClientMessage {
                                         intent: Some(client_message::Intent::AnswerSelect(
                                             AnswerSelect { index: 0 },
+                                        )),
+                                    })
+                                    .await
+                                    .ok();
+                                } else if let Some(app_mode_proto::Variant::PlanReview(_)) =
+                                    &mode.variant
+                                {
+                                    tx.send(ClientMessage {
+                                        intent: Some(client_message::Intent::ApprovePlan(
+                                            ApprovePlan {},
                                         )),
                                     })
                                     .await
@@ -236,10 +266,7 @@ async fn full_workflow_asserts_each_state_transition() {
         state_transitions
     );
 
-    let expected = if state_transitions
-        .iter()
-        .any(|(_, to)| to == "DemoComplete")
-    {
+    let expected = if state_transitions.iter().any(|(_, to)| to == "DemoComplete") {
         EXPECTED_WITH_DEMO
     } else {
         EXPECTED_WITHOUT_DEMO
@@ -255,14 +282,20 @@ async fn full_workflow_asserts_each_state_transition() {
     for (i, (from, to)) in state_transitions.iter().enumerate() {
         let (exp_from, exp_to) = expected[i];
         assert_eq!(
-            from, exp_from,
+            from,
+            exp_from,
             "Transition {}: expected from='{}', got from='{}'",
-            i + 1, exp_from, from
+            i + 1,
+            exp_from,
+            from
         );
         assert_eq!(
-            to, exp_to,
+            to,
+            exp_to,
             "Transition {}: expected to='{}', got to='{}'",
-            i + 1, exp_to, to
+            i + 1,
+            exp_to,
+            to
         );
     }
 }

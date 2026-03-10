@@ -7,8 +7,8 @@ use crate::backend::{AgentOutputSink, ProgressSink};
 use std::cell::RefCell;
 
 thread_local! {
-    static AGENT_SINK: RefCell<Option<AgentOutputSink>> = RefCell::new(None);
-    static PROGRESS_SINK: RefCell<Option<ProgressSink>> = RefCell::new(None);
+    static AGENT_SINK: RefCell<Option<AgentOutputSink>> = const { RefCell::new(None) };
+    static PROGRESS_SINK: RefCell<Option<ProgressSink>> = const { RefCell::new(None) };
 }
 
 /// Set the agent output sink for the current thread. Call before running a task.

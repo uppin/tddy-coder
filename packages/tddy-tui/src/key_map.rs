@@ -28,10 +28,32 @@ pub fn key_event_to_intent(
     match mode {
         AppMode::FeatureInput => feature_input_key(key, view_state),
         AppMode::Running => running_key(key, view_state),
+        AppMode::PlanReview { .. } => plan_review_key(key, view_state),
+        AppMode::MarkdownViewer { .. } => markdown_viewer_key(key),
         AppMode::Select { question, .. } => select_key(key, question, view_state),
         AppMode::MultiSelect { question, .. } => multiselect_key(key, question, view_state),
         AppMode::TextInput { .. } => text_input_key(key, view_state),
         AppMode::Done => done_key(key),
+    }
+}
+
+fn plan_review_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
+    if key.code == KeyCode::Enter {
+        match vs.plan_review_selected {
+            0 => Some(UserIntent::ViewPlan),
+            1 => Some(UserIntent::ApprovePlan),
+            2 => Some(UserIntent::RefinePlan),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+fn markdown_viewer_key(key: KeyEvent) -> Option<UserIntent> {
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => Some(UserIntent::DismissViewer),
+        _ => None,
     }
 }
 

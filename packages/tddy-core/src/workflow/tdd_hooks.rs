@@ -3,6 +3,7 @@
 //! Implements RunnerHooks for the graph-flow path. Writes artifacts from context
 //! in after_task, reads artifacts into context in before_task.
 
+use crate::backend::{AgentOutputSink, ProgressSink};
 use crate::changeset::{
     append_session_and_update_state, get_session_for_tag, next_goal_for_state, read_changeset,
     resolve_model, update_state, write_changeset, Changeset,
@@ -15,10 +16,9 @@ use crate::output::{
     update_progress_file, write_acceptance_tests_file, write_artifacts, write_demo_results_file,
     write_evaluation_report, write_progress_file, write_red_output_file, PlanningOutput,
 };
-use crate::backend::{AgentOutputSink, ProgressSink};
 use crate::presenter::WorkflowEvent;
-use crate::stream::ProgressEvent as StreamProgressEvent;
 use crate::schema::write_schema_to_dir;
+use crate::stream::ProgressEvent as StreamProgressEvent;
 use crate::workflow::context::Context;
 use crate::workflow::hooks::RunnerHooks;
 use crate::workflow::task::TaskResult;
@@ -298,8 +298,7 @@ impl RunnerHooks for TddWorkflowHooks {
                 let output_dir: PathBuf = context
                     .get_sync("output_dir")
                     .ok_or("plan after_task requires output_dir in context")?;
-                let feature_input: String =
-                    context.get_sync("feature_input").unwrap_or_default();
+                let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
                 let plan_dir = output_dir.join(slugify_directory_name(&feature_input));
                 let planning: PlanningOutput = context
                     .get_sync("parsed_planning")
