@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Plan step Task: invokes backend, parses response, writes PRD.md and TODO.md.
+/// Plan step Task: invokes backend, parses response, writes PRD.md (with TODO section).
 pub struct PlanTask {
     backend: Arc<dyn CodingBackend>,
 }

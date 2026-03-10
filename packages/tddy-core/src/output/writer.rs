@@ -91,23 +91,25 @@ pub fn read_impl_session_file(plan_dir: &Path) -> Result<String, WorkflowError> 
     fs::read_to_string(&session_path).map_err(|e| WorkflowError::SessionMissing(format!("{}", e)))
 }
 
-/// Write PRD.md and TODO.md to the given directory.
+/// Write PRD.md with TODO content as last section. No separate TODO.md.
 /// Injects cross-references to peer documents.
 pub fn write_artifacts(output_dir: &Path, planning: &PlanningOutput) -> Result<(), WorkflowError> {
     fs::create_dir_all(output_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
-    // Write TODO first so it exists when we inject cross-refs into PRD
-    let todo_path = output_dir.join("TODO.md");
-    let todo_content = inject_cross_references(&planning.todo, output_dir, "TODO.md");
-    fs::write(&todo_path, todo_content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
-
-    let prd_path = output_dir.join("PRD.md");
-    let prd_content = inject_cross_references(&planning.prd, output_dir, "PRD.md");
-    fs::write(&prd_path, prd_content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
-
     if let Some(ref demo) = planning.demo_plan {
         write_demo_plan_file(output_dir, demo)?;
     }
+
+    let mut prd_with_todo = planning.prd.clone();
+    if !prd_with_todo.ends_with('\n') {
+        prd_with_todo.push('\n');
+    }
+    prd_with_todo.push_str("\n## TODO\n\n");
+    prd_with_todo.push_str(&planning.todo);
+
+    let prd_path = output_dir.join("PRD.md");
+    let prd_content = inject_cross_references(&prd_with_todo, output_dir, "PRD.md");
+    fs::write(&prd_path, prd_content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
     Ok(())
 }

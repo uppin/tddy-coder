@@ -77,8 +77,8 @@ fn markdown_cross_references_added() {
 
     let prd_content = std::fs::read_to_string(plan_dir.join("PRD.md")).expect("read PRD");
     assert!(
-        prd_content.contains("TODO.md") || prd_content.contains("Related Documents") || prd_content.contains("./"),
-        "PRD.md should have cross-references to peer documents (TODO.md or Related Documents section)"
+        prd_content.contains("## TODO") && prd_content.contains("Task 1"),
+        "PRD.md should contain TODO content as last section"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);

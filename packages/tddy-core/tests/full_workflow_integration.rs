@@ -217,8 +217,11 @@ async fn full_workflow_resume_from_planned() {
     let plan_dir = std::env::temp_dir().join("tddy-full-resume-planned");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
-    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
-    std::fs::write(plan_dir.join("TODO.md"), "# TODO\n- [ ] Task 1").expect("write TODO");
+    std::fs::write(
+        plan_dir.join("PRD.md"),
+        "# PRD\n## Testing Plan\n\n## TODO\n\n- [ ] Task 1",
+    )
+    .expect("write PRD");
     write_changeset_with_state(&plan_dir, "Planned", "sess-resume-planned");
 
     let backend = Arc::new(MockBackend::new());
