@@ -147,7 +147,6 @@ fn default_models() -> BTreeMap<String, String> {
 fn default_artifacts() -> BTreeMap<String, String> {
     let mut a = BTreeMap::new();
     a.insert("prd".to_string(), "PRD.md".to_string());
-    a.insert("todo".to_string(), "TODO.md".to_string());
     a.insert(
         "acceptance_tests".to_string(),
         "acceptance-tests.md".to_string(),

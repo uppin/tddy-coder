@@ -501,9 +501,9 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
     );
 
     let has_artifacts = fs::read_dir(&tmp).unwrap().filter_map(|e| e.ok()).any(|e| {
-        e.path().is_dir() && e.path().join("PRD.md").exists() && e.path().join("TODO.md").exists()
+        e.path().is_dir() && e.path().join("PRD.md").exists()
     });
-    assert!(has_artifacts, "expected PRD.md and TODO.md in output dir");
+    assert!(has_artifacts, "expected PRD.md in output dir");
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -815,10 +815,9 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(
         plan_dir.join("PRD.md"),
-        "# Feature PRD\n## Summary\nAuth system.",
+        "# Feature PRD\n## Summary\nAuth system.\n\n## TODO\n\n- [ ] Task 1",
     )
     .expect("write PRD");
-    std::fs::write(plan_dir.join("TODO.md"), "- [ ] Task 1").expect("write TODO");
     let changeset = r#"version: 1
 models: {}
 sessions:

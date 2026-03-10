@@ -247,7 +247,6 @@ async fn workflow_engine_run_goal_plan_completes() {
         "SKIP_QUESTIONS feature",
     ));
     assert!(plan_dir.join("PRD.md").exists());
-    assert!(plan_dir.join("TODO.md").exists());
 
     let _ = std::fs::remove_dir_all(&storage_dir);
 }

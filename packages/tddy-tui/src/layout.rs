@@ -50,11 +50,23 @@ pub fn debug_log_height(log_count: usize) -> u16 {
     }
 }
 
+/// Compute the prompt bar height based on text length and available width.
+/// Grows to accommodate wrapped text, capped at `MAX_PROMPT_LINES`.
+pub fn prompt_height(text_len: usize, area_width: u16) -> u16 {
+    const MAX_PROMPT_LINES: u16 = 5;
+    if area_width == 0 {
+        return 1;
+    }
+    let lines = (text_len as u16).div_ceil(area_width);
+    lines.max(1).min(MAX_PROMPT_LINES)
+}
+
 /// Split the terminal area into six regions, including inbox and optional debug log.
 pub fn layout_chunks_with_inbox(
     area: Rect,
     inbox_h: u16,
     debug_log_h: u16,
+    prompt_h: u16,
 ) -> (Rect, Rect, Rect, Rect, Rect, Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -64,7 +76,7 @@ pub fn layout_chunks_with_inbox(
             Constraint::Length(inbox_h),
             Constraint::Length(1),
             Constraint::Length(debug_log_h),
-            Constraint::Length(1),
+            Constraint::Length(prompt_h),
         ])
         .split(area);
     (
@@ -135,5 +147,30 @@ mod tests {
         assert_eq!(inbox_height(3, false), 0);
         assert_eq!(inbox_height(1, true), 1);
         assert_eq!(inbox_height(10, true), 5);
+    }
+
+    #[test]
+    fn test_prompt_height_single_line() {
+        assert_eq!(prompt_height(10, 80), 1);
+    }
+
+    #[test]
+    fn test_prompt_height_wraps_to_two_lines() {
+        assert_eq!(prompt_height(100, 80), 2);
+    }
+
+    #[test]
+    fn test_prompt_height_capped_at_five() {
+        assert_eq!(prompt_height(1000, 80), 5);
+    }
+
+    #[test]
+    fn test_prompt_height_empty_text() {
+        assert_eq!(prompt_height(0, 80), 1);
+    }
+
+    #[test]
+    fn test_prompt_height_zero_width() {
+        assert_eq!(prompt_height(50, 0), 1);
     }
 }
