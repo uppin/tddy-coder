@@ -1,13 +1,68 @@
 //! Frame rendering: draw activity log, status bar, prompt bar.
 
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use tddy_core::{ActivityEntry, AppMode, PresenterState};
 
-use crate::layout::{debug_log_height, inbox_height, layout_chunks_with_inbox, question_height};
+use crate::layout::{
+    debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_height, question_height,
+};
 use crate::ui::{format_status_bar, status_bar_style_for_goal};
 use crate::view_state::{InboxFocus, ViewState};
+
+/// Build the prompt bar text for the current mode and view state.
+fn build_prompt_text(state: &PresenterState, view_state: &ViewState) -> String {
+    match &state.mode {
+        AppMode::FeatureInput => {
+            let prefix = "> ";
+            if view_state.feature_input.is_empty() {
+                format!("{}Type your feature description and press Enter...", prefix)
+            } else {
+                format!("{}{}", prefix, view_state.feature_input)
+            }
+        }
+        AppMode::Running => {
+            if view_state.running_input.is_empty() {
+                "> Queue a follow-up prompt...".to_string()
+            } else {
+                format!("> {}", view_state.running_input)
+            }
+        }
+        AppMode::Done => "> Workflow complete. Press Enter to exit.".to_string(),
+        AppMode::Select { .. } => {
+            if view_state.select_typing_other {
+                if view_state.select_other_text.is_empty() {
+                    "> Type your answer and press Enter...".to_string()
+                } else {
+                    format!("> {}", view_state.select_other_text)
+                }
+            } else {
+                "Up/Down navigate  Enter select".to_string()
+            }
+        }
+        AppMode::MultiSelect { .. } => {
+            if view_state.multiselect_typing_other {
+                if view_state.multiselect_other_text.is_empty() {
+                    "> Type your answer and press Enter...".to_string()
+                } else {
+                    format!("> {}", view_state.multiselect_other_text)
+                }
+            } else {
+                "Up/Down navigate  Space toggle  Enter submit".to_string()
+            }
+        }
+        AppMode::TextInput { .. } => {
+            if view_state.text_input.is_empty() {
+                "> Type your answer and press Enter...".to_string()
+            } else {
+                format!("> {}", view_state.text_input)
+            }
+        }
+        AppMode::PlanReview { .. } => "Up/Down navigate  Enter select".to_string(),
+        AppMode::MarkdownViewer { .. } => "Q or Esc to close".to_string(),
+    }
+}
 
 /// Draw the TUI layout: activity log, status bar, prompt bar.
 /// When `debug` is true, the debug log area is shown; otherwise it is hidden.
@@ -23,8 +78,11 @@ pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &ViewState, d
     };
     let debug_h = debug_log_height(debug_logs.len());
 
+    let prompt_content = build_prompt_text(state, view_state);
+    let prompt_h = prompt_height(prompt_content.len(), frame.area().width);
+
     let (activity_log, _status_spacer, dynamic_area, status_bar, debug_log, prompt_bar) =
-        layout_chunks_with_inbox(frame.area(), dynamic_h, debug_h);
+        layout_chunks_with_inbox(frame.area(), dynamic_h, debug_h, prompt_h);
 
     if activity_log.height > 0 {
         match &state.mode {
@@ -101,56 +159,7 @@ pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &ViewState, d
     }
 
     if prompt_bar.height > 0 {
-        let text = match &state.mode {
-            AppMode::FeatureInput => {
-                let prefix = "> ";
-                if view_state.feature_input.is_empty() {
-                    format!("{}Type your feature description and press Enter...", prefix)
-                } else {
-                    format!("{}{}", prefix, view_state.feature_input)
-                }
-            }
-            AppMode::Running => {
-                if view_state.running_input.is_empty() {
-                    "> Queue a follow-up prompt...".to_string()
-                } else {
-                    format!("> {}", view_state.running_input)
-                }
-            }
-            AppMode::Done => "> Workflow complete. Press Enter to exit.".to_string(),
-            AppMode::Select { .. } => {
-                if view_state.select_typing_other {
-                    if view_state.select_other_text.is_empty() {
-                        "> Type your answer and press Enter...".to_string()
-                    } else {
-                        format!("> {}", view_state.select_other_text)
-                    }
-                } else {
-                    "Up/Down navigate  Enter select".to_string()
-                }
-            }
-            AppMode::MultiSelect { .. } => {
-                if view_state.multiselect_typing_other {
-                    if view_state.multiselect_other_text.is_empty() {
-                        "> Type your answer and press Enter...".to_string()
-                    } else {
-                        format!("> {}", view_state.multiselect_other_text)
-                    }
-                } else {
-                    "Up/Down navigate  Space toggle  Enter submit".to_string()
-                }
-            }
-            AppMode::TextInput { .. } => {
-                if view_state.text_input.is_empty() {
-                    "> Type your answer and press Enter...".to_string()
-                } else {
-                    format!("> {}", view_state.text_input)
-                }
-            }
-            AppMode::PlanReview { .. } => "Up/Down navigate  Enter select".to_string(),
-            AppMode::MarkdownViewer { .. } => "Q or Esc to close".to_string(),
-        };
-        let widget = Paragraph::new(text);
+        let widget = Paragraph::new(prompt_content).wrap(Wrap { trim: false });
         frame.render_widget(widget, prompt_bar);
     }
 }

@@ -86,13 +86,14 @@ async fn planning_workflow_produces_prd_and_todo_in_output_directory() {
     assert!(output_path.is_dir(), "output should be a directory");
 
     let prd_path = output_path.join("PRD.md");
-    let todo_path = output_path.join("TODO.md");
 
     assert!(prd_path.exists(), "PRD.md should exist");
-    assert!(todo_path.exists(), "TODO.md should exist");
+    assert!(
+        !output_path.join("TODO.md").exists(),
+        "TODO.md should not exist as a separate file"
+    );
 
     let prd_content = std::fs::read_to_string(&prd_path).expect("read PRD");
-    let todo_content = std::fs::read_to_string(&todo_path).expect("read TODO");
 
     assert!(
         prd_content.contains("User authentication"),
@@ -103,12 +104,12 @@ async fn planning_workflow_produces_prd_and_todo_in_output_directory() {
         "PRD should contain acceptance criteria"
     );
     assert!(
-        todo_content.contains("Create auth module"),
-        "TODO should contain tasks"
+        prd_content.contains("Create auth module"),
+        "PRD should contain TODO tasks"
     );
     assert!(
-        todo_content.contains("Implement login"),
-        "TODO should contain implementation tasks"
+        prd_content.contains("Implement login"),
+        "PRD should contain TODO implementation tasks"
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -183,7 +184,6 @@ async fn planning_workflow_with_stub_backend_transitions_to_planned() {
     .expect("second call with answers should succeed");
 
     assert!(plan_dir.join("PRD.md").exists(), "PRD.md should exist");
-    assert!(plan_dir.join("TODO.md").exists(), "TODO.md should exist");
 
     let changeset = read_changeset(&plan_dir).expect("changeset should exist");
     assert_eq!(
@@ -393,7 +393,6 @@ async fn planning_workflow_stub_backend_clarification_roundtrip() {
 
     assert!(output_path.is_dir());
     assert!(output_path.join("PRD.md").exists());
-    assert!(output_path.join("TODO.md").exists());
 
     let _ = std::fs::remove_dir_all(&output_dir);
     let _ = std::fs::remove_dir_all(&storage_dir);

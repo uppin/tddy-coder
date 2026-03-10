@@ -57,9 +57,9 @@ fn enhanced_test_instructions_include_sequential_and_logging() {
     assert_eq!(red_out.tests.len(), 1);
 }
 
-/// Generated markdown files contain relative links to peer documents.
+/// PRD.md includes TODO content as last section; no separate TODO.md is created.
 #[test]
-fn markdown_cross_references_added() {
+fn prd_contains_todo_as_last_section() {
     use tddy_core::output::{write_artifacts, PlanningOutput};
 
     let plan_dir = std::env::temp_dir().join("tddy-crossref-test");
@@ -68,7 +68,7 @@ fn markdown_cross_references_added() {
 
     let planning = PlanningOutput {
         prd: "# PRD\n## Summary\nFeature.".to_string(),
-        todo: "- [ ] Task 1".to_string(),
+        todo: "## TODO\n\n- [ ] Task 1".to_string(),
         name: None,
         discovery: None,
         demo_plan: None,
@@ -77,8 +77,16 @@ fn markdown_cross_references_added() {
 
     let prd_content = std::fs::read_to_string(plan_dir.join("PRD.md")).expect("read PRD");
     assert!(
-        prd_content.contains("TODO.md") || prd_content.contains("Related Documents") || prd_content.contains("./"),
-        "PRD.md should have cross-references to peer documents (TODO.md or Related Documents section)"
+        prd_content.contains("Feature."),
+        "PRD.md should contain PRD content"
+    );
+    assert!(
+        prd_content.contains("Task 1"),
+        "PRD.md should contain TODO content as last section"
+    );
+    assert!(
+        !plan_dir.join("TODO.md").exists(),
+        "TODO.md should not exist as a separate file"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);

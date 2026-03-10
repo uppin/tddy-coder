@@ -270,7 +270,6 @@ fn relocate_plan_dir(
 /// Known artifact filenames to include in the context header.
 const KNOWN_ARTIFACTS: &[&str] = &[
     "PRD.md",
-    "TODO.md",
     "acceptance-tests.md",
     "progress.md",
     "evaluation-report.md",
@@ -529,7 +528,7 @@ mod context_header_tests {
     fn test_context_header_lists_existing_md_files() {
         let dir = temp_dir("lists-existing");
         fs::write(dir.join("PRD.md"), "# PRD").unwrap();
-        fs::write(dir.join("TODO.md"), "- [ ] Task").unwrap();
+        fs::write(dir.join("acceptance-tests.md"), "# Tests").unwrap();
 
         let header = build_context_header(Some(&dir));
 
@@ -539,7 +538,10 @@ mod context_header_tests {
             &header[..header.len().min(200)]
         );
         assert!(header.contains("PRD.md:"), "header must list PRD.md");
-        assert!(header.contains("TODO.md:"), "header must list TODO.md");
+        assert!(
+            header.contains("acceptance-tests.md:"),
+            "header must list acceptance-tests.md"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -550,15 +552,11 @@ mod context_header_tests {
     fn test_context_header_omits_missing_files() {
         let dir = temp_dir("omits-missing");
         fs::write(dir.join("PRD.md"), "# PRD").unwrap();
-        // TODO.md and acceptance-tests.md are NOT created
+        // acceptance-tests.md is NOT created
 
         let header = build_context_header(Some(&dir));
 
         assert!(header.contains("PRD.md:"), "should list PRD.md");
-        assert!(
-            !header.contains("TODO.md:"),
-            "must not list missing TODO.md"
-        );
         assert!(
             !header.contains("acceptance-tests.md:"),
             "must not list missing acceptance-tests.md"

@@ -7,7 +7,7 @@
 | Package | Type | Description |
 |---------|------|--------------|
 | `packages/tddy-core` | Library | CodingBackend trait, Workflow state machine, output parser, Claude/Mock backends |
-| `packages/tddy-coder` | Binary | CLI: `--goal plan`, reads stdin, produces PRD.md + TODO.md |
+| `packages/tddy-coder` | Binary | CLI: `--goal plan`, reads stdin, produces PRD.md (with TODO as last section) |
 
 ## Toolchain
 

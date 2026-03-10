@@ -47,10 +47,6 @@ fn run_plan_via_flow_runner_produces_plan_directory() {
         plan_dir.join("PRD.md").exists(),
         "PRD.md should exist in plan_dir"
     );
-    assert!(
-        plan_dir.join("TODO.md").exists(),
-        "TODO.md should exist in plan_dir"
-    );
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }

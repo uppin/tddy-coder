@@ -160,7 +160,7 @@ async fn acceptance_tests_prompt_header_omits_missing_artifacts() {
 
     assert!(
         !prompt.contains("TODO.md:"),
-        "header must NOT list TODO.md when it does not exist"
+        "header must NOT list TODO.md (not a known artifact)"
     );
     assert!(
         !prompt.contains("acceptance-tests.md:"),
