@@ -11,7 +11,7 @@ use crate::presenter::presenter_events::PresenterEvent;
 use crate::presenter::state::{ActivityEntry, ActivityKind, AppMode, PresenterState};
 use crate::presenter::view::PresenterView;
 use crate::presenter::workflow_runner;
-use crate::presenter::WorkflowEvent;
+use crate::presenter::{WorkflowCompletePayload, WorkflowEvent};
 
 /// Instruction prefix for dequeued inbox prompts.
 const QUEUED_INSTRUCTION_PREFIX: &str =
@@ -26,9 +26,10 @@ pub struct Presenter<V: PresenterView> {
     workflow_backend: Option<SharedBackend>,
     workflow_output_dir: Option<PathBuf>,
     workflow_conversation_output: Option<PathBuf>,
+    workflow_debug_output: Option<PathBuf>,
     workflow_debug: bool,
     /// Stored when WorkflowComplete is received; used to print result on TUI exit.
-    workflow_result: Option<Result<String, String>>,
+    workflow_result: Option<Result<WorkflowCompletePayload, String>>,
     pending_questions: Vec<ClarificationQuestion>,
     current_question_index: usize,
     collected_answers: Vec<String>,
@@ -62,6 +63,7 @@ impl<V: PresenterView> Presenter<V> {
             workflow_backend: None,
             workflow_output_dir: None,
             workflow_conversation_output: None,
+            workflow_debug_output: None,
             workflow_debug: false,
             workflow_result: None,
             pending_questions: Vec::new(),
@@ -383,7 +385,9 @@ impl<V: PresenterView> Presenter<V> {
                                 output_dir,
                                 Some(prefixed),
                                 self.workflow_conversation_output.clone(),
+                                self.workflow_debug_output.clone(),
                                 self.workflow_debug,
+                                None,
                             );
                         }
                     } else {
@@ -420,34 +424,43 @@ impl<V: PresenterView> Presenter<V> {
     }
 
     /// Start the workflow with the given backend.
+    #[allow(clippy::too_many_arguments)]
     pub fn start_workflow(
         &mut self,
         backend: SharedBackend,
         output_dir: PathBuf,
         initial_prompt: Option<String>,
         conversation_output_path: Option<PathBuf>,
+        debug_output_path: Option<PathBuf>,
         debug: bool,
+        session_id: Option<String>,
     ) {
         self.workflow_backend = Some(backend.clone());
         self.workflow_output_dir = Some(output_dir.clone());
         self.workflow_conversation_output = conversation_output_path.clone();
+        self.workflow_debug_output = debug_output_path.clone();
         self.workflow_debug = debug;
         self.spawn_workflow(
             backend,
             output_dir,
             initial_prompt,
             conversation_output_path,
+            debug_output_path,
             debug,
+            session_id,
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn spawn_workflow(
         &mut self,
         backend: SharedBackend,
         output_dir: PathBuf,
         initial_prompt: Option<String>,
         conversation_output_path: Option<PathBuf>,
+        debug_output_path: Option<PathBuf>,
         debug: bool,
+        session_id: Option<String>,
     ) {
         let (event_tx, event_rx) = mpsc::channel();
         let (answer_tx, answer_rx) = mpsc::channel();
@@ -459,9 +472,11 @@ impl<V: PresenterView> Presenter<V> {
                 answer_rx,
                 output_dir,
                 None,
+                session_id,
                 None,
                 initial_prompt,
                 conversation_output_path,
+                debug_output_path,
                 debug,
             );
         });
@@ -492,7 +507,7 @@ impl<V: PresenterView> Presenter<V> {
     }
 
     /// Take the workflow result (if any) for printing on TUI exit.
-    pub fn take_workflow_result(&mut self) -> Option<Result<String, String>> {
+    pub fn take_workflow_result(&mut self) -> Option<Result<WorkflowCompletePayload, String>> {
         self.workflow_result.take()
     }
 }

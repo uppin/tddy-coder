@@ -1,6 +1,15 @@
 //! Events sent from the workflow thread to the Presenter.
 
+use std::path::PathBuf;
+
 use crate::{ClarificationQuestion, ProgressEvent};
+
+/// Payload when workflow completes successfully.
+#[derive(Debug, Clone)]
+pub struct WorkflowCompletePayload {
+    pub summary: String,
+    pub plan_dir: Option<PathBuf>,
+}
 
 /// Events the workflow thread sends to the Presenter.
 #[derive(Debug)]
@@ -19,6 +28,6 @@ pub enum WorkflowEvent {
     PlanApprovalNeeded {
         prd_content: String,
     },
-    WorkflowComplete(Result<String, String>),
+    WorkflowComplete(Result<WorkflowCompletePayload, String>),
     AgentOutput(String),
 }

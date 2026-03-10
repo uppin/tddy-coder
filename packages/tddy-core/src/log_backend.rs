@@ -57,6 +57,45 @@ impl Log for TddyLogger {
     fn flush(&self) {}
 }
 
+/// Resolve conversation_output and debug_output defaults to plan_dir/logs/ when not set.
+/// Returns the resolved conversation output path. Call when plan_dir becomes known.
+pub fn resolve_log_defaults(
+    conversation_output_path: Option<std::path::PathBuf>,
+    debug_output_path: Option<impl AsRef<Path>>,
+    plan_dir: &Path,
+) -> Option<std::path::PathBuf> {
+    let logs = plan_dir.join("logs");
+    if debug_output_path.is_none() {
+        let _ = std::fs::create_dir_all(&logs);
+        redirect_debug_output(&logs.join("debug.log"));
+    }
+    if conversation_output_path.is_none() {
+        let _ = std::fs::create_dir_all(&logs);
+        Some(logs.join("conversation.jsonl"))
+    } else {
+        conversation_output_path
+    }
+}
+
+/// Redirect debug output to a file without changing the log level.
+/// Use when plan_dir becomes known after init_tddy_logger; early logs go to stderr/buffer,
+/// subsequent logs go to the file.
+pub fn redirect_debug_output(path: &Path) {
+    match OpenOptions::new().create(true).append(true).open(path) {
+        Ok(f) => {
+            if let Ok(mut guard) = DEBUG_OUTPUT_FILE.lock() {
+                *guard = Some(f);
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "[tddy-core] warning: could not open debug output file {:?}: {}",
+                path, e
+            );
+        }
+    }
+}
+
 /// Initialize the tddy logger. Call once at startup.
 /// When `debug` is true (--debug flag), uses Debug level. Otherwise respects RUST_LOG or defaults to Info.
 /// When `debug_output_path` is Some, enables Debug level and redirects logs to that file.

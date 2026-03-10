@@ -247,7 +247,11 @@ async fn workflow_engine_run_goal_plan_completes() {
         "SKIP_QUESTIONS feature",
     ));
     assert!(plan_dir.join("PRD.md").exists());
-    assert!(plan_dir.join("TODO.md").exists());
+    let prd = std::fs::read_to_string(plan_dir.join("PRD.md")).unwrap();
+    assert!(
+        prd.contains("- [ ]") || prd.contains("## TODO"),
+        "PRD.md should contain TODO content (merged as last section)"
+    );
 
     let _ = std::fs::remove_dir_all(&storage_dir);
 }

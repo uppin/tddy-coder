@@ -5,7 +5,10 @@
 
 use crate::backend::{CodingBackend, Goal, InvokeRequest};
 use crate::error::{BackendError, ParseError, WorkflowError};
-use crate::output::{create_session_dir_in, parse_planning_response, slugify_directory_name};
+use crate::output::{
+    create_session_dir_in, create_session_dir_with_id, parse_planning_response,
+    slugify_directory_name,
+};
 use crate::workflow::context::Context;
 use crate::workflow::planning;
 use crate::workflow::task::{NextAction, Task, TaskResult};
@@ -13,7 +16,7 @@ use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Plan step Task: invokes backend, parses response, writes PRD.md and TODO.md.
+/// Plan step Task: invokes backend, parses response, writes PRD.md (with TODO section).
 pub struct PlanTask {
     backend: Arc<dyn CodingBackend>,
 }
@@ -48,9 +51,15 @@ impl Task for PlanTask {
             return Err("empty feature description".into());
         }
 
-        // plan_dir: from context, or session_base/sessions/{uuid}, or output_dir/slug
+        // plan_dir: from context, or session_base/sessions/{session_id}, or output_dir/slug
         let plan_dir: PathBuf = if let Some(p) = context.get_sync::<PathBuf>("plan_dir") {
             p
+        } else if let (Some(base), Some(sid)) = (
+            context.get_sync::<PathBuf>("session_base"),
+            context.get_sync::<String>("session_id"),
+        ) {
+            create_session_dir_with_id(&base, &sid)
+                .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?
         } else if let Some(base) = context.get_sync::<PathBuf>("session_base") {
             create_session_dir_in(&base).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?
         } else {

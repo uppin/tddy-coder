@@ -8,6 +8,7 @@ mod state;
 mod view;
 mod workflow_runner;
 
+pub use events::WorkflowCompletePayload;
 pub(crate) use events::WorkflowEvent;
 
 pub use intent::UserIntent;

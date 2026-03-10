@@ -1,7 +1,7 @@
 //! TDD workflow graph builder.
 //!
 //! Constructs the graph of step Tasks with edges and conditional edges.
-//! Uses PlanTask for plan (writes PRD.md, TODO.md); BackendInvokeTask for
+//! Uses PlanTask for plan (writes PRD.md with TODO section); BackendInvokeTask for
 //! acceptance-tests, red, green, demo, evaluate, validate, refactor.
 
 use crate::backend::{CodingBackend, Goal};
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 /// Build the TDD workflow graph (plan -> acceptance-tests -> red -> green -> end).
 ///
-/// Uses PlanTask for plan (writes PRD.md, TODO.md); BackendInvokeTask for
+/// Uses PlanTask for plan (writes PRD.md with TODO section); BackendInvokeTask for
 /// acceptance-tests, red, green. For tddy-demo with StubBackend, produces
 /// a working graph with plan artifacts.
 pub fn build_tdd_workflow_graph(backend: Arc<dyn CodingBackend>) -> Graph {

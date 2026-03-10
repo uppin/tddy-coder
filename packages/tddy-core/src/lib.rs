@@ -23,7 +23,10 @@ pub use changeset::{
     ClarificationQuestionForQa, DiscoveryData, QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use error::{BackendError, ParseError, WorkflowError};
-pub use log_backend::{get_buffered_logs, init_tddy_logger, take_buffered_logs};
+pub use log_backend::{
+    get_buffered_logs, init_tddy_logger, redirect_debug_output, resolve_log_defaults,
+    take_buffered_logs,
+};
 pub use output::{
     extract_last_structured_block, parse_acceptance_tests_response, parse_demo_response,
     parse_evaluate_response, parse_green_response, parse_planning_output, parse_red_response,
@@ -41,7 +44,7 @@ pub use permission::{
 };
 pub use presenter::{
     ActivityEntry, ActivityKind, AppMode, Presenter, PresenterEvent, PresenterHandle,
-    PresenterState, PresenterView, UserIntent,
+    PresenterState, PresenterView, UserIntent, WorkflowCompletePayload,
 };
 pub use schema::{
     format_validation_errors, get_schema, schema_file_path, validate_output,

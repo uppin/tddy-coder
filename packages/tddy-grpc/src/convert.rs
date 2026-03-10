@@ -71,7 +71,7 @@ pub fn event_to_server_message(event: PresenterEvent) -> ServerMessage {
         },
         PresenterEvent::WorkflowComplete(result) => {
             let (ok, message) = match &result {
-                Ok(s) => (true, s.clone()),
+                Ok(payload) => (true, payload.summary.clone()),
                 Err(e) => (false, e.clone()),
             };
             ServerMessage {

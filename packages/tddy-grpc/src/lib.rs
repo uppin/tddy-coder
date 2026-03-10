@@ -28,7 +28,11 @@ mod test_util {
         fn on_activity_logged(&mut self, _entry: &ActivityEntry, _activity_log_len: usize) {}
         fn on_goal_started(&mut self, _goal: &str) {}
         fn on_state_changed(&mut self, _from: &str, _to: &str) {}
-        fn on_workflow_complete(&mut self, _result: &Result<String, String>) {}
+        fn on_workflow_complete(
+            &mut self,
+            _result: &Result<tddy_core::WorkflowCompletePayload, String>,
+        ) {
+        }
         fn on_agent_output(&mut self, _text: &str) {}
         fn on_inbox_changed(&mut self, _inbox: &[String]) {}
     }
