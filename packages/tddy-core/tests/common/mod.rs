@@ -12,13 +12,15 @@ pub fn plan_dir_for_input(parent: &std::path::Path, input: &str) -> PathBuf {
 }
 
 /// Build context for plan goal.
-/// conversation_output_path: optional path for raw agent output (used by conversation_output tests).
+/// output_dir is the repo root (parent of plan_dir); agent runs in output_dir to discover Cargo.toml, etc.
+/// plan_dir is output_dir/slug; defaults to output_dir.join(slugify(feature_input)) if not provided.
 pub fn ctx_plan(
     feature_input: &str,
     output_dir: PathBuf,
     answers: Option<&str>,
     conversation_output_path: Option<PathBuf>,
 ) -> HashMap<String, serde_json::Value> {
+    let plan_dir = plan_dir_for_input(&output_dir, feature_input);
     let mut m = HashMap::new();
     m.insert(
         "feature_input".to_string(),
@@ -27,6 +29,10 @@ pub fn ctx_plan(
     m.insert(
         "output_dir".to_string(),
         serde_json::to_value(output_dir).unwrap(),
+    );
+    m.insert(
+        "plan_dir".to_string(),
+        serde_json::to_value(plan_dir).unwrap(),
     );
     if let Some(a) = answers {
         m.insert("answers".to_string(), serde_json::json!(a));
@@ -175,7 +181,7 @@ pub async fn run_plan_with_conversation_output(
     let plan_dir = plan_dir_for_input(output_dir, input);
     std::fs::create_dir_all(&plan_dir)?;
 
-    let context = ctx_plan(input, plan_dir.clone(), answers, conversation_output_path);
+    let context = ctx_plan(input, output_dir.to_path_buf(), answers, conversation_output_path);
     let result = engine.run_goal("plan", context).await?;
 
     match &result.status {

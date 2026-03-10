@@ -57,17 +57,24 @@ impl FlowRunner {
 
         if let Some(ref hooks) = self.hooks {
             hooks.before_task(&session.current_task_id, &ctx)?;
+            crate::workflow::agent_output::set_sinks(
+                hooks.agent_output_sink(),
+                hooks.progress_sink(),
+            );
         }
 
         let result = match task.run(ctx.clone()).await {
             Ok(r) => r,
             Err(e) => {
+                crate::workflow::agent_output::clear_sinks();
                 if let Some(ref hooks) = self.hooks {
                     hooks.on_error(&session.current_task_id, e.as_ref());
                 }
                 return Err(e);
             }
         };
+
+        crate::workflow::agent_output::clear_sinks();
 
         let next_task_id = match &result.next_action {
             NextAction::WaitForInput => {

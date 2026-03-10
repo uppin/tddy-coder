@@ -55,6 +55,7 @@ exit 0
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
@@ -146,6 +147,7 @@ exit 0
             debug: false,
             agent_output: false,
             agent_output_sink: None,
+        progress_sink: None,
             conversation_output_path: None,
             inherit_stdin: false,
             extra_allowed_tools: None,
@@ -203,6 +205,7 @@ exit 0
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
@@ -286,6 +289,7 @@ exit 0
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
@@ -349,6 +353,7 @@ exit 0
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
@@ -412,6 +417,7 @@ exit 0
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
@@ -482,7 +488,7 @@ exit 0
 
     let plan_dir = plan_dir_for_input(&tmp, "Feature X");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
-    let ctx = ctx_plan("Feature X", plan_dir, None, None);
+    let ctx = ctx_plan("Feature X", tmp.clone(), None, None);
     let result = engine.run_goal("plan", ctx).await.expect("run_goal");
 
     match &result.status {

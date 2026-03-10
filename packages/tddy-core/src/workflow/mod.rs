@@ -1,6 +1,7 @@
 //! Workflow state machine for tddy-coder.
 
 mod acceptance_tests;
+mod agent_output;
 pub mod context;
 pub mod engine;
 mod evaluate;

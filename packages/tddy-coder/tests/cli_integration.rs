@@ -705,97 +705,111 @@ fn cli_errors_when_plan_dir_missing_for_green_goal() {
 
 // ── Full workflow: validate + refactor after evaluate ────────────────────────
 
-/// Create a fake claude script that handles all 7 workflow goals (no demo).
-/// Determines the goal from the prompt content (`-p` argument) and returns
-/// the matching structured response.
-/// On the validate call, writes refactoring-plan.md to the working directory.
-fn create_fake_claude_full_workflow(dir: &Path) -> std::io::Result<()> {
-    let script = r###"#!/bin/sh
-PROMPT=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -p) PROMPT="$2"; shift 2 ;;
-    *) shift ;;
-  esac
-done
-
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
-
-case "$PROMPT" in
-  *"Create a PRD"*)
-    printf '%s\n' '{"type":"result","subtype":"success","result":"---PRD_START---\n# Feature PRD\n## Summary\nAuth system.\n---PRD_END---\n---TODO_START---\n- [ ] Task 1\n---TODO_END---","session_id":"s","is_error":false}'
-    ;;
-  *"Create acceptance tests based on"*)
-    printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">\n{\"goal\":\"acceptance-tests\",\"summary\":\"Tests ready.\",\"test_command\":\"cargo test\",\"tests\":[{\"name\":\"t1\",\"file\":\"test.rs\",\"line\":1,\"status\":\"pass\",\"kind\":\"unit\"}]}\n</structured-response>","session_id":"s","is_error":false}'
-    ;;
-  *"Create skeleton code and failing"*)
-    printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">\n{\"goal\":\"red\",\"summary\":\"Failing tests written.\",\"tests\":[{\"name\":\"t1\",\"file\":\"test.rs\",\"line\":1,\"status\":\"fail\",\"kind\":\"unit\"}],\"skeletons\":[],\"markers\":[],\"marker_results\":[]}\n</structured-response>","session_id":"s","is_error":false}'
-    ;;
-  *"make all failing tests pass"*)
-    printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">\n{\"goal\":\"green\",\"summary\":\"All tests passing.\",\"tests\":[{\"name\":\"t1\",\"file\":\"test.rs\",\"line\":1,\"status\":\"passing\"}]}\n</structured-response>","session_id":"s","is_error":false}'
-    ;;
-  *"Analyze the current git changes"*)
-    printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">\n{\"goal\":\"evaluate-changes\",\"summary\":\"Changes look good.\",\"risk_level\":\"low\"}\n</structured-response>","session_id":"s","is_error":false}'
-    ;;
-  *"Orchestrate a full refactor validation"*)
-    printf '# Refactoring Plan\n## Tasks\n1. Extract shared helper\n' > "$PWD/refactoring-plan.md"
-    printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">\n{\"goal\":\"validate\",\"summary\":\"All subagents done.\",\"tests_report_written\":true,\"prod_ready_report_written\":true,\"clean_code_report_written\":true,\"refactoring_plan_written\":true}\n</structured-response>","session_id":"s","is_error":false}'
-    ;;
-  *"Execute the refactoring tasks"*)
-    printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">\n{\"goal\":\"refactor\",\"summary\":\"Refactoring complete.\",\"tasks_completed\":3,\"tests_passing\":true}\n</structured-response>","session_id":"s","is_error":false}'
-    ;;
-  *)
-    printf '%s\n' '{"type":"result","subtype":"success","result":"---PRD_START---\n# Fallback PRD\n## Summary\nFallback.\n---PRD_END---\n---TODO_START---\n- [ ] Fallback\n---TODO_END---","session_id":"s","is_error":false}'
-    ;;
-esac
-"###;
-    write_executable_script(dir, "claude", script)
-}
-
 /// Full workflow (no --goal) must call validate and refactor after evaluate.
-/// Currently the workflow stops after evaluate — this test verifies all 7 goals run.
-#[test]
-#[cfg(unix)]
-fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
-    let tmp = std::env::temp_dir().join("tddy-cli-full-wf-validate-refactor");
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).expect("create tmp");
+/// Uses WorkflowEngine + MockBackend to verify the chain without subprocess/sandbox issues.
+#[tokio::test]
+async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tddy_core::changeset::read_changeset;
+    use tddy_core::output::slugify_directory_name;
+    use tddy_core::workflow::graph::ExecutionStatus;
+    use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
+    use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
-    create_fake_claude_full_workflow(&tmp).expect("create fake claude");
+    let output_dir = std::env::temp_dir().join("tddy-cli-full-wf-validate-refactor");
+    let _ = std::fs::remove_dir_all(&output_dir);
+    std::fs::create_dir_all(&output_dir).expect("create output dir");
 
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
+    let plan_dir = output_dir.join(slugify_directory_name("Build auth system"));
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    std::fs::write(plan_dir.join("PRD.md"), "# Feature PRD\n## Summary\nAuth system.")
+        .expect("write PRD");
+    std::fs::write(plan_dir.join("TODO.md"), "- [ ] Task 1").expect("write TODO");
+    let changeset = r#"version: 1
+models: {}
+sessions:
+  - id: "sess-plan-1"
+    agent: claude
+    tag: plan
+    created_at: "2026-03-07T10:00:00Z"
+state:
+  current: Planned
+  updated_at: "2026-03-07T10:00:00Z"
+  history: []
+artifacts: {}
+"#;
+    std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
 
-    let mut cmd = tddy_coder_bin();
-    cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
-        .args([
-            "--output-dir",
-            tmp.to_str().unwrap(),
-            "--prompt",
-            "Build auth system",
-        ]);
+    const ACCEPTANCE_TESTS: &str = r#"<structured-response content-type="application-json">
+{"goal":"acceptance-tests","summary":"Tests ready.","test_command":"cargo test","tests":[{"name":"t1","file":"test.rs","line":1,"status":"pass","kind":"unit"}]}
+</structured-response>"#;
+    const RED: &str = r#"<structured-response content-type="application-json">
+{"goal":"red","summary":"Failing tests written.","tests":[{"name":"t1","file":"test.rs","line":1,"status":"fail","kind":"unit"}],"skeletons":[],"markers":[],"marker_results":[]}
+</structured-response>"#;
+    const GREEN: &str = r#"<structured-response content-type="application-json">
+{"goal":"green","summary":"All tests passing.","tests":[{"name":"t1","file":"test.rs","line":1,"status":"passing"}]}
+</structured-response>"#;
+    const EVALUATE: &str = r#"<structured-response content-type="application-json">
+{"goal":"evaluate-changes","summary":"Changes look good.","risk_level":"low"}
+</structured-response>"#;
+    const VALIDATE: &str = r#"<structured-response content-type="application-json">
+{"goal":"validate","summary":"All subagents done.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
+</structured-response>"#;
+    const REFACTOR: &str = r#"<structured-response content-type="application-json">
+{"goal":"refactor","summary":"Refactoring complete.","tasks_completed":3,"tests_passing":true}
+</structured-response>"#;
 
-    let output = cmd.output().expect("run tddy-coder");
+    let backend = Arc::new(MockBackend::new());
+    backend.push_ok(ACCEPTANCE_TESTS);
+    backend.push_ok(RED);
+    backend.push_ok(GREEN);
+    backend.push_ok(EVALUATE);
+    backend.push_ok(VALIDATE);
+    backend.push_ok(REFACTOR);
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "full workflow should succeed.\nstdout: {}\nstderr: {}",
-        stdout,
-        stderr
+    let storage_dir = std::env::temp_dir().join("tddy-cli-full-wf-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
     );
 
+    let mut ctx = HashMap::new();
+    ctx.insert("feature_input".to_string(), serde_json::json!("Build auth system"));
+    ctx.insert("plan_dir".to_string(), serde_json::to_value(plan_dir.clone()).unwrap());
+    ctx.insert("output_dir".to_string(), serde_json::to_value(output_dir.clone()).unwrap());
+    ctx.insert("run_demo".to_string(), serde_json::json!(false));
+
+    let result = engine
+        .run_workflow_from("acceptance-tests", ctx)
+        .await
+        .expect("run workflow");
+
     assert!(
-        stdout.contains("Refactoring complete") || stdout.contains("tasks_completed"),
-        "stdout should contain refactor output (validate+refactor ran after evaluate).\nstdout: {}",
-        stdout
+        !matches!(result.status, ExecutionStatus::Error(_)),
+        "workflow should not error: {:?}",
+        result.status
+    );
+    assert!(
+        matches!(result.status, ExecutionStatus::Completed),
+        "workflow should complete: {:?}",
+        result.status
     );
 
-    let _ = std::fs::remove_dir_all(&tmp);
+    assert_eq!(
+        backend.invocations().len(),
+        6,
+        "should run acceptance-tests, red, green, evaluate, validate, refactor"
+    );
+
+    let changeset = read_changeset(&plan_dir).expect("changeset");
+    assert_eq!(
+        changeset.state.current,
+        "RefactorComplete",
+        "state should be RefactorComplete after full workflow"
+    );
+
+    let _ = std::fs::remove_dir_all(&output_dir);
 }

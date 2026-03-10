@@ -11,10 +11,13 @@ path = "src/lib.rs"
 [dependencies]
 tddy-core = { path = "../tddy-core" }
 tddy-grpc = { path = "../tddy-grpc" }
+tddy-tui = { path = "../tddy-tui" }
+ratatui = "0.29"
 tonic = "0.12"
 prost = "0.13"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 async-stream = "0.3"
 termwright = "0.2"
+uuid = { version = "1", features = ["v4"] }
 anyhow = "1"

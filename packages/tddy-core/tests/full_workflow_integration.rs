@@ -100,7 +100,7 @@ async fn full_workflow_chains_all_steps() {
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let ctx = ctx_plan("Build auth", plan_dir.clone(), None, None);
+    let ctx = ctx_plan("Build auth", output_dir.clone(), None, None);
     let result = engine.run_workflow_from("plan", ctx).await.unwrap();
     assert!(!matches!(result.status, ExecutionStatus::Error(_)));
     assert!(matches!(result.status, ExecutionStatus::Completed));
@@ -469,7 +469,7 @@ async fn plain_full_workflow_uses_single_workflow_instance() {
     )
     .expect("write demo-plan.md");
 
-    let mut ctx = ctx_plan("Build auth", plan_dir.clone(), None, None);
+    let mut ctx = ctx_plan("Build auth", output_dir.clone(), None, None);
     ctx.insert("run_demo".to_string(), serde_json::json!(true));
     let result = engine.run_workflow_from("plan", ctx).await.unwrap();
     assert!(!matches!(result.status, ExecutionStatus::Error(_)));

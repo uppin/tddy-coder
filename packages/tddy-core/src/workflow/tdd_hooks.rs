@@ -4,18 +4,20 @@
 //! in after_task, reads artifacts into context in before_task.
 
 use crate::changeset::{
-    append_session_and_update_state, get_session_for_tag, read_changeset, resolve_model,
-    update_state, write_changeset, Changeset,
+    append_session_and_update_state, get_session_for_tag, next_goal_for_state, read_changeset,
+    resolve_model, update_state, write_changeset, Changeset,
 };
 use crate::error::WorkflowError;
 use crate::output::{
     parse_acceptance_tests_response, parse_evaluate_response, parse_green_response,
     parse_planning_response, parse_red_response, parse_refactor_response,
-    parse_validate_subagents_response, update_acceptance_tests_file, update_progress_file,
-    write_acceptance_tests_file, write_artifacts, write_demo_results_file, write_evaluation_report,
-    write_progress_file, write_red_output_file, PlanningOutput,
+    parse_validate_subagents_response, slugify_directory_name, update_acceptance_tests_file,
+    update_progress_file, write_acceptance_tests_file, write_artifacts, write_demo_results_file,
+    write_evaluation_report, write_progress_file, write_red_output_file, PlanningOutput,
 };
+use crate::backend::{AgentOutputSink, ProgressSink};
 use crate::presenter::WorkflowEvent;
+use crate::stream::ProgressEvent as StreamProgressEvent;
 use crate::schema::write_schema_to_dir;
 use crate::workflow::context::Context;
 use crate::workflow::hooks::RunnerHooks;
@@ -53,6 +55,24 @@ impl Default for TddWorkflowHooks {
 }
 
 impl RunnerHooks for TddWorkflowHooks {
+    fn agent_output_sink(&self) -> Option<AgentOutputSink> {
+        self.event_tx.as_ref().map(|tx| {
+            let tx = tx.clone();
+            AgentOutputSink::new(move |s: &str| {
+                let _ = tx.send(WorkflowEvent::AgentOutput(s.to_string()));
+            })
+        })
+    }
+
+    fn progress_sink(&self) -> Option<ProgressSink> {
+        self.event_tx.as_ref().map(|tx| {
+            let tx = tx.clone();
+            ProgressSink::new(move |ev: &StreamProgressEvent| {
+                let _ = tx.send(WorkflowEvent::Progress(ev.clone()));
+            })
+        })
+    }
+
     fn before_task(
         &self,
         task_id: &str,
@@ -206,6 +226,33 @@ impl RunnerHooks for TddWorkflowHooks {
             }
             _ => {}
         }
+        // Emit transitional state (e.g. RedTesting, GreenImplementing) when starting a goal.
+        // Skip when resuming from clarification (answers in context) to avoid duplicate emissions.
+        let is_resuming = context.get_sync::<String>("answers").is_some();
+        if !is_resuming {
+            if let Some(ref tx) = self.event_tx {
+                let from = read_changeset(&plan_dir)
+                    .map(|c| c.state.current)
+                    .unwrap_or_else(|_| "Init".to_string());
+                let to_transitional = match task_id {
+                    "plan" => Some("Planning"),
+                    "acceptance-tests" => Some("AcceptanceTesting"),
+                    "red" => Some("RedTesting"),
+                    "green" => Some("GreenImplementing"),
+                    "demo" => Some("DemoRunning"),
+                    "evaluate" => Some("Evaluating"),
+                    "validate" => Some("Validating"),
+                    "refactor" => Some("Refactoring"),
+                    _ => None,
+                };
+                if let Some(to) = to_transitional {
+                    let _ = tx.send(WorkflowEvent::StateChange {
+                        from: from.clone(),
+                        to: to.to_string(),
+                    });
+                }
+            }
+        }
         Ok(())
     }
 
@@ -219,32 +266,41 @@ impl RunnerHooks for TddWorkflowHooks {
             .get_sync("plan_dir")
             .or_else(|| context.get_sync("output_dir"));
         if let (Some(ref tx), Some(ref dir)) = (&self.event_tx, plan_dir) {
-            let from = read_changeset(dir)
+            let current = read_changeset(dir)
                 .map(|c| c.state.current)
                 .unwrap_or_else(|_| "Init".to_string());
-            let to = match task_id {
-                "plan" => "Planned",
-                "acceptance-tests" => "AcceptanceTestsReady",
-                "red" => "RedTestsReady",
-                "green" => "GreenComplete",
-                "demo" => "DemoComplete",
-                "evaluate" => "Evaluated",
-                "validate" => "ValidateComplete",
-                "refactor" => "RefactorComplete",
-                _ => from.as_str(),
+            let (from, to) = match task_id {
+                "plan" => ("Planning", "Planned"),
+                "acceptance-tests" => ("AcceptanceTesting", "AcceptanceTestsReady"),
+                "red" => ("RedTesting", "RedTestsReady"),
+                "green" => ("GreenImplementing", "GreenComplete"),
+                "demo" => ("DemoRunning", "DemoComplete"),
+                "evaluate" => ("Evaluating", "Evaluated"),
+                "validate" => ("Validating", "ValidateComplete"),
+                "refactor" => ("Refactoring", "RefactorComplete"),
+                _ => (current.as_str(), current.as_str()),
             };
-            if to != from.as_str() {
+            if to != from {
                 let _ = tx.send(WorkflowEvent::StateChange {
-                    from: from.clone(),
+                    from: from.to_string(),
                     to: to.to_string(),
                 });
+                // Advance goal display so UI shows next phase (e.g. "Goal: red" when state is AcceptanceTestsReady)
+                if let Some(next_goal) = next_goal_for_state(to) {
+                    let _ = tx.send(WorkflowEvent::GoalStarted(next_goal.to_string()));
+                }
             }
         }
+        // Clear answers so the next task does not think we're resuming from clarification.
+        context.remove_sync("answers");
         match task_id {
             "plan" => {
-                let plan_dir: PathBuf = context
+                let output_dir: PathBuf = context
                     .get_sync("output_dir")
                     .ok_or("plan after_task requires output_dir in context")?;
+                let feature_input: String =
+                    context.get_sync("feature_input").unwrap_or_default();
+                let plan_dir = output_dir.join(slugify_directory_name(&feature_input));
                 let planning: PlanningOutput = context
                     .get_sync("parsed_planning")
                     .or_else(|| {

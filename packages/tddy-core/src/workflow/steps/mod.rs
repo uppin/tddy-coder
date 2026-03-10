@@ -5,7 +5,7 @@
 
 use crate::backend::{CodingBackend, Goal, InvokeRequest};
 use crate::error::{BackendError, ParseError, WorkflowError};
-use crate::output::parse_planning_response;
+use crate::output::{parse_planning_response, slugify_directory_name};
 use crate::workflow::context::Context;
 use crate::workflow::planning;
 use crate::workflow::task::{NextAction, Task, TaskResult};
@@ -48,7 +48,11 @@ impl Task for PlanTask {
             return Err("empty feature description".into());
         }
 
-        std::fs::create_dir_all(&output_dir)
+        // output_dir = repo root (parent of plan_dir). plan_dir = output_dir/slug (where PRD.md etc go).
+        let plan_dir: PathBuf = context
+            .get_sync("plan_dir")
+            .unwrap_or_else(|| output_dir.join(slugify_directory_name(feature_input)));
+        std::fs::create_dir_all(&plan_dir)
             .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
         let answers: Option<String> = context.get_sync("answers");
@@ -60,6 +64,7 @@ impl Task for PlanTask {
 
         let system_prompt = planning::system_prompt();
 
+        // Use output_dir (repo root) as working_dir so agent can discover Cargo.toml, packages/, etc.
         let request = InvokeRequest {
             prompt,
             system_prompt: Some(system_prompt),
@@ -71,7 +76,8 @@ impl Task for PlanTask {
             working_dir: Some(output_dir.clone()),
             debug: context.get_sync::<bool>("debug").unwrap_or(false),
             agent_output: context.get_sync::<bool>("agent_output").unwrap_or(false),
-            agent_output_sink: None, // agent_output_sink from context not supported (not serializable)
+            agent_output_sink: crate::workflow::agent_output::get_agent_sink(),
+            progress_sink: crate::workflow::agent_output::get_progress_sink(),
             conversation_output_path: context.get_sync("conversation_output_path"),
             inherit_stdin: context.get_sync::<bool>("inherit_stdin").unwrap_or(false),
             extra_allowed_tools: context.get_sync("allowed_tools"),
@@ -100,13 +106,13 @@ impl Task for PlanTask {
         })?;
 
         context.set_sync("parsed_planning", planning);
-        context.set_sync("plan_dir", output_dir.clone());
+        context.set_sync("plan_dir", plan_dir.clone());
         if let Some(sid) = &response.session_id {
             context.set_sync("session_id", sid.clone());
         }
 
         Ok(TaskResult {
-            response: format!("Plan complete for {}", output_dir.display()),
+            response: format!("Plan complete for {}", plan_dir.display()),
             next_action: NextAction::Continue,
             task_id: "plan".to_string(),
             status_message: Some("Plan complete".to_string()),

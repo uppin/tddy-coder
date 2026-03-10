@@ -640,7 +640,7 @@ async fn changeset_contains_clarification_qa() {
     let input = "Feature Z";
     let plan_dir = plan_dir_for_input(&output_dir, input);
     std::fs::create_dir_all(&plan_dir).unwrap();
-    let ctx = ctx_plan(input, plan_dir.clone(), None, None);
+    let ctx = ctx_plan(input, output_dir.clone(), None, None);
     let result = engine.run_goal("plan", ctx).await.unwrap();
 
     assert!(
@@ -870,7 +870,7 @@ async fn changeset_written_before_plan_agent() {
     let input = "Build auth with early changeset";
     let plan_dir = plan_dir_for_input(&output_dir, input);
     std::fs::create_dir_all(&plan_dir).unwrap();
-    let ctx = ctx_plan(input, plan_dir.clone(), None, None);
+    let ctx = ctx_plan(input, output_dir.clone(), None, None);
     let _ = engine.run_goal("plan", ctx).await;
 
     let captured_state = changeset_state.lock().unwrap().clone();

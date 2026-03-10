@@ -285,6 +285,10 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         c.insert("feature_input".to_string(), serde_json::json!(input));
         c.insert(
             "output_dir".to_string(),
+            serde_json::to_value(args.output_dir.clone()).unwrap(),
+        );
+        c.insert(
+            "plan_dir".to_string(),
             serde_json::to_value(plan_dir.clone()).unwrap(),
         );
     });
@@ -654,7 +658,15 @@ fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
     let hooks = std::sync::Arc::new(tddy_core::workflow::tdd_hooks::TddWorkflowHooks::new());
     let engine = WorkflowEngine::new(backend, storage_dir, Some(hooks));
 
+    let feature_input = cs_pre
+        .as_ref()
+        .and_then(|c| c.initial_prompt.as_deref())
+        .or_else(|| args.prompt.as_deref())
+        .unwrap_or("feature")
+        .trim()
+        .to_string();
     let context_values = build_goal_context(args, Some(&plan_dir), |c| {
+        c.insert("feature_input".to_string(), serde_json::json!(feature_input));
         c.insert("run_demo".to_string(), serde_json::json!(run_demo));
         c.insert(
             "output_dir".to_string(),
@@ -745,6 +757,10 @@ fn run_plan_to_get_dir(args: &Args, backend: SharedBackend) -> anyhow::Result<Pa
         c.insert("feature_input".to_string(), serde_json::json!(input));
         c.insert(
             "output_dir".to_string(),
+            serde_json::to_value(args.output_dir.clone()).unwrap(),
+        );
+        c.insert(
+            "plan_dir".to_string(),
             serde_json::to_value(plan_dir.clone()).unwrap(),
         );
     });
@@ -758,11 +774,15 @@ fn run_plan_to_complete(
     input: &str,
     plan_dir: &PathBuf,
 ) -> anyhow::Result<PathBuf> {
+    let output_dir = plan_dir
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| plan_dir.clone());
     let ctx = build_goal_context(args, Some(plan_dir), |c| {
         c.insert("feature_input".to_string(), serde_json::json!(input));
         c.insert(
             "output_dir".to_string(),
-            serde_json::to_value(plan_dir.clone()).unwrap(),
+            serde_json::to_value(output_dir).unwrap(),
         );
     });
     run_goal_plain(args, backend, "plan", ctx, false)?;

@@ -62,9 +62,6 @@ pub fn run_workflow(
                 )));
                 return;
             }
-            event_tx
-                .send(WorkflowEvent::GoalStarted("plan".to_string()))
-                .ok();
             let plan_dir = output_dir.join(crate::output::slugify_directory_name(&input));
             std::fs::create_dir_all(&plan_dir).ok();
             let storage_dir = std::env::temp_dir().join("tddy-flowrunner-tui-session");
@@ -73,27 +70,33 @@ pub fn run_workflow(
                 crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(event_tx.clone()),
             );
             let engine = WorkflowEngine::new(backend.clone(), storage_dir, Some(hooks));
-            let mut ctx = std::collections::HashMap::new();
-            ctx.insert("feature_input".to_string(), serde_json::json!(input));
-            ctx.insert(
+            let mut context_values = std::collections::HashMap::new();
+            context_values.insert("feature_input".to_string(), serde_json::json!(input));
+            // output_dir = repo root (parent of plan_dir) so agent can discover Cargo.toml, packages/, etc.
+            context_values.insert(
                 "output_dir".to_string(),
+                serde_json::to_value(output_dir.clone()).unwrap(),
+            );
+            context_values.insert(
+                "plan_dir".to_string(),
                 serde_json::to_value(plan_dir.clone()).unwrap(),
             );
-            ctx.insert(
+            context_values.insert(
                 "model".to_string(),
                 serde_json::to_value(model.clone()).unwrap(),
             );
-            ctx.insert("agent_output".to_string(), serde_json::json!(true));
-            ctx.insert(
+            context_values.insert("agent_output".to_string(), serde_json::json!(true));
+            context_values.insert(
                 "inherit_stdin".to_string(),
                 serde_json::json!(inherit_stdin),
             );
-            ctx.insert("debug".to_string(), serde_json::json!(debug));
+            context_values.insert("debug".to_string(), serde_json::json!(debug));
+            context_values.insert("run_demo".to_string(), serde_json::json!(false));
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("tokio runtime");
-            let mut result = match rt.block_on(engine.run_goal("plan", ctx)) {
+            let mut result = match rt.block_on(engine.run_full_workflow(context_values)) {
                 Ok(r) => r,
                 Err(e) => {
                     let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
@@ -167,11 +170,15 @@ pub fn run_workflow(
                 crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(event_tx.clone()),
             );
             let engine = WorkflowEngine::new(backend.clone(), storage_dir, Some(hooks));
+            let output_dir = plan_dir
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| plan_dir.clone());
             let mut ctx = std::collections::HashMap::new();
             ctx.insert("feature_input".to_string(), serde_json::json!(input));
             ctx.insert(
                 "output_dir".to_string(),
-                serde_json::to_value(plan_dir.clone()).unwrap(),
+                serde_json::to_value(output_dir).unwrap(),
             );
             ctx.insert(
                 "plan_dir".to_string(),
@@ -241,17 +248,9 @@ pub fn run_workflow(
         }
     }
 
-    let run_demo = if plan_dir.join("demo-plan.md").exists() {
-        let _ = event_tx.send(WorkflowEvent::ClarificationNeeded {
-            questions: vec![demo_question()],
-        });
-        match answer_rx.recv() {
-            Ok(choice) => !choice.eq_ignore_ascii_case("skip"),
-            Err(_) => false,
-        }
-    } else {
-        false
-    };
+    // Demo question is asked only when we reach GreenComplete (after green), not before.
+    let mut run_demo = false;
+    let mut demo_asked = false;
 
     let cs = read_changeset(&plan_dir).ok();
     let start_goal = cs
@@ -304,7 +303,7 @@ pub fn run_workflow(
 
     loop {
         match &result.status {
-            ExecutionStatus::Completed | ExecutionStatus::Paused { .. } => {
+            ExecutionStatus::Completed => {
                 let session_opt = rt
                     .block_on(engine.get_session(&result.session_id))
                     .ok()
@@ -326,6 +325,44 @@ pub fn run_workflow(
                     .unwrap_or_else(|| format!("Plan dir: {}", plan_dir.display()));
                 let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Ok(summary)));
                 return;
+            }
+            ExecutionStatus::Paused { .. } => {
+                // Ask demo question only when we've reached GreenComplete (not earlier).
+                let current_state = read_changeset(&plan_dir)
+                    .ok()
+                    .map(|c| c.state.current)
+                    .unwrap_or_default();
+                if current_state == "GreenComplete"
+                    && plan_dir.join("demo-plan.md").exists()
+                    && !demo_asked
+                {
+                    let run_demo_asked = event_tx.send(WorkflowEvent::ClarificationNeeded {
+                        questions: vec![demo_question()],
+                    });
+                    if run_demo_asked.is_ok() {
+                        demo_asked = true;
+                        run_demo = match answer_rx.recv() {
+                            Ok(choice) => !choice.eq_ignore_ascii_case("skip"),
+                            Err(_) => false,
+                        };
+                        let mut updates = std::collections::HashMap::new();
+                        updates.insert(
+                            "run_demo".to_string(),
+                            serde_json::json!(run_demo),
+                        );
+                        let _ = rt.block_on(engine.update_session_context(
+                            &result.session_id,
+                            updates,
+                        ));
+                    }
+                }
+                result = match rt.block_on(engine.run_session(&result.session_id)) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
+                        return;
+                    }
+                };
             }
             ExecutionStatus::WaitingForInput { .. } => {
                 let session = match rt.block_on(engine.get_session(&result.session_id)) {

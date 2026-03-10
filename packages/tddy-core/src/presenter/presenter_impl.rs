@@ -224,20 +224,20 @@ impl<V: PresenterView> Presenter<V> {
     }
 
     /// Poll for workflow events. Call from main loop.
+    /// Drains all pending events per call to minimize latency between tasks.
     pub fn poll_workflow(&mut self) {
         let rx = match self.workflow_event_rx.as_ref() {
             Some(r) => r,
             None => return,
         };
 
-        // Process one event per poll so the main loop can react (e.g. queue prompt when Running)
-        // before the next event (e.g. ClarificationNeeded) changes the mode.
-        let ev = match rx.try_recv() {
-            Ok(e) => e,
-            Err(_) => return,
-        };
+        let mut events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
 
-        match ev {
+        for ev in events {
+            match ev {
             WorkflowEvent::Progress(pev) => {
                 let entry = match &pev {
                     crate::ProgressEvent::ToolUse {
@@ -348,6 +348,7 @@ impl<V: PresenterView> Presenter<V> {
                 self.view.on_agent_output(&text);
                 self.broadcast(PresenterEvent::AgentOutput(text.clone()));
             }
+        }
         }
     }
 

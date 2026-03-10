@@ -176,6 +176,7 @@ async fn refactor_rejects_cursor_backend() {
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,

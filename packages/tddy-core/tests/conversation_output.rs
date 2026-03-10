@@ -131,6 +131,7 @@ exit 0
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: Some(output_file.clone()),
         inherit_stdin: false,
         extra_allowed_tools: None,

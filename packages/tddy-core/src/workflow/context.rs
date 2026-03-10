@@ -55,6 +55,11 @@ impl Context {
             self.inner.insert(key.to_string(), v);
         }
     }
+
+    /// Remove a key. Use when clearing task-scoped state (e.g. answers) before the next task.
+    pub fn remove_sync(&self, key: &str) {
+        self.inner.remove(key);
+    }
 }
 
 impl Serialize for Context {
