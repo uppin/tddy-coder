@@ -500,10 +500,14 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
         stdout
     );
 
-    let has_artifacts = fs::read_dir(&tmp).unwrap().filter_map(|e| e.ok()).any(|e| {
-        e.path().is_dir() && e.path().join("PRD.md").exists()
-    });
-    assert!(has_artifacts, "expected PRD.md in output dir (TODO is merged into PRD)");
+    let has_artifacts = fs::read_dir(&tmp)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| e.path().is_dir() && e.path().join("PRD.md").exists());
+    assert!(
+        has_artifacts,
+        "expected PRD.md in output dir (TODO is merged into PRD)"
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

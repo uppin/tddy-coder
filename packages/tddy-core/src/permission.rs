@@ -13,6 +13,7 @@ pub fn plan_allowlist() -> Vec<String> {
         "SemanticSearch".to_string(),
         "AskUserQuestion".to_string(),
         "ExitPlanMode".to_string(),
+        "Bash(tddy-tools *)".to_string(),
     ]
 }
 
@@ -27,6 +28,7 @@ pub fn acceptance_tests_allowlist() -> Vec<String> {
         "Grep".to_string(),
         "Bash(cargo *)".to_string(),
         "SemanticSearch".to_string(),
+        "Bash(tddy-tools *)".to_string(),
     ]
 }
 
@@ -59,6 +61,7 @@ pub fn evaluate_allowlist() -> Vec<String> {
         "Bash(cargo build *)".to_string(),
         "Bash(cargo check *)".to_string(),
         "Bash(find *)".to_string(),
+        "Bash(tddy-tools *)".to_string(),
     ]
 }
 
@@ -78,6 +81,7 @@ pub fn validate_subagents_allowlist() -> Vec<String> {
         "Bash(cargo build *)".to_string(),
         "Bash(cargo check *)".to_string(),
         "Bash(cargo test *)".to_string(),
+        "Bash(tddy-tools *)".to_string(),
     ]
 }
 
@@ -93,5 +97,6 @@ pub fn refactor_allowlist() -> Vec<String> {
         "SemanticSearch".to_string(),
         "Bash(cargo *)".to_string(),
         "Bash(git diff *)".to_string(),
+        "Bash(tddy-tools *)".to_string(),
     ]
 }

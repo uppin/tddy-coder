@@ -138,9 +138,28 @@ fn extract_structured_response(s: &str) -> Option<PlanningOutput> {
     None
 }
 
-/// Parse LLM planning response: tries structured-response first, then delimited output.
-/// Returns Malformed if neither format is found.
+/// Parse LLM planning response: tries raw JSON (tddy-tools submit), structured-response, then delimited output.
+/// Returns Malformed if none found.
 pub fn parse_planning_response(s: &str) -> Result<PlanningOutput, ParseError> {
+    let s = s.trim();
+    if s.starts_with('{') {
+        if let Ok(parsed) = serde_json::from_str::<StructuredPlan>(s) {
+            if parsed.goal.as_deref() == Some("plan") {
+                if let (Some(prd), Some(todo)) = (
+                    parsed.prd.filter(|x| !x.is_empty()),
+                    parsed.todo.filter(|x| !x.is_empty()),
+                ) {
+                    return Ok(PlanningOutput {
+                        prd,
+                        todo,
+                        name: parsed.name.filter(|x| !x.is_empty()),
+                        discovery: parsed.discovery,
+                        demo_plan: parsed.demo_plan,
+                    });
+                }
+            }
+        }
+    }
     if let Some(out) = extract_structured_response(s) {
         return Ok(out);
     }
@@ -276,9 +295,43 @@ struct AcceptanceTestInfoDe {
     status: String,
 }
 
-/// Parse LLM acceptance tests response from structured-response block.
-/// Returns Malformed if the expected format is not found.
+/// Parse LLM acceptance tests response: tries raw JSON (tddy-tools submit), then structured-response.
 pub fn parse_acceptance_tests_response(s: &str) -> Result<AcceptanceTestsOutput, ParseError> {
+    let s = s.trim();
+    if s.starts_with('{') {
+        if let Ok(parsed) = serde_json::from_str::<StructuredAcceptanceTests>(s) {
+            if parsed.goal.as_deref() == Some("acceptance-tests") {
+                let summary = parsed
+                    .summary
+                    .filter(|x| !x.is_empty())
+                    .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+                let tests = parsed
+                    .tests
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|t| AcceptanceTestInfo {
+                        name: t.name,
+                        file: t.file,
+                        line: t.line,
+                        status: t.status,
+                    })
+                    .collect();
+                return Ok(AcceptanceTestsOutput {
+                    summary,
+                    tests,
+                    test_command: parsed.test_command.filter(|x| !x.is_empty()),
+                    prerequisite_actions: parsed.prerequisite_actions.filter(|x| !x.is_empty()),
+                    run_single_or_selected_tests: parsed
+                        .run_single_or_selected_tests
+                        .filter(|x| !x.is_empty()),
+                    sequential_command: parsed.sequential_command.filter(|x| !x.is_empty()),
+                    logging_command: parsed.logging_command.filter(|x| !x.is_empty()),
+                    metric_hooks: parsed.metric_hooks.filter(|x| !x.is_empty()),
+                    feedback_options: parsed.feedback_options.filter(|x| !x.is_empty()),
+                });
+            }
+        }
+    }
     let open = s
         .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
@@ -421,8 +474,57 @@ struct ImplementationInfoDe {
     kind: String,
 }
 
-/// Parse LLM green goal response from structured-response block.
+/// Parse LLM green goal response: tries raw JSON (tddy-tools submit), then structured-response.
 pub fn parse_green_response(s: &str) -> Result<GreenOutput, ParseError> {
+    let s = s.trim();
+    if s.starts_with('{') {
+        if let Ok(parsed) = serde_json::from_str::<StructuredGreen>(s) {
+            if parsed.goal.as_deref() == Some("green") {
+                let summary = parsed
+                    .summary
+                    .filter(|x| !x.is_empty())
+                    .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+                let tests = parsed
+                    .tests
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|t| GreenTestResult {
+                        name: t.name,
+                        file: t.file,
+                        line: t.line,
+                        status: t.status,
+                        reason: t.reason,
+                    })
+                    .collect();
+                let implementations = parsed
+                    .implementations
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|i| ImplementationInfo {
+                        name: i.name,
+                        file: i.file,
+                        line: i.line,
+                        kind: i.kind,
+                    })
+                    .collect();
+                let demo_results = parsed.demo_results.map(|d| DemoResults {
+                    summary: d.summary,
+                    steps_completed: d.steps_completed,
+                });
+                return Ok(GreenOutput {
+                    summary,
+                    tests,
+                    implementations,
+                    test_command: parsed.test_command.filter(|x| !x.is_empty()),
+                    prerequisite_actions: parsed.prerequisite_actions.filter(|x| !x.is_empty()),
+                    run_single_or_selected_tests: parsed
+                        .run_single_or_selected_tests
+                        .filter(|x| !x.is_empty()),
+                    demo_results,
+                });
+            }
+        }
+    }
     let open = s
         .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
@@ -695,9 +797,81 @@ struct SkeletonInfoDe {
     kind: String,
 }
 
-/// Parse LLM red goal response from structured-response block.
-/// Uses the last block in the output — earlier blocks may be from tool results (e.g. system prompt).
+/// Parse LLM red goal response: tries raw JSON (tddy-tools submit), then structured-response.
 pub fn parse_red_response(s: &str) -> Result<RedOutput, ParseError> {
+    let s = s.trim();
+    if s.starts_with('{') {
+        if let Ok(parsed) = serde_json::from_str::<StructuredRed>(s) {
+            if parsed.goal.as_deref() == Some("red") {
+                let summary = parsed
+                    .summary
+                    .filter(|x| !x.is_empty())
+                    .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+                let tests = parsed
+                    .tests
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|t| RedTestInfo {
+                        name: t.name,
+                        file: t.file,
+                        line: t.line,
+                        status: t.status,
+                    })
+                    .collect();
+                let skeletons = parsed
+                    .skeletons
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|s| SkeletonInfo {
+                        name: s.name,
+                        file: s.file,
+                        line: s.line,
+                        kind: s.kind,
+                    })
+                    .collect();
+                let markers = parsed
+                    .markers
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|m| MarkerInfo {
+                        marker_id: m.marker_id,
+                        test_name: m.test_name,
+                        scope: m.scope,
+                        data: m.data,
+                    })
+                    .collect();
+                let marker_results = parsed
+                    .marker_results
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|m| MarkerResult {
+                        marker_id: m.marker_id,
+                        test_name: m.test_name,
+                        scope: m.scope,
+                        collected: m.collected,
+                        investigation: m.investigation,
+                    })
+                    .collect();
+                return Ok(RedOutput {
+                    summary,
+                    tests,
+                    skeletons,
+                    markers,
+                    marker_results,
+                    test_command: parsed.test_command.filter(|x| !x.is_empty()),
+                    prerequisite_actions: parsed.prerequisite_actions.filter(|x| !x.is_empty()),
+                    test_output_file: parsed.test_output_file.filter(|x| !x.is_empty()),
+                    run_single_or_selected_tests: parsed
+                        .run_single_or_selected_tests
+                        .filter(|x| !x.is_empty()),
+                    sequential_command: parsed.sequential_command.filter(|x| !x.is_empty()),
+                    logging_command: parsed.logging_command.filter(|x| !x.is_empty()),
+                    metric_hooks: parsed.metric_hooks.filter(|x| !x.is_empty()),
+                    feedback_options: parsed.feedback_options.filter(|x| !x.is_empty()),
+                });
+            }
+        }
+    }
     let open = s
         .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
@@ -1034,10 +1208,101 @@ struct EvaluateAffectedTestDe {
     description: String,
 }
 
-/// Parse LLM evaluate-changes response from structured-response block.
-/// Uses rfind to skip any earlier blocks (e.g. system prompt examples).
-/// Returns Malformed if the expected format is not found or goal != "evaluate-changes".
+/// Parse LLM evaluate-changes response: tries raw JSON (tddy-tools submit), then structured-response.
 pub fn parse_evaluate_response(s: &str) -> Result<EvaluateOutput, ParseError> {
+    let s = s.trim();
+    if s.starts_with('{') {
+        if let Ok(parsed) = serde_json::from_str::<StructuredEvaluate>(s) {
+            if parsed.goal.as_deref() == Some("evaluate-changes") {
+                let summary = parsed
+                    .summary
+                    .filter(|x| !x.is_empty())
+                    .unwrap_or_else(|| "No summary provided.".to_string());
+                let risk_level = parsed
+                    .risk_level
+                    .filter(|x| !x.is_empty())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let build_results = parsed
+                    .build_results
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|b| EvaluateBuildResult {
+                        package: b.package,
+                        status: b.status,
+                        notes: b.notes,
+                    })
+                    .collect();
+                let issues = parsed
+                    .issues
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|i| EvaluateIssue {
+                        severity: i.severity,
+                        category: i.category,
+                        file: i.file,
+                        line: i.line,
+                        description: i.description,
+                        suggestion: i.suggestion,
+                    })
+                    .collect();
+                let changeset_sync = parsed.changeset_sync.map(|c| EvaluateChangesetSync {
+                    status: c.status,
+                    items_updated: c.items_updated,
+                    items_added: c.items_added,
+                });
+                let files_analyzed = parsed
+                    .files_analyzed
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|f| EvaluateFileAnalyzed {
+                        file: f.file,
+                        lines_changed: f.lines_changed,
+                        changeset_item: f.changeset_item,
+                    })
+                    .collect();
+                let test_impact = parsed.test_impact.map(|t| EvaluateTestImpact {
+                    tests_affected: t.tests_affected,
+                    new_tests_needed: t.new_tests_needed,
+                });
+                let changed_files = parsed
+                    .changed_files
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|c| EvaluateChangedFile {
+                        path: c.path,
+                        change_type: c.change_type,
+                        lines_added: c.lines_added,
+                        lines_removed: c.lines_removed,
+                    })
+                    .collect();
+                let affected_tests = parsed
+                    .affected_tests
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|a| EvaluateAffectedTest {
+                        path: a.path,
+                        status: a.status,
+                        description: a.description,
+                    })
+                    .collect();
+                return Ok(EvaluateOutput {
+                    summary,
+                    risk_level,
+                    build_results,
+                    issues,
+                    changeset_sync,
+                    files_analyzed,
+                    test_impact,
+                    changed_files,
+                    affected_tests,
+                    validity_assessment: parsed
+                        .validity_assessment
+                        .filter(|x| !x.is_empty())
+                        .unwrap_or_default(),
+                });
+            }
+        }
+    }
     let open = s
         .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
@@ -1197,10 +1462,27 @@ struct StructuredValidateRefactor {
     refactoring_plan_written: Option<bool>,
 }
 
-/// Parse LLM validate (subagent) response from structured-response block.
-/// Uses rfind to skip earlier blocks (e.g. system prompt examples).
-/// Returns Malformed if the expected format is not found or goal != "validate".
+/// Parse LLM validate (subagent) response: tries raw JSON (tddy-tools submit), then structured-response.
 pub fn parse_validate_subagents_response(s: &str) -> Result<ValidateSubagentsOutput, ParseError> {
+    let s = s.trim();
+    if s.starts_with('{') {
+        if let Ok(parsed) = serde_json::from_str::<StructuredValidateRefactor>(s) {
+            if parsed.goal.as_deref() == Some("validate") {
+                let summary = parsed
+                    .summary
+                    .filter(|x| !x.is_empty())
+                    .unwrap_or_else(|| "No summary provided.".to_string());
+                return Ok(ValidateSubagentsOutput {
+                    goal: "validate".to_string(),
+                    summary,
+                    tests_report_written: parsed.tests_report_written.unwrap_or(false),
+                    prod_ready_report_written: parsed.prod_ready_report_written.unwrap_or(false),
+                    clean_code_report_written: parsed.clean_code_report_written.unwrap_or(false),
+                    refactoring_plan_written: parsed.refactoring_plan_written.unwrap_or(false),
+                });
+            }
+        }
+    }
     let open = s
         .rfind(STRUCTURED_OPEN)
         .ok_or_else(|| ParseError::Malformed("structured-response not found".into()))?;
@@ -1572,8 +1854,25 @@ The Red phase skeleton and tests are already in place.
     }
 }
 
-/// Parse the standalone demo goal structured response.
+/// Parse the standalone demo goal: tries raw JSON (tddy-tools submit), then structured-response.
 pub fn parse_demo_response(s: &str) -> Result<DemoOutput, ParseError> {
+    let s = s.trim();
+    if s.starts_with('{') {
+        if let Ok(parsed) = serde_json::from_str::<StructuredDemo>(s) {
+            if parsed.goal.as_deref() == Some("demo") {
+                let summary = parsed
+                    .summary
+                    .filter(|x| !x.is_empty())
+                    .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+                return Ok(DemoOutput {
+                    summary,
+                    demo_type: parsed.demo_type.unwrap_or_else(|| "unknown".to_string()),
+                    steps_completed: parsed.steps_completed.unwrap_or(0),
+                    verification: parsed.verification.unwrap_or_default(),
+                });
+            }
+        }
+    }
     let block = extract_last_structured_block(s)?;
     let parsed: StructuredDemo =
         serde_json::from_str(block.json).map_err(|e| ParseError::Malformed(e.to_string()))?;
@@ -1624,8 +1923,24 @@ struct StructuredRefactor {
     tests_passing: Option<bool>,
 }
 
-/// Parse LLM refactor response from structured-response block.
+/// Parse LLM refactor response: tries raw JSON (tddy-tools submit), then structured-response.
 pub fn parse_refactor_response(s: &str) -> Result<RefactorOutput, ParseError> {
+    let s = s.trim();
+    if s.starts_with('{') {
+        if let Ok(parsed) = serde_json::from_str::<StructuredRefactor>(s) {
+            if parsed.goal.as_deref() == Some("refactor") {
+                let summary = parsed
+                    .summary
+                    .filter(|x| !x.is_empty())
+                    .ok_or_else(|| ParseError::Malformed("summary missing or empty".into()))?;
+                return Ok(RefactorOutput {
+                    summary,
+                    tasks_completed: parsed.tasks_completed.unwrap_or(0),
+                    tests_passing: parsed.tests_passing.unwrap_or(false),
+                });
+            }
+        }
+    }
     let block = extract_last_structured_block(s)?;
     let parsed: StructuredRefactor =
         serde_json::from_str(block.json).map_err(|e| ParseError::Malformed(e.to_string()))?;

@@ -9,6 +9,7 @@ use crate::output::{
     create_session_dir_in, create_session_dir_with_id, parse_planning_response,
     slugify_directory_name,
 };
+use crate::toolcall::take_submit_result_for_goal;
 use crate::workflow::context::Context;
 use crate::workflow::planning;
 use crate::workflow::task::{NextAction, Task, TaskResult};
@@ -96,6 +97,7 @@ impl Task for PlanTask {
             conversation_output_path: context.get_sync("conversation_output_path"),
             inherit_stdin: context.get_sync::<bool>("inherit_stdin").unwrap_or(false),
             extra_allowed_tools: context.get_sync("allowed_tools"),
+            socket_path: context.get_sync("socket_path"),
         };
 
         let response = self.backend.invoke(request).await.map_err(
@@ -104,7 +106,20 @@ impl Task for PlanTask {
             },
         )?;
 
-        context.set_sync("output", response.output.clone());
+        let output_to_store = match take_submit_result_for_goal("plan") {
+            Some(s) => {
+                log::debug!("[PlanTask] took submit result for plan (len={})", s.len());
+                s
+            }
+            None => {
+                log::debug!(
+                    "[PlanTask] no submit result, using response.output (len={})",
+                    response.output.len()
+                );
+                response.output.clone()
+            }
+        };
+        context.set_sync("output", output_to_store.clone());
 
         if !response.questions.is_empty() {
             context.set_sync("pending_questions", response.questions.clone());
@@ -116,7 +131,7 @@ impl Task for PlanTask {
             });
         }
 
-        let planning = parse_planning_response(&response.output).map_err(|e: ParseError| {
+        let planning = parse_planning_response(&output_to_store).map_err(|e: ParseError| {
             Box::new(WorkflowError::ParseError(e)) as Box<dyn std::error::Error + Send + Sync>
         })?;
 

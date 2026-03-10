@@ -4,11 +4,13 @@ mod claude;
 mod cursor;
 mod mock;
 mod stub;
+mod tool_executor;
 
 pub use claude::{build_claude_args, ClaudeCodeBackend, ClaudeInvokeConfig, PermissionMode};
 pub use cursor::CursorBackend;
 pub use mock::MockBackend;
 pub use stub::StubBackend;
+pub use tool_executor::{InMemoryToolExecutor, ProcessToolExecutor, ToolExecutor};
 
 /// Enum dispatch for CLI backend selection (avoids trait object overhead).
 /// tddy-coder uses claude/cursor only. tddy-demo uses stub (via lib, not CLI).
@@ -139,6 +141,22 @@ pub enum Goal {
     Refactor,
 }
 
+impl Goal {
+    /// Key used for store_submit_result / take_submit_result_for_goal (matches JSON "goal" field).
+    pub fn submit_key(&self) -> &'static str {
+        match self {
+            Goal::Plan => "plan",
+            Goal::AcceptanceTests => "acceptance-tests",
+            Goal::Red => "red",
+            Goal::Green => "green",
+            Goal::Demo => "demo",
+            Goal::Evaluate => "evaluate-changes",
+            Goal::Validate => "validate",
+            Goal::Refactor => "refactor",
+        }
+    }
+}
+
 /// Sink for routing agent output (e.g. to TUI instead of stderr).
 #[derive(Clone)]
 pub struct AgentOutputSink(std::sync::Arc<dyn Fn(&str) + Send + Sync>);
@@ -219,6 +237,8 @@ pub struct InvokeRequest {
     pub inherit_stdin: bool,
     /// Extra tools to add to the goal's allowlist (backends that support allowlists merge these).
     pub extra_allowed_tools: Option<Vec<String>>,
+    /// When set, backend sets TDDY_SOCKET env var for tddy-tools relay.
+    pub socket_path: Option<PathBuf>,
 }
 
 fn default_allow_other() -> bool {

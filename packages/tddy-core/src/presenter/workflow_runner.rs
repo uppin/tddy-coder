@@ -26,6 +26,7 @@ struct ElicitationContext<'a> {
     inherit_stdin: bool,
     conversation_output_path: &'a Option<PathBuf>,
     debug: bool,
+    socket_path: Option<&'a PathBuf>,
 }
 
 /// Loop on WaitingForInput until status is Completed, Paused, or ElicitationNeeded.
@@ -194,6 +195,9 @@ fn handle_elicitation(
                 if let Some(sid) = session_id_for_refine {
                     refine_ctx.insert("session_id".to_string(), serde_json::json!(sid));
                 }
+                if let Some(p) = ctx.socket_path {
+                    refine_ctx.insert("socket_path".to_string(), serde_json::to_value(p).unwrap());
+                }
                 let mut refine_result =
                     match ctx.rt.block_on(refine_engine.run_goal("plan", refine_ctx)) {
                         Ok(r) => r,
@@ -250,6 +254,7 @@ fn run_plan_without_output_dir(
     conversation_output_path: &Option<PathBuf>,
     debug_output_path: Option<&Path>,
     debug: bool,
+    socket_path: Option<&PathBuf>,
 ) -> Option<PathBuf> {
     let inherit_stdin = true;
     let (output_dir_for_ctx, session_base_opt) = if output_dir == Path::new(".") {
@@ -316,6 +321,9 @@ fn run_plan_without_output_dir(
     );
     context_values.insert("debug".to_string(), serde_json::json!(debug));
     context_values.insert("run_demo".to_string(), serde_json::json!(false));
+    if let Some(p) = socket_path {
+        context_values.insert("socket_path".to_string(), serde_json::to_value(p).unwrap());
+    }
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -358,6 +366,7 @@ fn run_plan_without_output_dir(
             inherit_stdin,
             conversation_output_path: &conversation_output_resolved,
             debug,
+            socket_path,
         };
         if !handle_elicitation(event, &plan_dir, &elicitation_ctx) {
             return None;
@@ -381,6 +390,7 @@ pub fn run_workflow(
     conversation_output_path: Option<PathBuf>,
     debug_output_path: Option<PathBuf>,
     debug: bool,
+    socket_path: Option<PathBuf>,
 ) {
     let inherit_stdin = true;
 
@@ -412,6 +422,7 @@ pub fn run_workflow(
                 &conversation_output_path,
                 debug_output_path.as_deref(),
                 debug,
+                socket_path.as_ref(),
             ) {
                 Some(p) => p,
                 None => return,
@@ -468,6 +479,9 @@ pub fn run_workflow(
                 serde_json::to_value(conversation_output_path.clone()).unwrap(),
             );
             ctx.insert("debug".to_string(), serde_json::json!(debug));
+            if let Some(ref p) = socket_path {
+                ctx.insert("socket_path".to_string(), serde_json::to_value(p).unwrap());
+            }
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -495,6 +509,7 @@ pub fn run_workflow(
                     inherit_stdin,
                     conversation_output_path: &conversation_output_path,
                     debug,
+                    socket_path: socket_path.as_ref(),
                 };
                 if !handle_elicitation(event, &plan_dir, &elicitation_ctx) {
                     return;
@@ -545,6 +560,9 @@ pub fn run_workflow(
     );
     context_values.insert("debug".to_string(), serde_json::json!(debug));
     context_values.insert("run_demo".to_string(), serde_json::json!(run_demo));
+    if let Some(ref p) = socket_path {
+        context_values.insert("socket_path".to_string(), serde_json::to_value(p).unwrap());
+    }
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -603,6 +621,7 @@ pub fn run_workflow(
                     inherit_stdin,
                     conversation_output_path: &conversation_output_path,
                     debug,
+                    socket_path: socket_path.as_ref(),
                 };
                 if !handle_elicitation(event, &plan_dir, &elicitation_ctx) {
                     return;

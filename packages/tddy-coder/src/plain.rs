@@ -51,7 +51,12 @@ pub fn read_plan_approval_plain(prd_content: &str) -> anyhow::Result<String> {
     loop {
         println!("\nPlan generated. Options: [v] View  [a] Approve  [r] Refine: ");
         let mut buf = String::new();
-        io::stdin().lock().read_line(&mut buf)?;
+        let n = io::stdin().lock().read_line(&mut buf)?;
+        if n == 0 {
+            return Err(anyhow::anyhow!(
+                "EOF: no input for plan approval (stdin closed)"
+            ));
+        }
         let choice = buf.trim().trim_end_matches('\r');
         match choice.to_lowercase().as_str() {
             "v" | "view" => {

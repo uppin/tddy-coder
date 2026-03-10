@@ -22,15 +22,14 @@ You MUST:
 2. Spawn all 3 subagents concurrently using the Agent tool
 3. Wait for all 3 to complete
 4. Report whether each report was written
-5. ALWAYS end your response with a structured-response block — REQUIRED.
+5. When done, submit your output by calling:
+  tddy-tools submit --schema schemas/validate-subagents.schema.json --data '<your JSON output>'
 
-**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object starting with {"goal":"validate",...}.
+If you need to ask the user clarification questions, call:
+  tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
+The call will block until the user answers. The response contains the user's answers.
 
-Read the JSON Schema file at `schemas/validate-subagents.schema.json` in the working directory for the exact output format specification.
-
-<structured-response content-type="application-json" schema="schemas/validate-subagents.schema.json">
-{"goal":"validate","summary":"<human-readable summary of all 3 subagent results>","tests_report_written":<true|false>,"prod_ready_report_written":<true|false>,"clean_code_report_written":<true|false>}
-</structured-response>"#
+Read the JSON Schema file at `schemas/validate-subagents.schema.json` in the working directory for the exact output format. The JSON must be a single object starting with {"goal":"validate",...}."#
     .to_string()
 }
 
@@ -63,15 +62,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn system_prompt_references_schema_and_includes_schema_attribute() {
+    fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt();
         assert!(
             prompt.contains("schemas/validate-subagents.schema.json"),
             "system prompt must reference validate-subagents schema file"
         );
         assert!(
-            prompt.contains("schema=\"schemas/validate-subagents.schema.json\""),
-            "system prompt example must include schema= attribute"
+            prompt.contains("tddy-tools submit")
+                && prompt.contains("schemas/validate-subagents.schema.json"),
+            "system prompt must instruct agent to use tddy-tools submit with schema"
         );
     }
 }

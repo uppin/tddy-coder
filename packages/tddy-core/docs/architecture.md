@@ -12,12 +12,13 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **UserIntent**: SubmitFeatureInput, AnswerSelect, AnswerMultiSelect, AnswerText, QueuePrompt, etc.
 - **PresenterState**: agent, model, mode (AppMode), activity_log, inbox, should_quit.
 - **PresenterView**: Trait with callbacks: on_mode_changed, on_activity_logged, on_goal_started, on_state_changed, on_workflow_complete, on_agent_output, on_inbox_changed.
-- **workflow_runner**: Runs full TDD workflow in background thread; sends events via mpsc; receives answers for clarification. Writes refactoring-plan.md when StubBackend (validate does not write files).
+- **workflow_runner**: Runs full TDD workflow in background thread; sends events via mpsc; receives answers for clarification. Polls `tool_call_rx` for tddy-tools relay requests (Submit, Ask). Writes refactoring-plan.md when StubBackend (validate does not write files).
 
 ### Backend (`backend/`)
 
 - **CodingBackend**: Async trait for invoking LLM-based coders. Implementations: `ClaudeCodeBackend`, `CursorBackend` (production), `MockBackend`, `StubBackend` (testing/demo). `AnyBackend` enum for CLI dispatch. `SharedBackend` wraps `Arc<dyn CodingBackend>`; backend created once per run.
-- **StubBackend**: Stateful backend for demo and workflow tests. Magic catch-words: CLARIFY (returns questions), FAIL_PARSE (malformed response), FAIL_INVOKE (BackendError). Returns schema-valid structured responses per goal.
+- **StubBackend**: Stateful backend for demo and workflow tests. Uses `ToolExecutor` (InMemoryToolExecutor in tests, ProcessToolExecutor in tddy-demo). Magic catch-words: CLARIFY (returns questions), FAIL_PARSE (malformed response), FAIL_INVOKE (BackendError). Returns schema-valid structured responses per goal.
+- **ToolExecutor**: Trait for submitting structured results. `InMemoryToolExecutor` stores via `store_submit_result` (tests and tddy-demo StubBackend). `ProcessToolExecutor` runs `tddy-tools submit` for real agents. `BackendInvokeTask` prefers `take_submit_result_for_goal` over stream parsing.
 - **InvokeRequest/InvokeResponse**: Request and response types. InvokeRequest: prompt, system_prompt, goal (Plan/AcceptanceTests/Red/Green/Demo/Evaluate/Validate/Refactor), model, session_id, is_resume, working_dir, debug, agent_output, inherit_stdin, extra_allowed_tools, conversation_output_path. InvokeResponse: output, exit_code, session_id (Option), questions. CursorBackend rejects Goal::Validate and Goal::Refactor (require Agent tool, Claude-only).
 - **ClarificationQuestion**: Structured question type from AskUserQuestion tool events or `<clarification-questions>` text block (header, question, options, multi_select).
 - **ClaudeInvokeConfig**: Claude-specific config (permission_mode, allowed_tools, permission_prompt_tool, mcp_config_path) derived from goal internally.
@@ -30,6 +31,13 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **read_changeset / write_changeset**: Load and persist changeset.yaml.
 - **append_session_and_update_state**: Add session (agent from backend.name(), id, tag, system_prompt_file); update workflow state.
 
+### Toolcall (`toolcall/`)
+
+- **store_submit_result / take_submit_result_for_goal**: Shared storage for submit results. Presenter writes via tool executor; workflow reads. Key: goal name; Value: JSON string.
+- **ToolCallRequest / ToolCallResponse**: IPC types. Submit (goal, data, response_tx), Ask (questions, response_tx). Response: SubmitOk, SubmitError, AskAnswer, Error.
+- **start_toolcall_listener**: Unix domain socket listener. Accepts connections, reads JSON line, deserializes to wire format, forwards to presenter via mpsc with oneshot response channel.
+- **TDDY_SOCKET**: Env var set by tddy-coder when spawning agent; tddy-tools connects to this path.
+
 ### Stream (`stream/`)
 
 - **stream/claude.rs**: `process_ndjson_stream` — Claude Code CLI NDJSON parser (assistant, user, result, tool_use, task_started, task_progress). Tool_result content from user events is collected separately and merged into result_text only as a fallback when primary sources (assistant text, result event) lack a structured-response block.
@@ -40,7 +48,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Permission (`permission.rs`)
 
-- **plan_allowlist / acceptance_tests_allowlist / red_allowlist / green_allowlist / demo_allowlist / evaluate_allowlist / validate_subagents_allowlist / refactor_allowlist**: Goal-specific tool allowlists passed as `--allowedTools`. Plan: Read, Glob, Grep, SemanticSearch, AskUserQuestion, ExitPlanMode. Acceptance-tests, Red, Green, Demo: Read, Write, Edit, Glob, Grep, Bash(cargo *), SemanticSearch. Evaluate: Read, Glob, Grep, SemanticSearch, Bash(git diff/log/find/cargo build/check *). Validate (subagents): Agent, Read, Write, Edit, Glob, Grep, SemanticSearch, Bash(git diff/cargo build/check/test *). Refactor: Read, Write, Edit, Glob, Grep, SemanticSearch, Bash(cargo *).
+- **plan_allowlist / acceptance_tests_allowlist / red_allowlist / green_allowlist / demo_allowlist / evaluate_allowlist / validate_subagents_allowlist / refactor_allowlist**: Goal-specific tool allowlists passed as `--allowedTools`. All goals include `Bash(tddy-tools *)` for agent tool calls. Plan: Read, Glob, Grep, SemanticSearch, AskUserQuestion, ExitPlanMode. Acceptance-tests, Red, Green, Demo: Read, Write, Edit, Glob, Grep, Bash(cargo *, tddy-tools *), SemanticSearch. Evaluate: Read, Glob, Grep, SemanticSearch, Bash(git diff/log/find/cargo build/check *, tddy-tools *). Validate (subagents): Agent, Read, Write, Edit, Glob, Grep, SemanticSearch, Bash(git diff/cargo build/check/test *, tddy-tools *). Refactor: Read, Write, Edit, Glob, Grep, SemanticSearch, Bash(cargo *, tddy-tools *).
 
 ### Workflow (`workflow/`)
 

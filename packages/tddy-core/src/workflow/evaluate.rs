@@ -13,16 +13,15 @@ You MUST:
 4. List all changed files with change_type (modified/added/removed) and line counts
 5. List all affected tests (created, updated, removed, skipped)
 6. Provide a validity assessment: does the change address the intended use-case?
-7. ALWAYS end your response with a structured-response block — REQUIRED.
+7. When done, submit your output by calling:
+  tddy-tools submit --schema schemas/evaluate.schema.json --data '<your JSON output>'
 
-**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object. Do NOT output a number, array, or numbered list items inside the block. The parser expects a single JSON object starting with {"goal":"evaluate-changes",...}.
+If you need to ask the user clarification questions, call:
+  tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
+The call will block until the user answers. The response contains the user's answers.
 
-Read the JSON Schema file at `schemas/evaluate.schema.json` in the working directory for the exact output format specification. Your final output MUST include this exact block (replace placeholders with actual values).
-For build_results status use: "pass", "fail", or "not_run" (when build could not be executed).
-
-<structured-response content-type="application-json" schema="schemas/evaluate.schema.json">
-{"goal":"evaluate-changes","summary":"<human-readable summary>","risk_level":"<low|medium|high|critical>","build_results":[{"package":"<name>","status":"<pass|fail|not_run>","notes":null}],"issues":[{"severity":"<info|warning|error>","category":"<code_quality|test_infrastructure|...>","file":"<path>","line":<number>,"description":"<text>","suggestion":"<optional>"}],"changeset_sync":{"status":"<synced|not_found|...>","items_updated":0,"items_added":0},"files_analyzed":[{"file":"<path>","lines_changed":<number>,"changeset_item":null}],"test_impact":{"tests_affected":0,"new_tests_needed":0},"changed_files":[{"path":"<path>","change_type":"<modified|added|removed>","lines_added":0,"lines_removed":0}],"affected_tests":[{"path":"<path>","status":"<created|updated|removed|skipped>","description":"<text>"}],"validity_assessment":"<detailed assessment of whether the change is valid for the intended use-case>"}
-</structured-response>"#
+Read the JSON Schema file at `schemas/evaluate.schema.json` in the working directory for the exact output format. The JSON must be a single object starting with {"goal":"evaluate-changes",...} — no number, array, or numbered list items.
+For build_results status use: "pass", "fail", or "not_run" (when build could not be executed)."#
     .to_string()
 }
 
@@ -79,15 +78,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn system_prompt_references_schema_and_includes_schema_attribute() {
+    fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt();
         assert!(
             prompt.contains("schemas/evaluate.schema.json"),
             "system prompt must reference evaluate schema file"
         );
         assert!(
-            prompt.contains("schema=\"schemas/evaluate.schema.json\""),
-            "system prompt example must include schema= attribute"
+            prompt.contains("tddy-tools submit") && prompt.contains("schemas/evaluate.schema.json"),
+            "system prompt must instruct agent to use tddy-tools submit with schema"
         );
     }
 }

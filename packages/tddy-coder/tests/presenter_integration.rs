@@ -95,6 +95,8 @@ fn full_workflow_completes_with_stub_backend() {
         None,
         false,
         None,
+        None,
+        None,
     );
 
     let mut iterations = 0;
@@ -153,6 +155,8 @@ fn clarification_roundtrip_sends_answers() {
         None,
         false,
         None,
+        None,
+        None,
     );
 
     let mut iterations = 0;
@@ -209,6 +213,8 @@ fn inbox_queue_and_dequeue() {
         None,
         false,
         None,
+        None,
+        None,
     );
 
     let mut iterations = 0;
@@ -264,6 +270,8 @@ fn plan_approval_approve_proceeds_to_next_step() {
         None,
         None,
         false,
+        None,
+        None,
         None,
     );
 
@@ -322,6 +330,8 @@ fn plan_approval_view_then_approve() {
         None,
         None,
         false,
+        None,
+        None,
         None,
     );
 
@@ -384,6 +394,8 @@ fn plan_approval_refine_re_shows_approval() {
         None,
         false,
         None,
+        None,
+        None,
     );
 
     let mut iterations = 0;
@@ -440,6 +452,8 @@ fn workflow_error_propagates() {
         None,
         None,
         false,
+        None,
+        None,
         None,
     );
 
