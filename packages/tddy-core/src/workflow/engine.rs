@@ -108,6 +108,7 @@ impl WorkflowEngine {
             match &result.status {
                 ExecutionStatus::Completed | ExecutionStatus::Error(_) => return Ok(result),
                 ExecutionStatus::WaitingForInput { .. } => return Ok(result),
+                ExecutionStatus::ElicitationNeeded { .. } => return Ok(result),
                 ExecutionStatus::Paused { .. } => {
                     result = self.runner.run(&session_id).await?;
                 }
@@ -149,6 +150,7 @@ impl WorkflowEngine {
             match &result.status {
                 ExecutionStatus::Completed | ExecutionStatus::Error(_) => return Ok(result),
                 ExecutionStatus::WaitingForInput { .. } => return Ok(result),
+                ExecutionStatus::ElicitationNeeded { .. } => return Ok(result),
                 ExecutionStatus::Paused { .. } => {
                     result = self.runner.run(&session_id).await?;
                 }

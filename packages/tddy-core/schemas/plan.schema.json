@@ -15,7 +15,6 @@
         "toolchain": { "type": "object", "additionalProperties": { "type": "string" } },
         "scripts": { "type": "object", "additionalProperties": { "type": "string" } },
         "doc_locations": { "type": "array", "items": { "type": "string" } },
-        "plan_dir_suggestion": { "type": "string" },
         "relevant_code": {
           "type": "array",
           "items": {

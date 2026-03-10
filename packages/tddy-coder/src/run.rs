@@ -276,16 +276,39 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         anyhow::bail!("empty feature description");
     }
 
-    let plan_dir = args
-        .output_dir
-        .join(tddy_core::output::slugify_directory_name(&input));
-    std::fs::create_dir_all(&plan_dir).context("create plan directory")?;
+    let (plan_dir, output_dir_for_ctx) = if args.output_dir == Path::new(".") {
+        #[cfg(unix)]
+        {
+            let home = std::env::var("HOME").map_err(|_| {
+                anyhow::anyhow!("HOME not set; cannot create session under ~/.tddy")
+            })?;
+            let base = PathBuf::from(&home).join(".tddy");
+            let plan_dir =
+                tddy_core::output::create_session_dir_in(&base).context("create session dir")?;
+            let output_dir_for_ctx =
+                std::env::current_dir().context("current dir for agent working_dir")?;
+            (plan_dir, output_dir_for_ctx)
+        }
+        #[cfg(not(unix))]
+        {
+            anyhow::bail!(
+                "plan without --output-dir requires HOME (Unix) or USERPROFILE (Windows); \
+                 use --output-dir <path> explicitly"
+            );
+        }
+    } else {
+        let plan_dir = args
+            .output_dir
+            .join(tddy_core::output::slugify_directory_name(&input));
+        std::fs::create_dir_all(&plan_dir).context("create plan directory")?;
+        (plan_dir, args.output_dir.clone())
+    };
 
     let ctx = build_goal_context(args, None, |c| {
         c.insert("feature_input".to_string(), serde_json::json!(input));
         c.insert(
             "output_dir".to_string(),
-            serde_json::to_value(args.output_dir.clone()).unwrap(),
+            serde_json::to_value(output_dir_for_ctx).unwrap(),
         );
         c.insert(
             "plan_dir".to_string(),
@@ -391,103 +414,49 @@ fn run_goal_plain(
                     .as_ref()
                     .and_then(|s| s.context.get_sync("output"));
 
-                // Plan approval gate: when plan completes and PRD exists, loop until user approves.
-                if goal == "plan" && plan_dir.join("PRD.md").exists() {
-                    let feature_input = session_opt
-                        .as_ref()
-                        .and_then(|s| s.context.get_sync("feature_input"))
-                        .or_else(|| context_values.get("feature_input").cloned())
-                        .and_then(|v| serde_json::from_value::<String>(v).ok())
-                        .unwrap_or_else(|| "feature".to_string());
-                    loop {
-                        let prd_content = std::fs::read_to_string(plan_dir.join("PRD.md"))
-                            .unwrap_or_else(|_| "Could not read PRD.md".to_string());
-                        let answer = plain::read_plan_approval_plain(&prd_content)
-                            .context("plan approval")?;
-                        if answer.eq_ignore_ascii_case("approve") {
-                            break;
-                        }
-                        // Refinement: run plan again with feedback.
-                        let refine_storage =
-                            std::env::temp_dir().join("tddy-flowrunner-refine-session");
-                        std::fs::create_dir_all(&refine_storage)
-                            .context("create refine session dir")?;
-                        let refine_hooks = std::sync::Arc::new(
-                            tddy_core::workflow::tdd_hooks::TddWorkflowHooks::new(),
-                        );
-                        let refine_engine = WorkflowEngine::new(
-                            backend.clone(),
-                            refine_storage,
-                            Some(refine_hooks),
-                        );
-                        let output_dir = plan_dir
-                            .parent()
-                            .map(|p| p.to_path_buf())
-                            .unwrap_or_else(|| plan_dir.clone());
-                        let mut refine_ctx = std::collections::HashMap::new();
-                        refine_ctx.insert(
-                            "feature_input".to_string(),
-                            serde_json::json!(feature_input),
-                        );
-                        refine_ctx.insert(
-                            "output_dir".to_string(),
-                            serde_json::to_value(&output_dir).unwrap(),
-                        );
-                        refine_ctx.insert(
-                            "plan_dir".to_string(),
-                            serde_json::to_value(plan_dir.clone()).unwrap(),
-                        );
-                        refine_ctx
-                            .insert("refinement_feedback".to_string(), serde_json::json!(answer));
-                        if let Ok(cs) = read_changeset(&plan_dir) {
-                            if let Some(sid) = get_session_for_tag(&cs, "plan") {
-                                refine_ctx.insert("session_id".to_string(), serde_json::json!(sid));
-                            }
-                        }
-                        let mut refine_result = rt
-                            .block_on(refine_engine.run_goal("plan", refine_ctx))
-                            .map_err(|e| anyhow::anyhow!("refinement: {}", e))?;
+                if print_output {
+                    print_goal_output(goal, output.as_deref(), &plan_dir)?;
+                }
+                return Ok(());
+            }
+            ExecutionStatus::ElicitationNeeded { ref event } => {
+                let plan_dir: PathBuf = rt
+                    .block_on(engine.get_session(&result.session_id))
+                    .ok()
+                    .flatten()
+                    .and_then(|s| {
+                        s.context
+                            .get_sync("plan_dir")
+                            .or_else(|| s.context.get_sync("output_dir"))
+                    })
+                    .unwrap_or_else(|| {
+                        args.plan_dir
+                            .clone()
+                            .unwrap_or_else(|| args.output_dir.clone())
+                    });
+                match event {
+                    tddy_core::ElicitationEvent::PlanApproval { ref prd_content } => {
+                        let mut current_prd = prd_content.clone();
                         loop {
-                            match &refine_result.status {
-                                ExecutionStatus::Completed | ExecutionStatus::Paused { .. } => {
-                                    break
-                                }
-                                ExecutionStatus::WaitingForInput { .. } => {
-                                    let session = rt
-                                        .block_on(
-                                            refine_engine.get_session(&refine_result.session_id),
-                                        )
-                                        .map_err(|e| anyhow::anyhow!("get session: {}", e))?
-                                        .ok_or_else(|| anyhow::anyhow!("session not found"))?;
-                                    let questions: Vec<tddy_core::ClarificationQuestion> = session
-                                        .context
-                                        .get_sync("pending_questions")
-                                        .ok_or_else(|| anyhow::anyhow!("no pending questions"))?;
-                                    let answers = plain::read_answers_plain(&questions)
-                                        .context("read answers")?;
-                                    let mut updates = std::collections::HashMap::new();
-                                    updates
-                                        .insert("answers".to_string(), serde_json::json!(answers));
-                                    rt.block_on(refine_engine.update_session_context(
-                                        &refine_result.session_id,
-                                        updates,
-                                    ))
-                                    .map_err(|e| anyhow::anyhow!("update session: {}", e))?;
-                                    refine_result = rt
-                                        .block_on(
-                                            refine_engine.run_session(&refine_result.session_id),
-                                        )
-                                        .map_err(|e| anyhow::anyhow!("run session: {}", e))?;
-                                }
-                                ExecutionStatus::Error(msg) => {
-                                    anyhow::bail!("Refinement error: {}", msg)
-                                }
+                            let answer = plain::read_plan_approval_plain(&current_prd)
+                                .context("plan approval")?;
+                            if answer.eq_ignore_ascii_case("approve") {
+                                break;
                             }
+                            run_plan_refinement(args, &backend, &rt, &plan_dir, &answer)?;
+                            current_prd = std::fs::read_to_string(plan_dir.join("PRD.md"))
+                                .unwrap_or_else(|_| "Could not read PRD.md".to_string());
                         }
                     }
                 }
-
                 if print_output {
+                    let session_opt = rt
+                        .block_on(engine.get_session(&result.session_id))
+                        .ok()
+                        .flatten();
+                    let output: Option<String> = session_opt
+                        .as_ref()
+                        .and_then(|s| s.context.get_sync("output"));
                     print_goal_output(goal, output.as_deref(), &plan_dir)?;
                 }
                 return Ok(());
@@ -691,7 +660,13 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     };
 
     let initial_prompt = args.prompt.clone();
-    presenter.start_workflow(backend, args.output_dir.clone(), initial_prompt);
+    presenter.start_workflow(
+        backend,
+        args.output_dir.clone(),
+        initial_prompt,
+        args.conversation_output.clone(),
+        args.debug,
+    );
 
     tddy_tui::run_event_loop(
         &mut presenter,
@@ -755,6 +730,7 @@ fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
     let storage_dir = std::env::temp_dir().join("tddy-flowrunner-session");
     std::fs::create_dir_all(&storage_dir).context("create session storage dir")?;
     let hooks = std::sync::Arc::new(tddy_core::workflow::tdd_hooks::TddWorkflowHooks::new());
+    let backend_for_refine = backend.clone();
     let engine = WorkflowEngine::new(backend, storage_dir, Some(hooks));
 
     let feature_input = cs_pre
@@ -841,6 +817,32 @@ fn run_full_workflow_plain(args: &Args) -> anyhow::Result<()> {
                     .map_err(|e| anyhow::anyhow!("run session: {}", e))?;
             }
             ExecutionStatus::Error(msg) => anyhow::bail!("Workflow error: {}", msg),
+            ExecutionStatus::ElicitationNeeded { ref event } => {
+                match event {
+                    tddy_core::ElicitationEvent::PlanApproval { ref prd_content } => {
+                        let mut current_prd = prd_content.clone();
+                        loop {
+                            let answer = plain::read_plan_approval_plain(&current_prd)
+                                .context("plan approval")?;
+                            if answer.eq_ignore_ascii_case("approve") {
+                                break;
+                            }
+                            run_plan_refinement(
+                                args,
+                                &backend_for_refine,
+                                &rt,
+                                &plan_dir,
+                                &answer,
+                            )?;
+                            current_prd = std::fs::read_to_string(plan_dir.join("PRD.md"))
+                                .unwrap_or_else(|_| "Could not read PRD.md".to_string());
+                        }
+                    }
+                }
+                result = rt
+                    .block_on(engine.run_session(&result.session_id))
+                    .map_err(|e| anyhow::anyhow!("run session: {}", e))?;
+            }
         }
     }
 }
@@ -889,6 +891,81 @@ fn run_plan_to_complete(
     });
     run_goal_plain(args, backend, "plan", ctx, false)?;
     Ok(plan_dir.clone())
+}
+
+/// Run plan refinement: re-run the plan goal with feedback, handling clarification.
+fn run_plan_refinement(
+    args: &Args,
+    backend: &SharedBackend,
+    rt: &tokio::runtime::Runtime,
+    plan_dir: &Path,
+    feedback: &str,
+) -> anyhow::Result<()> {
+    let feature_input = read_changeset(plan_dir)
+        .ok()
+        .and_then(|c| c.initial_prompt.clone())
+        .unwrap_or_else(|| "feature".to_string());
+    let session_id_for_refine = read_changeset(plan_dir)
+        .ok()
+        .and_then(|c| get_session_for_tag(&c, "plan"));
+    let output_dir = plan_dir
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| plan_dir.to_path_buf());
+    let refine_storage = std::env::temp_dir().join("tddy-flowrunner-refine-session");
+    std::fs::create_dir_all(&refine_storage).context("create refine session dir")?;
+    let refine_hooks = std::sync::Arc::new(tddy_core::workflow::tdd_hooks::TddWorkflowHooks::new());
+    let refine_engine = WorkflowEngine::new(backend.clone(), refine_storage, Some(refine_hooks));
+    let plan_dir_buf = plan_dir.to_path_buf();
+    let mut refine_ctx = build_goal_context(args, Some(&plan_dir_buf), |c| {
+        c.insert(
+            "feature_input".to_string(),
+            serde_json::json!(feature_input),
+        );
+        c.insert(
+            "output_dir".to_string(),
+            serde_json::to_value(&output_dir).unwrap(),
+        );
+        c.insert(
+            "refinement_feedback".to_string(),
+            serde_json::json!(feedback),
+        );
+    });
+    if let Some(sid) = session_id_for_refine {
+        refine_ctx.insert("session_id".to_string(), serde_json::json!(sid));
+    }
+    let mut refine_result = rt
+        .block_on(refine_engine.run_goal("plan", refine_ctx))
+        .map_err(|e| anyhow::anyhow!("refinement: {}", e))?;
+    loop {
+        match &refine_result.status {
+            ExecutionStatus::Completed
+            | ExecutionStatus::Paused { .. }
+            | ExecutionStatus::ElicitationNeeded { .. } => break,
+            ExecutionStatus::WaitingForInput { .. } => {
+                let session = rt
+                    .block_on(refine_engine.get_session(&refine_result.session_id))
+                    .map_err(|e| anyhow::anyhow!("get session: {}", e))?
+                    .ok_or_else(|| anyhow::anyhow!("session not found"))?;
+                let questions: Vec<tddy_core::ClarificationQuestion> = session
+                    .context
+                    .get_sync("pending_questions")
+                    .ok_or_else(|| anyhow::anyhow!("no pending questions"))?;
+                let answers = plain::read_answers_plain(&questions).context("read answers")?;
+                let mut updates = std::collections::HashMap::new();
+                updates.insert("answers".to_string(), serde_json::json!(answers));
+                rt.block_on(
+                    refine_engine.update_session_context(&refine_result.session_id, updates),
+                )
+                .map_err(|e| anyhow::anyhow!("update session: {}", e))?;
+                refine_result = rt
+                    .block_on(refine_engine.run_session(&refine_result.session_id))
+                    .map_err(|e| anyhow::anyhow!("run session: {}", e))?;
+            }
+            ExecutionStatus::Error(msg) => anyhow::bail!("Refinement error: {}", msg),
+        }
+    }
+    Ok(())
 }
 
 /// Read feature description. Uses --prompt if set; otherwise stdin.

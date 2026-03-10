@@ -25,7 +25,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 5. Accepts `--goal red`, `--goal green`, `--goal demo`, and `--goal evaluate` for the implementation and evaluation phases
 6. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
 7. Accepts `--plan-dir <path>`: path to plan output directory; required when `--goal acceptance-tests`, `--goal red`, `--goal green`, `--goal demo`, or `--goal evaluate`; used for resume when running full workflow
-8. Accepts `--output-dir <path>` to configure where planning output is written (default: current directory)
+8. Accepts `--output-dir <path>` to configure where planning output is written. When omitted, output goes to `$HOME/.tddy/sessions/{uuid}/` (stable session directory). When provided, output goes to `{path}/YYYY-MM-DD-slug/`
 9. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
 10. Accepts `--conversation-output <path>` to log the entire agent conversation in raw bytes to a file (Updated: 2026-03-07)
 11. Accepts `--debug` to print CLI command and cwd before running (for debugging empty output)
@@ -39,7 +39,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 1. Read feature description from `--prompt` (if set) or stdin (piped or interactive)
 2. Invoke the selected backend (Claude or Cursor) in plan mode to analyze the feature description
 3. **Q&A phase**: The agent may ask clarifying questions; the user is expected to answer them. The system must support this interactive exchange (Claude asks → user answers → Claude continues analysis).
-4. Generate a deterministic directory name based on the feature (date-prefixed, slugified)
+4. Create output directory: when `--output-dir` is omitted, use `$HOME/.tddy/sessions/{uuid}/`; when provided, use `{output-dir}/YYYY-MM-DD-slug/` (date-prefixed, slugified from feature)
 5. Parse Claude Code's structured output into PRD, TODO, discovery, and demo plan artifacts
 6. Write `PRD.md`, `TODO.md`, and `changeset.yaml` (unified manifest: session ID, workflow state, discovery, models, initial_prompt, clarification_qa) to the output directory
 7. **Plan approval gate**: After plan completes, the user is presented with three choices: View (full-screen PRD modal), Approve (proceed to acceptance-tests), or Refine (free-text feedback that resumes the LLM session). The approval loop continues until the user approves.
@@ -58,6 +58,8 @@ After the plan step produces PRD.md and TODO.md, the workflow presents an approv
 In plain mode (non-TTY): text prompt `[v] View  [a] Approve  [r] Refine`; read user choice from stdin.
 
 The approval gate applies to both the initial plan and plan resume/completion scenarios.
+
+**Orchestration**: Elicitation is hook-triggered. `TddWorkflowHooks` signals `PlanApproval` after the plan task when PRD.md exists; the orchestrator returns `ElicitationNeeded` to the caller instead of auto-continuing. The caller presents the approval UI, collects the user's choice, and resumes the workflow.
 
 **Dependencies**: `tui-markdown` crate in tddy-tui for markdown rendering.
 

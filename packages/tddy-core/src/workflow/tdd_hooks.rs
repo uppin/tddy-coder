@@ -12,21 +12,22 @@ use crate::error::WorkflowError;
 use crate::output::{
     parse_acceptance_tests_response, parse_evaluate_response, parse_green_response,
     parse_planning_response, parse_red_response, parse_refactor_response,
-    parse_validate_subagents_response, slugify_directory_name, update_acceptance_tests_file,
-    update_progress_file, write_acceptance_tests_file, write_artifacts, write_demo_results_file,
-    write_evaluation_report, write_progress_file, write_red_output_file, PlanningOutput,
+    parse_validate_subagents_response, update_acceptance_tests_file, update_progress_file,
+    write_acceptance_tests_file, write_artifacts, write_demo_results_file, write_evaluation_report,
+    write_progress_file, write_red_output_file, PlanningOutput,
 };
 use crate::presenter::WorkflowEvent;
 use crate::schema::write_schema_to_dir;
 use crate::stream::ProgressEvent as StreamProgressEvent;
 use crate::workflow::context::Context;
+use crate::workflow::graph::ElicitationEvent;
 use crate::workflow::hooks::RunnerHooks;
 use crate::workflow::task::TaskResult;
 use crate::workflow::{
     acceptance_tests, evaluate, green, prepend_context_header, red, refactor, validate_subagents,
 };
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 /// Hooks for the TDD workflow. Handles file I/O. Event emission for TUI when event_tx is set.
@@ -52,6 +53,301 @@ impl Default for TddWorkflowHooks {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn before_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if read_changeset(plan_dir).is_err() {
+        let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
+        let init_changeset = Changeset {
+            initial_prompt: Some(feature_input),
+            ..Changeset::default()
+        };
+        let _ = write_changeset(plan_dir, &init_changeset);
+    }
+    Ok(())
+}
+
+fn before_acceptance_tests(
+    plan_dir: &Path,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let prd = std::fs::read_to_string(plan_dir.join("PRD.md"))
+        .map_err(|e| format!("read PRD.md: {}", e))?;
+    let changeset = read_changeset(plan_dir).map_err(|e| e.to_string())?;
+    let session_id =
+        get_session_for_tag(&changeset, "plan").ok_or("no plan session in changeset")?;
+    let model = resolve_model(
+        Some(&changeset),
+        "acceptance-tests",
+        context.get_sync::<String>("model").as_deref(),
+    );
+    let answers: Option<String> = context.get_sync("answers");
+    let prompt = match &answers {
+        Some(a) => acceptance_tests::build_followup_prompt(&prd, a),
+        None => acceptance_tests::build_prompt(&prd),
+    };
+    let prompt = prepend_context_header(prompt, Some(plan_dir));
+    context.set_sync("prompt", prompt);
+    context.set_sync("system_prompt", acceptance_tests::system_prompt());
+    context.set_sync("session_id", session_id);
+    context.set_sync("plan_dir", plan_dir.to_path_buf());
+    context.set_sync("model", model);
+    let _ = write_schema_to_dir(plan_dir, "acceptance-tests");
+    Ok(())
+}
+
+fn before_red(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let prd = std::fs::read_to_string(plan_dir.join("PRD.md"))
+        .map_err(|e| format!("read PRD.md: {}", e))?;
+    let at = std::fs::read_to_string(plan_dir.join("acceptance-tests.md"))
+        .map_err(|e| format!("read acceptance-tests.md: {}", e))?;
+    let changeset = read_changeset(plan_dir).ok();
+    let model = resolve_model(
+        changeset.as_ref(),
+        "red",
+        context.get_sync::<String>("model").as_deref(),
+    );
+    let answers: Option<String> = context.get_sync("answers");
+    let prompt = match &answers {
+        Some(a) => red::build_followup_prompt(&prd, &at, a),
+        None => red::build_prompt(&prd, &at),
+    };
+    let prompt = prepend_context_header(prompt, Some(plan_dir));
+    context.set_sync("prompt", prompt);
+    context.set_sync("system_prompt", red::system_prompt());
+    context.set_sync("plan_dir", plan_dir.to_path_buf());
+    context.set_sync("model", model);
+    let session_id = uuid::Uuid::new_v4().to_string();
+    context.set_sync("session_id", session_id);
+    let _ = write_schema_to_dir(plan_dir, "red");
+    Ok(())
+}
+
+fn before_green(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let progress = std::fs::read_to_string(plan_dir.join("progress.md"))
+        .map_err(|e| format!("read progress.md: {}", e))?;
+    let prd = std::fs::read_to_string(plan_dir.join("PRD.md")).ok();
+    let at = std::fs::read_to_string(plan_dir.join("acceptance-tests.md")).ok();
+    let changeset = read_changeset(plan_dir).ok();
+    let session_id = changeset
+        .as_ref()
+        .and_then(|cs| get_session_for_tag(cs, "impl"))
+        .or_else(|| {
+            std::fs::read_to_string(plan_dir.join(".impl-session"))
+                .ok()
+                .map(|s| s.trim().to_string())
+        })
+        .filter(|s| !s.is_empty())
+        .ok_or("green requires changeset with impl session or .impl-session file")?;
+    let model = resolve_model(
+        changeset.as_ref(),
+        "green",
+        context.get_sync::<String>("model").as_deref(),
+    );
+    let run_demo = context.get_sync::<bool>("run_demo").unwrap_or(false);
+    let answers: Option<String> = context.get_sync("answers");
+    let prompt = match &answers {
+        Some(a) => green::build_followup_prompt(&progress, a, prd.as_deref(), at.as_deref()),
+        None => green::build_prompt(&progress, prd.as_deref(), at.as_deref()),
+    };
+    context.set_sync("prompt", prompt);
+    context.set_sync("system_prompt", green::system_prompt(run_demo));
+    context.set_sync("plan_dir", plan_dir.to_path_buf());
+    context.set_sync("session_id", session_id);
+    context.set_sync("model", model);
+    let _ = write_schema_to_dir(plan_dir, "green");
+    Ok(())
+}
+
+fn before_demo(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let demo_plan = std::fs::read_to_string(plan_dir.join("demo-plan.md"))
+        .map_err(|e| format!("read demo-plan.md: {}", e))?;
+    let prompt = format!(
+        "Execute the demo described in demo-plan.md:\n\n{}",
+        demo_plan
+    );
+    context.set_sync("prompt", prompt);
+    context.set_sync("plan_dir", plan_dir.to_path_buf());
+    Ok(())
+}
+
+fn before_evaluate(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let prd = std::fs::read_to_string(plan_dir.join("PRD.md")).ok();
+    let changeset = std::fs::read_to_string(plan_dir.join("changeset.yaml")).ok();
+    let prompt = evaluate::build_prompt(prd.as_deref(), changeset.as_deref());
+    context.set_sync("prompt", prompt);
+    context.set_sync("system_prompt", evaluate::system_prompt());
+    context.set_sync("plan_dir", plan_dir.to_path_buf());
+    let _ = write_schema_to_dir(plan_dir, "evaluate");
+    Ok(())
+}
+
+fn before_validate(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let eval_report = std::fs::read_to_string(plan_dir.join("evaluation-report.md"))
+        .map_err(|e| format!("read evaluation-report.md: {}", e))?;
+    let prompt = validate_subagents::build_prompt(&eval_report);
+    context.set_sync("prompt", prompt);
+    context.set_sync("system_prompt", validate_subagents::system_prompt());
+    context.set_sync("plan_dir", plan_dir.to_path_buf());
+    let _ = write_schema_to_dir(plan_dir, "validate-subagents");
+    Ok(())
+}
+
+fn before_refactor(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let refactor_plan = std::fs::read_to_string(plan_dir.join("refactoring-plan.md"))
+        .map_err(|e| format!("read refactoring-plan.md: {}", e))?;
+    let prompt = refactor::build_prompt(&refactor_plan);
+    context.set_sync("prompt", prompt);
+    context.set_sync("system_prompt", refactor::system_prompt());
+    context.set_sync("plan_dir", plan_dir.to_path_buf());
+    let _ = write_schema_to_dir(plan_dir, "refactor");
+    Ok(())
+}
+
+fn after_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let planning: PlanningOutput = context
+        .get_sync("parsed_planning")
+        .or_else(|| {
+            let output: String = context.get_sync("output")?;
+            parse_planning_response(&output).ok()
+        })
+        .ok_or("plan after_task requires parsed_planning or parseable output in context")?;
+    write_artifacts(plan_dir, &planning)?;
+    let session_id: String = context
+        .get_sync("session_id")
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let backend_name: String = context
+        .get_sync("backend_name")
+        .unwrap_or_else(|| "claude".to_string());
+    let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
+    let mut cs = read_changeset(plan_dir).unwrap_or_else(|_| Changeset::default());
+    cs.name = planning.name.clone();
+    cs.initial_prompt = Some(feature_input);
+    cs.discovery = planning.discovery.clone();
+    append_session_and_update_state(
+        &mut cs,
+        session_id,
+        "plan",
+        "Planned",
+        &backend_name,
+        Some("system-prompt-plan.md".to_string()),
+    );
+    let _ = write_changeset(plan_dir, &cs);
+    Ok(())
+}
+
+fn after_acceptance_tests(
+    plan_dir: &Path,
+    output: &str,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let parsed = parse_acceptance_tests_response(output).map_err(WorkflowError::ParseError)?;
+    write_acceptance_tests_file(plan_dir, &parsed)?;
+    let session_id: String = context
+        .get_sync("session_id")
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let backend_name: String = context
+        .get_sync("backend_name")
+        .unwrap_or_else(|| "claude".to_string());
+    let mut cs = read_changeset(plan_dir).unwrap_or_default();
+    append_session_and_update_state(
+        &mut cs,
+        session_id,
+        "acceptance-tests",
+        "AcceptanceTestsReady",
+        &backend_name,
+        None,
+    );
+    let _ = write_changeset(plan_dir, &cs);
+    Ok(())
+}
+
+fn after_red(
+    plan_dir: &Path,
+    output: &str,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let parsed = parse_red_response(output).map_err(WorkflowError::ParseError)?;
+    let _ = write_red_output_file(plan_dir, &parsed);
+    let _ = write_progress_file(plan_dir, &parsed);
+    let session_id: String = context
+        .get_sync("session_id")
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let backend_name: String = context
+        .get_sync("backend_name")
+        .unwrap_or_else(|| "claude".to_string());
+    let mut cs = read_changeset(plan_dir).unwrap_or_default();
+    append_session_and_update_state(
+        &mut cs,
+        session_id,
+        "impl",
+        "RedTestsReady",
+        &backend_name,
+        None,
+    );
+    let _ = write_changeset(plan_dir, &cs);
+    Ok(())
+}
+
+fn after_green(plan_dir: &Path, output: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let parsed = parse_green_response(output).map_err(WorkflowError::ParseError)?;
+    let _ = update_progress_file(plan_dir, &parsed);
+    let _ = update_acceptance_tests_file(plan_dir, &parsed);
+    if let Some(ref demo) = parsed.demo_results {
+        let _ = write_demo_results_file(plan_dir, &demo.summary, demo.steps_completed);
+    }
+    if parsed.all_tests_passing() {
+        if let Ok(mut cs) = read_changeset(plan_dir) {
+            update_state(&mut cs, "GreenComplete");
+            let _ = write_changeset(plan_dir, &cs);
+        }
+    }
+    Ok(())
+}
+
+fn after_evaluate(plan_dir: &Path, output: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let parsed = parse_evaluate_response(output).map_err(WorkflowError::ParseError)?;
+    let _ = write_evaluation_report(plan_dir, &parsed);
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "Evaluated");
+        let _ = write_changeset(plan_dir, &cs);
+    }
+    Ok(())
+}
+
+fn after_validate(plan_dir: &Path, output: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let parsed = parse_validate_subagents_response(output).map_err(WorkflowError::ParseError)?;
+    if parsed.refactoring_plan_written {
+        let refactoring_plan_path = plan_dir.join("refactoring-plan.md");
+        if !refactoring_plan_path.exists() {
+            let _ = std::fs::write(
+                &refactoring_plan_path,
+                "# Refactoring Plan\n## Tasks\n1. No-op refactoring task\n",
+            );
+        }
+    }
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "ValidateComplete");
+        let _ = write_changeset(plan_dir, &cs);
+    }
+    Ok(())
+}
+
+fn after_refactor(plan_dir: &Path, output: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let _ = parse_refactor_response(output).map_err(WorkflowError::ParseError)?;
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "RefactorComplete");
+        let _ = write_changeset(plan_dir, &cs);
+    }
+    Ok(())
+}
+
+fn after_demo(plan_dir: &Path) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "DemoComplete");
+        let _ = write_changeset(plan_dir, &cs);
+    }
+    Ok(())
 }
 
 impl RunnerHooks for TddWorkflowHooks {
@@ -91,139 +387,14 @@ impl RunnerHooks for TddWorkflowHooks {
         };
 
         match task_id {
-            "plan" => {
-                if read_changeset(&plan_dir).is_err() {
-                    let feature_input: String =
-                        context.get_sync("feature_input").unwrap_or_default();
-                    let init_changeset = Changeset {
-                        initial_prompt: Some(feature_input),
-                        ..Changeset::default()
-                    };
-                    let _ = write_changeset(&plan_dir, &init_changeset);
-                }
-            }
-            "acceptance-tests" => {
-                let prd = std::fs::read_to_string(plan_dir.join("PRD.md"))
-                    .map_err(|e| format!("read PRD.md: {}", e))?;
-                let changeset = read_changeset(&plan_dir).map_err(|e| e.to_string())?;
-                let session_id = get_session_for_tag(&changeset, "plan")
-                    .ok_or("no plan session in changeset")?;
-                let model = resolve_model(
-                    Some(&changeset),
-                    "acceptance-tests",
-                    context.get_sync::<String>("model").as_deref(),
-                );
-                let answers: Option<String> = context.get_sync("answers");
-                let prompt = match &answers {
-                    Some(a) => acceptance_tests::build_followup_prompt(&prd, a),
-                    None => acceptance_tests::build_prompt(&prd),
-                };
-                let prompt = prepend_context_header(prompt, Some(&plan_dir));
-                context.set_sync("prompt", prompt);
-                context.set_sync("system_prompt", acceptance_tests::system_prompt());
-                context.set_sync("session_id", session_id);
-                context.set_sync("plan_dir", plan_dir.clone());
-                context.set_sync("model", model);
-                let _ = write_schema_to_dir(&plan_dir, "acceptance-tests");
-            }
-            "red" => {
-                let prd = std::fs::read_to_string(plan_dir.join("PRD.md"))
-                    .map_err(|e| format!("read PRD.md: {}", e))?;
-                let at = std::fs::read_to_string(plan_dir.join("acceptance-tests.md"))
-                    .map_err(|e| format!("read acceptance-tests.md: {}", e))?;
-                let changeset = read_changeset(&plan_dir).ok();
-                let model = resolve_model(
-                    changeset.as_ref(),
-                    "red",
-                    context.get_sync::<String>("model").as_deref(),
-                );
-                let answers: Option<String> = context.get_sync("answers");
-                let prompt = match &answers {
-                    Some(a) => red::build_followup_prompt(&prd, &at, a),
-                    None => red::build_prompt(&prd, &at),
-                };
-                let prompt = prepend_context_header(prompt, Some(&plan_dir));
-                context.set_sync("prompt", prompt);
-                context.set_sync("system_prompt", red::system_prompt());
-                context.set_sync("plan_dir", plan_dir.clone());
-                context.set_sync("model", model);
-                let session_id = uuid::Uuid::new_v4().to_string();
-                context.set_sync("session_id", session_id);
-                let _ = write_schema_to_dir(&plan_dir, "red");
-            }
-            "green" => {
-                let progress = std::fs::read_to_string(plan_dir.join("progress.md"))
-                    .map_err(|e| format!("read progress.md: {}", e))?;
-                let prd = std::fs::read_to_string(plan_dir.join("PRD.md")).ok();
-                let at = std::fs::read_to_string(plan_dir.join("acceptance-tests.md")).ok();
-                let changeset = read_changeset(&plan_dir).ok();
-                let session_id = changeset
-                    .as_ref()
-                    .and_then(|cs| get_session_for_tag(cs, "impl"))
-                    .or_else(|| {
-                        std::fs::read_to_string(plan_dir.join(".impl-session"))
-                            .ok()
-                            .map(|s| s.trim().to_string())
-                    })
-                    .filter(|s| !s.is_empty())
-                    .ok_or("green requires changeset with impl session or .impl-session file")?;
-                let model = resolve_model(
-                    changeset.as_ref(),
-                    "green",
-                    context.get_sync::<String>("model").as_deref(),
-                );
-                let run_demo = context.get_sync::<bool>("run_demo").unwrap_or(false);
-                let answers: Option<String> = context.get_sync("answers");
-                let prompt = match &answers {
-                    Some(a) => {
-                        green::build_followup_prompt(&progress, a, prd.as_deref(), at.as_deref())
-                    }
-                    None => green::build_prompt(&progress, prd.as_deref(), at.as_deref()),
-                };
-                context.set_sync("prompt", prompt);
-                context.set_sync("system_prompt", green::system_prompt(run_demo));
-                context.set_sync("plan_dir", plan_dir.clone());
-                context.set_sync("session_id", session_id);
-                context.set_sync("model", model);
-                let _ = write_schema_to_dir(&plan_dir, "green");
-            }
-            "demo" => {
-                let demo_plan = std::fs::read_to_string(plan_dir.join("demo-plan.md"))
-                    .map_err(|e| format!("read demo-plan.md: {}", e))?;
-                let prompt = format!(
-                    "Execute the demo described in demo-plan.md:\n\n{}",
-                    demo_plan
-                );
-                context.set_sync("prompt", prompt);
-                context.set_sync("plan_dir", plan_dir.clone());
-            }
-            "evaluate" => {
-                let prd = std::fs::read_to_string(plan_dir.join("PRD.md")).ok();
-                let changeset = std::fs::read_to_string(plan_dir.join("changeset.yaml")).ok();
-                let prompt = evaluate::build_prompt(prd.as_deref(), changeset.as_deref());
-                context.set_sync("prompt", prompt);
-                context.set_sync("system_prompt", evaluate::system_prompt());
-                context.set_sync("plan_dir", plan_dir.clone());
-                let _ = write_schema_to_dir(&plan_dir, "evaluate");
-            }
-            "validate" => {
-                let eval_report = std::fs::read_to_string(plan_dir.join("evaluation-report.md"))
-                    .map_err(|e| format!("read evaluation-report.md: {}", e))?;
-                let prompt = validate_subagents::build_prompt(&eval_report);
-                context.set_sync("prompt", prompt);
-                context.set_sync("system_prompt", validate_subagents::system_prompt());
-                context.set_sync("plan_dir", plan_dir.clone());
-                let _ = write_schema_to_dir(&plan_dir, "validate-subagents");
-            }
-            "refactor" => {
-                let refactor_plan = std::fs::read_to_string(plan_dir.join("refactoring-plan.md"))
-                    .map_err(|e| format!("read refactoring-plan.md: {}", e))?;
-                let prompt = refactor::build_prompt(&refactor_plan);
-                context.set_sync("prompt", prompt);
-                context.set_sync("system_prompt", refactor::system_prompt());
-                context.set_sync("plan_dir", plan_dir.clone());
-                let _ = write_schema_to_dir(&plan_dir, "refactor");
-            }
+            "plan" => before_plan(&plan_dir, context)?,
+            "acceptance-tests" => before_acceptance_tests(&plan_dir, context)?,
+            "red" => before_red(&plan_dir, context)?,
+            "green" => before_green(&plan_dir, context)?,
+            "demo" => before_demo(&plan_dir, context)?,
+            "evaluate" => before_evaluate(&plan_dir, context)?,
+            "validate" => before_validate(&plan_dir, context)?,
+            "refactor" => before_refactor(&plan_dir, context)?,
             _ => {}
         }
         // Emit transitional state (e.g. RedTesting, GreenImplementing) when starting a goal.
@@ -295,41 +466,10 @@ impl RunnerHooks for TddWorkflowHooks {
         context.remove_sync("answers");
         match task_id {
             "plan" => {
-                let output_dir: PathBuf = context
-                    .get_sync("output_dir")
-                    .ok_or("plan after_task requires output_dir in context")?;
-                let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
-                let plan_dir = output_dir.join(slugify_directory_name(&feature_input));
-                let planning: PlanningOutput = context
-                    .get_sync("parsed_planning")
-                    .or_else(|| {
-                        let output: String = context.get_sync("output")?;
-                        parse_planning_response(&output).ok()
-                    })
-                    .ok_or(
-                        "plan after_task requires parsed_planning or parseable output in context",
-                    )?;
-                write_artifacts(&plan_dir, &planning)?;
-                let session_id: String = context
-                    .get_sync("session_id")
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                let backend_name: String = context
-                    .get_sync("backend_name")
-                    .unwrap_or_else(|| "claude".to_string());
-                let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
-                let mut cs = read_changeset(&plan_dir).unwrap_or_else(|_| Changeset::default());
-                cs.name = planning.name.clone();
-                cs.initial_prompt = Some(feature_input);
-                cs.discovery = planning.discovery.clone();
-                append_session_and_update_state(
-                    &mut cs,
-                    session_id,
-                    "plan",
-                    "Planned",
-                    &backend_name,
-                    Some("system-prompt-plan.md".to_string()),
-                );
-                let _ = write_changeset(&plan_dir, &cs);
+                let plan_dir: PathBuf = context
+                    .get_sync("plan_dir")
+                    .ok_or("plan after_task requires plan_dir in context (set by PlanTask)")?;
+                after_plan(&plan_dir, context)?;
             }
             "acceptance-tests" | "red" | "green" | "evaluate" => {
                 let plan_dir: PathBuf = context
@@ -340,77 +480,10 @@ impl RunnerHooks for TddWorkflowHooks {
                     .get_sync("output")
                     .ok_or("after_task requires output in context")?;
                 match task_id {
-                    "acceptance-tests" => {
-                        let parsed = parse_acceptance_tests_response(&output)
-                            .map_err(WorkflowError::ParseError)?;
-                        write_acceptance_tests_file(&plan_dir, &parsed)?;
-                        let session_id: String = context
-                            .get_sync("session_id")
-                            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                        let backend_name: String = context
-                            .get_sync("backend_name")
-                            .unwrap_or_else(|| "claude".to_string());
-                        let mut cs = read_changeset(&plan_dir).unwrap_or_default();
-                        append_session_and_update_state(
-                            &mut cs,
-                            session_id,
-                            "acceptance-tests",
-                            "AcceptanceTestsReady",
-                            &backend_name,
-                            None,
-                        );
-                        let _ = write_changeset(&plan_dir, &cs);
-                    }
-                    "red" => {
-                        let parsed =
-                            parse_red_response(&output).map_err(WorkflowError::ParseError)?;
-                        let _ = write_red_output_file(&plan_dir, &parsed);
-                        let _ = write_progress_file(&plan_dir, &parsed);
-                        let session_id: String = context
-                            .get_sync("session_id")
-                            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                        let backend_name: String = context
-                            .get_sync("backend_name")
-                            .unwrap_or_else(|| "claude".to_string());
-                        let mut cs = read_changeset(&plan_dir).unwrap_or_default();
-                        append_session_and_update_state(
-                            &mut cs,
-                            session_id,
-                            "impl",
-                            "RedTestsReady",
-                            &backend_name,
-                            None,
-                        );
-                        let _ = write_changeset(&plan_dir, &cs);
-                    }
-                    "green" => {
-                        let parsed =
-                            parse_green_response(&output).map_err(WorkflowError::ParseError)?;
-                        let _ = update_progress_file(&plan_dir, &parsed);
-                        let _ = update_acceptance_tests_file(&plan_dir, &parsed);
-                        if let Some(ref demo) = parsed.demo_results {
-                            let _ = write_demo_results_file(
-                                &plan_dir,
-                                &demo.summary,
-                                demo.steps_completed,
-                            );
-                        }
-                        if parsed.all_tests_passing() {
-                            if let Ok(mut cs) = read_changeset(&plan_dir) {
-                                update_state(&mut cs, "GreenComplete");
-                                let _ = write_changeset(&plan_dir, &cs);
-                            }
-                        }
-                    }
-                    "evaluate" => {
-                        let parsed =
-                            parse_evaluate_response(&output).map_err(WorkflowError::ParseError)?;
-                        let _ = write_evaluation_report(&plan_dir, &parsed);
-                        if let Ok(mut cs) = read_changeset(&plan_dir) {
-                            update_state(&mut cs, "Evaluated");
-                            let _ = write_changeset(&plan_dir, &cs);
-                        }
-                    }
+                    "acceptance-tests" => after_acceptance_tests(&plan_dir, &output, context)?,
+                    "red" => after_red(&plan_dir, &output, context)?,
+                    "green" => after_green(&plan_dir, &output)?,
+                    "evaluate" => after_evaluate(&plan_dir, &output)?,
                     _ => {}
                 }
             }
@@ -421,37 +494,9 @@ impl RunnerHooks for TddWorkflowHooks {
                     .or_else(|| context.get_sync("output_dir"));
                 if let (Some(ref output), Some(ref plan_dir)) = (output, plan_dir) {
                     match task_id {
-                        "validate" => {
-                            let parsed = parse_validate_subagents_response(output)
-                                .map_err(WorkflowError::ParseError)?;
-                            if parsed.refactoring_plan_written {
-                                let refactoring_plan_path = plan_dir.join("refactoring-plan.md");
-                                if !refactoring_plan_path.exists() {
-                                    let _ = std::fs::write(
-                                        &refactoring_plan_path,
-                                        "# Refactoring Plan\n## Tasks\n1. No-op refactoring task\n",
-                                    );
-                                }
-                            }
-                            if let Ok(mut cs) = read_changeset(plan_dir) {
-                                update_state(&mut cs, "ValidateComplete");
-                                let _ = write_changeset(plan_dir, &cs);
-                            }
-                        }
-                        "refactor" => {
-                            let _ = parse_refactor_response(output)
-                                .map_err(WorkflowError::ParseError)?;
-                            if let Ok(mut cs) = read_changeset(plan_dir) {
-                                update_state(&mut cs, "RefactorComplete");
-                                let _ = write_changeset(plan_dir, &cs);
-                            }
-                        }
-                        "demo" => {
-                            if let Ok(mut cs) = read_changeset(plan_dir) {
-                                update_state(&mut cs, "DemoComplete");
-                                let _ = write_changeset(plan_dir, &cs);
-                            }
-                        }
+                        "validate" => after_validate(plan_dir, output)?,
+                        "refactor" => after_refactor(plan_dir, output)?,
+                        "demo" => after_demo(plan_dir)?,
                         _ => {}
                     }
                 }
@@ -459,6 +504,26 @@ impl RunnerHooks for TddWorkflowHooks {
             _ => {}
         }
         Ok(())
+    }
+
+    fn elicitation_after_task(
+        &self,
+        task_id: &str,
+        context: &Context,
+        _result: &TaskResult,
+    ) -> Option<ElicitationEvent> {
+        if task_id != "plan" {
+            return None;
+        }
+        let plan_dir: PathBuf = context
+            .get_sync("plan_dir")
+            .or_else(|| context.get_sync("output_dir"))?;
+        let prd_path = plan_dir.join("PRD.md");
+        if !prd_path.exists() {
+            return None;
+        }
+        let prd_content = std::fs::read_to_string(&prd_path).ok()?;
+        Some(ElicitationEvent::PlanApproval { prd_content })
     }
 
     fn on_error(&self, _task_id: &str, _error: &(dyn Error + Send + Sync)) {

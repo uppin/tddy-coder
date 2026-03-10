@@ -4,6 +4,7 @@
 
 use crate::backend::{AgentOutputSink, ProgressSink};
 use crate::workflow::context::Context;
+use crate::workflow::graph::ElicitationEvent;
 use crate::workflow::task::TaskResult;
 use std::error::Error;
 
@@ -34,6 +35,18 @@ pub trait RunnerHooks: Send + Sync {
         context: &Context,
         result: &TaskResult,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
+
+    /// Signal that the workflow should pause for user elicitation after a task.
+    /// When Some, the runner returns ElicitationNeeded; the caller handles the event,
+    /// collects user input, updates context, and resumes.
+    fn elicitation_after_task(
+        &self,
+        _task_id: &str,
+        _context: &Context,
+        _result: &TaskResult,
+    ) -> Option<ElicitationEvent> {
+        None
+    }
 
     /// Called when a task fails. Use for logging or error reporting.
     fn on_error(&self, task_id: &str, error: &(dyn Error + Send + Sync));

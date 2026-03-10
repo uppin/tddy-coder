@@ -5,7 +5,7 @@
 
 use crate::backend::{CodingBackend, Goal, InvokeRequest};
 use crate::error::{BackendError, ParseError, WorkflowError};
-use crate::output::{parse_planning_response, slugify_directory_name};
+use crate::output::{create_session_dir_in, parse_planning_response, slugify_directory_name};
 use crate::workflow::context::Context;
 use crate::workflow::planning;
 use crate::workflow::task::{NextAction, Task, TaskResult};
@@ -48,12 +48,17 @@ impl Task for PlanTask {
             return Err("empty feature description".into());
         }
 
-        // output_dir = repo root (parent of plan_dir). plan_dir = output_dir/slug (where PRD.md etc go).
-        let plan_dir: PathBuf = context
-            .get_sync("plan_dir")
-            .unwrap_or_else(|| output_dir.join(slugify_directory_name(feature_input)));
+        // plan_dir: from context, or session_base/sessions/{uuid}, or output_dir/slug
+        let plan_dir: PathBuf = if let Some(p) = context.get_sync::<PathBuf>("plan_dir") {
+            p
+        } else if let Some(base) = context.get_sync::<PathBuf>("session_base") {
+            create_session_dir_in(&base).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?
+        } else {
+            output_dir.join(slugify_directory_name(feature_input))
+        };
         std::fs::create_dir_all(&plan_dir)
             .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+        context.set_sync("plan_dir", plan_dir.clone());
 
         let refinement_feedback: Option<String> = context.get_sync("refinement_feedback");
         let answers: Option<String> = context.get_sync("answers");

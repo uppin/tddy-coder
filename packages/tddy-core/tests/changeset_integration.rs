@@ -184,10 +184,8 @@ async fn plan_discovery_identifies_doc_locations() {
     let changeset_path = output_path.join("changeset.yaml");
     let content = std::fs::read_to_string(&changeset_path).expect("read changeset");
     assert!(
-        content.contains("docs")
-            || content.contains("doc_locations")
-            || content.contains("plan_dir"),
-        "changeset discovery should include doc_locations or plan_dir_suggestion"
+        content.contains("docs") || content.contains("doc_locations"),
+        "changeset discovery should include doc_locations"
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -663,7 +661,9 @@ async fn changeset_contains_clarification_qa() {
     loop {
         match &r.status {
             ExecutionStatus::Completed | ExecutionStatus::Error(_) => break,
-            ExecutionStatus::WaitingForInput { .. } => break,
+            ExecutionStatus::WaitingForInput { .. } | ExecutionStatus::ElicitationNeeded { .. } => {
+                break;
+            }
             ExecutionStatus::Paused { .. } => {
                 r = engine.run_session(&result.session_id).await.unwrap();
             }
@@ -890,4 +890,48 @@ async fn changeset_written_before_plan_agent() {
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+// ── Acceptance tests for Stable session dir PRD: R2 ──────────────────────────
+
+/// plan.schema.json must not contain the `plan_dir_suggestion` property.
+///
+/// Fails until `plan_dir_suggestion` is removed from the discovery object in the schema file.
+#[test]
+fn test_plan_dir_suggestion_removed_from_schema() {
+    let schema_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/plan.schema.json");
+    let schema_content =
+        std::fs::read_to_string(&schema_path).expect("schemas/plan.schema.json should be readable");
+    assert!(
+        !schema_content.contains("plan_dir_suggestion"),
+        "plan.schema.json must not contain 'plan_dir_suggestion' property after R2 removal; \
+         found it in schema at: {}",
+        schema_path.display()
+    );
+}
+
+/// DiscoveryData round-trip (deserialize YAML without plan_dir_suggestion, re-serialize)
+/// must not produce a `plan_dir_suggestion` key in the output.
+///
+/// Fails until `plan_dir_suggestion` field is removed from `DiscoveryData` struct.
+/// Uses YAML deserialization (no struct literal) so the test compiles after removal too.
+#[test]
+fn test_discovery_data_without_plan_dir_suggestion() {
+    use tddy_core::changeset::DiscoveryData;
+
+    // Minimal YAML that does NOT include plan_dir_suggestion
+    let yaml_input = "toolchain: {}\nscripts: {}\ndoc_locations: []\nrelevant_code: []\n";
+    let discovery: DiscoveryData = serde_yaml::from_str(yaml_input)
+        .expect("DiscoveryData should deserialize when plan_dir_suggestion is absent");
+
+    // Re-serializing must not emit the plan_dir_suggestion key
+    let yaml_output =
+        serde_yaml::to_string(&discovery).expect("DiscoveryData should serialize back to YAML");
+    assert!(
+        !yaml_output.contains("plan_dir_suggestion"),
+        "serialized DiscoveryData must not contain 'plan_dir_suggestion' key after R2 removal; \
+         got YAML:\n{}",
+        yaml_output
+    );
 }

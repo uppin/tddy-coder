@@ -7,11 +7,26 @@ use crate::workflow::task::Task;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Hook-triggered elicitation: the workflow should pause for user interaction.
+/// Defined at the workflow layer to avoid coupling with presenter types.
+#[derive(Debug, Clone)]
+pub enum ElicitationEvent {
+    PlanApproval { prd_content: String },
+}
+
 /// Execution status after a step.
 #[derive(Debug, Clone)]
 pub enum ExecutionStatus {
-    Paused { message: Option<String> },
-    WaitingForInput { message: Option<String> },
+    Paused {
+        message: Option<String>,
+    },
+    WaitingForInput {
+        message: Option<String>,
+    },
+    /// Hook requested user elicitation; caller must handle event and resume.
+    ElicitationNeeded {
+        event: ElicitationEvent,
+    },
     Completed,
     Error(String),
 }

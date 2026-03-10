@@ -36,8 +36,12 @@ impl PresenterView for TuiView {
         self.view_state.on_mode_changed(mode);
     }
 
-    fn on_activity_logged(&mut self, _entry: &ActivityEntry) {
-        // No-op; activity log is in PresenterState, rendered from there
+    fn on_activity_logged(&mut self, _entry: &ActivityEntry, activity_log_len: usize) {
+        // Auto-scroll to bottom when new activity arrives.
+        // Use usize::MAX to signal "show bottom" — render clamps to max_scroll.
+        if activity_log_len > 0 {
+            self.view_state.scroll_offset = usize::MAX;
+        }
     }
 
     fn on_goal_started(&mut self, _goal: &str) {

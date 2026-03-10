@@ -36,7 +36,7 @@ mod tests {
         let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
         let output_dir = std::env::temp_dir().join("tddy-grpc-test");
         std::fs::create_dir_all(&output_dir).unwrap();
-        presenter.start_workflow(backend, output_dir, None);
+        presenter.start_workflow(backend, output_dir, None, None, false);
 
         let shutdown = AtomicBool::new(false);
         let shutdown_clone = std::sync::Arc::new(shutdown);

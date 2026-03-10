@@ -15,6 +15,7 @@ use std::sync::Arc;
 use tddy_core::changeset::read_changeset;
 use tddy_core::output::parse_green_response;
 use tddy_core::workflow::graph::ExecutionStatus;
+use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{next_goal_for_state, MockBackend, SharedBackend, StubBackend, WorkflowEngine};
 
@@ -73,6 +74,7 @@ const EVALUATE_OUTPUT_CHAIN: &str = r#"Evaluation complete.
 
 /// Full workflow chains plan -> acceptance-tests -> red -> green on a single WorkflowEngine.
 /// Uses run_workflow_from so the graph chains all steps in one run.
+/// Now expects ElicitationNeeded after plan, then resume completes the rest.
 #[tokio::test]
 async fn full_workflow_chains_all_steps() {
     let output_dir = std::env::temp_dir().join("tddy-full-workflow-chain");
@@ -90,7 +92,6 @@ async fn full_workflow_chains_all_steps() {
     backend.push_ok(EVALUATE_OUTPUT_CHAIN);
     backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
-    // 8 goals: plan, at, red, green, evaluate, validate, refactor (no demo when run_demo=false)
 
     let storage_dir = std::env::temp_dir().join("tddy-full-chain-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -102,8 +103,23 @@ async fn full_workflow_chains_all_steps() {
 
     let ctx = ctx_plan("Build auth", output_dir.clone(), None, None);
     let result = engine.run_workflow_from("plan", ctx).await.unwrap();
-    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
-    assert!(matches!(result.status, ExecutionStatus::Completed));
+
+    assert!(
+        matches!(result.status, ExecutionStatus::ElicitationNeeded { .. }),
+        "plan should trigger ElicitationNeeded, got {:?}",
+        result.status
+    );
+
+    let mut result = engine.run_session(&result.session_id).await.unwrap();
+    loop {
+        match &result.status {
+            ExecutionStatus::Completed => break,
+            ExecutionStatus::Paused { .. } => {
+                result = engine.run_session(&result.session_id).await.unwrap();
+            }
+            other => panic!("unexpected status: {:?}", other),
+        }
+    }
 
     let inv_count = backend.invocations().len();
     assert_eq!(
@@ -437,6 +453,7 @@ fn next_goal_refactor_complete_returns_none() {
 }
 
 /// AC10: plain full workflow uses a single WorkflowEngine instance.
+/// With hook-triggered elicitation: plan returns ElicitationNeeded, then resume completes.
 #[tokio::test]
 async fn plain_full_workflow_uses_single_workflow_instance() {
     let output_dir = std::env::temp_dir().join("tddy-single-instance-test");
@@ -472,7 +489,23 @@ async fn plain_full_workflow_uses_single_workflow_instance() {
     let mut ctx = ctx_plan("Build auth", output_dir.clone(), None, None);
     ctx.insert("run_demo".to_string(), serde_json::json!(true));
     let result = engine.run_workflow_from("plan", ctx).await.unwrap();
-    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
+
+    assert!(
+        matches!(result.status, ExecutionStatus::ElicitationNeeded { .. }),
+        "plan should return ElicitationNeeded, got {:?}",
+        result.status
+    );
+
+    let mut result = engine.run_session(&result.session_id).await.unwrap();
+    loop {
+        match &result.status {
+            ExecutionStatus::Completed => break,
+            ExecutionStatus::Paused { .. } => {
+                result = engine.run_session(&result.session_id).await.unwrap();
+            }
+            other => panic!("unexpected status: {:?}", other),
+        }
+    }
 
     let invocations = backend.invocations();
     assert_eq!(invocations.len(), 8);
@@ -564,6 +597,197 @@ async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
     assert_eq!(goals[7], tddy_core::Goal::Refactor);
 
     let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+// ── Hook-Triggered Elicitation acceptance tests ──────────────────────────────
+
+/// TddWorkflowHooks triggers PlanApproval after plan task when PRD.md exists.
+#[tokio::test]
+async fn tdd_hooks_elicitation_returns_plan_approval_when_prd_exists() {
+    let plan_dir = std::env::temp_dir().join("tddy-hooks-elicit-prd");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    std::fs::write(plan_dir.join("PRD.md"), "# Test PRD\n\nContent here.").expect("write PRD");
+
+    let hooks = TddWorkflowHooks::new();
+    let ctx = tddy_core::workflow::context::Context::new();
+    ctx.set_sync("plan_dir", plan_dir.clone());
+
+    let result = tddy_core::workflow::task::TaskResult {
+        task_id: "plan".to_string(),
+        response: "done".to_string(),
+        next_action: tddy_core::workflow::task::NextAction::Continue,
+        status_message: None,
+    };
+
+    let event = hooks.elicitation_after_task("plan", &ctx, &result);
+    assert!(
+        event.is_some(),
+        "elicitation_after_task should return Some when PRD.md exists"
+    );
+    if let Some(tddy_core::ElicitationEvent::PlanApproval { prd_content }) = event {
+        assert!(
+            prd_content.contains("Test PRD"),
+            "prd_content should contain PRD file contents"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// TddWorkflowHooks returns None for non-plan tasks.
+#[tokio::test]
+async fn tdd_hooks_elicitation_returns_none_for_non_plan_tasks() {
+    let plan_dir = std::env::temp_dir().join("tddy-hooks-elicit-nonplan");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    std::fs::write(plan_dir.join("PRD.md"), "# PRD").expect("write PRD");
+
+    let hooks = TddWorkflowHooks::new();
+    let ctx = tddy_core::workflow::context::Context::new();
+    ctx.set_sync("plan_dir", plan_dir.clone());
+
+    let result = tddy_core::workflow::task::TaskResult {
+        task_id: "red".to_string(),
+        response: "done".to_string(),
+        next_action: tddy_core::workflow::task::NextAction::Continue,
+        status_message: None,
+    };
+
+    assert!(
+        hooks.elicitation_after_task("red", &ctx, &result).is_none(),
+        "elicitation_after_task should return None for non-plan tasks"
+    );
+    assert!(hooks
+        .elicitation_after_task("acceptance-tests", &ctx, &result)
+        .is_none(),);
+    assert!(hooks
+        .elicitation_after_task("green", &ctx, &result)
+        .is_none(),);
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// TddWorkflowHooks returns None when PRD.md doesn't exist.
+#[tokio::test]
+async fn tdd_hooks_elicitation_returns_none_when_no_prd() {
+    let plan_dir = std::env::temp_dir().join("tddy-hooks-elicit-noprd");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+
+    let hooks = TddWorkflowHooks::new();
+    let ctx = tddy_core::workflow::context::Context::new();
+    ctx.set_sync("plan_dir", plan_dir.clone());
+
+    let result = tddy_core::workflow::task::TaskResult {
+        task_id: "plan".to_string(),
+        response: "done".to_string(),
+        next_action: tddy_core::workflow::task::NextAction::Continue,
+        status_message: None,
+    };
+
+    assert!(
+        hooks
+            .elicitation_after_task("plan", &ctx, &result)
+            .is_none(),
+        "elicitation_after_task should return None when PRD.md doesn't exist"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// Full workflow with TddWorkflowHooks: engine returns ElicitationNeeded after plan.
+#[tokio::test]
+async fn full_workflow_returns_elicitation_needed_after_plan() {
+    let output_dir = std::env::temp_dir().join("tddy-full-wf-elicit");
+    let _ = std::fs::remove_dir_all(&output_dir);
+    std::fs::create_dir_all(&output_dir).expect("create output dir");
+
+    let backend = Arc::new(MockBackend::new());
+    backend.push_ok(PLAN_OUTPUT);
+
+    let storage_dir = std::env::temp_dir().join("tddy-full-elicit-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir.clone(),
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_plan("Build auth", output_dir.clone(), None, None);
+    let result = engine.run_workflow_from("plan", ctx).await.unwrap();
+
+    assert!(
+        matches!(result.status, ExecutionStatus::ElicitationNeeded { .. }),
+        "full workflow should return ElicitationNeeded after plan, got {:?}",
+        result.status
+    );
+
+    if let ExecutionStatus::ElicitationNeeded { ref event } = result.status {
+        match event {
+            tddy_core::ElicitationEvent::PlanApproval { ref prd_content } => {
+                assert!(!prd_content.is_empty(), "prd_content should not be empty");
+            }
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&output_dir);
+    let _ = std::fs::remove_dir_all(&storage_dir);
+}
+
+/// Full workflow: after ElicitationNeeded, caller can resume and workflow continues.
+#[tokio::test]
+async fn full_workflow_resumes_after_elicitation_approval() {
+    let output_dir = std::env::temp_dir().join("tddy-full-wf-elicit-resume");
+    let _ = std::fs::remove_dir_all(&output_dir);
+    std::fs::create_dir_all(&output_dir).expect("create output dir");
+
+    let backend = Arc::new(MockBackend::new());
+    backend.push_ok(PLAN_OUTPUT);
+    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+    backend.push_ok(RED_OUTPUT);
+    backend.push_ok(GREEN_OUTPUT_ALL_PASS);
+    backend.push_ok(EVALUATE_OUTPUT_CHAIN);
+    backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+
+    let storage_dir = std::env::temp_dir().join("tddy-full-elicit-resume-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir.clone(),
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_plan("Build auth", output_dir.clone(), None, None);
+    let result = engine.run_workflow_from("plan", ctx).await.unwrap();
+    assert!(
+        matches!(result.status, ExecutionStatus::ElicitationNeeded { .. }),
+        "first call should return ElicitationNeeded"
+    );
+
+    let mut result = engine.run_session(&result.session_id).await.unwrap();
+    loop {
+        match &result.status {
+            ExecutionStatus::Completed => break,
+            ExecutionStatus::ElicitationNeeded { .. } | ExecutionStatus::WaitingForInput { .. } => {
+                panic!("unexpected status after resume: {:?}", result.status);
+            }
+            ExecutionStatus::Error(e) => panic!("unexpected error: {}", e),
+            ExecutionStatus::Paused { .. } => {
+                result = engine.run_session(&result.session_id).await.unwrap();
+            }
+        }
+    }
+
+    assert_eq!(
+        backend.invocations().len(),
+        7,
+        "plan+at+red+green+evaluate+validate+refactor"
+    );
+
+    let _ = std::fs::remove_dir_all(&output_dir);
+    let _ = std::fs::remove_dir_all(&storage_dir);
 }
 
 /// Phase 5: Full workflow with skipped demo still includes validate and refactor.

@@ -303,6 +303,7 @@ pub async fn run_goal_until_done(
         match &result.status {
             ExecutionStatus::Completed | ExecutionStatus::Error(_) => return Ok(result),
             ExecutionStatus::WaitingForInput { .. } => return Ok(result),
+            ExecutionStatus::ElicitationNeeded { .. } => return Ok(result),
             ExecutionStatus::Paused { .. } => {
                 result = engine.run_session(&result.session_id).await?;
             }

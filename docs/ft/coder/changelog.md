@@ -2,6 +2,20 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-10 — Hook-Triggered Elicitation
+
+- **Orchestrator pause**: Hooks can signal elicitation via `RunnerHooks::elicitation_after_task`. When a hook returns `Some(ElicitationEvent)`, the orchestrator returns `ExecutionStatus::ElicitationNeeded` to the caller instead of auto-continuing to the next task.
+- **Plan approval gate fix**: `TddWorkflowHooks` implements elicitation for the plan task (returns `PlanApproval` when PRD.md exists). This fixes the plan approval gate not appearing; previously the orchestrator never returned control between tasks.
+- **Caller handling**: `workflow_runner` (TUI) and `run.rs` (plain mode) handle `ElicitationNeeded` in their main loops; present approval UI; resume with user choice. Removed ~400 lines of redundant plan approval loops.
+- **Packages**: tddy-core (ElicitationEvent, ExecutionStatus::ElicitationNeeded, RunnerHooks::elicitation_after_task, FlowRunner, WorkflowEngine), tddy-coder (run.rs ElicitationNeeded handlers).
+
+## 2026-03-10 — Stable Session Directory
+
+- **Default output location**: When `--output-dir` is omitted, planning output goes to `$HOME/.tddy/sessions/{uuid}/` instead of the current directory. Each session gets a unique UUID subdirectory.
+- **Explicit output-dir**: When `--output-dir` is provided, output goes to `{path}/YYYY-MM-DD-slug/` as before.
+- **Discovery**: Removed `plan_dir_suggestion` from schema; planning prompt uses `name` (human-readable changeset name) instead.
+- **Packages**: tddy-core (create_session_dir_in, SESSIONS_SUBDIR, PlanTask session_base), tddy-coder (run.rs output_dir handling).
+
 ## 2026-03-10 — Plan Approval Gate
 
 - **Plan approval gate**: After the plan step completes, the user sees a 3-option menu: View (full-screen PRD modal), Approve (proceed to acceptance-tests), or Refine (free-text feedback that resumes the LLM session).

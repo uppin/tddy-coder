@@ -914,3 +914,82 @@ artifacts: {}
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
+
+// ── Acceptance tests for Stable session dir PRD: R1, R4 ──────────────────────
+
+/// Running `tddy-coder --goal plan` WITHOUT `--output-dir` creates the session directory under
+/// `$HOME/.tddy/sessions/{uuid}/` and writes changeset.yaml there.
+///
+/// Fails until the plan goal generates a session dir from $HOME/.tddy instead of requiring
+/// --output-dir and creating a YYYY-MM-DD-slug subdirectory.
+#[test]
+#[cfg(unix)]
+fn test_plan_goal_cli_creates_session_under_home_tddy() {
+    let tmp = std::env::temp_dir().join("tddy-cli-session-dir-home-test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).expect("create tmp");
+
+    create_fake_claude_prd_only(&tmp).expect("create fake claude");
+
+    // Use a controlled fake HOME so we do not pollute the real ~/.tddy
+    let fake_home = tmp.join("fake-home");
+    std::fs::create_dir_all(&fake_home).expect("create fake home");
+
+    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .env("PATH", tmp_path.to_str().unwrap())
+        .env("HOME", fake_home.to_str().unwrap())
+        .args(["--goal", "plan", "--prompt", "Build auth feature"])
+        .write_stdin("a\n");
+
+    let output = cmd.output().expect("run tddy-coder");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "plan without --output-dir should succeed and place session under $HOME/.tddy/sessions/; \
+         stdout={} stderr={}",
+        stdout,
+        stderr
+    );
+
+    // $HOME/.tddy/sessions/ must have been created
+    let sessions_dir = fake_home.join(".tddy").join("sessions");
+    assert!(
+        sessions_dir.exists(),
+        "$HOME/.tddy/sessions/ should have been created at {}, but it does not exist",
+        sessions_dir.display()
+    );
+
+    // Exactly one UUID-named subdirectory should exist inside sessions/
+    let entries: Vec<_> = std::fs::read_dir(&sessions_dir)
+        .expect("read sessions dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "exactly one session dir should be created under {}/sessions/, got: {:?}",
+        fake_home.join(".tddy").display(),
+        entries.iter().map(|e| e.path()).collect::<Vec<_>>()
+    );
+
+    let session_dir = entries[0].path();
+    let uuid_part = session_dir.file_name().unwrap().to_str().unwrap();
+    assert_eq!(
+        uuid_part.len(),
+        36,
+        "session dir name should be a 36-char UUID, got: {}",
+        uuid_part
+    );
+    assert!(
+        session_dir.join("changeset.yaml").exists(),
+        "changeset.yaml should be in session dir: {}",
+        session_dir.display()
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

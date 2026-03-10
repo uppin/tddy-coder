@@ -2,16 +2,100 @@
 //!
 //! Uses WorkflowEngine + FlowRunner with TddWorkflowHooks (event_tx) for TUI integration.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Directory name for TUI workflow session storage under temp.
+const TUI_SESSION_DIR: &str = "tddy-flowrunner-tui-session";
 use std::sync::mpsc;
 
-use crate::workflow::graph::ExecutionStatus;
+use crate::workflow::graph::{ElicitationEvent, ExecutionResult, ExecutionStatus};
 use crate::{
     get_session_for_tag, next_goal_for_state, parse_refactor_response, read_changeset,
     ClarificationQuestion, SharedBackend, WorkflowEngine,
 };
 
 use super::WorkflowEvent;
+
+/// Context for elicitation (plan approval, refinement). Groups parameters passed to handle_elicitation.
+struct ElicitationContext<'a> {
+    event_tx: &'a mpsc::Sender<WorkflowEvent>,
+    answer_rx: &'a mpsc::Receiver<String>,
+    rt: &'a tokio::runtime::Runtime,
+    backend: &'a SharedBackend,
+    model: &'a Option<String>,
+    inherit_stdin: bool,
+    conversation_output_path: &'a Option<PathBuf>,
+    debug: bool,
+}
+
+/// Loop on WaitingForInput until status is Completed, Paused, or ElicitationNeeded.
+/// Returns Ok(result) or Err(()) if the caller should return.
+fn run_until_not_waiting_for_input(
+    rt: &tokio::runtime::Runtime,
+    engine: &WorkflowEngine,
+    mut result: ExecutionResult,
+    event_tx: &mpsc::Sender<WorkflowEvent>,
+    answer_rx: &mpsc::Receiver<String>,
+) -> Result<ExecutionResult, ()> {
+    loop {
+        match &result.status {
+            ExecutionStatus::Completed
+            | ExecutionStatus::Paused { .. }
+            | ExecutionStatus::ElicitationNeeded { .. } => return Ok(result),
+            ExecutionStatus::WaitingForInput { .. } => {
+                result = handle_clarification_round(rt, engine, &result, event_tx, answer_rx)?;
+            }
+            ExecutionStatus::Error(msg) => {
+                let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(msg.clone())));
+                return Err(());
+            }
+        }
+    }
+}
+
+/// Handle one round of WaitingForInput: get session, send questions, receive answers,
+/// update context, run session. Returns the new result or Err(()) if the caller should return.
+fn handle_clarification_round(
+    rt: &tokio::runtime::Runtime,
+    engine: &WorkflowEngine,
+    result: &ExecutionResult,
+    event_tx: &mpsc::Sender<WorkflowEvent>,
+    answer_rx: &mpsc::Receiver<String>,
+) -> Result<ExecutionResult, ()> {
+    let session = match rt.block_on(engine.get_session(&result.session_id)) {
+        Ok(Some(s)) => s,
+        _ => {
+            let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
+                "session not found".into()
+            )));
+            return Err(());
+        }
+    };
+    let questions: Vec<ClarificationQuestion> = session
+        .context
+        .get_sync("pending_questions")
+        .unwrap_or_default();
+    let _ = event_tx.send(WorkflowEvent::ClarificationNeeded { questions });
+    let answers = match answer_rx.recv() {
+        Ok(a) => a,
+        Err(_) => return Err(()),
+    };
+    let mut updates = std::collections::HashMap::new();
+    updates.insert("answers".to_string(), serde_json::json!(answers));
+    if rt
+        .block_on(engine.update_session_context(&result.session_id, updates))
+        .is_err()
+    {
+        return Err(());
+    }
+    match rt.block_on(engine.run_session(&result.session_id)) {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
+            Err(())
+        }
+    }
+}
 
 fn demo_question() -> ClarificationQuestion {
     ClarificationQuestion {
@@ -32,7 +116,246 @@ fn demo_question() -> ClarificationQuestion {
     }
 }
 
+/// Handle an ElicitationNeeded result: show approval UI, handle refinement loop.
+/// Returns once the user approves the plan.
+fn handle_elicitation(
+    event: &ElicitationEvent,
+    plan_dir: &Path,
+    ctx: &ElicitationContext<'_>,
+) -> bool {
+    match event {
+        ElicitationEvent::PlanApproval { ref prd_content } => {
+            let mut current_prd = prd_content.clone();
+            loop {
+                if ctx
+                    .event_tx
+                    .send(WorkflowEvent::PlanApprovalNeeded {
+                        prd_content: current_prd.clone(),
+                    })
+                    .is_err()
+                {
+                    return false;
+                }
+                let answer = match ctx.answer_rx.recv() {
+                    Ok(a) => a,
+                    Err(_) => return false,
+                };
+                if answer.eq_ignore_ascii_case("approve") {
+                    return true;
+                }
+                let feature_input = read_changeset(plan_dir)
+                    .ok()
+                    .and_then(|c| c.initial_prompt.clone())
+                    .unwrap_or_else(|| "feature".to_string());
+                let session_id_for_refine = read_changeset(plan_dir)
+                    .ok()
+                    .and_then(|c| get_session_for_tag(&c, "plan"));
+                let output_dir_refine = plan_dir
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| plan_dir.to_path_buf());
+                let refine_storage = std::env::temp_dir().join("tddy-flowrunner-refine-session");
+                std::fs::create_dir_all(&refine_storage).ok();
+                let refine_hooks = std::sync::Arc::new(
+                    crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(
+                        ctx.event_tx.clone(),
+                    ),
+                );
+                let refine_engine =
+                    WorkflowEngine::new(ctx.backend.clone(), refine_storage, Some(refine_hooks));
+                let mut refine_ctx = std::collections::HashMap::new();
+                refine_ctx.insert(
+                    "feature_input".to_string(),
+                    serde_json::json!(feature_input),
+                );
+                refine_ctx.insert(
+                    "output_dir".to_string(),
+                    serde_json::to_value(&output_dir_refine).unwrap(),
+                );
+                refine_ctx.insert(
+                    "plan_dir".to_string(),
+                    serde_json::to_value(plan_dir).unwrap(),
+                );
+                refine_ctx.insert("refinement_feedback".to_string(), serde_json::json!(answer));
+                refine_ctx.insert(
+                    "model".to_string(),
+                    serde_json::to_value(ctx.model.clone().unwrap_or_default()).unwrap(),
+                );
+                refine_ctx.insert("agent_output".to_string(), serde_json::json!(true));
+                refine_ctx.insert(
+                    "inherit_stdin".to_string(),
+                    serde_json::json!(ctx.inherit_stdin),
+                );
+                refine_ctx.insert(
+                    "conversation_output_path".to_string(),
+                    serde_json::to_value(ctx.conversation_output_path.clone()).unwrap(),
+                );
+                refine_ctx.insert("debug".to_string(), serde_json::json!(ctx.debug));
+                if let Some(sid) = session_id_for_refine {
+                    refine_ctx.insert("session_id".to_string(), serde_json::json!(sid));
+                }
+                let mut refine_result =
+                    match ctx.rt.block_on(refine_engine.run_goal("plan", refine_ctx)) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let _ = ctx
+                                .event_tx
+                                .send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
+                            return false;
+                        }
+                    };
+                loop {
+                    match &refine_result.status {
+                        ExecutionStatus::Completed
+                        | ExecutionStatus::Paused { .. }
+                        | ExecutionStatus::ElicitationNeeded { .. } => break,
+                        ExecutionStatus::WaitingForInput { .. } => {
+                            refine_result = match handle_clarification_round(
+                                ctx.rt,
+                                &refine_engine,
+                                &refine_result,
+                                ctx.event_tx,
+                                ctx.answer_rx,
+                            ) {
+                                Ok(r) => r,
+                                Err(()) => return false,
+                            };
+                        }
+                        ExecutionStatus::Error(msg) => {
+                            let _ = ctx
+                                .event_tx
+                                .send(WorkflowEvent::WorkflowComplete(Err(msg.clone())));
+                            return false;
+                        }
+                    }
+                }
+                current_prd = std::fs::read_to_string(plan_dir.join("PRD.md"))
+                    .unwrap_or_else(|_| "Could not read PRD.md".to_string());
+            }
+        }
+    }
+}
+
+/// Run plan goal when output_dir is omitted (or "."). Creates session under ~/.tddy/sessions.
+/// Returns Some(plan_dir) on success, None when the caller should return.
+#[allow(clippy::too_many_arguments)]
+fn run_plan_without_output_dir(
+    backend: &SharedBackend,
+    event_tx: &mpsc::Sender<WorkflowEvent>,
+    answer_rx: &mpsc::Receiver<String>,
+    output_dir: &Path,
+    input: &str,
+    model: &Option<String>,
+    conversation_output_path: &Option<PathBuf>,
+    debug: bool,
+) -> Option<PathBuf> {
+    let inherit_stdin = true;
+    let (output_dir_for_ctx, session_base_opt) = if output_dir == Path::new(".") {
+        #[cfg(unix)]
+        {
+            let home = match std::env::var("HOME") {
+                Ok(h) => PathBuf::from(h).join(".tddy"),
+                Err(_) => {
+                    let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
+                        "HOME not set; cannot create session under ~/.tddy".into(),
+                    )));
+                    return None;
+                }
+            };
+            let agent_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            (agent_cwd, Some(home))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
+                "plan without --output-dir requires Unix (HOME); use --output-dir <path>".into(),
+            )));
+            return None;
+        }
+    } else {
+        (output_dir.to_path_buf(), None)
+    };
+
+    let storage_dir = std::env::temp_dir().join(TUI_SESSION_DIR);
+    std::fs::create_dir_all(&storage_dir).ok();
+    let hooks = std::sync::Arc::new(crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(
+        event_tx.clone(),
+    ));
+    let engine = WorkflowEngine::new(backend.clone(), storage_dir, Some(hooks));
+    let mut context_values = std::collections::HashMap::new();
+    context_values.insert("feature_input".to_string(), serde_json::json!(input));
+    context_values.insert(
+        "output_dir".to_string(),
+        serde_json::to_value(output_dir_for_ctx).unwrap(),
+    );
+    if let Some(ref base) = session_base_opt {
+        context_values.insert(
+            "session_base".to_string(),
+            serde_json::to_value(base).unwrap(),
+        );
+    }
+    context_values.insert(
+        "model".to_string(),
+        serde_json::to_value(model.clone()).unwrap(),
+    );
+    context_values.insert("agent_output".to_string(), serde_json::json!(true));
+    context_values.insert(
+        "inherit_stdin".to_string(),
+        serde_json::json!(inherit_stdin),
+    );
+    context_values.insert(
+        "conversation_output_path".to_string(),
+        serde_json::to_value(conversation_output_path.clone()).unwrap(),
+    );
+    context_values.insert("debug".to_string(), serde_json::json!(debug));
+    context_values.insert("run_demo".to_string(), serde_json::json!(false));
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+
+    let result = match rt.block_on(engine.run_full_workflow(context_values)) {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
+            return None;
+        }
+    };
+
+    let result = match run_until_not_waiting_for_input(&rt, &engine, result, event_tx, answer_rx) {
+        Ok(r) => r,
+        Err(()) => return None,
+    };
+
+    let plan_dir = rt
+        .block_on(engine.get_session(&result.session_id))
+        .ok()
+        .flatten()
+        .and_then(|s| s.context.get_sync::<PathBuf>("plan_dir"))
+        .unwrap_or_else(|| output_dir.join(crate::output::slugify_directory_name(input)));
+
+    if let ExecutionStatus::ElicitationNeeded { ref event } = result.status {
+        let elicitation_ctx = ElicitationContext {
+            event_tx,
+            answer_rx,
+            rt: &rt,
+            backend,
+            model,
+            inherit_stdin,
+            conversation_output_path,
+            debug,
+        };
+        if !handle_elicitation(event, &plan_dir, &elicitation_ctx) {
+            return None;
+        }
+    }
+
+    Some(plan_dir)
+}
+
 /// Run the full workflow in a blocking thread. Sends events to event_tx, receives answers from answer_rx.
+#[allow(clippy::too_many_arguments)]
 pub fn run_workflow(
     backend: SharedBackend,
     event_tx: mpsc::Sender<WorkflowEvent>,
@@ -41,9 +364,10 @@ pub fn run_workflow(
     plan_dir: Option<PathBuf>,
     model: Option<String>,
     initial_prompt: Option<String>,
+    conversation_output_path: Option<PathBuf>,
+    debug: bool,
 ) {
     let inherit_stdin = true;
-    let debug = false;
 
     let plan_dir = match plan_dir {
         Some(p) => p,
@@ -62,217 +386,19 @@ pub fn run_workflow(
                 )));
                 return;
             }
-            let plan_dir = output_dir.join(crate::output::slugify_directory_name(&input));
-            std::fs::create_dir_all(&plan_dir).ok();
-            let storage_dir = std::env::temp_dir().join("tddy-flowrunner-tui-session");
-            std::fs::create_dir_all(&storage_dir).ok();
-            let hooks = std::sync::Arc::new(
-                crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(event_tx.clone()),
-            );
-            let engine = WorkflowEngine::new(backend.clone(), storage_dir, Some(hooks));
-            let mut context_values = std::collections::HashMap::new();
-            context_values.insert("feature_input".to_string(), serde_json::json!(input));
-            // output_dir = repo root (parent of plan_dir) so agent can discover Cargo.toml, packages/, etc.
-            context_values.insert(
-                "output_dir".to_string(),
-                serde_json::to_value(output_dir.clone()).unwrap(),
-            );
-            context_values.insert(
-                "plan_dir".to_string(),
-                serde_json::to_value(plan_dir.clone()).unwrap(),
-            );
-            context_values.insert(
-                "model".to_string(),
-                serde_json::to_value(model.clone()).unwrap(),
-            );
-            context_values.insert("agent_output".to_string(), serde_json::json!(true));
-            context_values.insert(
-                "inherit_stdin".to_string(),
-                serde_json::json!(inherit_stdin),
-            );
-            context_values.insert("debug".to_string(), serde_json::json!(debug));
-            context_values.insert("run_demo".to_string(), serde_json::json!(false));
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime");
-            let mut result = match rt.block_on(engine.run_full_workflow(context_values)) {
-                Ok(r) => r,
-                Err(e) => {
-                    let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
-                    return;
-                }
-            };
-            loop {
-                match &result.status {
-                    ExecutionStatus::Completed | ExecutionStatus::Paused { .. } => break,
-                    ExecutionStatus::WaitingForInput { .. } => {
-                        let session = match rt.block_on(engine.get_session(&result.session_id)) {
-                            Ok(Some(s)) => s,
-                            _ => {
-                                let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
-                                    "session not found".into(),
-                                )));
-                                return;
-                            }
-                        };
-                        let questions: Vec<ClarificationQuestion> = session
-                            .context
-                            .get_sync("pending_questions")
-                            .unwrap_or_default();
-                        let _ = event_tx.send(WorkflowEvent::ClarificationNeeded { questions });
-                        let answers = match answer_rx.recv() {
-                            Ok(a) => a,
-                            Err(_) => return,
-                        };
-                        let mut updates = std::collections::HashMap::new();
-                        updates.insert("answers".to_string(), serde_json::json!(answers));
-                        if rt
-                            .block_on(engine.update_session_context(&result.session_id, updates))
-                            .is_err()
-                        {
-                            return;
-                        }
-                        result = match rt.block_on(engine.run_session(&result.session_id)) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                let _ = event_tx
-                                    .send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
-                                return;
-                            }
-                        };
-                    }
-                    ExecutionStatus::Error(msg) => {
-                        let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(msg.clone())));
-                        return;
-                    }
-                }
+            match run_plan_without_output_dir(
+                &backend,
+                &event_tx,
+                &answer_rx,
+                &output_dir,
+                &input,
+                &model,
+                &conversation_output_path,
+                debug,
+            ) {
+                Some(p) => p,
+                None => return,
             }
-            // Plan approval gate after initial plan completion.
-            loop {
-                if !plan_dir.join("PRD.md").exists() {
-                    break;
-                }
-                let prd_content = std::fs::read_to_string(plan_dir.join("PRD.md"))
-                    .unwrap_or_else(|_| "Could not read PRD.md".to_string());
-                if event_tx
-                    .send(WorkflowEvent::PlanApprovalNeeded { prd_content })
-                    .is_err()
-                {
-                    return;
-                }
-                let answer = match answer_rx.recv() {
-                    Ok(a) => a,
-                    Err(_) => return,
-                };
-                if answer.eq_ignore_ascii_case("approve") {
-                    break;
-                }
-                // Refinement: run plan again.
-                let storage_dir = std::env::temp_dir().join("tddy-flowrunner-tui-session");
-                let hooks = std::sync::Arc::new(
-                    crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(event_tx.clone()),
-                );
-                let refine_engine = WorkflowEngine::new(backend.clone(), storage_dir, Some(hooks));
-                let output_dir = plan_dir
-                    .parent()
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|| plan_dir.clone());
-                let input = input.clone();
-                let mut refine_ctx = std::collections::HashMap::new();
-                refine_ctx.insert("feature_input".to_string(), serde_json::json!(input));
-                refine_ctx.insert(
-                    "output_dir".to_string(),
-                    serde_json::to_value(&output_dir).unwrap(),
-                );
-                refine_ctx.insert(
-                    "plan_dir".to_string(),
-                    serde_json::to_value(plan_dir.clone()).unwrap(),
-                );
-                refine_ctx.insert("refinement_feedback".to_string(), serde_json::json!(answer));
-                refine_ctx.insert(
-                    "model".to_string(),
-                    serde_json::to_value(model.clone().unwrap_or_default()).unwrap(),
-                );
-                refine_ctx.insert("agent_output".to_string(), serde_json::json!(true));
-                refine_ctx.insert(
-                    "inherit_stdin".to_string(),
-                    serde_json::json!(inherit_stdin),
-                );
-                refine_ctx.insert("debug".to_string(), serde_json::json!(debug));
-                if let Ok(cs) = read_changeset(&plan_dir) {
-                    if let Some(sid) = get_session_for_tag(&cs, "plan") {
-                        refine_ctx.insert("session_id".to_string(), serde_json::json!(sid));
-                    }
-                }
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("tokio runtime");
-                let mut refine_result = match rt
-                    .block_on(refine_engine.run_goal("plan", refine_ctx))
-                {
-                    Ok(r) => r,
-                    Err(e) => {
-                        let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
-                        return;
-                    }
-                };
-                loop {
-                    match &refine_result.status {
-                        ExecutionStatus::Completed | ExecutionStatus::Paused { .. } => break,
-                        ExecutionStatus::WaitingForInput { .. } => {
-                            let session = match rt
-                                .block_on(refine_engine.get_session(&refine_result.session_id))
-                            {
-                                Ok(Some(s)) => s,
-                                _ => {
-                                    let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
-                                        "session not found".into(),
-                                    )));
-                                    return;
-                                }
-                            };
-                            let questions: Vec<ClarificationQuestion> = session
-                                .context
-                                .get_sync("pending_questions")
-                                .unwrap_or_default();
-                            let _ = event_tx.send(WorkflowEvent::ClarificationNeeded { questions });
-                            let answers = match answer_rx.recv() {
-                                Ok(a) => a,
-                                Err(_) => return,
-                            };
-                            let mut updates = std::collections::HashMap::new();
-                            updates.insert("answers".to_string(), serde_json::json!(answers));
-                            if rt
-                                .block_on(
-                                    refine_engine
-                                        .update_session_context(&refine_result.session_id, updates),
-                                )
-                                .is_err()
-                            {
-                                return;
-                            }
-                            refine_result = match rt
-                                .block_on(refine_engine.run_session(&refine_result.session_id))
-                            {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    let _ = event_tx
-                                        .send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
-                                    return;
-                                }
-                            };
-                        }
-                        ExecutionStatus::Error(msg) => {
-                            let _ =
-                                event_tx.send(WorkflowEvent::WorkflowComplete(Err(msg.clone())));
-                            return;
-                        }
-                    }
-                }
-            }
-            plan_dir
         }
     };
 
@@ -289,7 +415,7 @@ pub fn run_workflow(
             .trim()
             .to_string();
         if !input.is_empty() {
-            let storage_dir = std::env::temp_dir().join("tddy-flowrunner-tui-session");
+            let storage_dir = std::env::temp_dir().join(TUI_SESSION_DIR);
             let hooks = std::sync::Arc::new(
                 crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(event_tx.clone()),
             );
@@ -317,186 +443,41 @@ pub fn run_workflow(
                 "inherit_stdin".to_string(),
                 serde_json::json!(inherit_stdin),
             );
+            ctx.insert(
+                "conversation_output_path".to_string(),
+                serde_json::to_value(conversation_output_path.clone()).unwrap(),
+            );
             ctx.insert("debug".to_string(), serde_json::json!(debug));
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("tokio runtime");
-            let mut result = match rt.block_on(engine.run_goal("plan", ctx)) {
+            let result = match rt.block_on(engine.run_goal("plan", ctx)) {
                 Ok(r) => r,
                 Err(e) => {
                     let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
                     return;
                 }
             };
-            loop {
-                match &result.status {
-                    ExecutionStatus::Completed | ExecutionStatus::Paused { .. } => break,
-                    ExecutionStatus::WaitingForInput { .. } => {
-                        let session = match rt.block_on(engine.get_session(&result.session_id)) {
-                            Ok(Some(s)) => s,
-                            _ => return,
-                        };
-                        let questions: Vec<ClarificationQuestion> = session
-                            .context
-                            .get_sync("pending_questions")
-                            .unwrap_or_default();
-                        let _ = event_tx.send(WorkflowEvent::ClarificationNeeded { questions });
-                        let answers = match answer_rx.recv() {
-                            Ok(a) => a,
-                            Err(_) => return,
-                        };
-                        let mut updates = std::collections::HashMap::new();
-                        updates.insert("answers".to_string(), serde_json::json!(answers));
-                        if rt
-                            .block_on(engine.update_session_context(&result.session_id, updates))
-                            .is_err()
-                        {
-                            return;
-                        }
-                        result = match rt.block_on(engine.run_session(&result.session_id)) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                let _ = event_tx
-                                    .send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
-                                return;
-                            }
-                        };
-                    }
-                    ExecutionStatus::Error(msg) => {
-                        let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(msg.clone())));
-                        return;
-                    }
-                }
-            }
-            // Plan approval gate after plan_needs_completion.
-            loop {
-                if !plan_dir.join("PRD.md").exists() {
-                    break;
-                }
-                let prd_content = std::fs::read_to_string(plan_dir.join("PRD.md"))
-                    .unwrap_or_else(|_| "Could not read PRD.md".to_string());
-                if event_tx
-                    .send(WorkflowEvent::PlanApprovalNeeded { prd_content })
-                    .is_err()
-                {
+            let result = match run_until_not_waiting_for_input(
+                &rt, &engine, result, &event_tx, &answer_rx,
+            ) {
+                Ok(r) => r,
+                Err(()) => return,
+            };
+            if let ExecutionStatus::ElicitationNeeded { ref event } = result.status {
+                let elicitation_ctx = ElicitationContext {
+                    event_tx: &event_tx,
+                    answer_rx: &answer_rx,
+                    rt: &rt,
+                    backend: &backend,
+                    model: &model,
+                    inherit_stdin,
+                    conversation_output_path: &conversation_output_path,
+                    debug,
+                };
+                if !handle_elicitation(event, &plan_dir, &elicitation_ctx) {
                     return;
-                }
-                let answer = match answer_rx.recv() {
-                    Ok(a) => a,
-                    Err(_) => return,
-                };
-                if answer.eq_ignore_ascii_case("approve") {
-                    break;
-                }
-                // Refinement: run plan again.
-                let feature_input = read_changeset(&plan_dir)
-                    .ok()
-                    .and_then(|c| c.initial_prompt.clone())
-                    .unwrap_or_else(|| "feature".to_string());
-                let session_id = read_changeset(&plan_dir)
-                    .ok()
-                    .and_then(|c| get_session_for_tag(&c, "plan"));
-                let output_dir = plan_dir
-                    .parent()
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|| plan_dir.clone());
-                let refine_storage =
-                    std::env::temp_dir().join("tddy-flowrunner-refine-resume-session");
-                std::fs::create_dir_all(&refine_storage).ok();
-                let refine_hooks = std::sync::Arc::new(
-                    crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(event_tx.clone()),
-                );
-                let refine_engine =
-                    WorkflowEngine::new(backend.clone(), refine_storage, Some(refine_hooks));
-                let mut refine_ctx = std::collections::HashMap::new();
-                refine_ctx.insert(
-                    "feature_input".to_string(),
-                    serde_json::json!(feature_input),
-                );
-                refine_ctx.insert(
-                    "output_dir".to_string(),
-                    serde_json::to_value(&output_dir).unwrap(),
-                );
-                refine_ctx.insert(
-                    "plan_dir".to_string(),
-                    serde_json::to_value(plan_dir.clone()).unwrap(),
-                );
-                refine_ctx.insert("refinement_feedback".to_string(), serde_json::json!(answer));
-                refine_ctx.insert(
-                    "model".to_string(),
-                    serde_json::to_value(model.clone().unwrap_or_default()).unwrap(),
-                );
-                refine_ctx.insert("agent_output".to_string(), serde_json::json!(true));
-                refine_ctx.insert(
-                    "inherit_stdin".to_string(),
-                    serde_json::json!(inherit_stdin),
-                );
-                refine_ctx.insert("debug".to_string(), serde_json::json!(debug));
-                if let Some(sid) = session_id {
-                    refine_ctx.insert("session_id".to_string(), serde_json::json!(sid));
-                }
-                let mut refine_result = match rt
-                    .block_on(refine_engine.run_goal("plan", refine_ctx))
-                {
-                    Ok(r) => r,
-                    Err(e) => {
-                        let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
-                        return;
-                    }
-                };
-                loop {
-                    match &refine_result.status {
-                        ExecutionStatus::Completed | ExecutionStatus::Paused { .. } => break,
-                        ExecutionStatus::WaitingForInput { .. } => {
-                            let session = match rt
-                                .block_on(refine_engine.get_session(&refine_result.session_id))
-                            {
-                                Ok(Some(s)) => s,
-                                _ => {
-                                    let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
-                                        "session not found".into(),
-                                    )));
-                                    return;
-                                }
-                            };
-                            let questions: Vec<ClarificationQuestion> = session
-                                .context
-                                .get_sync("pending_questions")
-                                .unwrap_or_default();
-                            let _ = event_tx.send(WorkflowEvent::ClarificationNeeded { questions });
-                            let answers = match answer_rx.recv() {
-                                Ok(a) => a,
-                                Err(_) => return,
-                            };
-                            let mut updates = std::collections::HashMap::new();
-                            updates.insert("answers".to_string(), serde_json::json!(answers));
-                            if rt
-                                .block_on(
-                                    refine_engine
-                                        .update_session_context(&refine_result.session_id, updates),
-                                )
-                                .is_err()
-                            {
-                                return;
-                            }
-                            refine_result = match rt
-                                .block_on(refine_engine.run_session(&refine_result.session_id))
-                            {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    let _ = event_tx
-                                        .send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
-                                    return;
-                                }
-                            };
-                        }
-                        ExecutionStatus::Error(msg) => {
-                            let _ =
-                                event_tx.send(WorkflowEvent::WorkflowComplete(Err(msg.clone())));
-                            return;
-                        }
-                    }
                 }
             }
         }
@@ -512,7 +493,7 @@ pub fn run_workflow(
         .and_then(|c| next_goal_for_state(&c.state.current))
         .unwrap_or("plan");
 
-    let storage_dir = std::env::temp_dir().join("tddy-flowrunner-tui-session");
+    let storage_dir = std::env::temp_dir().join(TUI_SESSION_DIR);
     std::fs::create_dir_all(&storage_dir).ok();
     let hooks = std::sync::Arc::new(crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(
         event_tx.clone(),
@@ -537,6 +518,10 @@ pub fn run_workflow(
     context_values.insert(
         "inherit_stdin".to_string(),
         serde_json::json!(inherit_stdin),
+    );
+    context_values.insert(
+        "conversation_output_path".to_string(),
+        serde_json::to_value(conversation_output_path.clone()).unwrap(),
     );
     context_values.insert("debug".to_string(), serde_json::json!(debug));
     context_values.insert("run_demo".to_string(), serde_json::json!(run_demo));
@@ -584,157 +569,33 @@ pub fn run_workflow(
                 let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Ok(summary)));
                 return;
             }
+            ExecutionStatus::ElicitationNeeded { ref event } => {
+                let elicitation_ctx = ElicitationContext {
+                    event_tx: &event_tx,
+                    answer_rx: &answer_rx,
+                    rt: &rt,
+                    backend: &backend_for_refine,
+                    model: &model,
+                    inherit_stdin,
+                    conversation_output_path: &conversation_output_path,
+                    debug,
+                };
+                if !handle_elicitation(event, &plan_dir, &elicitation_ctx) {
+                    return;
+                }
+                result = match rt.block_on(engine.run_session(&result.session_id)) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
+                        return;
+                    }
+                };
+            }
             ExecutionStatus::Paused { .. } => {
                 let current_state = read_changeset(&plan_dir)
                     .ok()
                     .map(|c| c.state.current)
                     .unwrap_or_default();
-                let current_task = result.current_task_id.as_deref().unwrap_or_default();
-
-                // Plan approval gate: when we've just completed plan (state Planned, about to run acceptance-tests).
-                if current_state == "Planned"
-                    && current_task == "acceptance-tests"
-                    && plan_dir.join("PRD.md").exists()
-                {
-                    loop {
-                        let prd_content = std::fs::read_to_string(plan_dir.join("PRD.md"))
-                            .unwrap_or_else(|_| "Could not read PRD.md".to_string());
-                        if event_tx
-                            .send(WorkflowEvent::PlanApprovalNeeded { prd_content })
-                            .is_err()
-                        {
-                            return;
-                        }
-                        let answer = match answer_rx.recv() {
-                            Ok(a) => a,
-                            Err(_) => return,
-                        };
-                        if answer.eq_ignore_ascii_case("approve") {
-                            break;
-                        }
-                        // Refinement: run plan again with feedback.
-                        let feature_input = read_changeset(&plan_dir)
-                            .ok()
-                            .and_then(|c| c.initial_prompt.clone())
-                            .unwrap_or_else(|| "feature".to_string());
-                        let session_id = read_changeset(&plan_dir)
-                            .ok()
-                            .and_then(|c| get_session_for_tag(&c, "plan"));
-                        let output_dir = plan_dir
-                            .parent()
-                            .map(|p| p.to_path_buf())
-                            .unwrap_or_else(|| plan_dir.clone());
-                        let refine_storage =
-                            std::env::temp_dir().join("tddy-flowrunner-refine-session");
-                        std::fs::create_dir_all(&refine_storage).ok();
-                        let refine_hooks = std::sync::Arc::new(
-                            crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(
-                                event_tx.clone(),
-                            ),
-                        );
-                        let refine_engine = WorkflowEngine::new(
-                            backend_for_refine.clone(),
-                            refine_storage,
-                            Some(refine_hooks),
-                        );
-                        let mut refine_ctx = std::collections::HashMap::new();
-                        refine_ctx.insert(
-                            "feature_input".to_string(),
-                            serde_json::json!(feature_input),
-                        );
-                        refine_ctx.insert(
-                            "output_dir".to_string(),
-                            serde_json::to_value(&output_dir).unwrap(),
-                        );
-                        refine_ctx.insert(
-                            "plan_dir".to_string(),
-                            serde_json::to_value(plan_dir.clone()).unwrap(),
-                        );
-                        refine_ctx
-                            .insert("refinement_feedback".to_string(), serde_json::json!(answer));
-                        refine_ctx.insert(
-                            "model".to_string(),
-                            serde_json::to_value(model.clone().unwrap_or_default()).unwrap(),
-                        );
-                        refine_ctx.insert("agent_output".to_string(), serde_json::json!(true));
-                        refine_ctx.insert(
-                            "inherit_stdin".to_string(),
-                            serde_json::json!(inherit_stdin),
-                        );
-                        refine_ctx.insert("debug".to_string(), serde_json::json!(debug));
-                        if let Some(sid) = session_id {
-                            refine_ctx.insert("session_id".to_string(), serde_json::json!(sid));
-                        }
-                        let mut refine_result =
-                            match rt.block_on(refine_engine.run_goal("plan", refine_ctx)) {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    let _ = event_tx
-                                        .send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
-                                    return;
-                                }
-                            };
-                        loop {
-                            match &refine_result.status {
-                                ExecutionStatus::Completed | ExecutionStatus::Paused { .. } => {
-                                    break
-                                }
-                                ExecutionStatus::WaitingForInput { .. } => {
-                                    let session = match rt.block_on(
-                                        refine_engine.get_session(&refine_result.session_id),
-                                    ) {
-                                        Ok(Some(s)) => s,
-                                        _ => {
-                                            let _ = event_tx.send(WorkflowEvent::WorkflowComplete(
-                                                Err("session not found".into()),
-                                            ));
-                                            return;
-                                        }
-                                    };
-                                    let questions: Vec<ClarificationQuestion> = session
-                                        .context
-                                        .get_sync("pending_questions")
-                                        .unwrap_or_default();
-                                    let _ = event_tx
-                                        .send(WorkflowEvent::ClarificationNeeded { questions });
-                                    let answers = match answer_rx.recv() {
-                                        Ok(a) => a,
-                                        Err(_) => return,
-                                    };
-                                    let mut updates = std::collections::HashMap::new();
-                                    updates
-                                        .insert("answers".to_string(), serde_json::json!(answers));
-                                    if rt
-                                        .block_on(refine_engine.update_session_context(
-                                            &refine_result.session_id,
-                                            updates,
-                                        ))
-                                        .is_err()
-                                    {
-                                        return;
-                                    }
-                                    refine_result = match rt.block_on(
-                                        refine_engine.run_session(&refine_result.session_id),
-                                    ) {
-                                        Ok(r) => r,
-                                        Err(e) => {
-                                            let _ = event_tx.send(WorkflowEvent::WorkflowComplete(
-                                                Err(e.to_string()),
-                                            ));
-                                            return;
-                                        }
-                                    };
-                                }
-                                ExecutionStatus::Error(msg) => {
-                                    let _ = event_tx
-                                        .send(WorkflowEvent::WorkflowComplete(Err(msg.clone())));
-                                    return;
-                                }
-                            }
-                        }
-                        // Refinement complete; loop continues to re-show approval.
-                    }
-                }
 
                 // Ask demo question only when we've reached GreenComplete (not earlier).
                 if current_state == "GreenComplete"
@@ -765,38 +626,11 @@ pub fn run_workflow(
                 };
             }
             ExecutionStatus::WaitingForInput { .. } => {
-                let session = match rt.block_on(engine.get_session(&result.session_id)) {
-                    Ok(Some(s)) => s,
-                    _ => {
-                        let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
-                            "session not found".into(),
-                        )));
-                        return;
-                    }
-                };
-                let questions: Vec<ClarificationQuestion> = session
-                    .context
-                    .get_sync("pending_questions")
-                    .unwrap_or_default();
-                let _ = event_tx.send(WorkflowEvent::ClarificationNeeded { questions });
-                let answers = match answer_rx.recv() {
-                    Ok(a) => a,
-                    Err(_) => return,
-                };
-                let mut updates = std::collections::HashMap::new();
-                updates.insert("answers".to_string(), serde_json::json!(answers));
-                if rt
-                    .block_on(engine.update_session_context(&result.session_id, updates))
-                    .is_err()
-                {
-                    return;
-                }
-                result = match rt.block_on(engine.run_session(&result.session_id)) {
+                result = match handle_clarification_round(
+                    &rt, &engine, &result, &event_tx, &answer_rx,
+                ) {
                     Ok(r) => r,
-                    Err(e) => {
-                        let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
-                        return;
-                    }
+                    Err(()) => return,
                 };
             }
             ExecutionStatus::Error(msg) => {

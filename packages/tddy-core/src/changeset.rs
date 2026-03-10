@@ -91,7 +91,6 @@ pub struct DiscoveryData {
     pub scripts: BTreeMap<String, String>,
     #[serde(default)]
     pub doc_locations: Vec<String>,
-    pub plan_dir_suggestion: Option<String>,
     #[serde(default)]
     pub relevant_code: Vec<RelevantCode>,
     pub test_infrastructure: Option<TestInfrastructure>,
