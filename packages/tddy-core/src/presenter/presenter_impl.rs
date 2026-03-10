@@ -25,6 +25,8 @@ pub struct Presenter<V: PresenterView> {
     answer_tx: Option<mpsc::Sender<String>>,
     workflow_backend: Option<SharedBackend>,
     workflow_output_dir: Option<PathBuf>,
+    workflow_conversation_output: Option<PathBuf>,
+    workflow_debug: bool,
     /// Stored when WorkflowComplete is received; used to print result on TUI exit.
     workflow_result: Option<Result<String, String>>,
     pending_questions: Vec<ClarificationQuestion>,
@@ -59,6 +61,8 @@ impl<V: PresenterView> Presenter<V> {
             answer_tx: None,
             workflow_backend: None,
             workflow_output_dir: None,
+            workflow_conversation_output: None,
+            workflow_debug: false,
             workflow_result: None,
             pending_questions: Vec::new(),
             current_question_index: 0,
@@ -265,7 +269,8 @@ impl<V: PresenterView> Presenter<V> {
                 kind: ActivityKind::AgentOutput,
             };
             self.state.activity_log.push(entry.clone());
-            self.view.on_activity_logged(&entry);
+            self.view
+                .on_activity_logged(&entry, self.state.activity_log.len());
             self.broadcast(PresenterEvent::ActivityLogged(entry));
         }
     }
@@ -308,7 +313,8 @@ impl<V: PresenterView> Presenter<V> {
                         },
                     };
                     self.state.activity_log.push(entry.clone());
-                    self.view.on_activity_logged(&entry);
+                    self.view
+                        .on_activity_logged(&entry, self.state.activity_log.len());
                     self.broadcast(PresenterEvent::ActivityLogged(entry));
                 }
                 WorkflowEvent::StateChange { from, to } => {
@@ -318,7 +324,8 @@ impl<V: PresenterView> Presenter<V> {
                         kind: ActivityKind::StateChange,
                     };
                     self.state.activity_log.push(entry.clone());
-                    self.view.on_activity_logged(&entry);
+                    self.view
+                        .on_activity_logged(&entry, self.state.activity_log.len());
                     self.view.on_state_changed(&from, &to);
                     self.broadcast(PresenterEvent::ActivityLogged(entry));
                     self.broadcast(PresenterEvent::StateChanged {
@@ -371,7 +378,13 @@ impl<V: PresenterView> Presenter<V> {
                             if let Some(h) = self.workflow_handle.take() {
                                 let _ = h.join();
                             }
-                            self.spawn_workflow(backend, output_dir, Some(prefixed));
+                            self.spawn_workflow(
+                                backend,
+                                output_dir,
+                                Some(prefixed),
+                                self.workflow_conversation_output.clone(),
+                                self.workflow_debug,
+                            );
                         }
                     } else {
                         self.state.mode = AppMode::Done;
@@ -391,7 +404,8 @@ impl<V: PresenterView> Presenter<V> {
                                     kind: ActivityKind::AgentOutput,
                                 };
                                 self.state.activity_log.push(entry.clone());
-                                self.view.on_activity_logged(&entry);
+                                self.view
+                                    .on_activity_logged(&entry, self.state.activity_log.len());
                                 self.broadcast(PresenterEvent::ActivityLogged(entry));
                             }
                         } else {
@@ -411,10 +425,20 @@ impl<V: PresenterView> Presenter<V> {
         backend: SharedBackend,
         output_dir: PathBuf,
         initial_prompt: Option<String>,
+        conversation_output_path: Option<PathBuf>,
+        debug: bool,
     ) {
         self.workflow_backend = Some(backend.clone());
         self.workflow_output_dir = Some(output_dir.clone());
-        self.spawn_workflow(backend, output_dir, initial_prompt);
+        self.workflow_conversation_output = conversation_output_path.clone();
+        self.workflow_debug = debug;
+        self.spawn_workflow(
+            backend,
+            output_dir,
+            initial_prompt,
+            conversation_output_path,
+            debug,
+        );
     }
 
     fn spawn_workflow(
@@ -422,6 +446,8 @@ impl<V: PresenterView> Presenter<V> {
         backend: SharedBackend,
         output_dir: PathBuf,
         initial_prompt: Option<String>,
+        conversation_output_path: Option<PathBuf>,
+        debug: bool,
     ) {
         let (event_tx, event_rx) = mpsc::channel();
         let (answer_tx, answer_rx) = mpsc::channel();
@@ -435,6 +461,8 @@ impl<V: PresenterView> Presenter<V> {
                 None,
                 None,
                 initial_prompt,
+                conversation_output_path,
+                debug,
             );
         });
 

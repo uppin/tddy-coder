@@ -544,6 +544,74 @@ impl RunnerHooks for RecordHooks {
     }
 }
 
+/// Hooks that trigger ElicitationNeeded for a specific task_id.
+struct ElicitationHooks {
+    trigger_task: String,
+    calls: Mutex<Vec<String>>,
+}
+
+impl ElicitationHooks {
+    fn new(trigger_task: &str) -> Self {
+        Self {
+            trigger_task: trigger_task.to_string(),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl RunnerHooks for ElicitationHooks {
+    fn before_task(
+        &self,
+        task_id: &str,
+        _context: &Context,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("before:{}", task_id));
+        Ok(())
+    }
+
+    fn after_task(
+        &self,
+        task_id: &str,
+        _context: &Context,
+        _result: &TaskResult,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("after:{}", task_id));
+        Ok(())
+    }
+
+    fn elicitation_after_task(
+        &self,
+        task_id: &str,
+        _context: &Context,
+        _result: &TaskResult,
+    ) -> Option<tddy_core::workflow::graph::ElicitationEvent> {
+        if task_id == self.trigger_task {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("elicitation:{}", task_id));
+            Some(tddy_core::workflow::graph::ElicitationEvent::PlanApproval {
+                prd_content: "# Test PRD".to_string(),
+            })
+        } else {
+            None
+        }
+    }
+
+    fn on_error(&self, task_id: &str, _error: &(dyn std::error::Error + Send + Sync)) {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("error:{}", task_id));
+    }
+}
+
 /// Hooks that fail in before_task.
 struct FailBeforeHooks;
 
@@ -712,4 +780,214 @@ async fn flow_runner_on_error_called_when_task_fails() {
     assert_eq!(calls, vec!["before:fail", "error:fail"]);
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── Hook-Triggered Elicitation tests ─────────────────────────────────────────
+
+/// elicitation_after_task default returns None (trait default).
+#[tokio::test]
+async fn elicitation_after_task_default_returns_none() {
+    let hooks = RecordHooks::new();
+    let ctx = Context::new();
+    let result = TaskResult {
+        task_id: "plan".to_string(),
+        response: "test".to_string(),
+        next_action: tddy_core::workflow::task::NextAction::Continue,
+        status_message: None,
+    };
+    assert!(
+        hooks
+            .elicitation_after_task("plan", &ctx, &result)
+            .is_none(),
+        "default implementation should return None"
+    );
+}
+
+/// FlowRunner returns ElicitationNeeded when hook signals elicitation.
+#[tokio::test]
+async fn flow_runner_returns_elicitation_needed_when_hook_signals() {
+    let dir = std::env::temp_dir().join("tddy-flowrunner-elicitation");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let storage = Arc::new(FileSessionStorage::new(dir.clone()));
+
+    let hooks = Arc::new(ElicitationHooks::new("t1"));
+    let t1 = Arc::new(EchoTask::new("t1"));
+    let t2 = Arc::new(EchoTask::new("t2"));
+    let graph = Arc::new(
+        GraphBuilder::new("elicit_test")
+            .add_task(t1)
+            .add_task(t2)
+            .add_edge("t1", "t2")
+            .add_edge("t2", "t2")
+            .build(),
+    );
+
+    let session = Session::new_from_task(
+        "el1".to_string(),
+        "elicit_test".to_string(),
+        "t1".to_string(),
+    );
+    session.context.set_sync("input", "test");
+    storage.save(&session).await.unwrap();
+
+    let runner = FlowRunner::new_with_hooks(graph, storage.clone(), Some(hooks));
+    let result = runner.run("el1").await.unwrap();
+
+    assert!(
+        matches!(result.status, ExecutionStatus::ElicitationNeeded { .. }),
+        "should return ElicitationNeeded, got {:?}",
+        result.status
+    );
+
+    if let ExecutionStatus::ElicitationNeeded { ref event } = result.status {
+        match event {
+            tddy_core::workflow::graph::ElicitationEvent::PlanApproval { ref prd_content } => {
+                assert_eq!(prd_content, "# Test PRD");
+            }
+        }
+    }
+
+    assert_eq!(
+        result.current_task_id,
+        Some("t2".to_string()),
+        "session should advance to next task despite ElicitationNeeded"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// FlowRunner returns Paused when hook returns None (no elicitation).
+#[tokio::test]
+async fn flow_runner_returns_paused_when_no_elicitation() {
+    let dir = std::env::temp_dir().join("tddy-flowrunner-no-elicit");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let storage = Arc::new(FileSessionStorage::new(dir.clone()));
+
+    let hooks = Arc::new(ElicitationHooks::new("other_task"));
+    let t1 = Arc::new(EchoTask::new("t1"));
+    let t2 = Arc::new(EchoTask::new("t2"));
+    let graph = Arc::new(
+        GraphBuilder::new("no_elicit")
+            .add_task(t1)
+            .add_task(t2)
+            .add_edge("t1", "t2")
+            .add_edge("t2", "t2")
+            .build(),
+    );
+
+    let session =
+        Session::new_from_task("ne1".to_string(), "no_elicit".to_string(), "t1".to_string());
+    session.context.set_sync("input", "test");
+    storage.save(&session).await.unwrap();
+
+    let runner = FlowRunner::new_with_hooks(graph, storage.clone(), Some(hooks));
+    let result = runner.run("ne1").await.unwrap();
+
+    assert!(
+        matches!(result.status, ExecutionStatus::Paused { .. }),
+        "should return Paused when elicitation hook returns None, got {:?}",
+        result.status
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// WorkflowEngine returns ElicitationNeeded to caller (does not auto-continue).
+#[tokio::test]
+async fn engine_returns_elicitation_needed_to_caller() {
+    use tddy_core::WorkflowEngine;
+
+    let dir = std::env::temp_dir().join("tddy-engine-elicitation");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let backend = Arc::new(StubBackend::new());
+    let plan_dir = dir.join("plan");
+    std::fs::create_dir_all(&plan_dir).unwrap();
+
+    let storage_dir = std::env::temp_dir().join("tddy-engine-elicit-storage");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+
+    let hooks = Arc::new(ElicitationHooks::new("plan"));
+    let engine = WorkflowEngine::new(
+        tddy_core::SharedBackend::from_arc(backend),
+        storage_dir.clone(),
+        Some(hooks),
+    );
+
+    let mut ctx = std::collections::HashMap::new();
+    ctx.insert(
+        "feature_input".to_string(),
+        serde_json::json!("Build auth SKIP_QUESTIONS"),
+    );
+    ctx.insert(
+        "output_dir".to_string(),
+        serde_json::to_value(dir.clone()).unwrap(),
+    );
+    ctx.insert(
+        "plan_dir".to_string(),
+        serde_json::to_value(plan_dir).unwrap(),
+    );
+
+    let result = engine.run_goal("plan", ctx).await.unwrap();
+
+    assert!(
+        matches!(result.status, ExecutionStatus::ElicitationNeeded { .. }),
+        "engine should return ElicitationNeeded to caller, got {:?}",
+        result.status
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&storage_dir);
+}
+
+/// WorkflowEngine run_workflow_from also returns ElicitationNeeded to caller.
+#[tokio::test]
+async fn engine_run_workflow_from_returns_elicitation_needed() {
+    use tddy_core::WorkflowEngine;
+
+    let dir = std::env::temp_dir().join("tddy-engine-wf-elicitation");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let backend = Arc::new(StubBackend::new());
+    let plan_dir = dir.join("plan");
+    std::fs::create_dir_all(&plan_dir).unwrap();
+
+    let storage_dir = std::env::temp_dir().join("tddy-engine-wf-elicit-storage");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+
+    let hooks = Arc::new(ElicitationHooks::new("plan"));
+    let engine = WorkflowEngine::new(
+        tddy_core::SharedBackend::from_arc(backend),
+        storage_dir.clone(),
+        Some(hooks),
+    );
+
+    let mut ctx = std::collections::HashMap::new();
+    ctx.insert(
+        "feature_input".to_string(),
+        serde_json::json!("Build auth SKIP_QUESTIONS"),
+    );
+    ctx.insert(
+        "output_dir".to_string(),
+        serde_json::to_value(dir.clone()).unwrap(),
+    );
+    ctx.insert(
+        "plan_dir".to_string(),
+        serde_json::to_value(plan_dir).unwrap(),
+    );
+
+    let result = engine.run_workflow_from("plan", ctx).await.unwrap();
+
+    assert!(
+        matches!(result.status, ExecutionStatus::ElicitationNeeded { .. }),
+        "run_workflow_from should return ElicitationNeeded, got {:?}",
+        result.status
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&storage_dir);
 }

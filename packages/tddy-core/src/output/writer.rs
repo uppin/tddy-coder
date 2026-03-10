@@ -5,7 +5,7 @@ use crate::output::{
     AcceptanceTestsOutput, DemoPlan, EvaluateOutput, GreenOutput, PlanningOutput, RedOutput,
 };
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Inject a "Related Documents" section with relative links to peer .md files.
 pub fn inject_cross_references(content: &str, plan_dir: &Path, self_name: &str) -> String {
@@ -291,4 +291,17 @@ pub fn write_evaluation_report(
         .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
     Ok(())
+}
+
+/// Subdirectory name for session directories under a base path.
+pub const SESSIONS_SUBDIR: &str = "sessions";
+
+/// Create a session directory at `{base}/sessions/{uuid}/` and return its path.
+pub fn create_session_dir_in(base: &Path) -> Result<PathBuf, WorkflowError> {
+    use uuid::Uuid;
+    let id = Uuid::new_v4();
+    let sessions_dir = base.join(SESSIONS_SUBDIR);
+    let session_dir = sessions_dir.join(id.to_string());
+    fs::create_dir_all(&session_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    Ok(session_dir)
 }

@@ -15,12 +15,14 @@ If you need clarification before creating the PRD, either use the AskUserQuestio
 Otherwise, you MUST include a structured-response block with your output. Read the JSON Schema file at `schemas/plan.schema.json` in the working directory for the exact output format specification. Use this exact format:
 
 <structured-response content-type="application-json" schema="schemas/plan.schema.json">
-{"goal": "plan", "prd": "<PRD markdown content>", "todo": "<TODO markdown content>", "discovery": {"toolchain": {"<tool>": "<version>"}, "scripts": {"<name>": "<command>"}, "doc_locations": ["<path>"], "plan_dir_suggestion": "<path>", "relevant_code": [{"path": "<path>", "reason": "<why>"}], "test_infrastructure": {"runner": "<cmd>", "conventions": "<pattern>"}}, "demo_plan": {"demo_type": "cli|api|ui", "setup_instructions": "<text>", "steps": [{"description": "<text>", "command_or_action": "<cmd>", "expected_result": "<text>"}], "verification": "<text>"}}
+{"goal": "plan", "name": "<human-readable changeset name>", "prd": "<PRD markdown content>", "todo": "<TODO markdown content>", "discovery": {"toolchain": {"<tool>": "<version>"}, "scripts": {"<name>": "<command>"}, "doc_locations": ["<path>"], "relevant_code": [{"path": "<path>", "reason": "<why>"}], "test_infrastructure": {"runner": "<cmd>", "conventions": "<pattern>"}}, "demo_plan": {"demo_type": "cli|api|ui", "setup_instructions": "<text>", "steps": [{"description": "<text>", "command_or_action": "<cmd>", "expected_result": "<text>"}], "verification": "<text>"}}
 </structured-response>
 
 The prd and todo values must be JSON strings (escape quotes and newlines as needed). The PRD should include: Summary, Background, Requirements, Acceptance Criteria, and a Testing Plan section. The Testing Plan must contain: (1) test level determination (E2E/Integration/Unit) with rationale, (2) a list of acceptance tests with descriptive names, (3) target test file paths (existing or new), (4) strong assertions for each test. The TODO should list discrete implementation tasks in dependency order using - [ ] for pending and [x] for completed.
 
-**discovery** (optional): Inspect the project to populate toolchain (e.g. rust, cargo, node), scripts (test, lint), doc_locations, plan_dir_suggestion (where to create plan dir, e.g. docs/dev/1-WIP/), relevant_code paths, and test_infrastructure. The working directory is the project root; read Cargo.toml, package.json, packages/, etc. directly. The plan schema path is provided in the user prompt. **IMPORTANT**: `plan_dir_suggestion` is now acted upon — the workflow will move the plan directory from its staging location to `git_root/plan_dir_suggestion/` after you respond. Inspect the repo for existing plan directories (e.g. docs/, plans/, .dev/), CLAUDE.md conventions, or documentation patterns to decide the best location. Only set `plan_dir_suggestion` to a relative path (no `..`, no leading `/`); leave it absent to keep the default output location.
+**name** (optional): A short, human-readable name for the changeset (e.g. "Auth Feature", "Stable session dir"). This appears in changeset.yaml and helps identify the session; the session directory itself is a UUID managed by the system.
+
+**discovery** (optional): Inspect the project to populate toolchain (e.g. rust, cargo, node), scripts (test, lint), doc_locations, relevant_code paths, and test_infrastructure. The working directory is the project root; read Cargo.toml, package.json, packages/, etc. directly. The plan schema path is provided in the user prompt.
 
 **demo_plan** (optional): When the feature has a user-facing demo (CLI, API, UI), include demo_type, setup_instructions, steps with description/command_or_action/expected_result, and verification criteria.
 
@@ -84,6 +86,25 @@ mod tests {
         assert!(
             prompt.contains("schema=\"schemas/plan.schema.json\""),
             "system prompt example must include schema= attribute"
+        );
+    }
+
+    /// System prompt must not mention plan_dir_suggestion and must guide agent to provide
+    /// a human-readable changeset `name` instead.
+    ///
+    /// Fails until `plan_dir_suggestion` is removed from the prompt and `name` guidance is added.
+    #[test]
+    fn test_planning_prompt_mentions_name_not_plan_dir_suggestion() {
+        let prompt = system_prompt();
+        assert!(
+            !prompt.contains("plan_dir_suggestion"),
+            "system prompt must not reference 'plan_dir_suggestion' after R2 removal; \
+             the field should be removed from the prompt template"
+        );
+        // The prompt must instruct the agent to set the `name` field of the changeset
+        assert!(
+            prompt.contains("\"name\"") || prompt.contains("`name`") || prompt.contains("name"),
+            "system prompt must guide agent to provide a changeset 'name' field"
         );
     }
 }

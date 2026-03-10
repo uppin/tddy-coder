@@ -233,10 +233,16 @@ async fn workflow_engine_run_goal_plan_completes() {
     let result = engine.run_goal("plan", context_values).await.unwrap();
 
     assert_eq!(result.session_id.len(), 36);
-    assert!(matches!(
-        result.status,
-        ExecutionStatus::Paused { .. } | ExecutionStatus::Completed
-    ));
+    assert!(
+        matches!(
+            result.status,
+            ExecutionStatus::Paused { .. }
+                | ExecutionStatus::Completed
+                | ExecutionStatus::ElicitationNeeded { .. }
+        ),
+        "plan should return Paused, Completed, or ElicitationNeeded; got {:?}",
+        result.status
+    );
     let plan_dir = output_dir.join(tddy_core::output::slugify_directory_name(
         "SKIP_QUESTIONS feature",
     ));
@@ -270,10 +276,16 @@ async fn workflow_engine_run_full_workflow_completes_with_stub() {
 
     let result = engine.run_full_workflow(context_values).await.unwrap();
 
-    assert!(matches!(
-        result.status,
-        ExecutionStatus::Completed | ExecutionStatus::Paused { .. }
-    ));
+    assert!(
+        matches!(
+            result.status,
+            ExecutionStatus::Completed
+                | ExecutionStatus::Paused { .. }
+                | ExecutionStatus::ElicitationNeeded { .. }
+        ),
+        "full workflow should return Completed, Paused, or ElicitationNeeded; got {:?}",
+        result.status
+    );
 
     let _ = std::fs::remove_dir_all(&storage_dir);
 }

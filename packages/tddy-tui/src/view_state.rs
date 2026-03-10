@@ -303,6 +303,14 @@ impl ViewState {
                     self.inbox_focus = InboxFocus::List;
                     true
                 }
+                KeyCode::PageUp => {
+                    self.scroll_offset = self.scroll_offset.saturating_sub(5);
+                    true
+                }
+                KeyCode::PageDown => {
+                    self.scroll_offset = self.scroll_offset.saturating_add(5);
+                    true
+                }
                 _ => false,
             },
         }

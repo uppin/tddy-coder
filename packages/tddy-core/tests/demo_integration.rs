@@ -139,7 +139,7 @@ async fn setup_plan_dir_with_green_complete(
     let ctx = ctx_green(plan_dir.clone(), None, false);
     let result = engine.run_goal("green", ctx).await.unwrap();
     match &result.status {
-        ExecutionStatus::Paused { .. } => {}
+        ExecutionStatus::Paused { .. } | ExecutionStatus::ElicitationNeeded { .. } => {}
         _ => panic!("expected Paused after green, got {:?}", result.status),
     }
 

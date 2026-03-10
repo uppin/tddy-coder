@@ -114,15 +114,25 @@ impl FlowRunner {
             hooks.after_task(&session.current_task_id, &ctx, &result)?;
         }
 
+        let elicitation = self
+            .hooks
+            .as_ref()
+            .and_then(|h| h.elicitation_after_task(&session.current_task_id, &ctx, &result));
+
         let mut session = session;
         session.current_task_id = next_task_id.clone();
         session.status_message = result.status_message;
         self.storage.save(&session).await?;
 
-        Ok(ExecutionResult {
-            status: ExecutionStatus::Paused {
+        let status = match elicitation {
+            Some(event) => ExecutionStatus::ElicitationNeeded { event },
+            None => ExecutionStatus::Paused {
                 message: Some("Step complete".to_string()),
             },
+        };
+
+        Ok(ExecutionResult {
+            status,
             session_id: session_id.to_string(),
             current_task_id: Some(next_task_id),
         })

@@ -37,7 +37,7 @@ pub fn spawn_presenter_with_grpc(
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
     let output_dir = std::env::temp_dir().join(format!("tddy-e2e-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&output_dir).unwrap();
-    presenter.start_workflow(backend, output_dir, initial_prompt);
+    presenter.start_workflow(backend, output_dir, initial_prompt, None, false);
 
     let shutdown = std::sync::Arc::new(AtomicBool::new(false));
     let shutdown_clone = shutdown.clone();
@@ -113,7 +113,7 @@ pub fn spawn_presenter_with_grpc_and_tui(
     let output_dir =
         std::env::temp_dir().join(format!("tddy-e2e-tui-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&output_dir).unwrap();
-    presenter.start_workflow(backend, output_dir, initial_prompt);
+    presenter.start_workflow(backend, output_dir, initial_prompt, None, false);
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = shutdown.clone();

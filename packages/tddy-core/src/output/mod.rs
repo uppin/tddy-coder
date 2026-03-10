@@ -14,7 +14,7 @@ pub use parser::{
     RedTestInfo, RefactorOutput, SkeletonInfo, StructuredBlock, ValidateSubagentsOutput,
 };
 pub use writer::{
-    read_impl_session_file, read_session_file, slugify_directory_name,
+    create_session_dir_in, read_impl_session_file, read_session_file, slugify_directory_name,
     update_acceptance_tests_file, update_progress_file, write_acceptance_tests_file,
     write_artifacts, write_demo_plan_file, write_demo_results_file, write_evaluation_report,
     write_impl_session_file, write_progress_file, write_red_output_file, write_session_file,

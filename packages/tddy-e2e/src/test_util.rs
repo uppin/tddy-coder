@@ -7,7 +7,7 @@ pub struct NoopView;
 
 impl PresenterView for NoopView {
     fn on_mode_changed(&mut self, _mode: &AppMode) {}
-    fn on_activity_logged(&mut self, _entry: &ActivityEntry) {}
+    fn on_activity_logged(&mut self, _entry: &ActivityEntry, _activity_log_len: usize) {}
     fn on_goal_started(&mut self, _goal: &str) {}
     fn on_state_changed(&mut self, _from: &str, _to: &str) {}
     fn on_workflow_complete(&mut self, _result: &Result<String, String>) {}

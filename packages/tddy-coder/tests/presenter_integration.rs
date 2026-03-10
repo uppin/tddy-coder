@@ -45,7 +45,7 @@ impl PresenterView for TestView {
         self.events.push(TestEvent::ModeChanged(mode.clone()));
     }
 
-    fn on_activity_logged(&mut self, entry: &ActivityEntry) {
+    fn on_activity_logged(&mut self, entry: &ActivityEntry, _activity_log_len: usize) {
         self.events.push(TestEvent::ActivityLogged(entry.clone()));
     }
 
@@ -87,7 +87,13 @@ fn full_workflow_completes_with_stub_backend() {
     let output_dir = std::env::temp_dir().join("tddy-presenter-test-full");
 
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
-    presenter.start_workflow(backend, output_dir, Some("Build auth".to_string()));
+    presenter.start_workflow(
+        backend,
+        output_dir,
+        Some("Build auth".to_string()),
+        None,
+        false,
+    );
 
     let mut iterations = 0;
     let max_iterations = 500;
@@ -137,7 +143,13 @@ fn clarification_roundtrip_sends_answers() {
     let backend = create_stub_backend();
     let output_dir = std::env::temp_dir().join("tddy-presenter-test-clarify");
 
-    presenter.start_workflow(backend, output_dir, Some("CLARIFY test".to_string()));
+    presenter.start_workflow(
+        backend,
+        output_dir,
+        Some("CLARIFY test".to_string()),
+        None,
+        false,
+    );
 
     let mut iterations = 0;
     let max_iterations = 500;
@@ -185,20 +197,28 @@ fn inbox_queue_and_dequeue() {
     let output_dir = std::env::temp_dir().join("tddy-presenter-test-inbox");
 
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
-    presenter.start_workflow(backend, output_dir, Some("Build auth".to_string()));
+    presenter.start_workflow(
+        backend,
+        output_dir,
+        Some("Build auth".to_string()),
+        None,
+        false,
+    );
 
     let mut iterations = 0;
     let max_iterations = 500;
     let mut queued = false;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
+        // Handle intents; approve sets Running, so we can queue in same iteration.
+        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+            presenter.handle_intent(UserIntent::ApprovePlan);
+        }
         if matches!(presenter.state().mode, AppMode::Running) && !queued {
             presenter.handle_intent(UserIntent::QueuePrompt("fix the login bug".to_string()));
             queued = true;
         }
-        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
-            presenter.handle_intent(UserIntent::ApprovePlan);
-        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+        if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
@@ -231,7 +251,13 @@ fn plan_approval_approve_proceeds_to_next_step() {
     let output_dir = std::env::temp_dir().join("tddy-presenter-test-plan-approve");
 
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
-    presenter.start_workflow(backend, output_dir, Some("Build auth".to_string()));
+    presenter.start_workflow(
+        backend,
+        output_dir,
+        Some("Build auth".to_string()),
+        None,
+        false,
+    );
 
     let mut iterations = 0;
     let max_iterations = 500;
@@ -281,7 +307,13 @@ fn plan_approval_view_then_approve() {
     let output_dir = std::env::temp_dir().join("tddy-presenter-test-plan-view");
 
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
-    presenter.start_workflow(backend, output_dir, Some("Build auth".to_string()));
+    presenter.start_workflow(
+        backend,
+        output_dir,
+        Some("Build auth".to_string()),
+        None,
+        false,
+    );
 
     let mut iterations = 0;
     let max_iterations = 500;
@@ -334,7 +366,13 @@ fn plan_approval_refine_re_shows_approval() {
     let output_dir = std::env::temp_dir().join("tddy-presenter-test-plan-refine");
 
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
-    presenter.start_workflow(backend, output_dir, Some("Build auth".to_string()));
+    presenter.start_workflow(
+        backend,
+        output_dir,
+        Some("Build auth".to_string()),
+        None,
+        false,
+    );
 
     let mut iterations = 0;
     let max_iterations = 800;
@@ -383,7 +421,13 @@ fn workflow_error_propagates() {
     presenter.handle_intent(UserIntent::SubmitFeatureInput(
         "FAIL_INVOKE test".to_string(),
     ));
-    presenter.start_workflow(backend, output_dir, Some("FAIL_INVOKE test".to_string()));
+    presenter.start_workflow(
+        backend,
+        output_dir,
+        Some("FAIL_INVOKE test".to_string()),
+        None,
+        false,
+    );
 
     let mut iterations = 0;
     let max_iterations = 200;

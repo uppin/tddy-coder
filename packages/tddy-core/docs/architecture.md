@@ -44,11 +44,14 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Workflow (`workflow/`)
 
-- **Graph-flow modules**: `Task` trait (async run), `NextAction`, `TaskResult`, `Context` (typed k/v store), `Graph`/`GraphBuilder`, `Session`/`SessionStorage`, `FlowRunner`. `build_tdd_workflow_graph(backend)` builds plan→acceptance-tests→red→green→end. `PlanTask` invokes backend, parses response, writes PRD.md and TODO.md. `BackendInvokeTask` for acceptance-tests, red, green. `FlowRunner` loads session, executes one step, saves session.
+- **Graph-flow modules**: `Task` trait (async run), `NextAction`, `TaskResult`, `Context` (typed k/v store), `Graph`/`GraphBuilder`, `Session`/`SessionStorage`, `FlowRunner`, `WorkflowEngine`. `build_tdd_workflow_graph(backend)` builds plan→acceptance-tests→red→green→end. `PlanTask` invokes backend, parses response, writes PRD.md and TODO.md. `BackendInvokeTask` for acceptance-tests, red, green. `FlowRunner` loads session, executes one step, saves session. After `after_task`, FlowRunner calls `RunnerHooks::elicitation_after_task`; if `Some(event)`, returns `ExecutionStatus::ElicitationNeeded` to caller instead of advancing. `WorkflowEngine` returns to caller on `ElicitationNeeded` (no auto-continue).
+- **RunnerHooks**: `before_task`, `after_task`, `on_error`, `elicitation_after_task` (optional, default `None`). When a hook returns `Some(ElicitationEvent)` from `elicitation_after_task`, the orchestrator pauses and returns control to the caller.
+- **ElicitationEvent / ExecutionStatus::ElicitationNeeded**: `ElicitationEvent::PlanApproval { prd_content }` signals plan approval gate. Caller maps to `WorkflowEvent::PlanApprovalNeeded`; presents UI; resumes workflow.
+- **TddWorkflowHooks**: Implements `elicitation_after_task` for plan task: returns `PlanApproval` when PRD.md exists in plan dir.
 - **WorkflowState**: Init, Planning, Planned, AcceptanceTesting, AcceptanceTestsReady, RedTesting, RedTestsReady, GreenImplementing, GreenComplete, DemoRunning, DemoComplete, Evaluating, Evaluated, Validating, ValidateComplete, Refactoring, RefactorComplete, Failed.
 - **Workflow**: Orchestrates plan, acceptance-tests, red, green, evaluate, validate, and refactor steps with session continuity for Q&A followup. Each goal calls `validate_and_retry` after invoke: validates JSON against schema, retries once with validation errors on failure.
 - **Context header**: `build_context_header` and `prepend_context_header` prepend a `<context-reminder>` block to agent prompts when plan_dir contains `.md` artifacts. Lists absolute paths to PRD.md, TODO.md, acceptance-tests.md, progress.md, etc. Omitted when plan_dir is None or no artifacts exist. Plan, acceptance-tests, and red goals use it.
-- **planning**: System prompt (structured-response format) and user prompt construction. Staging at output_dir/dir_name. Writes system prompt to plan dir; stores initial_prompt and clarification_qa in changeset. Persists questions when ClarificationNeeded; pairs with answers on follow-up. After write_artifacts, relocate_plan_dir moves the plan dir to git_root/suggestion/dir_name when plan_dir_suggestion is present and valid (rejects absolute, .., empty; cross-device copy+delete fallback).
+- **planning**: System prompt (structured-response format) and user prompt construction. Staging at output_dir/dir_name or `$HOME/.tddy/sessions/{uuid}/` when output_dir omitted. Writes system prompt to plan dir; stores initial_prompt and clarification_qa in changeset. Persists questions when ClarificationNeeded; pairs with answers on follow-up. Discovery uses `name` (human-readable changeset name) in planning prompt.
 - **acceptance_tests**: System prompt for test creation and verification; parses test summary and run instructions; writes acceptance-tests.md; appends session to changeset.
 - **red**: System prompt for skeleton code and failing lower-level tests; parses RedOutput; writes red-output.md and progress.md; appends impl session to changeset.
 - **green**: System prompt for implementation; parses GreenOutput; updates progress.md and acceptance-tests.md; writes demo-results.md when demo plan exists.
@@ -75,6 +78,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **parse_refactor_response**: Extracts RefactorOutput (goal, summary, items_completed, items_remaining) from refactor goal response.
 - **write_evaluation_report**: Writes evaluation-report.md to plan_dir from EvaluateOutput.
 - **slugify_directory_name**: Generates directory names (YYYY-MM-DD-<slug>).
+- **create_session_dir_in**: Creates `{base}/sessions/{uuid}/` for stable session directory. Uses `SESSIONS_SUBDIR` constant. When `output_dir == "."`, CLI uses `$HOME/.tddy` as base; PlanTask uses `session_base` from context.
 
 ## Data Flow
 

@@ -138,15 +138,22 @@ async fn pty_full_workflow_asserts_each_state_transition() {
                             seen_workflow_complete = true;
                             workflow_ok = wc.ok;
                             let mut seen = false;
-                            for _ in 0..50 {
+                            for _ in 0..200 {
                                 let screen = screen_buffer.lock().unwrap().clone();
+                                // Accept any of: final prompt bar ("Workflow complete"), completion
+                                // summary ("Plan dir:", etc.), or status bar showing RefactorComplete
+                                // (race: gRPC can arrive before presenter switches mode to Done)
                                 if screen.contains("Plan dir:")
                                     || screen.contains("Workflow complete")
+                                    || screen.contains("Tasks completed")
+                                    || screen.contains("Tests passing")
+                                    || (screen.contains("RefactorComplete")
+                                        && screen.contains("Goal: end"))
                                 {
                                     seen = true;
                                     break;
                                 }
-                                tokio::time::sleep(Duration::from_millis(5)).await;
+                                tokio::time::sleep(Duration::from_millis(10)).await;
                             }
                             assert!(
                                 seen,

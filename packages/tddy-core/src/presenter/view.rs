@@ -5,7 +5,7 @@ use crate::presenter::state::{ActivityEntry, AppMode};
 /// View interface. Presenter calls these methods when state changes.
 pub trait PresenterView {
     fn on_mode_changed(&mut self, mode: &AppMode);
-    fn on_activity_logged(&mut self, entry: &ActivityEntry);
+    fn on_activity_logged(&mut self, entry: &ActivityEntry, activity_log_len: usize);
     fn on_goal_started(&mut self, goal: &str);
     fn on_state_changed(&mut self, from: &str, to: &str);
     fn on_workflow_complete(&mut self, result: &Result<String, String>);

@@ -2,6 +2,8 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-03-10** [Feature] Stable Session Directory — When `--output-dir` omitted, run.rs uses `$HOME/.tddy` and `create_session_dir_in`; agent working_dir = current_dir(). Plan goal creates session under `$HOME/.tddy/sessions/{uuid}/`. (tddy-coder)
+- **2026-03-10** [Feature] Hook-Triggered Elicitation — run.rs handles ElicitationNeeded in run_goal_plain and run_full_workflow_plain; removed manual plan approval loop. run_plan_refinement helper. (tddy-coder)
 - **2026-03-10** [Feature] Plan Approval Gate — plain.rs read_plan_approval_plain (v/a/r); run.rs plan approval loop in run_goal_plain when goal is plan and PRD exists; refinement loop with run_goal("plan", ctx). (tddy-coder)
 - **2026-03-09** [Feature] gRPC Remote Control — Single `--grpc [PORT]` option (default 50051). Creates broadcast + mpsc channels, Presenter with with_broadcast, spawns tonic gRPC server in thread, passes intent_rx to run_event_loop. Dependencies: tonic, tokio-stream. (tddy-coder)
 - **2026-03-09** [Feature] MVP Architecture — Removed tui/ module. run_full_workflow_tui uses Presenter + tddy_tui::TuiView + tddy_tui::run_event_loop. Added tty module (should_run_tui). Re-export presenter types from tddy-core; disable_raw_mode from tddy-tui. presenter_integration.rs tests with TestView + StubBackend. (tddy-coder)

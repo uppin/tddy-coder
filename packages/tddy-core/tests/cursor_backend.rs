@@ -500,6 +500,9 @@ exit 0
         }
         ExecutionStatus::Error(e) => panic!("expected WaitingForInput, got Error: {}", e),
         ExecutionStatus::Paused { .. } => panic!("expected WaitingForInput, got Paused"),
+        ExecutionStatus::ElicitationNeeded { .. } => {
+            panic!("expected WaitingForInput, got ElicitationNeeded")
+        }
     }
 
     let _ = std::fs::remove_dir_all(&tmp);
