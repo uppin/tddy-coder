@@ -1,9 +1,17 @@
 //! Tests for --conversation-output: raw agent bytes written to file.
+//!
+//! Migrated from Workflow to WorkflowEngine.
+
+mod common;
 
 use std::fs;
+use std::sync::Arc;
+use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{
-    CodingBackend, CursorBackend, Goal, InvokeRequest, MockBackend, PlanOptions, Workflow,
+    CodingBackend, CursorBackend, Goal, InvokeRequest, MockBackend, SharedBackend, WorkflowEngine,
 };
+
+use common::run_plan_with_conversation_output;
 
 const PLAN_OUTPUT: &str = r#"---PRD_START---
 # Feature PRD
@@ -18,28 +26,33 @@ const RAW_STREAM: &str = r#"{"type":"system","session_id":"sess-1"}
 {"type":"result","result":"output","session_id":"sess-1"}"#;
 
 /// When conversation_output_path is set, MockBackend writes raw bytes to the file.
-#[test]
-fn mock_backend_writes_conversation_to_file_when_path_set() {
+#[tokio::test]
+async fn mock_backend_writes_conversation_to_file_when_path_set() {
     let tmp = std::env::temp_dir().join("tddy-conv-output-mock");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
     let output_file = tmp.join("conversation.ndjson");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok_with_raw_stream(PLAN_OUTPUT, RAW_STREAM);
 
-    let mut workflow = Workflow::new(backend);
-    let options = PlanOptions {
-        model: Some("sonnet".into()),
-        agent_output: false,
-        agent_output_sink: None,
-        conversation_output_path: Some(output_file.clone()),
-        inherit_stdin: false,
-        allowed_tools_extras: None,
-        debug: false,
-    };
+    let storage_dir = std::env::temp_dir().join("tddy-conv-output-mock-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let result = workflow.plan("Build auth", &tmp, None, &options);
+    let result = run_plan_with_conversation_output(
+        &engine,
+        "Build auth",
+        &tmp,
+        None,
+        Some(output_file.clone()),
+    )
+    .await;
+
     assert!(result.is_ok(), "plan should succeed: {:?}", result);
 
     let content = fs::read_to_string(&output_file).expect("conversation file should exist");
@@ -49,28 +62,25 @@ fn mock_backend_writes_conversation_to_file_when_path_set() {
 }
 
 /// When conversation_output_path is None, no file is created.
-#[test]
-fn mock_backend_creates_no_file_when_path_not_set() {
+#[tokio::test]
+async fn mock_backend_creates_no_file_when_path_not_set() {
     let tmp = std::env::temp_dir().join("tddy-conv-output-none");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
     let output_file = tmp.join("conversation.ndjson");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = PlanOptions {
-        model: Some("sonnet".into()),
-        agent_output: false,
-        agent_output_sink: None,
-        conversation_output_path: None,
-        inherit_stdin: false,
-        allowed_tools_extras: None,
-        debug: false,
-    };
+    let storage_dir = std::env::temp_dir().join("tddy-conv-output-none-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let _ = workflow.plan("Build auth", &tmp, None, &options);
+    let _ = run_plan_with_conversation_output(&engine, "Build auth", &tmp, None, None).await;
 
     assert!(
         !output_file.exists(),
@@ -81,9 +91,9 @@ fn mock_backend_creates_no_file_when_path_not_set() {
 }
 
 /// CursorBackend writes raw stdout bytes to file when conversation_output_path is set.
-#[test]
+#[tokio::test]
 #[cfg(unix)]
-fn cursor_backend_writes_raw_stream_to_conversation_output_file() {
+async fn cursor_backend_writes_raw_stream_to_conversation_output_file() {
     let tmp = std::env::temp_dir().join("tddy-conv-output-cursor");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
@@ -121,14 +131,13 @@ exit 0
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: Some(output_file.clone()),
         inherit_stdin: false,
         extra_allowed_tools: None,
     };
 
-    let result = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(backend.invoke(req));
+    let result = backend.invoke(req).await;
     assert!(result.is_ok(), "invoke should succeed: {:?}", result);
 
     let content = fs::read_to_string(&output_file).expect("conversation file should exist");

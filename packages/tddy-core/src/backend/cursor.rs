@@ -216,8 +216,12 @@ impl CursorBackend {
             })
         });
 
-        let mut on_progress = |ev: &crate::stream::ProgressEvent| {
-            if let Some(ref cb) = self.progress_callback {
+        let progress_sink = request.progress_sink.clone();
+        let instance_cb = self.progress_callback.clone();
+        let mut on_progress = move |ev: &crate::stream::ProgressEvent| {
+            if let Some(ref sink) = progress_sink {
+                sink.emit(ev);
+            } else if let Some(ref cb) = instance_cb {
                 if let Ok(mut f) = cb.lock() {
                     f(ev);
                 }

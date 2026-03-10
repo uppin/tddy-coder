@@ -47,6 +47,11 @@ impl SharedBackend {
         Self(std::sync::Arc::new(backend))
     }
 
+    /// Create SharedBackend from an Arc<dyn CodingBackend> (e.g. for MockBackend in tests).
+    pub fn from_arc(inner: std::sync::Arc<dyn CodingBackend>) -> Self {
+        Self(inner)
+    }
+
     /// Get the inner Arc for use with graph builders that require Arc<dyn CodingBackend>.
     pub fn as_arc(&self) -> std::sync::Arc<dyn CodingBackend> {
         self.0.clone()
@@ -144,6 +149,31 @@ impl std::fmt::Debug for AgentOutputSink {
     }
 }
 
+/// Sink for routing progress events (ToolUse, TaskStarted, TaskProgress) to TUI.
+#[derive(Clone)]
+pub struct ProgressSink(std::sync::Arc<dyn Fn(&crate::stream::ProgressEvent) + Send + Sync>);
+
+impl std::fmt::Debug for ProgressSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<progress_sink>")
+    }
+}
+
+impl ProgressSink {
+    /// Create a sink from a closure.
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(&crate::stream::ProgressEvent) + Send + Sync + 'static,
+    {
+        Self(std::sync::Arc::new(f))
+    }
+
+    /// Invoke the sink with the given event.
+    pub fn emit(&self, ev: &crate::stream::ProgressEvent) {
+        (self.0)(ev);
+    }
+}
+
 impl AgentOutputSink {
     /// Create a sink from a closure.
     pub fn new<F>(f: F) -> Self
@@ -181,6 +211,8 @@ pub struct InvokeRequest {
     pub agent_output: bool,
     /// When set and agent_output is true, routes output here instead of stderr (for TUI).
     pub agent_output_sink: Option<AgentOutputSink>,
+    /// When set, routes progress events (ToolUse, TaskStarted, TaskProgress) here instead of instance callback.
+    pub progress_sink: Option<ProgressSink>,
     /// When set, write entire agent conversation (raw bytes from stdout) to this file.
     pub conversation_output_path: Option<PathBuf>,
     /// When true, inherit stdin so the user can grant permission prompts interactively.

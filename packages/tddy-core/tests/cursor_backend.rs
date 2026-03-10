@@ -2,9 +2,17 @@
 //!
 //! Verifies that CursorBackend spawns `cursor agent` with correct flags,
 //! parses Cursor's stream-json output, and captures thread_id for --resume.
+//! Migrated from Workflow to WorkflowEngine where applicable.
+
+mod common;
 
 use std::fs;
-use tddy_core::{CodingBackend, CursorBackend, Goal, InvokeRequest, PlanOptions, Workflow};
+use std::sync::Arc;
+use tddy_core::workflow::graph::ExecutionStatus;
+use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
+use tddy_core::{CodingBackend, CursorBackend, Goal, InvokeRequest, SharedBackend, WorkflowEngine};
+
+use common::{ctx_plan, plan_dir_for_input};
 
 /// CursorBackend spawns cursor agent with -p, --output-format stream-json, --force, --trust.
 #[test]
@@ -47,6 +55,7 @@ exit 0
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
@@ -138,6 +147,7 @@ exit 0
             debug: false,
             agent_output: false,
             agent_output_sink: None,
+        progress_sink: None,
             conversation_output_path: None,
             inherit_stdin: false,
             extra_allowed_tools: None,
@@ -195,6 +205,7 @@ exit 0
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
@@ -278,6 +289,7 @@ exit 0
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
@@ -341,6 +353,7 @@ exit 0
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
@@ -404,6 +417,7 @@ exit 0
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
@@ -430,9 +444,9 @@ exit 0
 
 /// CursorBackend plan workflow returns ClarificationNeeded when stream contains
 /// clarification-questions block in result event (real-world tddy-coder format).
-#[test]
+#[tokio::test]
 #[cfg(unix)]
-fn cursor_backend_plan_returns_clarification_needed_when_stream_has_questions() {
+async fn cursor_backend_plan_returns_clarification_needed_when_stream_has_questions() {
     let tmp = std::env::temp_dir().join("tddy-cursor-clarification-plan");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
@@ -443,13 +457,17 @@ fn cursor_backend_plan_returns_clarification_needed_when_stream_has_questions() 
 {{"type":"result","subtype":"success","is_error":false,"result":{},"session_id":"cursor-sess"}}"#,
         serde_json::to_string(result_content).expect("escape")
     );
-    let stream_path = tmp.join("stream.ndjson");
+    let tmp_canonical = tmp.canonicalize().unwrap_or_else(|_| tmp.clone());
+    let stream_path = tmp_canonical.join("stream.ndjson");
     fs::write(&stream_path, ndjson).expect("write stream");
 
-    let script = r#"#!/bin/sh
-cat stream.ndjson
+    let script = format!(
+        r#"#!/bin/sh
+cat "{}"
 exit 0
-"#;
+"#,
+        stream_path.display()
+    );
     let script_path = tmp.join("cursor");
     fs::write(&script_path, script).expect("write script");
     {
@@ -459,22 +477,29 @@ exit 0
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = CursorBackend::with_path(script_path.into());
-    let mut workflow = Workflow::new(backend);
-    let result = workflow.plan("Feature X", &tmp, None, &PlanOptions::default());
+    let backend = Arc::new(CursorBackend::with_path(script_path.into()));
+    let storage_dir = std::env::temp_dir().join("tddy-cursor-clarification-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    match &result {
-        Err(tddy_core::WorkflowError::ClarificationNeeded {
-            questions,
-            session_id,
-        }) => {
-            assert_eq!(session_id, "cursor-sess");
-            assert_eq!(questions.len(), 2, "should extract 2 questions from stream");
-            assert_eq!(questions[0].header, "Validate goal scope");
-            assert_eq!(questions[1].header, "Refactor behavior");
+    let plan_dir = plan_dir_for_input(&tmp, "Feature X");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let ctx = ctx_plan("Feature X", tmp.clone(), None, None);
+    let result = engine.run_goal("plan", ctx).await.expect("run_goal");
+
+    match &result.status {
+        ExecutionStatus::WaitingForInput { .. } => {
+            assert!(!result.session_id.is_empty(), "session_id should be set");
         }
-        Ok(path) => panic!("expected ClarificationNeeded, got Ok({:?})", path),
-        Err(e) => panic!("expected ClarificationNeeded, got {:?}", e),
+        ExecutionStatus::Completed => {
+            panic!("expected WaitingForInput (ClarificationNeeded), got Completed")
+        }
+        ExecutionStatus::Error(e) => panic!("expected WaitingForInput, got Error: {}", e),
+        ExecutionStatus::Paused { .. } => panic!("expected WaitingForInput, got Paused"),
     }
 
     let _ = std::fs::remove_dir_all(&tmp);

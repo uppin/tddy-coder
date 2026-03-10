@@ -60,7 +60,7 @@ const TODO_START: &str = "---TODO_START---";
 const TODO_END: &str = "---TODO_END---";
 
 /// Parsed planning output containing PRD and TODO content.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlanningOutput {
     pub prd: String,
     pub todo: String,

@@ -1,13 +1,12 @@
 //! Integration tests for FlowRunner-based plan execution.
 //!
-//! Verifies run_plan_via_flow_runner exists and produces plan output when CLI/TUI
-//! migrates from Workflow to FlowRunner.
+//! Verifies plan goal produces plan output via WorkflowEngine (graph-flow path).
 //!
-//! Uses SKIP_QUESTIONS in prompt because FlowRunner does not support clarification input.
+//! Uses SKIP_QUESTIONS in prompt because the test does not provide clarification input.
 
 use std::path::PathBuf;
-use tddy_coder::{run_plan_via_flow_runner, Args};
-use tddy_core::{SharedBackend, StubBackend};
+use std::sync::atomic::AtomicBool;
+use tddy_coder::{run_with_args, Args};
 
 fn temp_output_dir() -> PathBuf {
     let dir = std::env::temp_dir().join("tddy-flowrunner-plan-test");
@@ -16,7 +15,7 @@ fn temp_output_dir() -> PathBuf {
     dir
 }
 
-/// run_plan_via_flow_runner produces a plan directory when given feature input.
+/// Plan goal produces a plan directory when given feature input (via WorkflowEngine).
 #[test]
 fn run_plan_via_flow_runner_produces_plan_directory() {
     let output_dir = temp_output_dir();
@@ -34,12 +33,12 @@ fn run_plan_via_flow_runner_produces_plan_directory() {
         grpc: None,
     };
 
-    let backend: SharedBackend =
-        SharedBackend::from_any(tddy_core::AnyBackend::Stub(StubBackend::new()));
+    run_with_args(&args, std::sync::Arc::new(AtomicBool::new(false)))
+        .expect("run_with_args plan should succeed");
 
-    let plan_dir =
-        run_plan_via_flow_runner(&args, backend).expect("run_plan_via_flow_runner should succeed");
-
+    let plan_dir_name =
+        tddy_core::output::slugify_directory_name("Add user authentication SKIP_QUESTIONS");
+    let plan_dir = output_dir.join(&plan_dir_name);
     assert!(
         plan_dir.is_dir(),
         "plan_dir should be a directory: {}",

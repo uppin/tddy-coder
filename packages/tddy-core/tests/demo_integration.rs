@@ -2,10 +2,18 @@
 //!
 //! These tests verify the demo() method, DemoOptions struct,
 //! Goal::Demo variant, parse_demo_response, and state transitions for the demo step.
-//! All tests are expected to FAIL in the Red phase.
+//! Migrated from Workflow to WorkflowEngine.
 
-use tddy_core::{
-    DemoOptions, GreenOptions, MockBackend, PlanOptions, RedOptions, Workflow, WorkflowState,
+mod common;
+
+use std::sync::Arc;
+use tddy_core::changeset::read_changeset;
+use tddy_core::workflow::graph::ExecutionStatus;
+use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
+use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
+
+use common::{
+    ctx_acceptance_tests, ctx_demo, ctx_evaluate, ctx_green, ctx_red, run_goal_until_done, run_plan,
 };
 
 const PLAN_OUTPUT: &str = r#"Here is my analysis.
@@ -66,42 +74,61 @@ const EVALUATE_OUTPUT: &str = r#"Evaluation complete.
 </structured-response>
 "#;
 
-fn setup_plan_dir_with_green_complete(label: &str) -> (std::path::PathBuf, Workflow<MockBackend>) {
+const VALIDATE_OUTPUT: &str = r#"All 3 subagents completed.
+
+<structured-response content-type="application-json">
+{"goal":"validate","summary":"All 3 subagents completed.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
+</structured-response>
+"#;
+
+const REFACTOR_OUTPUT: &str = r#"Refactoring complete.
+
+<structured-response content-type="application-json">
+{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}
+</structured-response>
+"#;
+
+async fn setup_plan_dir_with_green_complete(
+    label: &str,
+) -> (std::path::PathBuf, WorkflowEngine, Arc<MockBackend>) {
     let output_dir = std::env::temp_dir().join(format!("tddy-demo-{}", label));
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
 
-    let mut workflow = Workflow::new(backend);
-    let plan_dir = workflow
-        .plan("Build auth", &output_dir, None, &PlanOptions::default())
+    let storage_dir = std::env::temp_dir().join(format!("tddy-demo-engine-{}", label));
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let (plan_dir, _) = run_plan(&engine, "Build auth", &output_dir, None)
+        .await
         .expect("plan");
 
-    let _ = workflow.acceptance_tests(
-        &plan_dir,
-        None,
-        &tddy_core::AcceptanceTestsOptions::default(),
+    // Run each step with run_goal (single step) so we stop at GreenComplete.
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let r = engine.run_goal("acceptance-tests", ctx).await.unwrap();
+    assert!(
+        matches!(r.status, ExecutionStatus::Paused { .. }),
+        "at: {:?}",
+        r.status
     );
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
-    let _ = workflow.green(&plan_dir, None, &GreenOptions::default());
 
-    (plan_dir, workflow)
-}
-
-// ── Tests that verify new behavior not yet implemented (all should FAIL) ──────
-
-/// Demo should parse the structured response and return DemoOutput.
-/// Currently parse_demo_response has todo!() and the output is not parsed.
-/// This test verifies the demo() method completes successfully end-to-end.
-#[test]
-fn demo_completes_and_returns_demo_output() {
-    eprintln!("{{\"tddy\":{{\"marker_id\":\"M004\",\"scope\":\"demo_integration::demo_completes_and_returns_demo_output\",\"data\":{{}}}}}}");
-    let (plan_dir, mut workflow) = setup_plan_dir_with_green_complete("demo-output");
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let r = engine.run_goal("red", ctx).await.unwrap();
+    assert!(
+        matches!(r.status, ExecutionStatus::Paused { .. }),
+        "red: {:?}",
+        r.status
+    );
 
     std::fs::write(
         plan_dir.join("demo-plan.md"),
@@ -109,29 +136,58 @@ fn demo_completes_and_returns_demo_output() {
     )
     .expect("write demo-plan.md");
 
-    workflow.backend().push_ok(DEMO_OUTPUT);
+    let ctx = ctx_green(plan_dir.clone(), None, false);
+    let result = engine.run_goal("green", ctx).await.unwrap();
+    match &result.status {
+        ExecutionStatus::Paused { .. } => {}
+        _ => panic!("expected Paused after green, got {:?}", result.status),
+    }
 
-    let result = workflow.demo(&plan_dir, None, &DemoOptions::default());
+    (plan_dir, engine, backend)
+}
+
+/// Demo should parse the structured response and return DemoOutput.
+#[tokio::test]
+async fn demo_completes_and_returns_demo_output() {
+    let (plan_dir, engine, backend) = setup_plan_dir_with_green_complete("demo-output").await;
+
+    std::fs::write(
+        plan_dir.join("demo-plan.md"),
+        "# Demo\n## Steps\n- Run CLI\n## Verification\nOK",
+    )
+    .expect("write demo-plan.md");
+
+    backend.push_ok(DEMO_OUTPUT);
+
+    let ctx = ctx_demo(plan_dir.clone());
+    let result = engine.run_goal("demo", ctx).await.unwrap();
     assert!(
-        result.is_ok(),
-        "demo should complete successfully and return DemoOutput, got {:?}",
-        result
+        matches!(result.status, ExecutionStatus::Paused { .. }),
+        "demo: {:?}",
+        result.status
     );
 
-    let output = result.unwrap();
+    let session = engine
+        .get_session(&result.session_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let output_str: String = session.context.get_sync("output").unwrap();
+    let output = tddy_core::output::parse_demo_response(&output_str).expect("parse demo output");
     assert_eq!(
         output.summary,
         "Demo ran successfully. CLI produced expected output."
     );
     assert_eq!(output.demo_type, "cli");
     assert_eq!(output.steps_completed, 2);
+
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 /// After demo completes, state should be DemoComplete.
-#[test]
-fn demo_sets_state_to_demo_complete() {
-    eprintln!("{{\"tddy\":{{\"marker_id\":\"M005\",\"scope\":\"demo_integration::demo_sets_state_to_demo_complete\",\"data\":{{}}}}}}");
-    let (plan_dir, mut workflow) = setup_plan_dir_with_green_complete("demo-state");
+#[tokio::test]
+async fn demo_sets_state_to_demo_complete() {
+    let (plan_dir, engine, backend) = setup_plan_dir_with_green_complete("demo-state").await;
 
     std::fs::write(
         plan_dir.join("demo-plan.md"),
@@ -139,21 +195,29 @@ fn demo_sets_state_to_demo_complete() {
     )
     .expect("write demo-plan.md");
 
-    workflow.backend().push_ok(DEMO_OUTPUT);
+    backend.push_ok(DEMO_OUTPUT);
 
-    let _ = workflow.demo(&plan_dir, None, &DemoOptions::default());
-
+    let ctx = ctx_demo(plan_dir.clone());
+    let r = engine.run_goal("demo", ctx).await.unwrap();
     assert!(
-        matches!(workflow.state(), WorkflowState::DemoComplete { .. }),
-        "after demo, state should be DemoComplete, got {:?}",
-        workflow.state()
+        matches!(r.status, ExecutionStatus::Paused { .. }),
+        "demo: {:?}",
+        r.status
     );
+
+    let changeset = read_changeset(&plan_dir).expect("changeset");
+    assert_eq!(
+        changeset.state.current, "DemoComplete",
+        "after demo, state should be DemoComplete, got {}",
+        changeset.state.current
+    );
+
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 /// next_goal_for_state: GreenComplete should map to "demo" (not None).
 #[test]
 fn next_goal_green_complete_maps_to_demo() {
-    eprintln!("{{\"tddy\":{{\"marker_id\":\"M006\",\"scope\":\"demo_integration::next_goal_green_complete_maps_to_demo\",\"data\":{{}}}}}}");
     let result = tddy_core::next_goal_for_state("GreenComplete");
     assert_eq!(
         result,
@@ -166,7 +230,6 @@ fn next_goal_green_complete_maps_to_demo() {
 /// next_goal_for_state: DemoComplete should map to "evaluate".
 #[test]
 fn next_goal_demo_complete_maps_to_evaluate() {
-    eprintln!("{{\"tddy\":{{\"marker_id\":\"M007\",\"scope\":\"demo_integration::next_goal_demo_complete_maps_to_evaluate\",\"data\":{{}}}}}}");
     let result = tddy_core::next_goal_for_state("DemoComplete");
     assert_eq!(
         result,
@@ -179,7 +242,6 @@ fn next_goal_demo_complete_maps_to_evaluate() {
 /// default_models() should include a "demo" key.
 #[test]
 fn default_models_includes_demo() {
-    eprintln!("{{\"tddy\":{{\"marker_id\":\"M009\",\"scope\":\"demo_integration::default_models_includes_demo\",\"data\":{{}}}}}}");
     let changeset = tddy_core::Changeset::default();
     assert!(
         changeset.models.contains_key("demo"),
@@ -189,20 +251,20 @@ fn default_models_includes_demo() {
 }
 
 /// evaluate() should accept GreenComplete state (needed for full workflow).
-/// Currently evaluate only starts from Init — this needs to be relaxed.
-#[test]
-fn evaluate_accepts_green_complete_state() {
-    eprintln!("{{\"tddy\":{{\"marker_id\":\"M010\",\"scope\":\"demo_integration::evaluate_accepts_green_complete_state\",\"data\":{{}}}}}}");
-    let (plan_dir, mut workflow) = setup_plan_dir_with_green_complete("eval-from-green");
+#[tokio::test]
+async fn evaluate_accepts_green_complete_state() {
+    let (plan_dir, engine, backend) = setup_plan_dir_with_green_complete("eval-from-green").await;
 
-    workflow.backend().push_ok(EVALUATE_OUTPUT);
+    backend.push_ok(EVALUATE_OUTPUT);
+    backend.push_ok(VALIDATE_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT);
 
-    let result = workflow.evaluate(
-        &std::path::Path::new("."),
-        Some(&plan_dir),
-        None,
-        &tddy_core::EvaluateOptions::default(),
+    let ctx = ctx_evaluate(
+        plan_dir.clone(),
+        Some(std::path::Path::new(".").to_path_buf()),
     );
+    let result = run_goal_until_done(&engine, "evaluate", ctx).await;
+
     assert!(
         result.is_ok(),
         "evaluate should accept GreenComplete state for full workflow, got {:?}",
@@ -213,31 +275,34 @@ fn evaluate_accepts_green_complete_state() {
 }
 
 /// evaluate() should accept DemoComplete state (needed for full workflow after demo).
-#[test]
-fn evaluate_accepts_demo_complete_state() {
-    eprintln!("{{\"tddy\":{{\"marker_id\":\"M011\",\"scope\":\"demo_integration::evaluate_accepts_demo_complete_state\",\"data\":{{}}}}}}");
-    let backend = MockBackend::new();
-    backend.push_ok(EVALUATE_OUTPUT);
-    let mut workflow = Workflow::new(backend);
-    workflow.restore_state(WorkflowState::DemoComplete {
-        output: tddy_core::DemoOutput {
-            summary: "test".to_string(),
-            demo_type: "cli".to_string(),
-            steps_completed: 1,
-            verification: "ok".to_string(),
-        },
-    });
-
+#[tokio::test]
+async fn evaluate_accepts_demo_complete_state() {
     let plan_dir = std::env::temp_dir().join("tddy-demo-eval-accepts-dc");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create dir");
+    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Summary\nTest.").expect("write PRD");
 
-    let result = workflow.evaluate(
-        &std::path::Path::new("."),
-        Some(&plan_dir),
-        None,
-        &tddy_core::EvaluateOptions::default(),
+    common::write_changeset_with_state(&plan_dir, "DemoComplete", "sess-demo-1");
+
+    let backend = Arc::new(MockBackend::new());
+    backend.push_ok(EVALUATE_OUTPUT);
+    backend.push_ok(VALIDATE_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT);
+
+    let storage_dir = std::env::temp_dir().join("tddy-demo-eval-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
     );
+
+    let ctx = ctx_evaluate(
+        plan_dir.clone(),
+        Some(std::path::Path::new(".").to_path_buf()),
+    );
+    let result = run_goal_until_done(&engine, "evaluate", ctx).await;
+
     assert!(
         result.is_ok(),
         "evaluate should accept DemoComplete state, got {:?}",
@@ -248,11 +313,9 @@ fn evaluate_accepts_demo_complete_state() {
 }
 
 /// Demo backend invocation should use Goal::Demo.
-/// Verify the invocation's goal field when demo completes.
-#[test]
-fn demo_backend_invocation_uses_goal_demo() {
-    eprintln!("{{\"tddy\":{{\"marker_id\":\"M013\",\"scope\":\"demo_integration::demo_backend_invocation_uses_goal_demo\",\"data\":{{}}}}}}");
-    let (plan_dir, mut workflow) = setup_plan_dir_with_green_complete("goal-demo");
+#[tokio::test]
+async fn demo_backend_invocation_uses_goal_demo() {
+    let (plan_dir, engine, backend) = setup_plan_dir_with_green_complete("goal-demo").await;
 
     std::fs::write(
         plan_dir.join("demo-plan.md"),
@@ -260,28 +323,27 @@ fn demo_backend_invocation_uses_goal_demo() {
     )
     .expect("write demo-plan.md");
 
-    workflow.backend().push_ok(DEMO_OUTPUT);
+    backend.push_ok(DEMO_OUTPUT);
 
-    let result = workflow.demo(&plan_dir, None, &DemoOptions::default());
-    assert!(
-        result.is_ok(),
-        "demo should succeed (requires parse_demo_response to be implemented), got {:?}",
-        result
-    );
+    let ctx = ctx_demo(plan_dir.clone());
+    let result = engine.run_goal("demo", ctx).await;
 
-    let invocations = workflow.backend().invocations();
+    assert!(result.is_ok(), "demo should succeed, got {:?}", result);
+
+    let invocations = backend.invocations();
     let demo_inv = invocations.last().expect("should have demo invocation");
     assert_eq!(
         demo_inv.goal,
         tddy_core::Goal::Demo,
         "demo invocation should use Goal::Demo"
     );
+
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 /// Changeset should include "demo" in default_models for model resolution.
 #[test]
 fn changeset_default_models_has_demo_key() {
-    eprintln!("{{\"tddy\":{{\"marker_id\":\"M014\",\"scope\":\"demo_integration::changeset_default_models_has_demo_key\",\"data\":{{}}}}}}");
     let cs = tddy_core::Changeset::default();
     let demo_model = tddy_core::resolve_model(Some(&cs), "demo", None);
     assert!(

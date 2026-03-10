@@ -3,16 +3,21 @@
 //! All tests reference types and methods introduced by the evaluate-changes rename:
 //! - `Goal::Evaluate` (renamed from Goal::Validate)
 //! - `EvaluateOptions` (renamed from ValidateOptions)
-//! - `WorkflowState::Evaluated` (renamed from WorkflowState::Validated)
-//! - `workflow.evaluate()` method (renamed from workflow.validate())
+//! - `workflow.evaluate()` -> run_goal_until_done with ctx_evaluate
 //! - `evaluate_allowlist()` for the evaluate goal
 //! - `evaluation-report.md` written to plan_dir (not working_dir)
 //! - New report fields: changed_files, affected_tests, validity_assessment
 //!
-//! These tests are in Red state — they fail to compile because the production
-//! code has not been renamed/implemented yet.
+//! Migrated from Workflow to WorkflowEngine.
 
-use tddy_core::{evaluate_allowlist, EvaluateOptions, Goal, MockBackend, Workflow, WorkflowState};
+mod common;
+
+use std::sync::Arc;
+use tddy_core::changeset::read_changeset;
+use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
+use tddy_core::{evaluate_allowlist, Goal, MockBackend, SharedBackend, WorkflowEngine};
+
+use common::{ctx_evaluate, run_goal_until_done, write_changeset_with_state};
 
 /// Full evaluate-changes structured response with new fields:
 /// changed_files, affected_tests, validity_assessment.
@@ -23,26 +28,47 @@ const EVALUATE_OUTPUT: &str = r#"Evaluation complete.
 </structured-response>
 "#;
 
+/// For run_goal_until_done(evaluate): evaluate -> validate -> refactor chain.
+const VALIDATE_OUTPUT: &str = r#"All 3 subagents completed.
+<structured-response content-type="application-json">
+{"goal":"validate","summary":"All 3 subagents completed.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
+</structured-response>
+"#;
+
+const REFACTOR_OUTPUT: &str = r#"Refactoring complete.
+<structured-response content-type="application-json">
+{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}
+</structured-response>
+"#;
+
 /// evaluate() invokes backend with Goal::Evaluate (renamed from Goal::Validate).
-#[test]
-fn evaluate_workflow_invokes_backend_with_evaluate_goal() {
+#[tokio::test]
+async fn evaluate_workflow_invokes_backend_with_evaluate_goal() {
     let working_dir = std::env::temp_dir().join("tddy-evaluate-goal-test");
     let plan_dir = std::env::temp_dir().join("tddy-evaluate-goal-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    write_changeset_with_state(&plan_dir, "GreenComplete", "sess-eval-goal");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(EVALUATE_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = EvaluateOptions::default();
-    let result = workflow.evaluate(&working_dir, Some(&plan_dir), None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-evaluate-goal-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_evaluate(plan_dir.clone(), Some(working_dir.clone()));
+    let result = engine.run_goal("evaluate", ctx).await;
 
     assert!(result.is_ok(), "evaluate should succeed, got: {:?}", result);
 
-    let invocations = workflow.backend().invocations();
+    let invocations = backend.invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
     assert_eq!(
@@ -56,27 +82,35 @@ fn evaluate_workflow_invokes_backend_with_evaluate_goal() {
 }
 
 /// evaluate() transitions workflow to Evaluated state on success.
-#[test]
-fn evaluate_workflow_transitions_to_evaluated_state() {
+#[tokio::test]
+async fn evaluate_workflow_transitions_to_evaluated_state() {
     let working_dir = std::env::temp_dir().join("tddy-evaluate-state-test");
     let plan_dir = std::env::temp_dir().join("tddy-evaluate-state-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    write_changeset_with_state(&plan_dir, "GreenComplete", "sess-eval-1");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(EVALUATE_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = EvaluateOptions::default();
-    let _ = workflow.evaluate(&working_dir, Some(&plan_dir), None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-evaluate-state-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let state = workflow.state();
-    assert!(
-        matches!(state, WorkflowState::Evaluated { .. }),
-        "workflow should transition to Evaluated (not Validated), got {:?}",
-        state
+    let ctx = ctx_evaluate(plan_dir.clone(), Some(working_dir.clone()));
+    let _ = engine.run_goal("evaluate", ctx).await.unwrap();
+
+    let changeset = read_changeset(&plan_dir).expect("changeset");
+    assert_eq!(
+        changeset.state.current, "Evaluated",
+        "workflow should transition to Evaluated (not Validated), got {}",
+        changeset.state.current
     );
 
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -84,8 +118,8 @@ fn evaluate_workflow_transitions_to_evaluated_state() {
 }
 
 /// evaluate() writes evaluation-report.md to plan_dir, NOT to working_dir.
-#[test]
-fn evaluate_workflow_writes_evaluation_report_to_plan_dir() {
+#[tokio::test]
+async fn evaluate_workflow_writes_evaluation_report_to_plan_dir() {
     let working_dir = std::env::temp_dir().join("tddy-evaluate-writes-working");
     let plan_dir = std::env::temp_dir().join("tddy-evaluate-writes-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -93,12 +127,21 @@ fn evaluate_workflow_writes_evaluation_report_to_plan_dir() {
     std::fs::create_dir_all(&working_dir).expect("create working dir");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(EVALUATE_OUTPUT);
+    backend.push_ok(VALIDATE_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = EvaluateOptions::default();
-    let _ = workflow.evaluate(&working_dir, Some(&plan_dir), None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-evaluate-writes-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_evaluate(plan_dir.clone(), Some(working_dir.clone()));
+    let _ = run_goal_until_done(&engine, "evaluate", ctx).await.unwrap();
 
     let report_in_plan = plan_dir.join("evaluation-report.md");
     assert!(
@@ -107,7 +150,6 @@ fn evaluate_workflow_writes_evaluation_report_to_plan_dir() {
         report_in_plan.display()
     );
 
-    // Must NOT appear in working_dir (old behavior)
     let report_in_working = working_dir.join("evaluation-report.md");
     assert!(
         !report_in_working.exists(),
@@ -115,7 +157,6 @@ fn evaluate_workflow_writes_evaluation_report_to_plan_dir() {
         report_in_working.display()
     );
 
-    // Confirm old filename is also absent
     assert!(
         !plan_dir.join("validation-report.md").exists(),
         "old validation-report.md must not be created; the new name is evaluation-report.md"
@@ -126,19 +167,25 @@ fn evaluate_workflow_writes_evaluation_report_to_plan_dir() {
 }
 
 /// evaluate() without plan_dir returns an error (plan_dir is required).
-#[test]
-fn evaluate_workflow_requires_plan_dir() {
+#[tokio::test]
+async fn evaluate_workflow_requires_plan_dir() {
     let working_dir = std::env::temp_dir().join("tddy-evaluate-no-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(EVALUATE_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = EvaluateOptions::default();
-    // plan_dir is None — evaluate-changes requires a plan_dir to write its report
-    let result = workflow.evaluate(&working_dir, None, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-evaluate-no-plan-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = std::collections::HashMap::new();
+    let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
     assert!(
         result.is_err(),
@@ -149,8 +196,8 @@ fn evaluate_workflow_requires_plan_dir() {
 }
 
 /// evaluate() report includes a Changed Files section listing all changed files.
-#[test]
-fn evaluate_workflow_includes_changed_files_in_report() {
+#[tokio::test]
+async fn evaluate_workflow_includes_changed_files_in_report() {
     let working_dir = std::env::temp_dir().join("tddy-evaluate-changed-files");
     let plan_dir = std::env::temp_dir().join("tddy-evaluate-changed-files-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -158,12 +205,21 @@ fn evaluate_workflow_includes_changed_files_in_report() {
     std::fs::create_dir_all(&working_dir).expect("create working dir");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(EVALUATE_OUTPUT);
+    backend.push_ok(VALIDATE_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = EvaluateOptions::default();
-    let result = workflow.evaluate(&working_dir, Some(&plan_dir), None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-evaluate-changed-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_evaluate(plan_dir.clone(), Some(working_dir.clone()));
+    let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
     assert!(result.is_ok(), "evaluate should succeed, got: {:?}", result);
 
@@ -181,8 +237,8 @@ fn evaluate_workflow_includes_changed_files_in_report() {
 }
 
 /// evaluate() report includes an Affected Tests section.
-#[test]
-fn evaluate_workflow_includes_affected_tests_in_report() {
+#[tokio::test]
+async fn evaluate_workflow_includes_affected_tests_in_report() {
     let working_dir = std::env::temp_dir().join("tddy-evaluate-affected-tests");
     let plan_dir = std::env::temp_dir().join("tddy-evaluate-affected-tests-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -190,12 +246,21 @@ fn evaluate_workflow_includes_affected_tests_in_report() {
     std::fs::create_dir_all(&working_dir).expect("create working dir");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(EVALUATE_OUTPUT);
+    backend.push_ok(VALIDATE_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = EvaluateOptions::default();
-    let result = workflow.evaluate(&working_dir, Some(&plan_dir), None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-evaluate-affected-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_evaluate(plan_dir.clone(), Some(working_dir.clone()));
+    let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
     assert!(result.is_ok(), "evaluate should succeed, got: {:?}", result);
 
@@ -215,8 +280,8 @@ fn evaluate_workflow_includes_affected_tests_in_report() {
 }
 
 /// evaluate() report includes a Validity Assessment section.
-#[test]
-fn evaluate_workflow_includes_validity_assessment() {
+#[tokio::test]
+async fn evaluate_workflow_includes_validity_assessment() {
     let working_dir = std::env::temp_dir().join("tddy-evaluate-validity");
     let plan_dir = std::env::temp_dir().join("tddy-evaluate-validity-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -224,12 +289,21 @@ fn evaluate_workflow_includes_validity_assessment() {
     std::fs::create_dir_all(&working_dir).expect("create working dir");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(EVALUATE_OUTPUT);
+    backend.push_ok(VALIDATE_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = EvaluateOptions::default();
-    let result = workflow.evaluate(&working_dir, Some(&plan_dir), None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-evaluate-validity-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_evaluate(plan_dir.clone(), Some(working_dir.clone()));
+    let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
     assert!(result.is_ok(), "evaluate should succeed, got: {:?}", result);
 
@@ -249,8 +323,8 @@ fn evaluate_workflow_includes_validity_assessment() {
 }
 
 /// evaluate() includes PRD/changeset context in prompt when plan_dir is provided.
-#[test]
-fn evaluate_workflow_includes_plan_dir_context_when_provided() {
+#[tokio::test]
+async fn evaluate_workflow_includes_plan_dir_context_when_provided() {
     let working_dir = std::env::temp_dir().join("tddy-evaluate-with-plan-dir");
     let plan_dir = std::env::temp_dir().join("tddy-evaluate-plan-context");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -259,14 +333,21 @@ fn evaluate_workflow_includes_plan_dir_context_when_provided() {
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Summary\nAuth feature.").expect("write PRD");
-    write_changeset_for_plan_session(&plan_dir, "sess-ctx-456");
+    write_changeset_with_state(&plan_dir, "GreenComplete", "sess-ctx-456");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(EVALUATE_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = EvaluateOptions::default();
-    let result = workflow.evaluate(&working_dir, Some(&plan_dir), None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-evaluate-ctx-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_evaluate(plan_dir.clone(), Some(working_dir.clone()));
+    let result = engine.run_goal("evaluate", ctx).await;
 
     assert!(
         result.is_ok(),
@@ -274,7 +355,7 @@ fn evaluate_workflow_includes_plan_dir_context_when_provided() {
         result
     );
 
-    let invocations = workflow.backend().invocations();
+    let invocations = backend.invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
     assert!(
@@ -324,8 +405,8 @@ fn evaluate_allowlist_contains_required_tools() {
 }
 
 /// evaluate() returns ParseError when backend returns a response with no structured-response block.
-#[test]
-fn evaluate_workflow_returns_parse_error_on_malformed_response() {
+#[tokio::test]
+async fn evaluate_workflow_returns_parse_error_on_malformed_response() {
     let working_dir = std::env::temp_dir().join("tddy-evaluate-parse-error");
     let plan_dir = std::env::temp_dir().join("tddy-evaluate-parse-error-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -333,46 +414,31 @@ fn evaluate_workflow_returns_parse_error_on_malformed_response() {
     std::fs::create_dir_all(&working_dir).expect("create working dir");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
-    let backend = MockBackend::new();
-    // No structured-response block — parser should fail
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok("I evaluated the changes and they look fine. No issues found.");
 
-    let mut workflow = Workflow::new(backend);
-    let options = EvaluateOptions::default();
-    let result = workflow.evaluate(&working_dir, Some(&plan_dir), None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-evaluate-parse-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_evaluate(plan_dir.clone(), Some(working_dir.clone()));
+    let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
     assert!(
         result.is_err(),
         "evaluate should fail on malformed response (missing structured-response block)"
     );
+    let err_msg = result.unwrap_err().to_string();
     assert!(
-        matches!(result, Err(tddy_core::WorkflowError::ParseError(_))),
-        "expected ParseError, got: {:?}",
-        result
+        err_msg.contains("Parse") || err_msg.contains("parse") || err_msg.contains("structured"),
+        "expected ParseError, got: {}",
+        err_msg
     );
 
     let _ = std::fs::remove_dir_all(&working_dir);
     let _ = std::fs::remove_dir_all(&plan_dir);
-}
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-fn write_changeset_for_plan_session(plan_dir: &std::path::Path, session_id: &str) {
-    let changeset = format!(
-        r#"version: 1
-models: {{}}
-sessions:
-  - id: "{}"
-    agent: claude
-    tag: plan
-    created_at: "2026-03-08T10:00:00Z"
-state:
-  current: Planned
-  updated_at: "2026-03-08T10:00:00Z"
-  history: []
-artifacts: {{}}
-"#,
-        session_id
-    );
-    std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
 }

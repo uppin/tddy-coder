@@ -3179,6 +3179,7 @@ dependencies = [
  "ctrlc",
  "libc",
  "log",
+ "serde_json",
  "tddy-core",
  "tddy-grpc",
  "tddy-tui",
@@ -3226,12 +3227,15 @@ dependencies = [
  "anyhow",
  "async-stream",
  "prost",
+ "ratatui",
  "tddy-core",
  "tddy-grpc",
+ "tddy-tui",
  "termwright",
  "tokio",
  "tokio-stream",
  "tonic",
+ "uuid",
 ]
 
 [[package]]

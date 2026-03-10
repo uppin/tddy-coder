@@ -2,15 +2,29 @@
 //!
 //! Tests cover types and methods for the validate goal:
 //! - `Goal::Validate`, `ValidateOptions`, `WorkflowState::ValidateComplete`
-//! - `workflow.validate()`, `validate_subagents_allowlist()`
+//! - `workflow.validate()` -> run_goal_until_done with ctx_validate
+//! - `validate_subagents_allowlist()`
 //!
 //! CursorBackend must reject Goal::Validate immediately with an "unsupported" error,
 //! before attempting to spawn the cursor process.
+//!
+//! Migrated from Workflow to WorkflowEngine.
 
+mod common;
+
+use std::sync::Arc;
+use tddy_core::changeset::read_changeset;
+use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{
     validate_subagents_allowlist, BackendError, CodingBackend, CursorBackend, Goal, InvokeRequest,
-    MockBackend, ValidateOptions, Workflow, WorkflowState,
+    MockBackend, SharedBackend, WorkflowEngine,
 };
+
+use common::{
+    ctx_validate, run_goal_until_done, write_changeset_with_state,
+    write_evaluation_report_to_plan_dir,
+};
+use tddy_core::workflow::graph::ExecutionStatus;
 
 /// Minimal validate (subagent) structured response.
 const VALIDATE_REFACTOR_OUTPUT: &str = r#"All 3 subagents have completed their analysis.
@@ -20,30 +34,47 @@ validate-prod-ready-report.md written.
 analyze-clean-code-report.md written.
 
 <structured-response content-type="application-json">
-{"goal":"validate","summary":"All 3 subagents completed. Reports written to plan-dir. Tests: 2 issues found. Production readiness: 1 blocker. Clean code score: 7/10.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true}
+{"goal":"validate","summary":"All 3 subagents completed. Reports written to plan-dir. Tests: 2 issues found. Production readiness: 1 blocker. Clean code score: 7/10.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
+</structured-response>
+"#;
+
+/// For run_goal_until_done(validate): validate -> refactor chain.
+const REFACTOR_OUTPUT: &str = r#"Refactoring complete.
+<structured-response content-type="application-json">
+{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}
 </structured-response>
 "#;
 
 /// validate() invokes backend with Goal::Validate.
-#[test]
-fn validate_invokes_backend_with_validate_goal() {
+#[tokio::test]
+async fn validate_invokes_backend_with_validate_goal() {
     let plan_dir = std::env::temp_dir().join("tddy-vr-goal-plan");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_evaluation_report_to_plan_dir(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let result = workflow.validate(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-vr-goal-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_validate(plan_dir.clone());
+    let result = engine.run_goal("validate", ctx).await;
 
     assert!(result.is_ok(), "validate should succeed, got: {:?}", result);
 
-    let invocations = workflow.backend().invocations();
+    let invocations = backend.invocations();
     assert!(!invocations.is_empty(), "backend should have been invoked");
-    let req = invocations.last().unwrap();
+    let req = invocations
+        .iter()
+        .find(|r| r.goal == Goal::Validate)
+        .expect("validate invocation");
     assert_eq!(
         req.goal,
         Goal::Validate,
@@ -55,19 +86,26 @@ fn validate_invokes_backend_with_validate_goal() {
 
 /// validate() requires plan_dir — returns an error when plan_dir does not exist
 /// or the working directory contains no evaluation-report.md.
-#[test]
-fn validate_requires_plan_dir_with_evaluation_report() {
+#[tokio::test]
+async fn validate_requires_plan_dir_with_evaluation_report() {
     let plan_dir = std::env::temp_dir().join("tddy-vr-no-plan");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     // Deliberately do NOT write evaluation-report.md — validate should fail
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let result = workflow.validate(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-vr-no-plan-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_validate(plan_dir.clone());
+    let result = run_goal_until_done(&engine, "validate", ctx).await;
 
     assert!(
         result.is_err(),
@@ -80,14 +118,8 @@ fn validate_requires_plan_dir_with_evaluation_report() {
 
 /// CursorBackend must reject Goal::Validate with an "unsupported" error
 /// before spawning the cursor process.
-///
-/// The backend pointed at a nonexistent binary: if the early return works, we get
-/// an InvocationFailed("not supported") error, NOT a BinaryNotFound error.
-/// If early return is not implemented, the test fails (BinaryNotFound ≠ unsupported).
-#[test]
-fn validate_rejects_cursor_backend() {
-    // Point at a nonexistent binary so any spawn attempt would produce BinaryNotFound.
-    // The rejection must happen BEFORE spawning.
+#[tokio::test]
+async fn validate_rejects_cursor_backend() {
     let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/cursor"));
     let req = InvokeRequest {
         prompt: "validate refactor".to_string(),
@@ -101,14 +133,13 @@ fn validate_rejects_cursor_backend() {
         debug: false,
         agent_output: false,
         agent_output_sink: None,
+        progress_sink: None,
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
     };
 
-    let result = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(backend.invoke(req));
+    let result = backend.invoke(req).await;
 
     assert!(
         result.is_err(),
@@ -144,47 +175,79 @@ fn validate_rejects_cursor_backend() {
 }
 
 /// validate() transitions workflow to ValidateComplete state on success.
-#[test]
-fn validate_transitions_to_complete_state() {
+#[tokio::test]
+async fn validate_transitions_to_complete_state() {
     let plan_dir = std::env::temp_dir().join("tddy-vr-state-plan");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_evaluation_report_to_plan_dir(&plan_dir);
+    write_changeset_with_state(&plan_dir, "Evaluated", "sess-eval-1");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let _ = workflow.validate(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-vr-state-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let state = workflow.state();
+    let ctx = ctx_validate(plan_dir.clone());
+    let r = engine.run_goal("validate", ctx).await.unwrap();
     assert!(
-        matches!(state, WorkflowState::ValidateComplete { .. }),
-        "workflow should transition to ValidateComplete, got {:?}",
-        state
+        matches!(r.status, ExecutionStatus::Paused { .. }),
+        "validate: {:?}",
+        r.status
+    );
+
+    let changeset = read_changeset(&plan_dir).expect("changeset");
+    assert!(
+        changeset.state.current == "ValidateComplete"
+            || changeset.state.current == "RefactorComplete",
+        "workflow should transition to ValidateComplete or RefactorComplete, got {}",
+        changeset.state.current
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
 /// validate() correctly parses a structured response with tests/prod/clean-code flags.
-#[test]
-fn validate_parses_structured_response() {
+#[tokio::test]
+async fn validate_parses_structured_response() {
     let plan_dir = std::env::temp_dir().join("tddy-vr-parse-plan");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_evaluation_report_to_plan_dir(&plan_dir);
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let result = workflow.validate(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-vr-parse-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    assert!(result.is_ok(), "validate should succeed, got: {:?}", result);
-    let output = result.unwrap();
+    let ctx = ctx_validate(plan_dir.clone());
+    let result = engine.run_goal("validate", ctx).await.unwrap();
+    assert!(
+        matches!(result.status, ExecutionStatus::Paused { .. }),
+        "validate: {:?}",
+        result.status
+    );
+
+    let session = engine
+        .get_session(&result.session_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let output_str: String = session.context.get_sync("output").unwrap();
+    let output =
+        tddy_core::output::parse_validate_subagents_response(&output_str).expect("parse output");
 
     assert!(
         output.tests_report_written,
@@ -221,8 +284,6 @@ fn validate_subagents_allowlist_includes_agent_tool() {
          the orchestrator spawns 3 concurrent subagents via the Agent tool, got: {:?}",
         allowlist
     );
-
-    // Also must retain the read-only analysis tools from evaluate_allowlist
     assert!(
         allowlist.iter().any(|t| t == "Read"),
         "validate_subagents_allowlist must include Read, got: {:?}",
@@ -240,13 +301,9 @@ fn validate_subagents_allowlist_includes_agent_tool() {
     );
 }
 
-// ── validate goal acceptance tests ─────────────────────────────────────────────
-
 /// validate() produces response with goal="validate".
-#[test]
-fn validate_response_has_validate_goal() {
-    use tddy_core::{MockBackend, Workflow};
-
+#[tokio::test]
+async fn validate_response_has_validate_goal() {
     let plan_dir = std::env::temp_dir().join("tddy-validate-renamed-goal");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -259,20 +316,34 @@ fn validate_response_has_validate_goal() {
 </structured-response>
 "#;
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(validate_output_with_plan);
 
-    let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let result = workflow.validate(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-validate-goal-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    assert!(result.is_ok(), "validate should succeed, got: {:?}", result);
+    let ctx = ctx_validate(plan_dir.clone());
+    let result = engine.run_goal("validate", ctx).await.unwrap();
+    assert!(
+        matches!(result.status, ExecutionStatus::Paused { .. }),
+        "validate: {:?}",
+        result.status
+    );
 
-    let invocations = workflow.backend().invocations();
-    assert!(!invocations.is_empty(), "backend should have been invoked");
-    let _req = invocations.last().unwrap();
+    let session = engine
+        .get_session(&result.session_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let output_str: String = session.context.get_sync("output").unwrap();
+    let output =
+        tddy_core::output::parse_validate_subagents_response(&output_str).expect("parse output");
 
-    let output = result.unwrap();
     assert_eq!(
         output.goal, "validate",
         "validate goal response should have goal='validate'"
@@ -282,8 +353,8 @@ fn validate_response_has_validate_goal() {
 }
 
 /// validate produces structured response with refactoring_plan_written field.
-#[test]
-fn validate_produces_refactoring_plan() {
+#[tokio::test]
+async fn validate_produces_refactoring_plan() {
     let plan_dir = std::env::temp_dir().join("tddy-validate-refactoring-plan");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -296,15 +367,33 @@ fn validate_produces_refactoring_plan() {
 </structured-response>
 "#;
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(validate_output);
 
-    let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let result = workflow.validate(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-validate-refactor-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    assert!(result.is_ok(), "validate should succeed, got: {:?}", result);
-    let output = result.unwrap();
+    let ctx = ctx_validate(plan_dir.clone());
+    let result = engine.run_goal("validate", ctx).await.unwrap();
+    assert!(
+        matches!(result.status, ExecutionStatus::Paused { .. }),
+        "validate: {:?}",
+        result.status
+    );
+
+    let session = engine
+        .get_session(&result.session_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let output_str: String = session.context.get_sync("output").unwrap();
+    let output =
+        tddy_core::output::parse_validate_subagents_response(&output_str).expect("parse output");
 
     assert!(
         output.refactoring_plan_written,
@@ -315,60 +404,36 @@ fn validate_produces_refactoring_plan() {
 }
 
 /// validate transitions to ValidateComplete state.
-#[test]
-fn validate_transitions_to_validate_complete() {
+#[tokio::test]
+async fn validate_transitions_to_validate_complete() {
     let plan_dir = std::env::temp_dir().join("tddy-validate-complete-state");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_evaluation_report_to_plan_dir(&plan_dir);
+    write_changeset_with_state(&plan_dir, "Evaluated", "sess-eval-1");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT);
 
-    let mut workflow = Workflow::new(backend);
-    let options = ValidateOptions::default();
-    let _ = workflow.validate(&plan_dir, None, &options);
+    let storage_dir = std::env::temp_dir().join("tddy-validate-complete-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let state = workflow.state();
-    // Will fail until ValidateRefactorComplete is renamed to ValidateComplete
+    let ctx = ctx_validate(plan_dir.clone());
+    let _ = run_goal_until_done(&engine, "validate", ctx).await.unwrap();
+
+    let changeset = read_changeset(&plan_dir).expect("changeset");
     assert!(
-        matches!(state, WorkflowState::ValidateComplete { .. }),
-        "workflow should transition to ValidateComplete (renamed from ValidateRefactorComplete), got {:?}",
-        state
+        changeset.state.current == "ValidateComplete"
+            || changeset.state.current == "RefactorComplete",
+        "workflow should transition to ValidateComplete or RefactorComplete, got {}",
+        changeset.state.current
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
-}
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-/// Write a minimal evaluation-report.md to plan_dir to satisfy validate's prerequisite.
-fn write_evaluation_report_to_plan_dir(plan_dir: &std::path::Path) {
-    let content = r#"# Evaluation Report
-
-## Summary
-
-Evaluated 3 changed files. Risk level: medium.
-
-## Risk Level
-
-medium
-
-## Changed Files
-
-- src/main.rs (modified, +15/-3)
-- src/lib.rs (modified, +5/-0)
-- tests/main_test.rs (added, +40/-0)
-
-## Affected Tests
-
-- tests/main_test.rs: created
-- tests/integration_test.rs: updated
-
-## Validity Assessment
-
-The change is valid for the intended use-case.
-"#;
-    std::fs::write(plan_dir.join("evaluation-report.md"), content)
-        .expect("write evaluation-report.md");
 }

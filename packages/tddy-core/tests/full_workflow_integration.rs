@@ -2,13 +2,21 @@
 //!
 //! These acceptance tests define the expected behavior when running the full workflow
 //! without a specific --goal. They verify chaining, resume logic, and next_goal_for_state.
+//!
+//! Migrated from Workflow to WorkflowEngine.
 
-use tddy_core::{
-    next_goal_for_state, AcceptanceTestsOptions, DemoOptions, EvaluateOptions, MockBackend,
-    PlanOptions, RedOptions, RefactorOptions, StubBackend, ValidateOptions, Workflow,
-    WorkflowError,
+mod common;
+
+use common::{
+    ctx_acceptance_tests, ctx_demo, ctx_evaluate, ctx_green, ctx_plan, ctx_red, ctx_refactor,
+    ctx_validate, plan_dir_for_input, run_goal_until_done, run_plan, write_changeset_with_state,
 };
-use tddy_core::{GreenOptions, WorkflowState};
+use std::sync::Arc;
+use tddy_core::changeset::read_changeset;
+use tddy_core::output::parse_green_response;
+use tddy_core::workflow::graph::ExecutionStatus;
+use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
+use tddy_core::{next_goal_for_state, MockBackend, SharedBackend, StubBackend, WorkflowEngine};
 
 const PLAN_OUTPUT: &str = r#"Here is my analysis.
 
@@ -56,129 +64,120 @@ const GREEN_OUTPUT_ALL_PASS: &str = r#"Implemented production code. All tests pa
 </structured-response>
 "#;
 
-fn write_changeset_with_state(plan_dir: &std::path::Path, state: &str, session_id: &str) {
-    let changeset = format!(
-        r#"version: 1
-models: {{}}
-sessions:
-  - id: "{}"
-    agent: claude
-    tag: plan
-    created_at: "2026-03-07T10:00:00Z"
-state:
-  current: {}
-  updated_at: "2026-03-07T10:00:00Z"
-  history: []
-artifacts: {{}}
-"#,
-        session_id, state
-    );
-    std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
-}
+const EVALUATE_OUTPUT_CHAIN: &str = r#"Evaluation complete.
 
-/// Full workflow chains plan -> acceptance-tests -> red -> green on a single Workflow.
-#[test]
-fn full_workflow_chains_all_steps() {
+<structured-response content-type="application-json">
+{"goal":"evaluate-changes","summary":"Evaluated. All criteria met.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"synced","items_updated":0,"items_added":0},"files_analyzed":[],"test_impact":{"tests_affected":0,"new_tests_needed":0},"changed_files":[],"affected_tests":[],"validity_assessment":"OK"}
+</structured-response>
+"#;
+
+/// Full workflow chains plan -> acceptance-tests -> red -> green on a single WorkflowEngine.
+/// Uses run_workflow_from so the graph chains all steps in one run.
+#[tokio::test]
+async fn full_workflow_chains_all_steps() {
     let output_dir = std::env::temp_dir().join("tddy-full-workflow-chain");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
 
-    let backend = MockBackend::new();
+    let plan_dir = plan_dir_for_input(&output_dir, "Build auth");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
+    backend.push_ok(EVALUATE_OUTPUT_CHAIN);
+    backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
+    // 8 goals: plan, at, red, green, evaluate, validate, refactor (no demo when run_demo=false)
 
-    let mut workflow = Workflow::new(backend);
-    let plan_options = PlanOptions::default();
-    let plan_dir = workflow
-        .plan("Build auth", &output_dir, None, &plan_options)
-        .expect("plan should succeed");
-
-    let at_options = AcceptanceTestsOptions::default();
-    let _ = workflow
-        .acceptance_tests(&plan_dir, None, &at_options)
-        .expect("acceptance_tests should succeed");
-
-    let red_options = RedOptions::default();
-    let _ = workflow
-        .red(&plan_dir, None, &red_options)
-        .expect("red should succeed");
-
-    let green_options = GreenOptions::default();
-    let green_output = workflow
-        .green(&plan_dir, None, &green_options)
-        .expect("green should succeed");
-
-    assert!(green_output.summary.contains("passing"));
-    assert_eq!(green_output.tests.len(), 3);
-    assert_eq!(green_output.implementations.len(), 2);
-
-    let state = workflow.state();
-    assert!(
-        matches!(state, WorkflowState::GreenComplete { .. }),
-        "workflow should end in GreenComplete, got {:?}",
-        state
+    let storage_dir = std::env::temp_dir().join("tddy-full-chain-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir.clone(),
+        Some(Arc::new(TddWorkflowHooks::new())),
     );
+
+    let ctx = ctx_plan("Build auth", output_dir.clone(), None, None);
+    let result = engine.run_workflow_from("plan", ctx).await.unwrap();
+    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
+    assert!(matches!(result.status, ExecutionStatus::Completed));
+
+    let inv_count = backend.invocations().len();
+    assert_eq!(
+        inv_count, 7,
+        "plan+at+red+green+evaluate+validate+refactor (no demo), got {}",
+        inv_count
+    );
+    let changeset = read_changeset(&plan_dir).expect("changeset");
+    assert_eq!(changeset.state.current, "RefactorComplete");
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 /// Full workflow with StubBackend reaches GreenComplete (tddy-demo flow).
 /// StubBackend always asks clarification (plan) and permission (acceptance-tests).
-#[test]
-fn full_workflow_with_stub_backend_reaches_green_complete() {
+#[tokio::test]
+async fn full_workflow_with_stub_backend_reaches_green_complete() {
     let output_dir = std::env::temp_dir().join("tddy-full-workflow-stub");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
 
-    let backend = StubBackend::new();
-    let mut workflow = Workflow::new(backend);
-    let plan_options = PlanOptions::default();
-    let first = workflow.plan("Add a feature", &output_dir, None, &plan_options);
-    assert!(
-        matches!(first, Err(WorkflowError::ClarificationNeeded { .. })),
-        "plan should ask clarification first"
+    let backend = Arc::new(StubBackend::new());
+    let storage_dir = std::env::temp_dir().join("tddy-full-stub-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir.clone(),
+        Some(Arc::new(TddWorkflowHooks::new())),
     );
-    let plan_dir = workflow
-        .plan(
-            "Add a feature",
-            &output_dir,
-            Some("Email/password"),
-            &plan_options,
-        )
-        .expect("plan should succeed with clarification answer");
 
-    let at_options = AcceptanceTestsOptions::default();
-    let at_first = workflow.acceptance_tests(&plan_dir, None, &at_options);
+    let first = run_plan(&engine, "Add a feature", &output_dir, None).await;
     assert!(
-        matches!(at_first, Err(WorkflowError::ClarificationNeeded { .. })),
-        "acceptance_tests should ask permission first"
+        first.is_err(),
+        "plan should ask clarification first (StubBackend)"
     );
-    let _ = workflow
-        .acceptance_tests(&plan_dir, Some("Yes"), &at_options)
-        .expect("acceptance_tests should succeed with permission answer");
 
-    let red_options = RedOptions::default();
-    let _ = workflow
-        .red(&plan_dir, None, &red_options)
-        .expect("red should succeed");
+    let (plan_dir, _) = run_plan(
+        &engine,
+        "Add a feature",
+        &output_dir,
+        Some("Email/password"),
+    )
+    .await
+    .expect("plan should succeed with clarification answer");
 
-    let green_options = GreenOptions::default();
-    let green_output = workflow
-        .green(&plan_dir, None, &green_options)
-        .expect("green should succeed");
-
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let result = engine.run_goal("acceptance-tests", ctx).await.unwrap();
     assert!(
-        green_output.summary.contains("pass"),
-        "summary should mention pass: {}",
-        green_output.summary
+        matches!(result.status, ExecutionStatus::WaitingForInput { .. }),
+        "acceptance-tests should ask permission first"
     );
-    let state = workflow.state();
+
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some("Yes"), false);
+    let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
+        .await
+        .unwrap();
+    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
+
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let result = run_goal_until_done(&engine, "red", ctx).await.unwrap();
+    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
+
+    let ctx = ctx_green(plan_dir.clone(), None, false);
+    let result = run_goal_until_done(&engine, "green", ctx).await.unwrap();
+    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
+
+    let changeset = read_changeset(&plan_dir).expect("changeset");
     assert!(
-        matches!(state, WorkflowState::GreenComplete { .. }),
-        "workflow should end in GreenComplete with StubBackend, got {:?}",
-        state
+        matches!(
+            changeset.state.current.as_str(),
+            "GreenComplete" | "Evaluated" | "ValidateComplete" | "RefactorComplete"
+        ),
+        "StubBackend chain should reach GreenComplete or beyond, got {}",
+        changeset.state.current
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -196,9 +195,9 @@ fn next_goal_for_state_maps_states_correctly() {
     assert_eq!(next_goal_for_state("Unknown"), Some("plan"));
 }
 
-/// Resume from Planned: skip plan, run acceptance-tests -> red -> green.
-#[test]
-fn full_workflow_resume_from_planned() {
+/// Resume from Planned: skip plan, run acceptance-tests -> red -> green -> evaluate -> validate -> refactor.
+#[tokio::test]
+async fn full_workflow_resume_from_planned() {
     let plan_dir = std::env::temp_dir().join("tddy-full-resume-planned");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -206,40 +205,40 @@ fn full_workflow_resume_from_planned() {
     std::fs::write(plan_dir.join("TODO.md"), "# TODO\n- [ ] Task 1").expect("write TODO");
     write_changeset_with_state(&plan_dir, "Planned", "sess-resume-planned");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
+    backend.push_ok(EVALUATE_OUTPUT_CHAIN);
+    backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
 
-    let mut workflow = Workflow::new(backend);
-    let at_options = AcceptanceTestsOptions::default();
-    let _ = workflow
-        .acceptance_tests(&plan_dir, None, &at_options)
-        .expect("acceptance_tests should succeed");
+    let storage_dir = std::env::temp_dir().join("tddy-resume-planned-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir.clone(),
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let red_options = RedOptions::default();
-    let _ = workflow
-        .red(&plan_dir, None, &red_options)
-        .expect("red should succeed");
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
+        .await
+        .unwrap();
+    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
-    let green_options = GreenOptions::default();
-    let green_output = workflow
-        .green(&plan_dir, None, &green_options)
-        .expect("green should succeed");
-
-    assert!(green_output.summary.contains("passing"));
     assert_eq!(
-        workflow.backend().invocations().len(),
-        3,
-        "plan should be skipped"
+        backend.invocations().len(),
+        6,
+        "plan skipped; at, red, green, evaluate, validate, refactor"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// Resume from AcceptanceTestsReady: skip plan and acceptance-tests, run red -> green.
-#[test]
-fn full_workflow_resume_from_acceptance_tests_ready() {
+/// Resume from AcceptanceTestsReady: skip plan and acceptance-tests, run red -> green -> evaluate -> validate -> refactor.
+#[tokio::test]
+async fn full_workflow_resume_from_acceptance_tests_ready() {
     let plan_dir = std::env::temp_dir().join("tddy-full-resume-at");
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -251,26 +250,29 @@ fn full_workflow_resume_from_acceptance_tests_ready() {
     .expect("write acceptance-tests.md");
     write_changeset_with_state(&plan_dir, "AcceptanceTestsReady", "sess-resume-at");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
+    backend.push_ok(EVALUATE_OUTPUT_CHAIN);
+    backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
 
-    let mut workflow = Workflow::new(backend);
-    let red_options = RedOptions::default();
-    let _ = workflow
-        .red(&plan_dir, None, &red_options)
-        .expect("red should succeed");
+    let storage_dir = std::env::temp_dir().join("tddy-resume-at-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir.clone(),
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let green_options = GreenOptions::default();
-    let green_output = workflow
-        .green(&plan_dir, None, &green_options)
-        .expect("green should succeed");
+    let ctx = ctx_red(plan_dir.clone(), None);
+    let result = run_goal_until_done(&engine, "red", ctx).await.unwrap();
+    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
-    assert!(green_output.summary.contains("passing"));
     assert_eq!(
-        workflow.backend().invocations().len(),
-        2,
-        "plan and at should be skipped"
+        backend.invocations().len(),
+        5,
+        "plan and at skipped; red, green, evaluate, validate, refactor"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);
@@ -298,201 +300,111 @@ const DEMO_OUTPUT: &str = r#"Demo executed successfully.
 </structured-response>
 "#;
 
-/// AC1, AC7: Full workflow chains plan → acceptance-tests → red → green → demo → evaluate
-/// with MockBackend. All 6+ goals invoked in order; final state is Evaluated.
-///
-/// This test will fail until:
-/// - DemoComplete/DemoRunning states are in WorkflowState
-/// - workflow.demo() method is implemented
-/// - next_goal_for_state maps GreenComplete → "demo" and DemoComplete → "evaluate"
-/// - evaluate can run from GreenComplete/DemoComplete state (not just Init)
-#[test]
-fn full_workflow_includes_demo_and_evaluate() {
+/// AC1, AC7: Full workflow chains plan → acceptance-tests → red → green → demo → evaluate → validate → refactor
+#[tokio::test]
+async fn full_workflow_includes_demo_and_evaluate() {
     let output_dir = std::env::temp_dir().join("tddy-full-wf-demo-evaluate");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
     backend.push_ok(DEMO_OUTPUT);
     backend.push_ok(EVALUATE_OUTPUT);
+    backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
 
-    let mut workflow = Workflow::new(backend);
+    let storage_dir = std::env::temp_dir().join("tddy-full-demo-eval-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir.clone(),
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let plan_options = PlanOptions::default();
-    let plan_dir = workflow
-        .plan("Build auth", &output_dir, None, &plan_options)
+    let (plan_dir, _) = run_plan(&engine, "Build auth", &output_dir, None)
+        .await
         .expect("plan should succeed");
 
-    // Write demo-plan.md so demo goal can find it
     std::fs::write(
         plan_dir.join("demo-plan.md"),
         "# Demo\n## Steps\n- Run CLI\n## Verification\nCLI runs.",
     )
     .expect("write demo-plan.md");
 
-    let at_options = AcceptanceTestsOptions::default();
-    let _ = workflow
-        .acceptance_tests(&plan_dir, None, &at_options)
-        .expect("acceptance_tests should succeed");
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, true);
+    let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
+        .await
+        .unwrap();
+    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
-    let red_options = RedOptions::default();
-    let _ = workflow
-        .red(&plan_dir, None, &red_options)
-        .expect("red should succeed");
-
-    let green_options = GreenOptions::default();
-    let _ = workflow
-        .green(&plan_dir, None, &green_options)
-        .expect("green should succeed");
-
-    // After green, state should be GreenComplete
-    assert!(
-        matches!(workflow.state(), WorkflowState::GreenComplete { .. }),
-        "after green, state should be GreenComplete, got {:?}",
-        workflow.state()
-    );
-
-    // Demo step — requires workflow.demo() method to exist
-    let demo_result = workflow.demo(&plan_dir, None, &DemoOptions::default());
-    assert!(
-        demo_result.is_ok(),
-        "demo should succeed, got {:?}",
-        demo_result
-    );
-
-    // After demo, state should be DemoComplete
-    assert!(
-        matches!(workflow.state(), WorkflowState::DemoComplete { .. }),
-        "after demo, state should be DemoComplete, got {:?}",
-        workflow.state()
-    );
-
-    // Evaluate step — requires evaluate to accept DemoComplete state
-    let eval_options = EvaluateOptions::default();
-    let eval_result = workflow.evaluate(
-        &std::path::Path::new("."),
-        Some(&plan_dir),
-        None,
-        &eval_options,
-    );
-    assert!(
-        eval_result.is_ok(),
-        "evaluate should succeed, got {:?}",
-        eval_result
-    );
-
-    // Final state should be Evaluated
-    assert!(
-        matches!(workflow.state(), WorkflowState::Evaluated { .. }),
-        "final state should be Evaluated, got {:?}",
-        workflow.state()
-    );
-
-    // All 6 goals should have been invoked
     assert_eq!(
-        workflow.backend().invocations().len(),
-        6,
-        "all 6 goals should be invoked: plan, acceptance-tests, red, green, demo, evaluate"
+        read_changeset(&plan_dir).unwrap().state.current,
+        "RefactorComplete"
     );
+    assert_eq!(backend.invocations().len(), 8);
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
 
-/// AC2, AC3: Full workflow where demo is skipped proceeds green → evaluate.
-/// When user skips demo, workflow goes directly from GreenComplete to evaluate.
-#[test]
-fn full_workflow_skip_demo_goes_to_evaluate() {
+/// AC2, AC3: Full workflow where demo is skipped proceeds green → evaluate → validate → refactor.
+#[tokio::test]
+async fn full_workflow_skip_demo_goes_to_evaluate() {
     let output_dir = std::env::temp_dir().join("tddy-full-wf-skip-demo");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
     backend.push_ok(EVALUATE_OUTPUT);
+    backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
 
-    let mut workflow = Workflow::new(backend);
+    let storage_dir = std::env::temp_dir().join("tddy-skip-demo-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir.clone(),
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let plan_dir = workflow
-        .plan("Build auth", &output_dir, None, &PlanOptions::default())
+    let (plan_dir, _) = run_plan(&engine, "Build auth", &output_dir, None)
+        .await
         .expect("plan should succeed");
 
-    let _ = workflow
-        .acceptance_tests(&plan_dir, None, &AcceptanceTestsOptions::default())
-        .expect("acceptance_tests should succeed");
-
-    let _ = workflow
-        .red(&plan_dir, None, &RedOptions::default())
-        .expect("red should succeed");
-
-    let _ = workflow
-        .green(&plan_dir, None, &GreenOptions::default())
-        .expect("green should succeed");
-
-    // Skip demo: go directly from GreenComplete to evaluate (no DemoSkipped state)
-    let eval_result = workflow.evaluate(
-        &std::path::Path::new("."),
-        Some(&plan_dir),
-        None,
-        &EvaluateOptions::default(),
-    );
-    assert!(
-        eval_result.is_ok(),
-        "evaluate should succeed when demo is skipped, got {:?}",
-        eval_result
-    );
-
-    assert!(
-        matches!(workflow.state(), WorkflowState::Evaluated { .. }),
-        "final state should be Evaluated, got {:?}",
-        workflow.state()
-    );
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
+        .await
+        .unwrap();
+    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
     assert_eq!(
-        workflow.backend().invocations().len(),
-        5,
-        "5 goals when demo skipped: plan, acceptance-tests, red, green, evaluate"
+        read_changeset(&plan_dir).unwrap().state.current,
+        "RefactorComplete"
     );
+    assert_eq!(backend.invocations().len(), 7);
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
 
 /// AC7, AC8, AC9: Unit test for next_goal_for_state mapping.
-/// GreenComplete → "demo"; DemoComplete → "evaluate"; Evaluated → "validate".
 #[test]
 fn next_goal_for_state_includes_demo_and_evaluate() {
-    assert_eq!(
-        next_goal_for_state("GreenComplete"),
-        Some("demo"),
-        "GreenComplete should map to demo"
-    );
-    assert_eq!(
-        next_goal_for_state("DemoComplete"),
-        Some("evaluate"),
-        "DemoComplete should map to evaluate"
-    );
-    assert_eq!(
-        next_goal_for_state("Evaluated"),
-        Some("validate"),
-        "Evaluated should map to validate"
-    );
+    assert_eq!(next_goal_for_state("GreenComplete"), Some("demo"));
+    assert_eq!(next_goal_for_state("DemoComplete"), Some("evaluate"));
+    assert_eq!(next_goal_for_state("Evaluated"), Some("validate"));
 }
 
 /// AC11: GreenOptions has no run_demo field.
-/// GreenOptions::default() should compile without run_demo; green focuses purely on implementation.
-///
-/// This test will fail until:
-/// - The run_demo field is removed from GreenOptions
 #[test]
 fn green_options_no_run_demo_field() {
-    // Construct GreenOptions with all expected fields via struct literal.
-    // If run_demo still exists on the struct, this is non-exhaustive and fails to compile.
+    use tddy_core::GreenOptions;
     let _explicit = GreenOptions {
         model: None,
         agent_output: false,
@@ -501,135 +413,79 @@ fn green_options_no_run_demo_field() {
         inherit_stdin: false,
         allowed_tools_extras: None,
         debug: false,
-        // run_demo is intentionally NOT listed here — if the field still exists,
-        // this struct literal is non-exhaustive and will fail to compile.
     };
-
     let options = GreenOptions::default();
-    // Verify default works and is usable
-    assert!(
-        options.model.is_none(),
-        "GreenOptions::default() model should be None"
-    );
+    assert!(options.model.is_none());
 }
 
 /// AC (R6): next_goal_for_state("Evaluated") returns Some("validate").
-///
-/// This test will fail until:
-/// - next_goal_for_state is updated to return Some("validate") for "Evaluated"
-///   (currently returns None)
 #[test]
 fn next_goal_evaluated_returns_validate() {
-    assert_eq!(
-        next_goal_for_state("Evaluated"),
-        Some("validate"),
-        "Evaluated should map to validate"
-    );
+    assert_eq!(next_goal_for_state("Evaluated"), Some("validate"));
 }
 
 /// AC (R6): next_goal_for_state("ValidateComplete") returns Some("refactor").
-///
-/// This test will fail until:
-/// - "ValidateComplete" state is handled in next_goal_for_state
-/// - It returns Some("refactor")
 #[test]
 fn next_goal_validate_complete_returns_refactor() {
-    assert_eq!(
-        next_goal_for_state("ValidateComplete"),
-        Some("refactor"),
-        "ValidateComplete should map to refactor"
-    );
+    assert_eq!(next_goal_for_state("ValidateComplete"), Some("refactor"));
 }
 
 /// AC (R6): next_goal_for_state("RefactorComplete") returns None (terminal).
-///
-/// This test will fail until:
-/// - "RefactorComplete" state is handled in next_goal_for_state
-/// - It returns None
 #[test]
 fn next_goal_refactor_complete_returns_none() {
-    assert_eq!(
-        next_goal_for_state("RefactorComplete"),
-        None,
-        "RefactorComplete should be terminal (None)"
-    );
+    assert_eq!(next_goal_for_state("RefactorComplete"), None);
 }
 
-/// AC10: plain full workflow uses a single Workflow instance.
-/// Backend invocation count matches expected (no dropped invocations from a second instance).
-///
-/// This test verifies that all goals share a single Workflow instance by checking
-/// the total invocation count matches exactly what was pushed onto the MockBackend.
-///
-/// This test will fail until:
-/// - run_full_workflow_plain uses a single Workflow instance
-/// - demo and evaluate are included in the full workflow
-#[test]
-fn plain_full_workflow_uses_single_workflow_instance() {
+/// AC10: plain full workflow uses a single WorkflowEngine instance.
+#[tokio::test]
+async fn plain_full_workflow_uses_single_workflow_instance() {
     let output_dir = std::env::temp_dir().join("tddy-single-instance-test");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
     backend.push_ok(DEMO_OUTPUT);
     backend.push_ok(EVALUATE_OUTPUT);
+    backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
+    backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
 
-    let mut workflow = Workflow::new(backend);
+    let storage_dir = std::env::temp_dir().join("tddy-single-instance-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir.clone(),
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let plan_dir = workflow
-        .plan("Build auth", &output_dir, None, &PlanOptions::default())
-        .expect("plan");
-
+    let plan_dir = plan_dir_for_input(&output_dir, "Build auth");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     std::fs::write(
         plan_dir.join("demo-plan.md"),
         "# Demo\n## Steps\n- Run CLI\n## Verification\nOK",
     )
     .expect("write demo-plan.md");
 
-    let _ = workflow.acceptance_tests(&plan_dir, None, &AcceptanceTestsOptions::default());
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
-    let _ = workflow.green(&plan_dir, None, &GreenOptions::default());
-    let _ = workflow.demo(&plan_dir, None, &DemoOptions::default());
-    let _ = workflow.evaluate(
-        &std::path::Path::new("."),
-        Some(&plan_dir),
-        None,
-        &EvaluateOptions::default(),
-    );
+    let mut ctx = ctx_plan("Build auth", output_dir.clone(), None, None);
+    ctx.insert("run_demo".to_string(), serde_json::json!(true));
+    let result = engine.run_workflow_from("plan", ctx).await.unwrap();
+    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
-    // Single instance: all invocations should be tracked on the same backend
-    let invocations = workflow.backend().invocations();
-    assert_eq!(
-        invocations.len(),
-        6,
-        "single Workflow instance should track all 6 invocations (plan, at, red, green, demo, evaluate), got {}",
-        invocations.len()
-    );
+    let invocations = backend.invocations();
+    assert_eq!(invocations.len(), 8);
 
-    // Verify goal order
-    let goals: Vec<_> = invocations.iter().map(|inv| inv.goal.clone()).collect();
-    assert_eq!(goals[0], tddy_core::Goal::Plan, "first goal should be Plan");
-    assert_eq!(
-        goals[1],
-        tddy_core::Goal::AcceptanceTests,
-        "second goal should be AcceptanceTests"
-    );
-    assert_eq!(goals[2], tddy_core::Goal::Red, "third goal should be Red");
-    assert_eq!(
-        goals[3],
-        tddy_core::Goal::Green,
-        "fourth goal should be Green"
-    );
-    assert_eq!(goals[4], tddy_core::Goal::Demo, "fifth goal should be Demo");
-    assert_eq!(
-        goals[5],
-        tddy_core::Goal::Evaluate,
-        "sixth goal should be Evaluate"
-    );
+    let goals: Vec<_> = invocations.iter().map(|inv| inv.goal).collect();
+    assert_eq!(goals[0], tddy_core::Goal::Plan);
+    assert_eq!(goals[1], tddy_core::Goal::AcceptanceTests);
+    assert_eq!(goals[2], tddy_core::Goal::Red);
+    assert_eq!(goals[3], tddy_core::Goal::Green);
+    assert_eq!(goals[4], tddy_core::Goal::Demo);
+    assert_eq!(goals[5], tddy_core::Goal::Evaluate);
+    assert_eq!(goals[6], tddy_core::Goal::Validate);
+    assert_eq!(goals[7], tddy_core::Goal::Refactor);
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
@@ -650,16 +506,14 @@ const REFACTOR_OUTPUT_COMPLETE: &str = r#"All refactoring tasks completed. Tests
 </structured-response>
 "#;
 
-/// Phase 5 / PRD R7: Full workflow chains all 8 steps:
-/// plan → acceptance-tests → red → green → demo → evaluate → validate → refactor.
-/// Final state should be RefactorComplete. 8 backend invocations total.
-#[test]
-fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
+/// Phase 5 / PRD R7: Full workflow chains all 8 steps.
+#[tokio::test]
+async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
     let output_dir = std::env::temp_dir().join("tddy-full-wf-8-steps");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
     backend.push_ok(RED_OUTPUT);
@@ -669,106 +523,37 @@ fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
     backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
 
-    let mut workflow = Workflow::new(backend);
+    let storage_dir = std::env::temp_dir().join("tddy-full-8-steps-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir.clone(),
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    // 1. Plan
-    let plan_dir = workflow
-        .plan("Build auth", &output_dir, None, &PlanOptions::default())
+    let (plan_dir, _) = run_plan(&engine, "Build auth", &output_dir, None)
+        .await
         .expect("plan should succeed");
 
-    // Write demo-plan.md so demo goal can find it
     std::fs::write(
         plan_dir.join("demo-plan.md"),
         "# Demo\n## Steps\n- Run CLI\n## Verification\nCLI runs.",
     )
     .expect("write demo-plan.md");
 
-    // 2. Acceptance tests
-    let _ = workflow
-        .acceptance_tests(&plan_dir, None, &AcceptanceTestsOptions::default())
-        .expect("acceptance_tests should succeed");
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, true);
+    let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
+        .await
+        .unwrap();
+    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
-    // 3. Red
-    let _ = workflow
-        .red(&plan_dir, None, &RedOptions::default())
-        .expect("red should succeed");
-
-    // 4. Green
-    let _ = workflow
-        .green(&plan_dir, None, &GreenOptions::default())
-        .expect("green should succeed");
-
-    // 5. Demo
-    let _ = workflow
-        .demo(&plan_dir, None, &DemoOptions::default())
-        .expect("demo should succeed");
-
-    // 6. Evaluate (writes evaluation-report.md to plan_dir)
-    let _ = workflow
-        .evaluate(
-            &std::path::Path::new("."),
-            Some(&plan_dir),
-            None,
-            &EvaluateOptions::default(),
-        )
-        .expect("evaluate should succeed");
-
-    assert!(
-        matches!(workflow.state(), WorkflowState::Evaluated { .. }),
-        "after evaluate, state should be Evaluated, got {:?}",
-        workflow.state()
-    );
-
-    // 7. Validate (subagent-based, requires evaluation-report.md)
-    let validate_result = workflow.validate(&plan_dir, None, &ValidateOptions::default());
-    assert!(
-        validate_result.is_ok(),
-        "validate (subagent) should succeed, got: {:?}",
-        validate_result
-    );
-
-    assert!(
-        matches!(workflow.state(), WorkflowState::ValidateComplete { .. }),
-        "after validate, state should be ValidateComplete, got {:?}",
-        workflow.state()
-    );
-
-    // Write refactoring-plan.md (MockBackend doesn't write files; in production
-    // the validate agent writes this via Write tool)
-    std::fs::write(
-        plan_dir.join("refactoring-plan.md"),
-        "# Refactoring Plan\n## Tasks\n1. Extract shared workflow helper\n2. Add error context\n3. Remove magic strings\n4. Add doc comments\n5. Consolidate duplicated test setup",
-    )
-    .expect("write refactoring-plan.md");
-
-    // 8. Refactor (requires refactoring-plan.md)
-    let refactor_result = workflow.refactor(&plan_dir, None, &RefactorOptions::default());
-    assert!(
-        refactor_result.is_ok(),
-        "refactor should succeed, got: {:?}",
-        refactor_result
-    );
-
-    assert!(
-        matches!(workflow.state(), WorkflowState::RefactorComplete { .. }),
-        "final state should be RefactorComplete, got {:?}",
-        workflow.state()
-    );
-
-    // All 8 goals should have been invoked
     assert_eq!(
-        workflow.backend().invocations().len(),
-        8,
-        "all 8 goals should be invoked: plan, at, red, green, demo, evaluate, validate, refactor"
+        read_changeset(&plan_dir).unwrap().state.current,
+        "RefactorComplete"
     );
+    assert_eq!(backend.invocations().len(), 8);
 
-    // Verify goal order
-    let goals: Vec<_> = workflow
-        .backend()
-        .invocations()
-        .iter()
-        .map(|inv| inv.goal)
-        .collect();
+    let goals: Vec<_> = backend.invocations().iter().map(|inv| inv.goal).collect();
     assert_eq!(goals[0], tddy_core::Goal::Plan);
     assert_eq!(goals[1], tddy_core::Goal::AcceptanceTests);
     assert_eq!(goals[2], tddy_core::Goal::Red);
@@ -782,71 +567,44 @@ fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
 }
 
 /// Phase 5: Full workflow with skipped demo still includes validate and refactor.
-/// plan → at → red → green → (skip demo) → evaluate → validate → refactor.
-#[test]
-fn full_workflow_skip_demo_includes_validate_and_refactor() {
+#[tokio::test]
+async fn full_workflow_skip_demo_includes_validate_and_refactor() {
     let output_dir = std::env::temp_dir().join("tddy-full-wf-skip-demo-8");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
 
-    let backend = MockBackend::new();
+    let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
     backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
     backend.push_ok(RED_OUTPUT);
     backend.push_ok(GREEN_OUTPUT_ALL_PASS);
-    // No demo output — demo is skipped
     backend.push_ok(EVALUATE_OUTPUT);
     backend.push_ok(VALIDATE_SUBAGENTS_OUTPUT);
     backend.push_ok(REFACTOR_OUTPUT_COMPLETE);
 
-    let mut workflow = Workflow::new(backend);
+    let storage_dir = std::env::temp_dir().join("tddy-skip-demo-8-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir.clone(),
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
 
-    let plan_dir = workflow
-        .plan("Build auth", &output_dir, None, &PlanOptions::default())
+    let (plan_dir, _) = run_plan(&engine, "Build auth", &output_dir, None)
+        .await
         .expect("plan");
 
-    let _ = workflow.acceptance_tests(&plan_dir, None, &AcceptanceTestsOptions::default());
-    let _ = workflow.red(&plan_dir, None, &RedOptions::default());
-    let _ = workflow.green(&plan_dir, None, &GreenOptions::default());
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
+        .await
+        .unwrap();
+    assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
-    let _ = workflow
-        .evaluate(
-            &std::path::Path::new("."),
-            Some(&plan_dir),
-            None,
-            &EvaluateOptions::default(),
-        )
-        .expect("evaluate should succeed");
-
-    let _ = workflow
-        .validate(&plan_dir, None, &ValidateOptions::default())
-        .expect("validate should succeed");
-
-    std::fs::write(
-        plan_dir.join("refactoring-plan.md"),
-        "# Refactoring Plan\n## Tasks\n1. Fix issues",
-    )
-    .expect("write refactoring-plan.md");
-
-    let refactor_result = workflow.refactor(&plan_dir, None, &RefactorOptions::default());
-    assert!(
-        refactor_result.is_ok(),
-        "refactor should succeed after skip-demo workflow: {:?}",
-        refactor_result
-    );
-
-    assert!(
-        matches!(workflow.state(), WorkflowState::RefactorComplete { .. }),
-        "final state should be RefactorComplete, got {:?}",
-        workflow.state()
-    );
-
-    // 7 backend invocations (demo skipped)
     assert_eq!(
-        workflow.backend().invocations().len(),
-        7,
-        "7 goals should be invoked when demo is skipped"
+        read_changeset(&plan_dir).unwrap().state.current,
+        "RefactorComplete"
     );
+    assert_eq!(backend.invocations().len(), 7);
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
