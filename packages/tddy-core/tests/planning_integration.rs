@@ -404,57 +404,13 @@ async fn planning_workflow_stub_backend_clarification_roundtrip() {
     let _ = std::fs::remove_dir_all(&storage_dir);
 }
 
-/// Backend that returns structured response with whitespace-only todo should not produce PRD.md.
-/// This is the end-to-end reproduction of the no-op PRD bug observed on another host.
-#[tokio::test]
-async fn planning_workflow_rejects_structured_response_with_whitespace_only_todo() {
-    let structured_noop = concat!(
-        "Here is the plan.\n\n",
-        "<structured-response content-type=\"application-json\">\n",
-        r#"{"goal": "plan", "prd": "PRD Summary\nSome feature.", "todo": "  \n  "}"#,
-        "\n</structured-response>"
-    );
-
-    let backend = Arc::new(MockBackend::new());
-    backend.push_ok(structured_noop);
-
-    let output_dir = std::env::temp_dir().join("tddy-planning-noop-todo-test");
-    let _ = std::fs::remove_dir_all(&output_dir);
-    std::fs::create_dir_all(&output_dir).unwrap();
-
-    let storage_dir = std::env::temp_dir().join("tddy-planning-noop-todo-engine");
-    let _ = std::fs::remove_dir_all(&storage_dir);
-    let hooks = Arc::new(TddWorkflowHooks::new());
-    let engine = WorkflowEngine::new(
-        SharedBackend::from_arc(backend),
-        storage_dir.clone(),
-        Some(hooks),
-    );
-
-    let result = run_plan(&engine, "some feature", &output_dir, None).await;
-    assert!(
-        result.is_err(),
-        "planning should fail when todo is whitespace-only, got: {:?}",
-        result
-    );
-
-    let plan_dir = common::plan_dir_for_input(&output_dir, "some feature");
-    assert!(
-        !plan_dir.join("PRD.md").exists(),
-        "PRD.md should not be written for no-op plan"
-    );
-
-    let _ = std::fs::remove_dir_all(&output_dir);
-    let _ = std::fs::remove_dir_all(&storage_dir);
-}
-
 /// Backend that returns structured response with whitespace-only prd should not produce PRD.md.
 #[tokio::test]
 async fn planning_workflow_rejects_structured_response_with_whitespace_only_prd() {
     let structured_noop = concat!(
         "Here is the plan.\n\n",
         "<structured-response content-type=\"application-json\">\n",
-        r#"{"goal": "plan", "prd": "   ", "todo": "- [ ] Task 1"}"#,
+        r#"{"goal": "plan", "prd": "   "}"#,
         "\n</structured-response>"
     );
 

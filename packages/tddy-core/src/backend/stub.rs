@@ -92,7 +92,7 @@ impl StubBackend {
 
     fn plan_response(&self) -> InvokeResponse {
         // Omit discovery when not demo_mode (null fails for type:object). demo_plan only in demo_mode.
-        // PRD includes TDD flow instructions so the demo covers the entire flow.
+        // PRD includes TDD flow instructions and ## TODO section (single PRD format).
         let prd = r#"# PRD — Stub Feature
 
 ## Summary
@@ -111,13 +111,21 @@ After planning, run each step (or omit `--goal` to run the full flow interactive
 6. **Validate** (tests, prod-ready, clean-code): `tddy-demo --goal validate --plan-dir <plan_dir>`
 7. **Refactor** (apply refactoring plan): `tddy-demo --goal refactor --plan-dir <plan_dir>`
 
-Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI."#;
-        let todo = "- [ ] Run acceptance-tests\n- [ ] Run red\n- [ ] Run green\n- [ ] Run demo\n- [ ] Run evaluate\n- [ ] Run validate\n- [ ] Run refactor";
+Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
+
+## TODO
+
+- [ ] Run acceptance-tests
+- [ ] Run red
+- [ ] Run green
+- [ ] Run demo
+- [ ] Run evaluate
+- [ ] Run validate
+- [ ] Run refactor"#;
         let demo_plan = r#","demo_plan":{"demo_type":"cli","setup_instructions":"Run cargo build","steps":[{"description":"Run the CLI","command_or_action":"cargo run","expected_result":"See output"}],"verification":"CLI runs without error"}"#;
         let json = format!(
-            r#"{{"goal":"plan","name":"Stub Feature","prd":"{}","todo":"{}"{}}}"#,
+            r#"{{"goal":"plan","name":"Stub Feature","prd":"{}"{}}}"#,
             escape_json_string(prd),
-            escape_json_string(todo),
             demo_plan
         );
         self.submit_and_respond(

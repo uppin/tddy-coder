@@ -162,7 +162,6 @@ async fn stub_backend_plan_returns_valid_structured_response() {
         .expect("stub stores plan via tool executor");
     let parsed = parse_planning_response(&output).expect("should parse plan");
     assert!(!parsed.prd.is_empty());
-    assert!(!parsed.todo.is_empty());
 }
 
 /// StubBackend returns valid acceptance-tests output via tool executor.
@@ -490,7 +489,6 @@ async fn plan_task_run_writes_parsed_planning_to_context() {
     assert!(planning.is_some(), "parsed_planning should be in context");
     let planning = planning.unwrap();
     assert!(!planning.prd.is_empty());
-    assert!(!planning.todo.is_empty());
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }

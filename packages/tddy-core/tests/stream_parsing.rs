@@ -260,7 +260,12 @@ fn process_ndjson_skips_tool_use_when_parent_tool_use_id_set() {
 fn cursor_partial_chunks_ndjson() -> String {
     let chunk1 = r#"{"type":"system","subtype":"init","session_id":"cursor-sess"}"#;
     let chunk2 = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"<structured-response content-type=\"application-json\">"}]}}"#;
-    let chunk3 = r##"{"type":"assistant","message":{"content":[{"type":"text","text":"{\"goal\":\"plan\",\"prd\":\"# X\",\"todo\":\"- [ ] T1\"}"}]}}"##;
+    // JSON string value must use escaped \n. Use r### so "##" in prd doesn't end the raw string.
+    let plan_json = r###"{"goal":"plan","prd":"# X\n\n## TODO\n\n- [ ] T1"}"###;
+    let chunk3 = format!(
+        r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"{}"}}]}}}}"#,
+        plan_json.replace('\\', "\\\\").replace('"', "\\\"")
+    );
     let chunk4 = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"</structured-response>"}]}}"#;
     let chunk5 = r#"{"type":"result","subtype":"success","result":"","session_id":"cursor-sess","is_error":false}"#;
     format!(
@@ -290,8 +295,8 @@ fn process_cursor_stream_concatenates_partial_chunks_for_parsing() {
 
     let planning =
         parse_planning_response(&result.result_text).expect("should parse concatenated chunks");
-    assert_eq!(planning.prd, "# X");
-    assert_eq!(planning.todo, "- [ ] T1");
+    assert!(planning.prd.contains("# X"));
+    assert!(planning.prd.contains("T1"));
 }
 
 /// Cursor tool_call events should emit ToolUse with displayable detail (glob pattern, file path).

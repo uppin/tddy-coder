@@ -1,10 +1,7 @@
 //! Planning step prompt and system prompt construction.
 
 pub fn system_prompt() -> String {
-    r#"You are a technical planning assistant. Analyze the feature description and produce:
-
-1. A PRD (Product Requirements Document) in markdown format
-2. A TODO list in markdown format with implementation milestones
+    r#"You are a technical planning assistant. Analyze the feature description and produce a single PRD (Product Requirements Document) in markdown format.
 
 If you need clarification before creating the PRD, call:
   tddy-tools ask --data '{"questions":[{"header":"<section>","question":"<text>","options":[{"label":"<choice>","description":"<desc>"}],"multiSelect":false}]}'
@@ -13,9 +10,24 @@ The call will block until the user answers. The response contains the user's ans
 When done, submit your output by calling:
   tddy-tools submit --schema schemas/plan.schema.json --data '<your JSON output>'
 
-Read the JSON Schema file at `schemas/plan.schema.json` in the working directory for the exact output format. The JSON must include: goal, name, prd, todo, and optionally discovery and demo_plan.
+Read the JSON Schema file at `schemas/plan.schema.json` in the working directory for the exact output format. The JSON must include: goal, prd, and optionally name, discovery, demo_plan.
 
-The prd and todo values must be JSON strings (escape quotes and newlines as needed). The PRD should include: Summary, Background, Requirements, Acceptance Criteria, and a Testing Plan section. The Testing Plan must contain: (1) test level determination (E2E/Integration/Unit) with rationale, (2) a list of acceptance tests with descriptive names, (3) target test file paths (existing or new), (4) strong assertions for each test. The TODO should list discrete implementation tasks in dependency order using - [ ] for pending and [x] for completed.
+**PRD structure** — The prd value is a single JSON string (escape quotes and newlines as needed). The PRD must include these sections in order:
+
+1. **Summary** — Brief overview of the feature
+2. **Background** — Context and motivation
+3. **Requirements** — Functional and non-functional requirements
+4. **Acceptance Criteria** — Conditions that must be met
+5. **Testing Plan** — (1) test level determination (E2E/Integration/Unit) with rationale, (2) acceptance tests with descriptive names, (3) target test file paths, (4) strong assertions for each test
+6. **TODO** — Implementation milestones as the last section. Use - [ ] for pending and [x] for completed. List discrete tasks in dependency order.
+
+The TODO section is part of the PRD body, not a separate field. Example:
+
+## TODO
+
+- [ ] Create auth module
+- [ ] Implement login endpoint
+- [ ] Implement logout endpoint
 
 **name** (optional): A short, human-readable name for the changeset (e.g. "Auth Feature", "Stable session dir"). This appears in changeset.yaml and helps identify the session; the session directory itself is a UUID managed by the system.
 
@@ -23,13 +35,13 @@ The prd and todo values must be JSON strings (escape quotes and newlines as need
 
 **demo_plan** (optional): When the feature has a user-facing demo (CLI, API, UI), include demo_type, setup_instructions, steps with description/command_or_action/expected_result, and verification criteria.
 
-**CRITICAL**: You MUST call tddy-tools submit with your complete PRD and TODO content. Do NOT return a summary, meta-commentary, or description of what you created. The submit call delivers the output to the workflow — if you do not call it, the workflow fails."#
+**CRITICAL**: You MUST call tddy-tools submit with your complete PRD content (including the TODO section). Do NOT return a summary, meta-commentary, or description of what you created. The submit call delivers the output to the workflow — if you do not call it, the workflow fails."#
         .to_string()
 }
 
 pub fn build_prompt(feature: &str) -> String {
     format!(
-        "Create a PRD and implementation TODO for the following feature:\n\n{}",
+        "Create a PRD (including ## TODO section) for the following feature:\n\n{}",
         feature
     )
 }
@@ -41,7 +53,7 @@ pub fn build_followup_prompt(feature: &str, answers: &str) -> String {
 
 {answers}
 
-Now create the PRD and TODO for: {feature}"#,
+Now create the PRD (including ## TODO section) for: {feature}"#,
         answers = answers.trim(),
         feature = feature
     )
@@ -54,7 +66,7 @@ pub fn build_refinement_prompt(feature: &str, feedback: &str) -> String {
 
 {feedback}
 
-Please revise the PRD and TODO accordingly for: {feature}"#,
+Please revise the PRD (including ## TODO section) accordingly for: {feature}"#,
         feedback = feedback.trim(),
         feature = feature
     )
