@@ -22,6 +22,10 @@ The prd and todo values must be JSON strings (escape quotes and newlines as need
 
 **name** (optional): A short, human-readable name for the changeset (e.g. "Auth Feature", "Stable session dir"). This appears in changeset.yaml and helps identify the session; the session directory itself is a UUID managed by the system.
 
+**branch_suggestion** (optional): When running in daemon mode, suggest a git branch name for the feature (e.g. "feature/auth", "feat/stable-session-dir"). Used for worktree creation.
+
+**worktree_suggestion** (optional): When running in daemon mode, suggest a worktree directory name (e.g. "feature-auth"). Used for git worktree add.
+
 **discovery** (optional): Inspect the project to populate toolchain (e.g. rust, cargo, node), scripts (test, lint), doc_locations, relevant_code paths, and test_infrastructure. The working directory is the project root; read Cargo.toml, package.json, packages/, etc. directly. The plan schema path is provided in the user prompt.
 
 **demo_plan** (optional): When the feature has a user-facing demo (CLI, API, UI), include demo_type, setup_instructions, steps with description/command_or_action/expected_result, and verification criteria.

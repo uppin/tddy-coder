@@ -11,7 +11,10 @@ use tddy_core::PresenterEvent;
 use tddy_core::PresenterHandle;
 
 use crate::convert::{client_message_to_intent, event_to_server_message};
-use crate::gen::{tddy_remote_server::TddyRemote, ClientMessage, ServerMessage};
+use crate::gen::{
+    tddy_remote_server::TddyRemote, ClientMessage, GetSessionRequest, GetSessionResponse,
+    ListSessionsRequest, ListSessionsResponse, ServerMessage,
+};
 
 /// gRPC service that bridges Presenter events and intents.
 /// Implements the Stream RPC (renamed from Connect to avoid conflict with tonic client).
@@ -72,5 +75,23 @@ impl TddyRemote for TddyRemoteService {
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn get_session(
+        &self,
+        _request: Request<GetSessionRequest>,
+    ) -> Result<Response<GetSessionResponse>, Status> {
+        Err(Status::unimplemented(
+            "GetSession is only available in daemon mode",
+        ))
+    }
+
+    async fn list_sessions(
+        &self,
+        _request: Request<ListSessionsRequest>,
+    ) -> Result<Response<ListSessionsResponse>, Status> {
+        Err(Status::unimplemented(
+            "ListSessions is only available in daemon mode",
+        ))
     }
 }

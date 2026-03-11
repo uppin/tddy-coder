@@ -1,6 +1,6 @@
 //! Conversion between tddy-core types and proto messages.
 
-use tddy_core::{ActivityKind, AppMode, PresenterEvent, UserIntent};
+use tddy_core::{ActivityKind, AppMode, PresenterEvent, UserIntent, WorkflowEvent};
 
 use crate::gen::{
     app_mode_proto, client_message, server_message, ActivityLogged, AgentOutput, AnswerMultiSelect,
@@ -45,6 +45,47 @@ pub fn client_message_to_intent(msg: ClientMessage) -> Option<UserIntent> {
         Intent::ViewPlan(ViewPlan {}) => Some(UserIntent::ViewPlan),
         Intent::RefinePlan(RefinePlan {}) => Some(UserIntent::RefinePlan),
         Intent::DismissViewer(DismissViewer {}) => Some(UserIntent::DismissViewer),
+        Intent::StartSession(_) | Intent::ConfirmWorktree(_) => None, // Daemon-only, not UserIntent
+    }
+}
+
+/// Convert WorkflowEvent to ServerMessage. Used by daemon when running WorkflowEngine directly.
+pub fn workflow_event_to_server_message(event: WorkflowEvent) -> Option<ServerMessage> {
+    use server_message::Event;
+    let event = match event {
+        WorkflowEvent::GoalStarted(goal) => Event::GoalStarted(GoalStarted { goal }),
+        WorkflowEvent::StateChange { from, to } => Event::StateChanged(StateChanged { from, to }),
+        WorkflowEvent::AgentOutput(text) => Event::AgentOutput(AgentOutput { text }),
+        WorkflowEvent::WorkflowComplete(result) => {
+            let (ok, message) = match &result {
+                Ok(payload) => (true, payload.summary.clone()),
+                Err(e) => (false, e.clone()),
+            };
+            Event::WorkflowComplete(WorkflowComplete { ok, message })
+        }
+        WorkflowEvent::PlanApprovalNeeded { prd_content } => Event::ModeChanged(ModeChanged {
+            mode: Some(AppModeProto {
+                variant: Some(app_mode_proto::Variant::PlanReview(AppModePlanReview {
+                    prd_content,
+                })),
+            }),
+        }),
+        WorkflowEvent::Progress(_) | WorkflowEvent::ClarificationNeeded { .. } => return None,
+    };
+    Some(ServerMessage { event: Some(event) })
+}
+
+/// Build ServerMessage for plan approval elicitation (ModeChanged with PlanReview).
+pub fn plan_approval_to_server_message(prd_content: String) -> ServerMessage {
+    use server_message::Event;
+    ServerMessage {
+        event: Some(Event::ModeChanged(ModeChanged {
+            mode: Some(AppModeProto {
+                variant: Some(app_mode_proto::Variant::PlanReview(AppModePlanReview {
+                    prd_content,
+                })),
+            }),
+        })),
     }
 }
 

@@ -10,6 +10,7 @@ pub mod presenter;
 pub mod schema;
 pub mod stream;
 pub mod workflow;
+pub mod worktree;
 
 pub use backend::{
     build_claude_args, clear_child_pid, get_child_pid, kill_child_process, set_child_pid,
@@ -45,7 +46,7 @@ pub use permission::{
 };
 pub use presenter::{
     ActivityEntry, ActivityKind, AppMode, Presenter, PresenterEvent, PresenterHandle,
-    PresenterState, PresenterView, UserIntent, WorkflowCompletePayload,
+    PresenterState, PresenterView, UserIntent, WorkflowCompletePayload, WorkflowEvent,
 };
 pub use schema::{
     format_validation_errors, get_schema, schema_file_path, validate_output,
@@ -59,3 +60,4 @@ pub use workflow::{
     AcceptanceTestsOptions, DemoOptions, EvaluateOptions, GreenOptions, PlanOptions, RedOptions,
     RefactorOptions, UpdateDocsOptions, ValidateOptions,
 };
+pub use worktree::{create_worktree, list_worktrees, worktree_dir, WorktreeInfo};

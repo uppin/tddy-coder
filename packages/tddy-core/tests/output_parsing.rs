@@ -96,6 +96,8 @@ fn markdown_cross_references_added() {
         name: None,
         discovery: None,
         demo_plan: None,
+        branch_suggestion: None,
+        worktree_suggestion: None,
     };
     write_artifacts(&plan_dir, &planning).expect("write artifacts");
 

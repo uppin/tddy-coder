@@ -70,6 +70,10 @@ pub struct PlanningOutput {
     pub discovery: Option<crate::changeset::DiscoveryData>,
     /// Demo plan for user verification.
     pub demo_plan: Option<DemoPlan>,
+    /// Daemon mode: suggested git branch name for the feature.
+    pub branch_suggestion: Option<String>,
+    /// Daemon mode: suggested worktree directory name (e.g. "feature-auth").
+    pub worktree_suggestion: Option<String>,
 }
 
 /// Demo plan for presenting the feature to the user.
@@ -97,6 +101,8 @@ struct StructuredPlan {
     todo: Option<String>,
     discovery: Option<crate::changeset::DiscoveryData>,
     demo_plan: Option<DemoPlan>,
+    branch_suggestion: Option<String>,
+    worktree_suggestion: Option<String>,
 }
 
 /// Extract JSON from <structured-response content-type="application-json">...</structured-response>.
@@ -129,6 +135,8 @@ fn extract_structured_response(s: &str) -> Option<PlanningOutput> {
                         name: parsed.name.filter(|s| !s.is_empty()),
                         discovery: parsed.discovery,
                         demo_plan: parsed.demo_plan,
+                        branch_suggestion: parsed.branch_suggestion.filter(|s| !s.is_empty()),
+                        worktree_suggestion: parsed.worktree_suggestion.filter(|s| !s.is_empty()),
                     });
                 }
             }
@@ -170,6 +178,8 @@ pub fn parse_planning_output(s: &str) -> Result<PlanningOutput, ParseError> {
         name: None,
         discovery: None,
         demo_plan: None,
+        branch_suggestion: None,
+        worktree_suggestion: None,
     })
 }
 

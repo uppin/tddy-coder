@@ -9,7 +9,7 @@ mod view;
 mod workflow_runner;
 
 pub use events::WorkflowCompletePayload;
-pub(crate) use events::WorkflowEvent;
+pub use events::WorkflowEvent;
 
 pub use intent::UserIntent;
 pub use presenter_events::{PresenterEvent, PresenterHandle};

@@ -881,6 +881,9 @@ async fn flow_runner_returns_elicitation_needed_when_hook_signals() {
             tddy_core::workflow::graph::ElicitationEvent::PlanApproval { ref prd_content } => {
                 assert_eq!(prd_content, "# Test PRD");
             }
+            tddy_core::workflow::graph::ElicitationEvent::WorktreeConfirmation { .. } => {
+                panic!("test expects PlanApproval, not WorktreeConfirmation");
+            }
         }
     }
 

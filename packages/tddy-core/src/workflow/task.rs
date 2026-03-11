@@ -169,9 +169,10 @@ impl Task for BackendInvokeTask {
             .unwrap_or_else(|| "Add a feature".to_string());
 
         let plan_dir: Option<PathBuf> = context.get_sync("plan_dir");
-        let working_dir = plan_dir
-            .or_else(|| context.get_sync::<PathBuf>("output_dir"))
-            .clone();
+        let working_dir = context
+            .get_sync::<PathBuf>("worktree_dir")
+            .or_else(|| plan_dir.clone())
+            .or_else(|| context.get_sync::<PathBuf>("output_dir"));
         let is_resume = context.get_sync::<String>("answers").is_some();
 
         let request = InvokeRequest {

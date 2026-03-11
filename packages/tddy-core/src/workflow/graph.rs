@@ -11,7 +11,14 @@ use std::sync::Arc;
 /// Defined at the workflow layer to avoid coupling with presenter types.
 #[derive(Debug, Clone)]
 pub enum ElicitationEvent {
-    PlanApproval { prd_content: String },
+    PlanApproval {
+        prd_content: String,
+    },
+    /// Daemon mode: agent suggested branch/worktree names; client confirms before worktree creation.
+    WorktreeConfirmation {
+        suggested_branch: String,
+        suggested_worktree: String,
+    },
 }
 
 /// Execution status after a step.

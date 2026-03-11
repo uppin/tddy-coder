@@ -3,8 +3,11 @@ syntax = "proto3";
 package tddy.v1;
 
 // TddyRemote: bidirectional streaming for programmatic control of tddy-coder.
+// Daemon mode adds GetSession and ListSessions for session management.
 service TddyRemote {
   rpc Stream(stream ClientMessage) returns (stream ServerMessage);
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
 }
 
 // --- Client -> Server: UserIntent variants ---
@@ -25,7 +28,19 @@ message ClientMessage {
     ViewPlan view_plan = 13;
     RefinePlan refine_plan = 14;
     DismissViewer dismiss_viewer = 15;
+    StartSession start_session = 16;
+    ConfirmWorktree confirm_worktree = 17;
   }
+}
+
+message StartSession {
+  string prompt = 1;
+  string repo_root = 2;  // Path to git repo root
+}
+
+message ConfirmWorktree {
+  string branch = 1;
+  string worktree_name = 2;
 }
 
 message ApprovePlan {}
@@ -85,7 +100,48 @@ message ServerMessage {
     AgentOutput agent_output = 6;
     InboxChanged inbox_changed = 7;
     IntentReceived intent_received = 8;
+    SessionCreated session_created = 9;
+    WorktreeElicitation worktree_elicitation = 10;
+    SessionStatusChanged session_status_changed = 11;
   }
+}
+
+message SessionCreated {
+  string session_id = 1;
+}
+
+message WorktreeElicitation {
+  string suggested_branch = 1;
+  string suggested_worktree = 2;
+}
+
+message SessionStatusChanged {
+  string session_id = 1;
+  string status = 2;  // Pending, Active, WaitingForInput, Completed, Failed
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  SessionInfo session = 1;
+}
+
+message ListSessionsRequest {
+  string repo_root = 1;  // Optional: filter by repo
+}
+
+message ListSessionsResponse {
+  repeated SessionInfo sessions = 1;
+}
+
+message SessionInfo {
+  string session_id = 1;
+  string status = 2;
+  string plan_dir = 3;
+  string worktree = 4;
+  string branch = 5;
 }
 
 message ModeChanged {
