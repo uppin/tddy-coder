@@ -94,6 +94,13 @@ pub fn read_impl_session_file(plan_dir: &Path) -> Result<String, WorkflowError> 
 /// Write PRD.md with TODO content as last section. No separate TODO.md.
 /// Injects cross-references to peer documents.
 pub fn write_artifacts(output_dir: &Path, planning: &PlanningOutput) -> Result<(), WorkflowError> {
+    if planning.prd.trim().is_empty() {
+        return Err(WorkflowError::WriteFailed("PRD content is empty or whitespace-only".into()));
+    }
+    if planning.todo.trim().is_empty() {
+        return Err(WorkflowError::WriteFailed("TODO content is empty or whitespace-only".into()));
+    }
+
     fs::create_dir_all(output_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
     if let Some(ref demo) = planning.demo_plan {
