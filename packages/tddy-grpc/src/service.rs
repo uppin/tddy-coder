@@ -13,7 +13,8 @@ use tddy_core::PresenterHandle;
 use crate::convert::{client_message_to_intent, event_to_server_message};
 use crate::gen::{
     tddy_remote_server::TddyRemote, ClientMessage, GetSessionRequest, GetSessionResponse,
-    ListSessionsRequest, ListSessionsResponse, ServerMessage,
+    ListSessionsRequest, ListSessionsResponse, ServerMessage, StreamTerminalRequest,
+    TerminalOutput,
 };
 
 /// gRPC service that bridges Presenter events and intents.
@@ -21,6 +22,7 @@ use crate::gen::{
 pub struct TddyRemoteService {
     event_tx: broadcast::Sender<PresenterEvent>,
     intent_tx: mpsc::Sender<tddy_core::UserIntent>,
+    terminal_byte_tx: Option<broadcast::Sender<Vec<u8>>>,
 }
 
 impl TddyRemoteService {
@@ -28,13 +30,20 @@ impl TddyRemoteService {
         Self {
             event_tx: handle.event_tx,
             intent_tx: handle.intent_tx,
+            terminal_byte_tx: None,
         }
+    }
+
+    pub fn with_terminal_bytes(mut self, tx: broadcast::Sender<Vec<u8>>) -> Self {
+        self.terminal_byte_tx = Some(tx);
+        self
     }
 }
 
 #[tonic::async_trait]
 impl TddyRemote for TddyRemoteService {
     type StreamStream = ReceiverStream<Result<ServerMessage, Status>>;
+    type StreamTerminalStream = ReceiverStream<Result<TerminalOutput, Status>>;
 
     async fn stream(
         &self,
@@ -73,6 +82,34 @@ impl TddyRemote for TddyRemoteService {
                 }
             }
         });
+
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn stream_terminal(
+        &self,
+        _request: Request<StreamTerminalRequest>,
+    ) -> Result<Response<Self::StreamTerminalStream>, Status> {
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+
+        if let Some(ref byte_tx) = self.terminal_byte_tx {
+            let mut byte_rx = byte_tx.subscribe();
+            tokio::spawn(async move {
+                loop {
+                    match byte_rx.recv().await {
+                        Ok(data) => {
+                            if tx.send(Ok(TerminalOutput { data })).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
+        } else {
+            drop(tx);
+        }
 
         Ok(Response::new(ReceiverStream::new(rx)))
     }
