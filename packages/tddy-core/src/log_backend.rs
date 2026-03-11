@@ -82,9 +82,17 @@ pub fn resolve_log_defaults(
 /// Redirect debug output to a file without changing the log level.
 /// Use when plan_dir becomes known after init_tddy_logger; early logs go to stderr/buffer,
 /// subsequent logs go to the file.
+/// Flushes any buffered log lines (from TUI mode) into the file so early messages are preserved.
 pub fn redirect_debug_output(path: &Path) {
     match OpenOptions::new().create(true).append(true).open(path) {
-        Ok(f) => {
+        Ok(mut f) => {
+            let buffered = take_buffered_logs();
+            for line in &buffered {
+                let _ = writeln!(f, "{}", line);
+            }
+            if !buffered.is_empty() {
+                let _ = f.flush();
+            }
             if let Ok(mut guard) = DEBUG_OUTPUT_FILE.lock() {
                 *guard = Some(f);
             }
@@ -118,6 +126,10 @@ pub fn init_tddy_logger(debug: bool, debug_output_path: Option<&Path>) {
         }
     }
     let level = if debug || debug_output_path.is_some() {
+        log::LevelFilter::Debug
+    } else if std::env::var("TDDY_QUIET").is_ok() {
+        // TUI mode: enable Debug from the start so early messages are buffered.
+        // They'll be flushed to the debug file when redirect_debug_output opens it.
         log::LevelFilter::Debug
     } else {
         std::env::var("RUST_LOG")
