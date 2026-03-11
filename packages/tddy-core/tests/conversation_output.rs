@@ -136,10 +136,22 @@ exit 0
     assert!(result.is_ok(), "invoke should succeed: {:?}", result);
 
     let content = fs::read_to_string(&output_file).expect("conversation file should exist");
+    let lines: Vec<&str> = content.trim().lines().collect();
+    assert!(
+        lines.len() >= 3,
+        "file should have request + stream lines, got {} lines",
+        lines.len()
+    );
+    let first: serde_json::Value = serde_json::from_str(lines[0]).expect("parse request entry");
+    assert_eq!(first["type"], "tddy-request", "first line should be the request");
+    assert_eq!(first["prompt"], "test");
+    assert_eq!(first["goal"], "Plan");
+
+    let stream_lines = lines[1..].join("\n");
     assert_eq!(
-        content.trim(),
+        stream_lines.trim(),
         expected_raw.trim(),
-        "file should contain raw NDJSON"
+        "remaining lines should contain raw NDJSON stream"
     );
 
     let _ = std::fs::remove_dir_all(&tmp);

@@ -4,12 +4,12 @@
 //! and changeset updates. Currently stubbed for TDD red phase.
 
 use crate::backend::{CodingBackend, Goal, InvokeRequest};
+use crate::toolcall::take_submit_result_for_goal;
 use crate::error::{BackendError, ParseError, WorkflowError};
 use crate::output::{
     create_session_dir_in, create_session_dir_with_id, parse_planning_response,
     slugify_directory_name,
 };
-use crate::toolcall::take_submit_result_for_goal;
 use crate::workflow::context::Context;
 use crate::workflow::planning;
 use crate::workflow::task::{NextAction, Task, TaskResult};
@@ -116,11 +116,16 @@ impl Task for PlanTask {
             });
         }
 
-        let output_to_store = take_submit_result_for_goal("plan").ok_or_else(|| {
-            Box::new(WorkflowError::ParseError(ParseError::Malformed(
-                "Agent finished without calling tddy-tools submit. Ensure tddy-tools is on PATH and the agent follows the system prompt.".into(),
-            ))) as Box<dyn std::error::Error + Send + Sync>
-        })?;
+        let output_to_store = self
+            .backend
+            .submit_channel()
+            .and_then(|ch| ch.take_for_goal("plan"))
+            .or_else(|| take_submit_result_for_goal("plan"))
+            .ok_or_else(|| {
+                Box::new(WorkflowError::ParseError(ParseError::Malformed(
+                    "Agent finished without calling tddy-tools submit. Ensure tddy-tools is on PATH and the agent follows the system prompt.".into(),
+                ))) as Box<dyn std::error::Error + Send + Sync>
+            })?;
         context.set_sync("output", output_to_store.clone());
 
         let planning = parse_planning_response(&output_to_store).map_err(|e: ParseError| {

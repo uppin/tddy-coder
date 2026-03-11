@@ -893,24 +893,35 @@ fn print_goal_output(goal: &str, output: Option<&str>, plan_dir: &Path) -> anyho
 
 fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     std::env::set_var("TDDY_QUIET", "1");
+    log::set_max_level(log::LevelFilter::Debug);
 
     let (socket_path, tool_call_rx) = match tddy_core::toolcall::start_toolcall_listener() {
         Ok((path, rx)) => (Some(path), Some(rx)),
         Err(_) => (None, None),
     };
-    let backend = create_backend(&args.agent, socket_path.as_deref(), args.output_dir.as_deref());
+    let backend = create_backend(
+        &args.agent,
+        socket_path.as_deref(),
+        args.output_dir.as_deref(),
+    );
     let view = tddy_tui::TuiView::new();
     let mut presenter = Presenter::new(view, &args.agent, args.model.as_deref().unwrap_or("opus"));
 
-    let external_intent_rx = if let Some(port) = args.grpc {
+    let (external_intent_rx, byte_capture) = if let Some(port) = args.grpc {
         let (event_tx, _) = tokio::sync::broadcast::channel(256);
         let (intent_tx, intent_rx) = std::sync::mpsc::channel();
+        let (terminal_byte_tx, _) = tokio::sync::broadcast::channel(256);
         let handle = tddy_core::PresenterHandle {
             event_tx: event_tx.clone(),
             intent_tx: intent_tx.clone(),
         };
         presenter = presenter.with_broadcast(event_tx);
-        let service = tddy_grpc::TddyRemoteService::new(handle);
+        let service =
+            tddy_grpc::TddyRemoteService::new(handle).with_terminal_bytes(terminal_byte_tx.clone());
+        let byte_tx_for_callback = terminal_byte_tx.clone();
+        let byte_capture: Option<tddy_tui::ByteCallback> = Some(Box::new(move |buf: &[u8]| {
+            let _ = byte_tx_for_callback.send(buf.to_vec());
+        }));
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -930,9 +941,9 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             });
             result.expect("gRPC server failed")
         });
-        Some(intent_rx)
+        (Some(intent_rx), byte_capture)
     } else {
-        None
+        (None, None)
     };
 
     if let Some(ref output_dir) = args.output_dir {
@@ -957,6 +968,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         &mut presenter,
         shutdown.as_ref(),
         external_intent_rx,
+        byte_capture,
         args.debug,
     )?;
 

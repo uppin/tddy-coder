@@ -158,8 +158,8 @@ async fn stub_backend_plan_returns_valid_structured_response() {
     };
 
     let _resp = backend.invoke(req).await.unwrap();
-    let output = tddy_core::toolcall::take_submit_result_for_goal("plan")
-        .expect("stub stores plan via tool executor");
+    let ch = backend.submit_channel().expect("StubBackend has channel");
+    let output = ch.take_for_goal("plan").expect("stub stores plan via tool executor");
     let parsed = parse_planning_response(&output).expect("should parse plan");
     assert!(!parsed.prd.is_empty());
 }
@@ -188,7 +188,9 @@ async fn stub_backend_acceptance_tests_returns_valid_response() {
     };
 
     let _resp = backend.invoke(req).await.unwrap();
-    let output = tddy_core::toolcall::take_submit_result_for_goal("acceptance-tests")
+    let ch = backend.submit_channel().expect("StubBackend has channel");
+    let output = ch
+        .take_for_goal("acceptance-tests")
         .expect("stub stores acceptance-tests via tool executor");
     let parsed = parse_acceptance_tests_response(&output).expect("should parse");
     assert!(!parsed.summary.is_empty());
@@ -219,8 +221,8 @@ async fn stub_backend_red_returns_valid_response() {
     };
 
     let _resp = backend.invoke(req).await.unwrap();
-    let output = tddy_core::toolcall::take_submit_result_for_goal("red")
-        .expect("stub stores red via tool executor");
+    let ch = backend.submit_channel().expect("StubBackend has channel");
+    let output = ch.take_for_goal("red").expect("stub stores red via tool executor");
     let parsed = parse_red_response(&output).expect("should parse");
     assert!(!parsed.summary.is_empty());
 }
@@ -249,7 +251,9 @@ async fn stub_backend_update_docs_returns_valid_response() {
     };
 
     let _resp = backend.invoke(req).await.unwrap();
-    let output = tddy_core::toolcall::take_submit_result_for_goal("update-docs")
+    let ch = backend.submit_channel().expect("StubBackend has channel");
+    let output = ch
+        .take_for_goal("update-docs")
         .expect("stub stores update-docs via tool executor");
     let parsed = parse_update_docs_response(&output).expect("should parse");
     assert!(!parsed.summary.is_empty());
@@ -280,8 +284,8 @@ async fn stub_backend_green_returns_valid_response() {
     };
 
     let _resp = backend.invoke(req).await.unwrap();
-    let output = tddy_core::toolcall::take_submit_result_for_goal("green")
-        .expect("stub stores green via tool executor");
+    let ch = backend.submit_channel().expect("StubBackend has channel");
+    let output = ch.take_for_goal("green").expect("stub stores green via tool executor");
     let parsed = parse_green_response(&output).expect("should parse");
     assert!(!parsed.summary.is_empty());
 }

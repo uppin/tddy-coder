@@ -12,6 +12,14 @@ Release note history for the Coder product area.
 - **System prompts**: All goal system prompts (plan, acceptance-tests, red, green, evaluate, validate, refactor, update-docs) instruct the agent to call `tddy-tools submit` with the appropriate schema path.
 - **Packages**: tddy-core (parser.rs JSON-only, stream cleanup, fail-fast in PlanTask/BackendInvokeTask), tddy-coder (verify_tddy_tools_available at startup, stub agent option).
 
+## 2026-03-11 — Terminal Streaming via gRPC
+
+- **StreamTerminal RPC**: Server-streaming RPC on TddyRemote service streams raw ANSI bytes from ratatui/crossterm rendering. Clients receive the exact byte stream a terminal would see.
+- **CapturingWriter**: tddy-tui captures terminal writes via custom Write implementation; `run_event_loop` accepts optional `ByteCallback`; no-op when not provided.
+- **Wiring**: When `--grpc` is set, tddy-coder creates broadcast channel, passes callback to event loop and `TddyRemoteService::with_terminal_bytes`.
+- **Use case**: Remote TUI viewer — pipe received bytes into a terminal emulator to render the TUI remotely.
+- **Packages**: tddy-tui (CapturingWriter, event_loop byte_capture), tddy-grpc (StreamTerminal proto, service, daemon stub), tddy-coder (run.rs wiring).
+
 ## 2026-03-11 — Daemon Mode
 
 - **--daemon flag**: tddy-coder runs as a headless gRPC server for systemd deployment. Process serves multiple sessions sequentially; stateless between sessions (reads changeset.yaml from disk).

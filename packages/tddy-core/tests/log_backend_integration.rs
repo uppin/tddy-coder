@@ -21,6 +21,11 @@ fn resolve_log_defaults_returns_conversation_path_when_none() {
         "path should be plan_dir/logs/conversation.jsonl"
     );
     assert!(tmp.join("logs").is_dir(), "logs dir should be created");
+    assert_eq!(
+        log::max_level(),
+        log::LevelFilter::Debug,
+        "resolve_log_defaults should bump log level to Debug when no explicit debug_output_path"
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

@@ -212,14 +212,19 @@ impl Task for BackendInvokeTask {
         }
 
         let key = self.goal.submit_key();
-        let output = take_submit_result_for_goal(key).ok_or_else(|| {
-            Box::new(crate::WorkflowError::ParseError(crate::ParseError::Malformed(
-                format!(
-                    "Agent finished without calling tddy-tools submit for goal '{}'. Ensure tddy-tools is on PATH and the agent follows the system prompt.",
-                    key
-                ),
-            ))) as Box<dyn std::error::Error + Send + Sync>
-        })?;
+        let output = self
+            .backend
+            .submit_channel()
+            .and_then(|ch| ch.take_for_goal(key))
+            .or_else(|| take_submit_result_for_goal(key))
+            .ok_or_else(|| {
+                Box::new(crate::WorkflowError::ParseError(crate::ParseError::Malformed(
+                    format!(
+                        "Agent finished without calling tddy-tools submit for goal '{}'. Ensure tddy-tools is on PATH and the agent follows the system prompt.",
+                        key
+                    ),
+                ))) as Box<dyn std::error::Error + Send + Sync>
+            })?;
         context.set_sync("output", output.clone());
         if let Some(sid) = &response.session_id {
             context.set_sync("session_id", sid.clone());

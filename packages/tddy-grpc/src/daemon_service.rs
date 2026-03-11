@@ -122,6 +122,8 @@ impl DaemonService {
 #[tonic::async_trait]
 impl TddyRemote for DaemonService {
     type StreamStream = tokio_stream::wrappers::ReceiverStream<Result<ServerMessage, Status>>;
+    type StreamTerminalStream =
+        tokio_stream::wrappers::ReceiverStream<Result<crate::gen::TerminalOutput, Status>>;
 
     async fn stream(
         &self,
@@ -135,6 +137,17 @@ impl TddyRemote for DaemonService {
             tx,
         );
         tokio::spawn(handler.run());
+        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
+            rx,
+        )))
+    }
+
+    async fn stream_terminal(
+        &self,
+        _request: Request<crate::gen::StreamTerminalRequest>,
+    ) -> Result<Response<Self::StreamTerminalStream>, Status> {
+        let (tx, rx) = tokio_mpsc::channel(64);
+        drop(tx);
         Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
             rx,
         )))

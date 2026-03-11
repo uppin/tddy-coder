@@ -3,7 +3,7 @@
 //! StubBackend uses InMemoryToolExecutor (tests and tddy-demo): stores via `store_submit_result`.
 //! ProcessToolExecutor (for real agents) runs `tddy-tools submit`; not used by StubBackend.
 
-use crate::toolcall::store_submit_result;
+use crate::toolcall::SubmitResultChannel;
 use std::path::Path;
 
 /// Executes a tool call to submit structured JSON for a goal.
@@ -17,13 +17,27 @@ pub trait ToolExecutor: Send + Sync {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
 
-/// In-memory executor for tests. Directly stores the result for the workflow to read.
-#[derive(Debug, Clone, Default)]
-pub struct InMemoryToolExecutor;
+/// In-memory executor for tests. Stores to a per-instance channel (no global state).
+#[derive(Debug, Clone)]
+pub struct InMemoryToolExecutor {
+    channel: SubmitResultChannel,
+}
+
+impl Default for InMemoryToolExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl InMemoryToolExecutor {
     pub fn new() -> Self {
-        Self
+        Self {
+            channel: SubmitResultChannel::new(),
+        }
+    }
+
+    pub fn channel(&self) -> &SubmitResultChannel {
+        &self.channel
     }
 }
 
@@ -38,7 +52,7 @@ impl ToolExecutor for InMemoryToolExecutor {
             goal,
             json.len()
         );
-        store_submit_result(goal, json);
+        self.channel.store(goal, json);
         Ok(())
     }
 }
