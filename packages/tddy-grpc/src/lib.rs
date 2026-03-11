@@ -4,9 +4,11 @@
 //! clients send UserIntent, receive PresenterView events.
 
 pub mod convert;
+pub mod daemon_service;
 pub mod service;
 
 pub use convert::{client_message_to_intent, event_to_server_message};
+pub use daemon_service::DaemonService;
 pub use service::TddyRemoteService;
 
 pub mod gen {

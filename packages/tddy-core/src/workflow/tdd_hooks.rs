@@ -229,7 +229,16 @@ fn before_update_docs(
     };
     let prompt = update_docs::build_prompt(&artifacts_summary);
     context.set_sync("prompt", prompt);
-    context.set_sync("system_prompt", update_docs::system_prompt());
+
+    let mut system_prompt = update_docs::system_prompt();
+    if let Ok(cs) = read_changeset(plan_dir) {
+        if let Some(ref branch) = cs.branch {
+            system_prompt.push_str("\n\n**FINAL STEP**: After completing all documentation updates, commit all modifications with a descriptive message and push to the remote branch: ");
+            system_prompt.push_str(branch);
+            system_prompt.push('.');
+        }
+    }
+    context.set_sync("system_prompt", system_prompt);
     context.set_sync("plan_dir", plan_dir.to_path_buf());
     let _ = write_schema_to_dir(plan_dir, "update-docs");
     Ok(())

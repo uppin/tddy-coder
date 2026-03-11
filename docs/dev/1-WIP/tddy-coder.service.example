@@ -1,0 +1,23 @@
+# Example systemd unit for tddy-coder daemon.
+# Copy to /etc/systemd/system/tddy-coder.service and adjust paths.
+#
+# Install: sudo cp tddy-coder.service.example /etc/systemd/system/tddy-coder.service
+# Enable:  sudo systemctl enable tddy-coder
+# Start:   sudo systemctl start tddy-coder
+
+[Unit]
+Description=tddy-coder gRPC daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/path/to/tddy-coder --daemon --output-dir /var/lib/tddy/sessions
+Restart=on-failure
+RestartSec=5
+
+# Optional: run as dedicated user
+# User=tddy
+# Group=tddy
+
+[Install]
+WantedBy=multi-user.target

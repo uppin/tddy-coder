@@ -309,3 +309,10 @@ pub fn create_session_dir_with_id(base: &Path, session_id: &str) -> Result<PathB
     fs::create_dir_all(&session_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     Ok(session_dir)
 }
+
+/// Create a session directory directly at `{base}/{id}/`. Used when base is already the sessions dir (e.g. daemon mode).
+pub fn create_session_dir_under(base: &Path, session_id: &str) -> Result<PathBuf, WorkflowError> {
+    let session_dir = base.join(session_id);
+    fs::create_dir_all(&session_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    Ok(session_dir)
+}

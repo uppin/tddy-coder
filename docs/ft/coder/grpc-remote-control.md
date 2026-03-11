@@ -56,7 +56,29 @@ Replace the single `V: PresenterView` generic with a broadcast channel pattern:
 - Both TUI and gRPC operate on the same Presenter instance simultaneously
 - Optional `--grpc-port <port>` to override the default
 
-### 5. Codegen tooling
+### 5. Daemon mode
+
+The `--daemon` flag starts a headless gRPC server (no TUI) suitable for systemd deployment. The process runs indefinitely and serves multiple sessions sequentially.
+
+**Session lifecycle via gRPC**:
+- **Stream RPC**: Clients send `StartSession` with a prompt; daemon creates a session, runs the plan step, streams events (SessionCreated, PlanApproval, WorktreeElicitation, WorkflowComplete). Client responds with `ApprovePlan` and `ConfirmWorktree` to drive the elicitation flow.
+- **GetSession**: Returns session status (Active, Completed, Failed) by reading changeset.yaml from disk.
+- **ListSessions**: Lists all sessions with their status.
+
+**Session states**: Pending, Active, WaitingForInput, Completed, Failed.
+
+**Git worktree management**:
+- Each session gets a git worktree via `git worktree add`. Worktrees live in `.worktrees/` relative to the repo root.
+- The worktree path is persisted in `changeset.yaml` (`worktree` field). The agent's working directory is set to the worktree path for post-plan steps.
+- Branch and worktree names are suggested by the agent in the plan output (`branch_suggestion`, `worktree_suggestion`); the client confirms or modifies via the WorktreeElicitation elicitation.
+
+**Agent commit & push**: The final workflow step's system prompt instructs the agent to commit all changes and push to the remote branch. The branch name is established during session creation and stored in the changeset.
+
+**Changeset extensions**: `worktree`, `branch`, `remote_pushed` fields.
+
+**Configuration**: Sessions base is `--output-dir` or `~/.tddy/sessions`. Port defaults to 50051 (`--grpc`). Graceful shutdown on SIGTERM.
+
+### 6. Codegen tooling
 
 - Use **Buf** for proto management and code generation (prost plugin)
 - Add `buf` to the Nix flake devShell

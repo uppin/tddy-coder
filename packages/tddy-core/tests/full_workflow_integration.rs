@@ -650,11 +650,17 @@ async fn tdd_hooks_elicitation_returns_plan_approval_when_prd_exists() {
         event.is_some(),
         "elicitation_after_task should return Some when PRD.md exists"
     );
-    if let Some(tddy_core::ElicitationEvent::PlanApproval { prd_content }) = event {
-        assert!(
-            prd_content.contains("Test PRD"),
-            "prd_content should contain PRD file contents"
-        );
+    match event {
+        Some(tddy_core::ElicitationEvent::PlanApproval { prd_content }) => {
+            assert!(
+                prd_content.contains("Test PRD"),
+                "prd_content should contain PRD file contents"
+            );
+        }
+        Some(tddy_core::ElicitationEvent::WorktreeConfirmation { .. }) => {
+            panic!("expected PlanApproval, got WorktreeConfirmation");
+        }
+        None => {}
     }
 
     let _ = std::fs::remove_dir_all(&plan_dir);
@@ -752,6 +758,9 @@ async fn full_workflow_returns_elicitation_needed_after_plan() {
         match event {
             tddy_core::ElicitationEvent::PlanApproval { ref prd_content } => {
                 assert!(!prd_content.is_empty(), "prd_content should not be empty");
+            }
+            tddy_core::ElicitationEvent::WorktreeConfirmation { .. } => {
+                panic!("test expects PlanApproval, not WorktreeConfirmation");
             }
         }
     }

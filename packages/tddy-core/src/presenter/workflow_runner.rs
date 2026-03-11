@@ -237,6 +237,13 @@ fn handle_elicitation(
                     .unwrap_or_else(|_| "Could not read PRD.md".to_string());
             }
         }
+        ElicitationEvent::WorktreeConfirmation { .. } => {
+            // WorktreeConfirmation is only used in daemon mode; handled by DaemonService.
+            let _ = ctx.event_tx.send(WorkflowEvent::WorkflowComplete(Err(
+                "WorktreeConfirmation not supported in TUI mode".to_string(),
+            )));
+            false
+        }
     }
 }
 

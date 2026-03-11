@@ -3909,11 +3909,13 @@ version = "0.1.0"
 dependencies = [
  "async-stream",
  "prost",
+ "serde_json",
  "tddy-core",
  "tokio",
  "tokio-stream",
  "tonic",
  "tonic-build",
+ "uuid",
 ]
 
 [[package]]

@@ -52,6 +52,15 @@ pub struct Changeset {
     #[serde(default)]
     pub artifacts: BTreeMap<String, String>,
     pub discovery: Option<DiscoveryData>,
+    /// Git worktree path for this session (e.g. .worktrees/feature-auth).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<String>,
+    /// Branch name for this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// Whether changes were pushed to remote.
+    #[serde(default)]
+    pub remote_pushed: bool,
 }
 
 /// A single session entry (plan, acceptance-tests, or impl).
@@ -130,6 +139,9 @@ impl Default for Changeset {
             },
             artifacts: default_artifacts(),
             discovery: None,
+            worktree: None,
+            branch: None,
+            remote_pushed: false,
         }
     }
 }

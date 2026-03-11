@@ -31,9 +31,7 @@ fn reject_output_dir_if_repo_root(output_dir: &Path) -> anyhow::Result<()> {
         .context("resolve output-dir path")?;
     let cwd = std::env::current_dir().context("current dir")?;
     let git_root = find_git_root(&cwd);
-    let git_root_resolved = git_root
-        .canonicalize()
-        .unwrap_or_else(|_| git_root.clone());
+    let git_root_resolved = git_root.canonicalize().unwrap_or_else(|_| git_root.clone());
     if resolved == git_root_resolved {
         anyhow::bail!(
             "--output-dir must not be the repository root ({}); use a subdirectory or omit for $HOME/.tddy/sessions",
@@ -109,6 +107,8 @@ pub struct Args {
     pub grpc: Option<u16>,
     /// Session ID set at program start; used for exit output when no plan_dir.
     pub session_id: Option<String>,
+    /// When true, run as headless gRPC daemon (no TUI).
+    pub daemon: bool,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -159,6 +159,10 @@ pub struct CoderArgs {
     /// Start gRPC server alongside TUI for programmatic remote control (e.g. --grpc 50052)
     #[arg(long, value_name = "PORT", default_missing_value = "50051")]
     pub grpc: Option<u16>,
+
+    /// Run as headless gRPC daemon (systemd-friendly)
+    #[arg(long)]
+    pub daemon: bool,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -209,6 +213,10 @@ pub struct DemoArgs {
     /// Start gRPC server alongside TUI for programmatic remote control (e.g. --grpc 50052)
     #[arg(long, value_name = "PORT", default_missing_value = "50051")]
     pub grpc: Option<u16>,
+
+    /// Run as headless gRPC daemon (systemd-friendly)
+    #[arg(long)]
+    pub daemon: bool,
 }
 
 impl From<CoderArgs> for Args {
@@ -226,6 +234,7 @@ impl From<CoderArgs> for Args {
             prompt: a.prompt,
             grpc: a.grpc,
             session_id: None,
+            daemon: a.daemon,
         }
     }
 }
@@ -245,12 +254,16 @@ impl From<DemoArgs> for Args {
             prompt: a.prompt,
             grpc: a.grpc,
             session_id: None,
+            daemon: a.daemon,
         }
     }
 }
 
 /// Main entry point. Run the workflow with the given args.
 pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
+    if args.daemon {
+        return run_daemon(args, shutdown);
+    }
     if args.goal.is_none() {
         let use_tui = should_run_tui(io::stdin().is_terminal(), io::stderr().is_terminal());
         if use_tui {
@@ -407,6 +420,58 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
 
 fn on_progress(_event: &ProgressEvent) {
     // Plain mode: progress is not displayed (no stdout/stderr per AGENTS.md)
+}
+
+/// Run as headless gRPC daemon. Serves GetSession and ListSessions; blocks until shutdown.
+fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
+    tddy_core::init_tddy_logger(args.debug, args.debug_output.as_deref());
+
+    let sessions_base = args.output_dir.clone().unwrap_or_else(|| {
+        #[cfg(unix)]
+        {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            PathBuf::from(home).join(".tddy").join("sessions")
+        }
+        #[cfg(not(unix))]
+        {
+            PathBuf::from(".").join("sessions")
+        }
+    });
+    std::fs::create_dir_all(&sessions_base).context("create sessions base dir")?;
+
+    let port = args.grpc.unwrap_or(50051);
+    let backend = create_backend(&args.agent, None, None);
+    let service = tddy_grpc::DaemonService::new(sessions_base, backend);
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("create tokio runtime")?;
+
+    rt.block_on(async {
+        let addr: std::net::SocketAddr = ([0, 0, 0, 0], port).into();
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .context("bind gRPC port")?;
+        log::info!("tddy-coder daemon listening on port {}", port);
+
+        let server = tonic::transport::Server::builder()
+            .add_service(tddy_grpc::gen::tddy_remote_server::TddyRemoteServer::new(
+                service,
+            ))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener));
+
+        tokio::select! {
+            res = server => res.context("gRPC server error")?,
+            _ = async {
+                while !shutdown.load(Ordering::Relaxed) {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+            } => {}
+        }
+
+        Ok(())
+    })
 }
 
 /// Print session id and plan dir to stderr on program exit.
@@ -616,6 +681,11 @@ fn run_goal_plain(
                             current_prd = std::fs::read_to_string(plan_dir.join("PRD.md"))
                                 .unwrap_or_else(|_| "Could not read PRD.md".to_string());
                         }
+                    }
+                    tddy_core::ElicitationEvent::WorktreeConfirmation { .. } => {
+                        anyhow::bail!(
+                            "WorktreeConfirmation not supported in plain mode; use --daemon"
+                        );
                     }
                 }
                 if print_output {
@@ -1042,6 +1112,11 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
                             current_prd = std::fs::read_to_string(plan_dir.join("PRD.md"))
                                 .unwrap_or_else(|_| "Could not read PRD.md".to_string());
                         }
+                    }
+                    tddy_core::ElicitationEvent::WorktreeConfirmation { .. } => {
+                        anyhow::bail!(
+                            "WorktreeConfirmation not supported in plain mode; use --daemon"
+                        );
                     }
                 }
                 result = rt
