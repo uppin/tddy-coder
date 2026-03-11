@@ -13,15 +13,8 @@ use tddy_core::{
 
 use common::run_plan_with_conversation_output;
 
-const PLAN_OUTPUT: &str = r#"---PRD_START---
-# Feature PRD
-## Summary
-Test feature.
-
-## TODO
-
-- [ ] Task 1
----PRD_END---"#;
+/// Plan output as JSON (tddy-tools submit format). MockBackend stores this via store_submit_result.
+const PLAN_OUTPUT: &str = r##"{"goal":"plan","prd":"# Feature PRD\n\n## Summary\nTest feature.\n\n## TODO\n\n- [ ] Task 1"}"##;
 
 const RAW_STREAM: &str = r#"{"type":"system","session_id":"sess-1"}
 {"type":"result","result":"output","session_id":"sess-1"}"#;

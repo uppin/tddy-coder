@@ -79,9 +79,6 @@ fn truncate_description(s: &str, max_len: usize) -> String {
     }
 }
 
-/// Marker for structured output we need to parse (avoids pulling in Read/Bash noise).
-const STRUCTURED_RESPONSE_MARKER: &str = "<structured-response";
-
 /// Extract filename from a `file_path` value for display.
 fn file_path_display(obj: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
     obj.get("file_path").and_then(|v| v.as_str()).map(|s| {
@@ -91,51 +88,6 @@ fn file_path_display(obj: &serde_json::Map<String, serde_json::Value>) -> Option
             .unwrap_or(s)
             .to_string()
     })
-}
-
-/// Extract concatenated text from user event's tool_result content when it contains
-/// structured-response. Content can be a string or array of {"type":"text","text":"..."} blocks.
-/// Only returns content that contains the structured-response marker (avoids Read/Bash output).
-fn extract_tool_result_content_from_user_line(line: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    let obj = v.as_object()?;
-    if obj.get("type")?.as_str()? != "user" {
-        return None;
-    }
-    let message = obj.get("message")?.as_object()?;
-    let content = message.get("content")?.as_array()?;
-    let mut out = String::new();
-    for block in content {
-        let block_obj = block.as_object()?;
-        if block_obj.get("type")?.as_str()? != "tool_result" {
-            continue;
-        }
-        let c = block_obj.get("content")?;
-        if let Some(s) = c.as_str() {
-            if s.contains(STRUCTURED_RESPONSE_MARKER) {
-                out.push_str(s);
-                if !s.ends_with('\n') {
-                    out.push('\n');
-                }
-            }
-        } else if let Some(arr) = c.as_array() {
-            for item in arr {
-                if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                    if text.contains(STRUCTURED_RESPONSE_MARKER) {
-                        out.push_str(text);
-                        if !text.ends_with('\n') {
-                            out.push('\n');
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
 }
 
 /// Extract a short display detail from tool input (file_path, command, description, etc.).
@@ -188,7 +140,6 @@ where
     O: FnMut(&str),
 {
     let mut result_text = String::new();
-    let mut tool_result_text = String::new();
     let mut session_id = String::new();
     let mut questions: Vec<ClarificationQuestion> = vec![];
     let mut seen_questions: HashSet<(String, String)> = HashSet::new();
@@ -217,20 +168,6 @@ where
             Ok(e) => e,
             Err(_) => continue,
         };
-
-        // Fallback: extract from user tool_result content (Agent tool return, etc.).
-        // Claude Code CLI has a known bug where result event can be empty (issue #7124).
-        // Collected separately; merged into result_text only when primary sources lack structured-response.
-        if event.event_type == "user" {
-            if let Some(text) = extract_tool_result_content_from_user_line(line) {
-                if !text.is_empty() {
-                    tool_result_text.push_str(&text);
-                    if should_echo {
-                        on_raw_output(&text);
-                    }
-                }
-            }
-        }
 
         match event.event_type.as_str() {
             "system" => {
@@ -313,11 +250,6 @@ where
             }
             _ => {}
         }
-    }
-
-    // Use tool_result as fallback only when primary sources lack structured-response.
-    if !result_text.contains(STRUCTURED_RESPONSE_MARKER) && !tool_result_text.is_empty() {
-        result_text.push_str(&tool_result_text);
     }
 
     Ok(StreamResult {
@@ -409,31 +341,6 @@ mod tests {
         assert!(
             result.result_text.contains(r#""goal":"green""#),
             "result_text must contain the real green response"
-        );
-    }
-
-    #[test]
-    fn result_text_uses_tool_result_fallback_when_result_event_empty() {
-        let agent_return = concat!(
-            "<structured-response content-type=\"application-json\">\n",
-            r#"{"goal":"green","summary":"Implemented","tests":[],"implementations":[]}"#,
-            "\n",
-            "</structured-response>"
-        );
-
-        let ndjson = format!(
-            "{}\n{}",
-            make_user_tool_result(agent_return),
-            make_result_event(""),
-        );
-
-        let reader = std::io::BufReader::new(ndjson.as_bytes());
-        let result =
-            process_ndjson_stream(reader, noop_progress, noop_output, None, None, 0).unwrap();
-
-        assert!(
-            result.result_text.contains(r#""goal":"green""#),
-            "result_text should fall back to tool_result content when result event is empty"
         );
     }
 

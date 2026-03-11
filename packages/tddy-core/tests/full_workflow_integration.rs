@@ -19,58 +19,15 @@ use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{next_goal_for_state, MockBackend, SharedBackend, StubBackend, WorkflowEngine};
 
-const PLAN_OUTPUT: &str = r#"Here is my analysis.
+const PLAN_OUTPUT: &str = r##"{"goal":"plan","prd":"# Feature PRD\n\n## Summary\nUser authentication system with login and logout.\n\n## Testing Plan\n\n### Test Level\nIntegration - changes how auth component interacts with session storage.\n\n### Acceptance Tests\n- [ ] **Integration**: Login stores session token (packages/auth/tests/session.it.rs)\n- [ ] **Integration**: Logout clears session (packages/auth/tests/session.it.rs)\n\n## TODO\n\n- [ ] Create auth module\n- [ ] Implement login endpoint"}"##;
 
----PRD_START---
-# Feature PRD
+const ACCEPTANCE_TESTS_OUTPUT: &str = r#"{"goal":"acceptance-tests","summary":"Created 2 acceptance tests. All failing (Red state) as expected.","tests":[{"name":"login_stores_session_token","file":"packages/auth/tests/session.it.rs","line":15,"status":"failing"},{"name":"logout_clears_session","file":"packages/auth/tests/session.it.rs","line":28,"status":"failing"}]}"#;
 
-## Summary
-User authentication system with login and logout.
+const RED_OUTPUT: &str = r#"{"goal":"red","summary":"Created 2 skeleton methods and 3 failing unit tests. All tests failing as expected.","tests":[{"name":"auth_service_validates_email","file":"packages/auth/src/service.rs","line":42,"status":"failing"},{"name":"auth_service_rejects_empty_email","file":"packages/auth/src/service.rs","line":55,"status":"failing"},{"name":"session_store_persists_token","file":"packages/auth/tests/session_it.rs","line":22,"status":"failing"}],"skeletons":[{"name":"AuthService","file":"packages/auth/src/service.rs","line":10,"kind":"struct"},{"name":"validate_email","file":"packages/auth/src/service.rs","line":25,"kind":"method"}]}"#;
 
-## Testing Plan
+const GREEN_OUTPUT_ALL_PASS: &str = r#"{"goal":"green","summary":"Implemented 2 methods. All 3 unit tests and 2 acceptance tests passing.","tests":[{"name":"auth_service_validates_email","file":"packages/auth/src/service.rs","line":42,"status":"passing"},{"name":"auth_service_rejects_empty_email","file":"packages/auth/src/service.rs","line":55,"status":"passing"},{"name":"session_store_persists_token","file":"packages/auth/tests/session_it.rs","line":22,"status":"passing"}],"implementations":[{"name":"AuthService","file":"packages/auth/src/service.rs","line":10,"kind":"struct"},{"name":"validate_email","file":"packages/auth/src/service.rs","line":25,"kind":"method"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}"#;
 
-### Test Level
-Integration - changes how auth component interacts with session storage.
-
-### Acceptance Tests
-- [ ] **Integration**: Login stores session token (packages/auth/tests/session.it.rs)
-- [ ] **Integration**: Logout clears session (packages/auth/tests/session.it.rs)
-
-## TODO
-
-- [ ] Create auth module
-- [ ] Implement login endpoint
----PRD_END---
-
-That concludes the plan."#;
-
-const ACCEPTANCE_TESTS_OUTPUT: &str = r#"Created acceptance tests.
-
-<structured-response content-type="application-json">
-{"goal":"acceptance-tests","summary":"Created 2 acceptance tests. All failing (Red state) as expected.","tests":[{"name":"login_stores_session_token","file":"packages/auth/tests/session.it.rs","line":15,"status":"failing"},{"name":"logout_clears_session","file":"packages/auth/tests/session.it.rs","line":28,"status":"failing"}]}
-</structured-response>
-"#;
-
-const RED_OUTPUT: &str = r#"Created skeleton code and failing tests.
-
-<structured-response content-type="application-json">
-{"goal":"red","summary":"Created 2 skeleton methods and 3 failing unit tests. All tests failing as expected.","tests":[{"name":"auth_service_validates_email","file":"packages/auth/src/service.rs","line":42,"status":"failing"},{"name":"auth_service_rejects_empty_email","file":"packages/auth/src/service.rs","line":55,"status":"failing"},{"name":"session_store_persists_token","file":"packages/auth/tests/session_it.rs","line":22,"status":"failing"}],"skeletons":[{"name":"AuthService","file":"packages/auth/src/service.rs","line":10,"kind":"struct"},{"name":"validate_email","file":"packages/auth/src/service.rs","line":25,"kind":"method"}]}
-</structured-response>
-"#;
-
-const GREEN_OUTPUT_ALL_PASS: &str = r#"Implemented production code. All tests passing.
-
-<structured-response content-type="application-json">
-{"goal":"green","summary":"Implemented 2 methods. All 3 unit tests and 2 acceptance tests passing.","tests":[{"name":"auth_service_validates_email","file":"packages/auth/src/service.rs","line":42,"status":"passing"},{"name":"auth_service_rejects_empty_email","file":"packages/auth/src/service.rs","line":55,"status":"passing"},{"name":"session_store_persists_token","file":"packages/auth/tests/session_it.rs","line":22,"status":"passing"}],"implementations":[{"name":"AuthService","file":"packages/auth/src/service.rs","line":10,"kind":"struct"},{"name":"validate_email","file":"packages/auth/src/service.rs","line":25,"kind":"method"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}
-</structured-response>
-"#;
-
-const EVALUATE_OUTPUT_CHAIN: &str = r#"Evaluation complete.
-
-<structured-response content-type="application-json">
-{"goal":"evaluate-changes","summary":"Evaluated. All criteria met.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"synced","items_updated":0,"items_added":0},"files_analyzed":[],"test_impact":{"tests_affected":0,"new_tests_needed":0},"changed_files":[],"affected_tests":[],"validity_assessment":"OK"}
-</structured-response>
-"#;
+const EVALUATE_OUTPUT_CHAIN: &str = r#"{"goal":"evaluate-changes","summary":"Evaluated. All criteria met.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"synced","items_updated":0,"items_added":0},"files_analyzed":[],"test_impact":{"tests_affected":0,"new_tests_needed":0},"changed_files":[],"affected_tests":[],"validity_assessment":"OK"}"#;
 
 /// Full workflow chains plan -> acceptance-tests -> red -> green on a single WorkflowEngine.
 /// Uses run_workflow_from so the graph chains all steps in one run.
@@ -308,19 +265,9 @@ fn full_workflow_resume_from_green_complete_returns_demo() {
 
 // ── Acceptance tests for TDD Workflow Restructure PRD ─────────────────────────
 
-const EVALUATE_OUTPUT: &str = r#"Evaluation complete.
+const EVALUATE_OUTPUT: &str = r#"{"goal":"evaluate-changes","summary":"Evaluated 3 changed files. All criteria met.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"synced","items_updated":0,"items_added":0},"files_analyzed":[{"file":"src/workflow/mod.rs","lines_changed":50,"changeset_item":null}],"test_impact":{"tests_affected":5,"new_tests_needed":0},"changed_files":[{"path":"src/workflow/mod.rs","change_type":"modified","lines_added":30,"lines_removed":10}],"affected_tests":[{"path":"tests/full_workflow_integration.rs","status":"updated","description":"Updated for new demo/evaluate flow"}],"validity_assessment":"All acceptance criteria from the PRD are addressed."}"#;
 
-<structured-response content-type="application-json">
-{"goal":"evaluate-changes","summary":"Evaluated 3 changed files. All criteria met.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"synced","items_updated":0,"items_added":0},"files_analyzed":[{"file":"src/workflow/mod.rs","lines_changed":50,"changeset_item":null}],"test_impact":{"tests_affected":5,"new_tests_needed":0},"changed_files":[{"path":"src/workflow/mod.rs","change_type":"modified","lines_added":30,"lines_removed":10}],"affected_tests":[{"path":"tests/full_workflow_integration.rs","status":"updated","description":"Updated for new demo/evaluate flow"}],"validity_assessment":"All acceptance criteria from the PRD are addressed."}
-</structured-response>
-"#;
-
-const DEMO_OUTPUT: &str = r#"Demo executed successfully.
-
-<structured-response content-type="application-json">
-{"goal":"demo","summary":"Demo ran successfully. CLI produced expected output.","demo_type":"cli","steps_completed":2,"verification":"CLI runs without error"}
-</structured-response>
-"#;
+const DEMO_OUTPUT: &str = r#"{"goal":"demo","summary":"Demo ran successfully. CLI produced expected output.","demo_type":"cli","steps_completed":2,"verification":"CLI runs without error"}"#;
 
 /// AC1, AC7: Full workflow chains plan → acceptance-tests → red → green → demo → evaluate → validate → refactor
 #[tokio::test]
@@ -541,26 +488,11 @@ async fn plain_full_workflow_uses_single_workflow_instance() {
 
 // ── Phase 5: Full workflow chains all 8 steps ───────────────────────────────
 
-const VALIDATE_SUBAGENTS_OUTPUT: &str = r#"All 3 subagents completed. Reports and refactoring plan written.
+const VALIDATE_SUBAGENTS_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 subagents completed. Reports and refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
 
-<structured-response content-type="application-json">
-{"goal":"validate","summary":"All 3 subagents completed. Reports and refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
-</structured-response>
-"#;
+const REFACTOR_OUTPUT_COMPLETE: &str = r#"{"goal":"refactor","summary":"Completed 5 refactoring tasks. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
 
-const REFACTOR_OUTPUT_COMPLETE: &str = r#"All refactoring tasks completed. Tests passing.
-
-<structured-response content-type="application-json">
-{"goal":"refactor","summary":"Completed 5 refactoring tasks. All tests passing.","tasks_completed":5,"tests_passing":true}
-</structured-response>
-"#;
-
-const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
-
-<structured-response content-type="application-json">
-{"goal":"update-docs","summary":"Updated 3 docs.","docs_updated":3}
-</structured-response>
-"#;
+const UPDATE_DOCS_OUTPUT: &str = r#"{"goal":"update-docs","summary":"Updated 3 docs.","docs_updated":3}"#;
 
 /// Phase 5 / PRD R7: Full workflow chains all 9 steps (plan through update-docs).
 #[tokio::test]

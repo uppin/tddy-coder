@@ -12,55 +12,21 @@ use tddy_core::{InvokeResponse, MockBackend, SharedBackend, WorkflowEngine};
 
 use common::{ctx_red, run_goal_until_done};
 
-const RED_OUTPUT: &str = r#"Created skeleton code and failing tests.
+const RED_OUTPUT: &str = r#"{"goal":"red","summary":"Created 2 skeleton methods and 3 failing unit tests. All tests failing as expected.","tests":[{"name":"auth_service_validates_email","file":"packages/auth/src/service.rs","line":42,"status":"failing"},{"name":"auth_service_rejects_empty_email","file":"packages/auth/src/service.rs","line":55,"status":"failing"},{"name":"session_store_persists_token","file":"packages/auth/tests/session_it.rs","line":22,"status":"failing"}],"skeletons":[{"name":"AuthService","file":"packages/auth/src/service.rs","line":10,"kind":"struct"},{"name":"validate_email","file":"packages/auth/src/service.rs","line":25,"kind":"method"}]}"#;
 
-<structured-response content-type="application-json">
-{"goal":"red","summary":"Created 2 skeleton methods and 3 failing unit tests. All tests failing as expected.","tests":[{"name":"auth_service_validates_email","file":"packages/auth/src/service.rs","line":42,"status":"failing"},{"name":"auth_service_rejects_empty_email","file":"packages/auth/src/service.rs","line":55,"status":"failing"},{"name":"session_store_persists_token","file":"packages/auth/tests/session_it.rs","line":22,"status":"failing"}],"skeletons":[{"name":"AuthService","file":"packages/auth/src/service.rs","line":10,"kind":"struct"},{"name":"validate_email","file":"packages/auth/src/service.rs","line":25,"kind":"method"}]}
-</structured-response>
-"#;
+const RED_OUTPUT_VALID: &str = r#"{"goal":"red","summary":"Created 2 skeletons and 1 failing test.","tests":[{"name":"test_foo","file":"src/foo.rs","line":10,"status":"failing"}],"skeletons":[{"name":"Foo","file":"src/foo.rs","line":5,"kind":"struct"},{"name":"bar","file":"src/foo.rs","line":8,"kind":"method"}]}"#;
 
-const RED_OUTPUT_VALID: &str = r#"<structured-response content-type="application-json" schema="schemas/red.schema.json">
-{"goal":"red","summary":"Created 2 skeletons and 1 failing test.","tests":[{"name":"test_foo","file":"src/foo.rs","line":10,"status":"failing"}],"skeletons":[{"name":"Foo","file":"src/foo.rs","line":5,"kind":"struct"},{"name":"bar","file":"src/foo.rs","line":8,"kind":"method"}]}
-</structured-response>"#;
+const RED_OUTPUT_INVALID: &str = r#"{"goal":"red","summary":"Created skeletons.","tests":[{"name":"test_foo","file":"src/foo.rs","line":"ten","status":"failing"}],"skeletons":[]}"#;
 
-const RED_OUTPUT_INVALID: &str = r#"<structured-response content-type="application-json" schema="schemas/red.schema.json">
-{"goal":"red","summary":"Created skeletons.","tests":[{"name":"test_foo","file":"src/foo.rs","line":"ten","status":"failing"}],"skeletons":[]}
-</structured-response>"#;
+const GREEN_OUTPUT: &str = r#"{"goal":"green","summary":"Done.","tests":[{"name":"test_foo","file":"src/foo.rs","line":10,"status":"passing"}],"implementations":[{"name":"Foo","file":"src/foo.rs","line":5,"kind":"struct"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}"#;
 
-const GREEN_OUTPUT: &str = r#"Implemented.
+const EVALUATE_OUTPUT: &str = r#"{"goal":"evaluate-changes","summary":"Evaluated. All criteria met.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"synced","items_updated":0,"items_added":0},"files_analyzed":[],"test_impact":{"tests_affected":0,"new_tests_needed":0},"changed_files":[],"affected_tests":[],"validity_assessment":"OK"}"#;
 
-<structured-response content-type="application-json">
-{"goal":"green","summary":"Done.","tests":[{"name":"test_foo","file":"src/foo.rs","line":10,"status":"passing"}],"implementations":[{"name":"Foo","file":"src/foo.rs","line":5,"kind":"struct"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}
-</structured-response>
-"#;
+const VALIDATE_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 subagents completed.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
 
-const EVALUATE_OUTPUT: &str = r#"Evaluation complete.
+const REFACTOR_OUTPUT: &str = r#"{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
 
-<structured-response content-type="application-json">
-{"goal":"evaluate-changes","summary":"Evaluated. All criteria met.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"synced","items_updated":0,"items_added":0},"files_analyzed":[],"test_impact":{"tests_affected":0,"new_tests_needed":0},"changed_files":[],"affected_tests":[],"validity_assessment":"OK"}
-</structured-response>
-"#;
-
-const VALIDATE_OUTPUT: &str = r#"All 3 subagents completed.
-
-<structured-response content-type="application-json">
-{"goal":"validate","summary":"All 3 subagents completed.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
-</structured-response>
-"#;
-
-const REFACTOR_OUTPUT: &str = r#"Refactoring complete.
-
-<structured-response content-type="application-json">
-{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}
-</structured-response>
-"#;
-
-const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
-
-<structured-response content-type="application-json">
-{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}
-</structured-response>
-"#;
+const UPDATE_DOCS_OUTPUT: &str = r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
 
 fn setup_red_plan_dir(plan_dir: &std::path::Path) {
     let _ = std::fs::remove_dir_all(plan_dir);

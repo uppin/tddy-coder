@@ -61,12 +61,7 @@ fn parse_validate_subagents_response_fails_on_missing_block() {
 fn parse_validate_subagents_response_with_refactoring_plan() {
     use tddy_core::parse_validate_subagents_response;
 
-    let input = r#"All subagents completed.
-
-<structured-response content-type="application-json">
-{"goal":"validate","summary":"All 3 subagents completed. Refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
-</structured-response>
-"#;
+    let input = r#"{"goal":"validate","summary":"All 3 subagents completed. Refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
 
     let result = parse_validate_subagents_response(input);
     assert!(

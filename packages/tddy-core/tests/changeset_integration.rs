@@ -4,6 +4,7 @@
 //! Migrated from Workflow to WorkflowEngine.
 
 mod common;
+mod fixtures;
 
 use std::sync::Arc;
 use tddy_core::changeset::read_changeset;
@@ -15,45 +16,14 @@ use common::{
     ctx_acceptance_tests, ctx_plan, ctx_red, get_plan_dir_from_session, plan_dir_for_input,
     run_goal_until_done, run_plan,
 };
-
-const DELIMITED_OUTPUT: &str = r#"Here is my analysis.
-
----PRD_START---
-# Feature PRD
-
-## Summary
-User authentication system.
-
-## Acceptance Criteria
-- [ ] Login with email/password
-
-## TODO
-
-- [ ] Create auth module
----PRD_END---
-
-That concludes the plan."#;
-
-const ACCEPTANCE_TESTS_OUTPUT: &str = r#"Created acceptance tests.
-
-<structured-response content-type="application-json">
-{"goal":"acceptance-tests","summary":"Created 2 tests.","tests":[{"name":"login_stores_session_token","file":"packages/auth/tests/session.it.rs","line":15,"status":"failing"},{"name":"logout_clears_session","file":"packages/auth/tests/session.it.rs","line":28,"status":"failing"}]}
-</structured-response>
-"#;
-
-const RED_OUTPUT: &str = r#"Created skeleton code.
-
-<structured-response content-type="application-json">
-{"goal":"red","summary":"Created skeletons and failing tests.","tests":[{"name":"test_auth","file":"src/auth.rs","line":10,"status":"failing"}],"skeletons":[{"name":"AuthService","file":"src/auth.rs","line":5,"kind":"struct"}]}
-</structured-response>
-"#;
+use fixtures::*;
 
 /// Plan goal creates changeset.yaml instead of .session.
 /// .session should NOT exist; changeset.yaml should exist with correct structure.
 #[tokio::test]
 async fn changeset_yaml_replaces_session_files() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(DELIMITED_OUTPUT);
+    backend.push_ok(PLAN_JSON);
 
     let output_dir = std::env::temp_dir().join("tddy-changeset-replaces-session");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -107,26 +77,11 @@ async fn changeset_yaml_replaces_session_files() {
 
 // --- Additional acceptance tests for PRD requirements ---
 
-const PLANNING_WITH_DISCOVERY: &str = r##"Analysis with discovery.
-
-<structured-response content-type="application-json">
-{"goal":"plan","prd":"# PRD\n## Summary\nAuth feature.\n\n## TODO\n\n- [ ] Task 1","discovery":{"toolchain":{"rust":"1.78.0","cargo":"from Cargo.toml"},"scripts":{"test":"cargo test","lint":"cargo clippy"},"doc_locations":["docs/ft/","packages/*/docs/"],"relevant_code":[{"path":"src/workflow/mod.rs","reason":"state machine"}],"test_infrastructure":{"runner":"cargo test","conventions":"tests/*.rs"}},"demo_plan":{"demo_type":"cli","setup_instructions":"Run cargo build","steps":[{"description":"Run the CLI","command_or_action":"cargo run","expected_result":"See output"}],"verification":"CLI runs without error"}}
-</structured-response>
-"##;
-
-/// Plan output with explicit PRD name for changeset.yaml name field.
-const PLANNING_WITH_NAME: &str = r##"Analysis with name.
-
-<structured-response content-type="application-json">
-{"goal":"plan","name":"Auth Feature","prd":"# PRD\n## Summary\nAuth feature.\n\n## TODO\n\n- [ ] Task 1","discovery":{"toolchain":{"rust":"1.78.0"},"scripts":{"test":"cargo test"},"doc_locations":["docs/"]},"demo_plan":{"demo_type":"cli","setup_instructions":"Run cargo build","steps":[{"description":"Run CLI","command_or_action":"cargo run","expected_result":"See output"}],"verification":"OK"}}
-</structured-response>
-"##;
-
 /// Plan output includes discovery section with toolchain versions and scripts.
 #[tokio::test]
 async fn plan_discovery_includes_toolchain_and_scripts() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(PLANNING_WITH_DISCOVERY);
+    backend.push_ok(PLAN_JSON_WITH_DISCOVERY);
 
     let output_dir = std::env::temp_dir().join("tddy-plan-discovery");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -163,7 +118,7 @@ async fn plan_discovery_includes_toolchain_and_scripts() {
 #[tokio::test]
 async fn plan_discovery_identifies_doc_locations() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(PLANNING_WITH_DISCOVERY);
+    backend.push_ok(PLAN_JSON_WITH_DISCOVERY);
 
     let output_dir = std::env::temp_dir().join("tddy-plan-doc-locations");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -195,7 +150,7 @@ async fn plan_discovery_identifies_doc_locations() {
 #[tokio::test]
 async fn changeset_yaml_contains_prd_name() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(PLANNING_WITH_NAME);
+    backend.push_ok(PLAN_JSON_WITH_NAME);
 
     let output_dir = std::env::temp_dir().join("tddy-changeset-name");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -231,7 +186,7 @@ async fn changeset_yaml_contains_prd_name() {
 #[tokio::test]
 async fn plan_goal_creates_demo_plan() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(PLANNING_WITH_DISCOVERY);
+    backend.push_ok(PLAN_JSON_WITH_DISCOVERY);
 
     let output_dir = std::env::temp_dir().join("tddy-plan-demo");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -257,41 +212,6 @@ async fn plan_goal_creates_demo_plan() {
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
-
-const GREEN_OUTPUT: &str = r#"Implemented.
-
-<structured-response content-type="application-json">
-{"goal":"green","summary":"Done.","tests":[{"name":"test_auth","file":"src/auth.rs","line":10,"status":"passing"}],"implementations":[{"name":"AuthService","file":"src/auth.rs","line":5,"kind":"struct"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}
-</structured-response>
-"#;
-
-const EVALUATE_OUTPUT: &str = r#"Evaluation complete.
-
-<structured-response content-type="application-json">
-{"goal":"evaluate-changes","summary":"Evaluated. All criteria met.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"synced","items_updated":0,"items_added":0},"files_analyzed":[],"test_impact":{"tests_affected":0,"new_tests_needed":0},"changed_files":[],"affected_tests":[],"validity_assessment":"OK"}
-</structured-response>
-"#;
-
-const VALIDATE_OUTPUT: &str = r#"All 3 subagents completed.
-
-<structured-response content-type="application-json">
-{"goal":"validate","summary":"All 3 subagents completed.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
-</structured-response>
-"#;
-
-const REFACTOR_OUTPUT: &str = r#"Refactoring complete.
-
-<structured-response content-type="application-json">
-{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}
-</structured-response>
-"#;
-
-const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
-
-<structured-response content-type="application-json">
-{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}
-</structured-response>
-"#;
 
 /// Each goal reads current state from changeset.yaml and writes updated state.
 /// Initial state is AcceptanceTestsReady; after red runs, state should become RedTestsReady.
@@ -322,12 +242,12 @@ artifacts: {}
         .expect("write .impl-session for red");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(RED_OUTPUT);
-    backend.push_ok(GREEN_OUTPUT);
-    backend.push_ok(EVALUATE_OUTPUT);
-    backend.push_ok(VALIDATE_OUTPUT);
-    backend.push_ok(REFACTOR_OUTPUT);
-    backend.push_ok(UPDATE_DOCS_OUTPUT); // red -> green -> evaluate -> validate -> refactor -> update-docs
+    backend.push_ok(RED_JSON_MINIMAL);
+    backend.push_ok(GREEN_JSON_MINIMAL);
+    backend.push_ok(EVALUATE_JSON);
+    backend.push_ok(VALIDATE_JSON);
+    backend.push_ok(REFACTOR_JSON);
+    backend.push_ok(UPDATE_DOCS_JSON); // red -> green -> evaluate -> validate -> refactor -> update-docs
 
     let storage_dir = std::env::temp_dir().join("tddy-changeset-state-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -376,12 +296,12 @@ artifacts: {}
     std::fs::write(plan_dir.join("changeset.yaml"), changeset_content).expect("write changeset");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(RED_OUTPUT);
-    backend.push_ok(GREEN_OUTPUT);
-    backend.push_ok(EVALUATE_OUTPUT);
-    backend.push_ok(VALIDATE_OUTPUT);
-    backend.push_ok(REFACTOR_OUTPUT);
-    backend.push_ok(UPDATE_DOCS_OUTPUT);
+    backend.push_ok(RED_JSON_MINIMAL);
+    backend.push_ok(GREEN_JSON_MINIMAL);
+    backend.push_ok(EVALUATE_JSON);
+    backend.push_ok(VALIDATE_JSON);
+    backend.push_ok(REFACTOR_JSON);
+    backend.push_ok(UPDATE_DOCS_JSON);
 
     let storage_dir = std::env::temp_dir().join("tddy-changeset-model-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -408,13 +328,6 @@ artifacts: {}
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-const RED_OUTPUT_WITH_MARKERS: &str = r#"Created skeleton code with markers.
-
-<structured-response content-type="application-json">
-{"goal":"red","summary":"Created skeletons and failing tests with logging markers.","tests":[{"name":"test_auth","file":"src/auth.rs","line":10,"status":"failing"}],"skeletons":[{"name":"AuthService","file":"src/auth.rs","line":5,"kind":"struct"}],"markers":[{"marker_id":"M001","test_name":"test_auth","scope":"auth_service::validate","data":{"user":"test@example.com"}}],"marker_results":[{"marker_id":"M001","test_name":"test_auth","scope":"auth_service::validate","collected":true,"investigation":null}]}
-</structured-response>
-"#;
-
 /// Red goal output includes marker definitions with JSON format and scope data.
 #[tokio::test]
 async fn red_goal_adds_logging_markers() {
@@ -425,12 +338,12 @@ async fn red_goal_adds_logging_markers() {
     std::fs::write(plan_dir.join("acceptance-tests.md"), "# Acceptance Tests").expect("write AT");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(RED_OUTPUT_WITH_MARKERS);
-    backend.push_ok(GREEN_OUTPUT);
-    backend.push_ok(EVALUATE_OUTPUT);
-    backend.push_ok(VALIDATE_OUTPUT);
-    backend.push_ok(REFACTOR_OUTPUT);
-    backend.push_ok(UPDATE_DOCS_OUTPUT);
+    backend.push_ok(RED_JSON_WITH_LOGGING_MARKERS);
+    backend.push_ok(GREEN_JSON_MINIMAL);
+    backend.push_ok(EVALUATE_JSON);
+    backend.push_ok(VALIDATE_JSON);
+    backend.push_ok(REFACTOR_JSON);
+    backend.push_ok(UPDATE_DOCS_JSON);
 
     let storage_dir = std::env::temp_dir().join("tddy-red-markers-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -458,7 +371,7 @@ async fn red_goal_adds_logging_markers() {
 fn red_goal_verifies_marker_collection() {
     use tddy_core::output::parse_red_response;
 
-    let out = parse_red_response(RED_OUTPUT_WITH_MARKERS).expect("parse red output with markers");
+    let out = parse_red_response(RED_JSON_WITH_LOGGING_MARKERS).expect("parse red output with markers");
     assert!(out.skeletons.len() >= 1, "red output should have skeletons");
 }
 
@@ -467,7 +380,7 @@ fn red_goal_verifies_marker_collection() {
 #[ignore = "PlanTask does not write system-prompt-plan.md to plan dir; Workflow does"]
 async fn system_prompt_stored_in_plan_dir() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(PLANNING_WITH_DISCOVERY);
+    backend.push_ok(PLAN_JSON_WITH_DISCOVERY);
 
     let output_dir = std::env::temp_dir().join("tddy-system-prompt-plan-dir");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -511,7 +424,7 @@ async fn system_prompt_stored_in_plan_dir() {
 #[tokio::test]
 async fn session_object_has_system_prompt_file() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok_with_questions(PLANNING_WITH_DISCOVERY, "sess-plan-123", vec![]);
+    backend.push_ok_with_questions(PLAN_JSON_WITH_DISCOVERY, "sess-plan-123", vec![]);
 
     let output_dir = std::env::temp_dir().join("tddy-session-system-prompt");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -552,7 +465,7 @@ async fn session_object_has_system_prompt_file() {
 #[tokio::test]
 async fn changeset_contains_initial_prompt() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(PLANNING_WITH_DISCOVERY);
+    backend.push_ok(PLAN_JSON_WITH_DISCOVERY);
 
     let output_dir = std::env::temp_dir().join("tddy-changeset-initial-prompt");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -625,14 +538,14 @@ async fn changeset_contains_clarification_qa() {
         },
     ];
     backend.push_ok_with_questions("", "sess-qa", questions);
-    backend.push_ok(DELIMITED_OUTPUT);
-    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
-    backend.push_ok(RED_OUTPUT);
-    backend.push_ok(GREEN_OUTPUT);
-    backend.push_ok(EVALUATE_OUTPUT);
-    backend.push_ok(VALIDATE_OUTPUT);
-    backend.push_ok(REFACTOR_OUTPUT);
-    backend.push_ok(UPDATE_DOCS_OUTPUT); // plan -> at -> red -> green -> evaluate -> validate -> refactor -> update-docs
+    backend.push_ok(PLAN_JSON);
+    backend.push_ok(ACCEPTANCE_TESTS_JSON_MINIMAL);
+    backend.push_ok(RED_JSON_MINIMAL);
+    backend.push_ok(GREEN_JSON_MINIMAL);
+    backend.push_ok(EVALUATE_JSON);
+    backend.push_ok(VALIDATE_JSON);
+    backend.push_ok(REFACTOR_JSON);
+    backend.push_ok(UPDATE_DOCS_JSON); // plan -> at -> red -> green -> evaluate -> validate -> refactor -> update-docs
 
     let output_dir = std::env::temp_dir().join("tddy-changeset-clarification-qa");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -731,20 +644,20 @@ async fn changeset_contains_clarification_qa() {
 #[tokio::test]
 async fn changeset_yaml_sessions_array_tracks_all_sessions() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(DELIMITED_OUTPUT);
-    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
-    backend.push_ok(RED_OUTPUT);
-    backend.push_ok(GREEN_OUTPUT);
-    backend.push_ok(EVALUATE_OUTPUT);
-    backend.push_ok(VALIDATE_OUTPUT);
-    backend.push_ok(REFACTOR_OUTPUT);
-    backend.push_ok(UPDATE_DOCS_OUTPUT); // acceptance-tests -> red -> green -> ... -> refactor -> update-docs
-    backend.push_ok(RED_OUTPUT);
-    backend.push_ok(GREEN_OUTPUT);
-    backend.push_ok(EVALUATE_OUTPUT);
-    backend.push_ok(VALIDATE_OUTPUT);
-    backend.push_ok(REFACTOR_OUTPUT);
-    backend.push_ok(UPDATE_DOCS_OUTPUT); // red goal -> green -> ... -> refactor -> update-docs
+    backend.push_ok(PLAN_JSON);
+    backend.push_ok(ACCEPTANCE_TESTS_JSON_MINIMAL);
+    backend.push_ok(RED_JSON_MINIMAL);
+    backend.push_ok(GREEN_JSON_MINIMAL);
+    backend.push_ok(EVALUATE_JSON);
+    backend.push_ok(VALIDATE_JSON);
+    backend.push_ok(REFACTOR_JSON);
+    backend.push_ok(UPDATE_DOCS_JSON); // acceptance-tests -> red -> green -> ... -> refactor -> update-docs
+    backend.push_ok(RED_JSON_MINIMAL);
+    backend.push_ok(GREEN_JSON_MINIMAL);
+    backend.push_ok(EVALUATE_JSON);
+    backend.push_ok(VALIDATE_JSON);
+    backend.push_ok(REFACTOR_JSON);
+    backend.push_ok(UPDATE_DOCS_JSON); // red goal -> green -> ... -> refactor -> update-docs
 
     let output_dir = std::env::temp_dir().join("tddy-changeset-sessions");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -844,7 +757,7 @@ async fn changeset_written_before_plan_agent() {
             }
 
             Ok(InvokeResponse {
-                output: DELIMITED_OUTPUT.to_string(),
+                output: PLAN_JSON.to_string(),
                 exit_code: 0,
                 session_id: Some("sess-check-123".to_string()),
                 questions: vec![],

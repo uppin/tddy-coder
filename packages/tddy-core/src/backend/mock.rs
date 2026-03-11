@@ -1,7 +1,10 @@
 //! Mock backend for testing.
+//!
+//! Stores response output via store_submit_result so workflow tasks can take_submit_result_for_goal.
 
 use super::{ClarificationQuestion, CodingBackend, InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
+use crate::toolcall::store_submit_result;
 use std::collections::VecDeque;
 use std::sync::RwLock;
 
@@ -103,6 +106,8 @@ impl CodingBackend for MockBackend {
                     ))
                 })?;
         }
+
+        store_submit_result(request.goal.submit_key(), &response.output);
 
         Ok(response)
     }

@@ -44,12 +44,7 @@ fn refactor_allowlist_includes_write_and_bash() {
 fn parse_refactor_response_extracts_fields() {
     use tddy_core::parse_refactor_response;
 
-    let input = r#"Refactoring complete.
-
-<structured-response content-type="application-json">
-{"goal":"refactor","summary":"Executed 3 refactoring tasks from refactoring-plan.md. All tests pass.","tasks_completed":3,"tests_passing":true}
-</structured-response>
-"#;
+    let input = r#"{"goal":"refactor","summary":"Executed 3 refactoring tasks from refactoring-plan.md. All tests pass.","tasks_completed":3,"tests_passing":true}"#;
 
     let result = parse_refactor_response(input);
     assert!(
@@ -85,9 +80,7 @@ fn parse_refactor_response_fails_on_empty_input() {
 fn parse_refactor_response_fails_on_wrong_goal() {
     use tddy_core::parse_refactor_response;
 
-    let input = r#"<structured-response content-type="application-json">
-{"goal":"green","summary":"Wrong goal.","tasks_completed":0,"tests_passing":false}
-</structured-response>"#;
+    let input = r#"{"goal":"green","summary":"Wrong goal.","tasks_completed":0,"tests_passing":false}"#;
 
     let result = parse_refactor_response(input);
     assert!(

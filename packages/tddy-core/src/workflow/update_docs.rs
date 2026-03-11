@@ -29,15 +29,11 @@ pub fn system_prompt() -> String {
 3. Extract final state (State B) — no delta language ("changed", "updated", "now")
 4. Apply content transformations to target docs
 5. Update changelog/changesets history
-6. ALWAYS end your response with a structured-response block — REQUIRED.
+6. When done, submit your output by calling: tddy-tools submit --schema schemas/update-docs.schema.json --data '<your JSON output>'
 
-**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object starting with {"goal":"update-docs",...}.
+Read the JSON Schema file at `schemas/update-docs.schema.json` in the working directory for the exact output format. The JSON must include: goal, summary, docs_updated.
 
-Read the JSON Schema file at `schemas/update-docs.schema.json` in the working directory for the exact output format specification.
-
-<structured-response content-type="application-json" schema="schemas/update-docs.schema.json">
-{"goal":"update-docs","summary":"<human-readable summary of documentation updates>","docs_updated":<number>}
-</structured-response>"#
+**CRITICAL**: You MUST call tddy-tools submit with your complete output. Do NOT embed structured output in text. The submit call delivers the output to the workflow — if you do not call it, the workflow fails."#
         .to_string()
 }
 

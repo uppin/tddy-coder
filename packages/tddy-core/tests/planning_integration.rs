@@ -15,27 +15,8 @@ use tddy_core::{
 
 use common::{plan_dir_for_input, run_plan};
 
-const DELIMITED_OUTPUT: &str = r#"Here is my analysis.
-
----PRD_START---
-# Feature PRD
-
-## Summary
-User authentication system with login and logout.
-
-## Acceptance Criteria
-- [ ] Login with email/password
-- [ ] Logout clears session
-
-## TODO
-
-- [ ] Create auth module
-- [ ] Implement login endpoint
-- [ ] Implement logout endpoint
-- [ ] Add session management
----PRD_END---
-
-That concludes the plan."#;
+/// Plan output as JSON (tddy-tools submit format). MockBackend stores this via store_submit_result.
+const PLAN_JSON_OUTPUT: &str = "{\"goal\":\"plan\",\"prd\":\"# Feature PRD\\n\\n## Summary\\nUser authentication system with login and logout.\\n\\n## Acceptance Criteria\\n- [ ] Login with email/password\\n- [ ] Logout clears session\\n\\n## TODO\\n\\n- [ ] Create auth module\\n- [ ] Implement login endpoint\\n- [ ] Implement logout endpoint\\n- [ ] Add session management\"}";
 
 fn clarification_questions() -> Vec<ClarificationQuestion> {
     vec![
@@ -59,7 +40,7 @@ fn clarification_questions() -> Vec<ClarificationQuestion> {
 #[tokio::test]
 async fn planning_workflow_produces_prd_and_todo_in_output_directory() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(DELIMITED_OUTPUT);
+    backend.push_ok(PLAN_JSON_OUTPUT);
 
     let output_dir = std::env::temp_dir().join("tddy-planning-test");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -115,7 +96,7 @@ async fn planning_workflow_produces_prd_and_todo_in_output_directory() {
 #[tokio::test]
 async fn planning_workflow_invokes_backend_with_plan_permission_mode() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(DELIMITED_OUTPUT);
+    backend.push_ok(PLAN_JSON_OUTPUT);
 
     let output_dir = std::env::temp_dir().join("tddy-planning-invoke-test");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -327,7 +308,7 @@ async fn planning_workflow_returns_clarification_needed_with_structured_question
 async fn planning_workflow_produces_prd_after_clarification_answers() {
     let backend = Arc::new(MockBackend::new());
     backend.push_ok_with_questions("", "sess-qa", clarification_questions());
-    backend.push_ok(DELIMITED_OUTPUT);
+    backend.push_ok(PLAN_JSON_OUTPUT);
 
     let output_dir = std::env::temp_dir().join("tddy-planning-followup-test");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -404,18 +385,13 @@ async fn planning_workflow_stub_backend_clarification_roundtrip() {
     let _ = std::fs::remove_dir_all(&storage_dir);
 }
 
-/// Backend that returns structured response with whitespace-only prd should not produce PRD.md.
+/// Backend that returns JSON with whitespace-only prd should not produce PRD.md.
 #[tokio::test]
-async fn planning_workflow_rejects_structured_response_with_whitespace_only_prd() {
-    let structured_noop = concat!(
-        "Here is the plan.\n\n",
-        "<structured-response content-type=\"application-json\">\n",
-        r#"{"goal": "plan", "prd": "   "}"#,
-        "\n</structured-response>"
-    );
+async fn planning_workflow_rejects_json_with_whitespace_only_prd() {
+    let json_noop = r#"{"goal":"plan","prd":"   "}"#;
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(structured_noop);
+    backend.push_ok(json_noop);
 
     let output_dir = std::env::temp_dir().join("tddy-planning-noop-prd-test");
     let _ = std::fs::remove_dir_all(&output_dir);
