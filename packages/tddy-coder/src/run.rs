@@ -868,6 +868,7 @@ fn print_goal_output(goal: &str, output: Option<&str>, plan_dir: &Path) -> anyho
 
 fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     std::env::set_var("TDDY_QUIET", "1");
+    log::set_max_level(log::LevelFilter::Debug);
 
     let (socket_path, tool_call_rx) = match tddy_core::toolcall::start_toolcall_listener() {
         Ok((path, rx)) => (Some(path), Some(rx)),

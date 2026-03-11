@@ -322,9 +322,22 @@ fn run_plan_without_output_dir(
         "inherit_stdin".to_string(),
         serde_json::json!(inherit_stdin),
     );
+    let temp_conv_path = if conversation_output_path.is_none() {
+        let p = std::env::temp_dir().join(format!(
+            "tddy-plan-conv-{}.jsonl",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&p);
+        Some(p)
+    } else {
+        None
+    };
+    let conv_for_ctx = conversation_output_path
+        .clone()
+        .or_else(|| temp_conv_path.clone());
     context_values.insert(
         "conversation_output_path".to_string(),
-        serde_json::to_value(conversation_output_path.clone()).unwrap(),
+        serde_json::to_value(conv_for_ctx).unwrap(),
     );
     context_values.insert("debug".to_string(), serde_json::json!(debug));
     context_values.insert("run_demo".to_string(), serde_json::json!(false));
@@ -362,6 +375,19 @@ fn run_plan_without_output_dir(
         debug_output_path,
         &plan_dir,
     );
+
+    if let Some(ref temp) = temp_conv_path {
+        if temp.exists() {
+            if let Some(ref final_path) = conversation_output_resolved {
+                if let Some(parent) = final_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::rename(temp, final_path)
+                    .or_else(|_| std::fs::copy(temp, final_path).map(|_| ()));
+                let _ = std::fs::remove_file(temp);
+            }
+        }
+    }
 
     if let ExecutionStatus::ElicitationNeeded { ref event } = result.status {
         let elicitation_ctx = ElicitationContext {

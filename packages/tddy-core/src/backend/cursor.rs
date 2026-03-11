@@ -158,30 +158,39 @@ impl CursorBackend {
             cmd.arg(arg);
         }
 
-        // Always log spawn for debugging backend/binary confusion
         let resolved = super::claude::which_binary(&self.binary_path);
+        let cwd_str = request
+            .working_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| "(unknown)".into())
+            });
         log::debug!(
             "[tddy-coder] Cursor backend spawning: {} (resolved: {})",
             self.binary_path.display(),
             resolved
         );
-        log::debug!("[tddy-coder] cmd: cursor {}", args.join(" "));
-
-        if request.debug {
-            let cwd = request
-                .working_dir
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| {
-                    std::env::current_dir()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_else(|_| "(unknown)".into())
-                });
-            log::debug!("[tddy-coder debug] cwd: {}", cwd);
+        log::debug!("[tddy-coder] cwd: {}", cwd_str);
+        log::debug!(
+            "[tddy-coder] goal: {:?}, model: {:?}, session_id: {:?}, is_resume: {}",
+            request.goal,
+            request.model,
+            request.session_id,
+            request.is_resume
+        );
+        log::debug!(
+            "[tddy-coder] prompt ({} bytes): {}",
+            request.prompt.len(),
+            &request.prompt[..request.prompt.len().min(500)]
+        );
+        if let Some(ref sys) = system_content {
             log::debug!(
-                "[tddy-coder debug] cmd: {} {}",
-                self.binary_path.display(),
-                args.join(" ")
+                "[tddy-coder] system_prompt ({} bytes): {}",
+                sys.len(),
+                &sys[..sys.len().min(500)]
             );
         }
 
@@ -236,7 +245,14 @@ impl CursorBackend {
                 .conversation_output_path
                 .as_ref()
                 .and_then(|p| std::fs::read_to_string(p).ok())
-                .map(|c| c.lines().filter(|l| !l.trim().is_empty()).count())
+                .map(|c| {
+                    c.lines()
+                        .filter(|l| {
+                            let t = l.trim();
+                            !t.is_empty() && !t.contains("\"type\":\"tddy-request\"")
+                        })
+                        .count()
+                })
                 .unwrap_or(0)
         } else {
             0
@@ -277,6 +293,20 @@ impl CursorBackend {
         } else {
             None
         };
+
+        if let Some(ref mut f) = conv_file {
+            let request_entry = serde_json::json!({
+                "type": "tddy-request",
+                "goal": format!("{:?}", request.goal),
+                "prompt": request.prompt,
+                "system_prompt": system_content,
+                "model": request.model,
+                "session_id": request.session_id,
+                "is_resume": request.is_resume,
+            });
+            let _ = writeln!(f, "{}", request_entry);
+            let _ = f.flush();
+        }
 
         let mut on_conversation_line = |line: &str| {
             if let Some(ref mut f) = conv_file {

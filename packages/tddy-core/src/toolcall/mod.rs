@@ -7,16 +7,64 @@ mod listener;
 
 pub use listener::start_toolcall_listener;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-/// Shared storage for Submit results. Presenter writes, workflow reads.
-/// Key: goal name, Value: JSON string of the submitted data.
+/// Per-instance channel for submit results. Isolates parallel workflows (tests).
+#[derive(Clone, Debug, Default)]
+pub struct SubmitResultChannel {
+    inner: Arc<Mutex<Option<(String, String)>>>,
+}
+
+impl SubmitResultChannel {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub fn store(&self, goal: &str, json_str: &str) {
+        log::debug!(
+            "[toolcall] channel store goal={} json_len={}",
+            goal,
+            json_str.len()
+        );
+        if let Ok(mut guard) = self.inner.lock() {
+            *guard = Some((goal.to_string(), json_str.to_string()));
+        }
+    }
+
+    pub fn take_for_goal(&self, goal: &str) -> Option<String> {
+        if let Ok(mut guard) = self.inner.lock() {
+            if let Some((g, s)) = guard.take() {
+                if g == goal {
+                    log::debug!(
+                        "[toolcall] channel take goal={} matched (len={})",
+                        goal,
+                        s.len()
+                    );
+                    return Some(s);
+                }
+                log::debug!(
+                    "[toolcall] channel take goal={} no match (stored goal={})",
+                    goal,
+                    g
+                );
+                *guard = Some((g, s));
+            } else {
+                log::debug!("[toolcall] channel take goal={} empty", goal);
+            }
+        }
+        None
+    }
+}
+
+/// Process-global fallback for presenter/RPC flow (single workflow per process).
 static TOOL_CALL_SUBMIT_RESULT: Mutex<Option<(String, String)>> = Mutex::new(None);
 
-/// Store a submit result for the workflow to use instead of parsing the stream.
+/// Store a submit result in the global (presenter/RPC path).
 pub fn store_submit_result(goal: &str, json_str: &str) {
     log::debug!(
-        "[toolcall] store_submit_result goal={} json_len={}",
+        "[toolcall] global store_submit_result goal={} json_len={}",
         goal,
         json_str.len()
     );
@@ -25,29 +73,26 @@ pub fn store_submit_result(goal: &str, json_str: &str) {
     }
 }
 
-/// Take the stored submit result if it matches the goal.
+/// Take from the global (fallback when no per-instance channel).
 pub fn take_submit_result_for_goal(goal: &str) -> Option<String> {
     if let Ok(mut guard) = TOOL_CALL_SUBMIT_RESULT.lock() {
         if let Some((g, s)) = guard.take() {
             if g == goal {
                 log::debug!(
-                    "[toolcall] take_submit_result_for_goal goal={} matched (len={})",
+                    "[toolcall] global take goal={} matched (len={})",
                     goal,
                     s.len()
                 );
                 return Some(s);
             }
             log::debug!(
-                "[toolcall] take_submit_result_for_goal goal={} no match (stored goal={})",
+                "[toolcall] global take goal={} no match (stored goal={})",
                 goal,
                 g
             );
             *guard = Some((g, s));
         } else {
-            log::debug!(
-                "[toolcall] take_submit_result_for_goal goal={} store empty",
-                goal
-            );
+            log::debug!("[toolcall] global take goal={} empty", goal);
         }
     }
     None

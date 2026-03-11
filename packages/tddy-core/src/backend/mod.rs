@@ -41,6 +41,10 @@ impl CodingBackend for SharedBackend {
     fn name(&self) -> &str {
         self.0.name()
     }
+
+    fn submit_channel(&self) -> Option<&crate::toolcall::SubmitResultChannel> {
+        self.0.submit_channel()
+    }
 }
 
 impl SharedBackend {
@@ -75,6 +79,14 @@ impl CodingBackend for AnyBackend {
             AnyBackend::Claude(b) => b.name(),
             AnyBackend::Cursor(b) => b.name(),
             AnyBackend::Stub(b) => b.name(),
+        }
+    }
+
+    fn submit_channel(&self) -> Option<&crate::toolcall::SubmitResultChannel> {
+        match self {
+            AnyBackend::Claude(b) => b.submit_channel(),
+            AnyBackend::Cursor(b) => b.submit_channel(),
+            AnyBackend::Stub(b) => b.submit_channel(),
         }
     }
 }
@@ -287,6 +299,11 @@ pub trait CodingBackend: Send + Sync {
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError>;
     /// Backend identifier (e.g. "claude", "cursor", "mock") for changeset and display.
     fn name(&self) -> &str;
+    /// Per-instance submit result channel. Backends using InMemoryToolExecutor
+    /// return their channel here so tasks can read without touching global state.
+    fn submit_channel(&self) -> Option<&crate::toolcall::SubmitResultChannel> {
+        None
+    }
 }
 
 #[cfg(test)]

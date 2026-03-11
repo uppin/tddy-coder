@@ -289,35 +289,43 @@ impl ClaudeCodeBackend {
             cmd.arg(arg);
         }
 
-        // Always log spawn for debugging backend/binary confusion (e.g. claude -> cursor)
         let resolved = which_binary(&self.binary_path);
+        let cwd_str = request
+            .working_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| "(unknown)".into())
+            });
         log::debug!(
             "[tddy-coder] Claude backend spawning: {} (resolved: {})",
             self.binary_path.display(),
             resolved
         );
+        log::debug!("[tddy-coder] cwd: {}", cwd_str);
         log::debug!(
-            "[tddy-coder] cmd: {} {}",
-            self.binary_path.display(),
-            args.join(" ")
+            "[tddy-coder] goal: {:?}, model: {:?}, session_id: {:?}, is_resume: {}",
+            request.goal,
+            request.model,
+            request.session_id,
+            request.is_resume
         );
-
-        if request.debug {
-            let cwd = request
-                .working_dir
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| {
-                    std::env::current_dir()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_else(|_| "(unknown)".into())
-                });
-            log::debug!("[tddy-coder debug] cwd: {}", cwd);
+        log::debug!(
+            "[tddy-coder] prompt ({} bytes): {}",
+            request.prompt.len(),
+            &request.prompt[..request.prompt.len().min(500)]
+        );
+        if let Some(ref sp) = request.system_prompt {
             log::debug!(
-                "[tddy-coder debug] cmd: {} {}",
-                self.binary_path.display(),
-                args.join(" ")
+                "[tddy-coder] system_prompt ({} bytes): {}",
+                sp.len(),
+                &sp[..sp.len().min(500)]
             );
+        }
+        if let Some(ref sp_path) = request.system_prompt_path {
+            log::debug!("[tddy-coder] system_prompt_path: {}", sp_path.display());
         }
 
         if let Some(ref p) = request.socket_path {
@@ -371,7 +379,14 @@ impl ClaudeCodeBackend {
                 .conversation_output_path
                 .as_ref()
                 .and_then(|p| std::fs::read_to_string(p).ok())
-                .map(|c| c.lines().filter(|l| !l.trim().is_empty()).count())
+                .map(|c| {
+                    c.lines()
+                        .filter(|l| {
+                            let t = l.trim();
+                            !t.is_empty() && !t.contains("\"type\":\"tddy-request\"")
+                        })
+                        .count()
+                })
                 .unwrap_or(0)
         } else {
             0
@@ -412,6 +427,24 @@ impl ClaudeCodeBackend {
         } else {
             None
         };
+
+        if let Some(ref mut f) = conv_file {
+            let sys_prompt_content = system_prompt_path
+                .as_ref()
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .or_else(|| request.system_prompt.clone());
+            let request_entry = serde_json::json!({
+                "type": "tddy-request",
+                "goal": format!("{:?}", request.goal),
+                "prompt": request.prompt,
+                "system_prompt": sys_prompt_content,
+                "model": request.model,
+                "session_id": request.session_id,
+                "is_resume": request.is_resume,
+            });
+            let _ = writeln!(f, "{}", request_entry);
+            let _ = f.flush();
+        }
 
         let mut first_line_logged = false;
         let mut on_conversation_line = |line: &str| {
