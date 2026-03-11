@@ -70,7 +70,11 @@ fn standalone_demo_goal() {
     )
     .expect("write demo-plan.md");
 
-    let path = format!("{}:{}", tmp.display(), std::env::var("PATH").unwrap_or_default());
+    let path = format!(
+        "{}:{}",
+        tmp.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     let mut cmd = tddy_coder_bin();
     cmd.env("PATH", &path);
     cmd.args(["--goal", "demo", "--plan-dir", plan_dir.to_str().unwrap()]);
@@ -160,7 +164,11 @@ fn cli_accepts_update_docs_goal() {
     let plan_dir = tmp.join("plan");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
 
-    let path = format!("{}:{}", tmp.display(), std::env::var("PATH").unwrap_or_default());
+    let path = format!(
+        "{}:{}",
+        tmp.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     let mut cmd = tddy_coder_bin();
     cmd.env("PATH", &path);
     cmd.args([
@@ -217,7 +225,11 @@ fn cli_accepts_refactor_goal() {
     )
     .expect("write refactoring-plan.md");
 
-    let path = format!("{}:{}", tmp.display(), std::env::var("PATH").unwrap_or_default());
+    let path = format!(
+        "{}:{}",
+        tmp.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     let mut cmd = tddy_coder_bin();
     cmd.env("PATH", &path);
     cmd.args([
