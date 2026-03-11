@@ -141,6 +141,25 @@ async fn pty_full_workflow_asserts_each_state_transition() {
                         server_message::Event::WorkflowComplete(wc) => {
                             seen_workflow_complete = true;
                             workflow_ok = wc.ok;
+                            // Drain stream briefly to allow any in-flight StateChanged events
+                            // (race: WorkflowComplete can arrive before last StateChanged)
+                            for _ in 0..20 {
+                                match tokio::time::timeout(
+                                    Duration::from_millis(10),
+                                    stream.message(),
+                                )
+                                .await
+                                {
+                                    Ok(Ok(Some(msg))) => {
+                                        if let Some(event) = msg.event {
+                                            if let server_message::Event::StateChanged(sc) = event {
+                                                state_transitions.push((sc.from, sc.to));
+                                            }
+                                        }
+                                    }
+                                    _ => break,
+                                }
+                            }
                             let mut seen = false;
                             for _ in 0..200 {
                                 let screen = screen_buffer.lock().unwrap().clone();

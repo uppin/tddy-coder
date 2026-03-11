@@ -2,56 +2,13 @@
 
 use assert_cmd::Command;
 use std::fs;
-use std::path::Path;
 
 #[allow(deprecated)]
 fn tddy_coder_bin() -> Command {
     Command::cargo_bin("tddy-coder").expect("tddy-coder binary")
 }
 
-/// Create a fake claude script that returns NDJSON with PRD+TODO in result event.
-/// Uses \\n in shell so output is literal \n (JSON escape), not actual newlines.
-fn create_fake_claude_prd_only(dir: &Path) -> std::io::Result<()> {
-    let script = r###"#!/bin/sh
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
-printf '%s\n' '{"type":"result","subtype":"success","result":"---PRD_START---\n# Feature PRD\n## Summary\nTest feature.\n---PRD_END---\n---TODO_START---\n- [ ] Task 1\n---TODO_END---","session_id":"fake-sess","is_error":false}'
-"###;
-    write_executable_script(dir, "claude", script)
-}
-
-/// Create a fake claude script that returns questions (via tool_use) on first call, PRD+TODO on second.
-/// Uses printf so JSON stays on one line (\\n outputs literal backslash-n for JSON).
-fn create_fake_claude_script(dir: &Path) -> std::io::Result<()> {
-    let script = r###"#!/bin/sh
-CALL_FILE="$0.calls"
-if [ -f "$CALL_FILE" ]; then
-  printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
-  printf '%s\n' '{"type":"result","subtype":"success","result":"---PRD_START---\n# Feature PRD\n## Summary\nUser authentication system.\n---PRD_END---\n---TODO_START---\n- [ ] Create auth module\n---TODO_END---","session_id":"fake-sess","is_error":false}'
-else
-  echo 1 > "$CALL_FILE"
-  printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
-  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"AskUserQuestion","input":{"questions":[{"question":"What is the target audience?","header":"Audience","options":[],"multiSelect":false},{"question":"What is the expected timeline?","header":"Timeline","options":[],"multiSelect":false}]}}]}}'
-  printf '%s\n' '{"type":"result","subtype":"success","result":"","session_id":"fake-sess","is_error":false}'
-fi
-"###;
-    write_executable_script(dir, "claude", script)
-}
-
-fn write_executable_script(dir: &Path, name: &str, script: &str) -> std::io::Result<()> {
-    let script_path = dir.join(name);
-    fs::write(&script_path, script)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script_path)?.permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&script_path, perms)?;
-    }
-    Ok(())
-}
-
 /// When --goal is omitted, the full workflow (plan -> acceptance-tests -> red -> green) runs.
-/// This test fails until --goal is made optional and run_full_workflow is implemented.
 #[test]
 #[cfg(unix)]
 fn cli_runs_full_workflow_when_goal_omitted() {
@@ -59,22 +16,20 @@ fn cli_runs_full_workflow_when_goal_omitted() {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
 
-    create_fake_claude_prd_only(&tmp).expect("create fake claude");
-
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env(
             "HOME",
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
         .args([
+            "--agent",
+            "stub",
             "--output-dir",
             tmp.to_str().unwrap(),
             "--prompt",
-            "Build auth",
+            "SKIP_QUESTIONS Build auth",
         ])
         .write_stdin("a\n");
 
@@ -97,24 +52,22 @@ fn cli_accepts_goal_plan() {
     let tmp = std::env::temp_dir().join("tddy-cli-goal-test");
     let _ = std::fs::create_dir_all(&tmp);
 
-    create_fake_claude_prd_only(&tmp).expect("create fake claude");
-
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env(
             "HOME",
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
         .args([
+            "--agent",
+            "stub",
             "--goal",
             "plan",
             "--output-dir",
             tmp.to_str().unwrap(),
             "--prompt",
-            "Build feature X",
+            "SKIP_QUESTIONS Build feature X",
         ])
         .write_stdin("a\n");
 
@@ -138,24 +91,22 @@ fn cli_plain_mode_plan_approval_approve_proceeds() {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
 
-    create_fake_claude_prd_only(&tmp).expect("create fake claude");
-
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env(
             "HOME",
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
         .args([
+            "--agent",
+            "stub",
             "--goal",
             "plan",
             "--output-dir",
             tmp.to_str().unwrap(),
             "--prompt",
-            "Build feature for approval test",
+            "SKIP_QUESTIONS Build feature for approval test",
         ])
         .write_stdin("a\n");
 
@@ -194,24 +145,22 @@ fn cli_accepts_output_dir_flag() {
     let tmp = std::env::temp_dir().join("tddy-cli-output-dir-test");
     let _ = std::fs::create_dir_all(&tmp);
 
-    create_fake_claude_prd_only(&tmp).expect("create fake claude");
-
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env(
             "HOME",
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
         .args([
+            "--agent",
+            "stub",
             "--goal",
             "plan",
             "--output-dir",
             tmp.to_str().unwrap(),
             "--prompt",
-            "Build feature Y",
+            "SKIP_QUESTIONS Build feature Y",
         ])
         .write_stdin("a\n");
 
@@ -244,19 +193,17 @@ fn cli_displays_agent_and_model_before_goal_execution() {
     let _ = std::fs::remove_dir_all(&tmp);
     let _ = std::fs::create_dir_all(&tmp);
 
-    create_fake_claude_prd_only(&tmp).expect("create fake claude");
-
     let log_file = tmp.join("debug.log");
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env(
             "HOME",
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
         .args([
+            "--agent",
+            "stub",
             "--goal",
             "plan",
             "--output-dir",
@@ -264,7 +211,7 @@ fn cli_displays_agent_and_model_before_goal_execution() {
             "--debug-output",
             log_file.to_str().unwrap(),
             "--prompt",
-            "Build feature X",
+            "SKIP_QUESTIONS Build feature X",
         ])
         .write_stdin("a\n");
 
@@ -277,7 +224,7 @@ fn cli_displays_agent_and_model_before_goal_execution() {
 
     let logs = fs::read_to_string(&log_file).unwrap_or_default();
     assert!(
-        logs.contains("agent") && logs.contains("claude"),
+        logs.contains("agent") && logs.contains("stub"),
         "debug log should contain agent name, got: {}",
         logs
     );
@@ -299,19 +246,17 @@ fn cli_displays_state_transitions() {
     let _ = std::fs::remove_dir_all(&tmp);
     let _ = std::fs::create_dir_all(&tmp);
 
-    create_fake_claude_prd_only(&tmp).expect("create fake claude");
-
     let log_file = tmp.join("debug.log");
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env(
             "HOME",
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
         .args([
+            "--agent",
+            "stub",
             "--goal",
             "plan",
             "--output-dir",
@@ -319,7 +264,7 @@ fn cli_displays_state_transitions() {
             "--debug-output",
             log_file.to_str().unwrap(),
             "--prompt",
-            "Build feature X",
+            "SKIP_QUESTIONS Build feature X",
         ])
         .write_stdin("a\n");
 
@@ -350,24 +295,22 @@ fn cli_accepts_prompt_flag_instead_of_stdin() {
     let tmp = std::env::temp_dir().join("tddy-cli-prompt-flag-test");
     let _ = std::fs::create_dir_all(&tmp);
 
-    create_fake_claude_prd_only(&tmp).expect("create fake claude");
-
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env(
             "HOME",
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
         .args([
+            "--agent",
+            "stub",
             "--goal",
             "plan",
             "--output-dir",
             tmp.to_str().unwrap(),
             "--prompt",
-            "Build feature from CLI arg",
+            "SKIP_QUESTIONS Build feature from CLI arg",
         ])
         .write_stdin("a\n");
 
@@ -450,19 +393,16 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
     let tmp = std::env::temp_dir().join(format!("tddy-cli-qa-{}", id));
     let _ = std::fs::create_dir_all(&tmp);
 
-    create_fake_claude_script(&tmp).expect("create fake claude");
-
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
-    let path_str = tmp_path.to_str().expect("path");
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", path_str)
         .env(
             "HOME",
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
         .args([
+            "--agent",
+            "stub",
             "--goal",
             "plan",
             "--output-dir",
@@ -470,7 +410,7 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
             "--prompt",
             "Build auth",
         ])
-        .write_stdin("Developers\nQ2 2025\na\n");
+        .write_stdin("Email/password\nQ2 2025\na\n");
 
     let output = cmd.output().expect("run tddy-coder");
 
@@ -512,22 +452,11 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// Create a fake claude script that returns acceptance-tests structured output.
-fn create_fake_claude_acceptance_tests(dir: &Path) -> std::io::Result<()> {
-    let script = r###"#!/bin/sh
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
-printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">{\"goal\":\"acceptance-tests\",\"summary\":\"Created 2 tests. All failing.\",\"tests\":[{\"name\":\"test_a\",\"file\":\"tests/a.rs\",\"line\":1,\"status\":\"failing\"}]}</structured-response>","session_id":"fake-sess","is_error":false}'
-"###;
-    write_executable_script(dir, "claude", script)
-}
-
 #[test]
 #[cfg(unix)]
 fn cli_accepts_goal_acceptance_tests_with_plan_dir() {
     let tmp = std::env::temp_dir().join("tddy-cli-at-goal-test");
     let _ = std::fs::create_dir_all(&tmp);
-
-    create_fake_claude_acceptance_tests(&tmp).expect("create fake claude");
 
     let plan_dir = tmp.join("plan-output");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -547,21 +476,22 @@ artifacts: {}
 "#;
     std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
 
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env(
             "HOME",
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
         .args([
+            "--agent",
+            "stub",
             "--goal",
             "acceptance-tests",
             "--plan-dir",
             plan_dir.to_str().unwrap(),
-        ]);
+        ])
+        .write_stdin("Yes\n");
 
     let output = cmd.output().expect("run tddy-coder");
 
@@ -621,22 +551,11 @@ fn cli_errors_when_plan_dir_missing_for_acceptance_tests_goal() {
     );
 }
 
-/// Create a fake claude script that returns red goal structured output.
-fn create_fake_claude_red(dir: &Path) -> std::io::Result<()> {
-    let script = r###"#!/bin/sh
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
-printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">{\"goal\":\"red\",\"summary\":\"Created 1 skeleton and 1 failing test.\",\"tests\":[{\"name\":\"test_foo\",\"file\":\"src/foo.rs\",\"line\":10,\"status\":\"failing\"}],\"skeletons\":[{\"name\":\"Foo\",\"file\":\"src/foo.rs\",\"line\":5,\"kind\":\"struct\"}]}</structured-response>","session_id":"fake-sess","is_error":false}'
-"###;
-    write_executable_script(dir, "claude", script)
-}
-
 #[test]
 #[cfg(unix)]
 fn cli_accepts_goal_red_with_plan_dir() {
     let tmp = std::env::temp_dir().join("tddy-cli-red-goal-test");
     let _ = std::fs::create_dir_all(&tmp);
-
-    create_fake_claude_red(&tmp).expect("create fake claude");
 
     let plan_dir = tmp.join("plan-output");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -647,16 +566,21 @@ fn cli_accepts_goal_red_with_plan_dir() {
     )
     .expect("write acceptance-tests.md");
 
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env(
             "HOME",
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
-        .args(["--goal", "red", "--plan-dir", plan_dir.to_str().unwrap()]);
+        .args([
+            "--agent",
+            "stub",
+            "--goal",
+            "red",
+            "--plan-dir",
+            plan_dir.to_str().unwrap(),
+        ]);
 
     let output = cmd.output().expect("run tddy-coder");
 
@@ -697,29 +621,11 @@ fn cli_errors_when_plan_dir_missing_for_red_goal() {
     );
 }
 
-/// Create a fake claude script that returns red on first call, green on second.
-fn create_fake_claude_red_then_green(dir: &Path) -> std::io::Result<()> {
-    let script = r###"#!/bin/sh
-CALL_FILE="$0.calls"
-if [ -f "$CALL_FILE" ]; then
-  printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
-  printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">{\"goal\":\"green\",\"summary\":\"Implemented. All tests passing.\",\"tests\":[{\"name\":\"test_foo\",\"file\":\"src/foo.rs\",\"line\":10,\"status\":\"passing\"}],\"implementations\":[{\"name\":\"Foo\",\"file\":\"src/foo.rs\",\"line\":5,\"kind\":\"struct\"}]}</structured-response>","session_id":"fake-sess","is_error":false}'
-else
-  echo 1 > "$CALL_FILE"
-  printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-sess"}'
-  printf '%s\n' '{"type":"result","subtype":"success","result":"<structured-response content-type=\"application-json\">{\"goal\":\"red\",\"summary\":\"Created 1 skeleton and 1 failing test.\",\"tests\":[{\"name\":\"test_foo\",\"file\":\"src/foo.rs\",\"line\":10,\"status\":\"failing\"}],\"skeletons\":[{\"name\":\"Foo\",\"file\":\"src/foo.rs\",\"line\":5,\"kind\":\"struct\"}]}</structured-response>","session_id":"fake-sess","is_error":false}'
-fi
-"###;
-    write_executable_script(dir, "claude", script)
-}
-
 #[test]
 #[cfg(unix)]
 fn cli_accepts_goal_green_with_plan_dir() {
     let tmp = std::env::temp_dir().join("tddy-cli-green-goal-test");
     let _ = std::fs::create_dir_all(&tmp);
-
-    create_fake_claude_red_then_green(&tmp).expect("create fake claude");
 
     let plan_dir = tmp.join("plan-output");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -730,16 +636,21 @@ fn cli_accepts_goal_green_with_plan_dir() {
     )
     .expect("write acceptance-tests.md");
 
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env(
             "HOME",
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
-        .args(["--goal", "red", "--plan-dir", plan_dir.to_str().unwrap()]);
+        .args([
+            "--agent",
+            "stub",
+            "--goal",
+            "red",
+            "--plan-dir",
+            plan_dir.to_str().unwrap(),
+        ]);
 
     let output = cmd.output().expect("run tddy-coder red");
     assert!(
@@ -750,13 +661,19 @@ fn cli_accepts_goal_green_with_plan_dir() {
 
     let mut cmd2 = tddy_coder_bin();
     cmd2.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env(
             "HOME",
             std::env::var("HOME")
                 .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
         )
-        .args(["--goal", "green", "--plan-dir", plan_dir.to_str().unwrap()]);
+        .args([
+            "--agent",
+            "stub",
+            "--goal",
+            "green",
+            "--plan-dir",
+            plan_dir.to_str().unwrap(),
+        ]);
 
     let output2 = cmd2.output().expect("run tddy-coder green");
 
@@ -838,27 +755,13 @@ artifacts: {}
 "#;
     std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
 
-    const ACCEPTANCE_TESTS: &str = r#"<structured-response content-type="application-json">
-{"goal":"acceptance-tests","summary":"Tests ready.","test_command":"cargo test","tests":[{"name":"t1","file":"test.rs","line":1,"status":"pass","kind":"unit"}]}
-</structured-response>"#;
-    const RED: &str = r#"<structured-response content-type="application-json">
-{"goal":"red","summary":"Failing tests written.","tests":[{"name":"t1","file":"test.rs","line":1,"status":"fail","kind":"unit"}],"skeletons":[],"markers":[],"marker_results":[]}
-</structured-response>"#;
-    const GREEN: &str = r#"<structured-response content-type="application-json">
-{"goal":"green","summary":"All tests passing.","tests":[{"name":"t1","file":"test.rs","line":1,"status":"passing"}]}
-</structured-response>"#;
-    const EVALUATE: &str = r#"<structured-response content-type="application-json">
-{"goal":"evaluate-changes","summary":"Changes look good.","risk_level":"low"}
-</structured-response>"#;
-    const VALIDATE: &str = r#"<structured-response content-type="application-json">
-{"goal":"validate","summary":"All subagents done.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
-</structured-response>"#;
-    const REFACTOR: &str = r#"<structured-response content-type="application-json">
-{"goal":"refactor","summary":"Refactoring complete.","tasks_completed":3,"tests_passing":true}
-</structured-response>"#;
-    const UPDATE_DOCS: &str = r#"<structured-response content-type="application-json">
-{"goal":"update-docs","summary":"Documentation updated.","docs_updated":2}
-</structured-response>"#;
+    const ACCEPTANCE_TESTS: &str = r#"{"goal":"acceptance-tests","summary":"Tests ready.","test_command":"cargo test","tests":[{"name":"t1","file":"test.rs","line":1,"status":"pass","kind":"unit"}]}"#;
+    const RED: &str = r#"{"goal":"red","summary":"Failing tests written.","tests":[{"name":"t1","file":"test.rs","line":1,"status":"fail","kind":"unit"}],"skeletons":[],"markers":[],"marker_results":[]}"#;
+    const GREEN: &str = r#"{"goal":"green","summary":"All tests passing.","tests":[{"name":"t1","file":"test.rs","line":1,"status":"passing"}]}"#;
+    const EVALUATE: &str = r#"{"goal":"evaluate-changes","summary":"Changes look good.","risk_level":"low"}"#;
+    const VALIDATE: &str = r#"{"goal":"validate","summary":"All subagents done.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
+    const REFACTOR: &str = r#"{"goal":"refactor","summary":"Refactoring complete.","tasks_completed":3,"tests_passing":true}"#;
+    const UPDATE_DOCS: &str = r#"{"goal":"update-docs","summary":"Documentation updated.","docs_updated":2}"#;
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS);
@@ -937,18 +840,21 @@ fn test_plan_goal_cli_creates_session_under_home_tddy() {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
 
-    create_fake_claude_prd_only(&tmp).expect("create fake claude");
-
     // Use a controlled fake HOME so we do not pollute the real ~/.tddy
     let fake_home = tmp.join("fake-home");
     std::fs::create_dir_all(&fake_home).expect("create fake home");
 
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env("HOME", fake_home.to_str().unwrap())
-        .args(["--goal", "plan", "--prompt", "Build auth feature"])
+        .args([
+            "--agent",
+            "stub",
+            "--goal",
+            "plan",
+            "--prompt",
+            "SKIP_QUESTIONS Build auth feature",
+        ])
         .write_stdin("a\n");
 
     let output = cmd.output().expect("run tddy-coder");
@@ -1010,8 +916,6 @@ fn cli_rejects_output_dir_when_repo_root() {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
 
-    create_fake_claude_prd_only(&tmp).expect("create fake claude");
-
     // Use a git repo (tddy-coder workspace root)
     let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -1020,10 +924,8 @@ fn cli_rejects_output_dir_when_repo_root() {
         .unwrap_or_else(|| std::env::current_dir().unwrap());
     let repo_root = repo_root.canonicalize().unwrap_or(repo_root);
 
-    let tmp_path = tmp.canonicalize().unwrap_or(tmp.clone());
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("PATH", tmp_path.to_str().unwrap())
         .env(
             "HOME",
             std::env::var("HOME")
@@ -1031,6 +933,8 @@ fn cli_rejects_output_dir_when_repo_root() {
         )
         .current_dir(&repo_root)
         .args([
+            "--agent",
+            "stub",
             "--goal",
             "plan",
             "--output-dir",

@@ -19,33 +19,15 @@ use tddy_core::{evaluate_allowlist, Goal, MockBackend, SharedBackend, WorkflowEn
 
 use common::{ctx_evaluate, run_goal_until_done, write_changeset_with_state};
 
-/// Full evaluate-changes structured response with new fields:
-/// changed_files, affected_tests, validity_assessment.
-const EVALUATE_OUTPUT: &str = r#"Evaluation complete.
-
-<structured-response content-type="application-json">
-{"goal":"evaluate-changes","summary":"Evaluated 3 changed files. Risk level: medium. Found 2 issues.","risk_level":"medium","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[{"severity":"warning","category":"code_quality","file":"src/main.rs","line":42,"description":"Function exceeds 50 lines","suggestion":"Extract into smaller functions"},{"severity":"info","category":"test_infrastructure","file":"src/lib.rs","line":10,"description":"Test helper visible in production","suggestion":"Move to test module"}],"changeset_sync":{"status":"not_found","items_updated":0,"items_added":0},"files_analyzed":[{"file":"src/main.rs","lines_changed":25,"changeset_item":null}],"test_impact":{"tests_affected":2,"new_tests_needed":1},"changed_files":[{"path":"src/main.rs","change_type":"modified","lines_added":15,"lines_removed":3},{"path":"src/lib.rs","change_type":"modified","lines_added":5,"lines_removed":0},{"path":"tests/main_test.rs","change_type":"added","lines_added":40,"lines_removed":0}],"affected_tests":[{"path":"tests/main_test.rs","status":"created","description":"New acceptance tests for the main module"},{"path":"tests/integration_test.rs","status":"updated","description":"Updated to cover new code paths"}],"validity_assessment":"The change is valid for the intended use-case. All acceptance criteria from the PRD are addressed. The new code follows existing patterns and does not introduce breaking changes. Risk is medium due to the size of the diff."}
-</structured-response>
-"#;
+/// Full evaluate-changes output as JSON (tddy-tools submit format).
+const EVALUATE_OUTPUT: &str = r#"{"goal":"evaluate-changes","summary":"Evaluated 3 changed files. Risk level: medium. Found 2 issues.","risk_level":"medium","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[{"severity":"warning","category":"code_quality","file":"src/main.rs","line":42,"description":"Function exceeds 50 lines","suggestion":"Extract into smaller functions"},{"severity":"info","category":"test_infrastructure","file":"src/lib.rs","line":10,"description":"Test helper visible in production","suggestion":"Move to test module"}],"changeset_sync":{"status":"not_found","items_updated":0,"items_added":0},"files_analyzed":[{"file":"src/main.rs","lines_changed":25,"changeset_item":null}],"test_impact":{"tests_affected":2,"new_tests_needed":1},"changed_files":[{"path":"src/main.rs","change_type":"modified","lines_added":15,"lines_removed":3},{"path":"src/lib.rs","change_type":"modified","lines_added":5,"lines_removed":0},{"path":"tests/main_test.rs","change_type":"added","lines_added":40,"lines_removed":0}],"affected_tests":[{"path":"tests/main_test.rs","status":"created","description":"New acceptance tests for the main module"},{"path":"tests/integration_test.rs","status":"updated","description":"Updated to cover new code paths"}],"validity_assessment":"The change is valid for the intended use-case. All acceptance criteria from the PRD are addressed. The new code follows existing patterns and does not introduce breaking changes. Risk is medium due to the size of the diff."}"#;
 
 /// For run_goal_until_done(evaluate): evaluate -> validate -> refactor chain.
-const VALIDATE_OUTPUT: &str = r#"All 3 subagents completed.
-<structured-response content-type="application-json">
-{"goal":"validate","summary":"All 3 subagents completed.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
-</structured-response>
-"#;
+const VALIDATE_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 subagents completed.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
 
-const REFACTOR_OUTPUT: &str = r#"Refactoring complete.
-<structured-response content-type="application-json">
-{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}
-</structured-response>
-"#;
+const REFACTOR_OUTPUT: &str = r#"{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
 
-const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
-<structured-response content-type="application-json">
-{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}
-</structured-response>
-"#;
+const UPDATE_DOCS_OUTPUT: &str = r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
 
 /// evaluate() invokes backend with Goal::Evaluate (renamed from Goal::Validate).
 #[tokio::test]
@@ -444,8 +426,8 @@ async fn evaluate_workflow_returns_parse_error_on_malformed_response() {
     );
     let err_msg = result.unwrap_err().to_string();
     assert!(
-        err_msg.contains("Parse") || err_msg.contains("parse") || err_msg.contains("structured"),
-        "expected ParseError, got: {}",
+        err_msg.contains("Parse") || err_msg.contains("parse") || err_msg.contains("malformed") || err_msg.contains("JSON"),
+        "expected ParseError or malformed, got: {}",
         err_msg
     );
 

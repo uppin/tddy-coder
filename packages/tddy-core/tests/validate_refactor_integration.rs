@@ -26,30 +26,13 @@ use common::{
 };
 use tddy_core::workflow::graph::ExecutionStatus;
 
-/// Minimal validate (subagent) structured response.
-const VALIDATE_REFACTOR_OUTPUT: &str = r#"All 3 subagents have completed their analysis.
-
-validate-tests-report.md written.
-validate-prod-ready-report.md written.
-analyze-clean-code-report.md written.
-
-<structured-response content-type="application-json">
-{"goal":"validate","summary":"All 3 subagents completed. Reports written to plan-dir. Tests: 2 issues found. Production readiness: 1 blocker. Clean code score: 7/10.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
-</structured-response>
-"#;
+/// Minimal validate (subagent) output as JSON (tddy-tools submit format).
+const VALIDATE_REFACTOR_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 subagents completed. Reports written to plan-dir. Tests: 2 issues found. Production readiness: 1 blocker. Clean code score: 7/10.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
 
 /// For run_goal_until_done(validate): validate -> refactor -> update-docs chain.
-const REFACTOR_OUTPUT: &str = r#"Refactoring complete.
-<structured-response content-type="application-json">
-{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}
-</structured-response>
-"#;
+const REFACTOR_OUTPUT: &str = r#"{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
 
-const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
-<structured-response content-type="application-json">
-{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}
-</structured-response>
-"#;
+const UPDATE_DOCS_OUTPUT: &str = r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
 
 /// validate() invokes backend with Goal::Validate.
 #[tokio::test]
@@ -316,12 +299,7 @@ async fn validate_response_has_validate_goal() {
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_evaluation_report_to_plan_dir(&plan_dir);
 
-    let validate_output_with_plan = r#"All 3 subagents completed. Refactoring plan synthesized.
-
-<structured-response content-type="application-json">
-{"goal":"validate","summary":"All 3 subagents completed. Reports and refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
-</structured-response>
-"#;
+    let validate_output_with_plan = r#"{"goal":"validate","summary":"All 3 subagents completed. Reports and refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(validate_output_with_plan);
@@ -367,12 +345,7 @@ async fn validate_produces_refactoring_plan() {
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_evaluation_report_to_plan_dir(&plan_dir);
 
-    let validate_output = r#"All 3 subagents completed. Refactoring plan synthesized.
-
-<structured-response content-type="application-json">
-{"goal":"validate","summary":"All 3 subagents completed. Refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}
-</structured-response>
-"#;
+    let validate_output = r#"{"goal":"validate","summary":"All 3 subagents completed. Refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(validate_output);

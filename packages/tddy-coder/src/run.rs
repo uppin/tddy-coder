@@ -23,6 +23,30 @@ use tddy_core::{find_git_root, Presenter};
 
 use crate::disable_raw_mode;
 
+/// Verify tddy-tools binary is available. Required for claude/cursor agents.
+/// Skips when agent is stub (uses InMemoryToolExecutor).
+fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
+    if agent == "stub" {
+        return Ok(());
+    }
+    // Check 1: Same directory as current executable
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            if dir.join("tddy-tools").exists() {
+                return Ok(());
+            }
+        }
+    }
+    // Check 2: On PATH
+    match std::process::Command::new("tddy-tools").arg("--help").output() {
+        Ok(output) if output.status.success() => Ok(()),
+        _ => anyhow::bail!(
+            "tddy-tools binary not found. Build it with: cargo build -p tddy-tools\n\
+             Or ensure it's on PATH."
+        ),
+    }
+}
+
 /// Reject if `output_dir` resolves to the git repo root (would pollute the repo).
 fn reject_output_dir_if_repo_root(output_dir: &Path) -> anyhow::Result<()> {
     let resolved = output_dir
@@ -148,8 +172,8 @@ pub struct CoderArgs {
     #[arg(long)]
     pub debug_output: Option<PathBuf>,
 
-    /// Agent backend: claude or cursor (default: claude)
-    #[arg(long, default_value = "claude", value_parser = ["claude", "cursor"])]
+    /// Agent backend: claude, cursor, or stub (stub for tests/demo, no tddy-tools needed)
+    #[arg(long, default_value = "claude", value_parser = ["claude", "cursor", "stub"])]
     pub agent: String,
 
     /// Feature description (alternative to stdin). When set, skips interactive/piped input.
@@ -261,6 +285,7 @@ impl From<DemoArgs> for Args {
 
 /// Main entry point. Run the workflow with the given args.
 pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
+    verify_tddy_tools_available(&args.agent)?;
     if args.daemon {
         return run_daemon(args, shutdown);
     }

@@ -1,21 +1,30 @@
 //! Mock backend for testing.
+//!
+//! Stores response output via per-instance SubmitResultChannel for test isolation.
+//! Workflow tasks read via submit_channel().take_for_goal() or take_submit_result_for_goal.
 
 use super::{ClarificationQuestion, CodingBackend, InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
+use crate::toolcall::SubmitResultChannel;
 use std::collections::VecDeque;
 use std::sync::RwLock;
 
 /// Mock backend that returns pre-configured responses for testing.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MockBackend {
     responses: RwLock<VecDeque<Result<InvokeResponse, BackendError>>>,
     invocations: RwLock<Vec<InvokeRequest>>,
+    submit_channel: SubmitResultChannel,
 }
 
 impl MockBackend {
     /// Create a new empty mock backend.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            responses: RwLock::new(VecDeque::new()),
+            invocations: RwLock::new(Vec::new()),
+            submit_channel: SubmitResultChannel::new(),
+        }
     }
 
     /// Push a response to be returned on the next invoke() call.
@@ -104,10 +113,16 @@ impl CodingBackend for MockBackend {
                 })?;
         }
 
+        self.submit_channel.store(request.goal.submit_key(), &response.output);
+
         Ok(response)
     }
 
     fn name(&self) -> &str {
         "mock"
+    }
+
+    fn submit_channel(&self) -> Option<&SubmitResultChannel> {
+        Some(&self.submit_channel)
     }
 }

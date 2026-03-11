@@ -5,35 +5,16 @@
 //! Migrated from Workflow to WorkflowEngine.
 
 mod common;
+mod fixtures;
 
 use std::sync::Arc;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
 use common::{ctx_acceptance_tests, ctx_red, run_plan, write_changeset_for_plan_session};
+use fixtures::{PLAN_JSON, RED_JSON_VALID};
 
-const ACCEPTANCE_TESTS_OUTPUT: &str = r#"<structured-response content-type="application-json">
-{"goal":"acceptance-tests","summary":"Created 1 test. Failing.","tests":[{"name":"test_foo","file":"src/foo.rs","line":1,"status":"failing"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test test_foo"}
-</structured-response>"#;
-
-const RED_OUTPUT: &str = r#"<structured-response content-type="application-json">
-{"goal":"red","summary":"Created 1 skeleton.","tests":[{"name":"test_foo","file":"src/foo.rs","line":1,"status":"failing"}],"skeletons":[{"name":"Foo","file":"src/foo.rs","line":1,"kind":"struct"}]}
-</structured-response>"#;
-
-const PLAN_OUTPUT: &str = r#"---PRD_START---
-# PRD
-
-## Summary
-A feature.
-
-## Testing Plan
-### Acceptance Tests
-- test_foo
-
-## TODO
-
-- [ ] Task
----PRD_END---"#;
+const ACCEPTANCE_TESTS_JSON: &str = r#"{"goal":"acceptance-tests","summary":"Created 1 test. Failing.","tests":[{"name":"test_foo","file":"src/foo.rs","line":1,"status":"failing"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test test_foo"}"#;
 
 // ── AC1: prompt starts with marker when artifacts exist ───────────────────────
 
@@ -47,7 +28,7 @@ async fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
     write_changeset_for_plan_session(&plan_dir, "sess-ctx-hdr-1");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+    backend.push_ok(ACCEPTANCE_TESTS_JSON);
 
     let storage_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -89,7 +70,7 @@ async fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
     write_changeset_for_plan_session(&plan_dir, "sess-ctx-hdr-2");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+    backend.push_ok(ACCEPTANCE_TESTS_JSON);
 
     let storage_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-abs-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -142,7 +123,7 @@ async fn acceptance_tests_prompt_header_omits_missing_artifacts() {
     write_changeset_for_plan_session(&plan_dir, "sess-ctx-hdr-3");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+    backend.push_ok(ACCEPTANCE_TESTS_JSON);
 
     let storage_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-omit-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -182,7 +163,7 @@ async fn acceptance_tests_prompt_header_separated_from_body_by_blank_line() {
     write_changeset_for_plan_session(&plan_dir, "sess-ctx-hdr-blank");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+    backend.push_ok(ACCEPTANCE_TESTS_JSON);
 
     let storage_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-blank-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -236,7 +217,7 @@ async fn red_prompt_includes_context_header_with_multiple_artifacts() {
         .expect("write acceptance-tests.md");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(RED_OUTPUT);
+    backend.push_ok(RED_JSON_VALID);
 
     let storage_dir = std::env::temp_dir().join("tddy-ctx-hdr-red-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -283,7 +264,7 @@ async fn plan_prompt_has_no_context_header_for_empty_output_dir() {
     let _ = std::fs::remove_dir_all(&output_dir);
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(PLAN_OUTPUT);
+    backend.push_ok(PLAN_JSON);
 
     let storage_dir = std::env::temp_dir().join("tddy-ctx-hdr-plan-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);

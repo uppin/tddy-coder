@@ -5,7 +5,7 @@
 //! AskQuestion tool uses askUserQuestionToolCall or askQuestionToolCall with args.questions.
 
 use super::{
-    parse_ask_user_question, parse_clarification_questions_from_text, ProgressEvent, StreamResult,
+    parse_ask_user_question, ProgressEvent, StreamResult,
 };
 use crate::backend::ClarificationQuestion;
 use serde::Deserialize;
@@ -245,13 +245,6 @@ where
             _ => {}
         }
     }
-
-    // Fallback: when Cursor outputs questions in text (no AskQuestion tool events), parse from result_text
-    let questions = if questions.is_empty() {
-        parse_clarification_questions_from_text(&result_text)
-    } else {
-        questions
-    };
 
     Ok(StreamResult {
         result_text: result_text.trim().to_string(),

@@ -3,6 +3,7 @@
 //! Mirrors [graph-flow task.rs](https://github.com/a-agmon/rs-graph-llm/blob/main/graph-flow/src/task.rs).
 
 use crate::backend::{CodingBackend, Goal, InvokeRequest};
+use crate::toolcall::take_submit_result_for_goal;
 use crate::workflow::context::Context;
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -200,45 +201,38 @@ impl Task for BackendInvokeTask {
             .await
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
 
+        if !response.questions.is_empty() {
+            context.set_sync("pending_questions", response.questions.clone());
+            return Ok(TaskResult {
+                response: response.output,
+                next_action: NextAction::WaitForInput,
+                task_id: self.id.clone(),
+                status_message: Some("Clarification needed".to_string()),
+            });
+        }
+
         let key = self.goal.submit_key();
         let output = self
             .backend
             .submit_channel()
             .and_then(|ch| ch.take_for_goal(key))
-            .or_else(|| crate::toolcall::take_submit_result_for_goal(key));
-        let output = match output {
-            Some(s) => {
-                log::debug!(
-                    "[BackendInvokeTask] goal={} took submit result (len={})",
-                    key,
-                    s.len()
-                );
-                s
-            }
-            None => {
-                log::debug!(
-                    "[BackendInvokeTask] goal={} no submit result, using response.output (len={})",
-                    key,
-                    response.output.len()
-                );
-                response.output.clone()
-            }
-        };
+            .or_else(|| take_submit_result_for_goal(key))
+            .ok_or_else(|| {
+                Box::new(crate::WorkflowError::ParseError(crate::ParseError::Malformed(
+                    format!(
+                        "Agent finished without calling tddy-tools submit for goal '{}'. Ensure tddy-tools is on PATH and the agent follows the system prompt.",
+                        key
+                    ),
+                ))) as Box<dyn std::error::Error + Send + Sync>
+            })?;
         context.set_sync("output", output.clone());
         if let Some(sid) = &response.session_id {
             context.set_sync("session_id", sid.clone());
         }
 
-        let next_action = if response.questions.is_empty() {
-            NextAction::Continue
-        } else {
-            context.set_sync("pending_questions", response.questions.clone());
-            NextAction::WaitForInput
-        };
-
         Ok(TaskResult {
             response: output,
-            next_action,
+            next_action: NextAction::Continue,
             task_id: self.id.clone(),
             status_message: Some(format!("{} step complete", self.id)),
         })

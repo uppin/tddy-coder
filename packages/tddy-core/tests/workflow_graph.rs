@@ -250,8 +250,12 @@ async fn stub_backend_update_docs_returns_valid_response() {
         socket_path: None,
     };
 
-    let resp = backend.invoke(req).await.unwrap();
-    let parsed = parse_update_docs_response(&resp.output).expect("should parse");
+    let _resp = backend.invoke(req).await.unwrap();
+    let ch = backend.submit_channel().expect("StubBackend has channel");
+    let output = ch
+        .take_for_goal("update-docs")
+        .expect("stub stores update-docs via tool executor");
+    let parsed = parse_update_docs_response(&output).expect("should parse");
     assert!(!parsed.summary.is_empty());
     assert_eq!(parsed.docs_updated, 3);
 }
