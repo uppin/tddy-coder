@@ -144,6 +144,14 @@ pub struct Args {
     pub session_id: Option<String>,
     /// When true, run as headless gRPC daemon (no TUI).
     pub daemon: bool,
+    /// LiveKit server WebSocket URL (e.g. ws://localhost:7880)
+    pub livekit_url: Option<String>,
+    /// LiveKit access token for room join
+    pub livekit_token: Option<String>,
+    /// LiveKit room name
+    pub livekit_room: Option<String>,
+    /// LiveKit participant identity
+    pub livekit_identity: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -198,6 +206,22 @@ pub struct CoderArgs {
     /// Run as headless gRPC daemon (systemd-friendly)
     #[arg(long)]
     pub daemon: bool,
+
+    /// LiveKit server WebSocket URL (e.g. ws://localhost:7880). Requires --livekit-token, --livekit-room, --livekit-identity.
+    #[arg(long)]
+    pub livekit_url: Option<String>,
+
+    /// LiveKit access token for room join
+    #[arg(long)]
+    pub livekit_token: Option<String>,
+
+    /// LiveKit room name
+    #[arg(long)]
+    pub livekit_room: Option<String>,
+
+    /// LiveKit participant identity
+    #[arg(long)]
+    pub livekit_identity: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -270,6 +294,10 @@ impl From<CoderArgs> for Args {
             grpc: a.grpc,
             session_id: None,
             daemon: a.daemon,
+            livekit_url: a.livekit_url,
+            livekit_token: a.livekit_token,
+            livekit_room: a.livekit_room,
+            livekit_identity: a.livekit_identity,
         }
     }
 }
@@ -290,6 +318,10 @@ impl From<DemoArgs> for Args {
             grpc: a.grpc,
             session_id: None,
             daemon: a.daemon,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
         }
     }
 }
@@ -463,6 +495,7 @@ fn on_progress(_event: &ProgressEvent) {
 }
 
 /// Run as headless gRPC daemon. Serves GetSession and ListSessions; blocks until shutdown.
+/// When LiveKit args are present, also joins the room as a participant serving RPC over the data channel.
 fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     tddy_core::init_tddy_logger(args.debug, args.debug_output.as_deref());
 
@@ -488,6 +521,22 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         .build()
         .context("create tokio runtime")?;
 
+    let livekit_enabled = args.livekit_url.is_some()
+        && args.livekit_token.is_some()
+        && args.livekit_room.is_some()
+        && args.livekit_identity.is_some();
+
+    if (args.livekit_url.is_some()
+        || args.livekit_token.is_some()
+        || args.livekit_room.is_some()
+        || args.livekit_identity.is_some())
+        && !livekit_enabled
+    {
+        anyhow::bail!(
+            "LiveKit requires all of: --livekit-url, --livekit-token, --livekit-room, --livekit-identity"
+        );
+    }
+
     rt.block_on(async {
         let addr: std::net::SocketAddr = ([0, 0, 0, 0], port).into();
         let listener = tokio::net::TcpListener::bind(addr)
@@ -501,13 +550,49 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             ))
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener));
 
+        if livekit_enabled {
+            let url = args.livekit_url.as_ref().unwrap().clone();
+            let token = args.livekit_token.as_ref().unwrap().clone();
+            let shutdown_clone = shutdown.clone();
+            tokio::spawn(async move {
+                let participant = match tddy_livekit::LiveKitParticipant::connect(
+                    &url,
+                    &token,
+                    tddy_livekit::EchoServiceImpl,
+                )
+                .await
+                {
+                    Ok(p) => {
+                        log::info!("LiveKit participant connected to room");
+                        p
+                    }
+                    Err(e) => {
+                        log::error!("LiveKit connect failed: {}", e);
+                        return;
+                    }
+                };
+                tokio::select! {
+                    _ = participant.run() => {
+                        log::info!("LiveKit participant disconnected");
+                    }
+                    _ = async {
+                        while !shutdown_clone.load(Ordering::Relaxed) {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        }
+                    } => {}
+                }
+            });
+        }
+
+        let shutdown_fut = async {
+            while !shutdown.load(Ordering::Relaxed) {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+        };
+
         tokio::select! {
             res = server => res.context("gRPC server error")?,
-            _ = async {
-                while !shutdown.load(Ordering::Relaxed) {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                }
-            } => {}
+            _ = shutdown_fut => {}
         }
 
         Ok(())

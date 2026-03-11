@@ -1,6 +1,7 @@
 //! Integration tests for log_backend: redirect_debug_output and resolve_log_defaults.
 //!
-//! Tests use #[serial] because they share global logger state (DEBUG_OUTPUT_FILE).
+//! These tests touch global logger state (DEBUG_OUTPUT_FILE). The #[serial] attribute
+//! ensures they run one at a time to avoid races when one test's redirect overwrites another's.
 
 use serial_test::serial;
 use tddy_core::{redirect_debug_output, resolve_log_defaults};

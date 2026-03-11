@@ -143,7 +143,10 @@ exit 0
         lines.len()
     );
     let first: serde_json::Value = serde_json::from_str(lines[0]).expect("parse request entry");
-    assert_eq!(first["type"], "tddy-request", "first line should be the request");
+    assert_eq!(
+        first["type"], "tddy-request",
+        "first line should be the request"
+    );
     assert_eq!(first["prompt"], "test");
     assert_eq!(first["goal"], "Plan");
 
