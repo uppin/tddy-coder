@@ -323,10 +323,7 @@ fn run_plan_without_output_dir(
         serde_json::json!(inherit_stdin),
     );
     let temp_conv_path = if conversation_output_path.is_none() {
-        let p = std::env::temp_dir().join(format!(
-            "tddy-plan-conv-{}.jsonl",
-            std::process::id()
-        ));
+        let p = std::env::temp_dir().join(format!("tddy-plan-conv-{}.jsonl", std::process::id()));
         let _ = std::fs::remove_file(&p);
         Some(p)
     } else {
