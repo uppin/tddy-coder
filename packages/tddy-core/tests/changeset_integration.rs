@@ -26,11 +26,11 @@ User authentication system.
 
 ## Acceptance Criteria
 - [ ] Login with email/password
----PRD_END---
 
----TODO_START---
+## TODO
+
 - [ ] Create auth module
----TODO_END---
+---PRD_END---
 
 That concludes the plan."#;
 
@@ -110,7 +110,7 @@ async fn changeset_yaml_replaces_session_files() {
 const PLANNING_WITH_DISCOVERY: &str = r##"Analysis with discovery.
 
 <structured-response content-type="application-json">
-{"goal":"plan","prd":"# PRD\n## Summary\nAuth feature.","todo":"- [ ] Task 1","discovery":{"toolchain":{"rust":"1.78.0","cargo":"from Cargo.toml"},"scripts":{"test":"cargo test","lint":"cargo clippy"},"doc_locations":["docs/ft/","packages/*/docs/"],"plan_dir_suggestion":"docs/dev/1-WIP/","relevant_code":[{"path":"src/workflow/mod.rs","reason":"state machine"}],"test_infrastructure":{"runner":"cargo test","conventions":"tests/*.rs"}},"demo_plan":{"demo_type":"cli","setup_instructions":"Run cargo build","steps":[{"description":"Run the CLI","command_or_action":"cargo run","expected_result":"See output"}],"verification":"CLI runs without error"}}
+{"goal":"plan","prd":"# PRD\n## Summary\nAuth feature.\n\n## TODO\n\n- [ ] Task 1","discovery":{"toolchain":{"rust":"1.78.0","cargo":"from Cargo.toml"},"scripts":{"test":"cargo test","lint":"cargo clippy"},"doc_locations":["docs/ft/","packages/*/docs/"],"relevant_code":[{"path":"src/workflow/mod.rs","reason":"state machine"}],"test_infrastructure":{"runner":"cargo test","conventions":"tests/*.rs"}},"demo_plan":{"demo_type":"cli","setup_instructions":"Run cargo build","steps":[{"description":"Run the CLI","command_or_action":"cargo run","expected_result":"See output"}],"verification":"CLI runs without error"}}
 </structured-response>
 "##;
 
@@ -118,7 +118,7 @@ const PLANNING_WITH_DISCOVERY: &str = r##"Analysis with discovery.
 const PLANNING_WITH_NAME: &str = r##"Analysis with name.
 
 <structured-response content-type="application-json">
-{"goal":"plan","name":"Auth Feature","prd":"# PRD\n## Summary\nAuth feature.","todo":"- [ ] Task 1","discovery":{"toolchain":{"rust":"1.78.0"},"scripts":{"test":"cargo test"},"doc_locations":["docs/"]},"demo_plan":{"demo_type":"cli","setup_instructions":"Run cargo build","steps":[{"description":"Run CLI","command_or_action":"cargo run","expected_result":"See output"}],"verification":"OK"}}
+{"goal":"plan","name":"Auth Feature","prd":"# PRD\n## Summary\nAuth feature.\n\n## TODO\n\n- [ ] Task 1","discovery":{"toolchain":{"rust":"1.78.0"},"scripts":{"test":"cargo test"},"doc_locations":["docs/"]},"demo_plan":{"demo_type":"cli","setup_instructions":"Run cargo build","steps":[{"description":"Run CLI","command_or_action":"cargo run","expected_result":"See output"}],"verification":"OK"}}
 </structured-response>
 "##;
 

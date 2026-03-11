@@ -3,12 +3,11 @@
   "$id": "urn:tddy:goal/plan",
   "title": "PlanOutput",
   "type": "object",
-  "required": ["goal", "prd", "todo"],
+  "required": ["goal", "prd"],
   "properties": {
     "goal": { "const": "plan" },
     "name": { "type": "string" },
     "prd": { "type": "string" },
-    "todo": { "type": "string" },
     "discovery": {
       "type": "object",
       "properties": {
