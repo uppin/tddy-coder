@@ -69,6 +69,17 @@ fn reject_output_dir_if_repo_root(output_dir: &Path) -> anyhow::Result<()> {
 /// Use from both tddy-coder and tddy-demo binaries.
 pub fn run_main(mut args: Args) {
     args.session_id = Some(uuid::Uuid::now_v7().to_string());
+
+    tddy_core::init_tddy_logger(args.debug, args.debug_output.as_deref());
+    if args.debug_output.is_none() {
+        if let Some(session_dir) = session_dir_path(&args) {
+            let logs = session_dir.join("logs");
+            let _ = std::fs::create_dir_all(&logs);
+            tddy_core::redirect_debug_output(&logs.join("debug.log"));
+            log::set_max_level(log::LevelFilter::Debug);
+        }
+    }
+
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = crossterm::execute!(
@@ -413,8 +424,12 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
                 anyhow::anyhow!("HOME not set; cannot create session under ~/.tddy")
             })?;
             let base = PathBuf::from(&home).join(".tddy");
-            let plan_dir =
-                tddy_core::output::create_session_dir_in(&base).context("create session dir")?;
+            let plan_dir = if let Some(ref sid) = args.session_id {
+                tddy_core::output::create_session_dir_with_id(&base, sid)
+            } else {
+                tddy_core::output::create_session_dir_in(&base)
+            }
+            .context("create session dir")?;
             let output_dir_for_ctx =
                 std::env::current_dir().context("current dir for agent working_dir")?;
             (plan_dir, output_dir_for_ctx)
@@ -1187,8 +1202,12 @@ fn run_plan_to_get_dir(
                 anyhow::anyhow!("HOME not set; cannot create session under ~/.tddy")
             })?;
             let base = PathBuf::from(&home).join(".tddy");
-            let plan_dir =
-                tddy_core::output::create_session_dir_in(&base).context("create session dir")?;
+            let plan_dir = if let Some(ref sid) = args.session_id {
+                tddy_core::output::create_session_dir_with_id(&base, sid)
+            } else {
+                tddy_core::output::create_session_dir_in(&base)
+            }
+            .context("create session dir")?;
             let output_dir_for_ctx =
                 std::env::current_dir().context("current dir for agent working_dir")?;
             (plan_dir, output_dir_for_ctx)
