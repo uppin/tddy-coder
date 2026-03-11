@@ -29,11 +29,11 @@ A feature.
 ## Testing Plan
 ### Acceptance Tests
 - test_foo
----PRD_END---
 
----TODO_START---
+## TODO
+
 - [ ] Task
----TODO_END---"#;
+---PRD_END---"#;
 
 // ── AC1: prompt starts with marker when artifacts exist ───────────────────────
 

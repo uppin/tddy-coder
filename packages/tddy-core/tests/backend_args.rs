@@ -342,7 +342,7 @@ fn invoke_uses_system_prompt_file_not_inline() {
     let script = format!(
         r##"#!/bin/sh
 printf '%s\n' "$@" > "{}"
-printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n---PRD_END---\n---TODO_START---\n- [ ] Task\n---TODO_END---","session_id":"test-session"}}'
+printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n\n## TODO\n\n- [ ] Task\n---PRD_END---","session_id":"test-session"}}'
 "##,
         args_file.display()
     );

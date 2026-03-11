@@ -19,7 +19,7 @@ Read the JSON Schema file at `schemas/plan.schema.json` in the working directory
 3. **Requirements** — Functional and non-functional requirements
 4. **Acceptance Criteria** — Conditions that must be met
 5. **Testing Plan** — (1) test level determination (E2E/Integration/Unit) with rationale, (2) acceptance tests with descriptive names, (3) target test file paths, (4) strong assertions for each test
-6. **TODO** — Implementation milestones as the last section. Use - [ ] for pending and [x] for completed. List discrete tasks in dependency order.
+6. **TODO** — Work needed to fulfill the product requirement (implementation tasks for the feature). Do NOT list workflow steps (e.g. red phase, green phase, run tests). Use - [ ] for pending and [x] for completed. List discrete tasks in dependency order.
 
 The TODO section is part of the PRD body, not a separate field. Example:
 

@@ -26,14 +26,14 @@ User authentication system with login and logout.
 ## Acceptance Criteria
 - [ ] Login with email/password
 - [ ] Logout clears session
----PRD_END---
 
----TODO_START---
+## TODO
+
 - [ ] Create auth module
 - [ ] Implement login endpoint
 - [ ] Implement logout endpoint
 - [ ] Add session management
----TODO_END---
+---PRD_END---
 
 That concludes the plan."#;
 

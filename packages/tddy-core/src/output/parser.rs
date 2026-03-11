@@ -1,8 +1,9 @@
 //! Parser for LLM planning output.
 //!
 //! Supports two formats (in order of precedence):
-//! 1. Structured response: `<structured-response content-type="application-json">{"goal":"plan","prd":"...","todo":"..."}</structured-response>`
-//! 2. Delimited: `---PRD_START---` / `---PRD_END---` and `---TODO_START---` / `---TODO_END---`
+//! 1. Structured response: `<structured-response content-type="application-json">{"goal":"plan","prd":"..."}</structured-response>`
+//!    The prd value is a single markdown document including a `## TODO` section.
+//! 2. Delimited: `---PRD_START---` / `---PRD_END---` (PRD must include `## TODO` section)
 //!
 //! Questions are extracted from AskUserQuestion tool events in the NDJSON stream, not from text.
 
@@ -56,8 +57,6 @@ pub fn extract_last_structured_block(s: &str) -> Result<StructuredBlock<'_>, Par
     })
 }
 const PRD_END: &str = "---PRD_END---";
-const TODO_START: &str = "---TODO_START---";
-const TODO_END: &str = "---TODO_END---";
 
 /// Parsed planning output. PRD must include a `## TODO` section (implementation milestones).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -93,26 +92,8 @@ struct StructuredPlan {
     goal: Option<String>,
     name: Option<String>,
     prd: Option<String>,
-    #[serde(default)]
-    todo: Option<String>,
     discovery: Option<crate::changeset::DiscoveryData>,
     demo_plan: Option<DemoPlan>,
-}
-
-fn merge_todo_into_prd(prd: String, todo: Option<String>) -> String {
-    let todo = todo.filter(|s| !s.trim().is_empty());
-    match todo {
-        Some(t) => {
-            let mut out = prd;
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-            out.push_str("\n## TODO\n\n");
-            out.push_str(&t);
-            out
-        }
-        None => prd,
-    }
 }
 
 /// Extract JSON from <structured-response content-type="application-json">...</structured-response>.
@@ -136,7 +117,6 @@ fn extract_structured_response(s: &str) -> Option<PlanningOutput> {
         if let Ok(parsed) = serde_json::from_str::<StructuredPlan>(json_str) {
             if parsed.goal.as_deref() == Some("plan") {
                 if let Some(prd) = parsed.prd.filter(|s| !s.trim().is_empty()) {
-                    let prd = merge_todo_into_prd(prd, parsed.todo);
                     return Some(PlanningOutput {
                         prd,
                         name: parsed.name.filter(|s| !s.is_empty()),
@@ -159,7 +139,6 @@ pub fn parse_planning_response(s: &str) -> Result<PlanningOutput, ParseError> {
         if let Ok(parsed) = serde_json::from_str::<StructuredPlan>(s) {
             if parsed.goal.as_deref() == Some("plan") {
                 if let Some(prd) = parsed.prd.filter(|x| !x.trim().is_empty()) {
-                    let prd = merge_todo_into_prd(prd, parsed.todo);
                     return Ok(PlanningOutput {
                         prd,
                         name: parsed.name.filter(|x| !x.is_empty()),
@@ -182,20 +161,14 @@ pub fn parse_planning_response(s: &str) -> Result<PlanningOutput, ParseError> {
 }
 
 /// Parse LLM output that contains delimited PRD section. PRD must include ## TODO.
-/// If ---TODO_START---/---TODO_END--- is present (legacy), it is appended to prd.
 pub fn parse_planning_output(s: &str) -> Result<PlanningOutput, ParseError> {
-    let mut prd = extract_section(s, PRD_START, PRD_END)
+    let prd = extract_section(s, PRD_START, PRD_END)
         .ok_or(ParseError::MissingPrd)?
         .trim()
         .to_string();
     if prd.is_empty() {
         return Err(ParseError::MissingPrd);
     }
-
-    let todo = extract_section(s, TODO_START, TODO_END)
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty());
-    prd = merge_todo_into_prd(prd, todo);
 
     Ok(PlanningOutput {
         prd,
@@ -1550,19 +1523,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extracts_prd_and_todo_from_delimited_output() {
+    fn extracts_prd_with_embedded_todo_from_delimited_output() {
         let input = r#"preface
 ---PRD_START---
 # PRD
 
 ## Summary
 Feature X
----PRD_END---
-middle
----TODO_START---
+
+## TODO
+
 - [ ] Task 1
 - [ ] Task 2
----TODO_END---
+---PRD_END---
 trailing"#;
         let out = parse_planning_output(input).expect("should parse");
         assert!(out.prd.contains("Feature X"));
@@ -1571,7 +1544,7 @@ trailing"#;
 
     #[test]
     fn errors_on_missing_prd() {
-        let input = "---TODO_START---\n- [ ] Task\n---TODO_END---";
+        let input = "Some text without PRD delimiters";
         let err = parse_planning_output(input).unwrap_err();
         assert!(matches!(err, ParseError::MissingPrd));
     }
@@ -1594,17 +1567,18 @@ Feature X
     }
 
     #[test]
-    fn parse_planning_response_returns_planning_output_when_prd_todo_present() {
+    fn parse_planning_response_returns_planning_output_when_prd_has_embedded_todo() {
         let input = r#"preface
 ---PRD_START---
 # PRD
 
 ## Summary
 Feature X
----PRD_END---
----TODO_START---
+
+## TODO
+
 - [ ] Task 1
----TODO_END---
+---PRD_END---
 trailing"#;
         let out = parse_planning_response(input).expect("should parse");
         assert!(out.prd.contains("Feature X"));
@@ -1629,7 +1603,7 @@ What is the target audience?
 
     #[test]
     fn parse_planning_response_extracts_structured_response() {
-        let input = "Here is my analysis.\n\n<structured-response content-type=\"application-json\">\n{\"goal\": \"plan\", \"prd\": \"Summary: Feature X\", \"todo\": \"- [ ] Task 1\"}\n</structured-response>\n\nThat concludes the plan.";
+        let input = "Here is my analysis.\n\n<structured-response content-type=\"application-json\">\n{\"goal\": \"plan\", \"prd\": \"Summary: Feature X\\n\\n## TODO\\n\\n- [ ] Task 1\"}\n</structured-response>\n\nThat concludes the plan.";
         let out = parse_planning_response(input).expect("should parse");
         assert!(out.prd.contains("Feature X"));
         assert!(out.prd.contains("Task 1"));
@@ -1671,7 +1645,7 @@ What is the target audience?
     fn parse_planning_response_rejects_whitespace_only_prd_in_structured_response() {
         let input = concat!(
             "<structured-response content-type=\"application-json\">\n",
-            r#"{"goal": "plan", "prd": "   ", "todo": "- [ ] Task 1"}"#,
+            r#"{"goal": "plan", "prd": "   "}"#,
             "\n</structured-response>"
         );
         let err = parse_planning_response(input).unwrap_err();
@@ -1691,7 +1665,7 @@ What is the target audience?
 
 Model output:
 <structured-response content-type="application-json">
-{"goal": "plan", "prd": "Summary: Real PRD", "todo": "- [ ] Real task"}
+{"goal": "plan", "prd": "Summary: Real PRD\n\n## TODO\n\n- [ ] Real task"}
 </structured-response>"#;
         let out = parse_planning_response(input).expect("should parse");
         assert!(out.prd.contains("Real PRD"));
@@ -1702,10 +1676,7 @@ Model output:
     fn parse_planning_output_rejects_whitespace_only_prd_in_delimited() {
         let input = r#"---PRD_START---
    
----PRD_END---
----TODO_START---
-- [ ] Task 1
----TODO_END---"#;
+---PRD_END---"#;
         let err = parse_planning_output(input).unwrap_err();
         assert!(
             matches!(err, ParseError::MissingPrd),

@@ -10,10 +10,10 @@ use tddy_core::stream::{
     parse_clarification_questions_from_text, process_ndjson_stream, ProgressEvent,
 };
 
-/// Minimal NDJSON that produces PRD+TODO in result event.
+/// Minimal NDJSON that produces PRD (with embedded ## TODO) in result event.
 const NDJSON_WITH_RESULT: &str = r#"{"type":"system","subtype":"init","session_id":"sess-123"}
 {"type":"assistant","message":{"content":[{"type":"text","text":"Analyzing..."}]}}
-{"type":"result","subtype":"success","result":"---PRD_START---\n# PRD\nFeature X\n---PRD_END---\n---TODO_START---\n- [ ] Task 1\n---TODO_END---","session_id":"sess-123","is_error":false}
+{"type":"result","subtype":"success","result":"---PRD_START---\n# PRD\nFeature X\n\n## TODO\n\n- [ ] Task 1\n---PRD_END---","session_id":"sess-123","is_error":false}
 "#;
 
 /// NDJSON with AskUserQuestion tool_use event.
@@ -31,7 +31,7 @@ fn process_ndjson_extracts_result_text_and_session_id() {
     assert_eq!(result.session_id, "sess-123");
     assert!(result.result_text.contains("---PRD_START---"));
     assert!(result.result_text.contains("Feature X"));
-    assert!(result.result_text.contains("---TODO_START---"));
+    assert!(result.result_text.contains("## TODO"));
     assert!(result.questions.is_empty());
 }
 

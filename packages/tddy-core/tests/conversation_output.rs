@@ -17,10 +17,11 @@ const PLAN_OUTPUT: &str = r#"---PRD_START---
 # Feature PRD
 ## Summary
 Test feature.
----PRD_END---
----TODO_START---
+
+## TODO
+
 - [ ] Task 1
----TODO_END---"#;
+---PRD_END---"#;
 
 const RAW_STREAM: &str = r#"{"type":"system","session_id":"sess-1"}
 {"type":"result","result":"output","session_id":"sess-1"}"#;

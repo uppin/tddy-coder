@@ -31,11 +31,11 @@ Integration - changes how auth component interacts with session storage.
 
 ### Acceptance Tests
 - [ ] **Integration**: Login stores session token (packages/auth/tests/session.it.rs)
----PRD_END---
 
----TODO_START---
+## TODO
+
 - [ ] Create auth module
----TODO_END---
+---PRD_END---
 
 That concludes the plan."#;
 
