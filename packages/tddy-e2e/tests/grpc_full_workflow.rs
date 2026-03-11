@@ -17,8 +17,9 @@ use tddy_grpc::gen::{
 
 #[tokio::test]
 async fn full_workflow_with_clarification_completes() {
-    let (presenter_handle, port, shutdown) =
-        spawn_presenter_with_grpc(Some("Build auth".to_string()));
+    // Use None so workflow waits for SubmitFeatureInput; avoids race where events are
+    // broadcast before the test connects and subscribes.
+    let (presenter_handle, port, shutdown) = spawn_presenter_with_grpc(None);
 
     let mut client = connect_grpc(port).await.unwrap();
 
@@ -43,6 +44,7 @@ async fn full_workflow_with_clarification_completes() {
     let mut seen_goal_started = false;
     let mut seen_workflow_complete = false;
     let mut workflow_ok = false;
+    let mut workflow_message = String::new();
 
     for _ in 0..500 {
         match tokio::time::timeout(Duration::from_millis(100), stream.message()).await {
@@ -76,6 +78,7 @@ async fn full_workflow_with_clarification_completes() {
                         server_message::Event::WorkflowComplete(wc) => {
                             seen_workflow_complete = true;
                             workflow_ok = wc.ok;
+                            workflow_message = wc.message.clone();
                             break;
                         }
                         _ => {}
@@ -98,6 +101,7 @@ async fn full_workflow_with_clarification_completes() {
                 if let Some(server_message::Event::WorkflowComplete(wc)) = msg.event {
                     seen_workflow_complete = true;
                     workflow_ok = wc.ok;
+                    workflow_message = wc.message.clone();
                     break;
                 }
             }
@@ -111,7 +115,11 @@ async fn full_workflow_with_clarification_completes() {
 
     assert!(seen_goal_started, "Expected GoalStarted event");
     assert!(seen_workflow_complete, "Expected WorkflowComplete event");
-    assert!(workflow_ok, "Expected workflow to complete successfully");
+    assert!(
+        workflow_ok,
+        "Expected workflow to complete successfully, got error: {}",
+        workflow_message
+    );
 }
 
 /// Full workflow with StubBackend: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor.

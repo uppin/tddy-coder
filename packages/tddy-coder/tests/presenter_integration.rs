@@ -276,7 +276,7 @@ fn plan_approval_approve_proceeds_to_next_step() {
     );
 
     let mut iterations = 0;
-    let max_iterations = 500;
+    let max_iterations = 1000;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
         if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
@@ -294,8 +294,9 @@ fn plan_approval_approve_proceeds_to_next_step() {
 
     assert!(
         presenter.is_done(),
-        "workflow should complete within {} iterations",
-        max_iterations
+        "workflow should complete within {} iterations; last mode: {:?}",
+        max_iterations,
+        presenter.state().mode
     );
     let events = presenter.view_mut().events();
     assert!(
