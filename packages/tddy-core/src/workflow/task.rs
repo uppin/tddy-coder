@@ -3,7 +3,6 @@
 //! Mirrors [graph-flow task.rs](https://github.com/a-agmon/rs-graph-llm/blob/main/graph-flow/src/task.rs).
 
 use crate::backend::{CodingBackend, Goal, InvokeRequest};
-use crate::toolcall::take_submit_result_for_goal;
 use crate::workflow::context::Context;
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -202,7 +201,12 @@ impl Task for BackendInvokeTask {
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
 
         let key = self.goal.submit_key();
-        let output = match take_submit_result_for_goal(key) {
+        let output = self
+            .backend
+            .submit_channel()
+            .and_then(|ch| ch.take_for_goal(key))
+            .or_else(|| crate::toolcall::take_submit_result_for_goal(key));
+        let output = match output {
             Some(s) => {
                 log::debug!(
                     "[BackendInvokeTask] goal={} took submit result (len={})",

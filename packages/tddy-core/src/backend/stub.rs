@@ -46,17 +46,25 @@ const SLOW: &str = "SLOW";
 pub struct StubBackend {
     invocation_count: AtomicU32,
     tool_executor: Arc<dyn ToolExecutor>,
+    submit_channel: Option<crate::toolcall::SubmitResultChannel>,
 }
 
 impl StubBackend {
     pub fn new() -> Self {
-        Self::with_executor(Arc::new(super::InMemoryToolExecutor::new()))
+        let executor = super::InMemoryToolExecutor::new();
+        let channel = executor.channel().clone();
+        Self {
+            invocation_count: AtomicU32::new(0),
+            tool_executor: Arc::new(executor),
+            submit_channel: Some(channel),
+        }
     }
 
     pub fn with_executor(tool_executor: Arc<dyn ToolExecutor>) -> Self {
         Self {
             invocation_count: AtomicU32::new(0),
             tool_executor,
+            submit_channel: None,
         }
     }
 
@@ -282,6 +290,10 @@ impl Default for StubBackend {
 
 #[async_trait::async_trait]
 impl CodingBackend for StubBackend {
+    fn submit_channel(&self) -> Option<&crate::toolcall::SubmitResultChannel> {
+        self.submit_channel.as_ref()
+    }
+
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         let n = self.invocation_count.fetch_add(1, Ordering::SeqCst) + 1;
         log::debug!("[stub] invoke #{} goal={:?}", n, request.goal);

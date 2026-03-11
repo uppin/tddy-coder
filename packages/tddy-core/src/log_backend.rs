@@ -68,6 +68,7 @@ pub fn resolve_log_defaults(
     if debug_output_path.is_none() {
         let _ = std::fs::create_dir_all(&logs);
         redirect_debug_output(&logs.join("debug.log"));
+        log::set_max_level(log::LevelFilter::Debug);
     }
     if conversation_output_path.is_none() {
         let _ = std::fs::create_dir_all(&logs);
