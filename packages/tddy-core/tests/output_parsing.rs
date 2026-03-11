@@ -81,6 +81,106 @@ fn enhanced_test_instructions_include_sequential_and_logging() {
     assert_eq!(red_out.tests.len(), 1);
 }
 
+/// write_artifacts rejects PlanningOutput with empty todo (defense-in-depth).
+#[test]
+fn write_artifacts_rejects_empty_todo() {
+    use tddy_core::output::{write_artifacts, PlanningOutput};
+
+    let plan_dir = std::env::temp_dir().join("tddy-write-empty-todo-test");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create dir");
+
+    let planning = PlanningOutput {
+        prd: "# PRD\n## Summary\nFeature.".to_string(),
+        todo: String::new(),
+        name: None,
+        discovery: None,
+        demo_plan: None,
+    };
+    let result = write_artifacts(&plan_dir, &planning);
+    assert!(
+        result.is_err(),
+        "write_artifacts should reject empty todo, got Ok"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// write_artifacts rejects PlanningOutput with whitespace-only todo.
+#[test]
+fn write_artifacts_rejects_whitespace_only_todo() {
+    use tddy_core::output::{write_artifacts, PlanningOutput};
+
+    let plan_dir = std::env::temp_dir().join("tddy-write-ws-todo-test");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create dir");
+
+    let planning = PlanningOutput {
+        prd: "# PRD\n## Summary\nFeature.".to_string(),
+        todo: "  \n  ".to_string(),
+        name: None,
+        discovery: None,
+        demo_plan: None,
+    };
+    let result = write_artifacts(&plan_dir, &planning);
+    assert!(
+        result.is_err(),
+        "write_artifacts should reject whitespace-only todo, got Ok"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// write_artifacts rejects PlanningOutput with empty prd.
+#[test]
+fn write_artifacts_rejects_empty_prd() {
+    use tddy_core::output::{write_artifacts, PlanningOutput};
+
+    let plan_dir = std::env::temp_dir().join("tddy-write-empty-prd-test");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create dir");
+
+    let planning = PlanningOutput {
+        prd: String::new(),
+        todo: "- [ ] Task 1".to_string(),
+        name: None,
+        discovery: None,
+        demo_plan: None,
+    };
+    let result = write_artifacts(&plan_dir, &planning);
+    assert!(
+        result.is_err(),
+        "write_artifacts should reject empty prd, got Ok"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// write_artifacts rejects PlanningOutput with whitespace-only prd.
+#[test]
+fn write_artifacts_rejects_whitespace_only_prd() {
+    use tddy_core::output::{write_artifacts, PlanningOutput};
+
+    let plan_dir = std::env::temp_dir().join("tddy-write-ws-prd-test");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create dir");
+
+    let planning = PlanningOutput {
+        prd: "   \n   ".to_string(),
+        todo: "- [ ] Task 1".to_string(),
+        name: None,
+        discovery: None,
+        demo_plan: None,
+    };
+    let result = write_artifacts(&plan_dir, &planning);
+    assert!(
+        result.is_err(),
+        "write_artifacts should reject whitespace-only prd, got Ok"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
 /// Generated markdown files contain relative links to peer documents.
 #[test]
 fn markdown_cross_references_added() {

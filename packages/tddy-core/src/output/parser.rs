@@ -120,8 +120,8 @@ fn extract_structured_response(s: &str) -> Option<PlanningOutput> {
         if let Ok(parsed) = serde_json::from_str::<StructuredPlan>(json_str) {
             if parsed.goal.as_deref() == Some("plan") {
                 if let (Some(prd), Some(todo)) = (
-                    parsed.prd.filter(|s| !s.is_empty()),
-                    parsed.todo.filter(|s| !s.is_empty()),
+                    parsed.prd.filter(|s| !s.trim().is_empty()),
+                    parsed.todo.filter(|s| !s.trim().is_empty()),
                 ) {
                     return Some(PlanningOutput {
                         prd,
@@ -177,11 +177,17 @@ pub fn parse_planning_output(s: &str) -> Result<PlanningOutput, ParseError> {
         .ok_or(ParseError::MissingPrd)?
         .trim()
         .to_string();
+    if prd.is_empty() {
+        return Err(ParseError::MissingPrd);
+    }
 
     let todo = extract_section(s, TODO_START, TODO_END)
         .ok_or(ParseError::MissingTodo)?
         .trim()
         .to_string();
+    if todo.is_empty() {
+        return Err(ParseError::MissingTodo);
+    }
 
     Ok(PlanningOutput {
         prd,
@@ -1613,6 +1619,51 @@ What is the target audience?
     }
 
     #[test]
+    fn parse_planning_response_rejects_whitespace_only_todo_in_structured_response() {
+        let input = concat!(
+            "<structured-response content-type=\"application-json\">\n",
+            r#"{"goal": "plan", "prd": "PRD Summary\nReal feature.", "todo": "  \n  "}"#,
+            "\n</structured-response>"
+        );
+        let err = parse_planning_response(input).unwrap_err();
+        assert!(
+            matches!(err, ParseError::Malformed(_)),
+            "whitespace-only todo should be rejected, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn parse_planning_response_rejects_whitespace_only_prd_in_structured_response() {
+        let input = concat!(
+            "<structured-response content-type=\"application-json\">\n",
+            r#"{"goal": "plan", "prd": "   ", "todo": "- [ ] Task 1"}"#,
+            "\n</structured-response>"
+        );
+        let err = parse_planning_response(input).unwrap_err();
+        assert!(
+            matches!(err, ParseError::Malformed(_)),
+            "whitespace-only prd should be rejected, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn parse_planning_response_rejects_newline_only_todo_in_structured_response() {
+        let input = concat!(
+            "<structured-response content-type=\"application-json\">\n",
+            r#"{"goal": "plan", "prd": "PRD Content here.", "todo": "\n\n"}"#,
+            "\n</structured-response>"
+        );
+        let err = parse_planning_response(input).unwrap_err();
+        assert!(
+            matches!(err, ParseError::Malformed(_)),
+            "newline-only todo should be rejected, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn parse_planning_response_skips_invalid_block_and_uses_valid_one() {
         let input = r#"System prompt with example (invalid JSON):
 <structured-response content-type="application-json">
@@ -1626,6 +1677,59 @@ Model output:
         let out = parse_planning_response(input).expect("should parse");
         assert!(out.prd.contains("Real PRD"));
         assert!(out.todo.contains("Real task"));
+    }
+
+    #[test]
+    fn parse_planning_output_rejects_whitespace_only_todo_in_delimited() {
+        let input = r#"---PRD_START---
+# PRD
+
+## Summary
+Feature X
+---PRD_END---
+---TODO_START---
+   
+---TODO_END---"#;
+        let err = parse_planning_output(input).unwrap_err();
+        assert!(
+            matches!(err, ParseError::MissingTodo),
+            "whitespace-only todo section should be rejected, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn parse_planning_output_rejects_whitespace_only_prd_in_delimited() {
+        let input = r#"---PRD_START---
+   
+---PRD_END---
+---TODO_START---
+- [ ] Task 1
+---TODO_END---"#;
+        let err = parse_planning_output(input).unwrap_err();
+        assert!(
+            matches!(err, ParseError::MissingPrd),
+            "whitespace-only prd section should be rejected, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn parse_planning_response_rejects_delimited_with_whitespace_only_sections() {
+        let input = r#"---PRD_START---
+# PRD
+## Summary
+Feature X
+---PRD_END---
+---TODO_START---
+
+---TODO_END---"#;
+        let err = parse_planning_response(input).unwrap_err();
+        assert!(
+            matches!(err, ParseError::MissingTodo),
+            "delimited with whitespace-only todo should be rejected, got: {:?}",
+            err
+        );
     }
 
     #[test]
