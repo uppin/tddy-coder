@@ -110,6 +110,7 @@ pub fn run_event_loop(
             }
         }
 
+        presenter.poll_tool_calls();
         presenter.poll_workflow();
     }
 

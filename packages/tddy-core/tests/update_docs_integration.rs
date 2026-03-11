@@ -162,6 +162,7 @@ async fn cursor_backend_accepts_update_docs() {
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
+        socket_path: None,
     };
 
     let result = backend.invoke(req).await;

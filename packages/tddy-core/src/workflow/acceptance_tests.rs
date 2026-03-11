@@ -8,19 +8,14 @@ You MUST:
 2. Run the project's test command to verify all new tests fail (Red state). Use the appropriate command for the project: `cargo test` for Rust, `npm test` or `npx jest` for Node/TypeScript, `pytest` for Python, etc.
 3. Delete or adjust any tests that pass - passing tests do not verify new behavior
 4. Do NOT ask for permission to write files - you have write access. Create the test files directly.
-5. ALWAYS end your response with a structured-response block — REQUIRED even when summarizing existing work or when tests were already created in a previous turn.
+5. When done, submit your output by calling:
+  tddy-tools submit --schema schemas/acceptance-tests.schema.json --data '<your JSON output>'
 
-**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object. Do NOT output:
-- A number or array (e.g. [15, {...}])
-- Numbered list items (e.g. 15. First test...)
-- Any text before or inside the JSON block
-The parser expects a single JSON object starting with {"goal":"acceptance-tests",...} — nothing else.
+If you need to ask the user clarification questions, call:
+  tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
+The call will block until the user answers. The response contains the user's answers.
 
-Read the JSON Schema file at `schemas/acceptance-tests.schema.json` in the working directory for the exact output format specification. Your final output MUST include this exact block (replace placeholders with actual values):
-
-<structured-response content-type="application-json" schema="schemas/acceptance-tests.schema.json">
-{"goal": "acceptance-tests", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "failing"}], "test_command": "<command>", "prerequisite_actions": "<prereqs or None>", "run_single_or_selected_tests": "<how to run one test>", "sequential_command": "<optional: run tests sequentially>", "logging_command": "<optional: run with verbose/logging>", "metric_hooks": "<optional: how to add perf/metric hooks>", "feedback_options": "<optional: CI/IDE feedback options>"}
-</structured-response>
+Read the JSON Schema file at `schemas/acceptance-tests.schema.json` in the working directory for the exact output format. The JSON must be a single object starting with {"goal":"acceptance-tests",...} — no number, array, or numbered list items.
 
 The summary must describe what tests exist and confirm all are failing. The tests array must list each acceptance test with name, file, line, and status.
 
@@ -70,15 +65,16 @@ mod tests {
     }
 
     #[test]
-    fn system_prompt_references_schema_and_includes_schema_attribute() {
+    fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt();
         assert!(
             prompt.contains("schemas/acceptance-tests.schema.json"),
             "system prompt must reference acceptance-tests schema file"
         );
         assert!(
-            prompt.contains("schema=\"schemas/acceptance-tests.schema.json\""),
-            "system prompt example must include schema= attribute"
+            prompt.contains("tddy-tools submit")
+                && prompt.contains("schemas/acceptance-tests.schema.json"),
+            "system prompt must instruct agent to use tddy-tools submit with schema"
         );
     }
 }

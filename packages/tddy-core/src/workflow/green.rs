@@ -20,15 +20,14 @@ You MUST:
 3. Add detailed logging (log::debug!, log::info!) to reveal flows and system state during development — these will be cleaned in later phases
 4. After implementing, run the project's test command (e.g. cargo test) to verify all tests pass
 5. Run acceptance tests to verify end-to-end behavior
-6. ALWAYS end your response with a structured-response block — REQUIRED.
+6. When done, submit your output by calling:
+  tddy-tools submit --schema schemas/green.schema.json --data '<your JSON output>'
 
-**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object. Do NOT output a number, array, numbered list items, or any text inside the block. The parser expects a single JSON object starting with {{"goal":"green",...}} — nothing else.
+If you need to ask the user clarification questions, call:
+  tddy-tools ask --data '{{"questions":[{{"header":"...","question":"...","options":[...],"multiSelect":false}}]}}'
+The call will block until the user answers. The response contains the user's answers.
 
-Read the JSON Schema file at `schemas/green.schema.json` in the working directory for the exact output format specification. Your final output MUST include this exact block (replace placeholders with actual values):
-
-<structured-response content-type="application-json" schema="schemas/green.schema.json">
-{{"goal": "green", "summary": "<human-readable summary>", "tests": [{{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "passing|failing", "reason": "<optional reason if failing>"}}], "implementations": [{{"name": "<name>", "file": "<path>", "line": <number>, "kind": "<struct|method|function|trait|module>"}}], "test_command": "<command>", "prerequisite_actions": "<prereqs or None>", "run_single_or_selected_tests": "<how to run one test>", "demo_results": {{"summary": "<text>", "steps_completed": <number>}}}}
-</structured-response>
+Read the JSON Schema file at `schemas/green.schema.json` in the working directory for the exact output format. The JSON must be a single object starting with {{"goal":"green",...}} — no number, array, or numbered list items.
 
 The summary must describe what was implemented and confirm test results. The tests array lists each test with status "passing" or "failing"; include "reason" for failing tests. The implementations array lists each implemented item (struct, method, etc.).
 
@@ -100,15 +99,15 @@ mod tests {
     }
 
     #[test]
-    fn system_prompt_references_schema_and_includes_schema_attribute() {
+    fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt(true);
         assert!(
             prompt.contains("schemas/green.schema.json"),
             "system prompt must reference green schema file"
         );
         assert!(
-            prompt.contains("schema=\"schemas/green.schema.json\""),
-            "system prompt example must include schema= attribute"
+            prompt.contains("tddy-tools submit") && prompt.contains("schemas/green.schema.json"),
+            "system prompt must instruct agent to use tddy-tools submit with schema"
         );
     }
 }

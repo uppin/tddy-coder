@@ -6,17 +6,14 @@ pub fn system_prompt() -> String {
 1. A PRD (Product Requirements Document) in markdown format
 2. A TODO list in markdown format with implementation milestones
 
-If you need clarification before creating the PRD, either use the AskUserQuestion tool OR output a structured block with your questions:
+If you need clarification before creating the PRD, call:
+  tddy-tools ask --data '{"questions":[{"header":"<section>","question":"<text>","options":[{"label":"<choice>","description":"<desc>"}],"multiSelect":false}]}'
+The call will block until the user answers. The response contains the user's answers.
 
-<clarification-questions content-type="application-json">
-{"questions":[{"header":"<section>","question":"<text>","options":[{"label":"<choice>","description":"<desc>"}],"multiSelect":false}]}
-</clarification-questions>
+When done, submit your output by calling:
+  tddy-tools submit --schema schemas/plan.schema.json --data '<your JSON output>'
 
-Otherwise, you MUST include a structured-response block with your output. Read the JSON Schema file at `schemas/plan.schema.json` in the working directory for the exact output format specification. Use this exact format:
-
-<structured-response content-type="application-json" schema="schemas/plan.schema.json">
-{"goal": "plan", "name": "<human-readable changeset name>", "prd": "<PRD markdown content>", "todo": "<TODO markdown content>", "discovery": {"toolchain": {"<tool>": "<version>"}, "scripts": {"<name>": "<command>"}, "doc_locations": ["<path>"], "relevant_code": [{"path": "<path>", "reason": "<why>"}], "test_infrastructure": {"runner": "<cmd>", "conventions": "<pattern>"}}, "demo_plan": {"demo_type": "cli|api|ui", "setup_instructions": "<text>", "steps": [{"description": "<text>", "command_or_action": "<cmd>", "expected_result": "<text>"}], "verification": "<text>"}}
-</structured-response>
+Read the JSON Schema file at `schemas/plan.schema.json` in the working directory for the exact output format. The JSON must include: goal, name, prd, todo, and optionally discovery and demo_plan.
 
 The prd and todo values must be JSON strings (escape quotes and newlines as needed). The PRD should include: Summary, Background, Requirements, Acceptance Criteria, and a Testing Plan section. The Testing Plan must contain: (1) test level determination (E2E/Integration/Unit) with rationale, (2) a list of acceptance tests with descriptive names, (3) target test file paths (existing or new), (4) strong assertions for each test. The TODO should list discrete implementation tasks in dependency order using - [ ] for pending and [x] for completed.
 
@@ -26,7 +23,7 @@ The prd and todo values must be JSON strings (escape quotes and newlines as need
 
 **demo_plan** (optional): When the feature has a user-facing demo (CLI, API, UI), include demo_type, setup_instructions, steps with description/command_or_action/expected_result, and verification criteria.
 
-**CRITICAL**: Your response MUST contain the <structured-response> block with the actual PRD and TODO content. Do NOT return a summary, meta-commentary, or description of what you created. The parser extracts the block directly — if it is missing, the workflow fails. You may add brief explanatory text before the block, but the block itself is mandatory."#
+**CRITICAL**: You MUST call tddy-tools submit with your complete PRD and TODO content. Do NOT return a summary, meta-commentary, or description of what you created. The submit call delivers the output to the workflow — if you do not call it, the workflow fails."#
         .to_string()
 }
 
@@ -77,15 +74,15 @@ mod tests {
     }
 
     #[test]
-    fn system_prompt_references_schema_and_includes_schema_attribute() {
+    fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt();
         assert!(
             prompt.contains("schemas/plan.schema.json"),
             "system prompt must reference plan schema file"
         );
         assert!(
-            prompt.contains("schema=\"schemas/plan.schema.json\""),
-            "system prompt example must include schema= attribute"
+            prompt.contains("tddy-tools submit") && prompt.contains("schemas/plan.schema.json"),
+            "system prompt must instruct agent to use tddy-tools submit with schema"
         );
     }
 

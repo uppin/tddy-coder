@@ -9,13 +9,15 @@ pub mod permission;
 pub mod presenter;
 pub mod schema;
 pub mod stream;
+pub mod toolcall;
 pub mod workflow;
 
 pub use backend::{
     build_claude_args, clear_child_pid, get_child_pid, kill_child_process, set_child_pid,
     AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeCodeBackend, ClaudeInvokeConfig,
-    CodingBackend, CursorBackend, Goal, InvokeRequest, InvokeResponse, MockBackend, PermissionMode,
-    QuestionOption, SharedBackend, StubBackend,
+    CodingBackend, CursorBackend, Goal, InMemoryToolExecutor, InvokeRequest, InvokeResponse,
+    MockBackend, PermissionMode, ProcessToolExecutor, QuestionOption, SharedBackend, StubBackend,
+    ToolExecutor,
 };
 pub use changeset::{
     append_session_and_update_state, get_session_for_tag, next_goal_for_state, read_changeset,

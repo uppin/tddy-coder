@@ -135,6 +135,7 @@ exit 0
         conversation_output_path: Some(output_file.clone()),
         inherit_stdin: false,
         extra_allowed_tools: None,
+        socket_path: None,
     };
 
     let result = backend.invoke(req).await;

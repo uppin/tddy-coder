@@ -185,6 +185,9 @@ impl CursorBackend {
             );
         }
 
+        if let Some(ref p) = request.socket_path {
+            cmd.env("TDDY_SOCKET", p);
+        }
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.stdin(if request.inherit_stdin {

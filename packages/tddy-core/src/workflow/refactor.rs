@@ -17,15 +17,14 @@ You MUST:
 1. Execute tasks in priority order (critical → high → medium → low)
 2. Run tests after each change
 3. Stop if tests fail and report which task caused the failure
-4. ALWAYS end your response with a structured-response block — REQUIRED.
+4. When done, submit your output by calling:
+  tddy-tools submit --schema schemas/refactor.schema.json --data '<your JSON output>'
 
-**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object starting with {"goal":"refactor",...}.
+If you need to ask the user clarification questions, call:
+  tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
+The call will block until the user answers. The response contains the user's answers.
 
-Read the JSON Schema file at `schemas/refactor.schema.json` in the working directory for the exact output format specification.
-
-<structured-response content-type="application-json" schema="schemas/refactor.schema.json">
-{"goal":"refactor","summary":"<human-readable summary of refactoring results>","tasks_completed":<number>,"tests_passing":<true|false>}
-</structured-response>"#
+Read the JSON Schema file at `schemas/refactor.schema.json` in the working directory for the exact output format. The JSON must be a single object starting with {"goal":"refactor",...}."#
     .to_string()
 }
 
