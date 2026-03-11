@@ -313,6 +313,15 @@ fn run_plan_without_output_dir(
     if let Some(sid) = session_id {
         context_values.insert("session_id".to_string(), serde_json::json!(sid));
     }
+    if debug_output_path.is_none() {
+        if let (Some(ref base), Some(sid)) = (&session_base_opt, session_id) {
+            let session_dir = base.join(crate::output::SESSIONS_SUBDIR).join(sid);
+            let logs = session_dir.join("logs");
+            let _ = std::fs::create_dir_all(&logs);
+            crate::redirect_debug_output(&logs.join("debug.log"));
+            log::set_max_level(log::LevelFilter::Debug);
+        }
+    }
     context_values.insert(
         "model".to_string(),
         serde_json::to_value(model.clone()).unwrap(),
@@ -723,5 +732,81 @@ pub fn run_workflow(
                 return;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{MockBackend, SharedBackend};
+    use serial_test::serial;
+    use std::sync::Arc;
+
+    /// When a plan goal fails (e.g. output parsing error), debug.log should still be
+    /// written to the session dir/logs/ so the developer can diagnose the failure.
+    /// Reproduces: resolve_log_defaults is only called on the success path in
+    /// run_plan_without_output_dir; on error the function returns None before
+    /// reaching the resolve_log_defaults call.
+    #[test]
+    #[serial]
+    #[cfg(unix)]
+    fn debug_log_written_to_session_dir_when_plan_fails() {
+        let tmp = std::env::temp_dir().join("tddy-debug-log-on-plan-fail");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let backend = Arc::new(MockBackend::new());
+        backend.push_ok("not valid plan json");
+
+        let (event_tx, event_rx) = mpsc::channel();
+        let (_answer_tx, answer_rx) = mpsc::channel();
+
+        let session_id = "test-debug-log-session";
+
+        crate::init_tddy_logger(false, None);
+
+        run_workflow(
+            SharedBackend::from_arc(backend),
+            event_tx,
+            answer_rx,
+            tmp.clone(),
+            None,
+            Some(session_id.to_string()),
+            None,
+            Some("Build test feature".to_string()),
+            None,
+            None,
+            false,
+            None,
+        );
+
+        let mut got_error = false;
+        let mut error_msg = String::new();
+        while let Ok(event) = event_rx.try_recv() {
+            if let WorkflowEvent::WorkflowComplete(Err(ref msg)) = event {
+                got_error = true;
+                error_msg = msg.clone();
+            }
+        }
+        assert!(got_error, "should get a workflow error from plan failure");
+
+        let session_dir = tmp
+            .join(crate::output::SESSIONS_SUBDIR)
+            .join(session_id);
+        assert!(
+            session_dir.exists(),
+            "session dir should be created by PlanTask at {}",
+            session_dir.display()
+        );
+
+        let debug_log = session_dir.join("logs").join("debug.log");
+        assert!(
+            debug_log.exists(),
+            "debug.log should exist at {}/logs/ even when plan fails (error: {})",
+            session_dir.display(),
+            error_msg,
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -4,6 +4,7 @@
 //! and changeset updates. Currently stubbed for TDD red phase.
 
 use crate::backend::{CodingBackend, Goal, InvokeRequest};
+use crate::toolcall::take_submit_result_for_goal;
 use crate::error::{BackendError, ParseError, WorkflowError};
 use crate::output::{
     create_session_dir_in, create_session_dir_with_id, parse_planning_response,
@@ -105,26 +106,6 @@ impl Task for PlanTask {
             },
         )?;
 
-        let output_to_store = self
-            .backend
-            .submit_channel()
-            .and_then(|ch| ch.take_for_goal("plan"))
-            .or_else(|| crate::toolcall::take_submit_result_for_goal("plan"));
-        let output_to_store = match output_to_store {
-            Some(s) => {
-                log::debug!("[PlanTask] took submit result for plan (len={})", s.len());
-                s
-            }
-            None => {
-                log::debug!(
-                    "[PlanTask] no submit result, using response.output (len={})",
-                    response.output.len()
-                );
-                response.output.clone()
-            }
-        };
-        context.set_sync("output", output_to_store.clone());
-
         if !response.questions.is_empty() {
             context.set_sync("pending_questions", response.questions.clone());
             return Ok(TaskResult {
@@ -134,6 +115,18 @@ impl Task for PlanTask {
                 status_message: Some("Clarification needed".to_string()),
             });
         }
+
+        let output_to_store = self
+            .backend
+            .submit_channel()
+            .and_then(|ch| ch.take_for_goal("plan"))
+            .or_else(|| take_submit_result_for_goal("plan"))
+            .ok_or_else(|| {
+                Box::new(WorkflowError::ParseError(ParseError::Malformed(
+                    "Agent finished without calling tddy-tools submit. Ensure tddy-tools is on PATH and the agent follows the system prompt.".into(),
+                ))) as Box<dyn std::error::Error + Send + Sync>
+            })?;
+        context.set_sync("output", output_to_store.clone());
 
         let planning = parse_planning_response(&output_to_store).map_err(|e: ParseError| {
             Box::new(WorkflowError::ParseError(e)) as Box<dyn std::error::Error + Send + Sync>

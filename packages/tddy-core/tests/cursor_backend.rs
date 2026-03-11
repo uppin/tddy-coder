@@ -449,9 +449,12 @@ exit 0
 }
 
 /// CursorBackend plan workflow returns ClarificationNeeded when stream contains
-/// clarification-questions block in result event (real-world tddy-coder format).
+/// clarification-questions block in result event.
+/// IGNORED: inline clarification-questions text parsing was removed (Drop Inline Parsing plan).
+/// Clarification now comes from AskUserQuestion tool events or tddy-tools ask.
 #[tokio::test]
 #[cfg(unix)]
+#[ignore = "inline clarification-questions parsing removed; use tool events or tddy-tools ask"]
 async fn cursor_backend_plan_returns_clarification_needed_when_stream_has_questions() {
     let tmp = std::env::temp_dir().join("tddy-cursor-clarification-plan");
     let _ = std::fs::remove_dir_all(&tmp);

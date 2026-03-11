@@ -531,13 +531,6 @@ impl ClaudeCodeBackend {
             None
         };
 
-        // Fallback: when agent outputs questions in text (no AskUserQuestion tool events), parse from output
-        let questions = if stream_result.questions.is_empty() {
-            stream::parse_clarification_questions_from_text(&stream_result.result_text)
-        } else {
-            stream_result.questions
-        };
-
         Ok(InvokeResponse {
             output: stream_result.result_text,
             exit_code,
@@ -546,7 +539,7 @@ impl ClaudeCodeBackend {
             } else {
                 Some(stream_result.session_id)
             },
-            questions,
+            questions: stream_result.questions,
             raw_stream,
             stderr,
         })

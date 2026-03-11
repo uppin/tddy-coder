@@ -72,34 +72,6 @@ struct AskOptionItem {
     description: String,
 }
 
-/// Block marker for structured clarification questions in agent text output.
-/// Fallback when the agent outputs questions in text instead of using AskUserQuestion tool.
-const CLARIFICATION_QUESTIONS_OPEN: &str = "<clarification-questions";
-const CLARIFICATION_QUESTIONS_CLOSE: &str = "</clarification-questions>";
-
-/// Extract clarification questions from agent text when it contains a structured block.
-/// Format: <clarification-questions content-type="application-json">{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}</clarification-questions>
-/// Used as fallback when Cursor (or other backends) output questions in text instead of tool events.
-pub fn parse_clarification_questions_from_text(text: &str) -> Vec<ClarificationQuestion> {
-    let Some(open) = text.find(CLARIFICATION_QUESTIONS_OPEN) else {
-        return vec![];
-    };
-    let after_open = &text[open + CLARIFICATION_QUESTIONS_OPEN.len()..];
-    let Some(gt) = after_open.find('>') else {
-        return vec![];
-    };
-    let content = after_open[gt + 1..].trim();
-    let Some(close) = content.find(CLARIFICATION_QUESTIONS_CLOSE) else {
-        return vec![];
-    };
-    let json_str = content[..close].trim();
-    let value: serde_json::Value = match serde_json::from_str(json_str) {
-        Ok(v) => v,
-        Err(_) => return vec![],
-    };
-    parse_ask_user_question(&value)
-}
-
 pub(crate) fn parse_ask_user_question(input: &serde_json::Value) -> Vec<ClarificationQuestion> {
     let parsed: AskUserQuestionInput = match serde_json::from_value(input.clone()) {
         Ok(p) => p,

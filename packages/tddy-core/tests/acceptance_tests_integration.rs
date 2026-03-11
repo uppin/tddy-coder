@@ -13,37 +13,11 @@ use tddy_core::{AcceptanceTestsOptions, MockBackend, PlanOptions, SharedBackend,
 
 use common::{ctx_acceptance_tests, run_plan};
 
-const DELIMITED_OUTPUT: &str = r#"Here is my analysis.
+/// Plan output as JSON (tddy-tools submit format).
+const PLAN_JSON_OUTPUT: &str = "{\"goal\":\"plan\",\"prd\":\"# Feature PRD\\n\\n## Summary\\nUser authentication system with login and logout.\\n\\n## Testing Plan\\n\\n### Test Level\\nIntegration - changes how auth component interacts with session storage.\\n\\n### Acceptance Tests\\n- [ ] **Integration**: Login stores session token (packages/auth/tests/session.it.rs)\\n- [ ] **Integration**: Logout clears session (packages/auth/tests/session.it.rs)\\n\\n## TODO\\n\\n- [ ] Create auth module\\n- [ ] Implement login endpoint\"}";
 
----PRD_START---
-# Feature PRD
-
-## Summary
-User authentication system with login and logout.
-
-## Testing Plan
-
-### Test Level
-Integration - changes how auth component interacts with session storage.
-
-### Acceptance Tests
-- [ ] **Integration**: Login stores session token (packages/auth/tests/session.it.rs)
-- [ ] **Integration**: Logout clears session (packages/auth/tests/session.it.rs)
-
-## TODO
-
-- [ ] Create auth module
-- [ ] Implement login endpoint
----PRD_END---
-
-That concludes the plan."#;
-
-const ACCEPTANCE_TESTS_OUTPUT: &str = r#"Created acceptance tests.
-
-<structured-response content-type="application-json">
-{"goal":"acceptance-tests","summary":"Created 2 acceptance tests. All failing (Red state) as expected.","tests":[{"name":"login_stores_session_token","file":"packages/auth/tests/session.it.rs","line":15,"status":"failing"},{"name":"logout_clears_session","file":"packages/auth/tests/session.it.rs","line":28,"status":"failing"}]}
-</structured-response>
-"#;
+/// Acceptance-tests output as JSON (tddy-tools submit format).
+const ACCEPTANCE_TESTS_JSON_OUTPUT: &str = r#"{"goal":"acceptance-tests","summary":"Created 2 acceptance tests. All failing (Red state) as expected.","tests":[{"name":"login_stores_session_token","file":"packages/auth/tests/session.it.rs","line":15,"status":"failing"},{"name":"logout_clears_session","file":"packages/auth/tests/session.it.rs","line":28,"status":"failing"}]}"#;
 
 #[tokio::test]
 async fn acceptance_tests_workflow_reads_plan_dir_and_invokes_backend_with_resumed_session() {
@@ -55,7 +29,7 @@ async fn acceptance_tests_workflow_reads_plan_dir_and_invokes_backend_with_resum
     write_changeset_for_plan_session(&plan_dir, "sess-resume-123");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+    backend.push_ok(ACCEPTANCE_TESTS_JSON_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-at-engine-1");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -99,7 +73,7 @@ async fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_rea
     write_changeset_for_plan_session(&plan_dir, "sess-456");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+    backend.push_ok(ACCEPTANCE_TESTS_JSON_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-at-engine-2");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -187,7 +161,7 @@ async fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
     write_changeset_for_plan_session(&plan_dir, "sess-allowlist");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+    backend.push_ok(ACCEPTANCE_TESTS_JSON_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-at-engine-allowlist");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -215,7 +189,7 @@ async fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
 #[tokio::test]
 async fn plan_workflow_passes_goal_to_invoke_request() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(DELIMITED_OUTPUT);
+    backend.push_ok(PLAN_JSON_OUTPUT);
 
     let output_dir = std::env::temp_dir().join("tddy-plan-allowlist-test");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -254,7 +228,7 @@ async fn acceptance_tests_workflow_writes_acceptance_tests_md_to_plan_dir() {
     write_changeset_for_plan_session(&plan_dir, "sess-writes-md");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(ACCEPTANCE_TESTS_OUTPUT);
+    backend.push_ok(ACCEPTANCE_TESTS_JSON_OUTPUT);
 
     let storage_dir = std::env::temp_dir().join("tddy-at-engine-writes-md");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -301,7 +275,7 @@ async fn acceptance_tests_workflow_writes_acceptance_tests_md_to_plan_dir() {
 #[tokio::test]
 async fn plan_workflow_writes_session_file_to_output_directory() {
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(DELIMITED_OUTPUT);
+    backend.push_ok(PLAN_JSON_OUTPUT);
 
     let output_dir = std::env::temp_dir().join("tddy-planning-session-test");
     let _ = std::fs::remove_dir_all(&output_dir);

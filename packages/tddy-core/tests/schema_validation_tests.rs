@@ -1,7 +1,6 @@
 //! Integration tests for JSON Schema validation of structured agent output.
 
 use std::path::Path;
-use tddy_core::output::extract_last_structured_block;
 use tddy_core::schema::{
     format_validation_errors, get_schema, schema_file_path, validate_output,
     write_all_schemas_to_dir, write_schema_to_dir, SchemaError,
@@ -239,33 +238,3 @@ fn write_all_schemas_to_dir_writes_all_goal_schemas_when_plan_dir_created() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-#[test]
-fn extract_last_structured_block_extracts_schema_attribute() {
-    let input = r#"<structured-response content-type="application-json" schema="schemas/red.schema.json">
-{"goal":"red","summary":"x","tests":[]}
-</structured-response>"#;
-    let block = extract_last_structured_block(input).unwrap();
-    assert_eq!(block.json, r#"{"goal":"red","summary":"x","tests":[]}"#);
-    assert_eq!(block.schema, Some("schemas/red.schema.json"));
-}
-
-#[test]
-fn extract_last_structured_block_handles_missing_schema_attribute() {
-    let input = r#"<structured-response content-type="application-json">
-{"goal":"red","summary":"x","tests":[]}
-</structured-response>"#;
-    let block = extract_last_structured_block(input).unwrap();
-    assert_eq!(block.json, r#"{"goal":"red","summary":"x","tests":[]}"#);
-    assert_eq!(block.schema, None);
-}
-
-#[test]
-fn extract_last_structured_block_uses_last_block() {
-    let input = r#"Example:
-<structured-response schema="schemas/plan.schema.json">{"goal":"plan"}</structured-response>
-Real output:
-<structured-response schema="schemas/red.schema.json">{"goal":"red","summary":"ok","tests":[]}</structured-response>"#;
-    let block = extract_last_structured_block(input).unwrap();
-    assert!(block.json.contains("\"goal\":\"red\""));
-    assert_eq!(block.schema, Some("schemas/red.schema.json"));
-}

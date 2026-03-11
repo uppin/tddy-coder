@@ -16,20 +16,10 @@ use common::{
     ctx_refactor, run_goal_until_done, write_changeset_with_state, write_refactoring_plan,
 };
 
-/// Minimal refactor structured response for MockBackend.
-const REFACTOR_OUTPUT: &str = r#"Refactoring complete. All tasks from refactoring-plan.md executed.
+/// Minimal refactor output as JSON (tddy-tools submit format).
+const REFACTOR_OUTPUT: &str = r#"{"goal":"refactor","summary":"Executed 5 refactoring tasks. All tests passing after each change.","tasks_completed":5,"tests_passing":true}"#;
 
-<structured-response content-type="application-json">
-{"goal":"refactor","summary":"Executed 5 refactoring tasks. All tests passing after each change.","tasks_completed":5,"tests_passing":true}
-</structured-response>
-"#;
-
-const UPDATE_DOCS_OUTPUT: &str = r#"Documentation updated.
-
-<structured-response content-type="application-json">
-{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}
-</structured-response>
-"#;
+const UPDATE_DOCS_OUTPUT: &str = r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
 
 /// refactor() invokes backend with Goal::Refactor.
 #[tokio::test]
