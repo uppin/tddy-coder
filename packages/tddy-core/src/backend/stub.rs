@@ -115,13 +115,9 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
 
 ## TODO
 
-- [ ] Run acceptance-tests
-- [ ] Run red
-- [ ] Run green
-- [ ] Run demo
-- [ ] Run evaluate
-- [ ] Run validate
-- [ ] Run refactor"#;
+- [ ] Create auth module
+- [ ] Implement login endpoint
+- [ ] Implement logout endpoint"#;
         let demo_plan = r#","demo_plan":{"demo_type":"cli","setup_instructions":"Run cargo build","steps":[{"description":"Run the CLI","command_or_action":"cargo run","expected_result":"See output"}],"verification":"CLI runs without error"}"#;
         let json = format!(
             r#"{{"goal":"plan","name":"Stub Feature","prd":"{}"{}}}"#,
