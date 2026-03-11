@@ -14,7 +14,7 @@ use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
 const PLANNING_OUTPUT: &str = r##"<structured-response content-type="application-json">
-{"goal":"plan","name":"Auth Feature","prd":"# PRD\n## Summary\nAuth.","todo":"- [ ] Task 1","discovery":{"toolchain":{"rust":"1.78.0"},"scripts":{"test":"cargo test"},"doc_locations":["docs/"]}}
+{"goal":"plan","name":"Auth Feature","prd":"# PRD\n## Summary\nAuth.\n\n## TODO\n\n- [ ] Task 1","discovery":{"toolchain":{"rust":"1.78.0"},"scripts":{"test":"cargo test"},"doc_locations":["docs/"]}}
 </structured-response>"##;
 
 /// create_session_dir_in(base) creates base/sessions/{uuid}/ — directory exists and dirname is a

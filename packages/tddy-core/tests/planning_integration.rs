@@ -26,14 +26,14 @@ User authentication system with login and logout.
 ## Acceptance Criteria
 - [ ] Login with email/password
 - [ ] Logout clears session
----PRD_END---
 
----TODO_START---
+## TODO
+
 - [ ] Create auth module
 - [ ] Implement login endpoint
 - [ ] Implement logout endpoint
 - [ ] Add session management
----TODO_END---
+---PRD_END---
 
 That concludes the plan."#;
 
@@ -398,6 +398,43 @@ async fn planning_workflow_stub_backend_clarification_roundtrip() {
     assert!(
         prd.contains("- [ ]") || prd.contains("## TODO"),
         "PRD.md should contain TODO content (merged as last section)"
+    );
+
+    let _ = std::fs::remove_dir_all(&output_dir);
+    let _ = std::fs::remove_dir_all(&storage_dir);
+}
+
+/// Backend that returns structured response with whitespace-only prd should not produce PRD.md.
+#[tokio::test]
+async fn planning_workflow_rejects_structured_response_with_whitespace_only_prd() {
+    let structured_noop = concat!(
+        "Here is the plan.\n\n",
+        "<structured-response content-type=\"application-json\">\n",
+        r#"{"goal": "plan", "prd": "   "}"#,
+        "\n</structured-response>"
+    );
+
+    let backend = Arc::new(MockBackend::new());
+    backend.push_ok(structured_noop);
+
+    let output_dir = std::env::temp_dir().join("tddy-planning-noop-prd-test");
+    let _ = std::fs::remove_dir_all(&output_dir);
+    std::fs::create_dir_all(&output_dir).unwrap();
+
+    let storage_dir = std::env::temp_dir().join("tddy-planning-noop-prd-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let hooks = Arc::new(TddWorkflowHooks::new());
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir.clone(),
+        Some(hooks),
+    );
+
+    let result = run_plan(&engine, "another feature", &output_dir, None).await;
+    assert!(
+        result.is_err(),
+        "planning should fail when prd is whitespace-only, got: {:?}",
+        result
     );
 
     let _ = std::fs::remove_dir_all(&output_dir);

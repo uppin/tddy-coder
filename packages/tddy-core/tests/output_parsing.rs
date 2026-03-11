@@ -6,38 +6,32 @@ use tddy_core::output::{
 };
 
 #[test]
-fn extracts_prd_and_todo_from_delimited_output() {
+fn extracts_prd_with_embedded_todo_from_delimited_output() {
     let input = r#"preface
 ---PRD_START---
 # PRD
 
 ## Summary
 Feature X
----PRD_END---
-middle
----TODO_START---
+
+## TODO
+
 - [ ] Task 1
 - [ ] Task 2
----TODO_END---
+---PRD_END---
 trailing"#;
     let out = parse_planning_output(input).expect("should parse");
     assert!(out.prd.contains("Feature X"));
-    assert!(out.todo.contains("Task 1"));
+    assert!(out.prd.contains("Task 1"));
 }
 
 #[test]
 fn errors_on_missing_prd() {
-    let input = "---TODO_START---\n- [ ] Task\n---TODO_END---";
+    let input = "Some text without PRD delimiters";
     let err = parse_planning_output(input).unwrap_err();
     assert!(matches!(err, tddy_core::ParseError::MissingPrd));
 }
 
-#[test]
-fn errors_on_missing_todo() {
-    let input = "---PRD_START---\n# PRD\n---PRD_END---";
-    let err = parse_planning_output(input).unwrap_err();
-    assert!(matches!(err, tddy_core::ParseError::MissingTodo));
-}
 
 #[test]
 fn parse_update_docs_response_extracts_valid_output() {
@@ -81,6 +75,58 @@ fn enhanced_test_instructions_include_sequential_and_logging() {
     assert_eq!(red_out.tests.len(), 1);
 }
 
+/// write_artifacts rejects PlanningOutput with empty prd.
+#[test]
+fn write_artifacts_rejects_empty_prd() {
+    use tddy_core::output::{write_artifacts, PlanningOutput};
+
+    let plan_dir = std::env::temp_dir().join("tddy-write-empty-prd-test");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create dir");
+
+    let planning = PlanningOutput {
+        prd: String::new(),
+        name: None,
+        discovery: None,
+        demo_plan: None,
+        branch_suggestion: None,
+        worktree_suggestion: None,
+    };
+    let result = write_artifacts(&plan_dir, &planning);
+    assert!(
+        result.is_err(),
+        "write_artifacts should reject empty prd, got Ok"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// write_artifacts rejects PlanningOutput with whitespace-only prd.
+#[test]
+fn write_artifacts_rejects_whitespace_only_prd() {
+    use tddy_core::output::{write_artifacts, PlanningOutput};
+
+    let plan_dir = std::env::temp_dir().join("tddy-write-ws-prd-test");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create dir");
+
+    let planning = PlanningOutput {
+        prd: "   \n   ".to_string(),
+        name: None,
+        discovery: None,
+        demo_plan: None,
+        branch_suggestion: None,
+        worktree_suggestion: None,
+    };
+    let result = write_artifacts(&plan_dir, &planning);
+    assert!(
+        result.is_err(),
+        "write_artifacts should reject whitespace-only prd, got Ok"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
 /// Generated markdown files contain relative links to peer documents.
 #[test]
 fn markdown_cross_references_added() {
@@ -91,8 +137,7 @@ fn markdown_cross_references_added() {
     std::fs::create_dir_all(&plan_dir).expect("create dir");
 
     let planning = PlanningOutput {
-        prd: "# PRD\n## Summary\nFeature.".to_string(),
-        todo: "- [ ] Task 1".to_string(),
+        prd: "# PRD\n## Summary\nFeature.\n\n## TODO\n\n- [ ] Task 1".to_string(),
         name: None,
         discovery: None,
         demo_plan: None,

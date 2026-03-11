@@ -1,24 +1,33 @@
 //! Planning step prompt and system prompt construction.
 
 pub fn system_prompt() -> String {
-    r#"You are a technical planning assistant. Analyze the feature description and produce:
+    r#"You are a technical planning assistant. Analyze the feature description and produce a single PRD (Product Requirements Document) in markdown format.
 
-1. A PRD (Product Requirements Document) in markdown format
-2. A TODO list in markdown format with implementation milestones
+If you need clarification before creating the PRD, call:
+  tddy-tools ask --data '{"questions":[{"header":"<section>","question":"<text>","options":[{"label":"<choice>","description":"<desc>"}],"multiSelect":false}]}'
+The call will block until the user answers. The response contains the user's answers.
 
-If you need clarification before creating the PRD, either use the AskUserQuestion tool OR output a structured block with your questions:
+When done, submit your output by calling:
+  tddy-tools submit --schema schemas/plan.schema.json --data '<your JSON output>'
 
-<clarification-questions content-type="application-json">
-{"questions":[{"header":"<section>","question":"<text>","options":[{"label":"<choice>","description":"<desc>"}],"multiSelect":false}]}
-</clarification-questions>
+Read the JSON Schema file at `schemas/plan.schema.json` in the working directory for the exact output format. The JSON must include: goal, prd, and optionally name, discovery, demo_plan.
 
-Otherwise, you MUST include a structured-response block with your output. Read the JSON Schema file at `schemas/plan.schema.json` in the working directory for the exact output format specification. Use this exact format:
+**PRD structure** — The prd value is a single JSON string (escape quotes and newlines as needed). The PRD must include these sections in order:
 
-<structured-response content-type="application-json" schema="schemas/plan.schema.json">
-{"goal": "plan", "name": "<human-readable changeset name>", "prd": "<PRD markdown content>", "todo": "<TODO markdown content>", "discovery": {"toolchain": {"<tool>": "<version>"}, "scripts": {"<name>": "<command>"}, "doc_locations": ["<path>"], "relevant_code": [{"path": "<path>", "reason": "<why>"}], "test_infrastructure": {"runner": "<cmd>", "conventions": "<pattern>"}}, "demo_plan": {"demo_type": "cli|api|ui", "setup_instructions": "<text>", "steps": [{"description": "<text>", "command_or_action": "<cmd>", "expected_result": "<text>"}], "verification": "<text>"}}
-</structured-response>
+1. **Summary** — Brief overview of the feature
+2. **Background** — Context and motivation
+3. **Requirements** — Functional and non-functional requirements
+4. **Acceptance Criteria** — Conditions that must be met
+5. **Testing Plan** — (1) test level determination (E2E/Integration/Unit) with rationale, (2) acceptance tests with descriptive names, (3) target test file paths, (4) strong assertions for each test
+6. **TODO** — Work needed to fulfill the product requirement (implementation tasks for the feature). Do NOT list workflow steps (e.g. red phase, green phase, run tests). Use - [ ] for pending and [x] for completed. List discrete tasks in dependency order.
 
-The prd and todo values must be JSON strings (escape quotes and newlines as needed). The PRD should include: Summary, Background, Requirements, Acceptance Criteria, and a Testing Plan section. The Testing Plan must contain: (1) test level determination (E2E/Integration/Unit) with rationale, (2) a list of acceptance tests with descriptive names, (3) target test file paths (existing or new), (4) strong assertions for each test. The TODO should list discrete implementation tasks in dependency order using - [ ] for pending and [x] for completed.
+The TODO section is part of the PRD body, not a separate field. Example:
+
+## TODO
+
+- [ ] Create auth module
+- [ ] Implement login endpoint
+- [ ] Implement logout endpoint
 
 **name** (optional): A short, human-readable name for the changeset (e.g. "Auth Feature", "Stable session dir"). This appears in changeset.yaml and helps identify the session; the session directory itself is a UUID managed by the system.
 
@@ -30,13 +39,13 @@ The prd and todo values must be JSON strings (escape quotes and newlines as need
 
 **demo_plan** (optional): When the feature has a user-facing demo (CLI, API, UI), include demo_type, setup_instructions, steps with description/command_or_action/expected_result, and verification criteria.
 
-**CRITICAL**: Your response MUST contain the <structured-response> block with the actual PRD and TODO content. Do NOT return a summary, meta-commentary, or description of what you created. The parser extracts the block directly — if it is missing, the workflow fails. You may add brief explanatory text before the block, but the block itself is mandatory."#
+**CRITICAL**: You MUST call tddy-tools submit with your complete PRD content (including the TODO section). Do NOT return a summary, meta-commentary, or description of what you created. The submit call delivers the output to the workflow — if you do not call it, the workflow fails."#
         .to_string()
 }
 
 pub fn build_prompt(feature: &str) -> String {
     format!(
-        "Create a PRD and implementation TODO for the following feature:\n\n{}",
+        "Create a PRD (including ## TODO section) for the following feature:\n\n{}",
         feature
     )
 }
@@ -48,7 +57,7 @@ pub fn build_followup_prompt(feature: &str, answers: &str) -> String {
 
 {answers}
 
-Now create the PRD and TODO for: {feature}"#,
+Now create the PRD (including ## TODO section) for: {feature}"#,
         answers = answers.trim(),
         feature = feature
     )
@@ -61,7 +70,7 @@ pub fn build_refinement_prompt(feature: &str, feedback: &str) -> String {
 
 {feedback}
 
-Please revise the PRD and TODO accordingly for: {feature}"#,
+Please revise the PRD (including ## TODO section) accordingly for: {feature}"#,
         feedback = feedback.trim(),
         feature = feature
     )
@@ -81,15 +90,15 @@ mod tests {
     }
 
     #[test]
-    fn system_prompt_references_schema_and_includes_schema_attribute() {
+    fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt();
         assert!(
             prompt.contains("schemas/plan.schema.json"),
             "system prompt must reference plan schema file"
         );
         assert!(
-            prompt.contains("schema=\"schemas/plan.schema.json\""),
-            "system prompt example must include schema= attribute"
+            prompt.contains("tddy-tools submit") && prompt.contains("schemas/plan.schema.json"),
+            "system prompt must instruct agent to use tddy-tools submit with schema"
         );
     }
 

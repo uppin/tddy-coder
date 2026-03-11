@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
+use crate::toolcall::{store_submit_result, ToolCallRequest, ToolCallResponse};
 use crate::{ClarificationQuestion, SharedBackend};
 
 use crate::presenter::intent::UserIntent;
@@ -39,6 +40,12 @@ pub struct Presenter<V: PresenterView> {
     broadcast_tx: Option<tokio::sync::broadcast::Sender<PresenterEvent>>,
     /// When true, next AnswerText is refinement feedback (not clarification).
     plan_refinement_pending: bool,
+    /// Receiver for tddy-tools relay requests (Submit, Ask).
+    tool_call_rx: Option<mpsc::Receiver<ToolCallRequest>>,
+    /// When set, answers go to tool call response (Ask from tddy-tools) instead of answer_tx.
+    pending_tool_call_response_tx: Option<tokio::sync::oneshot::Sender<ToolCallResponse>>,
+    /// Stored socket path for workflow restart (dequeued prompts).
+    workflow_socket_path: Option<PathBuf>,
 }
 
 impl<V: PresenterView> Presenter<V> {
@@ -73,6 +80,9 @@ impl<V: PresenterView> Presenter<V> {
             workflow_handle: None,
             broadcast_tx: None,
             plan_refinement_pending: false,
+            tool_call_rx: None,
+            pending_tool_call_response_tx: None,
+            workflow_socket_path: None,
         }
     }
 
@@ -141,9 +151,7 @@ impl<V: PresenterView> Presenter<V> {
                         self.current_question_index += 1;
                         self.advance_to_next_question();
                         if self.clarification_answers_ready() {
-                            if let Some(ref tx) = self.answer_tx {
-                                let _ = tx.send(self.collect_answers());
-                            }
+                            self.send_clarification_answers();
                         }
                     }
                 }
@@ -153,9 +161,7 @@ impl<V: PresenterView> Presenter<V> {
                 self.current_question_index += 1;
                 self.advance_to_next_question();
                 if self.clarification_answers_ready() {
-                    if let Some(ref tx) = self.answer_tx {
-                        let _ = tx.send(self.collect_answers());
-                    }
+                    self.send_clarification_answers();
                 }
             }
             UserIntent::AnswerMultiSelect(indices, other) => {
@@ -171,9 +177,7 @@ impl<V: PresenterView> Presenter<V> {
                     self.current_question_index += 1;
                     self.advance_to_next_question();
                     if self.clarification_answers_ready() {
-                        if let Some(ref tx) = self.answer_tx {
-                            let _ = tx.send(self.collect_answers());
-                        }
+                        self.send_clarification_answers();
                     }
                 }
             }
@@ -191,9 +195,7 @@ impl<V: PresenterView> Presenter<V> {
                     self.current_question_index += 1;
                     self.advance_to_next_question();
                     if self.clarification_answers_ready() {
-                        if let Some(ref tx) = self.answer_tx {
-                            let _ = tx.send(self.collect_answers());
-                        }
+                        self.send_clarification_answers();
                     }
                 }
             }
@@ -231,6 +233,15 @@ impl<V: PresenterView> Presenter<V> {
         !self.pending_questions.is_empty()
             && self.current_question_index >= self.pending_questions.len()
             && matches!(self.state.mode, AppMode::Running)
+    }
+
+    fn send_clarification_answers(&mut self) {
+        let answers = self.collect_answers();
+        if let Some(tx) = self.pending_tool_call_response_tx.take() {
+            let _ = tx.send(ToolCallResponse::AskAnswer { answers });
+        } else if let Some(ref answer_tx) = self.answer_tx {
+            let _ = answer_tx.send(answers);
+        }
     }
 
     fn collect_answers(&self) -> String {
@@ -274,6 +285,42 @@ impl<V: PresenterView> Presenter<V> {
             self.view
                 .on_activity_logged(&entry, self.state.activity_log.len());
             self.broadcast(PresenterEvent::ActivityLogged(entry));
+        }
+    }
+
+    /// Poll for tool call requests (tddy-tools relay). Call from main loop.
+    pub fn poll_tool_calls(&mut self) {
+        let rx = match self.tool_call_rx.as_ref() {
+            Some(r) => r,
+            None => return,
+        };
+        let mut requests = Vec::new();
+        while let Ok(req) = rx.try_recv() {
+            requests.push(req);
+        }
+        for req in requests {
+            match req {
+                ToolCallRequest::Submit {
+                    goal,
+                    data,
+                    response_tx,
+                } => {
+                    let json_str = serde_json::to_string(&data).unwrap_or_default();
+                    store_submit_result(&goal, &json_str);
+                    let _ = response_tx.send(ToolCallResponse::SubmitOk { goal });
+                }
+                ToolCallRequest::Ask {
+                    questions,
+                    response_tx,
+                } => {
+                    self.flush_agent_output_buffer();
+                    self.pending_questions = questions;
+                    self.current_question_index = 0;
+                    self.collected_answers.clear();
+                    self.pending_tool_call_response_tx = Some(response_tx);
+                    self.advance_to_next_question();
+                }
+            }
         }
     }
 
@@ -388,6 +435,7 @@ impl<V: PresenterView> Presenter<V> {
                                 self.workflow_debug_output.clone(),
                                 self.workflow_debug,
                                 None,
+                                self.workflow_socket_path.clone(),
                             );
                         }
                     } else {
@@ -434,12 +482,16 @@ impl<V: PresenterView> Presenter<V> {
         debug_output_path: Option<PathBuf>,
         debug: bool,
         session_id: Option<String>,
+        socket_path: Option<PathBuf>,
+        tool_call_rx: Option<mpsc::Receiver<ToolCallRequest>>,
     ) {
         self.workflow_backend = Some(backend.clone());
         self.workflow_output_dir = Some(output_dir.clone());
         self.workflow_conversation_output = conversation_output_path.clone();
         self.workflow_debug_output = debug_output_path.clone();
         self.workflow_debug = debug;
+        self.tool_call_rx = tool_call_rx;
+        self.workflow_socket_path = socket_path.clone();
         self.spawn_workflow(
             backend,
             output_dir,
@@ -448,6 +500,7 @@ impl<V: PresenterView> Presenter<V> {
             debug_output_path,
             debug,
             session_id,
+            socket_path,
         );
     }
 
@@ -461,6 +514,7 @@ impl<V: PresenterView> Presenter<V> {
         debug_output_path: Option<PathBuf>,
         debug: bool,
         session_id: Option<String>,
+        socket_path: Option<PathBuf>,
     ) {
         let (event_tx, event_rx) = mpsc::channel();
         let (answer_tx, answer_rx) = mpsc::channel();
@@ -478,6 +532,7 @@ impl<V: PresenterView> Presenter<V> {
                 conversation_output_path,
                 debug_output_path,
                 debug,
+                socket_path,
             );
         });
 

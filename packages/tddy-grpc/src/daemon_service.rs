@@ -410,7 +410,6 @@ impl DaemonStreamHandler {
                     std::fs::read_to_string(plan_dir_path.join(PRD_FILENAME)).unwrap_or_default();
                 PlanningOutput {
                     prd,
-                    todo: String::new(),
                     name: None,
                     discovery: None,
                     demo_plan: None,

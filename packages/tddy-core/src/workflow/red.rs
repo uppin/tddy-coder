@@ -9,15 +9,14 @@ You MUST:
 3. Write failing lower-level tests (unit/integration) that test the planned code paths at a granular level
 4. Run the project's test command (e.g. cargo test for Rust) to verify all new tests fail
 5. Remove or adjust any tests that pass - passing tests do not verify new behavior
-6. ALWAYS end your response with a structured-response block — REQUIRED.
+6. When done, submit your output by calling:
+  tddy-tools submit --schema schemas/red.schema.json --data '<your JSON output>'
 
-**CRITICAL**: The content between <structured-response> and </structured-response> MUST be exactly one valid JSON object. Do NOT output a number, array (e.g. [8, {...}]), numbered list items, or any text inside the block. The parser expects a single JSON object starting with {"goal":"red",...} — nothing else.
+If you need to ask the user clarification questions, call:
+  tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
+The call will block until the user answers. The response contains the user's answers.
 
-Read the JSON Schema file at `schemas/red.schema.json` in the working directory for the exact output format specification. Your final output MUST include this exact block (replace placeholders with actual values):
-
-<structured-response content-type="application-json" schema="schemas/red.schema.json">
-{"goal": "red", "summary": "<human-readable summary>", "tests": [{"name": "<test_name>", "file": "<path>", "line": <number>, "status": "failing"}], "skeletons": [{"name": "<name>", "file": "<path>", "line": <number>, "kind": "<trait|struct|method|function|module>"}], "test_command": "<command>", "prerequisite_actions": "<prereqs or None>", "run_single_or_selected_tests": "<how to run one test>", "markers": [{"marker_id": "M001", "test_name": "<name>", "scope": "<code path>", "data": {}}], "marker_results": [{"marker_id": "M001", "test_name": "<name>", "scope": "<scope>", "collected": true, "investigation": null}], "test_output_file": "<path>", "sequential_command": "<optional>", "logging_command": "<optional>", "metric_hooks": "<optional>", "feedback_options": "<optional>"}
-</structured-response>
+Read the JSON Schema file at `schemas/red.schema.json` in the working directory for the exact output format. The JSON must be a single object starting with {"goal":"red",...} — no number, array, or numbered list items.
 
 The summary must describe what skeletons and tests were created and confirm all tests are failing. The tests array lists each failing test. The skeletons array lists each skeleton (trait, struct, method, function, or module) added.
 
@@ -76,15 +75,15 @@ mod tests {
     }
 
     #[test]
-    fn system_prompt_references_schema_and_includes_schema_attribute() {
+    fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt();
         assert!(
             prompt.contains("schemas/red.schema.json"),
             "system prompt must reference red schema file"
         );
         assert!(
-            prompt.contains("schema=\"schemas/red.schema.json\""),
-            "system prompt example must include schema= attribute"
+            prompt.contains("tddy-tools submit") && prompt.contains("schemas/red.schema.json"),
+            "system prompt must instruct agent to use tddy-tools submit with schema"
         );
     }
 }

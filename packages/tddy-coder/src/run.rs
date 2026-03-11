@@ -279,7 +279,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         args.model.as_deref().unwrap_or("(default)")
     );
 
-    let backend = create_backend(&args.agent);
+    let backend = create_backend(&args.agent, None, None);
 
     if args.goal.as_deref() == Some("acceptance-tests") {
         let plan_dir = args
@@ -440,7 +440,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     std::fs::create_dir_all(&sessions_base).context("create sessions base dir")?;
 
     let port = args.grpc.unwrap_or(50051);
-    let backend = create_backend(&args.agent);
+    let backend = create_backend(&args.agent, None, None);
     let service = tddy_grpc::DaemonService::new(sessions_base, backend);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -512,7 +512,14 @@ fn session_dir_path(args: &Args) -> Option<PathBuf> {
 }
 
 /// Create backend once at startup (plain mode, no progress events).
-fn create_backend(agent: &str) -> SharedBackend {
+/// StubBackend always uses InMemoryToolExecutor (no tddy-tools): stub simulates the agent,
+/// so it stores results directly. ProcessToolExecutor is for real agents (Claude/Cursor)
+/// that run tddy-tools submit.
+fn create_backend(
+    agent: &str,
+    _socket_path: Option<&Path>,
+    _working_dir: Option<&Path>,
+) -> SharedBackend {
     log::debug!("[tddy-coder] using agent: {}", agent);
     let backend: AnyBackend = match agent {
         "cursor" => AnyBackend::Cursor(CursorBackend::new().with_progress(on_progress)),
@@ -862,7 +869,11 @@ fn print_goal_output(goal: &str, output: Option<&str>, plan_dir: &Path) -> anyho
 fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     std::env::set_var("TDDY_QUIET", "1");
 
-    let backend = create_backend(&args.agent);
+    let (socket_path, tool_call_rx) = match tddy_core::toolcall::start_toolcall_listener() {
+        Ok((path, rx)) => (Some(path), Some(rx)),
+        Err(_) => (None, None),
+    };
+    let backend = create_backend(&args.agent, socket_path.as_deref(), args.output_dir.as_deref());
     let view = tddy_tui::TuiView::new();
     let mut presenter = Presenter::new(view, &args.agent, args.model.as_deref().unwrap_or("opus"));
 
@@ -913,6 +924,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         args.debug_output.clone(),
         args.debug,
         args.session_id.clone(),
+        socket_path,
+        tool_call_rx,
     );
 
     tddy_tui::run_event_loop(
@@ -948,7 +961,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
 }
 
 fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
-    let backend = create_backend(&args.agent);
+    let backend = create_backend(&args.agent, None, None);
 
     let mut plan_dir = if let Some(ref p) = args.plan_dir {
         p.clone()

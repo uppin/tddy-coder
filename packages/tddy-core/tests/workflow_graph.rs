@@ -22,13 +22,6 @@ use tddy_core::workflow::task::TaskResult;
 use tddy_core::workflow::task::{FailingTask, Task};
 use tddy_core::workflow::tdd_graph::{build_full_tdd_workflow_graph, build_tdd_workflow_graph};
 
-const STRUCTURED_OPEN: &str = "<structured-response";
-const STRUCTURED_CLOSE: &str = "</structured-response>";
-
-fn has_structured_block(s: &str) -> bool {
-    s.contains(STRUCTURED_OPEN) && s.contains(STRUCTURED_CLOSE)
-}
-
 /// Graph topology: build_tdd_workflow_graph creates correct edges.
 #[tokio::test]
 async fn graph_topology_plan_to_refactor_edges() {
@@ -140,12 +133,13 @@ async fn full_graph_conditional_demo_edge() {
     );
 }
 
-/// StubBackend returns valid plan output (parseable).
+/// StubBackend returns valid plan output via tool executor (parseable from take_submit_result).
+/// Uses SKIP_QUESTIONS to bypass clarification and get the plan directly.
 #[tokio::test]
 async fn stub_backend_plan_returns_valid_structured_response() {
     let backend = StubBackend::new();
     let req = tddy_core::backend::InvokeRequest {
-        prompt: "Add user auth".to_string(),
+        prompt: "SKIP_QUESTIONS Add user auth".to_string(),
         system_prompt: None,
         system_prompt_path: None,
         goal: tddy_core::backend::Goal::Plan,
@@ -160,21 +154,22 @@ async fn stub_backend_plan_returns_valid_structured_response() {
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
+        socket_path: None,
     };
 
-    let resp = backend.invoke(req).await.unwrap();
-    assert!(has_structured_block(&resp.output));
-    let parsed = parse_planning_response(&resp.output).expect("should parse plan");
+    let _resp = backend.invoke(req).await.unwrap();
+    let output = tddy_core::toolcall::take_submit_result_for_goal("plan")
+        .expect("stub stores plan via tool executor");
+    let parsed = parse_planning_response(&output).expect("should parse plan");
     assert!(!parsed.prd.is_empty());
-    assert!(!parsed.todo.is_empty());
 }
 
-/// StubBackend returns valid acceptance-tests output.
+/// StubBackend returns valid acceptance-tests output via tool executor.
 #[tokio::test]
 async fn stub_backend_acceptance_tests_returns_valid_response() {
     let backend = StubBackend::new();
     let req = tddy_core::backend::InvokeRequest {
-        prompt: "tests".to_string(),
+        prompt: "HERE ARE THE USER'S ANSWERS\n\nYes".to_string(),
         system_prompt: None,
         system_prompt_path: None,
         goal: tddy_core::backend::Goal::AcceptanceTests,
@@ -189,15 +184,18 @@ async fn stub_backend_acceptance_tests_returns_valid_response() {
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
+        socket_path: None,
     };
 
-    let resp = backend.invoke(req).await.unwrap();
-    let parsed = parse_acceptance_tests_response(&resp.output).expect("should parse");
+    let _resp = backend.invoke(req).await.unwrap();
+    let output = tddy_core::toolcall::take_submit_result_for_goal("acceptance-tests")
+        .expect("stub stores acceptance-tests via tool executor");
+    let parsed = parse_acceptance_tests_response(&output).expect("should parse");
     assert!(!parsed.summary.is_empty());
     assert!(!parsed.tests.is_empty());
 }
 
-/// StubBackend returns valid red output.
+/// StubBackend returns valid red output via tool executor.
 #[tokio::test]
 async fn stub_backend_red_returns_valid_response() {
     let backend = StubBackend::new();
@@ -217,10 +215,13 @@ async fn stub_backend_red_returns_valid_response() {
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
+        socket_path: None,
     };
 
-    let resp = backend.invoke(req).await.unwrap();
-    let parsed = parse_red_response(&resp.output).expect("should parse");
+    let _resp = backend.invoke(req).await.unwrap();
+    let output = tddy_core::toolcall::take_submit_result_for_goal("red")
+        .expect("stub stores red via tool executor");
+    let parsed = parse_red_response(&output).expect("should parse");
     assert!(!parsed.summary.is_empty());
 }
 
@@ -244,6 +245,7 @@ async fn stub_backend_update_docs_returns_valid_response() {
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
+        socket_path: None,
     };
 
     let resp = backend.invoke(req).await.unwrap();
@@ -252,7 +254,7 @@ async fn stub_backend_update_docs_returns_valid_response() {
     assert_eq!(parsed.docs_updated, 3);
 }
 
-/// StubBackend returns valid green output.
+/// StubBackend returns valid green output via tool executor.
 #[tokio::test]
 async fn stub_backend_green_returns_valid_response() {
     let backend = StubBackend::new();
@@ -272,10 +274,13 @@ async fn stub_backend_green_returns_valid_response() {
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
+        socket_path: None,
     };
 
-    let resp = backend.invoke(req).await.unwrap();
-    let parsed = parse_green_response(&resp.output).expect("should parse");
+    let _resp = backend.invoke(req).await.unwrap();
+    let output = tddy_core::toolcall::take_submit_result_for_goal("green")
+        .expect("stub stores green via tool executor");
+    let parsed = parse_green_response(&output).expect("should parse");
     assert!(!parsed.summary.is_empty());
 }
 
@@ -299,6 +304,7 @@ async fn stub_backend_clarify_with_answers_skips_questions() {
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
+        socket_path: None,
     };
 
     let resp = backend.invoke(req).await.unwrap();
@@ -328,6 +334,7 @@ async fn stub_backend_clarify_returns_questions() {
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
+        socket_path: None,
     };
 
     let resp = backend.invoke(req).await.unwrap();
@@ -354,6 +361,7 @@ async fn stub_backend_fail_invoke_returns_error() {
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
+        socket_path: None,
     };
 
     let result = backend.invoke(req).await;
@@ -380,6 +388,7 @@ async fn stub_backend_fail_parse_returns_malformed() {
         conversation_output_path: None,
         inherit_stdin: false,
         extra_allowed_tools: None,
+        socket_path: None,
     };
 
     let resp = backend.invoke(req).await.unwrap();
@@ -480,7 +489,6 @@ async fn plan_task_run_writes_parsed_planning_to_context() {
     assert!(planning.is_some(), "parsed_planning should be in context");
     let planning = planning.unwrap();
     assert!(!planning.prd.is_empty());
-    assert!(!planning.todo.is_empty());
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }
