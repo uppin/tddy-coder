@@ -15,12 +15,78 @@ use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{create_worktree, SharedBackend, WorkflowEngine};
 use tddy_core::{read_changeset, write_changeset};
 
-use crate::convert::workflow_event_to_server_message;
+use crate::convert::{plan_approval_to_server_message, workflow_event_to_server_message};
 use crate::gen::{
     client_message, server_message, tddy_remote_server::TddyRemote, GetSessionRequest,
     GetSessionResponse, ListSessionsRequest, ListSessionsResponse, ServerMessage, SessionCreated,
-    SessionInfo, WorktreeElicitation,
+    SessionInfo, WorkflowComplete, WorktreeElicitation,
 };
+
+// --- Constants ---
+
+const STREAM_CHANNEL_CAPACITY: usize = 64;
+const DAEMON_SESSION_TEMP_DIR: &str = "tddy-daemon-session";
+const DEFAULT_BRANCH_SUGGESTION: &str = "feature/impl";
+const DEFAULT_WORKTREE_SUGGESTION: &str = "feature-impl";
+const CTX_FEATURE_INPUT: &str = "feature_input";
+const CTX_OUTPUT_DIR: &str = "output_dir";
+const CTX_SESSION_BASE: &str = "session_base";
+const CTX_SESSION_ID: &str = "session_id";
+const CTX_PLAN_DIR: &str = "plan_dir";
+const CTX_WORKTREE_DIR: &str = "worktree_dir";
+const PRD_FILENAME: &str = "PRD.md";
+const CHANGESET_FILENAME: &str = "changeset.yaml";
+
+// --- Helpers ---
+
+/// Receive next client message. On Ok(None) or Err, returns None and may send error to tx.
+async fn recv_client_message(
+    client_stream: &mut tonic::codec::Streaming<crate::gen::ClientMessage>,
+    tx: &tokio_mpsc::Sender<Result<ServerMessage, Status>>,
+) -> Option<crate::gen::ClientMessage> {
+    match client_stream.message().await {
+        Ok(Some(m)) => Some(m),
+        Ok(None) => None,
+        Err(e) => {
+            let _ = tx
+                .send(Err(Status::internal(format!("stream error: {}", e))))
+                .await;
+            None
+        }
+    }
+}
+
+/// Construct and send WorkflowComplete ServerMessage.
+async fn send_workflow_complete(
+    tx: &tokio_mpsc::Sender<Result<ServerMessage, Status>>,
+    ok: bool,
+    message: String,
+) {
+    let _ = tx
+        .send(Ok(ServerMessage {
+            event: Some(server_message::Event::WorkflowComplete(WorkflowComplete {
+                ok,
+                message,
+            })),
+        }))
+        .await;
+}
+
+/// Spawn a thread that forwards workflow events from rx to tx.
+/// This avoids holding the non-Send mpsc::Receiver in async code.
+fn spawn_event_forwarder(
+    rx: mpsc::Receiver<tddy_core::WorkflowEvent>,
+    tx: tokio_mpsc::Sender<Result<ServerMessage, Status>>,
+) {
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Handle::current();
+        while let Ok(ev) = rx.recv() {
+            if let Some(msg) = workflow_event_to_server_message(ev) {
+                let _ = rt.block_on(tx.send(Ok(msg)));
+            }
+        }
+    });
+}
 
 /// Daemon gRPC service. Reads session state from disk; runs workflow on Stream.
 pub struct DaemonService {
@@ -61,336 +127,14 @@ impl TddyRemote for DaemonService {
         &self,
         request: Request<tonic::codec::Streaming<crate::gen::ClientMessage>>,
     ) -> Result<Response<Self::StreamStream>, Status> {
-        let (tx, rx) = tokio_mpsc::channel(64);
-        let sessions_base = self.sessions_base.clone();
-        let backend = self.backend.clone();
-
-        let mut client_stream = request.into_inner();
-
-        tokio::spawn(async move {
-            let mut state = DaemonStreamState::Idle;
-            let mut session_id: Option<String> = None;
-            let mut plan_dir: Option<PathBuf> = None;
-            let mut repo_root: Option<PathBuf> = None;
-            let mut engine: Option<WorkflowEngine> = None;
-            let mut event_rx: Option<mpsc::Receiver<tddy_core::WorkflowEvent>> = None;
-
-            loop {
-                match state {
-                    DaemonStreamState::Idle => {
-                        let msg = match client_stream.message().await {
-                            Ok(Some(m)) => m,
-                            Ok(None) => break,
-                            Err(e) => {
-                                let _ = tx
-                                    .send(Err(Status::internal(format!("stream error: {}", e))))
-                                    .await;
-                                break;
-                            }
-                        };
-
-                        if let Some(client_message::Intent::StartSession(start)) = msg.intent {
-                            let prompt = start.prompt;
-                            let repo = if start.repo_root.is_empty() {
-                                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-                            } else {
-                                PathBuf::from(start.repo_root)
-                            };
-
-                            std::fs::create_dir_all(&sessions_base)
-                                .map_err(|e| {
-                                    Status::internal(format!("create sessions base: {}", e))
-                                })
-                                .ok();
-
-                            let sid = uuid::Uuid::new_v4().to_string();
-                            let plan = create_session_dir_under(&sessions_base, &sid)
-                                .map_err(|e| Status::internal(format!("create session dir: {}", e)))
-                                .unwrap();
-
-                            session_id = Some(sid.clone());
-                            plan_dir = Some(plan.clone());
-                            repo_root = Some(repo.clone());
-
-                            let storage_dir = std::env::temp_dir().join("tddy-daemon-session");
-                            std::fs::create_dir_all(&storage_dir).ok();
-
-                            let (event_tx, rx) = mpsc::channel();
-                            event_rx = Some(rx);
-                            let hooks = Arc::new(TddWorkflowHooks::with_event_tx(event_tx));
-                            let eng =
-                                WorkflowEngine::new(backend.clone(), storage_dir, Some(hooks));
-                            engine = Some(eng);
-
-                            let mut ctx = std::collections::HashMap::new();
-                            ctx.insert("feature_input".to_string(), serde_json::json!(prompt));
-                            ctx.insert(
-                                "output_dir".to_string(),
-                                serde_json::to_value(repo.clone()).unwrap(),
-                            );
-                            ctx.insert(
-                                "session_base".to_string(),
-                                serde_json::to_value(sessions_base.clone()).unwrap(),
-                            );
-                            ctx.insert("session_id".to_string(), serde_json::json!(sid.clone()));
-                            ctx.insert(
-                                "plan_dir".to_string(),
-                                serde_json::to_value(plan.clone()).unwrap(),
-                            );
-
-                            let _ = tx
-                                .send(Ok(ServerMessage {
-                                    event: Some(server_message::Event::SessionCreated(
-                                        SessionCreated {
-                                            session_id: sid.clone(),
-                                        },
-                                    )),
-                                }))
-                                .await;
-
-                            let rt = tokio::runtime::Handle::current();
-                            let result = rt
-                                .block_on(engine.as_ref().unwrap().run_goal("plan", ctx))
-                                .map_err(|e| Status::internal(format!("run_goal: {}", e)))
-                                .unwrap();
-
-                            match result.status {
-                                ExecutionStatus::ElicitationNeeded {
-                                    event: ElicitationEvent::PlanApproval { prd_content },
-                                } => {
-                                    let _ = tx
-                                        .send(Ok(crate::convert::plan_approval_to_server_message(
-                                            prd_content,
-                                        )))
-                                        .await;
-                                    state = DaemonStreamState::WaitingApprovePlan;
-                                }
-                                ExecutionStatus::Completed => {
-                                    state = DaemonStreamState::PlanComplete;
-                                }
-                                ExecutionStatus::Error(msg) => {
-                                    let _ = tx
-                                        .send(Ok(ServerMessage {
-                                            event: Some(server_message::Event::WorkflowComplete(
-                                                crate::gen::WorkflowComplete {
-                                                    ok: false,
-                                                    message: msg,
-                                                },
-                                            )),
-                                        }))
-                                        .await;
-                                    break;
-                                }
-                                _ => {
-                                    state = DaemonStreamState::PlanComplete;
-                                }
-                            }
-
-                            while let Ok(ev) = event_rx.as_ref().unwrap().try_recv() {
-                                if let Some(msg) = workflow_event_to_server_message(ev) {
-                                    let _ = tx.send(Ok(msg)).await;
-                                }
-                            }
-                        }
-                    }
-                    DaemonStreamState::WaitingApprovePlan => {
-                        let msg = match client_stream.message().await {
-                            Ok(Some(m)) => m,
-                            Ok(None) => break,
-                            Err(e) => {
-                                let _ = tx
-                                    .send(Err(Status::internal(format!("stream error: {}", e))))
-                                    .await;
-                                break;
-                            }
-                        };
-
-                        if let Some(client_message::Intent::ApprovePlan(_)) = msg.intent {
-                            let plan_dir_path = plan_dir.as_ref().unwrap();
-                            let rt = tokio::runtime::Handle::current();
-                            let planning: PlanningOutput = engine
-                                .as_ref()
-                                .and_then(|e| {
-                                    rt.block_on(e.get_session(session_id.as_ref().unwrap()))
-                                        .ok()
-                                        .flatten()
-                                })
-                                .and_then(|s| s.context.get_sync::<String>("output"))
-                                .and_then(|o| parse_planning_response(&o).ok())
-                                .unwrap_or_else(|| {
-                                    let prd = std::fs::read_to_string(plan_dir_path.join("PRD.md"))
-                                        .unwrap_or_default();
-                                    PlanningOutput {
-                                        prd,
-                                        todo: String::new(),
-                                        name: None,
-                                        discovery: None,
-                                        demo_plan: None,
-                                        branch_suggestion: None,
-                                        worktree_suggestion: None,
-                                    }
-                                });
-
-                            let suggested_branch = planning
-                                .branch_suggestion
-                                .clone()
-                                .unwrap_or_else(|| "feature/impl".to_string());
-                            let suggested_worktree = planning
-                                .worktree_suggestion
-                                .clone()
-                                .or_else(|| planning.name.clone())
-                                .unwrap_or_else(|| "feature-impl".to_string());
-
-                            let _ = tx
-                                .send(Ok(ServerMessage {
-                                    event: Some(server_message::Event::WorktreeElicitation(
-                                        WorktreeElicitation {
-                                            suggested_branch: suggested_branch.clone(),
-                                            suggested_worktree: suggested_worktree.clone(),
-                                        },
-                                    )),
-                                }))
-                                .await;
-                            state = DaemonStreamState::WaitingConfirmWorktree {
-                                suggested_branch,
-                                suggested_worktree,
-                            };
-                        }
-                    }
-                    DaemonStreamState::WaitingConfirmWorktree {
-                        ref suggested_branch,
-                        ref suggested_worktree,
-                    } => {
-                        let msg = match client_stream.message().await {
-                            Ok(Some(m)) => m,
-                            Ok(None) => break,
-                            Err(e) => {
-                                let _ = tx
-                                    .send(Err(Status::internal(format!("stream error: {}", e))))
-                                    .await;
-                                break;
-                            }
-                        };
-
-                        if let Some(client_message::Intent::ConfirmWorktree(confirm)) = msg.intent {
-                            let branch = if confirm.branch.is_empty() {
-                                suggested_branch.clone()
-                            } else {
-                                confirm.branch.clone()
-                            };
-                            let worktree_name = if confirm.worktree_name.is_empty() {
-                                suggested_worktree.clone()
-                            } else {
-                                confirm.worktree_name.clone()
-                            };
-
-                            let repo = repo_root.as_ref().unwrap();
-                            let worktree_path = match create_worktree(repo, &worktree_name, &branch)
-                            {
-                                Ok(p) => p,
-                                Err(e) => {
-                                    let _ = tx
-                                        .send(Ok(ServerMessage {
-                                            event: Some(server_message::Event::WorkflowComplete(
-                                                crate::gen::WorkflowComplete {
-                                                    ok: false,
-                                                    message: e,
-                                                },
-                                            )),
-                                        }))
-                                        .await;
-                                    break;
-                                }
-                            };
-
-                            let plan_dir_path = plan_dir.as_ref().unwrap();
-                            let mut cs = read_changeset(plan_dir_path).unwrap_or_default();
-                            cs.branch = Some(branch.clone());
-                            cs.worktree = Some(worktree_path.to_string_lossy().to_string());
-                            let _ = write_changeset(plan_dir_path, &cs);
-
-                            let eng = engine.as_ref().unwrap();
-                            let sid = session_id.as_ref().unwrap();
-                            let mut updates = std::collections::HashMap::new();
-                            updates.insert(
-                                "worktree_dir".to_string(),
-                                serde_json::to_value(worktree_path.clone()).unwrap(),
-                            );
-                            let rt = tokio::runtime::Handle::current();
-                            rt.block_on(eng.update_session_context(sid, updates))
-                                .map_err(|e| Status::internal(format!("update session: {}", e)))
-                                .unwrap();
-
-                            let mut result = rt
-                                .block_on(eng.run_session(sid))
-                                .map_err(|e| Status::internal(format!("run_session: {}", e)))
-                                .unwrap();
-
-                            loop {
-                                while let Ok(ev) = event_rx.as_ref().unwrap().try_recv() {
-                                    if let Some(msg) = workflow_event_to_server_message(ev) {
-                                        let _ = tx.send(Ok(msg)).await;
-                                    }
-                                }
-                                match &result.status {
-                                    ExecutionStatus::Completed => {
-                                        let _ = tx
-                                            .send(Ok(ServerMessage {
-                                                event: Some(
-                                                    server_message::Event::WorkflowComplete(
-                                                        crate::gen::WorkflowComplete {
-                                                            ok: true,
-                                                            message: "Workflow complete"
-                                                                .to_string(),
-                                                        },
-                                                    ),
-                                                ),
-                                            }))
-                                            .await;
-                                        break;
-                                    }
-                                    ExecutionStatus::Error(msg) => {
-                                        let _ = tx
-                                            .send(Ok(ServerMessage {
-                                                event: Some(
-                                                    server_message::Event::WorkflowComplete(
-                                                        crate::gen::WorkflowComplete {
-                                                            ok: false,
-                                                            message: msg.clone(),
-                                                        },
-                                                    ),
-                                                ),
-                                            }))
-                                            .await;
-                                        break;
-                                    }
-                                    ExecutionStatus::ElicitationNeeded { .. }
-                                    | ExecutionStatus::WaitingForInput { .. } => {
-                                        let _ = tx
-                                            .send(Err(Status::unimplemented(
-                                                "daemon does not support clarification after worktree",
-                                            )))
-                                            .await;
-                                        break;
-                                    }
-                                    ExecutionStatus::Paused { .. } => {
-                                        result = rt
-                                            .block_on(eng.run_session(sid))
-                                            .map_err(|e| {
-                                                Status::internal(format!("run_session: {}", e))
-                                            })
-                                            .unwrap();
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                    }
-                    DaemonStreamState::PlanComplete => break,
-                }
-            }
-        });
-
+        let (tx, rx) = tokio_mpsc::channel(STREAM_CHANNEL_CAPACITY);
+        let handler = DaemonStreamHandler::new(
+            self.sessions_base.clone(),
+            self.backend.clone(),
+            request.into_inner(),
+            tx,
+        );
+        tokio::spawn(handler.run());
         Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
             rx,
         )))
@@ -442,7 +186,7 @@ impl TddyRemote for DaemonService {
             let entry = entry.map_err(|e| Status::internal(format!("read dir entry: {}", e)))?;
             let path = entry.path();
             if path.is_dir() {
-                let changeset_path = path.join("changeset.yaml");
+                let changeset_path = path.join(CHANGESET_FILENAME);
                 if changeset_path.exists() {
                     if let Ok(changeset) = read_changeset(&path) {
                         let session_id = path
@@ -476,4 +220,318 @@ enum DaemonStreamState {
         suggested_worktree: String,
     },
     PlanComplete,
+}
+
+/// Handles the bidirectional stream: receives ClientMessage, runs workflow, sends ServerMessage.
+struct DaemonStreamHandler {
+    sessions_base: PathBuf,
+    backend: SharedBackend,
+    client_stream: tonic::codec::Streaming<crate::gen::ClientMessage>,
+    tx: tokio_mpsc::Sender<Result<ServerMessage, Status>>,
+    state: DaemonStreamState,
+    session_id: Option<String>,
+    plan_dir: Option<PathBuf>,
+    repo_root: Option<PathBuf>,
+    engine: Option<WorkflowEngine>,
+}
+
+impl DaemonStreamHandler {
+    fn new(
+        sessions_base: PathBuf,
+        backend: SharedBackend,
+        client_stream: tonic::codec::Streaming<crate::gen::ClientMessage>,
+        tx: tokio_mpsc::Sender<Result<ServerMessage, Status>>,
+    ) -> Self {
+        Self {
+            sessions_base,
+            backend,
+            client_stream,
+            tx,
+            state: DaemonStreamState::Idle,
+            session_id: None,
+            plan_dir: None,
+            repo_root: None,
+            engine: None,
+        }
+    }
+
+    async fn run(mut self) {
+        loop {
+            if matches!(&self.state, DaemonStreamState::PlanComplete) {
+                break;
+            }
+
+            let msg = match recv_client_message(&mut self.client_stream, &self.tx).await {
+                Some(m) => m,
+                None => break,
+            };
+
+            let should_break = match &self.state {
+                DaemonStreamState::Idle => {
+                    if let Some(client_message::Intent::StartSession(start)) = msg.intent {
+                        self.handle_start_session(&start).await
+                    } else {
+                        false
+                    }
+                }
+                DaemonStreamState::WaitingApprovePlan => {
+                    if let Some(client_message::Intent::ApprovePlan(_)) = msg.intent {
+                        self.handle_approve_plan().await;
+                    }
+                    false
+                }
+                DaemonStreamState::WaitingConfirmWorktree {
+                    suggested_branch,
+                    suggested_worktree,
+                } => {
+                    if let Some(client_message::Intent::ConfirmWorktree(confirm)) = msg.intent {
+                        self.handle_confirm_worktree(
+                            suggested_branch.clone(),
+                            suggested_worktree.clone(),
+                            &confirm,
+                        )
+                        .await;
+                        true
+                    } else {
+                        false
+                    }
+                }
+                DaemonStreamState::PlanComplete => unreachable!(),
+            };
+
+            if should_break {
+                break;
+            }
+        }
+    }
+
+    /// Returns true if the run loop should break (e.g. on Error).
+    async fn handle_start_session(&mut self, start: &crate::gen::StartSession) -> bool {
+        let prompt = start.prompt.clone();
+        let repo = if start.repo_root.is_empty() {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        } else {
+            PathBuf::from(&start.repo_root)
+        };
+
+        std::fs::create_dir_all(&self.sessions_base)
+            .map_err(|e| Status::internal(format!("create sessions base: {}", e)))
+            .ok();
+
+        let sid = uuid::Uuid::new_v4().to_string();
+        let plan = create_session_dir_under(&self.sessions_base, &sid)
+            .map_err(|e| Status::internal(format!("create session dir: {}", e)))
+            .unwrap();
+
+        self.session_id = Some(sid.clone());
+        self.plan_dir = Some(plan.clone());
+        self.repo_root = Some(repo.clone());
+
+        let storage_dir = std::env::temp_dir().join(DAEMON_SESSION_TEMP_DIR);
+        std::fs::create_dir_all(&storage_dir).ok();
+
+        let (event_tx, rx) = mpsc::channel();
+        spawn_event_forwarder(rx, self.tx.clone());
+        let hooks = Arc::new(TddWorkflowHooks::with_event_tx(event_tx));
+        let eng = WorkflowEngine::new(self.backend.clone(), storage_dir, Some(hooks));
+        self.engine = Some(eng);
+
+        let mut ctx = std::collections::HashMap::new();
+        ctx.insert(CTX_FEATURE_INPUT.to_string(), serde_json::json!(prompt));
+        ctx.insert(
+            CTX_OUTPUT_DIR.to_string(),
+            serde_json::to_value(repo.clone()).unwrap(),
+        );
+        ctx.insert(
+            CTX_SESSION_BASE.to_string(),
+            serde_json::to_value(self.sessions_base.clone()).unwrap(),
+        );
+        ctx.insert(CTX_SESSION_ID.to_string(), serde_json::json!(sid.clone()));
+        ctx.insert(
+            CTX_PLAN_DIR.to_string(),
+            serde_json::to_value(plan.clone()).unwrap(),
+        );
+
+        let _ = self
+            .tx
+            .send(Ok(ServerMessage {
+                event: Some(server_message::Event::SessionCreated(SessionCreated {
+                    session_id: sid.clone(),
+                })),
+            }))
+            .await;
+
+        let rt = tokio::runtime::Handle::current();
+        let result = rt
+            .block_on(self.engine.as_ref().unwrap().run_goal("plan", ctx))
+            .map_err(|e| Status::internal(format!("run_goal: {}", e)))
+            .unwrap();
+
+        match result.status {
+            ExecutionStatus::ElicitationNeeded {
+                event: ElicitationEvent::PlanApproval { prd_content },
+            } => {
+                let _ = self
+                    .tx
+                    .send(Ok(plan_approval_to_server_message(prd_content)))
+                    .await;
+                self.state = DaemonStreamState::WaitingApprovePlan;
+            }
+            ExecutionStatus::Completed => {
+                self.state = DaemonStreamState::PlanComplete;
+            }
+            ExecutionStatus::Error(msg) => {
+                send_workflow_complete(&self.tx, false, msg).await;
+                return true;
+            }
+            _ => {
+                self.state = DaemonStreamState::PlanComplete;
+            }
+        }
+
+        false
+    }
+
+    async fn handle_approve_plan(&mut self) {
+        let plan_dir_path = self.plan_dir.as_ref().unwrap();
+        let rt = tokio::runtime::Handle::current();
+        let planning: PlanningOutput = self
+            .engine
+            .as_ref()
+            .and_then(|e| {
+                rt.block_on(e.get_session(self.session_id.as_ref().unwrap()))
+                    .ok()
+                    .flatten()
+            })
+            .and_then(|s| s.context.get_sync::<String>("output"))
+            .and_then(|o| parse_planning_response(&o).ok())
+            .unwrap_or_else(|| {
+                let prd =
+                    std::fs::read_to_string(plan_dir_path.join(PRD_FILENAME)).unwrap_or_default();
+                PlanningOutput {
+                    prd,
+                    todo: String::new(),
+                    name: None,
+                    discovery: None,
+                    demo_plan: None,
+                    branch_suggestion: None,
+                    worktree_suggestion: None,
+                }
+            });
+
+        let suggested_branch = planning
+            .branch_suggestion
+            .clone()
+            .unwrap_or_else(|| DEFAULT_BRANCH_SUGGESTION.to_string());
+        let suggested_worktree = planning
+            .worktree_suggestion
+            .clone()
+            .or_else(|| planning.name.clone())
+            .unwrap_or_else(|| DEFAULT_WORKTREE_SUGGESTION.to_string());
+
+        let _ = self
+            .tx
+            .send(Ok(ServerMessage {
+                event: Some(server_message::Event::WorktreeElicitation(
+                    WorktreeElicitation {
+                        suggested_branch: suggested_branch.clone(),
+                        suggested_worktree: suggested_worktree.clone(),
+                    },
+                )),
+            }))
+            .await;
+        self.state = DaemonStreamState::WaitingConfirmWorktree {
+            suggested_branch,
+            suggested_worktree,
+        };
+    }
+
+    async fn handle_confirm_worktree(
+        &mut self,
+        suggested_branch: String,
+        suggested_worktree: String,
+        confirm: &crate::gen::ConfirmWorktree,
+    ) {
+        let branch = if confirm.branch.is_empty() {
+            suggested_branch
+        } else {
+            confirm.branch.clone()
+        };
+        let worktree_name = if confirm.worktree_name.is_empty() {
+            suggested_worktree
+        } else {
+            confirm.worktree_name.clone()
+        };
+
+        let repo = self.repo_root.as_ref().unwrap();
+        let worktree_path = match create_worktree(repo, &worktree_name, &branch) {
+            Ok(p) => p,
+            Err(e) => {
+                send_workflow_complete(&self.tx, false, e).await;
+                return;
+            }
+        };
+
+        let plan_dir_path = self.plan_dir.as_ref().unwrap();
+        let mut cs = read_changeset(plan_dir_path).unwrap_or_default();
+        cs.branch = Some(branch.clone());
+        cs.worktree = Some(worktree_path.to_string_lossy().to_string());
+        let _ = write_changeset(plan_dir_path, &cs);
+
+        let eng = self.engine.as_ref().unwrap();
+        let sid = self.session_id.as_ref().unwrap();
+        let mut updates = std::collections::HashMap::new();
+        updates.insert(
+            CTX_WORKTREE_DIR.to_string(),
+            serde_json::to_value(worktree_path.clone()).unwrap(),
+        );
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(eng.update_session_context(sid, updates))
+            .map_err(|e| Status::internal(format!("update session: {}", e)))
+            .unwrap();
+
+        let tx = self.tx.clone();
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(Self::run_session_until_complete(&tx, eng, sid));
+    }
+
+    async fn run_session_until_complete(
+        tx: &tokio_mpsc::Sender<Result<ServerMessage, Status>>,
+        eng: &WorkflowEngine,
+        sid: &str,
+    ) {
+        let rt = tokio::runtime::Handle::current();
+        let mut result = rt
+            .block_on(eng.run_session(sid))
+            .map_err(|e| Status::internal(format!("run_session: {}", e)))
+            .unwrap();
+
+        loop {
+            match &result.status {
+                ExecutionStatus::Completed => {
+                    send_workflow_complete(tx, true, "Workflow complete".to_string()).await;
+                    break;
+                }
+                ExecutionStatus::Error(msg) => {
+                    send_workflow_complete(tx, false, msg.clone()).await;
+                    break;
+                }
+                ExecutionStatus::ElicitationNeeded { .. }
+                | ExecutionStatus::WaitingForInput { .. } => {
+                    let _ = tx
+                        .send(Err(Status::unimplemented(
+                            "daemon does not support clarification after worktree",
+                        )))
+                        .await;
+                    break;
+                }
+                ExecutionStatus::Paused { .. } => {
+                    result = rt
+                        .block_on(eng.run_session(sid))
+                        .map_err(|e| Status::internal(format!("run_session: {}", e)))
+                        .unwrap();
+                }
+            }
+        }
+    }
 }
