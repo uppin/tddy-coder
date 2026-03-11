@@ -129,6 +129,237 @@ mod tests {
     }
 }
 
+/// StreamTerminal acceptance tests: terminal byte streaming via gRPC.
+#[cfg(test)]
+mod stream_terminal_tests {
+    use std::sync::mpsc;
+
+    use tokio::sync::broadcast;
+    use tonic::transport::Server;
+    use tonic::Request;
+
+    use crate::gen::tddy_remote_server::TddyRemoteServer;
+    use crate::gen::{tddy_remote_client::TddyRemoteClient, StreamTerminalRequest};
+    use crate::TddyRemoteService;
+    use tddy_core::PresenterHandle;
+
+    fn service_without_terminal_bytes() -> TddyRemoteService {
+        let (event_tx, _) = broadcast::channel(256);
+        let (intent_tx, _) = mpsc::channel();
+        let handle = PresenterHandle {
+            event_tx,
+            intent_tx,
+        };
+        TddyRemoteService::new(handle)
+    }
+
+    #[tokio::test]
+    async fn stream_terminal_returns_bytes() {
+        let (byte_tx, _) = broadcast::channel::<Vec<u8>>(256);
+        let (event_tx, _) = broadcast::channel(256);
+        let (intent_tx, _) = mpsc::channel();
+        let handle = PresenterHandle {
+            event_tx,
+            intent_tx,
+        };
+        let service = TddyRemoteService::new(handle).with_terminal_bytes(byte_tx.clone());
+
+        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(TddyRemoteServer::new(service))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+        });
+
+        let mut client = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
+            .await
+            .unwrap();
+
+        let mut stream = client
+            .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let _ = byte_tx.send(b"hello terminal".to_vec());
+
+        let mut received_bytes = Vec::new();
+        for _ in 0..20 {
+            match tokio::time::timeout(std::time::Duration::from_millis(100), stream.message())
+                .await
+            {
+                Ok(Ok(Some(msg))) => received_bytes.extend_from_slice(&msg.data),
+                Ok(Ok(None)) => break,
+                _ => {}
+            }
+        }
+
+        assert!(
+            !received_bytes.is_empty(),
+            "Expected at least one TerminalOutput with non-empty bytes, got none"
+        );
+    }
+
+    #[tokio::test]
+    async fn streamed_bytes_contain_ansi_sequences() {
+        let (byte_tx, _) = broadcast::channel::<Vec<u8>>(256);
+        let (event_tx, _) = broadcast::channel(256);
+        let (intent_tx, _) = mpsc::channel();
+        let handle = PresenterHandle {
+            event_tx,
+            intent_tx,
+        };
+        let service = TddyRemoteService::new(handle).with_terminal_bytes(byte_tx.clone());
+
+        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(TddyRemoteServer::new(service))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+        });
+
+        let mut client = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
+            .await
+            .unwrap();
+
+        let mut stream = client
+            .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let _ = byte_tx.send(b"\x1b[2J\x1b[H".to_vec());
+
+        let mut all_bytes = Vec::new();
+        for _ in 0..20 {
+            match tokio::time::timeout(std::time::Duration::from_millis(100), stream.message())
+                .await
+            {
+                Ok(Ok(Some(msg))) => all_bytes.extend_from_slice(&msg.data),
+                Ok(Ok(None)) => break,
+                _ => {}
+            }
+        }
+
+        let has_csi = all_bytes.windows(2).any(|w| w == b"\x1b[");
+        assert!(
+            has_csi,
+            "Expected ANSI CSI escape sequences (\\x1b[) in streamed bytes, got: {:?}",
+            &all_bytes[..all_bytes.len().min(100)]
+        );
+    }
+
+    #[tokio::test]
+    async fn multiple_clients_receive_same_stream() {
+        let (byte_tx, _) = broadcast::channel::<Vec<u8>>(256);
+        let (event_tx, _) = broadcast::channel(256);
+        let (intent_tx, _) = mpsc::channel();
+        let handle = PresenterHandle {
+            event_tx,
+            intent_tx,
+        };
+        let service = TddyRemoteService::new(handle).with_terminal_bytes(byte_tx.clone());
+
+        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(TddyRemoteServer::new(service))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+        });
+
+        let mut client1 = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
+            .await
+            .unwrap();
+        let mut client2 = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
+            .await
+            .unwrap();
+
+        let mut stream1 = client1
+            .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
+            .await
+            .unwrap()
+            .into_inner();
+        let mut stream2 = client2
+            .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let _ = byte_tx.send(b"\x1b[2J\x1b[H".to_vec());
+
+        let msg1 =
+            match tokio::time::timeout(std::time::Duration::from_millis(100), stream1.message())
+                .await
+            {
+                Ok(Ok(Some(m))) => Some(m),
+                _ => None,
+            };
+        let msg2 =
+            match tokio::time::timeout(std::time::Duration::from_millis(100), stream2.message())
+                .await
+            {
+                Ok(Ok(Some(m))) => Some(m),
+                _ => None,
+            };
+
+        assert_eq!(
+            msg1.as_ref().map(|m| m.data.as_slice()),
+            msg2.as_ref().map(|m| m.data.as_slice()),
+            "Both clients should receive the same bytes"
+        );
+        assert!(
+            msg1.as_ref().map_or(false, |m| !m.data.is_empty()),
+            "Both clients should receive non-empty bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_terminal_returns_empty_stream_when_no_terminal_bytes() {
+        let service = service_without_terminal_bytes();
+        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(TddyRemoteServer::new(service))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+        });
+
+        let mut client = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
+            .await
+            .unwrap();
+
+        let mut stream = client
+            .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let first =
+            tokio::time::timeout(std::time::Duration::from_millis(50), stream.message()).await;
+
+        assert!(
+            matches!(first, Ok(Ok(None))),
+            "Stream without terminal bytes should end immediately with None, got: {:?}",
+            first
+        );
+    }
+}
+
 /// Daemon acceptance tests: GetSession and ListSessions read from disk.
 #[cfg(test)]
 mod daemon_tests {

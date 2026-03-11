@@ -32,7 +32,6 @@ fn errors_on_missing_prd() {
     assert!(matches!(err, tddy_core::ParseError::MissingPrd));
 }
 
-
 #[test]
 fn parse_update_docs_response_extracts_valid_output() {
     let input = r#"Documentation updated.

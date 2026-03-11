@@ -13,20 +13,25 @@ use ratatui::Terminal;
 
 use tddy_core::{Presenter, UserIntent};
 
+use crate::capturing_writer::CapturingWriter;
 use crate::key_map::key_event_to_intent;
 use crate::raw::{disable_raw_mode, enable_raw_mode_keep_sig};
 use crate::render::draw;
 use crate::tui_view::TuiView;
+use crate::ByteCallback;
 
 /// Run the TUI event loop with the given Presenter.
 /// The Presenter must have been started (start_workflow called) before this runs.
 /// When `external_intents` is Some, intents from that channel are drained and applied
 /// (e.g. from gRPC clients when --grpc is used).
+/// When `byte_capture` is Some, all terminal output is captured and passed to the callback
+/// (e.g. for gRPC terminal streaming when --grpc is used).
 /// When `debug` is true, the debug log area is shown; otherwise it is hidden.
 pub fn run_event_loop(
     presenter: &mut Presenter<TuiView>,
     shutdown: &AtomicBool,
     external_intents: Option<mpsc::Receiver<UserIntent>>,
+    byte_capture: Option<ByteCallback>,
     debug: bool,
 ) -> anyhow::Result<()> {
     if shutdown.load(Ordering::Relaxed) {
@@ -41,9 +46,13 @@ pub fn run_event_loop(
     }));
 
     enable_raw_mode_keep_sig()?;
-    execute!(std::io::stdout(), EnterAlternateScreen)?;
 
-    let backend = CrosstermBackend::new(std::io::stdout());
+    fn noop(_: &[u8]) {}
+    let on_write = byte_capture.unwrap_or_else(|| Box::new(noop) as ByteCallback);
+    let mut writer = CapturingWriter::new(on_write);
+    execute!(&mut writer, EnterAlternateScreen)?;
+    let mut writer_for_execute = writer.clone();
+    let backend = CrosstermBackend::new(writer);
     let mut terminal = Terminal::new(backend)?;
 
     loop {
@@ -114,7 +123,7 @@ pub fn run_event_loop(
         presenter.poll_workflow();
     }
 
-    execute!(std::io::stdout(), LeaveAlternateScreen, Show)?;
+    execute!(&mut writer_for_execute, LeaveAlternateScreen, Show)?;
     disable_raw_mode()?;
 
     Ok(())

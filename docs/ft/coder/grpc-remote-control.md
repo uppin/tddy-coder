@@ -78,7 +78,17 @@ The `--daemon` flag starts a headless gRPC server (no TUI) suitable for systemd 
 
 **Configuration**: Sessions base is `--output-dir` or `~/.tddy/sessions`. Port defaults to 50051 (`--grpc`). Graceful shutdown on SIGTERM.
 
-### 6. Codegen tooling
+### 6. Terminal streaming (TUI mode)
+
+When `--grpc` is set with TUI, the gRPC server exposes `StreamTerminal` RPC:
+
+- **StreamTerminal**: Server-streaming RPC that delivers raw ANSI bytes from ratatui/crossterm rendering
+- **TerminalOutput**: Message with `bytes data` — the exact byte stream a terminal would see
+- **Use case**: Remote TUI viewer; clients pipe bytes into a terminal emulator to render the TUI remotely
+- **Broadcast**: Multiple clients can subscribe; slow clients may miss frames (acceptable for terminal streaming)
+- **Capture**: `CapturingWriter` in tddy-tui wraps stdout and invokes a callback on each write; tddy-coder wires a broadcast channel to `TddyRemoteService::with_terminal_bytes`
+
+### 7. Codegen tooling
 
 - Use **Buf** for proto management and code generation (prost plugin)
 - Add `buf` to the Nix flake devShell
