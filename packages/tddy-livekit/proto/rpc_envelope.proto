@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package rpc;
+
+// RPC request envelope for multiplexing over LiveKit data channel
+message RpcRequest {
+  int32 request_id = 1;
+  bytes request_message = 2;
+  CallMetadata call_metadata = 3;
+  Metadata metadata = 4;
+  bool end_of_stream = 5;
+  bool abort = 6;
+}
+
+// RPC response envelope (one message per LiveKit data packet)
+message RpcResponse {
+  int32 request_id = 1;
+  bytes response_message = 2;
+  Metadata metadata = 3;
+  bool end_of_stream = 4;
+  RpcError error = 5;
+  Metadata trailers = 6;
+}
+
+message CallMetadata {
+  string service = 1;
+  string method = 2;
+}
+
+message Metadata {
+  map<string, string> values = 1;
+}
+
+message RpcError {
+  string code = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}

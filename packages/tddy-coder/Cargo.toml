@@ -24,6 +24,7 @@ crossterm = "0.29"
 tddy-core = { path = "../tddy-core" }
 tddy-tui = { path = "../tddy-tui" }
 tddy-grpc = { path = "../tddy-grpc" }
+tddy-livekit = { path = "../tddy-livekit" }
 tonic = "0.12"
 tokio-stream = "0.1"
 

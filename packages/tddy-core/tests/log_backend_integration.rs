@@ -1,8 +1,13 @@
 //! Integration tests for log_backend: redirect_debug_output and resolve_log_defaults.
+//!
+//! These tests touch global logger state (DEBUG_OUTPUT_FILE). The #[serial] attribute
+//! ensures they run one at a time to avoid races when one test's redirect overwrites another's.
 
+use serial_test::serial;
 use tddy_core::{redirect_debug_output, resolve_log_defaults};
 
 #[test]
+#[serial]
 fn resolve_log_defaults_returns_conversation_path_when_none() {
     let tmp = std::env::temp_dir().join("tddy-resolve-log-defaults");
     let _ = std::fs::remove_dir_all(&tmp);
@@ -31,6 +36,7 @@ fn resolve_log_defaults_returns_conversation_path_when_none() {
 }
 
 #[test]
+#[serial]
 fn resolve_log_defaults_returns_explicit_path_when_set() {
     let tmp = std::env::temp_dir().join("tddy-resolve-log-explicit");
     let _ = std::fs::remove_dir_all(&tmp);
@@ -48,6 +54,7 @@ fn resolve_log_defaults_returns_explicit_path_when_set() {
 }
 
 #[test]
+#[serial]
 fn redirect_debug_output_writes_to_file() {
     let tmp = std::env::temp_dir().join("tddy-redirect-debug");
     let _ = std::fs::remove_dir_all(&tmp);

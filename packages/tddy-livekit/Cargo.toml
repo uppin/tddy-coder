@@ -1,0 +1,26 @@
+[package]
+name = "tddy-livekit"
+version = "0.1.0"
+edition = "2021"
+description = "LiveKit RPC transport for tddy-coder (custom protobuf over data channels)"
+
+[lib]
+name = "tddy_livekit"
+path = "src/lib.rs"
+
+[dependencies]
+prost = "0.13"
+livekit = "0.7"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net"] }
+async-trait = "0.1"
+dashmap = "5"
+log = "0.4"
+anyhow = "1"
+
+[build-dependencies]
+prost-build = "0.13"
+tddy-livekit-codegen = { path = "../tddy-livekit-codegen" }
+
+[dev-dependencies]
+tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
