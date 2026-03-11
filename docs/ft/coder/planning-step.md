@@ -40,7 +40,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 2. Invoke the selected backend (Claude or Cursor) in plan mode to analyze the feature description
 3. **Q&A phase**: The agent may ask clarifying questions; the user is expected to answer them. The system must support this interactive exchange (Claude asks → user answers → Claude continues analysis).
 4. Create output directory: when `--output-dir` is omitted, use `$HOME/.tddy/sessions/{uuid}/`; when provided, use `{output-dir}/YYYY-MM-DD-slug/` (date-prefixed, slugified from feature)
-5. Parse Claude Code's structured output into PRD, TODO, discovery, and demo plan artifacts
+5. Structured output is received via `tddy-tools submit` (Unix socket IPC). Parser deserializes JSON into PRD, TODO, discovery, and demo plan artifacts.
 6. Write `PRD.md`, `TODO.md`, and `changeset.yaml` (unified manifest: session ID, workflow state, discovery, models, initial_prompt, clarification_qa) to the output directory
 7. **Plan approval gate**: After plan completes, the user is presented with three choices: View (full-screen PRD modal), Approve (proceed to acceptance-tests), or Refine (free-text feedback that resumes the LLM session). The approval loop continues until the user approves.
 8. On successful exit, output the path to `PRD.md` (goal-specific exit output)
@@ -71,7 +71,7 @@ The approval gate applies to both the initial plan and plan resume/completion sc
 4. Use `--permission-mode acceptEdits` (auto-approves file edits for creating tests and running `cargo test`)
 5. **Q&A phase**: When Claude returns clarifying questions (e.g., permission requests), the user provides answers and the workflow continues
 6. System prompt instructs Claude to: read the testing plan from the PRD; create acceptance tests as specified; verify all new tests fail (Red state); remove or adjust any tests that pass
-7. Parse Claude's output to extract a summary of created tests and their status
+7. Parser receives JSON from `tddy-tools submit`; deserializes summary of created tests and their status
 8. Write `acceptance-tests.md` to the plan directory (structured list + rich descriptions for downstream goals)
 9. On successful exit, output a human-readable summary (test count, paths, failing status)
 
@@ -95,8 +95,8 @@ The approval gate applies to both the initial plan and plan resume/completion sc
 8. **Session management**: First invoke uses `--session-id <uuid>`; Q&A followup uses `--resume <uuid>` so Claude retains context across the exchange. Session IDs are persisted in `changeset.yaml`.
 9. **Structured Q&A**: Clarifying questions come from `AskUserQuestion` tool events (header, question, options, multi_select). In TUI mode, presented via ratatui Select/MultiSelect widgets with "Other (type your own)" option. In plain mode, presented via stdin (one answer per line). Questions and answers are stored in `changeset.yaml` as `clarification_qa`.
 10. **Real-time progress**: Tool activity (Read, Glob, Bash, etc.) displayed while Claude works.
-11. **Output parsing**: System prompt instructs Claude to emit PRD and TODO in `<structured-response content-type="application-json">` format; parser also supports delimiter fallback.
-12. **Structured output validation**: Each goal's output is validated against a JSON Schema file before serde deserialization. Schemas are embedded in the binary via `include_dir`, written to `{plan-dir}/schemas/` for the agent to read via its Read tool. The agent's working directory is the plan directory, so `schemas/plan.schema.json` resolves to `{plan-dir}/schemas/plan.schema.json`. System prompts reference the schema path and instruct the agent to emit the `schema="..."` attribute on the `<structured-response>` tag. On validation failure, the session resumes with validation errors (1 retry); the retry prompt includes the schema path and error details. (Updated: 2026-03-08)
+11. **Structured output**: System prompt instructs the agent to call `tddy-tools submit --schema schemas/{goal}.schema.json --data '<json>'`. All structured output is received via Unix socket IPC; the parser deserializes pre-validated JSON. No inline parsing (XML blocks or delimiters). If the agent finishes without calling `tddy-tools submit`, the workflow fails with a clear diagnostic.
+12. **Schema validation**: `tddy-tools submit` validates output against the goal's JSON Schema before the workflow receives it. Schemas are embedded via `include_dir`, written to `{plan-dir}/schemas/`. The agent's working directory is the plan directory. On validation failure, `tddy-tools` returns errors; the agent may retry. (Updated: 2026-03-11)
 
 ### Project Discovery (Plan Goal)
 
