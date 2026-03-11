@@ -31,7 +31,8 @@ impl Log for TddyLogger {
         if !self.enabled(record.metadata()) {
             return;
         }
-        let line = format!("[{}] {}\n", record.level(), record.args());
+        let ts = chrono::Local::now().format("%H:%M:%S%.3f");
+        let line = format!("{} [{}] {}\n", ts, record.level(), record.args());
         if let Ok(mut guard) = DEBUG_OUTPUT_FILE.lock() {
             if let Some(ref mut f) = *guard {
                 let _ = f.write_all(line.as_bytes());
