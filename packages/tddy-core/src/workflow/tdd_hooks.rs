@@ -91,6 +91,7 @@ fn before_acceptance_tests(
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", acceptance_tests::system_prompt());
     context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", true);
     context.set_sync("plan_dir", plan_dir.to_path_buf());
     context.set_sync("model", model);
     let _ = write_schema_to_dir(plan_dir, "acceptance-tests");
@@ -155,6 +156,7 @@ fn before_green(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error 
     context.set_sync("system_prompt", green::system_prompt(run_demo));
     context.set_sync("plan_dir", plan_dir.to_path_buf());
     context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", true);
     context.set_sync("model", model);
     let _ = write_schema_to_dir(plan_dir, "green");
     Ok(())
@@ -514,8 +516,9 @@ impl RunnerHooks for TddWorkflowHooks {
                 }
             }
         }
-        // Clear answers so the next task does not think we're resuming from clarification.
+        // Clear per-step resume flags so the next task starts fresh.
         context.remove_sync("answers");
+        context.remove_sync("is_resume");
         match task_id {
             "plan" => {
                 let plan_dir: PathBuf = context
