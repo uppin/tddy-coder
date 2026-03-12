@@ -1,12 +1,13 @@
 //! Acceptance tests for tddy-tools CLI: submit, ask, --mcp, help.
 
+use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
 
 fn tddy_tools_bin() -> Command {
-    Command::cargo_bin("tddy-tools").expect("tddy-tools binary")
+    cargo_bin_cmd!("tddy-tools")
 }
 
 fn copy_plan_schema_to(dir: &Path) -> std::io::Result<std::path::PathBuf> {

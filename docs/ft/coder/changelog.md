@@ -48,8 +48,7 @@ Release note history for the Coder product area.
 
 ## 2026-03-10 — Stable Session Directory
 
-- **Default output location**: When `--output-dir` is omitted, planning output goes to `$HOME/.tddy/sessions/{uuid}/` instead of the current directory. Each session gets a unique UUID subdirectory.
-- **Explicit output-dir**: When `--output-dir` is provided, output goes to `{path}/YYYY-MM-DD-slug/` as before.
+- **Output location**: Planning output always goes to `$HOME/.tddy/sessions/{uuid}/`. Each session gets a unique UUID subdirectory.
 - **Discovery**: Removed `plan_dir_suggestion` from schema; planning prompt uses `name` (human-readable changeset name) instead.
 - **Packages**: tddy-core (create_session_dir_in, SESSIONS_SUBDIR, PlanTask session_base), tddy-coder (run.rs output_dir handling).
 
@@ -175,7 +174,7 @@ Release note history for the Coder product area.
 ## 2026-03-07 — Full Workflow When --goal Omitted
 
 - **Full workflow**: When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → green in a single invocation
-- **Resume**: Auto-detects completed state from `changeset.yaml`; re-running skips completed steps (via `--plan-dir` or scanning `--output-dir`)
+- **Resume**: Auto-detects completed state from `changeset.yaml`; re-running skips completed steps (via `--plan-dir`)
 - **CLI**: `--goal` is now optional; individual goals (`plan`, `acceptance-tests`, `red`, `green`) unchanged
 - **Output**: Full workflow prints green step output on success; when `GreenComplete`, re-running exits with summary
 

@@ -3,29 +3,24 @@
 //! Verifies that when tddy-demo receives SIGINT (Ctrl+C), it prints session info
 //! to stderr before exiting (Session: <id> and Plan dir: <path>).
 
-use std::io::{Read, Write};
-use std::process::{Command, Stdio};
+mod common;
 
-fn temp_output_dir() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join("tddy-sigint-test");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("create output dir");
-    dir
+use std::io::{Read, Write};
+use std::process::Stdio;
+
+#[allow(deprecated)]
+fn tddy_demo_bin() -> std::path::PathBuf {
+    assert_cmd::cargo::cargo_bin("tddy-demo")
 }
 
 /// When tddy-demo receives SIGINT, stderr contains "Session:" (plan dir or fallback).
 #[test]
 #[cfg(unix)]
 fn tddy_demo_sigint_prints_session_info_to_stderr() {
-    let output_dir = temp_output_dir();
-    let output_dir_str = output_dir.to_str().expect("path");
-
-    let mut child = Command::new(assert_cmd::cargo::cargo_bin("tddy-demo"))
+    let mut child = std::process::Command::new(tddy_demo_bin())
         .args([
             "--goal",
             "plan",
-            "--output-dir",
-            output_dir_str,
             "--prompt",
             "Build auth SKIP_QUESTIONS",
         ])
@@ -65,6 +60,4 @@ fn tddy_demo_sigint_prints_session_info_to_stderr() {
         "stderr should contain 'Session:' on SIGINT, got: {}",
         stderr
     );
-
-    let _ = std::fs::remove_dir_all(&output_dir);
 }

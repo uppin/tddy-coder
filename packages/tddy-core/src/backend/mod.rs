@@ -122,6 +122,26 @@ pub fn kill_child_process() -> bool {
     unsafe { libc::kill(pid as i32, libc::SIGKILL) == 0 }
 }
 
+/// Format binary + args as a shell-like command for debug logging.
+/// Truncates args longer than max_arg_len to keep logs readable.
+pub(crate) fn format_command_for_log(binary: &std::path::Path, args: &[String], max_arg_len: usize) -> String {
+    let mut parts = vec![binary.display().to_string()];
+    for arg in args {
+        let s = if arg.len() > max_arg_len {
+            format!("{}... ({} chars total)", &arg[..arg.len().min(max_arg_len)], arg.len())
+        } else {
+            arg.clone()
+        };
+        let escaped = if s.contains(' ') || s.contains('"') || s.contains('\n') {
+            format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n"))
+        } else {
+            s
+        };
+        parts.push(escaped);
+    }
+    parts.join(" ")
+}
+
 /// Non-unix stub: clears the tracked PID but cannot actually kill the process.
 #[cfg(not(unix))]
 pub fn kill_child_process() -> bool {

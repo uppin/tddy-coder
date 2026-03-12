@@ -11,7 +11,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/path/to/tddy-coder --daemon --output-dir /var/lib/tddy/sessions
+# Sessions go to $HOME/.tddy/sessions. Set HOME to override (e.g. /var/lib/tddy).
+ExecStart=/path/to/tddy-coder --daemon
 Restart=on-failure
 RestartSec=5
 

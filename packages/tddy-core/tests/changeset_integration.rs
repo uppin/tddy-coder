@@ -8,7 +8,6 @@ mod fixtures;
 
 use std::sync::Arc;
 use tddy_core::changeset::read_changeset;
-use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 

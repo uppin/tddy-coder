@@ -6,14 +6,12 @@ mod common;
 
 use std::sync::Arc;
 use tddy_core::changeset::read_changeset;
-use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{
-    ClarificationQuestion, MockBackend, PlanOptions, QuestionOption, SharedBackend, StubBackend,
-    WorkflowEngine,
+    ClarificationQuestion, MockBackend, QuestionOption, SharedBackend, StubBackend, WorkflowEngine,
 };
 
-use common::{plan_dir_for_input, run_plan};
+use common::run_plan;
 
 /// Plan output as JSON (tddy-tools submit format). MockBackend stores this via store_submit_result.
 const PLAN_JSON_OUTPUT: &str = "{\"goal\":\"plan\",\"prd\":\"# Feature PRD\\n\\n## Summary\\nUser authentication system with login and logout.\\n\\n## Acceptance Criteria\\n- [ ] Login with email/password\\n- [ ] Logout clears session\\n\\n## TODO\\n\\n- [ ] Create auth module\\n- [ ] Implement login endpoint\\n- [ ] Implement logout endpoint\\n- [ ] Add session management\"}";

@@ -1,5 +1,8 @@
 //! Shared JSON fixtures for MockBackend integration tests.
 //! All outputs are tddy-tools submit format (raw JSON, no XML/delimiters).
+//! Each test file uses a subset; allow dead_code to avoid per-file unused warnings.
+
+#![allow(dead_code)]
 
 pub const PLAN_JSON: &str = "{\"goal\":\"plan\",\"prd\":\"# Feature PRD\\n\\n## Summary\\nUser authentication system with login and logout.\\n\\n## Acceptance Criteria\\n- [ ] Login with email/password\\n- [ ] Logout clears session\\n\\n## TODO\\n\\n- [ ] Create auth module\\n- [ ] Implement login endpoint\\n- [ ] Implement logout endpoint\\n- [ ] Add session management\"}";
 

@@ -5,6 +5,8 @@
 //! Uses tddy-demo (StubBackend) with SKIP_QUESTIONS so the test does not need clarification input.
 //! Runs as subprocess with piped stdin ("a\n" for plan approval) to avoid blocking.
 
+mod common;
+
 use assert_cmd::Command;
 use std::path::PathBuf;
 
@@ -17,27 +19,33 @@ fn temp_output_dir() -> PathBuf {
 
 /// Plan goal produces a plan directory when given feature input.
 /// Uses tddy-demo binary (StubBackend) with piped stdin for plan approval.
+/// TDDY_SESSIONS_DIR set to temp dir so tests do not write to production ~/.tddy.
 #[test]
+#[cfg(unix)]
 fn run_plan_via_flow_runner_produces_plan_directory() {
-    let output_dir = temp_output_dir();
-    let output_dir_str = output_dir.to_str().expect("path");
+    let sessions_base = temp_output_dir();
+    let sessions_base_str = sessions_base.to_str().expect("path");
 
+    #[allow(deprecated)]
     let mut cmd = Command::cargo_bin("tddy-demo").expect("tddy-demo binary");
-    cmd.args([
-        "--goal",
-        "plan",
-        "--output-dir",
-        output_dir_str,
-        "--prompt",
-        "Add user authentication SKIP_QUESTIONS",
-    ])
-    .write_stdin("a\n");
+    cmd.env(tddy_core::output::TDDY_SESSIONS_DIR_ENV, sessions_base_str)
+        .args([
+            "--goal",
+            "plan",
+            "--prompt",
+            "Add user authentication SKIP_QUESTIONS",
+        ])
+        .write_stdin("a\n");
 
     cmd.assert().success();
 
-    let plan_dir_name =
-        tddy_core::output::slugify_directory_name("Add user authentication SKIP_QUESTIONS");
-    let plan_dir = output_dir.join(&plan_dir_name);
+    let sessions_dir = sessions_base.join(tddy_core::output::SESSIONS_SUBDIR);
+    let plan_dir = std::fs::read_dir(&sessions_dir)
+        .expect("sessions dir should exist")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.is_dir())
+        .expect("at least one session dir should exist");
     assert!(
         plan_dir.is_dir(),
         "plan_dir should be a directory: {}",
@@ -61,5 +69,5 @@ fn run_plan_via_flow_runner_produces_plan_directory() {
         &prd_content[..prd_content.len().min(500)]
     );
 
-    let _ = std::fs::remove_dir_all(&output_dir);
+    let _ = std::fs::remove_dir_all(&sessions_base);
 }

@@ -9,7 +9,7 @@ use tddy_core::changeset::read_changeset;
 use tddy_core::output::parse_acceptance_tests_response;
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
-use tddy_core::{AcceptanceTestsOptions, MockBackend, PlanOptions, SharedBackend, WorkflowEngine};
+use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
 use common::{ctx_acceptance_tests, run_plan};
 

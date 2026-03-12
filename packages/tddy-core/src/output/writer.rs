@@ -297,6 +297,31 @@ pub fn write_evaluation_report(
 /// Subdirectory name for session directories under a base path.
 pub const SESSIONS_SUBDIR: &str = "sessions";
 
+/// Environment variable to override the session base path. When set, sessions go to
+/// `{TDDY_SESSIONS_DIR}/sessions/{uuid}/` instead of `$HOME/.tddy/sessions/{uuid}/`.
+/// Use in tests to avoid writing to production ~/.tddy (e.g. set to `$TMPDIR/tddy-test`).
+pub const TDDY_SESSIONS_DIR_ENV: &str = "TDDY_SESSIONS_DIR";
+
+/// Resolve the session base path (parent of the "sessions" subdir).
+/// When TDDY_SESSIONS_DIR is set, uses that. Otherwise uses $HOME/.tddy.
+pub fn sessions_base_path() -> Result<PathBuf, WorkflowError> {
+    if let Ok(path) = std::env::var(TDDY_SESSIONS_DIR_ENV) {
+        return Ok(PathBuf::from(path));
+    }
+    #[cfg(unix)]
+    {
+        let home = std::env::var("HOME")
+            .map_err(|_| WorkflowError::WriteFailed("HOME not set; set TDDY_SESSIONS_DIR or HOME".into()))?;
+        Ok(PathBuf::from(home).join(".tddy"))
+    }
+    #[cfg(not(unix))]
+    {
+        Err(WorkflowError::WriteFailed(
+            "TDDY_SESSIONS_DIR or HOME (Unix) required".into(),
+        ))
+    }
+}
+
 /// Create a session directory at `{base}/sessions/{uuid}/` and return its path.
 pub fn create_session_dir_in(base: &Path) -> Result<PathBuf, WorkflowError> {
     use uuid::Uuid;

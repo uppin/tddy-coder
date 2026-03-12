@@ -1,11 +1,14 @@
 //! Integration tests for CLI argument parsing and stdin.
 
+mod common;
+
+use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use std::fs;
+use tddy_core::output::TDDY_SESSIONS_DIR_ENV;
 
-#[allow(deprecated)]
 fn tddy_coder_bin() -> Command {
-    Command::cargo_bin("tddy-coder").expect("tddy-coder binary")
+    cargo_bin_cmd!("tddy-coder")
 }
 
 /// When --goal is omitted, the full workflow (plan -> acceptance-tests -> red -> green) runs.
@@ -18,16 +21,10 @@ fn cli_runs_full_workflow_when_goal_omitted() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
+        .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
-            "--output-dir",
-            tmp.to_str().unwrap(),
             "--prompt",
             "SKIP_QUESTIONS Build auth",
         ])
@@ -54,18 +51,12 @@ fn cli_accepts_goal_plan() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
+        .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
             "--goal",
             "plan",
-            "--output-dir",
-            tmp.to_str().unwrap(),
             "--prompt",
             "SKIP_QUESTIONS Build feature X",
         ])
@@ -93,18 +84,12 @@ fn cli_plain_mode_plan_approval_approve_proceeds() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
+        .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
             "--goal",
             "plan",
-            "--output-dir",
-            tmp.to_str().unwrap(),
             "--prompt",
             "SKIP_QUESTIONS Build feature for approval test",
         ])
@@ -139,51 +124,6 @@ fn cli_plain_mode_plan_approval_approve_proceeds() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-#[test]
-#[cfg(unix)]
-fn cli_accepts_output_dir_flag() {
-    let tmp = std::env::temp_dir().join("tddy-cli-output-dir-test");
-    let _ = std::fs::create_dir_all(&tmp);
-
-    let mut cmd = tddy_coder_bin();
-    cmd.env_clear()
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
-        .args([
-            "--agent",
-            "stub",
-            "--goal",
-            "plan",
-            "--output-dir",
-            tmp.to_str().unwrap(),
-            "--prompt",
-            "SKIP_QUESTIONS Build feature Y",
-        ])
-        .write_stdin("a\n");
-
-    let output = cmd.output().expect("run tddy-coder");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    assert!(
-        output.status.success(),
-        "expected success: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let last_line = stdout.trim().lines().last().unwrap_or("").trim();
-    let plan_dir = std::path::Path::new(last_line);
-    assert!(
-        plan_dir.is_dir() && plan_dir.join("PRD.md").exists(),
-        "stdout should end with plan dir path with PRD.md: {}",
-        stdout
-    );
-
-    let _ = std::fs::remove_dir_all(&tmp);
-}
-
 /// Each goal should log the agent and model it is using before execution.
 /// Uses --debug-output to collect log entries from the log system.
 #[test]
@@ -196,18 +136,12 @@ fn cli_displays_agent_and_model_before_goal_execution() {
     let log_file = tmp.join("debug.log");
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
+        .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
             "--goal",
             "plan",
-            "--output-dir",
-            tmp.to_str().unwrap(),
             "--debug-output",
             log_file.to_str().unwrap(),
             "--prompt",
@@ -249,18 +183,12 @@ fn cli_displays_state_transitions() {
     let log_file = tmp.join("debug.log");
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
+        .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
             "--goal",
             "plan",
-            "--output-dir",
-            tmp.to_str().unwrap(),
             "--debug-output",
             log_file.to_str().unwrap(),
             "--prompt",
@@ -297,18 +225,12 @@ fn cli_accepts_prompt_flag_instead_of_stdin() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
+        .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
             "--goal",
             "plan",
-            "--output-dir",
-            tmp.to_str().unwrap(),
             "--prompt",
             "SKIP_QUESTIONS Build feature from CLI arg",
         ])
@@ -395,18 +317,12 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
+        .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
             "--goal",
             "plan",
-            "--output-dir",
-            tmp.to_str().unwrap(),
             "--prompt",
             "Build auth",
         ])
@@ -440,13 +356,15 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
         stdout
     );
 
-    let has_artifacts = fs::read_dir(&tmp)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .any(|e| e.path().is_dir() && e.path().join("PRD.md").exists());
+    let sessions_dir = tmp.join("sessions");
+    let has_artifacts = sessions_dir.exists()
+        && fs::read_dir(&sessions_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.path().join("PRD.md").exists());
     assert!(
         has_artifacts,
-        "expected PRD.md in output dir (TODO is merged into PRD)"
+        "expected PRD.md under TDDY_SESSIONS_DIR/sessions (TODO is merged into PRD)"
     );
 
     let _ = std::fs::remove_dir_all(&tmp);
@@ -479,9 +397,8 @@ artifacts: {}
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
+            TDDY_SESSIONS_DIR_ENV,
+            tmp.to_str().unwrap(),
         )
         .args([
             "--agent",
@@ -568,11 +485,7 @@ fn cli_accepts_goal_red_with_plan_dir() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
+        .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -638,11 +551,7 @@ fn cli_accepts_goal_green_with_plan_dir() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
+        .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -661,11 +570,7 @@ fn cli_accepts_goal_green_with_plan_dir() {
 
     let mut cmd2 = tddy_coder_bin();
     cmd2.env_clear()
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
+        .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -829,10 +734,10 @@ artifacts: {}
 // ── Acceptance tests for Stable session dir PRD: R1, R4 ──────────────────────
 
 /// Running `tddy-coder --goal plan` WITHOUT `--output-dir` creates the session directory under
-/// `$HOME/.tddy/sessions/{uuid}/` and writes changeset.yaml there.
+/// `{TDDY_SESSIONS_DIR}/sessions/{uuid}/` (or $HOME/.tddy/sessions/ when env not set) and writes
+/// changeset.yaml there.
 ///
-/// Fails until the plan goal generates a session dir from $HOME/.tddy instead of requiring
-/// --output-dir and creating a YYYY-MM-DD-slug subdirectory.
+/// Uses TDDY_SESSIONS_DIR to a temp dir so tests do not write to production ~/.tddy.
 #[test]
 #[cfg(unix)]
 fn test_plan_goal_cli_creates_session_under_home_tddy() {
@@ -840,13 +745,13 @@ fn test_plan_goal_cli_creates_session_under_home_tddy() {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
 
-    // Use a controlled fake HOME so we do not pollute the real ~/.tddy
-    let fake_home = tmp.join("fake-home");
-    std::fs::create_dir_all(&fake_home).expect("create fake home");
+    // Use TDDY_SESSIONS_DIR so we do not pollute the real ~/.tddy
+    let sessions_base = tmp.join("fake-sessions-base");
+    std::fs::create_dir_all(&sessions_base).expect("create sessions base");
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env("HOME", fake_home.to_str().unwrap())
+        .env(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -863,17 +768,17 @@ fn test_plan_goal_cli_creates_session_under_home_tddy() {
 
     assert!(
         output.status.success(),
-        "plan without --output-dir should succeed and place session under $HOME/.tddy/sessions/; \
+        "plan without --output-dir should succeed and place session under TDDY_SESSIONS_DIR/sessions/; \
          stdout={} stderr={}",
         stdout,
         stderr
     );
 
-    // $HOME/.tddy/sessions/ must have been created
-    let sessions_dir = fake_home.join(".tddy").join("sessions");
+    // TDDY_SESSIONS_DIR/sessions/ must have been created
+    let sessions_dir = sessions_base.join("sessions");
     assert!(
         sessions_dir.exists(),
-        "$HOME/.tddy/sessions/ should have been created at {}, but it does not exist",
+        "TDDY_SESSIONS_DIR/sessions/ should have been created at {}, but it does not exist",
         sessions_dir.display()
     );
 
@@ -887,7 +792,7 @@ fn test_plan_goal_cli_creates_session_under_home_tddy() {
         entries.len(),
         1,
         "exactly one session dir should be created under {}/sessions/, got: {:?}",
-        fake_home.join(".tddy").display(),
+        sessions_base.display(),
         entries.iter().map(|e| e.path()).collect::<Vec<_>>()
     );
 
@@ -908,56 +813,3 @@ fn test_plan_goal_cli_creates_session_under_home_tddy() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// `--output-dir` must not be the repository root; rejects with clear error.
-#[test]
-#[cfg(unix)]
-fn cli_rejects_output_dir_when_repo_root() {
-    let tmp = std::env::temp_dir().join("tddy-cli-repo-root-reject");
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).expect("create tmp");
-
-    // Use a git repo (tddy-coder workspace root)
-    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| std::env::current_dir().unwrap());
-    let repo_root = repo_root.canonicalize().unwrap_or(repo_root);
-
-    let mut cmd = tddy_coder_bin();
-    cmd.env_clear()
-        .env(
-            "HOME",
-            std::env::var("HOME")
-                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned()),
-        )
-        .current_dir(&repo_root)
-        .args([
-            "--agent",
-            "stub",
-            "--goal",
-            "plan",
-            "--output-dir",
-            repo_root.to_str().unwrap(),
-            "--prompt",
-            "Build feature",
-        ])
-        .write_stdin("a\n");
-
-    let output = cmd.output().expect("run tddy-coder");
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    assert!(
-        !output.status.success(),
-        "should reject --output-dir when it is repo root: stderr={}",
-        stderr
-    );
-    assert!(
-        stderr.contains("must not be the repository root")
-            || stderr.contains("--output-dir must not be"),
-        "stderr should explain repo root rejection: {}",
-        stderr
-    );
-
-    let _ = std::fs::remove_dir_all(&tmp);
-}

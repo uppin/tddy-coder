@@ -299,6 +299,8 @@ impl ClaudeCodeBackend {
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "(unknown)".into())
             });
+        let cmd_str = super::format_command_for_log(&self.binary_path, &args, 200);
+        log::debug!("[tddy-coder] Claude backend command: {}", cmd_str);
         log::debug!(
             "[tddy-coder] Claude backend spawning: {} (resolved: {})",
             self.binary_path.display(),
