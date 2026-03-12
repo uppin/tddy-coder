@@ -68,10 +68,10 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **refactor**: Executes refactoring tasks from refactoring-plan.md. Requires refactoring-plan.md in plan_dir (from prior validate run). Claude-only (CursorBackend rejects). RefactorOptions: model, agent_output, conversation_output_path, inherit_stdin, allowed_tools_extras, debug. State: Refactoring → RefactorComplete.
 - **update_docs**: Reads planning artifacts (PRD.md, progress.md, changeset.yaml, acceptance-tests.md, evaluation-report.md) and updates docs in the target repo. Requires plan_dir. CursorBackend supports UpdateDocs. UpdateDocsOptions: model, agent_output, conversation_output_path, inherit_stdin, allowed_tools_extras, debug. State: UpdatingDocs → DocsUpdated.
 
-### Schema (`schema/`)
+### Schema (tddy-tools)
 
-- **JSON Schema validation**: Formal schemas in `schemas/` (6 goals + common types). Embedded via `include_dir`, written to `{plan-dir}/schemas/` for agent Read. Agent's working directory is plan_dir (or working_dir for evaluate), so `schemas/xxx.schema.json` resolves correctly. `validate_output(goal, json)` validates before serde. On failure: 1 retry with validation errors + schema path in prompt.
-- **get_schema / write_all_schemas_to_dir / write_schema_to_dir / format_validation_errors**: Schema retrieval. `write_all_schemas_to_dir` called when plan dir is created; writes all goal schemas + common types so subsequent goals have schemas available. `write_schema_to_dir` used for evaluate (working_dir may differ from plan_dir). Error formatting for retry prompts.
+- **JSON Schema validation**: All schema logic lives in tddy-tools. Schemas are embedded via `include_dir`; no schema files are written to disk. `tddy-tools submit --goal <goal>` validates JSON against the embedded schema before relaying to tddy-coder. `tddy-tools get-schema <goal>` outputs the schema for inspection. On validation failure, tddy-tools returns errors with a tip to run `get-schema`.
+- **ProcessToolExecutor**: Invokes `tddy-tools submit --goal <goal> --data '<json>'` with TDDY_SOCKET set. tddy-core has no schema module.
 
 ### Output (`output/`)
 

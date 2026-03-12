@@ -133,6 +133,54 @@ pub fn build_claude_args(
     args
 }
 
+/// Resolve tddy-tools binary path (next to current executable, or parent dir for test binaries in deps/).
+fn tddy_tools_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    #[cfg(windows)]
+    let name = "tddy-tools.exe";
+    #[cfg(not(windows))]
+    let name = "tddy-tools";
+    // Try same dir first (tddy-coder and tddy-tools in target/debug/)
+    let path = dir.join(name);
+    if path.is_file() {
+        return path.canonicalize().ok().or(Some(path));
+    }
+    // Fallback: parent dir (test binary in target/debug/deps/)
+    if let Some(parent) = dir.parent() {
+        let path = parent.join(name);
+        if path.is_file() {
+            return path.canonicalize().ok().or(Some(path));
+        }
+        return Some(parent.join(name));
+    }
+    Some(dir.join(name))
+}
+
+/// Create a temporary MCP config file registering tddy-tools. Returns path on success.
+fn create_mcp_config_temp_file() -> Option<PathBuf> {
+    let tddy_tools = tddy_tools_path()?;
+    let tddy_tools_str = tddy_tools.to_string_lossy();
+    let config = serde_json::json!({
+        "mcpServers": {
+            "tddy-tools": {
+                "command": tddy_tools_str,
+                "args": ["--mcp"]
+            }
+        }
+    });
+    let tmp = std::env::temp_dir().join(format!(
+        "tddy-mcp-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&tmp, config.to_string()).ok()?;
+    Some(tmp)
+}
+
 fn goal_to_claude_config(request: &InvokeRequest) -> ClaudeInvokeConfig {
     let (permission_mode, mut allowed_tools) = match request.goal {
         Goal::Plan => (PermissionMode::Plan, permission::plan_allowlist()),
@@ -283,7 +331,22 @@ impl ClaudeCodeBackend {
             None
         };
 
-        let config = goal_to_claude_config(&request);
+        let mut config = goal_to_claude_config(&request);
+
+        // Plan goal: create MCP config so Claude Code routes permission requests to tddy-tools.
+        let _mcp_cleanup: Option<CleanupGuard> = if request.goal == Goal::Plan {
+            if let Some(mcp_path) = create_mcp_config_temp_file() {
+                config.permission_prompt_tool =
+                    Some("mcp__tddy-tools__approval_prompt".to_string());
+                config.mcp_config_path = Some(mcp_path.clone());
+                Some(CleanupGuard(mcp_path))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let args = build_claude_args(&request, &config, system_prompt_path.as_deref());
         let mut cmd = Command::new(&self.binary_path);
         if let Some(ref wd) = request.working_dir {

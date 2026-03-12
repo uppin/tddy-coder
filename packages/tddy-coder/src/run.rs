@@ -1208,6 +1208,7 @@ fn run_plan_to_get_dir(
     let _ = tddy_core::changeset::write_changeset(&plan_dir, &init_cs);
     let output_dir_for_ctx =
         std::env::current_dir().context("current dir for agent working_dir")?;
+
     let conv = resolve_log_defaults(args, &plan_dir);
     let ctx = build_goal_context(args, None, &conv, |c| {
         c.insert("feature_input".to_string(), serde_json::json!(input));
