@@ -494,8 +494,7 @@ fn plan_approval_from_markdown_viewer() {
         .filter(|e| matches!(e, TestEvent::ModeChanged(AppMode::PlanReview { .. })))
         .count();
     assert_eq!(
-        plan_review_count,
-        1,
+        plan_review_count, 1,
         "PlanReview should appear exactly once when approving directly from viewer: {:?}",
         events
     );

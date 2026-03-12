@@ -106,6 +106,32 @@ impl Task for PlanTask {
             },
         )?;
 
+        let output_to_store = self
+            .backend
+            .submit_channel()
+            .and_then(|ch| ch.take_for_goal("plan"))
+            .or_else(|| take_submit_result_for_goal("plan"));
+
+        if let Some(output) = output_to_store {
+            context.set_sync("output", output.clone());
+            let planning = parse_planning_response(&output).map_err(|e: ParseError| {
+                Box::new(WorkflowError::ParseError(e)) as Box<dyn std::error::Error + Send + Sync>
+            })?;
+
+            context.set_sync("parsed_planning", planning);
+            context.set_sync("plan_dir", plan_dir.clone());
+            if let Some(sid) = &response.session_id {
+                context.set_sync("session_id", sid.clone());
+            }
+
+            return Ok(TaskResult {
+                response: format!("Plan complete for {}", plan_dir.display()),
+                next_action: NextAction::Continue,
+                task_id: "plan".to_string(),
+                status_message: Some("Plan complete".to_string()),
+            });
+        }
+
         if !response.questions.is_empty() {
             context.set_sync("pending_questions", response.questions.clone());
             return Ok(TaskResult {
@@ -116,34 +142,9 @@ impl Task for PlanTask {
             });
         }
 
-        let output_to_store = self
-            .backend
-            .submit_channel()
-            .and_then(|ch| ch.take_for_goal("plan"))
-            .or_else(|| take_submit_result_for_goal("plan"))
-            .ok_or_else(|| {
-                Box::new(WorkflowError::ParseError(ParseError::Malformed(
-                    "Agent finished without calling tddy-tools submit. Ensure tddy-tools is on PATH and the agent follows the system prompt.".into(),
-                ))) as Box<dyn std::error::Error + Send + Sync>
-            })?;
-        context.set_sync("output", output_to_store.clone());
-
-        let planning = parse_planning_response(&output_to_store).map_err(|e: ParseError| {
-            Box::new(WorkflowError::ParseError(e)) as Box<dyn std::error::Error + Send + Sync>
-        })?;
-
-        context.set_sync("parsed_planning", planning);
-        context.set_sync("plan_dir", plan_dir.clone());
-        if let Some(sid) = &response.session_id {
-            context.set_sync("session_id", sid.clone());
-        }
-
-        Ok(TaskResult {
-            response: format!("Plan complete for {}", plan_dir.display()),
-            next_action: NextAction::Continue,
-            task_id: "plan".to_string(),
-            status_message: Some("Plan complete".to_string()),
-        })
+        Err(Box::new(WorkflowError::ParseError(ParseError::Malformed(
+            "Agent finished without calling tddy-tools submit. Ensure tddy-tools is on PATH and the agent follows the system prompt.".into(),
+        ))) as Box<dyn std::error::Error + Send + Sync>)
     }
 }
 

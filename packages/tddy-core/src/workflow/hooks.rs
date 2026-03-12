@@ -16,8 +16,9 @@ pub trait RunnerHooks: Send + Sync {
         None
     }
 
-    /// When Some, tasks route progress events (ToolUse, TaskStarted, TaskProgress) here.
-    fn progress_sink(&self) -> Option<ProgressSink> {
+    /// When Some, tasks route progress events (ToolUse, TaskStarted, TaskProgress, SessionStarted) here.
+    /// Context is passed so the sink can access plan_dir for SessionStarted handling.
+    fn progress_sink(&self, _context: &Context) -> Option<ProgressSink> {
         None
     }
 

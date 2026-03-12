@@ -131,7 +131,11 @@ fn process_ndjson_emits_progress_events_for_tasks_and_tools() {
         .expect("should process");
 
     assert_eq!(result.result_text, "done");
-    assert_eq!(events.len(), 3);
+    assert_eq!(
+        events.len(),
+        3,
+        "TaskStarted + TaskProgress + ToolUse (no SessionStarted: session_id only in result event)"
+    );
     assert!(
         matches!(&events[0], ProgressEvent::TaskStarted { description } if description == "Explore repo")
     );
@@ -157,9 +161,12 @@ fn process_ndjson_extracts_glob_pattern_as_detail() {
     process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
-    assert_eq!(events.len(), 1);
+    assert_eq!(events.len(), 2, "SessionStarted + ToolUse");
+    assert!(
+        matches!(&events[0], ProgressEvent::SessionStarted { session_id } if session_id == "s1")
+    );
     assert!(matches!(
-        &events[0],
+        &events[1],
         ProgressEvent::ToolUse { name, detail: Some(d) } if name == "Glob" && d == "docs/**/*.md"
     ));
 }
@@ -177,9 +184,12 @@ fn process_ndjson_extracts_write_file_path_as_detail() {
     process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
-    assert_eq!(events.len(), 1);
+    assert_eq!(events.len(), 2, "SessionStarted + ToolUse");
+    assert!(
+        matches!(&events[0], ProgressEvent::SessionStarted { session_id } if session_id == "s1")
+    );
     assert!(matches!(
-        &events[0],
+        &events[1],
         ProgressEvent::ToolUse { name, detail: Some(d) } if name == "Write" && d == "PRD.md"
     ));
 }
@@ -197,9 +207,12 @@ fn process_ndjson_extracts_tool_use_detail_from_input() {
     process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
-    assert_eq!(events.len(), 1);
+    assert_eq!(events.len(), 2, "SessionStarted + ToolUse");
+    assert!(
+        matches!(&events[0], ProgressEvent::SessionStarted { session_id } if session_id == "s1")
+    );
     assert!(matches!(
-        &events[0],
+        &events[1],
         ProgressEvent::ToolUse { name, detail: Some(d) } if name == "Read" && d == "lib.rs"
     ));
 }
@@ -221,11 +234,14 @@ fn process_ndjson_skips_tool_use_when_parent_tool_use_id_set() {
 
     assert_eq!(
         events.len(),
-        2,
-        "TaskStarted + TaskProgress only, no ToolUse from sub-agent"
+        3,
+        "SessionStarted + TaskStarted + TaskProgress only, no ToolUse from sub-agent"
     );
-    assert!(matches!(&events[0], ProgressEvent::TaskStarted { .. }));
-    assert!(matches!(&events[1], ProgressEvent::TaskProgress { .. }));
+    assert!(
+        matches!(&events[0], ProgressEvent::SessionStarted { session_id } if session_id == "s1")
+    );
+    assert!(matches!(&events[1], ProgressEvent::TaskStarted { .. }));
+    assert!(matches!(&events[2], ProgressEvent::TaskProgress { .. }));
 }
 
 /// Cursor emits assistant events with partial text chunks. We must concatenate chunks.
@@ -286,16 +302,21 @@ fn process_cursor_stream_emits_tool_use_with_detail_for_display() {
     let _ = process_cursor_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
-    assert_eq!(events.len(), 2, "should emit 2 ToolUse events");
+    assert_eq!(events.len(), 3, "SessionStarted + 2 ToolUse events");
     assert!(
-        matches!(&events[0], ProgressEvent::ToolUse { name, detail: Some(d) } if name == "glob" && d == "*.md"),
-        "glob should have detail *.md, got: {:?}",
+        matches!(&events[0], ProgressEvent::SessionStarted { session_id } if session_id == "s1"),
+        "first event should be SessionStarted, got: {:?}",
         events[0]
     );
     assert!(
-        matches!(&events[1], ProgressEvent::ToolUse { name, detail: Some(d) } if name == "read" && d == "README.md"),
-        "read should have detail README.md (filename), got: {:?}",
+        matches!(&events[1], ProgressEvent::ToolUse { name, detail: Some(d) } if name == "glob" && d == "*.md"),
+        "glob should have detail *.md, got: {:?}",
         events[1]
+    );
+    assert!(
+        matches!(&events[2], ProgressEvent::ToolUse { name, detail: Some(d) } if name == "read" && d == "README.md"),
+        "read should have detail README.md (filename), got: {:?}",
+        events[2]
     );
 }
 

@@ -23,6 +23,8 @@ pub enum ProgressEvent {
         description: String,
         last_tool: Option<String>,
     },
+    /// Agent session started; session_id from first system/init stream event.
+    SessionStarted { session_id: String },
 }
 
 /// Result of processing an NDJSON stream from an agent CLI.

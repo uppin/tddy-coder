@@ -370,6 +370,10 @@ impl<V: PresenterView> Presenter<V> {
                             text: description.clone(),
                             kind: ActivityKind::TaskProgress,
                         },
+                        crate::ProgressEvent::SessionStarted { .. } => ActivityEntry {
+                            text: "Session connected".to_string(),
+                            kind: ActivityKind::Info,
+                        },
                     };
                     self.state.activity_log.push(entry.clone());
                     self.view

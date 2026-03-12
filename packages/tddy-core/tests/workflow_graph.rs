@@ -6,7 +6,10 @@
 
 use std::sync::Arc;
 use std::sync::Mutex;
-use tddy_core::backend::{CodingBackend, StubBackend};
+use tddy_core::backend::{
+    ClarificationQuestion, CodingBackend, MockBackend, QuestionOption, StubBackend,
+};
+use tddy_core::changeset::{write_changeset, Changeset};
 use tddy_core::output::{
     parse_acceptance_tests_response, parse_green_response, parse_planning_response,
     parse_red_response, parse_update_docs_response,
@@ -19,7 +22,7 @@ use tddy_core::workflow::session::{FileSessionStorage, Session, SessionStorage};
 use tddy_core::workflow::steps::PlanTask;
 use tddy_core::workflow::task::EchoTask;
 use tddy_core::workflow::task::TaskResult;
-use tddy_core::workflow::task::{FailingTask, Task};
+use tddy_core::workflow::task::{BackendInvokeTask, FailingTask, NextAction, Task};
 use tddy_core::workflow::tdd_graph::{build_full_tdd_workflow_graph, build_tdd_workflow_graph};
 
 /// Graph topology: build_tdd_workflow_graph creates correct edges.
@@ -353,6 +356,55 @@ async fn stub_backend_clarify_returns_questions() {
     assert!(!resp.questions.is_empty());
 }
 
+/// When backend returns both submit result and stream-extracted questions (e.g. from failed
+/// AskUserQuestion retries), submit takes priority — task proceeds with Continue, not WaitForInput.
+#[tokio::test]
+async fn backend_invoke_task_submit_takes_priority_over_questions() {
+    let plan_json = r##"{"goal":"plan","prd":"# PRD\n\n## TODO\n\n- [ ] Task","todo_items":[{"id":"1","title":"Task","done":false}]}"##;
+    let stale_questions = vec![ClarificationQuestion {
+        header: "Early errors".to_string(),
+        question: "When an error occurs, should Resume be offered?".to_string(),
+        options: vec![
+            QuestionOption {
+                label: "Context-aware".to_string(),
+                description: "Only when session exists".to_string(),
+            },
+            QuestionOption {
+                label: "Always".to_string(),
+                description: "Always show Resume".to_string(),
+            },
+        ],
+        multi_select: false,
+        allow_other: true,
+    }];
+
+    let backend = Arc::new(MockBackend::new());
+    backend.push_ok_with_questions(plan_json, "sess-1", stale_questions);
+    // Pre-populate submit channel to simulate tddy-tools submit (agent submitted despite stale questions)
+    backend
+        .as_ref()
+        .submit_channel()
+        .expect("MockBackend has channel")
+        .store("plan", plan_json);
+
+    let task = BackendInvokeTask::new("plan", tddy_core::backend::Goal::Plan, backend.clone());
+    let ctx = Context::new();
+    ctx.set_sync("prompt", "Add feature");
+    ctx.set_sync("output_dir", std::path::PathBuf::from("/tmp"));
+
+    let result = task.run(ctx).await.expect("task should succeed");
+
+    assert_eq!(
+        result.next_action,
+        NextAction::Continue,
+        "submit should take priority over stale questions"
+    );
+    assert!(
+        result.response.contains("PRD"),
+        "response should be the submitted plan, not clarification"
+    );
+}
+
 /// FAIL_INVOKE magic word returns BackendError.
 #[tokio::test]
 async fn stub_backend_fail_invoke_returns_error() {
@@ -520,6 +572,11 @@ async fn flow_runner_tdd_full_sequence_completes() {
 
     let plan_dir = dir.join("plan");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let init_cs = Changeset {
+        initial_prompt: Some("Add a feature SKIP_QUESTIONS".to_string()),
+        ..Changeset::default()
+    };
+    let _ = write_changeset(&plan_dir, &init_cs);
     let session = Session::new_from_task(
         "full1".to_string(),
         "tdd_workflow".to_string(),
@@ -965,6 +1022,11 @@ async fn engine_returns_elicitation_needed_to_caller() {
     let backend = Arc::new(StubBackend::new());
     let plan_dir = dir.join("plan");
     std::fs::create_dir_all(&plan_dir).unwrap();
+    let init_cs = Changeset {
+        initial_prompt: Some("Build auth SKIP_QUESTIONS".to_string()),
+        ..Changeset::default()
+    };
+    let _ = write_changeset(&plan_dir, &init_cs);
 
     let storage_dir = std::env::temp_dir().join("tddy-engine-elicit-storage");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -1014,6 +1076,11 @@ async fn engine_run_workflow_from_returns_elicitation_needed() {
     let backend = Arc::new(StubBackend::new());
     let plan_dir = dir.join("plan");
     std::fs::create_dir_all(&plan_dir).unwrap();
+    let init_cs = Changeset {
+        initial_prompt: Some("Build auth SKIP_QUESTIONS".to_string()),
+        ..Changeset::default()
+    };
+    let _ = write_changeset(&plan_dir, &init_cs);
 
     let storage_dir = std::env::temp_dir().join("tddy-engine-wf-elicit-storage");
     let _ = std::fs::remove_dir_all(&storage_dir);

@@ -302,6 +302,19 @@ fn run_plan_without_output_dir(
     if let Some(sid) = session_id {
         context_values.insert("session_id".to_string(), serde_json::json!(sid));
     }
+    if let (Some(ref base), Some(sid)) = (&session_base_opt, session_id) {
+        let plan_dir = base.join(crate::output::SESSIONS_SUBDIR).join(sid);
+        let _ = std::fs::create_dir_all(&plan_dir);
+        let init_cs = crate::changeset::Changeset {
+            initial_prompt: Some(input.to_string()),
+            ..crate::changeset::Changeset::default()
+        };
+        let _ = crate::changeset::write_changeset(&plan_dir, &init_cs);
+        context_values.insert(
+            "plan_dir".to_string(),
+            serde_json::to_value(&plan_dir).unwrap(),
+        );
+    }
     if debug_output_path.is_none() {
         if let (Some(ref base), Some(sid)) = (&session_base_opt, session_id) {
             let session_dir = base.join(crate::output::SESSIONS_SUBDIR).join(sid);

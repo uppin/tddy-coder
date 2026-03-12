@@ -59,7 +59,7 @@ impl FlowRunner {
             hooks.before_task(&session.current_task_id, &ctx)?;
             crate::workflow::agent_output::set_sinks(
                 hooks.agent_output_sink(),
-                hooks.progress_sink(),
+                hooks.progress_sink(&ctx),
             );
         }
 

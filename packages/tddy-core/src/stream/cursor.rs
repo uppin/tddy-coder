@@ -173,6 +173,9 @@ where
         // Capture thread ID from any event
         if session_id.is_empty() {
             if let Some(tid) = extract_thread_id(&event) {
+                on_progress(&ProgressEvent::SessionStarted {
+                    session_id: tid.clone(),
+                });
                 session_id = tid;
             }
         }
@@ -223,6 +226,11 @@ where
             }
             "result" => {
                 if !event.session_id.is_empty() {
+                    if session_id.is_empty() {
+                        on_progress(&ProgressEvent::SessionStarted {
+                            session_id: event.session_id.clone(),
+                        });
+                    }
                     session_id = event.session_id.clone();
                 }
                 if !event.result.is_empty() {
@@ -233,10 +241,20 @@ where
                 }
             }
             "system" => {
-                if !event.session_id.is_empty() {
+                if !event.session_id.is_empty() && session_id.is_empty() {
+                    on_progress(&ProgressEvent::SessionStarted {
+                        session_id: event.session_id.clone(),
+                    });
+                    session_id = event.session_id.clone();
+                } else if !event.session_id.is_empty() {
                     session_id = event.session_id.clone();
                 }
                 if !event.thread_id.is_empty() {
+                    if session_id.is_empty() {
+                        on_progress(&ProgressEvent::SessionStarted {
+                            session_id: event.thread_id.clone(),
+                        });
+                    }
                     session_id = event.thread_id.clone();
                 }
             }

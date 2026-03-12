@@ -202,6 +202,26 @@ impl Task for BackendInvokeTask {
             .await
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
 
+        let key = self.goal.submit_key();
+        let submit_output = self
+            .backend
+            .submit_channel()
+            .and_then(|ch| ch.take_for_goal(key))
+            .or_else(|| take_submit_result_for_goal(key));
+
+        if let Some(output) = submit_output {
+            context.set_sync("output", output.clone());
+            if let Some(sid) = &response.session_id {
+                context.set_sync("session_id", sid.clone());
+            }
+            return Ok(TaskResult {
+                response: output,
+                next_action: NextAction::Continue,
+                task_id: self.id.clone(),
+                status_message: Some(format!("{} step complete", self.id)),
+            });
+        }
+
         if !response.questions.is_empty() {
             context.set_sync("pending_questions", response.questions.clone());
             return Ok(TaskResult {
@@ -212,30 +232,11 @@ impl Task for BackendInvokeTask {
             });
         }
 
-        let key = self.goal.submit_key();
-        let output = self
-            .backend
-            .submit_channel()
-            .and_then(|ch| ch.take_for_goal(key))
-            .or_else(|| take_submit_result_for_goal(key))
-            .ok_or_else(|| {
-                Box::new(crate::WorkflowError::ParseError(crate::ParseError::Malformed(
-                    format!(
-                        "Agent finished without calling tddy-tools submit for goal '{}'. Ensure tddy-tools is on PATH and the agent follows the system prompt.",
-                        key
-                    ),
-                ))) as Box<dyn std::error::Error + Send + Sync>
-            })?;
-        context.set_sync("output", output.clone());
-        if let Some(sid) = &response.session_id {
-            context.set_sync("session_id", sid.clone());
-        }
-
-        Ok(TaskResult {
-            response: output,
-            next_action: NextAction::Continue,
-            task_id: self.id.clone(),
-            status_message: Some(format!("{} step complete", self.id)),
-        })
+        Err(Box::new(crate::WorkflowError::ParseError(
+            crate::ParseError::Malformed(format!(
+                "Agent finished without calling tddy-tools submit for goal '{}'. Ensure tddy-tools is on PATH and the agent follows the system prompt.",
+                key
+            )),
+        )))
     }
 }
