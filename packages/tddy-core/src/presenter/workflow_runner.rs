@@ -320,15 +320,29 @@ fn run_plan_without_output_dir(
         "inherit_stdin".to_string(),
         serde_json::json!(inherit_stdin),
     );
-    let temp_conv_path = if conversation_output_path.is_none() {
-        let p = std::env::temp_dir().join(format!("tddy-plan-conv-{}.jsonl", std::process::id()));
-        let _ = std::fs::remove_file(&p);
-        Some(p)
+    let (temp_conv_path, session_conv_path) = if conversation_output_path.is_none() {
+        if let (Some(ref base), Some(sid)) = (&session_base_opt, session_id) {
+            let conv_path = base
+                .join(crate::output::SESSIONS_SUBDIR)
+                .join(sid)
+                .join("logs")
+                .join("conversation.jsonl");
+            if let Some(parent) = conv_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            (None, Some(conv_path))
+        } else {
+            let p =
+                std::env::temp_dir().join(format!("tddy-plan-conv-{}.jsonl", std::process::id()));
+            let _ = std::fs::remove_file(&p);
+            (Some(p), None)
+        }
     } else {
-        None
+        (None, None)
     };
     let conv_for_ctx = conversation_output_path
         .clone()
+        .or(session_conv_path)
         .or_else(|| temp_conv_path.clone());
     context_values.insert(
         "conversation_output_path".to_string(),

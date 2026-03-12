@@ -1,6 +1,6 @@
 //! Integration tests: SIGINT handling and session info output.
 //!
-//! Verifies that when tddy-demo receives SIGINT (Ctrl+C), it prints session info
+//! Verifies that when tddy-coder (stub backend) receives SIGINT (Ctrl+C), it prints session info
 //! to stderr before exiting (Session: <id> and Plan dir: <path>).
 
 mod common;
@@ -9,21 +9,28 @@ use std::io::{Read, Write};
 use std::process::Stdio;
 
 #[allow(deprecated)]
-fn tddy_demo_bin() -> std::path::PathBuf {
-    assert_cmd::cargo::cargo_bin("tddy-demo")
+fn tddy_coder_bin() -> std::path::PathBuf {
+    assert_cmd::cargo::cargo_bin("tddy-coder")
 }
 
-/// When tddy-demo receives SIGINT, stderr contains "Session:" (plan dir or fallback).
+/// When tddy-coder receives SIGINT, stderr contains "Session:" (plan dir or fallback).
 #[test]
 #[cfg(unix)]
 fn tddy_demo_sigint_prints_session_info_to_stderr() {
-    let mut child = std::process::Command::new(tddy_demo_bin())
-        .args(["--goal", "plan", "--prompt", "Build auth SKIP_QUESTIONS"])
+    let mut child = std::process::Command::new(tddy_coder_bin())
+        .args([
+            "--agent",
+            "stub",
+            "--goal",
+            "plan",
+            "--prompt",
+            "Build auth SKIP_QUESTIONS",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("spawn tddy-demo");
+        .expect("spawn tddy-coder");
 
     let _stdin_handle = std::thread::spawn({
         let mut stdin = child.stdin.take().expect("stdin");

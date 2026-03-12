@@ -32,6 +32,19 @@ exit 0
     Ok(())
 }
 
+/// Fake tddy-tools that satisfies verify_tddy_tools_available's `--help` check.
+#[cfg(unix)]
+fn create_fake_tddy_tools(dir: &Path) -> std::io::Result<()> {
+    let script = "#!/bin/sh\necho 'tddy-tools stub'\nexit 0\n";
+    let script_path = dir.join("tddy-tools");
+    fs::write(&script_path, script)?;
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(&script_path)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms)?;
+    Ok(())
+}
+
 /// AC4: CLI argument parsing accepts `--goal evaluate`.
 #[test]
 fn cli_accepts_evaluate_goal() {
@@ -63,6 +76,7 @@ fn standalone_demo_goal() {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
     create_fake_claude_quick_exit(&tmp).expect("create fake claude");
+    create_fake_tddy_tools(&tmp).expect("create fake tddy-tools");
 
     let plan_dir = tmp.join("plan");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -163,6 +177,7 @@ fn cli_accepts_update_docs_goal() {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
     create_fake_claude_quick_exit(&tmp).expect("create fake claude");
+    create_fake_tddy_tools(&tmp).expect("create fake tddy-tools");
 
     let plan_dir = tmp.join("plan");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -219,6 +234,7 @@ fn cli_accepts_refactor_goal() {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
     create_fake_claude_quick_exit(&tmp).expect("create fake claude");
+    create_fake_tddy_tools(&tmp).expect("create fake tddy-tools");
 
     let plan_dir = tmp.join("plan");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
@@ -298,6 +314,8 @@ exit 0
         perms.set_mode(0o755);
         std::fs::set_permissions(&script_path, perms).unwrap();
     }
+
+    create_fake_tddy_tools(&tmp).expect("create fake tddy-tools");
 
     let mut cmd = tddy_coder_bin();
     let path = format!(

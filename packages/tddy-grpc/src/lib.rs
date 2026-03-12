@@ -38,4 +38,33 @@ mod test_util {
         fn on_agent_output(&mut self, _text: &str) {}
         fn on_inbox_changed(&mut self, _inbox: &[String]) {}
     }
+
+    /// Spawn a gRPC server on an ephemeral port. Returns the endpoint URL
+    /// and the server's JoinHandle. Yields once to let the server start.
+    pub async fn spawn_server(
+        router: tonic::transport::server::Router,
+    ) -> (String, tokio::task::JoinHandle<Result<(), tonic::transport::Error>>) {
+        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let endpoint = format!("http://[::1]:{}", port);
+
+        let handle = tokio::spawn(async move {
+            router
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+        });
+
+        tokio::task::yield_now().await;
+        (endpoint, handle)
+    }
+
+    /// Spawn a gRPC server on an ephemeral port and return a connected client.
+    pub async fn spawn_server_and_connect(
+        router: tonic::transport::server::Router,
+    ) -> crate::gen::tddy_remote_client::TddyRemoteClient<tonic::transport::Channel> {
+        let (endpoint, _handle) = spawn_server(router).await;
+        crate::gen::tddy_remote_client::TddyRemoteClient::connect(endpoint)
+            .await
+            .unwrap()
+    }
 }

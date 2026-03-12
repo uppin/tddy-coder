@@ -9,19 +9,18 @@ mod tests {
     use std::time::Duration;
 
     use tokio::sync::broadcast;
-    use tonic::transport::Server;
     use tonic::Request;
+
+    use tonic::transport::Server;
 
     use crate::gen::server_message;
     use crate::gen::tddy_remote_server::TddyRemoteServer;
-    use crate::gen::{
-        client_message, tddy_remote_client::TddyRemoteClient, ClientMessage, SubmitFeatureInput,
-    };
+    use crate::gen::{client_message, ClientMessage, SubmitFeatureInput};
     use crate::TddyRemoteService;
     use tddy_core::AnyBackend;
     use tddy_core::{Presenter, PresenterHandle, SharedBackend, StubBackend};
 
-    use crate::test_util::NoopView;
+    use crate::test_util::{spawn_server_and_connect, NoopView};
 
     #[tokio::test]
     async fn test_submit_feature_input_triggers_goal_started_and_mode_changed() {
@@ -60,20 +59,8 @@ mod tests {
         });
 
         let service = TddyRemoteService::new(handle);
-        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-
-        let _server_handle = tokio::spawn(async move {
-            Server::builder()
-                .add_service(TddyRemoteServer::new(service))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-                .await
-        });
-
-        let mut client = TddyRemoteClient::connect(format!("http://[::1]:{}", local_addr.port()))
-            .await
-            .unwrap();
+        let router = Server::builder().add_service(TddyRemoteServer::new(service));
+        let mut client = spawn_server_and_connect(router).await;
 
         let request = async_stream::stream! {
             yield ClientMessage {
@@ -139,9 +126,22 @@ mod stream_terminal_tests {
     use tonic::Request;
 
     use crate::gen::tddy_remote_server::TddyRemoteServer;
-    use crate::gen::{tddy_remote_client::TddyRemoteClient, StreamTerminalRequest};
+    use crate::gen::StreamTerminalRequest;
+    use crate::test_util::spawn_server_and_connect;
     use crate::TddyRemoteService;
     use tddy_core::PresenterHandle;
+
+    fn service_with_terminal_bytes() -> (TddyRemoteService, broadcast::Sender<Vec<u8>>) {
+        let (byte_tx, _) = broadcast::channel::<Vec<u8>>(256);
+        let (event_tx, _) = broadcast::channel(256);
+        let (intent_tx, _) = mpsc::channel();
+        let handle = PresenterHandle {
+            event_tx,
+            intent_tx,
+        };
+        let service = TddyRemoteService::new(handle).with_terminal_bytes(byte_tx.clone());
+        (service, byte_tx)
+    }
 
     fn service_without_terminal_bytes() -> TddyRemoteService {
         let (event_tx, _) = broadcast::channel(256);
@@ -155,29 +155,9 @@ mod stream_terminal_tests {
 
     #[tokio::test]
     async fn stream_terminal_returns_bytes() {
-        let (byte_tx, _) = broadcast::channel::<Vec<u8>>(256);
-        let (event_tx, _) = broadcast::channel(256);
-        let (intent_tx, _) = mpsc::channel();
-        let handle = PresenterHandle {
-            event_tx,
-            intent_tx,
-        };
-        let service = TddyRemoteService::new(handle).with_terminal_bytes(byte_tx.clone());
-
-        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        tokio::spawn(async move {
-            Server::builder()
-                .add_service(TddyRemoteServer::new(service))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-                .await
-        });
-
-        let mut client = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
-            .await
-            .unwrap();
+        let (service, byte_tx) = service_with_terminal_bytes();
+        let router = Server::builder().add_service(TddyRemoteServer::new(service));
+        let mut client = spawn_server_and_connect(router).await;
 
         let mut stream = client
             .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
@@ -206,29 +186,9 @@ mod stream_terminal_tests {
 
     #[tokio::test]
     async fn streamed_bytes_contain_ansi_sequences() {
-        let (byte_tx, _) = broadcast::channel::<Vec<u8>>(256);
-        let (event_tx, _) = broadcast::channel(256);
-        let (intent_tx, _) = mpsc::channel();
-        let handle = PresenterHandle {
-            event_tx,
-            intent_tx,
-        };
-        let service = TddyRemoteService::new(handle).with_terminal_bytes(byte_tx.clone());
-
-        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        tokio::spawn(async move {
-            Server::builder()
-                .add_service(TddyRemoteServer::new(service))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-                .await
-        });
-
-        let mut client = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
-            .await
-            .unwrap();
+        let (service, byte_tx) = service_with_terminal_bytes();
+        let router = Server::builder().add_service(TddyRemoteServer::new(service));
+        let mut client = spawn_server_and_connect(router).await;
 
         let mut stream = client
             .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
@@ -259,32 +219,19 @@ mod stream_terminal_tests {
 
     #[tokio::test]
     async fn multiple_clients_receive_same_stream() {
-        let (byte_tx, _) = broadcast::channel::<Vec<u8>>(256);
-        let (event_tx, _) = broadcast::channel(256);
-        let (intent_tx, _) = mpsc::channel();
-        let handle = PresenterHandle {
-            event_tx,
-            intent_tx,
-        };
-        let service = TddyRemoteService::new(handle).with_terminal_bytes(byte_tx.clone());
+        let (service, byte_tx) = service_with_terminal_bytes();
+        let (endpoint, _server) =
+            crate::test_util::spawn_server(Server::builder().add_service(TddyRemoteServer::new(service)))
+                .await;
 
-        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        tokio::spawn(async move {
-            Server::builder()
-                .add_service(TddyRemoteServer::new(service))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+        let mut client1 =
+            crate::gen::tddy_remote_client::TddyRemoteClient::connect(endpoint.clone())
                 .await
-        });
-
-        let mut client1 = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
-            .await
-            .unwrap();
-        let mut client2 = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
-            .await
-            .unwrap();
+                .unwrap();
+        let mut client2 =
+            crate::gen::tddy_remote_client::TddyRemoteClient::connect(endpoint)
+                .await
+                .unwrap();
 
         let mut stream1 = client1
             .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
@@ -328,20 +275,8 @@ mod stream_terminal_tests {
     #[tokio::test]
     async fn stream_terminal_returns_empty_stream_when_no_terminal_bytes() {
         let service = service_without_terminal_bytes();
-        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        tokio::spawn(async move {
-            Server::builder()
-                .add_service(TddyRemoteServer::new(service))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-                .await
-        });
-
-        let mut client = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
-            .await
-            .unwrap();
+        let router = Server::builder().add_service(TddyRemoteServer::new(service));
+        let mut client = spawn_server_and_connect(router).await;
 
         let mut stream = client
             .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
@@ -370,9 +305,8 @@ mod daemon_tests {
     use tonic::Request;
 
     use crate::gen::tddy_remote_server::TddyRemoteServer;
-    use crate::gen::{
-        tddy_remote_client::TddyRemoteClient, GetSessionRequest, ListSessionsRequest,
-    };
+    use crate::gen::{GetSessionRequest, ListSessionsRequest};
+    use crate::test_util::spawn_server_and_connect;
     use crate::DaemonService;
     use tddy_core::write_changeset;
 
@@ -405,20 +339,8 @@ mod daemon_tests {
             tddy_core::StubBackend::new(),
         ));
         let service = DaemonService::new(base.clone(), backend);
-        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        tokio::spawn(async move {
-            Server::builder()
-                .add_service(TddyRemoteServer::new(service))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-                .await
-        });
-
-        let mut client = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
-            .await
-            .unwrap();
+        let router = Server::builder().add_service(TddyRemoteServer::new(service));
+        let mut client = spawn_server_and_connect(router).await;
 
         let response = client
             .get_session(Request::new(GetSessionRequest {
@@ -453,20 +375,8 @@ mod daemon_tests {
             tddy_core::StubBackend::new(),
         ));
         let service = DaemonService::new(base_canonical.clone(), backend);
-        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        tokio::spawn(async move {
-            Server::builder()
-                .add_service(TddyRemoteServer::new(service))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-                .await
-        });
-
-        let mut client = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
-            .await
-            .unwrap();
+        let router = Server::builder().add_service(TddyRemoteServer::new(service));
+        let mut client = spawn_server_and_connect(router).await;
 
         let response = client
             .list_sessions(Request::new(ListSessionsRequest {
@@ -488,24 +398,14 @@ mod daemon_tests {
             tddy_core::StubBackend::new(),
         ));
         let service = DaemonService::new(base.clone(), backend);
-        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let router = Server::builder().add_service(TddyRemoteServer::new(service));
+        let client = spawn_server_and_connect(router).await;
 
-        tokio::spawn(async move {
-            Server::builder()
-                .add_service(TddyRemoteServer::new(service))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-                .await
-        });
-
-        let client = TddyRemoteClient::connect(format!("http://[::1]:{}", port)).await;
-        assert!(client.is_ok(), "daemon should accept connections");
+        drop(client);
 
         let _ = fs::remove_dir_all(&base);
     }
 
-    /// Acceptance test: StartSession creates worktree and runs workflow.
     #[tokio::test]
     async fn start_session_creates_worktree_and_runs_workflow() {
         let base = temp_sessions_dir();
@@ -521,25 +421,12 @@ mod daemon_tests {
             tddy_core::StubBackend::new(),
         ));
         let service = DaemonService::new(base.clone(), backend);
-        let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        tokio::spawn(async move {
-            Server::builder()
-                .add_service(TddyRemoteServer::new(service))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-                .await
-        });
-
-        let mut client = TddyRemoteClient::connect(format!("http://[::1]:{}", port))
-            .await
-            .unwrap();
+        let router = Server::builder().add_service(TddyRemoteServer::new(service));
+        let mut client = spawn_server_and_connect(router).await;
 
         use crate::gen::client_message;
         use crate::gen::ClientMessage;
         use async_stream::stream;
-        use tonic::Request;
 
         let request = stream! {
             yield ClientMessage {
