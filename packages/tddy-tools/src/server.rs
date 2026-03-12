@@ -112,6 +112,61 @@ mod tests {
     }
 
     #[test]
+    fn approval_prompt_allows_bash_tddy_tools_get_schema() {
+        let input = serde_json::json!({
+            "command": "tddy-tools get-schema plan"
+        });
+        let result = PermissionServer::decide("Bash", &input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["behavior"], "allow",
+            "Bash(tddy-tools get-schema) must be allowed, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn approval_prompt_allows_mcp_tddy_tools_tool_calls() {
+        let input = serde_json::json!({
+            "goal": "plan",
+            "data": "{}"
+        });
+        let result = PermissionServer::decide("mcp__tddy-tools__submit", &input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["behavior"], "allow",
+            "mcp__tddy-tools__* tool calls must be allowed (it's our tool), got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn approval_prompt_allows_mcp_tddy_tools_get_schema() {
+        let input = serde_json::json!({
+            "goal": "plan"
+        });
+        let result = PermissionServer::decide("mcp__tddy-tools__get_schema", &input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["behavior"], "allow",
+            "mcp__tddy-tools__get_schema must be allowed, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn approval_prompt_denies_mcp_from_unknown_server() {
+        let input = serde_json::json!({ "query": "drop tables" });
+        let result = PermissionServer::decide("mcp__evil-server__destroy", &input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["behavior"], "deny",
+            "MCP tools from unknown servers must be denied, got: {}",
+            result
+        );
+    }
+
+    #[test]
     fn approval_prompt_denies_arbitrary_bash_commands() {
         let input = serde_json::json!({
             "command": "rm -rf /important/data"
