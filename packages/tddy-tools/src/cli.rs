@@ -1,4 +1,4 @@
-//! CLI subcommands for submit and ask.
+//! CLI subcommands for submit, ask, and get-schema.
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -6,13 +6,15 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
 use std::path::PathBuf;
 
+use tddy_tools::schema;
+
 /// Submit structured output. Validates against schema, relays to tddy-coder via TDDY_SOCKET.
 #[derive(Parser)]
 #[command(name = "submit")]
 pub struct SubmitArgs {
-    /// Path to JSON schema file for validation.
+    /// Goal name for validation (uses embedded schema). Required for validation.
     #[arg(long)]
-    pub schema: Option<PathBuf>,
+    pub goal: Option<String>,
 
     /// JSON data (alternative to stdin).
     #[arg(long)]
@@ -26,6 +28,18 @@ pub struct AskArgs {
     /// Questions JSON (alternative to stdin). Format: {"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}
     #[arg(long)]
     pub data: Option<String>,
+}
+
+/// Get JSON schema for a goal.
+#[derive(Parser)]
+#[command(name = "get-schema")]
+pub struct GetSchemaArgs {
+    /// Goal name (plan, red, green, acceptance-tests, evaluate-changes, validate, refactor, update-docs, demo).
+    pub goal: String,
+
+    /// Write schema to file (creates schemas/ and common/ subdirs).
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
 }
 
 /// Wire format for submit request (sent to socket).
@@ -90,8 +104,13 @@ pub fn run_submit(args: SubmitArgs) -> Result<()> {
         .unwrap_or("unknown")
         .to_string();
 
-    if let Some(ref schema_path) = args.schema {
-        validate_against_schema(&data, schema_path)?;
+    let validation_goal = args.goal.as_deref().unwrap_or(&goal);
+    if schema::get_schema(validation_goal).is_some() {
+        if let Err(errors) = schema::validate_output(validation_goal, &json_str) {
+            let tip = schema::validation_error_tip(validation_goal);
+            output_validation_error_with_tip(&errors, &tip);
+            std::process::exit(3);
+        }
     }
 
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
@@ -110,30 +129,6 @@ fn read_input(data_arg: &Option<String>) -> Result<String> {
     let mut buf = String::new();
     io::stdin().read_to_string(&mut buf)?;
     Ok(buf)
-}
-
-fn validate_against_schema(data: &serde_json::Value, schema_path: &std::path::Path) -> Result<()> {
-    let schema_str = std::fs::read_to_string(schema_path)
-        .with_context(|| format!("schema file not found: {}", schema_path.display()))?;
-
-    let schema: serde_json::Value =
-        serde_json::from_str(&schema_str).context("invalid schema JSON")?;
-
-    let validator = jsonschema::options()
-        .build(&schema)
-        .context("failed to compile schema")?;
-
-    let errors: Vec<String> = validator
-        .iter_errors(data)
-        .map(|err| err.to_string())
-        .collect();
-
-    if !errors.is_empty() {
-        output_validation_error(&errors);
-        std::process::exit(3);
-    }
-
-    Ok(())
 }
 
 fn output_success(goal: &str) {
@@ -159,6 +154,27 @@ fn output_validation_error(errors: &[String]) {
         "status": "error",
         "errors": errors
     });
+    println!("{}", serde_json::to_string(&out).unwrap());
+    std::process::exit(3);
+}
+
+fn output_validation_error_with_tip(errors: &[schema::SchemaError], tip: &str) {
+    let error_strings: Vec<String> = errors
+        .iter()
+        .map(|e| {
+            if e.instance_path.is_empty() {
+                e.message.clone()
+            } else {
+                format!("{}: {}", e.instance_path, e.message)
+            }
+        })
+        .collect();
+    let out = serde_json::json!({
+        "status": "error",
+        "errors": error_strings,
+        "tip": tip
+    });
+    eprintln!("{}", tip);
     println!("{}", serde_json::to_string(&out).unwrap());
     std::process::exit(3);
 }
@@ -291,8 +307,26 @@ fn relay_ask(socket_path: &std::path::Path, questions: &[AskQuestionItem]) -> Re
     Ok(())
 }
 
+pub fn run_get_schema(args: GetSchemaArgs) -> Result<()> {
+    let content = match schema::get_schema(&args.goal) {
+        Some(c) => c,
+        None => {
+            output_error(&format!("unknown goal: {}", args.goal), 2);
+            unreachable!("output_error exits")
+        }
+    };
+    if let Some(ref out_path) = args.output {
+        if let Err(e) = schema::write_schema_to_path(&args.goal, out_path) {
+            output_error(&format!("failed to write schema: {}", e), 1);
+        }
+    } else {
+        println!("{}", content);
+    }
+    Ok(())
+}
+
 #[cfg(not(unix))]
-fn relay_ask(_socket_path: &std::path::Path, _questions: &[QuestionOption]) -> Result<()> {
+fn relay_ask(_socket_path: &std::path::Path, _questions: &[AskQuestionItem]) -> Result<()> {
     let out = serde_json::json!({
         "status": "ok",
         "message": "Unix socket not available on this platform"

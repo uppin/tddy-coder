@@ -10,13 +10,13 @@ You MUST:
 4. Run the project's test command (e.g. cargo test for Rust) to verify all new tests fail
 5. Remove or adjust any tests that pass - passing tests do not verify new behavior
 6. When done, submit your output by calling:
-  tddy-tools submit --schema schemas/red.schema.json --data '<your JSON output>'
+  tddy-tools submit --goal red --data '<your JSON output>'
 
 If you need to ask the user clarification questions, call:
   tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
 The call will block until the user answers. The response contains the user's answers.
 
-Read the JSON Schema file at `schemas/red.schema.json` in the working directory for the exact output format. The JSON must be a single object starting with {"goal":"red",...} — no number, array, or numbered list items.
+Run `tddy-tools get-schema red` to see the expected output format. The JSON must be a single object starting with {"goal":"red",...} — no number, array, or numbered list items.
 
 The summary must describe what skeletons and tests were created and confirm all tests are failing. The tests array lists each failing test. The skeletons array lists each skeleton (trait, struct, method, function, or module) added.
 
@@ -78,12 +78,12 @@ mod tests {
     fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt();
         assert!(
-            prompt.contains("schemas/red.schema.json"),
-            "system prompt must reference red schema file"
+            prompt.contains("tddy-tools get-schema red"),
+            "system prompt must reference get-schema for red"
         );
         assert!(
-            prompt.contains("tddy-tools submit") && prompt.contains("schemas/red.schema.json"),
-            "system prompt must instruct agent to use tddy-tools submit with schema"
+            prompt.contains("tddy-tools submit") && prompt.contains("--goal red"),
+            "system prompt must instruct agent to use tddy-tools submit --goal red"
         );
     }
 }

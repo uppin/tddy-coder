@@ -1,23 +1,10 @@
-//! Acceptance tests for tddy-tools CLI: submit, ask, --mcp, help.
+//! Acceptance tests for tddy-tools CLI: submit, ask, get-schema, --mcp, help.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
-use std::fs;
-use std::path::Path;
-use tempfile::TempDir;
 
 fn tddy_tools_bin() -> Command {
     cargo_bin_cmd!("tddy-tools")
-}
-
-fn copy_plan_schema_to(dir: &Path) -> std::io::Result<std::path::PathBuf> {
-    let schema_src = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("tddy-core/schemas/plan.schema.json");
-    let schema_dest = dir.join("plan.schema.json");
-    fs::copy(&schema_src, &schema_dest)?;
-    Ok(schema_dest)
 }
 
 #[test]
@@ -41,27 +28,19 @@ fn submit_help_includes_examples() {
     cmd.args(["submit", "--help"]);
     cmd.assert()
         .success()
-        .stdout(predicates::str::contains("--schema"));
+        .stdout(predicates::str::contains("--goal"));
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("--data"));
 }
 
 #[test]
-fn submit_valid_json_with_schema_returns_success() {
-    let tmp = TempDir::new().expect("temp dir");
-    let schema_path = copy_plan_schema_to(tmp.path()).expect("copy schema");
+fn submit_valid_json_with_goal_returns_success() {
     let valid_json =
         r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X","todo":"- [ ] Task 1"}"##;
 
     let mut cmd = tddy_tools_bin();
-    cmd.args([
-        "submit",
-        "--schema",
-        schema_path.to_str().unwrap(),
-        "--data",
-        valid_json,
-    ]);
+    cmd.args(["submit", "--goal", "plan", "--data", valid_json]);
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("\"status\":\"ok\""))
@@ -70,18 +49,10 @@ fn submit_valid_json_with_schema_returns_success() {
 
 #[test]
 fn submit_invalid_json_returns_validation_error() {
-    let tmp = TempDir::new().expect("temp dir");
-    let schema_path = copy_plan_schema_to(tmp.path()).expect("copy schema");
     let invalid_json = r#"{"goal":"plan","todo":"- [ ] Task 1"}"#;
 
     let mut cmd = tddy_tools_bin();
-    cmd.args([
-        "submit",
-        "--schema",
-        schema_path.to_str().unwrap(),
-        "--data",
-        invalid_json,
-    ]);
+    cmd.args(["submit", "--goal", "plan", "--data", invalid_json]);
     cmd.assert()
         .code(3)
         .stdout(predicates::str::contains("\"status\":\"error\""))
@@ -90,13 +61,11 @@ fn submit_invalid_json_returns_validation_error() {
 
 #[test]
 fn submit_reads_from_stdin() {
-    let tmp = TempDir::new().expect("temp dir");
-    let schema_path = copy_plan_schema_to(tmp.path()).expect("copy schema");
     let valid_json =
         r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X","todo":"- [ ] Task 1"}"##;
 
     let mut cmd = tddy_tools_bin();
-    cmd.args(["submit", "--schema", schema_path.to_str().unwrap()])
+    cmd.args(["submit", "--goal", "plan"])
         .write_stdin(valid_json);
     cmd.assert()
         .success()
@@ -105,14 +74,11 @@ fn submit_reads_from_stdin() {
 
 #[test]
 fn submit_malformed_json_returns_parse_error() {
-    let tmp = TempDir::new().expect("temp dir");
-    let schema_path = copy_plan_schema_to(tmp.path()).expect("copy schema");
-
     let mut cmd = tddy_tools_bin();
     cmd.args([
         "submit",
-        "--schema",
-        schema_path.to_str().unwrap(),
+        "--goal",
+        "plan",
         "--data",
         "not valid json {",
     ]);
@@ -122,18 +88,22 @@ fn submit_malformed_json_returns_parse_error() {
 }
 
 #[test]
-fn schema_file_not_found_returns_error() {
+fn get_schema_plan_outputs_schema() {
     let mut cmd = tddy_tools_bin();
-    cmd.args([
-        "submit",
-        "--schema",
-        "/nonexistent/schemas/plan.schema.json",
-        "--data",
-        r#"{"goal":"plan","prd":"x","todo":"y"}"#,
-    ]);
+    cmd.args(["get-schema", "plan"]);
     cmd.assert()
-        .code(1)
-        .stderr(predicates::str::contains("not found"));
+        .success()
+        .stdout(predicates::str::contains("$schema"))
+        .stdout(predicates::str::contains("plan"));
+}
+
+#[test]
+fn get_schema_unknown_goal_returns_error() {
+    let mut cmd = tddy_tools_bin();
+    cmd.args(["get-schema", "unknown"]);
+    cmd.assert()
+        .code(2)
+        .stderr(predicates::str::contains("unknown goal"));
 }
 
 #[test]

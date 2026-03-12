@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tddy:goal/demo",
+  "title": "DemoOutput",
+  "type": "object",
+  "required": ["goal", "summary"],
+  "properties": {
+    "goal": { "const": "demo" },
+    "summary": { "type": "string" },
+    "demo_type": { "type": "string" },
+    "steps_completed": { "type": "integer" },
+    "verification": { "type": "string" }
+  }
+}

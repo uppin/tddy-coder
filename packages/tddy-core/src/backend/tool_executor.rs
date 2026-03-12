@@ -85,23 +85,8 @@ impl ToolExecutor for ProcessToolExecutor {
             self.socket_path.display(),
             self.working_dir.display()
         );
-        let schema_name = match goal {
-            "plan" => "plan.schema.json",
-            "acceptance-tests" => "acceptance-tests.schema.json",
-            "red" => "red.schema.json",
-            "green" => "green.schema.json",
-            "demo" => "demo.schema.json",
-            "evaluate-changes" => "evaluate.schema.json",
-            "validate" => "validate-subagents.schema.json",
-            "refactor" => "refactor.schema.json",
-            _ => return Err(format!("unknown goal for schema: {}", goal).into()),
-        };
-        let schema_path = self.working_dir.join("schemas").join(schema_name);
         let output = std::process::Command::new("tddy-tools")
-            .args(["submit", "--schema"])
-            .arg(&schema_path)
-            .arg("--data")
-            .arg(json)
+            .args(["submit", "--goal", goal, "--data", json])
             .env("TDDY_SOCKET", &self.socket_path)
             .current_dir(&self.working_dir)
             .output()?;

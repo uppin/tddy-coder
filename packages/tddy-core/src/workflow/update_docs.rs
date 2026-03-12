@@ -29,9 +29,9 @@ pub fn system_prompt() -> String {
 3. Extract final state (State B) — no delta language ("changed", "updated", "now")
 4. Apply content transformations to target docs
 5. Update changelog/changesets history
-6. When done, submit your output by calling: tddy-tools submit --schema schemas/update-docs.schema.json --data '<your JSON output>'
+6. When done, submit your output by calling: tddy-tools submit --goal update-docs --data '<your JSON output>'
 
-Read the JSON Schema file at `schemas/update-docs.schema.json` in the working directory for the exact output format. The JSON must include: goal, summary, docs_updated.
+Run `tddy-tools get-schema update-docs` to see the expected output format. The JSON must include: goal, summary, docs_updated.
 
 **CRITICAL**: You MUST call tddy-tools submit with your complete output. Do NOT embed structured output in text. The submit call delivers the output to the workflow — if you do not call it, the workflow fails."#
         .to_string()
@@ -65,8 +65,12 @@ mod tests {
     fn system_prompt_references_schema() {
         let prompt = system_prompt();
         assert!(
-            prompt.contains("schemas/update-docs.schema.json"),
-            "system prompt must reference update-docs schema file"
+            prompt.contains("tddy-tools get-schema update-docs"),
+            "system prompt must reference get-schema for update-docs"
+        );
+        assert!(
+            prompt.contains("tddy-tools submit") && prompt.contains("--goal update-docs"),
+            "system prompt must instruct agent to use tddy-tools submit --goal update-docs"
         );
     }
 

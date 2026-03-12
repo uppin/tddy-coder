@@ -18,7 +18,6 @@ use crate::output::{
     write_evaluation_report, write_progress_file, write_red_output_file, PlanningOutput,
 };
 use crate::presenter::WorkflowEvent;
-use crate::schema::write_schema_to_dir;
 use crate::stream::ProgressEvent as StreamProgressEvent;
 use crate::workflow::context::Context;
 use crate::workflow::graph::ElicitationEvent;
@@ -117,7 +116,6 @@ fn before_acceptance_tests(
     context.set_sync("session_id", session_id);
     context.set_sync("plan_dir", plan_dir.to_path_buf());
     context.set_sync("model", model);
-    let _ = write_schema_to_dir(plan_dir, "acceptance-tests");
     Ok(())
 }
 
@@ -144,7 +142,6 @@ fn before_red(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + 
     context.set_sync("model", model);
     let session_id = uuid::Uuid::new_v4().to_string();
     context.set_sync("session_id", session_id);
-    let _ = write_schema_to_dir(plan_dir, "red");
     Ok(())
 }
 
@@ -188,7 +185,6 @@ fn before_green(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error 
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", true);
     context.set_sync("model", model);
-    let _ = write_schema_to_dir(plan_dir, "green");
     Ok(())
 }
 
@@ -211,7 +207,6 @@ fn before_evaluate(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Err
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", evaluate::system_prompt());
     context.set_sync("plan_dir", plan_dir.to_path_buf());
-    let _ = write_schema_to_dir(plan_dir, "evaluate");
     Ok(())
 }
 
@@ -222,7 +217,6 @@ fn before_validate(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Err
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", validate_subagents::system_prompt());
     context.set_sync("plan_dir", plan_dir.to_path_buf());
-    let _ = write_schema_to_dir(plan_dir, "validate-subagents");
     Ok(())
 }
 
@@ -233,7 +227,6 @@ fn before_refactor(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Err
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", refactor::system_prompt());
     context.set_sync("plan_dir", plan_dir.to_path_buf());
-    let _ = write_schema_to_dir(plan_dir, "refactor");
     Ok(())
 }
 
@@ -272,7 +265,6 @@ fn before_update_docs(
     }
     context.set_sync("system_prompt", system_prompt);
     context.set_sync("plan_dir", plan_dir.to_path_buf());
-    let _ = write_schema_to_dir(plan_dir, "update-docs");
     Ok(())
 }
 

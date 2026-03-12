@@ -18,13 +18,13 @@ You MUST:
 2. Run tests after each change
 3. Stop if tests fail and report which task caused the failure
 4. When done, submit your output by calling:
-  tddy-tools submit --schema schemas/refactor.schema.json --data '<your JSON output>'
+  tddy-tools submit --goal refactor --data '<your JSON output>'
 
 If you need to ask the user clarification questions, call:
   tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
 The call will block until the user answers. The response contains the user's answers.
 
-Read the JSON Schema file at `schemas/refactor.schema.json` in the working directory for the exact output format. The JSON must be a single object starting with {"goal":"refactor",...}."#
+Run `tddy-tools get-schema refactor` to see the expected output format. The JSON must be a single object starting with {"goal":"refactor",...}."#
     .to_string()
 }
 
@@ -54,8 +54,12 @@ mod tests {
     fn system_prompt_references_schema() {
         let prompt = system_prompt();
         assert!(
-            prompt.contains("schemas/refactor.schema.json"),
-            "system prompt must reference refactor schema file"
+            prompt.contains("tddy-tools get-schema refactor"),
+            "system prompt must reference get-schema for refactor"
+        );
+        assert!(
+            prompt.contains("tddy-tools submit") && prompt.contains("--goal refactor"),
+            "system prompt must instruct agent to use tddy-tools submit --goal refactor"
         );
     }
 

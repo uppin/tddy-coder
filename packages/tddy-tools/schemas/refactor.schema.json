@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Refactor Goal Output",
+  "description": "Structured output from the refactor goal.",
+  "type": "object",
+  "required": ["goal", "summary", "tasks_completed", "tests_passing"],
+  "properties": {
+    "goal": {
+      "type": "string",
+      "const": "refactor"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tasks_completed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tests_passing": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}
