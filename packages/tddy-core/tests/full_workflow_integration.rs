@@ -12,7 +12,7 @@ use common::{
     run_plan, write_changeset_with_state,
 };
 use std::sync::Arc;
-use tddy_core::changeset::read_changeset;
+use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
@@ -39,6 +39,11 @@ async fn full_workflow_chains_all_steps() {
 
     let plan_dir = plan_dir_for_input(&output_dir, "Build auth");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let init_cs = Changeset {
+        initial_prompt: Some("Build auth".to_string()),
+        ..Changeset::default()
+    };
+    let _ = write_changeset(&plan_dir, &init_cs);
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
@@ -441,6 +446,11 @@ async fn plain_full_workflow_uses_single_workflow_instance() {
 
     let plan_dir = plan_dir_for_input(&output_dir, "Build auth");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let init_cs = Changeset {
+        initial_prompt: Some("Build auth".to_string()),
+        ..Changeset::default()
+    };
+    let _ = write_changeset(&plan_dir, &init_cs);
     std::fs::write(
         plan_dir.join("demo-plan.md"),
         "# Demo\n## Steps\n- Run CLI\n## Verification\nOK",
@@ -665,6 +675,13 @@ async fn full_workflow_returns_elicitation_needed_after_plan() {
     let output_dir = std::env::temp_dir().join("tddy-full-wf-elicit");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
+    let plan_dir = plan_dir_for_input(&output_dir, "Build auth");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let init_cs = Changeset {
+        initial_prompt: Some("Build auth".to_string()),
+        ..Changeset::default()
+    };
+    let _ = write_changeset(&plan_dir, &init_cs);
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
@@ -707,6 +724,13 @@ async fn full_workflow_resumes_after_elicitation_approval() {
     let output_dir = std::env::temp_dir().join("tddy-full-wf-elicit-resume");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
+    let plan_dir = plan_dir_for_input(&output_dir, "Build auth");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let init_cs = Changeset {
+        initial_prompt: Some("Build auth".to_string()),
+        ..Changeset::default()
+    };
+    let _ = write_changeset(&plan_dir, &init_cs);
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);

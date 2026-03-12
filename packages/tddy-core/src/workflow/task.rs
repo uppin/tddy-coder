@@ -2,7 +2,7 @@
 //!
 //! Mirrors [graph-flow task.rs](https://github.com/a-agmon/rs-graph-llm/blob/main/graph-flow/src/task.rs).
 
-use crate::backend::{CodingBackend, Goal, InvokeRequest};
+use crate::backend::{CodingBackend, Goal, InvokeRequest, SessionMode};
 use crate::toolcall::take_submit_result_for_goal;
 use crate::workflow::context::Context;
 use async_trait::async_trait;
@@ -176,6 +176,13 @@ impl Task for BackendInvokeTask {
             .or_else(|| context.get_sync::<PathBuf>("output_dir"));
         let is_resume = context.get_sync::<String>("answers").is_some()
             || context.get_sync::<bool>("is_resume").unwrap_or(false);
+        let session = context.get_sync::<String>("session_id").map(|id| {
+            if is_resume {
+                SessionMode::Resume(id)
+            } else {
+                SessionMode::Fresh(id)
+            }
+        });
 
         let request = InvokeRequest {
             prompt: prompt.clone(),
@@ -183,8 +190,7 @@ impl Task for BackendInvokeTask {
             system_prompt_path: None,
             goal: self.goal,
             model: context.get_sync("model"),
-            session_id: context.get_sync("session_id"),
-            is_resume,
+            session,
             working_dir,
             debug: context.get_sync::<bool>("debug").unwrap_or(false),
             agent_output: context.get_sync::<bool>("agent_output").unwrap_or(false),
@@ -202,6 +208,26 @@ impl Task for BackendInvokeTask {
             .await
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
 
+        let key = self.goal.submit_key();
+        let submit_output = self
+            .backend
+            .submit_channel()
+            .and_then(|ch| ch.take_for_goal(key))
+            .or_else(|| take_submit_result_for_goal(key));
+
+        if let Some(output) = submit_output {
+            context.set_sync("output", output.clone());
+            if let Some(sid) = &response.session_id {
+                context.set_sync("session_id", sid.clone());
+            }
+            return Ok(TaskResult {
+                response: output,
+                next_action: NextAction::Continue,
+                task_id: self.id.clone(),
+                status_message: Some(format!("{} step complete", self.id)),
+            });
+        }
+
         if !response.questions.is_empty() {
             context.set_sync("pending_questions", response.questions.clone());
             return Ok(TaskResult {
@@ -212,30 +238,11 @@ impl Task for BackendInvokeTask {
             });
         }
 
-        let key = self.goal.submit_key();
-        let output = self
-            .backend
-            .submit_channel()
-            .and_then(|ch| ch.take_for_goal(key))
-            .or_else(|| take_submit_result_for_goal(key))
-            .ok_or_else(|| {
-                Box::new(crate::WorkflowError::ParseError(crate::ParseError::Malformed(
-                    format!(
-                        "Agent finished without calling tddy-tools submit for goal '{}'. Ensure tddy-tools is on PATH and the agent follows the system prompt.",
-                        key
-                    ),
-                ))) as Box<dyn std::error::Error + Send + Sync>
-            })?;
-        context.set_sync("output", output.clone());
-        if let Some(sid) = &response.session_id {
-            context.set_sync("session_id", sid.clone());
-        }
-
-        Ok(TaskResult {
-            response: output,
-            next_action: NextAction::Continue,
-            task_id: self.id.clone(),
-            status_message: Some(format!("{} step complete", self.id)),
-        })
+        Err(Box::new(crate::WorkflowError::ParseError(
+            crate::ParseError::Malformed(format!(
+                "Agent finished without calling tddy-tools submit for goal '{}'. Ensure tddy-tools is on PATH and the agent follows the system prompt.",
+                key
+            )),
+        )))
     }
 }

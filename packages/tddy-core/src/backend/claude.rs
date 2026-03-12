@@ -92,13 +92,17 @@ pub fn build_claude_args(
         args.push(model.clone());
     }
 
-    if let Some(ref sid) = request.session_id {
-        if request.is_resume {
-            args.push("--resume".to_string());
-        } else {
-            args.push("--session-id".to_string());
+    if let Some(ref session) = request.session {
+        match session {
+            super::SessionMode::Fresh(id) => {
+                args.push("--session-id".to_string());
+                args.push(id.clone());
+            }
+            super::SessionMode::Resume(id) => {
+                args.push("--resume".to_string());
+                args.push(id.clone());
+            }
         }
-        args.push(sid.clone());
     }
 
     if let Some(path) = system_prompt_path {
@@ -308,11 +312,10 @@ impl ClaudeCodeBackend {
         );
         log::debug!("[tddy-coder] cwd: {}", cwd_str);
         log::debug!(
-            "[tddy-coder] goal: {:?}, model: {:?}, session_id: {:?}, is_resume: {}",
+            "[tddy-coder] goal: {:?}, model: {:?}, session: {:?}",
             request.goal,
             request.model,
-            request.session_id,
-            request.is_resume
+            request.session
         );
         log::debug!(
             "[tddy-coder] prompt ({} bytes): {}",
@@ -377,7 +380,7 @@ impl ClaudeCodeBackend {
             }
         };
 
-        let skip_until_line = if request.is_resume {
+        let skip_until_line = if request.session.as_ref().is_some_and(|s| s.is_resume()) {
             request
                 .conversation_output_path
                 .as_ref()
@@ -436,14 +439,19 @@ impl ClaudeCodeBackend {
                 .as_ref()
                 .and_then(|p| std::fs::read_to_string(p).ok())
                 .or_else(|| request.system_prompt.clone());
+            let (session_id, is_resume) = request
+                .session
+                .as_ref()
+                .map(|s| (s.session_id().to_string(), s.is_resume()))
+                .unwrap_or((String::new(), false));
             let request_entry = serde_json::json!({
                 "type": "tddy-request",
                 "goal": format!("{:?}", request.goal),
                 "prompt": request.prompt,
                 "system_prompt": sys_prompt_content,
                 "model": request.model,
-                "session_id": request.session_id,
-                "is_resume": request.is_resume,
+                "session_id": session_id,
+                "is_resume": is_resume,
             });
             let _ = writeln!(f, "{}", request_entry);
             let _ = f.flush();

@@ -413,8 +413,8 @@ async fn green_workflow_resumes_session_from_impl_session_file() {
     let invocations_before_green = backend.invocations();
     let expected_session_id = invocations_before_green
         .last()
-        .and_then(|r| r.session_id.as_deref())
-        .expect("red should have set session_id");
+        .and_then(|r| r.session.as_ref().map(|s| s.session_id()))
+        .expect("red should have set session");
 
     let ctx = ctx_green(plan_dir.clone(), Some(""), false);
     let r = engine.run_goal("green", ctx).await.unwrap();
@@ -430,13 +430,13 @@ async fn green_workflow_resumes_session_from_impl_session_file() {
         .find(|r| r.goal == tddy_core::Goal::Green)
         .expect("green invocation should exist");
     assert_eq!(
-        green_req.session_id.as_deref(),
+        green_req.session.as_ref().map(|s| s.session_id()),
         Some(expected_session_id),
-        "green should resume with session_id from changeset.yaml"
+        "green should resume with session from changeset.yaml"
     );
     assert!(
-        green_req.is_resume,
-        "green should invoke with is_resume=true"
+        green_req.session.as_ref().map_or(false, |s| s.is_resume()),
+        "green should invoke with SessionMode::Resume"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);

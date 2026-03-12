@@ -56,6 +56,7 @@ impl MockBackend {
     }
 
     /// Push a successful response with the given output, session_id, and questions.
+    /// Does not store in submit_channel (agent has not submitted yet).
     pub fn push_ok_with_questions(
         &self,
         output: impl Into<String>,
@@ -119,8 +120,12 @@ impl CodingBackend for MockBackend {
                 })?;
         }
 
-        self.submit_channel
-            .store(request.goal.submit_key(), &response.output);
+        // Only store submit when the agent produced final output (no pending questions).
+        // When returning questions, the agent has not called tddy-tools submit yet.
+        if response.questions.is_empty() {
+            self.submit_channel
+                .store(request.goal.submit_key(), &response.output);
+        }
 
         Ok(response)
     }

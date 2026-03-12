@@ -11,7 +11,6 @@ pub fn plan_allowlist() -> Vec<String> {
         "Glob".to_string(),
         "Grep".to_string(),
         "SemanticSearch".to_string(),
-        "AskUserQuestion".to_string(),
         "ExitPlanMode".to_string(),
         "Bash(tddy-tools *)".to_string(),
     ]

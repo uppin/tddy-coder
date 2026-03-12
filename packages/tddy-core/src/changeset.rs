@@ -79,6 +79,9 @@ pub struct SessionEntry {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChangesetState {
     pub current: String,
+    /// Currently active agent session ID. Updated when a step starts or when SessionStarted is received.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     pub updated_at: String,
     #[serde(default)]
     pub history: Vec<StateTransition>,
@@ -131,6 +134,7 @@ impl Default for Changeset {
             sessions: Vec::new(),
             state: ChangesetState {
                 current: "Init".to_string(),
+                session_id: None,
                 updated_at: now.clone(),
                 history: vec![StateTransition {
                     state: "Init".to_string(),
@@ -292,12 +296,13 @@ pub fn append_session_and_update_state(
 ) {
     let now = chrono::Utc::now().to_rfc3339();
     changeset.sessions.push(SessionEntry {
-        id: session_id,
+        id: session_id.clone(),
         agent: agent.to_string(),
         tag: tag.to_string(),
         created_at: now.clone(),
         system_prompt_file,
     });
+    changeset.state.session_id = Some(session_id);
     changeset.state.history.push(StateTransition {
         state: new_state.to_string(),
         at: now.clone(),

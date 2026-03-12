@@ -63,6 +63,7 @@ impl WorkflowEngine {
         for (k, v) in context_values {
             ctx.set_sync(&k, v);
         }
+        ctx.set_sync("session_id", session_id.clone());
 
         let session = Session {
             id: session_id.clone(),
@@ -92,6 +93,7 @@ impl WorkflowEngine {
         for (k, v) in context_values {
             ctx.set_sync(&k, v);
         }
+        ctx.set_sync("session_id", session_id.clone());
 
         let session = Session {
             id: session_id.clone(),

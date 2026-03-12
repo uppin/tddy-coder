@@ -214,7 +214,9 @@ mod tests {
         let mut vs = ViewState::new();
         vs.markdown_at_end = true;
         vs.markdown_end_button_selected = 0;
-        let mode = AppMode::MarkdownViewer { content: "plan content".to_string() };
+        let mode = AppMode::MarkdownViewer {
+            content: "plan content".to_string(),
+        };
         let intent = key_event_to_intent(enter_key(), &mode, &vs);
         assert!(matches!(intent, Some(UserIntent::ApprovePlan)));
     }
@@ -224,7 +226,9 @@ mod tests {
         let mut vs = ViewState::new();
         vs.markdown_at_end = true;
         vs.markdown_end_button_selected = 1;
-        let mode = AppMode::MarkdownViewer { content: "plan content".to_string() };
+        let mode = AppMode::MarkdownViewer {
+            content: "plan content".to_string(),
+        };
         let intent = key_event_to_intent(enter_key(), &mode, &vs);
         assert!(matches!(intent, Some(UserIntent::RefinePlan)));
     }
@@ -233,7 +237,9 @@ mod tests {
     fn enter_when_not_at_end_returns_none() {
         let mut vs = ViewState::new();
         vs.markdown_at_end = false;
-        let mode = AppMode::MarkdownViewer { content: "plan content".to_string() };
+        let mode = AppMode::MarkdownViewer {
+            content: "plan content".to_string(),
+        };
         let intent = key_event_to_intent(enter_key(), &mode, &vs);
         assert!(intent.is_none());
     }

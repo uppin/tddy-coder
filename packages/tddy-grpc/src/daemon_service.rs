@@ -336,6 +336,12 @@ impl DaemonStreamHandler {
             .map_err(|e| Status::internal(format!("create session dir: {}", e)))
             .unwrap();
 
+        let init_cs = tddy_core::changeset::Changeset {
+            initial_prompt: Some(prompt.clone()),
+            ..tddy_core::changeset::Changeset::default()
+        };
+        let _ = tddy_core::changeset::write_changeset(&plan, &init_cs);
+
         self.session_id = Some(sid.clone());
         self.plan_dir = Some(plan.clone());
         self.repo_root = Some(repo.clone());

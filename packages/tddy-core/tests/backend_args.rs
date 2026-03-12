@@ -25,8 +25,7 @@ fn request_with_both_prompts(system_prompt: &str, user_prompt: &str) -> InvokeRe
         system_prompt_path: None,
         goal: Goal::Plan,
         model: None,
-        session_id: None,
-        is_resume: false,
+        session: None,
         working_dir: None,
         debug: false,
         agent_output: false,
@@ -60,8 +59,7 @@ fn build_claude_args_includes_output_format_stream_json() {
 #[test]
 fn build_claude_args_includes_session_id_on_first_call() {
     let mut req = request_with_both_prompts("Sys", "User");
-    req.session_id = Some("abc-123".to_string());
-    req.is_resume = false;
+    req.session = Some(tddy_core::SessionMode::Fresh("abc-123".to_string()));
 
     let config = plan_config();
     let args = build_claude_args(&req, &config, None);
@@ -74,8 +72,7 @@ fn build_claude_args_includes_session_id_on_first_call() {
 #[test]
 fn build_claude_args_includes_resume_on_followup_call() {
     let mut req = request_with_both_prompts("Sys", "User");
-    req.session_id = Some("abc-123".to_string());
-    req.is_resume = true;
+    req.session = Some(tddy_core::SessionMode::Resume("abc-123".to_string()));
 
     let config = plan_config();
     let args = build_claude_args(&req, &config, None);
@@ -200,8 +197,7 @@ fn request_without_system_prompt_has_user_prompt_after_p() {
         system_prompt_path: None,
         goal: Goal::Plan,
         model: None,
-        session_id: None,
-        is_resume: false,
+        session: None,
         working_dir: None,
         debug: false,
         agent_output: false,
@@ -363,8 +359,7 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n\n## TODO\n\n
         system_prompt_path: None,
         goal: Goal::Plan,
         model: None,
-        session_id: None,
-        is_resume: false,
+        session: None,
         working_dir: None,
         debug: false,
         agent_output: false,

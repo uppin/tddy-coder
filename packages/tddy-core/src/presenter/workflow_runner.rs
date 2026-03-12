@@ -302,10 +302,27 @@ fn run_plan_without_output_dir(
     if let Some(sid) = session_id {
         context_values.insert("session_id".to_string(), serde_json::json!(sid));
     }
+    let session_dir = match (&session_base_opt, session_id) {
+        (Some(base), Some(sid)) => Some(
+            crate::output::create_session_dir_with_id(base, sid)
+                .unwrap_or_else(|_| base.join(crate::output::SESSIONS_SUBDIR).join(sid)),
+        ),
+        _ => None,
+    };
+    if let Some(ref dir) = session_dir {
+        let init_cs = crate::changeset::Changeset {
+            initial_prompt: Some(input.to_string()),
+            ..crate::changeset::Changeset::default()
+        };
+        let _ = crate::changeset::write_changeset(dir, &init_cs);
+        context_values.insert(
+            "plan_dir".to_string(),
+            serde_json::to_value(dir).unwrap(),
+        );
+    }
     if debug_output_path.is_none() {
-        if let (Some(ref base), Some(sid)) = (&session_base_opt, session_id) {
-            let session_dir = base.join(crate::output::SESSIONS_SUBDIR).join(sid);
-            let logs = session_dir.join("logs");
+        if let Some(ref dir) = session_dir {
+            let logs = dir.join("logs");
             let _ = std::fs::create_dir_all(&logs);
             crate::redirect_debug_output(&logs.join("debug.log"));
             log::set_max_level(log::LevelFilter::Debug);
@@ -321,12 +338,8 @@ fn run_plan_without_output_dir(
         serde_json::json!(inherit_stdin),
     );
     let (temp_conv_path, session_conv_path) = if conversation_output_path.is_none() {
-        if let (Some(ref base), Some(sid)) = (&session_base_opt, session_id) {
-            let conv_path = base
-                .join(crate::output::SESSIONS_SUBDIR)
-                .join(sid)
-                .join("logs")
-                .join("conversation.jsonl");
+        if let Some(ref dir) = session_dir {
+            let conv_path = dir.join("logs").join("conversation.jsonl");
             if let Some(parent) = conv_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
