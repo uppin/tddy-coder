@@ -13,12 +13,14 @@ use crate::status::Status;
 
 const RPC_TOPIC: &str = "tddy-rpc";
 
+type PendingMap = HashMap<i32, oneshot::Sender<Result<Vec<u8>, Status>>>;
+
 /// Client for making RPC calls to a participant in a LiveKit room.
 pub struct RpcClient {
     room: Room,
     target_identity: ParticipantIdentity,
     next_request_id: AtomicI32,
-    pending_unary: Arc<Mutex<HashMap<i32, oneshot::Sender<Result<Vec<u8>, Status>>>>>,
+    pending_unary: Arc<Mutex<PendingMap>>,
 }
 
 impl RpcClient {
@@ -29,8 +31,7 @@ impl RpcClient {
         target_identity: impl Into<ParticipantIdentity>,
         mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
     ) -> Self {
-        let pending_unary: Arc<Mutex<HashMap<i32, oneshot::Sender<Result<Vec<u8>, Status>>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let pending_unary: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
         let pending_clone = pending_unary.clone();
 
         tokio::spawn(async move {
@@ -106,7 +107,7 @@ impl RpcClient {
             abort: false,
         };
 
-        let payload = encode_request(request).map_err(|e| Status::internal(e))?;
+        let payload = encode_request(request).map_err(Status::internal)?;
         let packet = DataPacket {
             payload,
             topic: Some(RPC_TOPIC.to_string()),

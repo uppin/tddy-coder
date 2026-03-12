@@ -36,7 +36,7 @@ impl<S: RpcService> RpcBridge<S> {
     /// Handle a raw request payload. Returns Ok(bytes) on success, Err(Status) on RPC or decode error.
     /// Server streaming is not yet supported and returns Status::Unimplemented.
     pub async fn handle_request(&self, payload: &[u8]) -> Result<Vec<Vec<u8>>, Status> {
-        let request = decode_request(payload).map_err(|e| Status::invalid_argument(e))?;
+        let request = decode_request(payload).map_err(Status::invalid_argument)?;
         self.handle_decoded_request(&request).await
     }
 
