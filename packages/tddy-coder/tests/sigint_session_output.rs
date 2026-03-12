@@ -14,6 +14,12 @@ fn tddy_coder_bin() -> std::path::PathBuf {
 }
 
 /// When tddy-coder receives SIGINT, stderr contains "Session:" (plan dir or fallback).
+///
+/// Without SKIP_QUESTIONS the stub backend returns clarification questions,
+/// causing the process to print "Clarification needed:" to stdout and block
+/// on stdin. That stdout output proves the ctrlc handler is registered
+/// (it happens after registration, inside the workflow loop). We wait for
+/// it, then send SIGINT.
 #[test]
 #[cfg(unix)]
 fn tddy_demo_sigint_prints_session_info_to_stderr() {
@@ -24,7 +30,7 @@ fn tddy_demo_sigint_prints_session_info_to_stderr() {
             "--goal",
             "plan",
             "--prompt",
-            "Build auth SKIP_QUESTIONS",
+            "Build auth",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -32,10 +38,12 @@ fn tddy_demo_sigint_prints_session_info_to_stderr() {
         .spawn()
         .expect("spawn tddy-coder");
 
-    // Wait for the process to fully initialize (register ctrlc handler).
-    // The debug binary can take several hundred milliseconds to load in CI/test
-    // contexts due to dynamic library loading and framework initialization.
-    std::thread::sleep(std::time::Duration::from_millis(1000));
+    // Wait for stdout output. When the stub returns clarification
+    // questions, the process prints "Clarification needed:" to stdout and
+    // blocks on stdin — this happens AFTER the ctrlc handler is registered.
+    let mut stdout = child.stdout.take().expect("stdout");
+    let mut buf = [0u8; 1];
+    stdout.read_exact(&mut buf).expect("read first byte of stdout");
 
     let pid = child.id() as i32;
     let _ = unsafe { libc::kill(pid, libc::SIGINT) };
@@ -44,6 +52,8 @@ fn tddy_demo_sigint_prints_session_info_to_stderr() {
     // reach its exit path and print session info.
     drop(child.stdin.take());
 
+    // Drain remaining stdout so the child doesn't get a broken pipe.
+    let _ = std::io::copy(&mut stdout, &mut std::io::sink());
     let _ = child.wait();
 
     let mut stderr = String::new();
