@@ -437,6 +437,70 @@ fn plan_approval_refine_re_shows_approval() {
     );
 }
 
+/// Plan approval from viewer: ViewPlan → ApprovePlan directly in MarkdownViewer (no DismissViewer) → workflow completes.
+/// Asserts presenter is_done() and PlanReview appears exactly once (no return to PlanReview after viewer approval).
+#[test]
+fn plan_approval_from_markdown_viewer() {
+    let view = TestView::new();
+    let mut presenter = Presenter::new(view, "stub", "default");
+    let backend = create_stub_backend();
+    let output_dir = std::env::temp_dir().join("tddy-presenter-test-viewer-approve");
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
+    presenter.start_workflow(
+        backend,
+        output_dir,
+        Some("Build auth".to_string()),
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+    );
+
+    let mut iterations = 0;
+    let max_iterations = 500;
+    let mut approved_from_viewer = false;
+    while !presenter.is_done() && iterations < max_iterations {
+        presenter.poll_workflow();
+        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) && !approved_from_viewer {
+            presenter.handle_intent(UserIntent::ViewPlan);
+        } else if matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
+            && !approved_from_viewer
+        {
+            presenter.handle_intent(UserIntent::ApprovePlan);
+            approved_from_viewer = true;
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        presenter.is_done(),
+        "workflow should complete after approving from viewer; last mode: {:?}",
+        presenter.state().mode
+    );
+
+    let events = presenter.view_mut().events();
+    let plan_review_count = events
+        .iter()
+        .filter(|e| matches!(e, TestEvent::ModeChanged(AppMode::PlanReview { .. })))
+        .count();
+    assert_eq!(
+        plan_review_count,
+        1,
+        "PlanReview should appear exactly once when approving directly from viewer: {:?}",
+        events
+    );
+}
+
 /// Error scenario: StubBackend with FAIL_INVOKE → assert WorkflowComplete(Err).
 #[test]
 fn workflow_error_propagates() {
