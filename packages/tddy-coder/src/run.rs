@@ -511,6 +511,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     &url,
                     &token,
                     tddy_livekit::EchoServiceImpl,
+                    tddy_livekit::RoomOptions::default(),
                 )
                 .await
                 {
@@ -923,6 +924,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     std::env::set_var("TDDY_QUIET", "1");
     log::set_max_level(log::LevelFilter::Debug);
 
+    if let Some(session_dir) = session_dir_path(args) {
+        let logs = session_dir.join("logs");
+        tddy_core::toolcall::set_toolcall_log_dir(&logs);
+    }
+
     let (socket_path, tool_call_rx) = match tddy_core::toolcall::start_toolcall_listener() {
         Ok((path, rx)) => (Some(path), Some(rx)),
         Err(_) => (None, None),
@@ -974,6 +980,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     presenter.start_workflow(
         backend,
         PathBuf::from("."),
+        args.plan_dir.clone(),
         initial_prompt,
         args.conversation_output.clone(),
         args.debug_output.clone(),

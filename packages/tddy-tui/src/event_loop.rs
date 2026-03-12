@@ -104,14 +104,18 @@ pub fn run_event_loop(
                     let view = presenter.view_mut();
                     let vs = view.view_state_mut();
                     let was_list = matches!(vs.inbox_focus, crate::view_state::InboxFocus::List);
-                    vs.handle_key_view_local(key, &mode, inbox_len);
+                    let consumed = vs.handle_key_view_local(key, &mode, inbox_len);
                     if was_list
                         && matches!(vs.inbox_focus, crate::view_state::InboxFocus::Editing)
                         && vs.inbox_edit_buffer.is_empty()
                     {
                         vs.inbox_edit_buffer = edit_item.unwrap_or_default();
                     }
-                    key_event_to_intent(key, &mode, view.view_state())
+                    if consumed {
+                        None
+                    } else {
+                        key_event_to_intent(key, &mode, view.view_state())
+                    }
                 };
                 if let Some(intent) = intent {
                     presenter.handle_intent(intent);

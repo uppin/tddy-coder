@@ -37,7 +37,7 @@ mod tests {
         let output_dir = std::env::temp_dir().join("tddy-grpc-test");
         std::fs::create_dir_all(&output_dir).unwrap();
         presenter.start_workflow(
-            backend, output_dir, None, None, None, false, None, None, None,
+            backend, output_dir, None, None, None, None, false, None, None, None,
         );
 
         let shutdown = AtomicBool::new(false);

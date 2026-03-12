@@ -237,10 +237,21 @@ impl<V: PresenterView> Presenter<V> {
 
     fn send_clarification_answers(&mut self) {
         let answers = self.collect_answers();
+        let is_tool_call = self.pending_tool_call_response_tx.is_some();
         if let Some(tx) = self.pending_tool_call_response_tx.take() {
-            let _ = tx.send(ToolCallResponse::AskAnswer { answers });
+            let _ = tx.send(ToolCallResponse::AskAnswer {
+                answers: answers.clone(),
+            });
         } else if let Some(ref answer_tx) = self.answer_tx {
-            let _ = answer_tx.send(answers);
+            let _ = answer_tx.send(answers.clone());
+        }
+        if is_tool_call {
+            let preview: String = answers.chars().take(80).collect();
+            let suffix = if answers.len() > 80 { "…" } else { "" };
+            self.log_activity(
+                format!("✓ ask answered: {}{}", preview, suffix),
+                ActivityKind::ToolUse,
+            );
         }
     }
 
@@ -277,15 +288,16 @@ impl<V: PresenterView> Presenter<V> {
     fn flush_agent_output_buffer(&mut self) {
         if !self.agent_output_buffer.is_empty() {
             let line = std::mem::take(&mut self.agent_output_buffer);
-            let entry = ActivityEntry {
-                text: line,
-                kind: ActivityKind::AgentOutput,
-            };
-            self.state.activity_log.push(entry.clone());
-            self.view
-                .on_activity_logged(&entry, self.state.activity_log.len());
-            self.broadcast(PresenterEvent::ActivityLogged(entry));
+            self.log_activity(line, ActivityKind::AgentOutput);
         }
+    }
+
+    fn log_activity(&mut self, text: String, kind: ActivityKind) {
+        let entry = ActivityEntry { text, kind };
+        self.state.activity_log.push(entry.clone());
+        self.view
+            .on_activity_logged(&entry, self.state.activity_log.len());
+        self.broadcast(PresenterEvent::ActivityLogged(entry));
     }
 
     /// Poll for tool call requests (tddy-tools relay). Call from main loop.
@@ -305,14 +317,42 @@ impl<V: PresenterView> Presenter<V> {
                     data,
                     response_tx,
                 } => {
+                    self.log_activity(
+                        format!("⚙ tddy-tools submit (goal: {})", goal),
+                        ActivityKind::ToolUse,
+                    );
                     let json_str = serde_json::to_string(&data).unwrap_or_default();
                     store_submit_result(&goal, &json_str);
-                    let _ = response_tx.send(ToolCallResponse::SubmitOk { goal });
+                    let _ = response_tx.send(ToolCallResponse::SubmitOk { goal: goal.clone() });
+                    self.log_activity(
+                        format!("✓ submit accepted (goal: {})", goal),
+                        ActivityKind::ToolUse,
+                    );
                 }
                 ToolCallRequest::Ask {
                     questions,
                     response_tx,
                 } => {
+                    let summary: Vec<String> = questions
+                        .iter()
+                        .map(|q| {
+                            let truncated: String = q.question.chars().take(60).collect();
+                            if q.question.len() > 60 {
+                                format!("{}…", truncated)
+                            } else {
+                                truncated
+                            }
+                        })
+                        .collect();
+                    self.log_activity(
+                        format!(
+                            "⚙ tddy-tools ask ({} question{}): {}",
+                            questions.len(),
+                            if questions.len() == 1 { "" } else { "s" },
+                            summary.join(" | ")
+                        ),
+                        ActivityKind::ToolUse,
+                    );
                     self.flush_agent_output_buffer();
                     self.pending_questions = questions;
                     self.current_question_index = 0;
@@ -430,6 +470,7 @@ impl<V: PresenterView> Presenter<V> {
                             self.spawn_workflow(
                                 backend,
                                 output_dir,
+                                None,
                                 Some(prefixed),
                                 self.workflow_conversation_output.clone(),
                                 self.workflow_debug_output.clone(),
@@ -477,6 +518,7 @@ impl<V: PresenterView> Presenter<V> {
         &mut self,
         backend: SharedBackend,
         output_dir: PathBuf,
+        plan_dir: Option<PathBuf>,
         initial_prompt: Option<String>,
         conversation_output_path: Option<PathBuf>,
         debug_output_path: Option<PathBuf>,
@@ -495,6 +537,7 @@ impl<V: PresenterView> Presenter<V> {
         self.spawn_workflow(
             backend,
             output_dir,
+            plan_dir,
             initial_prompt,
             conversation_output_path,
             debug_output_path,
@@ -509,6 +552,7 @@ impl<V: PresenterView> Presenter<V> {
         &mut self,
         backend: SharedBackend,
         output_dir: PathBuf,
+        plan_dir: Option<PathBuf>,
         initial_prompt: Option<String>,
         conversation_output_path: Option<PathBuf>,
         debug_output_path: Option<PathBuf>,
@@ -525,7 +569,7 @@ impl<V: PresenterView> Presenter<V> {
                 event_tx,
                 answer_rx,
                 output_dir,
-                None,
+                plan_dir,
                 session_id,
                 None,
                 initial_prompt,

@@ -364,7 +364,6 @@ impl ViewState {
                     && self.select_selected == other_idx
                     && !self.select_typing_other =>
             {
-                // Start typing immediately when user types on "Other" — no need to press Enter first
                 self.select_typing_other = true;
                 self.select_other_text.push(c);
                 true
@@ -379,6 +378,14 @@ impl ViewState {
                     && !self.select_typing_other =>
             {
                 self.select_typing_other = true;
+                true
+            }
+            KeyCode::PageUp => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(5);
+                true
+            }
+            KeyCode::PageDown => {
+                self.scroll_offset = self.scroll_offset.saturating_add(5);
                 true
             }
             _ => false,
@@ -457,6 +464,14 @@ impl ViewState {
                 self.multiselect_other_text.pop();
                 true
             }
+            KeyCode::PageUp => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(5);
+                true
+            }
+            KeyCode::PageDown => {
+                self.scroll_offset = self.scroll_offset.saturating_add(5);
+                true
+            }
             _ => false,
         }
     }
@@ -481,6 +496,14 @@ impl ViewState {
                 if self.text_input_cursor < self.text_input.len() {
                     self.text_input_cursor += 1;
                 }
+                true
+            }
+            KeyCode::PageUp => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(5);
+                true
+            }
+            KeyCode::PageDown => {
+                self.scroll_offset = self.scroll_offset.saturating_add(5);
                 true
             }
             _ => false,

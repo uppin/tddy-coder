@@ -319,6 +319,7 @@ pub struct ClarificationQuestion {
     pub header: String,
     pub question: String,
     pub options: Vec<QuestionOption>,
+    #[serde(default, alias = "multiSelect")]
     pub multi_select: bool,
     /// When false, omit "Other (type your own)" — e.g. for binary permission (Yes/No).
     #[serde(default = "default_allow_other")]

@@ -91,6 +91,7 @@ fn before_acceptance_tests(
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", acceptance_tests::system_prompt());
     context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", true);
     context.set_sync("plan_dir", plan_dir.to_path_buf());
     context.set_sync("model", model);
     let _ = write_schema_to_dir(plan_dir, "acceptance-tests");
@@ -120,6 +121,7 @@ fn before_red(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + 
     context.set_sync("model", model);
     let session_id = uuid::Uuid::new_v4().to_string();
     context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", false);
     let _ = write_schema_to_dir(plan_dir, "red");
     Ok(())
 }
@@ -155,6 +157,7 @@ fn before_green(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error 
     context.set_sync("system_prompt", green::system_prompt(run_demo));
     context.set_sync("plan_dir", plan_dir.to_path_buf());
     context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", true);
     context.set_sync("model", model);
     let _ = write_schema_to_dir(plan_dir, "green");
     Ok(())

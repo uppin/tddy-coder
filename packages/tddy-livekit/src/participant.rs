@@ -18,9 +18,14 @@ pub struct LiveKitParticipant<S: crate::bridge::RpcService> {
 
 impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
     /// Connect to a LiveKit room and create a participant that will serve RPC.
-    pub async fn connect(url: &str, token: &str, service: S) -> Result<Self, livekit::RoomError> {
+    pub async fn connect(
+        url: &str,
+        token: &str,
+        service: S,
+        room_options: RoomOptions,
+    ) -> Result<Self, livekit::RoomError> {
         let bridge = RpcBridge::new(service);
-        let (room, events) = Room::connect(url, token, RoomOptions::default()).await?;
+        let (room, events) = Room::connect(url, token, room_options).await?;
         Ok(Self {
             room,
             bridge: Arc::new(bridge),

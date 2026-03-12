@@ -494,6 +494,12 @@ impl ClaudeCodeBackend {
             .map_err(|e| BackendError::InvocationFailed(e.to_string()))?;
         super::clear_child_pid();
         let exit_code = status.code().unwrap_or(-1);
+        log::debug!(
+            "[tddy-coder] Claude process exited with code {} (goal: {:?}, session_id: {:?})",
+            exit_code,
+            request.goal,
+            request.session_id
+        );
 
         if exit_code != 0 {
             // When plan goal produced valid structured output, treat exit 1 as non-fatal.

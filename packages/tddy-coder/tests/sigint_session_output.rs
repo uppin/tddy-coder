@@ -5,7 +5,7 @@
 
 mod common;
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::process::Stdio;
 
 #[allow(deprecated)]
@@ -32,20 +32,17 @@ fn tddy_demo_sigint_prints_session_info_to_stderr() {
         .spawn()
         .expect("spawn tddy-coder");
 
-    let _stdin_handle = std::thread::spawn({
-        let mut stdin = child.stdin.take().expect("stdin");
-        move || {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            let _ = stdin.write_all(b"a\n");
-        }
-    });
-
-    // Send SIGINT during workflow (before StubBackend can complete).
-    // Delays sized for slow CI; no conditional logic per testing practices.
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    // Wait for the process to fully initialize (register ctrlc handler).
+    // The debug binary can take several hundred milliseconds to load in CI/test
+    // contexts due to dynamic library loading and framework initialization.
+    std::thread::sleep(std::time::Duration::from_millis(1000));
 
     let pid = child.id() as i32;
     let _ = unsafe { libc::kill(pid, libc::SIGINT) };
+
+    // Close stdin so the blocked read_line returns EOF, allowing the process to
+    // reach its exit path and print session info.
+    drop(child.stdin.take());
 
     let _ = child.wait();
 
