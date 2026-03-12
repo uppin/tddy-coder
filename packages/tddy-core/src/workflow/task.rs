@@ -174,7 +174,8 @@ impl Task for BackendInvokeTask {
             .get_sync::<PathBuf>("worktree_dir")
             .or_else(|| plan_dir.clone())
             .or_else(|| context.get_sync::<PathBuf>("output_dir"));
-        let is_resume = context.get_sync::<String>("answers").is_some();
+        let is_resume = context.get_sync::<String>("answers").is_some()
+            || context.get_sync::<bool>("is_resume").unwrap_or(false);
 
         let request = InvokeRequest {
             prompt: prompt.clone(),
