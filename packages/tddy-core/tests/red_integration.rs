@@ -26,7 +26,8 @@ const VALIDATE_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 subagents c
 
 const REFACTOR_OUTPUT: &str = r#"{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
 
-const UPDATE_DOCS_OUTPUT: &str = r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
+const UPDATE_DOCS_OUTPUT: &str =
+    r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
 
 fn setup_red_plan_dir(plan_dir: &std::path::Path) {
     let _ = std::fs::remove_dir_all(plan_dir);

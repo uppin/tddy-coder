@@ -124,16 +124,29 @@ pub fn kill_child_process() -> bool {
 
 /// Format binary + args as a shell-like command for debug logging.
 /// Truncates args longer than max_arg_len to keep logs readable.
-pub(crate) fn format_command_for_log(binary: &std::path::Path, args: &[String], max_arg_len: usize) -> String {
+pub(crate) fn format_command_for_log(
+    binary: &std::path::Path,
+    args: &[String],
+    max_arg_len: usize,
+) -> String {
     let mut parts = vec![binary.display().to_string()];
     for arg in args {
         let s = if arg.len() > max_arg_len {
-            format!("{}... ({} chars total)", &arg[..arg.len().min(max_arg_len)], arg.len())
+            format!(
+                "{}... ({} chars total)",
+                &arg[..arg.len().min(max_arg_len)],
+                arg.len()
+            )
         } else {
             arg.clone()
         };
         let escaped = if s.contains(' ') || s.contains('"') || s.contains('\n') {
-            format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n"))
+            format!(
+                "\"{}\"",
+                s.replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+            )
         } else {
             s
         };

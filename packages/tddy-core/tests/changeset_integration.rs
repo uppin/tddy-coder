@@ -370,7 +370,8 @@ async fn red_goal_adds_logging_markers() {
 fn red_goal_verifies_marker_collection() {
     use tddy_core::output::parse_red_response;
 
-    let out = parse_red_response(RED_JSON_WITH_LOGGING_MARKERS).expect("parse red output with markers");
+    let out =
+        parse_red_response(RED_JSON_WITH_LOGGING_MARKERS).expect("parse red output with markers");
     assert!(out.skeletons.len() >= 1, "red output should have skeletons");
 }
 

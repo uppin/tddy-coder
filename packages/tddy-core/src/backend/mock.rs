@@ -119,7 +119,8 @@ impl CodingBackend for MockBackend {
                 })?;
         }
 
-        self.submit_channel.store(request.goal.submit_key(), &response.output);
+        self.submit_channel
+            .store(request.goal.submit_key(), &response.output);
 
         Ok(response)
     }

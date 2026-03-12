@@ -271,9 +271,7 @@ fn run_plan_without_output_dir(
                 (agent_cwd, Some(base))
             }
             Err(e) => {
-                let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
-                    format!("{}", e),
-                )));
+                let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(format!("{}", e))));
                 return None;
             }
         }
@@ -781,9 +779,7 @@ mod tests {
         }
         assert!(got_error, "should get a workflow error from plan failure");
 
-        let session_dir = tmp
-            .join(crate::output::SESSIONS_SUBDIR)
-            .join(session_id);
+        let session_dir = tmp.join(crate::output::SESSIONS_SUBDIR).join(session_id);
         assert!(
             session_dir.exists(),
             "session dir should be created by PlanTask at {}",

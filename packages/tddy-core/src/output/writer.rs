@@ -310,8 +310,9 @@ pub fn sessions_base_path() -> Result<PathBuf, WorkflowError> {
     }
     #[cfg(unix)]
     {
-        let home = std::env::var("HOME")
-            .map_err(|_| WorkflowError::WriteFailed("HOME not set; set TDDY_SESSIONS_DIR or HOME".into()))?;
+        let home = std::env::var("HOME").map_err(|_| {
+            WorkflowError::WriteFailed("HOME not set; set TDDY_SESSIONS_DIR or HOME".into())
+        })?;
         Ok(PathBuf::from(home).join(".tddy"))
     }
     #[cfg(not(unix))]

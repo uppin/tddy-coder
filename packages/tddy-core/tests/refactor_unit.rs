@@ -80,7 +80,8 @@ fn parse_refactor_response_fails_on_empty_input() {
 fn parse_refactor_response_fails_on_wrong_goal() {
     use tddy_core::parse_refactor_response;
 
-    let input = r#"{"goal":"green","summary":"Wrong goal.","tasks_completed":0,"tests_passing":false}"#;
+    let input =
+        r#"{"goal":"green","summary":"Wrong goal.","tasks_completed":0,"tests_passing":false}"#;
 
     let result = parse_refactor_response(input);
     assert!(

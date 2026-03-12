@@ -18,12 +18,7 @@ fn tddy_demo_bin() -> std::path::PathBuf {
 #[cfg(unix)]
 fn tddy_demo_sigint_prints_session_info_to_stderr() {
     let mut child = std::process::Command::new(tddy_demo_bin())
-        .args([
-            "--goal",
-            "plan",
-            "--prompt",
-            "Build auth SKIP_QUESTIONS",
-        ])
+        .args(["--goal", "plan", "--prompt", "Build auth SKIP_QUESTIONS"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

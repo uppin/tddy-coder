@@ -237,4 +237,3 @@ fn write_all_schemas_to_dir_writes_all_goal_schemas_when_plan_dir_created() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
-

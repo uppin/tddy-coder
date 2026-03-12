@@ -491,7 +491,8 @@ const VALIDATE_SUBAGENTS_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 s
 
 const REFACTOR_OUTPUT_COMPLETE: &str = r#"{"goal":"refactor","summary":"Completed 5 refactoring tasks. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
 
-const UPDATE_DOCS_OUTPUT: &str = r#"{"goal":"update-docs","summary":"Updated 3 docs.","docs_updated":3}"#;
+const UPDATE_DOCS_OUTPUT: &str =
+    r#"{"goal":"update-docs","summary":"Updated 3 docs.","docs_updated":3}"#;
 
 /// Phase 5 / PRD R7: Full workflow chains all 9 steps (plan through update-docs).
 #[tokio::test]

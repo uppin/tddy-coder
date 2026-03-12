@@ -19,7 +19,8 @@ use common::{
 /// Minimal refactor output as JSON (tddy-tools submit format).
 const REFACTOR_OUTPUT: &str = r#"{"goal":"refactor","summary":"Executed 5 refactoring tasks. All tests passing after each change.","tasks_completed":5,"tests_passing":true}"#;
 
-const UPDATE_DOCS_OUTPUT: &str = r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
+const UPDATE_DOCS_OUTPUT: &str =
+    r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
 
 /// refactor() invokes backend with Goal::Refactor.
 #[tokio::test]

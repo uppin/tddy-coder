@@ -4,9 +4,7 @@
 //! message.content[0].text, model_call_id skip logic).
 //! AskQuestion tool uses askUserQuestionToolCall or askQuestionToolCall with args.questions.
 
-use super::{
-    parse_ask_user_question, ProgressEvent, StreamResult,
-};
+use super::{parse_ask_user_question, ProgressEvent, StreamResult};
 use crate::backend::ClarificationQuestion;
 use serde::Deserialize;
 use std::collections::HashSet;

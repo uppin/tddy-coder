@@ -231,9 +231,12 @@ fn process_ndjson_skips_tool_use_when_parent_tool_use_id_set() {
 /// Cursor emits assistant events with partial text chunks. We must concatenate chunks.
 fn cursor_partial_chunks_ndjson() -> String {
     let chunk1 = r#"{"type":"system","subtype":"init","session_id":"cursor-sess"}"#;
-    let chunk2 = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Analyzing "}]}}"#;
-    let chunk3 = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Feature X"}]}}"#;
-    let chunk4 = r#"{"type":"assistant","message":{"content":[{"type":"text","text":" with Task 1."}]}}"#;
+    let chunk2 =
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Analyzing "}]}}"#;
+    let chunk3 =
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Feature X"}]}}"#;
+    let chunk4 =
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":" with Task 1."}]}}"#;
     let chunk5 = r#"{"type":"result","subtype":"success","result":"","session_id":"cursor-sess","is_error":false}"#;
     format!(
         "{}\n{}\n{}\n{}\n{}\n",

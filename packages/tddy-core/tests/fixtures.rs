@@ -39,6 +39,7 @@ pub const VALIDATE_JSON: &str = r#"{"goal":"validate","summary":"All 3 subagents
 
 pub const REFACTOR_JSON: &str = r#"{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
 
-pub const UPDATE_DOCS_JSON: &str = r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
+pub const UPDATE_DOCS_JSON: &str =
+    r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
 
 pub const VALIDATE_REFACTOR_JSON: &str = r#"{"goal":"validate","summary":"All 3 subagents completed.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;

@@ -22,12 +22,7 @@ fn cli_runs_full_workflow_when_goal_omitted() {
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
-        .args([
-            "--agent",
-            "stub",
-            "--prompt",
-            "SKIP_QUESTIONS Build auth",
-        ])
+        .args(["--agent", "stub", "--prompt", "SKIP_QUESTIONS Build auth"])
         .write_stdin("a\n");
 
     let output = cmd.output().expect("run tddy-coder");
@@ -396,10 +391,7 @@ artifacts: {}
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env(
-            TDDY_SESSIONS_DIR_ENV,
-            tmp.to_str().unwrap(),
-        )
+        .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -663,10 +655,12 @@ artifacts: {}
     const ACCEPTANCE_TESTS: &str = r#"{"goal":"acceptance-tests","summary":"Tests ready.","test_command":"cargo test","tests":[{"name":"t1","file":"test.rs","line":1,"status":"pass","kind":"unit"}]}"#;
     const RED: &str = r#"{"goal":"red","summary":"Failing tests written.","tests":[{"name":"t1","file":"test.rs","line":1,"status":"fail","kind":"unit"}],"skeletons":[],"markers":[],"marker_results":[]}"#;
     const GREEN: &str = r#"{"goal":"green","summary":"All tests passing.","tests":[{"name":"t1","file":"test.rs","line":1,"status":"passing"}]}"#;
-    const EVALUATE: &str = r#"{"goal":"evaluate-changes","summary":"Changes look good.","risk_level":"low"}"#;
+    const EVALUATE: &str =
+        r#"{"goal":"evaluate-changes","summary":"Changes look good.","risk_level":"low"}"#;
     const VALIDATE: &str = r#"{"goal":"validate","summary":"All subagents done.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
     const REFACTOR: &str = r#"{"goal":"refactor","summary":"Refactoring complete.","tasks_completed":3,"tests_passing":true}"#;
-    const UPDATE_DOCS: &str = r#"{"goal":"update-docs","summary":"Documentation updated.","docs_updated":2}"#;
+    const UPDATE_DOCS: &str =
+        r#"{"goal":"update-docs","summary":"Documentation updated.","docs_updated":2}"#;
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(ACCEPTANCE_TESTS);
@@ -812,4 +806,3 @@ fn test_plan_goal_cli_creates_session_under_home_tddy() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
-

@@ -38,7 +38,10 @@ fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
         }
     }
     // Check 2: On PATH
-    match std::process::Command::new("tddy-tools").arg("--help").output() {
+    match std::process::Command::new("tddy-tools")
+        .arg("--help")
+        .output()
+    {
         Ok(output) if output.status.success() => Ok(()),
         _ => anyhow::bail!(
             "tddy-tools binary not found. Build it with: cargo build -p tddy-tools\n\
@@ -414,8 +417,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         anyhow::bail!("empty feature description");
     }
 
-    let base = tddy_core::output::sessions_base_path()
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let base = tddy_core::output::sessions_base_path().map_err(|e| anyhow::anyhow!("{}", e))?;
     let plan_dir = if let Some(ref sid) = args.session_id {
         tddy_core::output::create_session_dir_with_id(&base, sid)
     } else {
@@ -1184,8 +1186,7 @@ fn run_plan_to_get_dir(
     if input.is_empty() {
         anyhow::bail!("empty feature description");
     }
-    let base = tddy_core::output::sessions_base_path()
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let base = tddy_core::output::sessions_base_path().map_err(|e| anyhow::anyhow!("{}", e))?;
     let plan_dir = if let Some(ref sid) = args.session_id {
         tddy_core::output::create_session_dir_with_id(&base, sid)
     } else {
