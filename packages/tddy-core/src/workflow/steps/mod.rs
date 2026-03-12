@@ -80,6 +80,14 @@ impl Task for PlanTask {
 
         let system_prompt = planning::system_prompt();
 
+        let session = context.get_sync::<String>("session_id").map(|id| {
+            if is_resume {
+                crate::backend::SessionMode::Resume(id)
+            } else {
+                crate::backend::SessionMode::Fresh(id)
+            }
+        });
+
         // Use output_dir (repo root) as working_dir so agent can discover Cargo.toml, packages/, etc.
         let request = InvokeRequest {
             prompt,
@@ -87,8 +95,7 @@ impl Task for PlanTask {
             system_prompt_path: None,
             goal: Goal::Plan,
             model: context.get_sync("model"),
-            session_id: context.get_sync("session_id"),
-            is_resume,
+            session,
             working_dir: Some(output_dir.clone()),
             debug: context.get_sync::<bool>("debug").unwrap_or(false),
             agent_output: context.get_sync::<bool>("agent_output").unwrap_or(false),

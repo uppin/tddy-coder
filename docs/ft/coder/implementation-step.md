@@ -39,7 +39,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 
 1. Read `progress.md` from the plan directory specified by `--plan-dir` (required)
 2. Read `PRD.md` and `acceptance-tests.md` from the plan directory if present (optional, for richer LLM context)
-3. Read the session ID and model from `changeset.yaml` in the plan directory (persisted by the red goal)
+3. Read the session ID from `changeset.yaml` state.session_id and model (persisted by the red goal)
 4. Resume the Claude session using `--resume <session-id>` for context continuity with red
 5. Use `--permission-mode acceptEdits` with same allowlist as red
 6. System prompt instructs Claude to:
@@ -70,8 +70,9 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 
 #### changeset.yaml (session persistence)
 
-- Updated by the red goal with a new session entry (id, agent, tag, system_prompt_file)
-- Green goal reads the session ID from `changeset.yaml` to resume the same session for context continuity
+- Session entries and `state.session_id` are written when the first stream event with session_id arrives (not after the step completes)
+- Red goal: session entry and `state.session_id` updated via stream events
+- Green goal reads `state.session_id` from `changeset.yaml` to resume the same session for context continuity
 
 #### progress.md
 

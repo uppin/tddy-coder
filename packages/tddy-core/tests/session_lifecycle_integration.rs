@@ -173,11 +173,14 @@ async fn green_resumes_from_state_session_id() {
     );
     let req = &inv[0];
     assert_eq!(
-        req.session_id.as_deref(),
+        req.session.as_ref().map(|s| s.session_id()),
         Some("correct-impl-from-state"),
         "green must use state.session_id, not get_session_for_tag(impl)"
     );
-    assert!(req.is_resume, "green must use is_resume=true when resuming");
+    assert!(
+        req.session.as_ref().map_or(false, |s| s.is_resume()),
+        "green must use SessionMode::Resume when resuming"
+    );
 
     let _ = std::fs::remove_dir_all(&output_dir);
 }

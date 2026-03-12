@@ -2,7 +2,7 @@
 //!
 //! Mirrors [graph-flow task.rs](https://github.com/a-agmon/rs-graph-llm/blob/main/graph-flow/src/task.rs).
 
-use crate::backend::{CodingBackend, Goal, InvokeRequest};
+use crate::backend::{CodingBackend, Goal, InvokeRequest, SessionMode};
 use crate::toolcall::take_submit_result_for_goal;
 use crate::workflow::context::Context;
 use async_trait::async_trait;
@@ -176,6 +176,13 @@ impl Task for BackendInvokeTask {
             .or_else(|| context.get_sync::<PathBuf>("output_dir"));
         let is_resume = context.get_sync::<String>("answers").is_some()
             || context.get_sync::<bool>("is_resume").unwrap_or(false);
+        let session = context.get_sync::<String>("session_id").map(|id| {
+            if is_resume {
+                SessionMode::Resume(id)
+            } else {
+                SessionMode::Fresh(id)
+            }
+        });
 
         let request = InvokeRequest {
             prompt: prompt.clone(),
@@ -183,8 +190,7 @@ impl Task for BackendInvokeTask {
             system_prompt_path: None,
             goal: self.goal,
             model: context.get_sync("model"),
-            session_id: context.get_sync("session_id"),
-            is_resume,
+            session,
             working_dir,
             debug: context.get_sync::<bool>("debug").unwrap_or(false),
             agent_output: context.get_sync::<bool>("agent_output").unwrap_or(false),

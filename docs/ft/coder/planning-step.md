@@ -6,7 +6,7 @@
 
 ## Summary
 
-The Planning Step is the first phase of the tddy-coder workflow. When `--goal` is omitted, tddy-coder runs the full workflow (plan → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs) in a single invocation, with auto-resume from `changeset.yaml` state. When a specific goal is given, it executes that step only. The **plan** goal accepts a user's goal description via stdin or `--prompt`, invokes an LLM backend (Claude or Cursor per `--agent`) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, resumes the Claude session, creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
+The Planning Step is the first phase of the tddy-coder workflow. When `--goal` is omitted, tddy-coder runs the full workflow (plan → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs) in a single invocation, with auto-resume from `changeset.yaml` state. When a specific goal is given, it executes that step only. The **plan** goal accepts a user's goal description via stdin or `--prompt`, invokes an LLM backend (Claude or Cursor per `--agent`) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, creates a fresh session (no plan resume), creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
 
 ## Background
 
@@ -41,7 +41,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 3. **Q&A phase**: The agent may ask clarifying questions; the user is expected to answer them. The system must support this interactive exchange (Claude asks → user answers → Claude continues analysis).
 4. Create output directory: `$HOME/.tddy/sessions/{uuid}/`
 5. Structured output is received via `tddy-tools submit` (Unix socket IPC). Parser deserializes JSON into PRD, TODO, discovery, and demo plan artifacts.
-6. Write `PRD.md`, `TODO.md`, and `changeset.yaml` (unified manifest: session ID, workflow state, discovery, models, initial_prompt, clarification_qa) to the output directory
+6. `changeset.yaml` is created before the workflow starts (with initial_prompt, state.current = Init, empty sessions). The plan step updates it with PRD.md, TODO.md, discovery, models, clarification_qa. Session entries and `state.session_id` are written when the first stream event with session_id arrives.
 7. **Plan approval gate**: After plan completes, the user is presented with three choices: View (full-screen PRD modal), Approve (proceed to acceptance-tests), or Refine (free-text feedback that resumes the LLM session). The approval loop continues until the user approves.
 8. On successful exit, output the path to `PRD.md` (goal-specific exit output)
 
@@ -66,8 +66,8 @@ The approval gate applies to both the initial plan and plan resume/completion sc
 ### Acceptance-Tests Workflow
 
 1. Read PRD.md and TODO.md from the plan directory specified by `--plan-dir`
-2. Read the session ID and model from `changeset.yaml` in the plan directory
-3. Resume the Claude session using `--resume <session-id>`
+2. Read the model from `changeset.yaml` in the plan directory
+3. Create a fresh Claude session (does not resume the plan session)
 4. Use `--permission-mode acceptEdits` (auto-approves file edits for creating tests and running `cargo test`)
 5. **Q&A phase**: When Claude returns clarifying questions (e.g., permission requests), the user provides answers and the workflow continues
 6. System prompt instructs Claude to: read the testing plan from the PRD; create acceptance tests as specified; verify all new tests fail (Red state); remove or adjust any tests that pass
@@ -92,7 +92,7 @@ The approval gate applies to both the initial plan and plan resume/completion sc
 5. **Hybrid permission policy**: Each goal has a built-in allowlist; tools matching the allowlist are auto-approved. Optional `--allowed-tools` CLI flag adds extra tools to the allowlist. Unexpected permission requests (not in the allowlist) are denied in non-interactive mode; interactive handling via embedded permission tool is available when enabled.
 6. **Model selection**: Passes `--model <name>` to the `claude` binary. Model comes from `changeset.yaml` when `--model` is not specified; CLI `--model` overrides.
 7. **Output format**: Uses `--output-format=stream-json` for NDJSON event stream (tool_use, result, task_progress).
-8. **Session management**: First invoke uses `--session-id <uuid>`; Q&A followup uses `--resume <uuid>` so Claude retains context across the exchange. Session IDs are persisted in `changeset.yaml`.
+8. **Session management**: First invoke uses `--session-id <uuid>`; Q&A followup uses `--resume <uuid>` so Claude retains context across the exchange. Session IDs are persisted in `changeset.yaml`. The `state.session_id` field is the single source of truth for the currently-active agent session; session entries and `state.session_id` are written when the first stream event with session_id arrives (not after the step completes).
 9. **Structured Q&A**: Clarifying questions come from `AskUserQuestion` tool events (header, question, options, multi_select). In TUI mode, presented via ratatui Select/MultiSelect widgets with "Other (type your own)" option. In plain mode, presented via stdin (one answer per line). Questions and answers are stored in `changeset.yaml` as `clarification_qa`.
 10. **Real-time progress**: Tool activity (Read, Glob, Bash, etc.) displayed while Claude works.
 11. **Structured output**: System prompt instructs the agent to call `tddy-tools submit --schema schemas/{goal}.schema.json --data '<json>'`. All structured output is received via Unix socket IPC; the parser deserializes pre-validated JSON. No inline parsing (XML blocks or delimiters). If the agent finishes without calling `tddy-tools submit`, the workflow fails with a clear diagnostic.
@@ -137,7 +137,7 @@ Unified manifest in the plan directory:
 - `initial_prompt`: User's goal/feature description from stdin
 - `clarification_qa`: Questions asked during planning and user's answers (empty if no clarification)
 - `sessions`: Array of session entries (id, agent, tag, created_at, system_prompt_file)
-- `state`: Current workflow state and history
+- `state`: Current workflow state, `session_id` (currently-active agent session), and history
 - `models`: Model per goal (plan, acceptance-tests, red, green)
 - `discovery`: Toolchain, scripts, doc locations, relevant code
 - `artifacts`: Paths to PRD.md, TODO.md, acceptance-tests.md, etc.
@@ -221,7 +221,7 @@ When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → 
 ### Acceptance-Tests Goal
 
 - [ ] `tddy-coder --goal acceptance-tests --plan-dir <path>` creates failing acceptance tests from a plan
-- [ ] Acceptance-tests goal resumes the planning session via `--resume` for context continuity
+- [ ] Acceptance-tests goal creates a fresh session (does not resume the plan session)
 - [ ] Claude runs tests and verifies all new tests fail (Red state); passing tests are adjusted or removed
 - [ ] Output prints a summary of created tests, their paths, and failing status
 - [ ] State machine transitions: Init/Planned → AcceptanceTesting → AcceptanceTestsReady

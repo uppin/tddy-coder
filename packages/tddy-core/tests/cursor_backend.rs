@@ -49,8 +49,7 @@ exit 0
         system_prompt_path: None,
         goal: Goal::Plan,
         model: None,
-        session_id: None,
-        is_resume: false,
+        session: None,
         working_dir: None,
         debug: false,
         agent_output: false,
@@ -142,8 +141,7 @@ exit 0
             system_prompt_path: None,
             goal,
             model: None,
-            session_id: None,
-            is_resume: false,
+            session: None,
             working_dir: None,
             debug: false,
             agent_output: false,
@@ -168,7 +166,7 @@ exit 0
     }
 }
 
-/// CursorBackend adds --resume when session_id and is_resume are set.
+/// CursorBackend adds --resume when session is SessionMode::Resume.
 #[test]
 fn cursor_backend_adds_resume_flag_on_followup() {
     let tmp = std::env::temp_dir().join("tddy-cursor-resume-test");
@@ -201,8 +199,7 @@ exit 0
         system_prompt_path: None,
         goal: Goal::Plan,
         model: None,
-        session_id: Some("prev-thread-id".to_string()),
-        is_resume: true,
+        session: Some(tddy_core::SessionMode::Resume("prev-thread-id".to_string())),
         working_dir: None,
         debug: false,
         agent_output: false,
@@ -286,8 +283,7 @@ exit 0
         system_prompt_path: None,
         goal: Goal::Plan,
         model: None,
-        session_id: None,
-        is_resume: false,
+        session: None,
         working_dir: None,
         debug: false,
         agent_output: false,
@@ -351,8 +347,7 @@ exit 0
         system_prompt_path: Some(system_file),
         goal: Goal::Plan,
         model: None,
-        session_id: None,
-        is_resume: false,
+        session: None,
         working_dir: None,
         debug: false,
         agent_output: false,
@@ -416,8 +411,7 @@ exit 0
         system_prompt_path: Some(system_file),
         goal: Goal::Plan,
         model: None,
-        session_id: None,
-        is_resume: false,
+        session: None,
         working_dir: None,
         debug: false,
         agent_output: false,
