@@ -5,7 +5,7 @@
 
 mod listener;
 
-pub use listener::start_toolcall_listener;
+pub use listener::{set_toolcall_log_dir, start_toolcall_listener};
 
 use std::sync::{Arc, Mutex};
 

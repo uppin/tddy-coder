@@ -114,6 +114,7 @@ fn before_acceptance_tests(
     // Plan-mode sessions cannot be resumed with acceptEdits; create fresh session.
     let session_id = uuid::Uuid::new_v4().to_string();
     context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", true);
     context.set_sync("plan_dir", plan_dir.to_path_buf());
     context.set_sync("model", model);
     Ok(())
@@ -142,6 +143,7 @@ fn before_red(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + 
     context.set_sync("model", model);
     let session_id = uuid::Uuid::new_v4().to_string();
     context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", false);
     Ok(())
 }
 

@@ -92,6 +92,7 @@ fn full_workflow_completes_with_stub_backend() {
     presenter.start_workflow(
         backend,
         output_dir,
+        None,
         Some("Build auth".to_string()),
         None,
         None,
@@ -152,6 +153,7 @@ fn clarification_roundtrip_sends_answers() {
     presenter.start_workflow(
         backend,
         output_dir,
+        None,
         Some("CLARIFY test".to_string()),
         None,
         None,
@@ -210,6 +212,7 @@ fn inbox_queue_and_dequeue() {
     presenter.start_workflow(
         backend,
         output_dir,
+        None,
         Some("Build auth".to_string()),
         None,
         None,
@@ -268,6 +271,7 @@ fn plan_approval_approve_proceeds_to_next_step() {
     presenter.start_workflow(
         backend,
         output_dir,
+        None,
         Some("Build auth".to_string()),
         None,
         None,
@@ -329,6 +333,7 @@ fn plan_approval_view_then_approve() {
     presenter.start_workflow(
         backend,
         output_dir,
+        None,
         Some("Build auth".to_string()),
         None,
         None,
@@ -392,6 +397,7 @@ fn plan_approval_refine_re_shows_approval() {
     presenter.start_workflow(
         backend,
         output_dir,
+        None,
         Some("Build auth".to_string()),
         None,
         None,
@@ -450,6 +456,7 @@ fn plan_approval_from_markdown_viewer() {
     presenter.start_workflow(
         backend,
         output_dir,
+        None,
         Some("Build auth".to_string()),
         None,
         None,
@@ -514,6 +521,7 @@ fn workflow_error_propagates() {
     presenter.start_workflow(
         backend,
         output_dir,
+        None,
         Some("FAIL_INVOKE test".to_string()),
         None,
         None,

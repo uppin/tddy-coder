@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Remove stale Cargo build fingerprints. Keeps only the newest fingerprint per crate
+# in target/debug/build and target/release/build. Run from repo root.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+clean_build_dir() {
+  local build_dir="$1"
+  [[ -d "$build_dir" ]] || return 0
+
+  # Collect unique crate names (strip -{16hex} suffix from dir names)
+  local crate_names
+  crate_names=$(for d in "$build_dir"/*/; do
+    [[ -d "$d" ]] || continue
+    basename "${d%/}" | sed -E 's/-[a-f0-9]{16}$//'
+  done | sort -u)
+
+  for crate_name in $crate_names; do
+    [[ -n "$crate_name" ]] || continue
+    local matches=()
+    for d in "$build_dir/${crate_name}"-*/; do
+      [[ -d "$d" ]] && matches+=("$d")
+    done
+
+    if [[ ${#matches[@]} -gt 1 ]]; then
+      # Sort by mtime, newest first; remove all but the newest
+      local sorted
+      sorted=($(ls -td "${matches[@]}" 2>/dev/null))
+      local keep="${sorted[0]}"
+      for d in "${sorted[@]}"; do
+        if [[ "$d" != "$keep" ]]; then
+          echo "Removing stale: $d"
+          rm -rf "$d"
+        fi
+      done
+    fi
+  done
+}
+
+echo "Cleaning stale debug fingerprints..."
+clean_build_dir "target/debug/build"
+echo "Cleaning stale release fingerprints..."
+clean_build_dir "target/release/build"
+echo "Done."

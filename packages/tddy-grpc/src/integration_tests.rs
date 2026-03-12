@@ -37,7 +37,7 @@ mod tests {
         let output_dir = std::env::temp_dir().join("tddy-grpc-test");
         std::fs::create_dir_all(&output_dir).unwrap();
         presenter.start_workflow(
-            backend, output_dir, None, None, None, false, None, None, None,
+            backend, output_dir, None, None, None, None, false, None, None, None,
         );
 
         let shutdown = AtomicBool::new(false);
@@ -310,9 +310,10 @@ mod daemon_tests {
     use crate::DaemonService;
     use tddy_core::write_changeset;
 
-    fn temp_sessions_dir() -> PathBuf {
+    fn temp_sessions_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "tddy-daemon-test-{}",
+            "tddy-daemon-test-{}-{}",
+            label,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -324,7 +325,7 @@ mod daemon_tests {
 
     #[tokio::test]
     async fn get_session_returns_status_from_disk() {
-        let base = temp_sessions_dir();
+        let base = temp_sessions_dir("get-session");
         let session_dir = base.join("session-1");
         fs::create_dir_all(&session_dir).unwrap();
 
@@ -361,7 +362,7 @@ mod daemon_tests {
 
     #[tokio::test]
     async fn list_sessions_returns_all_sessions() {
-        let base = temp_sessions_dir();
+        let base = temp_sessions_dir("list-sessions");
         for (name, state) in [("s1", "Planned"), ("s2", "Completed"), ("s3", "Init")] {
             let dir = base.join(name);
             fs::create_dir_all(&dir).unwrap();
@@ -393,7 +394,7 @@ mod daemon_tests {
 
     #[tokio::test]
     async fn daemon_starts_and_listens() {
-        let base = temp_sessions_dir();
+        let base = temp_sessions_dir("daemon-starts");
         let backend = tddy_core::SharedBackend::from_any(tddy_core::AnyBackend::Stub(
             tddy_core::StubBackend::new(),
         ));
@@ -408,7 +409,7 @@ mod daemon_tests {
 
     #[tokio::test]
     async fn start_session_creates_worktree_and_runs_workflow() {
-        let base = temp_sessions_dir();
+        let base = temp_sessions_dir("start-session");
         let repo = base.join("repo");
         fs::create_dir_all(&repo).unwrap();
         std::process::Command::new("git")

@@ -5,7 +5,7 @@
 
 mod common;
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::process::Stdio;
 
 #[allow(deprecated)]
@@ -14,6 +14,12 @@ fn tddy_coder_bin() -> std::path::PathBuf {
 }
 
 /// When tddy-coder receives SIGINT, stderr contains "Session:" (plan dir or fallback).
+///
+/// Without SKIP_QUESTIONS the stub backend returns clarification questions,
+/// causing the process to print "Clarification needed:" to stdout and block
+/// on stdin. That stdout output proves the ctrlc handler is registered
+/// (it happens after registration, inside the workflow loop). We wait for
+/// it, then send SIGINT.
 #[test]
 #[cfg(unix)]
 fn tddy_demo_sigint_prints_session_info_to_stderr() {
@@ -24,7 +30,7 @@ fn tddy_demo_sigint_prints_session_info_to_stderr() {
             "--goal",
             "plan",
             "--prompt",
-            "Build auth SKIP_QUESTIONS",
+            "Build auth",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -32,21 +38,22 @@ fn tddy_demo_sigint_prints_session_info_to_stderr() {
         .spawn()
         .expect("spawn tddy-coder");
 
-    let _stdin_handle = std::thread::spawn({
-        let mut stdin = child.stdin.take().expect("stdin");
-        move || {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            let _ = stdin.write_all(b"a\n");
-        }
-    });
-
-    // Send SIGINT during workflow (before StubBackend can complete).
-    // Delays sized for slow CI; no conditional logic per testing practices.
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    // Wait for stdout output. When the stub returns clarification
+    // questions, the process prints "Clarification needed:" to stdout and
+    // blocks on stdin — this happens AFTER the ctrlc handler is registered.
+    let mut stdout = child.stdout.take().expect("stdout");
+    let mut buf = [0u8; 1];
+    stdout.read_exact(&mut buf).expect("read first byte of stdout");
 
     let pid = child.id() as i32;
     let _ = unsafe { libc::kill(pid, libc::SIGINT) };
 
+    // Close stdin so the blocked read_line returns EOF, allowing the process to
+    // reach its exit path and print session info.
+    drop(child.stdin.take());
+
+    // Drain remaining stdout so the child doesn't get a broken pipe.
+    let _ = std::io::copy(&mut stdout, &mut std::io::sink());
     let _ = child.wait();
 
     let mut stderr = String::new();

@@ -358,6 +358,12 @@ impl CursorBackend {
             .map_err(|e| BackendError::InvocationFailed(e.to_string()))?;
         super::clear_child_pid();
         let exit_code = status.code().unwrap_or(-1);
+        log::debug!(
+            "[tddy-coder] Cursor process exited with code {} (goal: {:?}, session_id: {:?})",
+            exit_code,
+            request.goal,
+            request.session
+        );
 
         if exit_code != 0 {
             let msg = if stderr_buf.trim().is_empty() {

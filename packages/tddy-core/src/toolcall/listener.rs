@@ -1,9 +1,39 @@
 //! Unix domain socket listener for tddy-tools relay.
 
 use super::{AskRequestWire, SubmitRequestWire, ToolCallRequest, ToolCallResponse};
+use std::io::Write as IoWrite;
+use std::path::PathBuf;
 use std::sync::mpsc;
+use std::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
+
+static TOOLCALL_LOG_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+fn toolcall_log(msg: &str) {
+    let path = match TOOLCALL_LOG_PATH.lock().ok().and_then(|g| g.clone()) {
+        Some(p) => p,
+        None => return,
+    };
+    let now = chrono::Local::now().format("%H:%M:%S%.3f");
+    let line = format!("{} {}\n", now, msg);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
+/// Set the log file path for toolcall debug logging.
+pub fn set_toolcall_log_dir(log_dir: &std::path::Path) {
+    let _ = std::fs::create_dir_all(log_dir);
+    let path = log_dir.join("toolcall.log");
+    if let Ok(mut guard) = TOOLCALL_LOG_PATH.lock() {
+        *guard = Some(path);
+    }
+}
 
 /// Start the tool call listener. Returns (socket_path, receiver).
 /// Caller must pass socket_path via TDDY_SOCKET to the agent subprocess.
@@ -54,6 +84,7 @@ async fn accept_loop(listener: UnixListener, tx: mpsc::SyncSender<ToolCallReques
         let tx = tx.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_connection(stream, tx).await {
+                toolcall_log(&format!("[error] connection error: {}", e));
                 log::debug!("[toolcall] connection error: {}", e);
             }
         });
@@ -70,6 +101,8 @@ async fn handle_connection(
     reader.read_line(&mut line).await?;
     let line = line.trim();
 
+    toolcall_log(&format!("[recv] {}", line));
+
     let request: serde_json::Value =
         serde_json::from_str(line).map_err(|e| format!("invalid JSON: {}", e))?;
 
@@ -78,6 +111,11 @@ async fn handle_connection(
     let (tool_request, response_rx) = if req_type == "submit" {
         let wire: SubmitRequestWire = serde_json::from_value(request)
             .map_err(|e| format!("invalid submit request: {}", e))?;
+        toolcall_log(&format!(
+            "[submit] goal={} data_len={}",
+            wire.goal,
+            wire.data.to_string().len()
+        ));
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let tool_request = ToolCallRequest::Submit {
             goal: wire.goal,
@@ -86,8 +124,17 @@ async fn handle_connection(
         };
         (tool_request, response_rx)
     } else if req_type == "ask" {
-        let wire: AskRequestWire =
-            serde_json::from_value(request).map_err(|e| format!("invalid ask request: {}", e))?;
+        let wire: AskRequestWire = serde_json::from_value(request)
+            .map_err(|e| format!("invalid ask request: {}", e))?;
+        toolcall_log(&format!(
+            "[ask] {} question(s): {}",
+            wire.questions.len(),
+            wire.questions
+                .iter()
+                .map(|q| q.question.chars().take(80).collect::<String>())
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ));
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let tool_request = ToolCallRequest::Ask {
             questions: wire.questions,
@@ -95,6 +142,7 @@ async fn handle_connection(
         };
         (tool_request, response_rx)
     } else {
+        toolcall_log(&format!("[error] unknown request type: {}", req_type));
         let response = ToolCallResponse::Error {
             message: format!("unknown request type: {}", req_type),
         };
@@ -105,6 +153,7 @@ async fn handle_connection(
     };
 
     tx.send(tool_request).map_err(|_| "channel closed")?;
+    toolcall_log("[wait] waiting for presenter response...");
 
     let response = response_rx
         .await
@@ -112,8 +161,12 @@ async fn handle_connection(
             message: "response channel dropped".to_string(),
         });
 
-    let response_line = response.to_json_line() + "\n";
-    writer.write_all(response_line.as_bytes()).await?;
+    let response_line = response.to_json_line();
+    toolcall_log(&format!("[send] {}", response_line));
+
+    writer
+        .write_all(format!("{}\n", response_line).as_bytes())
+        .await?;
     writer.flush().await?;
 
     Ok(())

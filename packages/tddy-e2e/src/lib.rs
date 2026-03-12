@@ -40,6 +40,7 @@ pub fn spawn_presenter_with_grpc(
     presenter.start_workflow(
         backend,
         output_dir,
+        None,
         initial_prompt,
         None,
         None,
@@ -126,6 +127,7 @@ pub fn spawn_presenter_with_grpc_and_tui(
     presenter.start_workflow(
         backend,
         output_dir,
+        None,
         initial_prompt,
         None,
         None,
