@@ -1,0 +1,8 @@
+{
+  "goal": "acceptance-tests",
+  "summary": "Created 2 acceptance tests. All failing (Red state) as expected.",
+  "tests": [
+    {"name": "login_stores_session_token", "file": "packages/auth/tests/session.it.rs", "line": 15, "status": "failing"},
+    {"name": "logout_clears_session", "file": "packages/auth/tests/session.it.rs", "line": 28, "status": "failing"}
+  ]
+}

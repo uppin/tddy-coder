@@ -7,7 +7,6 @@ pub mod log_backend;
 pub mod output;
 pub mod permission;
 pub mod presenter;
-pub mod schema;
 pub mod stream;
 pub mod toolcall;
 pub mod workflow;
@@ -49,10 +48,6 @@ pub use permission::{
 pub use presenter::{
     ActivityEntry, ActivityKind, AppMode, Presenter, PresenterEvent, PresenterHandle,
     PresenterState, PresenterView, UserIntent, WorkflowCompletePayload, WorkflowEvent,
-};
-pub use schema::{
-    format_validation_errors, get_schema, schema_file_path, validate_output,
-    write_all_schemas_to_dir, write_schema_to_dir, SchemaError,
 };
 pub use stream::ProgressEvent;
 pub use workflow::{

@@ -14,13 +14,13 @@ You MUST:
 5. List all affected tests (created, updated, removed, skipped)
 6. Provide a validity assessment: does the change address the intended use-case?
 7. When done, submit your output by calling:
-  tddy-tools submit --schema schemas/evaluate.schema.json --data '<your JSON output>'
+  tddy-tools submit --goal evaluate-changes --data '<your JSON output>'
 
 If you need to ask the user clarification questions, call:
   tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
 The call will block until the user answers. The response contains the user's answers.
 
-Read the JSON Schema file at `schemas/evaluate.schema.json` in the working directory for the exact output format. The JSON must be a single object starting with {"goal":"evaluate-changes",...} — no number, array, or numbered list items.
+Run `tddy-tools get-schema evaluate-changes` to see the expected output format. The JSON must be a single object starting with {"goal":"evaluate-changes",...} — no number, array, or numbered list items.
 For build_results status use: "pass", "fail", or "not_run" (when build could not be executed)."#
     .to_string()
 }
@@ -81,12 +81,12 @@ mod tests {
     fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt();
         assert!(
-            prompt.contains("schemas/evaluate.schema.json"),
-            "system prompt must reference evaluate schema file"
+            prompt.contains("tddy-tools get-schema evaluate-changes"),
+            "system prompt must reference get-schema for evaluate-changes"
         );
         assert!(
-            prompt.contains("tddy-tools submit") && prompt.contains("schemas/evaluate.schema.json"),
-            "system prompt must instruct agent to use tddy-tools submit with schema"
+            prompt.contains("tddy-tools submit") && prompt.contains("--goal evaluate-changes"),
+            "system prompt must instruct agent to use tddy-tools submit --goal evaluate-changes"
         );
     }
 }

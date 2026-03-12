@@ -9,13 +9,13 @@ You MUST:
 3. Delete or adjust any tests that pass - passing tests do not verify new behavior
 4. Do NOT ask for permission to write files - you have write access. Create the test files directly.
 5. When done, submit your output by calling:
-  tddy-tools submit --schema schemas/acceptance-tests.schema.json --data '<your JSON output>'
+  tddy-tools submit --goal acceptance-tests --data '<your JSON output>'
 
 If you need to ask the user clarification questions, call:
   tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
 The call will block until the user answers. The response contains the user's answers.
 
-Read the JSON Schema file at `schemas/acceptance-tests.schema.json` in the working directory for the exact output format. The JSON must be a single object starting with {"goal":"acceptance-tests",...} — no number, array, or numbered list items.
+Run `tddy-tools get-schema acceptance-tests` to see the expected output format. The JSON must be a single object starting with {"goal":"acceptance-tests",...} — no number, array, or numbered list items.
 
 The summary must describe what tests exist and confirm all are failing. The tests array must list each acceptance test with name, file, line, and status.
 
@@ -68,13 +68,12 @@ mod tests {
     fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt();
         assert!(
-            prompt.contains("schemas/acceptance-tests.schema.json"),
-            "system prompt must reference acceptance-tests schema file"
+            prompt.contains("tddy-tools get-schema acceptance-tests"),
+            "system prompt must reference get-schema for acceptance-tests"
         );
         assert!(
-            prompt.contains("tddy-tools submit")
-                && prompt.contains("schemas/acceptance-tests.schema.json"),
-            "system prompt must instruct agent to use tddy-tools submit with schema"
+            prompt.contains("tddy-tools submit") && prompt.contains("--goal acceptance-tests"),
+            "system prompt must instruct agent to use tddy-tools submit --goal acceptance-tests"
         );
     }
 }

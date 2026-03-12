@@ -1,6 +1,7 @@
 //! JSON Schema validation for structured agent output.
 //!
-//! Schemas are embedded in the binary via `include_dir` and validated with the `jsonschema` crate.
+//! Schemas are embedded in the binary via `include_dir`. All schema interaction
+//! is via tddy-tools; no schema files are written to disk by tddy-core.
 
 use include_dir::{include_dir, Dir};
 use jsonschema::Resource;
@@ -9,16 +10,17 @@ use std::path::Path;
 
 static SCHEMAS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/schemas");
 
-/// Goal name to schema file mapping.
+/// Goal name (from JSON "goal" field) to schema file mapping.
 const GOAL_SCHEMA_FILES: &[(&str, &str)] = &[
     ("plan", "plan.schema.json"),
     ("acceptance-tests", "acceptance-tests.schema.json"),
     ("red", "red.schema.json"),
     ("green", "green.schema.json"),
-    ("evaluate", "evaluate.schema.json"),
-    ("validate-subagents", "validate-subagents.schema.json"),
+    ("evaluate-changes", "evaluate.schema.json"),
+    ("validate", "validate-subagents.schema.json"),
     ("refactor", "refactor.schema.json"),
     ("update-docs", "update-docs.schema.json"),
+    ("demo", "demo.schema.json"),
 ];
 
 /// Common schema files (in common/ subdir) with their $id URIs.
@@ -63,7 +65,7 @@ pub fn get_schema(goal: &str) -> Option<&'static str> {
 }
 
 /// Returns (uri, parsed Value) for all common schemas.
-pub fn get_all_common_schemas() -> Vec<(&'static str, Value)> {
+fn get_all_common_schemas() -> Vec<(&'static str, Value)> {
     let mut out = Vec::with_capacity(COMMON_SCHEMAS.len());
     for (uri, path) in COMMON_SCHEMAS {
         if let Some(file) = SCHEMAS_DIR.get_file(path) {
@@ -150,64 +152,43 @@ pub fn format_validation_errors(errors: &[SchemaError]) -> String {
     out
 }
 
-/// Writes all goal schemas and common schemas to the given directory.
-/// Creates a `schemas/` subdirectory. Call when the plan dir is created so schemas
-/// are available for all subsequent goals (acceptance-tests, red, green, validate-subagents).
-pub fn write_all_schemas_to_dir(dir: &Path) -> std::io::Result<()> {
-    for (goal, _) in GOAL_SCHEMA_FILES {
-        write_schema_to_dir(dir, goal)?;
+/// Writes the goal schema and all common schemas to the given path.
+/// Used by `get-schema` subcommand when -o is specified.
+pub fn write_schema_to_path(goal: &str, out_path: &Path) -> std::io::Result<()> {
+    let schema_str = get_schema(goal).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("unknown goal: {}", goal),
+        )
+    })?;
+
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
-    Ok(())
-}
+    std::fs::write(out_path, schema_str)?;
 
-/// Writes the goal schema and all common schemas to the given directory.
-/// Creates a `schemas/` subdirectory. Returns the path to the goal schema file.
-pub fn write_schema_to_dir(dir: &Path, goal: &str) -> std::io::Result<std::path::PathBuf> {
-    let schemas_dir = dir.join("schemas");
-    std::fs::create_dir_all(&schemas_dir)?;
-
+    let base_dir = out_path.parent().unwrap();
     for (_uri, path) in COMMON_SCHEMAS {
         if let Some(file) = SCHEMAS_DIR.get_file(path) {
             if let Some(contents) = file.contents_utf8() {
-                let out_path = schemas_dir.join(path);
-                if let Some(parent) = out_path.parent() {
+                let common_out = base_dir.join(path);
+                if let Some(parent) = common_out.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
-                std::fs::write(out_path, contents)?;
+                std::fs::write(&common_out, contents)?;
             }
         }
     }
 
-    let (_, goal_filename) = GOAL_SCHEMA_FILES
-        .iter()
-        .find(|(g, _)| *g == goal)
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("unknown goal: {}", goal),
-            )
-        })?;
-
-    if let Some(file) = SCHEMAS_DIR.get_file(goal_filename) {
-        if let Some(contents) = file.contents_utf8() {
-            let out_path = schemas_dir.join(goal_filename);
-            std::fs::write(&out_path, contents)?;
-            return Ok(out_path);
-        }
-    }
-
-    Err(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        format!("schema file not found: {}", goal_filename),
-    ))
+    Ok(())
 }
 
-/// Returns the schema file path relative to the working directory for a goal.
-pub fn schema_file_path(goal: &str) -> Option<String> {
-    GOAL_SCHEMA_FILES
-        .iter()
-        .find(|(g, _)| *g == goal)
-        .map(|(_, f)| format!("schemas/{}", f))
+/// Tip for validation errors.
+pub fn validation_error_tip(goal: &str) -> String {
+    format!(
+        "Tip: Run `tddy-tools get-schema {}` to see the expected output format.",
+        goal
+    )
 }
 
 #[cfg(test)]
@@ -226,11 +207,5 @@ mod tests {
     #[test]
     fn get_schema_returns_none_for_unknown_goal() {
         assert!(get_schema("unknown").is_none());
-    }
-
-    #[test]
-    fn get_all_common_schemas_returns_all() {
-        let schemas = get_all_common_schemas();
-        assert_eq!(schemas.len(), COMMON_SCHEMAS.len());
     }
 }

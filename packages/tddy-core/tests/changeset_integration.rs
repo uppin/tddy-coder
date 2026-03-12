@@ -820,23 +820,6 @@ async fn changeset_written_before_plan_agent() {
 
 // ── Acceptance tests for Stable session dir PRD: R2 ──────────────────────────
 
-/// plan.schema.json must not contain the `plan_dir_suggestion` property.
-///
-/// Fails until `plan_dir_suggestion` is removed from the discovery object in the schema file.
-#[test]
-fn test_plan_dir_suggestion_removed_from_schema() {
-    let schema_path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/plan.schema.json");
-    let schema_content =
-        std::fs::read_to_string(&schema_path).expect("schemas/plan.schema.json should be readable");
-    assert!(
-        !schema_content.contains("plan_dir_suggestion"),
-        "plan.schema.json must not contain 'plan_dir_suggestion' property after R2 removal; \
-         found it in schema at: {}",
-        schema_path.display()
-    );
-}
-
 /// DiscoveryData round-trip (deserialize YAML without plan_dir_suggestion, re-serialize)
 /// must not produce a `plan_dir_suggestion` key in the output.
 ///
