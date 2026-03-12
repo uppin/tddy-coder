@@ -20,6 +20,14 @@
       in
       {
         devShells.default = pkgs.mkShell {
+          nativeBuildInputs = [
+            pkgs.pkg-config
+          ];
+          buildInputs = [
+            pkgs.glib
+          ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+            pkgs.libva
+          ];
           packages = [
             rustToolchain
             pkgs.rust-analyzer

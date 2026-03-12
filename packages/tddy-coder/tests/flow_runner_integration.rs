@@ -8,7 +8,6 @@
 mod common;
 
 use assert_cmd::cargo::cargo_bin_cmd;
-use assert_cmd::Command;
 use std::path::PathBuf;
 
 fn temp_output_dir() -> PathBuf {
