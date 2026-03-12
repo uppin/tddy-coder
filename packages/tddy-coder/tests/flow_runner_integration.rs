@@ -2,12 +2,12 @@
 //!
 //! Verifies plan goal produces plan output via WorkflowEngine (graph-flow path).
 //!
-//! Uses tddy-demo (StubBackend) with SKIP_QUESTIONS so the test does not need clarification input.
+//! Uses tddy-coder --agent stub (StubBackend) with SKIP_QUESTIONS so the test does not need clarification input.
 //! Runs as subprocess with piped stdin ("a\n" for plan approval) to avoid blocking.
 
 mod common;
 
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use std::path::PathBuf;
 
 fn temp_output_dir() -> PathBuf {
@@ -18,7 +18,7 @@ fn temp_output_dir() -> PathBuf {
 }
 
 /// Plan goal produces a plan directory when given feature input.
-/// Uses tddy-demo binary (StubBackend) with piped stdin for plan approval.
+/// Uses tddy-coder --agent stub (StubBackend) with piped stdin for plan approval.
 /// TDDY_SESSIONS_DIR set to temp dir so tests do not write to production ~/.tddy.
 #[test]
 #[cfg(unix)]
@@ -26,10 +26,11 @@ fn run_plan_via_flow_runner_produces_plan_directory() {
     let sessions_base = temp_output_dir();
     let sessions_base_str = sessions_base.to_str().expect("path");
 
-    #[allow(deprecated)]
-    let mut cmd = Command::cargo_bin("tddy-demo").expect("tddy-demo binary");
+    let mut cmd = cargo_bin_cmd!("tddy-coder");
     cmd.env(tddy_core::output::TDDY_SESSIONS_DIR_ENV, sessions_base_str)
         .args([
+            "--agent",
+            "stub",
             "--goal",
             "plan",
             "--prompt",

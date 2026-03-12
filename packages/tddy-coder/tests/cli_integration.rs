@@ -424,7 +424,7 @@ artifacts: {}
 #[test]
 fn cli_errors_when_plan_dir_missing_for_evaluate_goal() {
     let mut cmd = tddy_coder_bin();
-    cmd.args(["--goal", "evaluate"]);
+    cmd.args(["--agent", "stub", "--goal", "evaluate"]);
 
     let output = cmd.output().expect("run tddy-coder");
 
@@ -443,7 +443,7 @@ fn cli_errors_when_plan_dir_missing_for_evaluate_goal() {
 #[test]
 fn cli_errors_when_plan_dir_missing_for_acceptance_tests_goal() {
     let mut cmd = tddy_coder_bin();
-    cmd.args(["--goal", "acceptance-tests"]);
+    cmd.args(["--agent", "stub", "--goal", "acceptance-tests"]);
     // --plan-dir is NOT provided
 
     let output = cmd.output().expect("run tddy-coder");
@@ -509,7 +509,7 @@ fn cli_accepts_goal_red_with_plan_dir() {
 #[test]
 fn cli_errors_when_plan_dir_missing_for_red_goal() {
     let mut cmd = tddy_coder_bin();
-    cmd.args(["--goal", "red"]);
+    cmd.args(["--agent", "stub", "--goal", "red"]);
     // --plan-dir is NOT provided
 
     let output = cmd.output().expect("run tddy-coder");
@@ -594,7 +594,7 @@ fn cli_accepts_goal_green_with_plan_dir() {
 #[test]
 fn cli_errors_when_plan_dir_missing_for_green_goal() {
     let mut cmd = tddy_coder_bin();
-    cmd.args(["--goal", "green"]);
+    cmd.args(["--agent", "stub", "--goal", "green"]);
     // --plan-dir is NOT provided
 
     let output = cmd.output().expect("run tddy-coder");
