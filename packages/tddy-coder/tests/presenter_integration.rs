@@ -2,6 +2,8 @@
 //!
 //! Scenario-based tests that drive the full workflow without a terminal.
 
+mod common;
+
 use std::time::Duration;
 
 use tddy_coder::{ActivityEntry, AppMode, Presenter, PresenterView, UserIntent};

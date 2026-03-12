@@ -14,7 +14,8 @@ use tddy_core::{
 use common::{ctx_update_docs, run_goal_until_done, write_changeset_with_state};
 
 /// Minimal update-docs output as JSON (tddy-tools submit format).
-const UPDATE_DOCS_OUTPUT: &str = r#"{"goal":"update-docs","summary":"Updated 3 documentation files.","docs_updated":3}"#;
+const UPDATE_DOCS_OUTPUT: &str =
+    r#"{"goal":"update-docs","summary":"Updated 3 documentation files.","docs_updated":3}"#;
 
 fn write_minimal_artifacts(plan_dir: &std::path::Path) {
     std::fs::write(

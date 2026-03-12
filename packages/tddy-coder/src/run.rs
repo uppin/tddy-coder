@@ -19,7 +19,7 @@ use tddy_core::{
 
 use crate::plain;
 use crate::tty::should_run_tui;
-use tddy_core::{find_git_root, Presenter};
+use tddy_core::Presenter;
 
 use crate::disable_raw_mode;
 
@@ -38,31 +38,16 @@ fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
         }
     }
     // Check 2: On PATH
-    match std::process::Command::new("tddy-tools").arg("--help").output() {
+    match std::process::Command::new("tddy-tools")
+        .arg("--help")
+        .output()
+    {
         Ok(output) if output.status.success() => Ok(()),
         _ => anyhow::bail!(
             "tddy-tools binary not found. Build it with: cargo build -p tddy-tools\n\
              Or ensure it's on PATH."
         ),
     }
-}
-
-/// Reject if `output_dir` resolves to the git repo root (would pollute the repo).
-fn reject_output_dir_if_repo_root(output_dir: &Path) -> anyhow::Result<()> {
-    let resolved = output_dir
-        .canonicalize()
-        .or_else(|_| std::fs::canonicalize(output_dir.parent().unwrap_or(output_dir)))
-        .context("resolve output-dir path")?;
-    let cwd = std::env::current_dir().context("current dir")?;
-    let git_root = find_git_root(&cwd);
-    let git_root_resolved = git_root.canonicalize().unwrap_or_else(|_| git_root.clone());
-    if resolved == git_root_resolved {
-        anyhow::bail!(
-            "--output-dir must not be the repository root ({}); use a subdirectory or omit for $HOME/.tddy/sessions",
-            output_dir.display()
-        );
-    }
-    Ok(())
 }
 
 /// Shared main entry: panic hook, Ctrl+C handler, run_with_args, exit logic.
@@ -128,8 +113,6 @@ pub fn run_main(mut args: Args) {
 #[derive(Debug, Clone)]
 pub struct Args {
     pub goal: Option<String>,
-    /// None = use $HOME/.tddy/sessions. Some(path) = explicit; must not be repo root.
-    pub output_dir: Option<PathBuf>,
     pub plan_dir: Option<PathBuf>,
     pub conversation_output: Option<PathBuf>,
     pub model: Option<String>,
@@ -162,10 +145,6 @@ pub struct CoderArgs {
     /// Goal to execute: plan, acceptance-tests, red, green, demo, evaluate, validate, refactor. Omit to run full workflow.
     #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
     pub goal: Option<String>,
-
-    /// Output directory for planning artifacts. Omit to use $HOME/.tddy/sessions. Must not be the repo root.
-    #[arg(long)]
-    pub output_dir: Option<PathBuf>,
 
     /// Plan directory (required when goal is acceptance-tests, red, green, demo, validate, refactor, or update-docs)
     #[arg(long)]
@@ -233,10 +212,6 @@ pub struct DemoArgs {
     #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
     pub goal: Option<String>,
 
-    /// Output directory for planning artifacts. Omit to use $HOME/.tddy/sessions. Must not be the repo root.
-    #[arg(long)]
-    pub output_dir: Option<PathBuf>,
-
     /// Plan directory (required when goal is acceptance-tests, red, green, demo, validate, refactor, or update-docs)
     #[arg(long)]
     pub plan_dir: Option<PathBuf>,
@@ -282,7 +257,6 @@ impl From<CoderArgs> for Args {
     fn from(a: CoderArgs) -> Args {
         Args {
             goal: a.goal,
-            output_dir: a.output_dir,
             plan_dir: a.plan_dir,
             conversation_output: a.conversation_output,
             model: a.model,
@@ -306,7 +280,6 @@ impl From<DemoArgs> for Args {
     fn from(a: DemoArgs) -> Args {
         Args {
             goal: a.goal,
-            output_dir: a.output_dir,
             plan_dir: a.plan_dir,
             conversation_output: a.conversation_output,
             model: a.model,
@@ -444,36 +417,15 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         anyhow::bail!("empty feature description");
     }
 
-    let (plan_dir, output_dir_for_ctx) = if let Some(output_dir) = &args.output_dir {
-        reject_output_dir_if_repo_root(output_dir)?;
-        let plan_dir = output_dir.join(tddy_core::output::slugify_directory_name(&input));
-        std::fs::create_dir_all(&plan_dir).context("create plan directory")?;
-        (plan_dir, output_dir.clone())
+    let base = tddy_core::output::sessions_base_path().map_err(|e| anyhow::anyhow!("{}", e))?;
+    let plan_dir = if let Some(ref sid) = args.session_id {
+        tddy_core::output::create_session_dir_with_id(&base, sid)
     } else {
-        #[cfg(unix)]
-        {
-            let home = std::env::var("HOME").map_err(|_| {
-                anyhow::anyhow!("HOME not set; cannot create session under ~/.tddy")
-            })?;
-            let base = PathBuf::from(&home).join(".tddy");
-            let plan_dir = if let Some(ref sid) = args.session_id {
-                tddy_core::output::create_session_dir_with_id(&base, sid)
-            } else {
-                tddy_core::output::create_session_dir_in(&base)
-            }
-            .context("create session dir")?;
-            let output_dir_for_ctx =
-                std::env::current_dir().context("current dir for agent working_dir")?;
-            (plan_dir, output_dir_for_ctx)
-        }
-        #[cfg(not(unix))]
-        {
-            anyhow::bail!(
-                "plan without --output-dir requires HOME (Unix) or USERPROFILE (Windows); \
-                 use --output-dir <path> explicitly"
-            );
-        }
-    };
+        tddy_core::output::create_session_dir_in(&base)
+    }
+    .context("create session dir")?;
+    let output_dir_for_ctx =
+        std::env::current_dir().context("current dir for agent working_dir")?;
 
     let conv = resolve_log_defaults(args, &plan_dir);
     let ctx = build_goal_context(args, None, &conv, |c| {
@@ -499,17 +451,9 @@ fn on_progress(_event: &ProgressEvent) {
 fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     tddy_core::init_tddy_logger(args.debug, args.debug_output.as_deref());
 
-    let sessions_base = args.output_dir.clone().unwrap_or_else(|| {
-        #[cfg(unix)]
-        {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            PathBuf::from(home).join(".tddy").join("sessions")
-        }
-        #[cfg(not(unix))]
-        {
-            PathBuf::from(".").join("sessions")
-        }
-    });
+    let sessions_base = tddy_core::output::sessions_base_path()
+        .map_err(|e| anyhow::anyhow!("{}", e))?
+        .join(tddy_core::output::SESSIONS_SUBDIR);
     std::fs::create_dir_all(&sessions_base).context("create sessions base dir")?;
 
     let port = args.grpc.unwrap_or(50051);
@@ -620,19 +564,7 @@ fn print_session_id_on_exit(session_id: &str, session_dir: &Path) {
 /// Compute session dir path from args (base/sessions/{session_id}/).
 fn session_dir_path(args: &Args) -> Option<PathBuf> {
     let sid = args.session_id.as_deref()?;
-    let base = if args.output_dir.is_none() {
-        #[cfg(unix)]
-        {
-            let home = std::env::var("HOME").ok()?;
-            PathBuf::from(home).join(".tddy")
-        }
-        #[cfg(not(unix))]
-        {
-            return None;
-        }
-    } else {
-        args.output_dir.clone()?
-    };
+    let base = tddy_core::output::sessions_base_path().ok()?;
     Some(base.join(tddy_core::output::SESSIONS_SUBDIR).join(sid))
 }
 
@@ -693,10 +625,10 @@ fn build_goal_context(
     ctx.insert("debug".to_string(), serde_json::json!(args.debug));
     if let Some(p) = plan_dir {
         ctx.insert("plan_dir".to_string(), serde_json::to_value(p).unwrap());
-        let output_dir = args
-            .output_dir
-            .clone()
-            .or_else(|| p.parent().map(|x| x.to_path_buf()));
+        let output_dir = std::env::current_dir()
+            .ok()
+            .or_else(|| p.parent().map(|x| x.to_path_buf()))
+            .unwrap_or_else(|| PathBuf::from("."));
         ctx.insert(
             "output_dir".to_string(),
             serde_json::to_value(output_dir).unwrap(),
@@ -743,13 +675,7 @@ fn run_goal_plain(
                             .get_sync("plan_dir")
                             .or_else(|| s.context.get_sync("output_dir"))
                     })
-                    .unwrap_or_else(|| {
-                        args.plan_dir.clone().unwrap_or_else(|| {
-                            args.output_dir
-                                .clone()
-                                .unwrap_or_else(|| PathBuf::from("."))
-                        })
-                    });
+                    .unwrap_or_else(|| args.plan_dir.clone().unwrap_or_else(|| PathBuf::from(".")));
                 let output: Option<String> = session_opt
                     .as_ref()
                     .and_then(|s| s.context.get_sync("output"));
@@ -770,13 +696,7 @@ fn run_goal_plain(
                             .get_sync("plan_dir")
                             .or_else(|| s.context.get_sync("output_dir"))
                     })
-                    .unwrap_or_else(|| {
-                        args.plan_dir.clone().unwrap_or_else(|| {
-                            args.output_dir
-                                .clone()
-                                .unwrap_or_else(|| PathBuf::from("."))
-                        })
-                    });
+                    .unwrap_or_else(|| args.plan_dir.clone().unwrap_or_else(|| PathBuf::from(".")));
                 match event {
                     tddy_core::ElicitationEvent::PlanApproval { ref prd_content } => {
                         let mut current_prd = prd_content.clone();
@@ -999,11 +919,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         Ok((path, rx)) => (Some(path), Some(rx)),
         Err(_) => (None, None),
     };
-    let backend = create_backend(
-        &args.agent,
-        socket_path.as_deref(),
-        args.output_dir.as_deref(),
-    );
+    let backend = create_backend(&args.agent, socket_path.as_deref(), None);
     let view = tddy_tui::TuiView::new();
     let mut presenter = Presenter::new(view, &args.agent, args.model.as_deref().unwrap_or("opus"));
 
@@ -1046,15 +962,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         (None, None)
     };
 
-    if let Some(ref output_dir) = args.output_dir {
-        reject_output_dir_if_repo_root(output_dir)?;
-    }
     let initial_prompt = args.prompt.clone();
     presenter.start_workflow(
         backend,
-        args.output_dir
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(".")),
+        PathBuf::from("."),
         initial_prompt,
         args.conversation_output.clone(),
         args.debug_output.clone(),
@@ -1147,10 +1058,11 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         .trim()
         .to_string();
     let conv = resolve_log_defaults(args, &plan_dir);
-    let output_dir = args
-        .output_dir
-        .clone()
-        .or_else(|| plan_dir.parent().map(|p| p.to_path_buf()));
+    let output_dir = plan_dir
+        .parent()
+        .map(|p| p.to_path_buf())
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
     let context_values = build_goal_context(args, Some(&plan_dir), &conv, |c| {
         c.insert(
             "feature_input".to_string(),
@@ -1274,37 +1186,15 @@ fn run_plan_to_get_dir(
     if input.is_empty() {
         anyhow::bail!("empty feature description");
     }
-    let (plan_dir, output_dir_for_ctx) = if let Some(output_dir) = &args.output_dir {
-        reject_output_dir_if_repo_root(output_dir)?;
-        let plan_dir = output_dir.join(tddy_core::output::slugify_directory_name(&input));
-        std::fs::create_dir_all(&plan_dir).context("create plan directory")?;
-        let output_dir_for_ctx = output_dir.clone();
-        (plan_dir, output_dir_for_ctx)
+    let base = tddy_core::output::sessions_base_path().map_err(|e| anyhow::anyhow!("{}", e))?;
+    let plan_dir = if let Some(ref sid) = args.session_id {
+        tddy_core::output::create_session_dir_with_id(&base, sid)
     } else {
-        #[cfg(unix)]
-        {
-            let home = std::env::var("HOME").map_err(|_| {
-                anyhow::anyhow!("HOME not set; cannot create session under ~/.tddy")
-            })?;
-            let base = PathBuf::from(&home).join(".tddy");
-            let plan_dir = if let Some(ref sid) = args.session_id {
-                tddy_core::output::create_session_dir_with_id(&base, sid)
-            } else {
-                tddy_core::output::create_session_dir_in(&base)
-            }
-            .context("create session dir")?;
-            let output_dir_for_ctx =
-                std::env::current_dir().context("current dir for agent working_dir")?;
-            (plan_dir, output_dir_for_ctx)
-        }
-        #[cfg(not(unix))]
-        {
-            anyhow::bail!(
-                "plan without --output-dir requires HOME (Unix) or USERPROFILE (Windows); \
-                 use --output-dir <path> explicitly"
-            );
-        }
-    };
+        tddy_core::output::create_session_dir_in(&base)
+    }
+    .context("create session dir")?;
+    let output_dir_for_ctx =
+        std::env::current_dir().context("current dir for agent working_dir")?;
     let conv = resolve_log_defaults(args, &plan_dir);
     let ctx = build_goal_context(args, None, &conv, |c| {
         c.insert("feature_input".to_string(), serde_json::json!(input));

@@ -27,7 +27,8 @@ const VALIDATE_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 subagents c
 
 const REFACTOR_OUTPUT: &str = r#"{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
 
-const UPDATE_DOCS_OUTPUT: &str = r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
+const UPDATE_DOCS_OUTPUT: &str =
+    r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
 
 /// evaluate() invokes backend with Goal::Evaluate (renamed from Goal::Validate).
 #[tokio::test]
@@ -426,7 +427,10 @@ async fn evaluate_workflow_returns_parse_error_on_malformed_response() {
     );
     let err_msg = result.unwrap_err().to_string();
     assert!(
-        err_msg.contains("Parse") || err_msg.contains("parse") || err_msg.contains("malformed") || err_msg.contains("JSON"),
+        err_msg.contains("Parse")
+            || err_msg.contains("parse")
+            || err_msg.contains("malformed")
+            || err_msg.contains("JSON"),
         "expected ParseError or malformed, got: {}",
         err_msg
     );

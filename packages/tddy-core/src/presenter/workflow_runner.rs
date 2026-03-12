@@ -265,26 +265,15 @@ fn run_plan_without_output_dir(
 ) -> Option<PathBuf> {
     let inherit_stdin = true;
     let (output_dir_for_ctx, session_base_opt) = if output_dir == Path::new(".") {
-        #[cfg(unix)]
-        {
-            let home = match std::env::var("HOME") {
-                Ok(h) => PathBuf::from(h).join(".tddy"),
-                Err(_) => {
-                    let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
-                        "HOME not set; cannot create session under ~/.tddy".into(),
-                    )));
-                    return None;
-                }
-            };
-            let agent_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            (agent_cwd, Some(home))
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
-                "plan without --output-dir requires Unix (HOME); use --output-dir <path>".into(),
-            )));
-            return None;
+        match crate::output::sessions_base_path() {
+            Ok(base) => {
+                let agent_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                (agent_cwd, Some(base))
+            }
+            Err(e) => {
+                let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(format!("{}", e))));
+                return None;
+            }
         }
     } else if session_id.is_some() {
         (output_dir.to_path_buf(), Some(output_dir.to_path_buf()))
@@ -790,9 +779,7 @@ mod tests {
         }
         assert!(got_error, "should get a workflow error from plan failure");
 
-        let session_dir = tmp
-            .join(crate::output::SESSIONS_SUBDIR)
-            .join(session_id);
+        let session_dir = tmp.join(crate::output::SESSIONS_SUBDIR).join(session_id);
         assert!(
             session_dir.exists(),
             "session dir should be created by PlanTask at {}",

@@ -3,13 +3,15 @@
 //! AC4: --goal evaluate is accepted (replaces --goal validate-changes)
 //! AC12: --goal demo works standalone with --plan-dir
 
+mod common;
+
+use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use std::fs;
 use std::path::Path;
 
-#[allow(deprecated)]
 fn tddy_coder_bin() -> Command {
-    Command::cargo_bin("tddy-coder").expect("tddy-coder binary")
+    cargo_bin_cmd!("tddy-coder")
 }
 
 /// Fake claude script that exits immediately with minimal NDJSON.
@@ -119,6 +121,7 @@ fn standalone_demo_goal() {
 #[test]
 fn cli_accepts_validate_goal() {
     let plan_dir = std::env::temp_dir().join("tddy-cli-validate-test");
+    let _ = std::fs::create_dir_all(&plan_dir);
     // --goal validate should be recognized by the argument parser
     let mut cmd = tddy_coder_bin();
     cmd.args([
@@ -308,8 +311,6 @@ exit 0
         "plan",
         "--prompt",
         "test feature",
-        "--output-dir",
-        tmp.to_str().unwrap(),
         "--debug-output",
         debug_file.to_str().unwrap(),
         "--agent",

@@ -8,12 +8,11 @@
 mod common;
 
 use common::{
-    ctx_acceptance_tests, ctx_demo, ctx_evaluate, ctx_green, ctx_plan, ctx_red, ctx_refactor,
-    ctx_validate, plan_dir_for_input, run_goal_until_done, run_plan, write_changeset_with_state,
+    ctx_acceptance_tests, ctx_green, ctx_plan, ctx_red, plan_dir_for_input, run_goal_until_done,
+    run_plan, write_changeset_with_state,
 };
 use std::sync::Arc;
 use tddy_core::changeset::read_changeset;
-use tddy_core::output::parse_green_response;
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
@@ -492,7 +491,8 @@ const VALIDATE_SUBAGENTS_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 s
 
 const REFACTOR_OUTPUT_COMPLETE: &str = r#"{"goal":"refactor","summary":"Completed 5 refactoring tasks. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
 
-const UPDATE_DOCS_OUTPUT: &str = r#"{"goal":"update-docs","summary":"Updated 3 docs.","docs_updated":3}"#;
+const UPDATE_DOCS_OUTPUT: &str =
+    r#"{"goal":"update-docs","summary":"Updated 3 docs.","docs_updated":3}"#;
 
 /// Phase 5 / PRD R7: Full workflow chains all 9 steps (plan through update-docs).
 #[tokio::test]

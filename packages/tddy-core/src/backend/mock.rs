@@ -17,6 +17,12 @@ pub struct MockBackend {
     submit_channel: SubmitResultChannel,
 }
 
+impl Default for MockBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockBackend {
     /// Create a new empty mock backend.
     pub fn new() -> Self {
@@ -113,7 +119,8 @@ impl CodingBackend for MockBackend {
                 })?;
         }
 
-        self.submit_channel.store(request.goal.submit_key(), &response.output);
+        self.submit_channel
+            .store(request.goal.submit_key(), &response.output);
 
         Ok(response)
     }

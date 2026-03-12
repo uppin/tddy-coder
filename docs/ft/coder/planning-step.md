@@ -25,7 +25,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 5. Accepts `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, and `--goal update-docs` for the implementation and evaluation phases
 6. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
 7. Accepts `--plan-dir <path>`: path to plan output directory; required when `--goal acceptance-tests`, `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, or `--goal update-docs`; used for resume when running full workflow
-8. Accepts `--output-dir <path>` to configure where planning output is written. When omitted, output goes to `$HOME/.tddy/sessions/{uuid}/` (stable session directory). When provided, output goes to `{path}/YYYY-MM-DD-slug/`
+8. Planning output always goes to `$HOME/.tddy/sessions/{uuid}/` (stable session directory)
 9. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
 10. Accepts `--conversation-output <path>` to log the entire agent conversation in raw bytes to a file (Updated: 2026-03-07)
 11. Accepts `--debug` to print CLI command and cwd before running (for debugging empty output)
@@ -39,7 +39,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 1. Read feature description from `--prompt` (if set) or stdin (piped or interactive)
 2. Invoke the selected backend (Claude or Cursor) in plan mode to analyze the feature description
 3. **Q&A phase**: The agent may ask clarifying questions; the user is expected to answer them. The system must support this interactive exchange (Claude asks → user answers → Claude continues analysis).
-4. Create output directory: when `--output-dir` is omitted, use `$HOME/.tddy/sessions/{uuid}/`; when provided, use `{output-dir}/YYYY-MM-DD-slug/` (date-prefixed, slugified from feature)
+4. Create output directory: `$HOME/.tddy/sessions/{uuid}/`
 5. Structured output is received via `tddy-tools submit` (Unix socket IPC). Parser deserializes JSON into PRD, TODO, discovery, and demo plan artifacts.
 6. Write `PRD.md`, `TODO.md`, and `changeset.yaml` (unified manifest: session ID, workflow state, discovery, models, initial_prompt, clarification_qa) to the output directory
 7. **Plan approval gate**: After plan completes, the user is presented with three choices: View (full-screen PRD modal), Approve (proceed to acceptance-tests), or Refine (free-text feedback that resumes the LLM session). The approval loop continues until the user approves.
@@ -206,7 +206,7 @@ When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → 
 
 - [x] `tddy-coder --goal plan` reads from stdin and produces a named output directory
 - [ ] Output directory contains well-formed `PRD.md`, `TODO.md`, and `changeset.yaml`
-- [ ] `--output-dir` flag controls output location
+- [x] Output location fixed at `$HOME/.tddy/sessions/{uuid}/`
 - [ ] `--model <name>` selects the LLM model; default used when omitted
 - [ ] *Deferred*: `--list-models` lists available models
 - [ ] Claude Code CLI is invoked in plan mode with appropriate arguments

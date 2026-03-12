@@ -32,7 +32,8 @@ const VALIDATE_REFACTOR_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 su
 /// For run_goal_until_done(validate): validate -> refactor -> update-docs chain.
 const REFACTOR_OUTPUT: &str = r#"{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
 
-const UPDATE_DOCS_OUTPUT: &str = r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
+const UPDATE_DOCS_OUTPUT: &str =
+    r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
 
 /// validate() invokes backend with Goal::Validate.
 #[tokio::test]

@@ -1,4 +1,7 @@
 //! Shared helpers for WorkflowEngine integration tests.
+//! Each test file uses a subset; allow dead_code to avoid per-file unused warnings.
+
+#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::path::PathBuf;
