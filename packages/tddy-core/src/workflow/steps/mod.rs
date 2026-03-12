@@ -80,6 +80,14 @@ impl Task for PlanTask {
 
         let system_prompt = planning::system_prompt();
 
+        let session = context.get_sync::<String>("session_id").map(|id| {
+            if is_resume {
+                crate::backend::SessionMode::Resume(id)
+            } else {
+                crate::backend::SessionMode::Fresh(id)
+            }
+        });
+
         // Use output_dir (repo root) as working_dir so agent can discover Cargo.toml, packages/, etc.
         let request = InvokeRequest {
             prompt,
@@ -87,8 +95,7 @@ impl Task for PlanTask {
             system_prompt_path: None,
             goal: Goal::Plan,
             model: context.get_sync("model"),
-            session_id: context.get_sync("session_id"),
-            is_resume,
+            session,
             working_dir: Some(output_dir.clone()),
             debug: context.get_sync::<bool>("debug").unwrap_or(false),
             agent_output: context.get_sync::<bool>("agent_output").unwrap_or(false),
@@ -106,6 +113,32 @@ impl Task for PlanTask {
             },
         )?;
 
+        let output_to_store = self
+            .backend
+            .submit_channel()
+            .and_then(|ch| ch.take_for_goal("plan"))
+            .or_else(|| take_submit_result_for_goal("plan"));
+
+        if let Some(output) = output_to_store {
+            context.set_sync("output", output.clone());
+            let planning = parse_planning_response(&output).map_err(|e: ParseError| {
+                Box::new(WorkflowError::ParseError(e)) as Box<dyn std::error::Error + Send + Sync>
+            })?;
+
+            context.set_sync("parsed_planning", planning);
+            context.set_sync("plan_dir", plan_dir.clone());
+            if let Some(sid) = &response.session_id {
+                context.set_sync("session_id", sid.clone());
+            }
+
+            return Ok(TaskResult {
+                response: format!("Plan complete for {}", plan_dir.display()),
+                next_action: NextAction::Continue,
+                task_id: "plan".to_string(),
+                status_message: Some("Plan complete".to_string()),
+            });
+        }
+
         if !response.questions.is_empty() {
             context.set_sync("pending_questions", response.questions.clone());
             return Ok(TaskResult {
@@ -116,34 +149,9 @@ impl Task for PlanTask {
             });
         }
 
-        let output_to_store = self
-            .backend
-            .submit_channel()
-            .and_then(|ch| ch.take_for_goal("plan"))
-            .or_else(|| take_submit_result_for_goal("plan"))
-            .ok_or_else(|| {
-                Box::new(WorkflowError::ParseError(ParseError::Malformed(
-                    "Agent finished without calling tddy-tools submit. Ensure tddy-tools is on PATH and the agent follows the system prompt.".into(),
-                ))) as Box<dyn std::error::Error + Send + Sync>
-            })?;
-        context.set_sync("output", output_to_store.clone());
-
-        let planning = parse_planning_response(&output_to_store).map_err(|e: ParseError| {
-            Box::new(WorkflowError::ParseError(e)) as Box<dyn std::error::Error + Send + Sync>
-        })?;
-
-        context.set_sync("parsed_planning", planning);
-        context.set_sync("plan_dir", plan_dir.clone());
-        if let Some(sid) = &response.session_id {
-            context.set_sync("session_id", sid.clone());
-        }
-
-        Ok(TaskResult {
-            response: format!("Plan complete for {}", plan_dir.display()),
-            next_action: NextAction::Continue,
-            task_id: "plan".to_string(),
-            status_message: Some("Plan complete".to_string()),
-        })
+        Err(Box::new(WorkflowError::ParseError(ParseError::Malformed(
+            "Agent finished without calling tddy-tools submit. Ensure tddy-tools is on PATH and the agent follows the system prompt.".into(),
+        ))) as Box<dyn std::error::Error + Send + Sync>)
     }
 }
 

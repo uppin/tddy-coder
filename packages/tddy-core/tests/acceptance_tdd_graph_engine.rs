@@ -6,6 +6,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tddy_core::backend::{MockBackend, StubBackend};
+use tddy_core::changeset::{write_changeset, Changeset};
+use tddy_core::output::slugify_directory_name;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::{ExecutionStatus, GraphBuilder};
 use tddy_core::workflow::runner::FlowRunner;
@@ -215,6 +217,13 @@ async fn workflow_engine_run_goal_plan_completes() {
     let _ = std::fs::remove_dir_all(&storage_dir);
     let output_dir = storage_dir.join("plan-output");
     std::fs::create_dir_all(&output_dir).unwrap();
+    let plan_dir = output_dir.join(slugify_directory_name("SKIP_QUESTIONS feature"));
+    std::fs::create_dir_all(&plan_dir).unwrap();
+    let init_cs = Changeset {
+        initial_prompt: Some("SKIP_QUESTIONS feature".to_string()),
+        ..Changeset::default()
+    };
+    let _ = write_changeset(&plan_dir, &init_cs);
 
     let backend: SharedBackend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
     let hooks = Arc::new(tddy_core::workflow::tdd_hooks::TddWorkflowHooks::new());
@@ -262,6 +271,13 @@ async fn workflow_engine_run_full_workflow_completes_with_stub() {
     let _ = std::fs::remove_dir_all(&storage_dir);
     let output_dir = storage_dir.join("plan-output");
     std::fs::create_dir_all(&output_dir).unwrap();
+    let plan_dir = output_dir.join(slugify_directory_name("SKIP_QUESTIONS feature"));
+    std::fs::create_dir_all(&plan_dir).unwrap();
+    let init_cs = Changeset {
+        initial_prompt: Some("SKIP_QUESTIONS feature".to_string()),
+        ..Changeset::default()
+    };
+    let _ = write_changeset(&plan_dir, &init_cs);
 
     let backend: SharedBackend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
     let hooks = Arc::new(tddy_core::workflow::tdd_hooks::TddWorkflowHooks::new());

@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use tddy_core::changeset::{write_changeset, Changeset};
 use tddy_core::output::slugify_directory_name;
 use tddy_core::workflow::graph::{ExecutionResult, ExecutionStatus};
 use tddy_core::WorkflowEngine;
@@ -193,6 +194,11 @@ pub async fn run_plan_with_conversation_output(
 ) -> Result<(PathBuf, String), Box<dyn std::error::Error + Send + Sync>> {
     let plan_dir = plan_dir_for_input(output_dir, input);
     std::fs::create_dir_all(&plan_dir)?;
+    let init_cs = Changeset {
+        initial_prompt: Some(input.to_string()),
+        ..Changeset::default()
+    };
+    let _ = write_changeset(&plan_dir, &init_cs);
 
     let context = ctx_plan(
         input,

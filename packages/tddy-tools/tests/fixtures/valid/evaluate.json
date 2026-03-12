@@ -1,0 +1,10 @@
+{
+  "goal": "evaluate-changes",
+  "summary": "Evaluated changes.",
+  "risk_level": "low",
+  "build_results": [{"package": "tddy-core", "status": "ok"}],
+  "issues": [],
+  "changed_files": [{"path": "src/lib.rs", "change_type": "modified", "lines_added": 5, "lines_removed": 2}],
+  "affected_tests": [{"path": "tests/foo.rs", "status": "passing", "description": "Unit test"}],
+  "validity_assessment": "Changes look good."
+}

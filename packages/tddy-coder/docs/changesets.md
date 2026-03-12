@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-03-12** [Feature] Session Lifecycle Redesign — Early changeset creation in run_plan_to_get_dir before run_goal_plain. (tddy-coder)
 - **2026-03-11** [Feature] Terminal Streaming via gRPC — When --grpc set: create broadcast channel for terminal bytes, ByteCallback that sends to broadcast, pass to run_event_loop and TddyRemoteService.with_terminal_bytes. CapturingWriter captures ratatui output; gRPC clients receive raw ANSI bytes via StreamTerminal. (tddy-coder)
 - **2026-03-11** [Feature] Daemon Mode — `--daemon` flag. run_daemon: headless gRPC server, sessions_base (~/.tddy/sessions or --output-dir), create_backend, DaemonService. Blocks until shutdown (SIGTERM). (tddy-coder)
 - **2026-03-10** [Feature] tddy-tools Relay Handler — TUI mode: starts listener first, creates backend with ProcessToolExecutor when socket available. create_backend takes optional socket_path and working_dir. (tddy-coder)

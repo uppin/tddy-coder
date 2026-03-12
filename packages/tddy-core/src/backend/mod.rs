@@ -255,6 +255,29 @@ impl AgentOutputSink {
     }
 }
 
+/// Session mode for backend invocation: fresh session or resume existing.
+#[derive(Debug, Clone)]
+pub enum SessionMode {
+    /// Start a new session with this ID.
+    Fresh(String),
+    /// Resume an existing session.
+    Resume(String),
+}
+
+impl SessionMode {
+    /// Session ID (same for both variants).
+    pub fn session_id(&self) -> &str {
+        match self {
+            SessionMode::Fresh(id) | SessionMode::Resume(id) => id,
+        }
+    }
+
+    /// True when resuming.
+    pub fn is_resume(&self) -> bool {
+        matches!(self, SessionMode::Resume(_))
+    }
+}
+
 /// Request to invoke the coding backend.
 #[derive(Debug, Clone)]
 pub struct InvokeRequest {
@@ -265,10 +288,8 @@ pub struct InvokeRequest {
     pub goal: Goal,
     /// Optional model name (e.g. "sonnet") passed to the agent.
     pub model: Option<String>,
-    /// Session/thread ID for resume (first call: None; followup: Some(id)).
-    pub session_id: Option<String>,
-    /// When true, use --resume instead of --session-id (or equivalent).
-    pub is_resume: bool,
+    /// Session mode: fresh (--session-id) or resume (--resume).
+    pub session: Option<SessionMode>,
     /// Working directory for the subprocess (default: inherit from parent).
     pub working_dir: Option<PathBuf>,
     /// When true, print the command and cwd to stderr before running.

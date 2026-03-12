@@ -23,13 +23,13 @@ You MUST:
 3. Wait for all 3 to complete
 4. Report whether each report was written
 5. When done, submit your output by calling:
-  tddy-tools submit --schema schemas/validate-subagents.schema.json --data '<your JSON output>'
+  tddy-tools submit --goal validate --data '<your JSON output>'
 
 If you need to ask the user clarification questions, call:
   tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
 The call will block until the user answers. The response contains the user's answers.
 
-Read the JSON Schema file at `schemas/validate-subagents.schema.json` in the working directory for the exact output format. The JSON must be a single object starting with {"goal":"validate",...}."#
+Run `tddy-tools get-schema validate` to see the expected output format. The JSON must be a single object starting with {"goal":"validate",...}."#
     .to_string()
 }
 
@@ -65,13 +65,12 @@ mod tests {
     fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt();
         assert!(
-            prompt.contains("schemas/validate-subagents.schema.json"),
-            "system prompt must reference validate-subagents schema file"
+            prompt.contains("tddy-tools get-schema validate"),
+            "system prompt must reference get-schema for validate"
         );
         assert!(
-            prompt.contains("tddy-tools submit")
-                && prompt.contains("schemas/validate-subagents.schema.json"),
-            "system prompt must instruct agent to use tddy-tools submit with schema"
+            prompt.contains("tddy-tools submit") && prompt.contains("--goal validate"),
+            "system prompt must instruct agent to use tddy-tools submit --goal validate"
         );
     }
 }

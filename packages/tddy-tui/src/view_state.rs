@@ -60,6 +60,10 @@ pub struct ViewState {
     pub plan_review_selected: usize,
     /// Scroll offset for MarkdownViewer mode.
     pub markdown_scroll_offset: usize,
+    /// True when the MarkdownViewer has scrolled to the end of the document.
+    pub markdown_at_end: bool,
+    /// Index of the selected inline button at end of document (0=Approve, 1=Refine).
+    pub markdown_end_button_selected: usize,
 }
 
 impl ViewState {
@@ -100,6 +104,8 @@ impl ViewState {
             }
             AppMode::MarkdownViewer { .. } => {
                 self.markdown_scroll_offset = 0;
+                self.markdown_at_end = false;
+                self.markdown_end_button_selected = 0;
             }
             AppMode::Done => {}
         }
@@ -171,12 +177,25 @@ impl ViewState {
 
     fn handle_markdown_viewer_key_view_local(&mut self, key: KeyEvent) -> bool {
         match key.code {
+            KeyCode::Char(' ') => {
+                self.markdown_scroll_offset = self.markdown_scroll_offset.saturating_add(10);
+                true
+            }
             KeyCode::PageUp => {
                 self.markdown_scroll_offset = self.markdown_scroll_offset.saturating_sub(10);
                 true
             }
             KeyCode::PageDown => {
                 self.markdown_scroll_offset = self.markdown_scroll_offset.saturating_add(10);
+                true
+            }
+            KeyCode::Up if self.markdown_at_end => {
+                self.markdown_end_button_selected =
+                    self.markdown_end_button_selected.saturating_sub(1);
+                true
+            }
+            KeyCode::Down if self.markdown_at_end => {
+                self.markdown_end_button_selected = (self.markdown_end_button_selected + 1).min(1);
                 true
             }
             KeyCode::Up => {
@@ -513,6 +532,8 @@ impl ViewState {
 
 #[cfg(test)]
 mod tests {
+    use crossterm::event::KeyModifiers;
+
     use super::*;
 
     #[test]
@@ -530,5 +551,41 @@ mod tests {
         vs.on_mode_changed(&AppMode::FeatureInput);
         assert!(vs.feature_input.is_empty());
         assert_eq!(vs.feature_cursor, 0);
+    }
+
+    #[test]
+    fn space_key_pages_down_in_markdown_viewer() {
+        let mut vs = ViewState::new();
+        let mode = AppMode::MarkdownViewer {
+            content: "test content".to_string(),
+        };
+        let space = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::empty());
+        vs.handle_key_view_local(space, &mode, 0);
+        assert_eq!(vs.markdown_scroll_offset, 10);
+    }
+
+    #[test]
+    fn down_arrow_navigates_buttons_when_at_end() {
+        let mut vs = ViewState::new();
+        vs.markdown_at_end = true;
+        let mode = AppMode::MarkdownViewer {
+            content: "test content".to_string(),
+        };
+        let down = KeyEvent::new(KeyCode::Down, KeyModifiers::empty());
+        vs.handle_key_view_local(down, &mode, 0);
+        assert_eq!(vs.markdown_end_button_selected, 1);
+    }
+
+    #[test]
+    fn up_arrow_navigates_buttons_when_at_end() {
+        let mut vs = ViewState::new();
+        vs.markdown_at_end = true;
+        vs.markdown_end_button_selected = 1;
+        let mode = AppMode::MarkdownViewer {
+            content: "test content".to_string(),
+        };
+        let up = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
+        vs.handle_key_view_local(up, &mode, 0);
+        assert_eq!(vs.markdown_end_button_selected, 0);
     }
 }

@@ -8,9 +8,9 @@ If you need clarification before creating the PRD, call:
 The call will block until the user answers. The response contains the user's answers.
 
 When done, submit your output by calling:
-  tddy-tools submit --schema schemas/plan.schema.json --data '<your JSON output>'
+  tddy-tools submit --goal plan --data '<your JSON output>'
 
-Read the JSON Schema file at `schemas/plan.schema.json` in the working directory for the exact output format. The JSON must include: goal, prd, and optionally name, discovery, demo_plan.
+Run `tddy-tools get-schema plan` to see the expected output format. The JSON must include: goal, prd, and optionally name, discovery, demo_plan.
 
 **PRD structure** — The prd value is a single JSON string (escape quotes and newlines as needed). The PRD must include these sections in order:
 
@@ -93,12 +93,12 @@ mod tests {
     fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt();
         assert!(
-            prompt.contains("schemas/plan.schema.json"),
-            "system prompt must reference plan schema file"
+            prompt.contains("tddy-tools get-schema plan"),
+            "system prompt must reference get-schema for plan"
         );
         assert!(
-            prompt.contains("tddy-tools submit") && prompt.contains("schemas/plan.schema.json"),
-            "system prompt must instruct agent to use tddy-tools submit with schema"
+            prompt.contains("tddy-tools submit") && prompt.contains("--goal plan"),
+            "system prompt must instruct agent to use tddy-tools submit --goal plan"
         );
     }
 

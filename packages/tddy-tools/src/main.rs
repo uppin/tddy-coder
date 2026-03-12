@@ -31,6 +31,9 @@ enum Subcommand {
 
     /// Ask clarification questions. Blocks until user answers in TUI.
     Ask(cli::AskArgs),
+
+    /// Output JSON schema for a goal. Use -o to write to file.
+    GetSchema(cli::GetSchemaArgs),
 }
 
 #[tokio::main]
@@ -44,6 +47,7 @@ async fn main() -> Result<()> {
     match args.subcommand {
         Some(Subcommand::Submit(s)) => cli::run_submit(s),
         Some(Subcommand::Ask(s)) => cli::run_ask(s),
+        Some(Subcommand::GetSchema(s)) => cli::run_get_schema(s),
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);

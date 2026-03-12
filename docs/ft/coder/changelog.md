@@ -2,6 +2,25 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-12 — Schema via tddy-tools (No Schema Files)
+
+- **Schema ownership**: All schema logic moved to tddy-tools. tddy-core no longer has a schema module, does not write schemas to disk, and does not depend on jsonschema or include_dir.
+- **submit**: `tddy-tools submit --goal <goal> --data '<json>'` validates against embedded schemas. No `--schema` file path.
+- **get-schema**: New subcommand outputs JSON schema for a goal. Optional `-o <path>` writes to file.
+- **Validation error tips**: When validation fails, tddy-tools prints a tip to run `tddy-tools get-schema <goal>`.
+- **System prompts**: All goals instruct the agent to use `tddy-tools submit --goal X` and `tddy-tools get-schema X` for format inspection.
+- **Packages**: tddy-tools (schemas/, schema.rs, get-schema, --goal), tddy-core (schema module removed, ProcessToolExecutor uses --goal, tdd_hooks no write_schema_to_dir).
+
+## 2026-03-12 — Session Lifecycle Redesign
+
+- **state.session_id**: The `state` section of changeset.yaml includes `session_id` as the single source of truth for the currently-active agent session. Steps read from `state.session_id` instead of tag-based lookups.
+- **Early changeset creation**: changeset.yaml is created immediately after the user enters their first prompt, before the workflow starts. Applies to TUI, CLI, and daemon entry paths. The plan dir is resumable even if planning fails.
+- **Session capture from first stream event**: When the first system event with `session_id` arrives from the agent stream, the workflow immediately writes the session entry to changeset.sessions and updates `state.session_id`. Session data is persisted within seconds of agent start, not after the step completes.
+- **Removed is_resume hack**: Per-step hooks no longer use `context.set_sync("is_resume", true)`. Resume decisions are derived from `state.session_id` in the changeset.
+- **Acceptance-tests**: Creates a fresh session (does not resume the plan session). Fixes crash when acceptance-tests tried to resume plan-mode sessions.
+- **Green goal**: Reads `state.session_id` from changeset to resume the red session; fallback to tag lookup when state.session_id is absent.
+- **Packages**: tddy-core (ChangesetState.session_id, ProgressEvent::SessionStarted, progress_sink with &Context, TddWorkflowHooks SessionStarted handling, early changeset in before_plan), tddy-coder (early changeset in run_plan_to_get_dir), tddy-grpc (early changeset in handle_start_session).
+
 ## 2026-03-11 — tddy-tools Submit Only (Drop Inline Parsing)
 
 - **Sole output mechanism**: `tddy-tools submit` via Unix socket is the only way agents deliver structured output. All inline parsing (XML `<structured-response>` blocks, `---PRD_START---`/`---PRD_END---` delimiters, raw JSON prefix checks) has been removed from `output/parser.rs`.

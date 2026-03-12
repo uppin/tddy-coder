@@ -29,7 +29,7 @@ pub fn key_event_to_intent(
         AppMode::FeatureInput => feature_input_key(key, view_state),
         AppMode::Running => running_key(key, view_state),
         AppMode::PlanReview { .. } => plan_review_key(key, view_state),
-        AppMode::MarkdownViewer { .. } => markdown_viewer_key(key),
+        AppMode::MarkdownViewer { .. } => markdown_viewer_key(key, view_state),
         AppMode::Select { question, .. } => select_key(key, question, view_state),
         AppMode::MultiSelect { question, .. } => multiselect_key(key, question, view_state),
         AppMode::TextInput { .. } => text_input_key(key, view_state),
@@ -50,9 +50,20 @@ fn plan_review_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
     }
 }
 
-fn markdown_viewer_key(key: KeyEvent) -> Option<UserIntent> {
+fn markdown_viewer_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
     match key.code {
         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => Some(UserIntent::DismissViewer),
+        KeyCode::Enter => {
+            if vs.markdown_at_end {
+                match vs.markdown_end_button_selected {
+                    0 => Some(UserIntent::ApprovePlan),
+                    1 => Some(UserIntent::RefinePlan),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -195,6 +206,41 @@ mod tests {
     fn feature_input_enter_empty_returns_none() {
         let vs = ViewState::new();
         let intent = key_event_to_intent(enter_key(), &AppMode::FeatureInput, &vs);
+        assert!(intent.is_none());
+    }
+
+    #[test]
+    fn enter_at_end_approve_returns_approve_plan() {
+        let mut vs = ViewState::new();
+        vs.markdown_at_end = true;
+        vs.markdown_end_button_selected = 0;
+        let mode = AppMode::MarkdownViewer {
+            content: "plan content".to_string(),
+        };
+        let intent = key_event_to_intent(enter_key(), &mode, &vs);
+        assert!(matches!(intent, Some(UserIntent::ApprovePlan)));
+    }
+
+    #[test]
+    fn enter_at_end_refine_returns_refine_plan() {
+        let mut vs = ViewState::new();
+        vs.markdown_at_end = true;
+        vs.markdown_end_button_selected = 1;
+        let mode = AppMode::MarkdownViewer {
+            content: "plan content".to_string(),
+        };
+        let intent = key_event_to_intent(enter_key(), &mode, &vs);
+        assert!(matches!(intent, Some(UserIntent::RefinePlan)));
+    }
+
+    #[test]
+    fn enter_when_not_at_end_returns_none() {
+        let mut vs = ViewState::new();
+        vs.markdown_at_end = false;
+        let mode = AppMode::MarkdownViewer {
+            content: "plan content".to_string(),
+        };
+        let intent = key_event_to_intent(enter_key(), &mode, &vs);
         assert!(intent.is_none());
     }
 }

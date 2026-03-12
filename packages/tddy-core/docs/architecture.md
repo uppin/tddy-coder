@@ -19,7 +19,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **CodingBackend**: Async trait for invoking LLM-based coders. Implementations: `ClaudeCodeBackend`, `CursorBackend` (production), `MockBackend`, `StubBackend` (testing/demo). `AnyBackend` enum for CLI dispatch. `SharedBackend` wraps `Arc<dyn CodingBackend>`; backend created once per run.
 - **StubBackend**: Stateful backend for demo and workflow tests. Uses `ToolExecutor` (InMemoryToolExecutor in tests, ProcessToolExecutor in tddy-demo). Magic catch-words: CLARIFY (returns questions), FAIL_PARSE (malformed response), FAIL_INVOKE (BackendError). Returns schema-valid structured responses per goal.
 - **ToolExecutor**: Trait for submitting structured results. `InMemoryToolExecutor` stores via `store_submit_result` (tests and tddy-demo StubBackend). `ProcessToolExecutor` runs `tddy-tools submit` for real agents. `BackendInvokeTask` prefers `take_submit_result_for_goal` over stream parsing.
-- **InvokeRequest/InvokeResponse**: Request and response types. InvokeRequest: prompt, system_prompt, goal (Plan/AcceptanceTests/Red/Green/Demo/Evaluate/Validate/Refactor/UpdateDocs), model, session_id, is_resume, working_dir, debug, agent_output, inherit_stdin, extra_allowed_tools, conversation_output_path. InvokeResponse: output, exit_code, session_id (Option), questions. CursorBackend rejects Goal::Validate and Goal::Refactor (require Agent tool, Claude-only).
+- **InvokeRequest/InvokeResponse**: Request and response types. InvokeRequest: prompt, system_prompt, goal (Plan/AcceptanceTests/Red/Green/Demo/Evaluate/Validate/Refactor/UpdateDocs), model, session (Option<SessionMode>), working_dir, debug, agent_output, inherit_stdin, extra_allowed_tools, conversation_output_path. SessionMode: Fresh(id) or Resume(id) — single type for session_id + mode. InvokeResponse: output, exit_code, session_id (Option), questions. CursorBackend rejects Goal::Validate and Goal::Refactor (require Agent tool, Claude-only).
 - **ClarificationQuestion**: Structured question type from AskUserQuestion tool events or `<clarification-questions>` text block (header, question, options, multi_select).
 - **ClaudeInvokeConfig**: Claude-specific config (permission_mode, allowed_tools, permission_prompt_tool, mcp_config_path) derived from goal internally.
 
@@ -68,10 +68,10 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **refactor**: Executes refactoring tasks from refactoring-plan.md. Requires refactoring-plan.md in plan_dir (from prior validate run). Claude-only (CursorBackend rejects). RefactorOptions: model, agent_output, conversation_output_path, inherit_stdin, allowed_tools_extras, debug. State: Refactoring → RefactorComplete.
 - **update_docs**: Reads planning artifacts (PRD.md, progress.md, changeset.yaml, acceptance-tests.md, evaluation-report.md) and updates docs in the target repo. Requires plan_dir. CursorBackend supports UpdateDocs. UpdateDocsOptions: model, agent_output, conversation_output_path, inherit_stdin, allowed_tools_extras, debug. State: UpdatingDocs → DocsUpdated.
 
-### Schema (`schema/`)
+### Schema (tddy-tools)
 
-- **JSON Schema validation**: Formal schemas in `schemas/` (6 goals + common types). Embedded via `include_dir`, written to `{plan-dir}/schemas/` for agent Read. Agent's working directory is plan_dir (or working_dir for evaluate), so `schemas/xxx.schema.json` resolves correctly. `validate_output(goal, json)` validates before serde. On failure: 1 retry with validation errors + schema path in prompt.
-- **get_schema / write_all_schemas_to_dir / write_schema_to_dir / format_validation_errors**: Schema retrieval. `write_all_schemas_to_dir` called when plan dir is created; writes all goal schemas + common types so subsequent goals have schemas available. `write_schema_to_dir` used for evaluate (working_dir may differ from plan_dir). Error formatting for retry prompts.
+- **JSON Schema validation**: All schema logic lives in tddy-tools. Schemas are embedded via `include_dir`; no schema files are written to disk. `tddy-tools submit --goal <goal>` validates JSON against the embedded schema before relaying to tddy-coder. `tddy-tools get-schema <goal>` outputs the schema for inspection. On validation failure, tddy-tools returns errors with a tip to run `get-schema`.
+- **ProcessToolExecutor**: Invokes `tddy-tools submit --goal <goal> --data '<json>'` with TDDY_SOCKET set. tddy-core has no schema module.
 
 ### Output (`output/`)
 

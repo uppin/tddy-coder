@@ -21,13 +21,13 @@ You MUST:
 4. After implementing, run the project's test command (e.g. cargo test) to verify all tests pass
 5. Run acceptance tests to verify end-to-end behavior
 6. When done, submit your output by calling:
-  tddy-tools submit --schema schemas/green.schema.json --data '<your JSON output>'
+  tddy-tools submit --goal green --data '<your JSON output>'
 
 If you need to ask the user clarification questions, call:
   tddy-tools ask --data '{{"questions":[{{"header":"...","question":"...","options":[...],"multiSelect":false}}]}}'
 The call will block until the user answers. The response contains the user's answers.
 
-Read the JSON Schema file at `schemas/green.schema.json` in the working directory for the exact output format. The JSON must be a single object starting with {{"goal":"green",...}} — no number, array, or numbered list items.
+Run `tddy-tools get-schema green` to see the expected output format. The JSON must be a single object starting with {{"goal":"green",...}} — no number, array, or numbered list items.
 
 The summary must describe what was implemented and confirm test results. The tests array lists each test with status "passing" or "failing"; include "reason" for failing tests. The implementations array lists each implemented item (struct, method, etc.).
 
@@ -102,12 +102,12 @@ mod tests {
     fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
         let prompt = system_prompt(true);
         assert!(
-            prompt.contains("schemas/green.schema.json"),
-            "system prompt must reference green schema file"
+            prompt.contains("tddy-tools get-schema green"),
+            "system prompt must reference get-schema for green"
         );
         assert!(
-            prompt.contains("tddy-tools submit") && prompt.contains("schemas/green.schema.json"),
-            "system prompt must instruct agent to use tddy-tools submit with schema"
+            prompt.contains("tddy-tools submit") && prompt.contains("--goal green"),
+            "system prompt must instruct agent to use tddy-tools submit --goal green"
         );
     }
 }

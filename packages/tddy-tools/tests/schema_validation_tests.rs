@@ -1,20 +1,29 @@
 //! Integration tests for JSON Schema validation of structured agent output.
 
-use std::path::Path;
-use tddy_core::schema::{
-    format_validation_errors, get_schema, schema_file_path, validate_output,
-    write_all_schemas_to_dir, write_schema_to_dir, SchemaError,
-};
+use tddy_tools::schema::{format_validation_errors, get_schema, validate_output, SchemaError};
+
+/// plan.schema.json must not contain the `plan_dir_suggestion` property.
+///
+/// Fails until `plan_dir_suggestion` is removed from the discovery object in the schema file.
+#[test]
+fn test_plan_dir_suggestion_removed_from_schema() {
+    let content = get_schema("plan").expect("plan schema should exist");
+    assert!(
+        !content.contains("plan_dir_suggestion"),
+        "plan.schema.json must not contain 'plan_dir_suggestion' property after R2 removal"
+    );
+}
 
 const VALID_GOALS: &[&str] = &[
     "plan",
     "acceptance-tests",
     "red",
     "green",
-    "evaluate",
-    "validate-subagents",
+    "evaluate-changes",
+    "validate",
     "refactor",
     "update-docs",
+    "demo",
 ];
 
 #[test]
@@ -62,13 +71,13 @@ fn valid_green_passes_schema_validation() {
 #[test]
 fn valid_evaluate_passes_schema_validation() {
     let json = include_str!("fixtures/valid/evaluate.json");
-    assert!(validate_output("evaluate", json).is_ok());
+    assert!(validate_output("evaluate-changes", json).is_ok());
 }
 
 #[test]
 fn valid_validate_subagents_passes_schema_validation() {
     let json = include_str!("fixtures/valid/validate-subagents.json");
-    assert!(validate_output("validate-subagents", json).is_ok());
+    assert!(validate_output("validate", json).is_ok());
 }
 
 #[test]
@@ -81,6 +90,12 @@ fn valid_refactor_passes_schema_validation() {
 fn valid_update_docs_passes_schema_validation() {
     let json = r#"{"goal":"update-docs","summary":"Updated 3 docs.","docs_updated":3}"#;
     assert!(validate_output("update-docs", json).is_ok());
+}
+
+#[test]
+fn valid_demo_passes_schema_validation() {
+    let json = r#"{"goal":"demo","summary":"Demo completed.","demo_type":"cli","steps_completed":2,"verification":"All steps passed."}"#;
+    assert!(validate_output("demo", json).is_ok());
 }
 
 #[test]
@@ -132,7 +147,7 @@ fn invalid_green_missing_summary_fails() {
 #[test]
 fn invalid_evaluate_missing_goal_fails() {
     let json = include_str!("fixtures/invalid/evaluate-missing-goal.json");
-    let err = validate_output("evaluate", json).unwrap_err();
+    let err = validate_output("evaluate-changes", json).unwrap_err();
     assert!(!err.is_empty());
 }
 
@@ -146,7 +161,7 @@ fn invalid_acceptance_tests_missing_summary_fails() {
 #[test]
 fn invalid_validate_subagents_wrong_goal_fails() {
     let json = include_str!("fixtures/invalid/validate-subagents-wrong-goal.json");
-    let err = validate_output("validate-subagents", json).unwrap_err();
+    let err = validate_output("validate", json).unwrap_err();
     assert!(!err.is_empty());
 }
 
@@ -169,71 +184,4 @@ fn format_validation_errors_produces_readable_output() {
     assert!(formatted.contains("required property"));
     assert!(formatted.contains("/tests/0/line"));
     assert!(formatted.contains("integer"));
-}
-
-#[test]
-fn schema_file_path_returns_relative_path() {
-    assert_eq!(
-        schema_file_path("plan"),
-        Some("schemas/plan.schema.json".to_string())
-    );
-    assert_eq!(
-        schema_file_path("red"),
-        Some("schemas/red.schema.json".to_string())
-    );
-    assert!(schema_file_path("unknown").is_none());
-}
-
-#[test]
-fn write_schema_to_dir_writes_files() {
-    let tmp = std::env::temp_dir().join("tddy_schema_test");
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).unwrap();
-
-    let result = write_schema_to_dir(Path::new(&tmp), "plan");
-    assert!(result.is_ok());
-    let path = result.unwrap();
-    assert!(path.exists());
-    assert!(path.to_string_lossy().contains("plan.schema.json"));
-
-    let schemas_dir = tmp.join("schemas");
-    assert!(schemas_dir.exists());
-    assert!(schemas_dir.join("plan.schema.json").exists());
-    assert!(schemas_dir
-        .join("common")
-        .join("test-info.schema.json")
-        .exists());
-
-    let _ = std::fs::remove_dir_all(&tmp);
-}
-
-#[test]
-fn write_all_schemas_to_dir_writes_all_goal_schemas_when_plan_dir_created() {
-    let tmp = std::env::temp_dir().join("tddy_schema_all_test");
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).unwrap();
-
-    let result = write_all_schemas_to_dir(Path::new(&tmp));
-    assert!(result.is_ok());
-
-    let schemas_dir = tmp.join("schemas");
-    let goals = [
-        "plan.schema.json",
-        "acceptance-tests.schema.json",
-        "red.schema.json",
-        "green.schema.json",
-        "evaluate.schema.json",
-        "validate-subagents.schema.json",
-        "refactor.schema.json",
-        "update-docs.schema.json",
-    ];
-    for f in &goals {
-        assert!(schemas_dir.join(f).exists(), "{} should exist", f);
-    }
-    assert!(schemas_dir
-        .join("common")
-        .join("test-info.schema.json")
-        .exists());
-
-    let _ = std::fs::remove_dir_all(&tmp);
 }

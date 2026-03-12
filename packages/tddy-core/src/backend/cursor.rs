@@ -138,9 +138,17 @@ impl CursorBackend {
         if request.goal == Goal::Plan {
             args.push("--plan".to_string());
         }
-        if let (Some(ref sid), true) = (&request.session_id, request.is_resume) {
-            args.push("--resume".to_string());
-            args.push(sid.clone());
+        if let Some(ref session) = request.session {
+            match session {
+                super::SessionMode::Fresh(id) => {
+                    args.push("--session-id".to_string());
+                    args.push(id.clone());
+                }
+                super::SessionMode::Resume(id) => {
+                    args.push("--resume".to_string());
+                    args.push(id.clone());
+                }
+            }
         }
         args.push("-p".to_string());
         args.push(prompt);
@@ -177,11 +185,10 @@ impl CursorBackend {
         );
         log::debug!("[tddy-coder] cwd: {}", cwd_str);
         log::debug!(
-            "[tddy-coder] goal: {:?}, model: {:?}, session_id: {:?}, is_resume: {}",
+            "[tddy-coder] goal: {:?}, model: {:?}, session: {:?}",
             request.goal,
             request.model,
-            request.session_id,
-            request.is_resume
+            request.session
         );
         log::debug!(
             "[tddy-coder] prompt ({} bytes): {}",
@@ -243,7 +250,7 @@ impl CursorBackend {
             }
         };
 
-        let skip_until_line = if request.is_resume {
+        let skip_until_line = if request.session.as_ref().is_some_and(|s| s.is_resume()) {
             request
                 .conversation_output_path
                 .as_ref()
@@ -298,14 +305,19 @@ impl CursorBackend {
         };
 
         if let Some(ref mut f) = conv_file {
+            let (session_id, is_resume) = request
+                .session
+                .as_ref()
+                .map(|s| (s.session_id().to_string(), s.is_resume()))
+                .unwrap_or((String::new(), false));
             let request_entry = serde_json::json!({
                 "type": "tddy-request",
                 "goal": format!("{:?}", request.goal),
                 "prompt": request.prompt,
                 "system_prompt": system_content,
                 "model": request.model,
-                "session_id": request.session_id,
-                "is_resume": request.is_resume,
+                "session_id": session_id,
+                "is_resume": is_resume,
             });
             let _ = writeln!(f, "{}", request_entry);
             let _ = f.flush();
@@ -350,7 +362,7 @@ impl CursorBackend {
             "[tddy-coder] Cursor process exited with code {} (goal: {:?}, session_id: {:?})",
             exit_code,
             request.goal,
-            request.session_id
+            request.session
         );
 
         if exit_code != 0 {

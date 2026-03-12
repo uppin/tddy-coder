@@ -25,6 +25,7 @@
           ];
           buildInputs = [
             pkgs.glib
+            pkgs.fontconfig
           ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
             pkgs.libva
           ];

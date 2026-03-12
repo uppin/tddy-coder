@@ -220,18 +220,18 @@ mod stream_terminal_tests {
     #[tokio::test]
     async fn multiple_clients_receive_same_stream() {
         let (service, byte_tx) = service_with_terminal_bytes();
-        let (endpoint, _server) =
-            crate::test_util::spawn_server(Server::builder().add_service(TddyRemoteServer::new(service)))
-                .await;
+        let (endpoint, _server) = crate::test_util::spawn_server(
+            Server::builder().add_service(TddyRemoteServer::new(service)),
+        )
+        .await;
 
         let mut client1 =
             crate::gen::tddy_remote_client::TddyRemoteClient::connect(endpoint.clone())
                 .await
                 .unwrap();
-        let mut client2 =
-            crate::gen::tddy_remote_client::TddyRemoteClient::connect(endpoint)
-                .await
-                .unwrap();
+        let mut client2 = crate::gen::tddy_remote_client::TddyRemoteClient::connect(endpoint)
+            .await
+            .unwrap();
 
         let mut stream1 = client1
             .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))

@@ -1,0 +1,8 @@
+{
+  "goal": "red",
+  "summary": "Created skeletons.",
+  "tests": [
+    {"name": "test_foo", "file": "src/foo.rs", "line": "ten", "status": "failing"}
+  ],
+  "skeletons": []
+}

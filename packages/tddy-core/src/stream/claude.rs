@@ -172,6 +172,11 @@ where
         match event.event_type.as_str() {
             "system" => {
                 if !event.session_id.is_empty() {
+                    if session_id.is_empty() {
+                        on_progress(&ProgressEvent::SessionStarted {
+                            session_id: event.session_id.clone(),
+                        });
+                    }
                     session_id = event.session_id;
                 }
                 match event.subtype.as_str() {

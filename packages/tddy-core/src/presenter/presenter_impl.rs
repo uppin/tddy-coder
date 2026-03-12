@@ -110,12 +110,22 @@ impl<V: PresenterView> Presenter<V> {
                 }
             }
             UserIntent::ApprovePlan => {
-                if let Some(ref tx) = self.answer_tx {
-                    let _ = tx.send("Approve".to_string());
+                if matches!(self.state.mode, AppMode::PlanReview { .. }) {
+                    // Existing: approve from PlanReview menu
+                    if let Some(ref tx) = self.answer_tx {
+                        let _ = tx.send("Approve".to_string());
+                    }
+                    self.state.mode = AppMode::Running;
+                    self.view.on_mode_changed(&self.state.mode);
+                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                } else if matches!(self.state.mode, AppMode::MarkdownViewer { .. }) {
+                    if let Some(ref tx) = self.answer_tx {
+                        let _ = tx.send("Approve".to_string());
+                    }
+                    self.state.mode = AppMode::Running;
+                    self.view.on_mode_changed(&self.state.mode);
+                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
-                self.state.mode = AppMode::Running;
-                self.view.on_mode_changed(&self.state.mode);
-                self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
             }
             UserIntent::ViewPlan => {
                 if let AppMode::PlanReview { ref prd_content } = self.state.mode {
@@ -399,6 +409,10 @@ impl<V: PresenterView> Presenter<V> {
                         crate::ProgressEvent::TaskProgress { description, .. } => ActivityEntry {
                             text: description.clone(),
                             kind: ActivityKind::TaskProgress,
+                        },
+                        crate::ProgressEvent::SessionStarted { .. } => ActivityEntry {
+                            text: "Session connected".to_string(),
+                            kind: ActivityKind::Info,
                         },
                     };
                     self.state.activity_log.push(entry.clone());

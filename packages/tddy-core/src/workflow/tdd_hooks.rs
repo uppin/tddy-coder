@@ -6,9 +6,10 @@
 use crate::backend::{AgentOutputSink, ProgressSink};
 use crate::changeset::{
     append_session_and_update_state, get_session_for_tag, next_goal_for_state, read_changeset,
-    resolve_model, update_state, write_changeset, Changeset,
+    resolve_model, update_state, write_changeset, Changeset, SessionEntry,
 };
 use crate::error::WorkflowError;
+use crate::output::slugify_directory_name;
 use crate::output::{
     parse_acceptance_tests_response, parse_evaluate_response, parse_green_response,
     parse_planning_response, parse_red_response, parse_refactor_response,
@@ -17,7 +18,6 @@ use crate::output::{
     write_evaluation_report, write_progress_file, write_red_output_file, PlanningOutput,
 };
 use crate::presenter::WorkflowEvent;
-use crate::schema::write_schema_to_dir;
 use crate::stream::ProgressEvent as StreamProgressEvent;
 use crate::workflow::context::Context;
 use crate::workflow::graph::ElicitationEvent;
@@ -57,14 +57,37 @@ impl Default for TddWorkflowHooks {
 }
 
 fn before_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
-    if read_changeset(plan_dir).is_err() {
+    use crate::output::create_session_dir_with_id;
+    // Resolve actual plan_dir: session_base+session_id, or output_dir/slug, or fallback.
+    let dir: PathBuf = if let (Some(base), Some(sid)) = (
+        context.get_sync::<PathBuf>("session_base"),
+        context.get_sync::<String>("session_id"),
+    ) {
+        create_session_dir_with_id(&base, &sid).map_err(|e| e.to_string())?
+    } else if let (Some(output_dir), Some(feature_input)) = (
+        context.get_sync::<PathBuf>("output_dir"),
+        context.get_sync::<String>("feature_input"),
+    ) {
+        let input = feature_input.trim();
+        if !input.is_empty() {
+            output_dir.join(slugify_directory_name(input))
+        } else {
+            plan_dir.to_path_buf()
+        }
+    } else {
+        plan_dir.to_path_buf()
+    };
+    // Create changeset if missing (session_base path or tests that bypass entry paths).
+    if read_changeset(&dir).is_err() {
+        let _ = std::fs::create_dir_all(&dir);
         let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
-        let init_changeset = Changeset {
+        let init_cs = Changeset {
             initial_prompt: Some(feature_input),
             ..Changeset::default()
         };
-        let _ = write_changeset(plan_dir, &init_changeset);
+        let _ = write_changeset(&dir, &init_cs);
     }
+    read_changeset(&dir).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -75,8 +98,6 @@ fn before_acceptance_tests(
     let prd = std::fs::read_to_string(plan_dir.join("PRD.md"))
         .map_err(|e| format!("read PRD.md: {}", e))?;
     let changeset = read_changeset(plan_dir).map_err(|e| e.to_string())?;
-    let session_id =
-        get_session_for_tag(&changeset, "plan").ok_or("no plan session in changeset")?;
     let model = resolve_model(
         Some(&changeset),
         "acceptance-tests",
@@ -90,11 +111,12 @@ fn before_acceptance_tests(
     let prompt = prepend_context_header(prompt, Some(plan_dir));
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", acceptance_tests::system_prompt());
+    // Plan-mode sessions cannot be resumed with acceptEdits; create fresh session.
+    let session_id = uuid::Uuid::new_v4().to_string();
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", true);
     context.set_sync("plan_dir", plan_dir.to_path_buf());
     context.set_sync("model", model);
-    let _ = write_schema_to_dir(plan_dir, "acceptance-tests");
     Ok(())
 }
 
@@ -122,7 +144,6 @@ fn before_red(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + 
     let session_id = uuid::Uuid::new_v4().to_string();
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", false);
-    let _ = write_schema_to_dir(plan_dir, "red");
     Ok(())
 }
 
@@ -134,14 +155,21 @@ fn before_green(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error 
     let changeset = read_changeset(plan_dir).ok();
     let session_id = changeset
         .as_ref()
-        .and_then(|cs| get_session_for_tag(cs, "impl"))
+        .and_then(|cs| cs.state.session_id.clone())
+        .or_else(|| {
+            changeset
+                .as_ref()
+                .and_then(|cs| get_session_for_tag(cs, "impl"))
+        })
         .or_else(|| {
             std::fs::read_to_string(plan_dir.join(".impl-session"))
                 .ok()
                 .map(|s| s.trim().to_string())
         })
         .filter(|s| !s.is_empty())
-        .ok_or("green requires changeset with impl session or .impl-session file")?;
+        .ok_or(
+            "green requires changeset with state.session_id, impl session, or .impl-session file",
+        )?;
     let model = resolve_model(
         changeset.as_ref(),
         "green",
@@ -159,7 +187,6 @@ fn before_green(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error 
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", true);
     context.set_sync("model", model);
-    let _ = write_schema_to_dir(plan_dir, "green");
     Ok(())
 }
 
@@ -182,7 +209,6 @@ fn before_evaluate(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Err
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", evaluate::system_prompt());
     context.set_sync("plan_dir", plan_dir.to_path_buf());
-    let _ = write_schema_to_dir(plan_dir, "evaluate");
     Ok(())
 }
 
@@ -193,7 +219,6 @@ fn before_validate(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Err
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", validate_subagents::system_prompt());
     context.set_sync("plan_dir", plan_dir.to_path_buf());
-    let _ = write_schema_to_dir(plan_dir, "validate-subagents");
     Ok(())
 }
 
@@ -204,7 +229,6 @@ fn before_refactor(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Err
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", refactor::system_prompt());
     context.set_sync("plan_dir", plan_dir.to_path_buf());
-    let _ = write_schema_to_dir(plan_dir, "refactor");
     Ok(())
 }
 
@@ -243,7 +267,6 @@ fn before_update_docs(
     }
     context.set_sync("system_prompt", system_prompt);
     context.set_sync("plan_dir", plan_dir.to_path_buf());
-    let _ = write_schema_to_dir(plan_dir, "update-docs");
     Ok(())
 }
 
@@ -267,14 +290,19 @@ fn after_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + 
     cs.name = planning.name.clone();
     cs.initial_prompt = Some(feature_input);
     cs.discovery = planning.discovery.clone();
-    append_session_and_update_state(
-        &mut cs,
-        session_id,
-        "plan",
-        "Planned",
-        &backend_name,
-        Some("system-prompt-plan.md".to_string()),
-    );
+    let session_exists = cs.sessions.iter().any(|s| s.id == session_id);
+    if session_exists {
+        update_state(&mut cs, "Planned");
+    } else {
+        append_session_and_update_state(
+            &mut cs,
+            session_id,
+            "plan",
+            "Planned",
+            &backend_name,
+            Some("system-prompt-plan.md".to_string()),
+        );
+    }
     let _ = write_changeset(plan_dir, &cs);
     Ok(())
 }
@@ -293,14 +321,19 @@ fn after_acceptance_tests(
         .get_sync("backend_name")
         .unwrap_or_else(|| "claude".to_string());
     let mut cs = read_changeset(plan_dir).unwrap_or_default();
-    append_session_and_update_state(
-        &mut cs,
-        session_id,
-        "acceptance-tests",
-        "AcceptanceTestsReady",
-        &backend_name,
-        None,
-    );
+    let session_exists = cs.sessions.iter().any(|s| s.id == session_id);
+    if session_exists {
+        update_state(&mut cs, "AcceptanceTestsReady");
+    } else {
+        append_session_and_update_state(
+            &mut cs,
+            session_id,
+            "acceptance-tests",
+            "AcceptanceTestsReady",
+            &backend_name,
+            None,
+        );
+    }
     let _ = write_changeset(plan_dir, &cs);
     Ok(())
 }
@@ -320,14 +353,19 @@ fn after_red(
         .get_sync("backend_name")
         .unwrap_or_else(|| "claude".to_string());
     let mut cs = read_changeset(plan_dir).unwrap_or_default();
-    append_session_and_update_state(
-        &mut cs,
-        session_id,
-        "impl",
-        "RedTestsReady",
-        &backend_name,
-        None,
-    );
+    let session_exists = cs.sessions.iter().any(|s| s.id == session_id);
+    if session_exists {
+        update_state(&mut cs, "RedTestsReady");
+    } else {
+        append_session_and_update_state(
+            &mut cs,
+            session_id,
+            "impl",
+            "RedTestsReady",
+            &backend_name,
+            None,
+        );
+    }
     let _ = write_changeset(plan_dir, &cs);
     Ok(())
 }
@@ -412,13 +450,45 @@ impl RunnerHooks for TddWorkflowHooks {
         })
     }
 
-    fn progress_sink(&self) -> Option<ProgressSink> {
-        self.event_tx.as_ref().map(|tx| {
-            let tx = tx.clone();
-            ProgressSink::new(move |ev: &StreamProgressEvent| {
+    fn progress_sink(&self, context: &Context) -> Option<ProgressSink> {
+        let plan_dir: Option<PathBuf> = context
+            .get_sync("plan_dir")
+            .or_else(|| context.get_sync("output_dir"));
+        let task_id: Option<String> = context.get_sync("current_task_id");
+        let backend_name: String = context
+            .get_sync("backend_name")
+            .unwrap_or_else(|| "claude".to_string());
+        let event_tx = self.event_tx.clone();
+
+        Some(ProgressSink::new(move |ev: &StreamProgressEvent| {
+            if let StreamProgressEvent::SessionStarted { session_id } = ev {
+                if let Some(ref dir) = plan_dir {
+                    if let Ok(mut cs) = read_changeset(dir) {
+                        let already_exists = cs.sessions.iter().any(|s| s.id == *session_id);
+                        if !already_exists {
+                            let tag = match task_id.as_deref() {
+                                Some("red") => "impl",
+                                Some(t) => t,
+                                None => "plan",
+                            };
+                            let now = chrono::Utc::now().to_rfc3339();
+                            cs.sessions.push(SessionEntry {
+                                id: session_id.clone(),
+                                agent: backend_name.clone(),
+                                tag: tag.to_string(),
+                                created_at: now,
+                                system_prompt_file: None,
+                            });
+                        }
+                        cs.state.session_id = Some(session_id.clone());
+                        let _ = write_changeset(dir, &cs);
+                    }
+                }
+            }
+            if let Some(ref tx) = event_tx {
                 let _ = tx.send(WorkflowEvent::Progress(ev.clone()));
-            })
-        })
+            }
+        }))
     }
 
     fn before_task(
@@ -426,6 +496,7 @@ impl RunnerHooks for TddWorkflowHooks {
         task_id: &str,
         context: &Context,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        context.set_sync("current_task_id", task_id.to_string());
         log::debug!("[tddy-core] state: → {}", task_id);
         if let Some(ref tx) = self.event_tx {
             let _ = tx.send(WorkflowEvent::GoalStarted(task_id.to_string()));
@@ -517,8 +588,9 @@ impl RunnerHooks for TddWorkflowHooks {
                 }
             }
         }
-        // Clear answers so the next task does not think we're resuming from clarification.
+        // Clear per-step resume flags so the next task starts fresh.
         context.remove_sync("answers");
+        context.remove_sync("is_resume");
         match task_id {
             "plan" => {
                 let plan_dir: PathBuf = context

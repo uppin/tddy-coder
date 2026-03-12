@@ -30,7 +30,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 2. Read `changeset.yaml` for model and state; start a fresh Claude session (does not resume planning session)
 3. Use `--permission-mode acceptEdits` with same allowlist as acceptance-tests
 4. System prompt instructs Claude to: plan implementation structure; create skeleton code that compiles; write failing lower-level tests; run `cargo test` to verify tests fail; emit structured response with tests and skeletons
-5. Parser receives JSON from `tddy-tools submit`; deserializes summary, tests, and skeletons. `tddy-tools` validates against `schemas/red.schema.json` before the workflow receives it. Agent runs with working directory = plan_dir so `schemas/red.schema.json` resolves to `{plan-dir}/schemas/red.schema.json`. (Updated: 2026-03-11)
+5. Parser receives JSON from `tddy-tools submit`; deserializes summary, tests, and skeletons. `tddy-tools submit --goal red` validates against embedded schema before the workflow receives it. Agent runs `tddy-tools get-schema red` to inspect the expected format. (Updated: 2026-03-12)
 6. Write `red-output.md` and `progress.md` to the plan directory
 7. Update `changeset.yaml` with new session entry for green to resume
 8. On successful exit, output summary, test list, and skeleton list
@@ -39,7 +39,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 
 1. Read `progress.md` from the plan directory specified by `--plan-dir` (required)
 2. Read `PRD.md` and `acceptance-tests.md` from the plan directory if present (optional, for richer LLM context)
-3. Read the session ID and model from `changeset.yaml` in the plan directory (persisted by the red goal)
+3. Read the session ID from `changeset.yaml` state.session_id and model (persisted by the red goal)
 4. Resume the Claude session using `--resume <session-id>` for context continuity with red
 5. Use `--permission-mode acceptEdits` with same allowlist as red
 6. System prompt instructs Claude to:
@@ -49,7 +49,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
    - After implementing, run the project's test command to verify tests pass
    - Run acceptance tests to verify end-to-end behavior
    - Emit structured response with implementation summary and test results
-7. Parser receives JSON from `tddy-tools submit`; deserializes summary, test results (pass/fail per test), and implementation details. `tddy-tools` validates against `schemas/green.schema.json` before the workflow receives it. Agent runs with working directory = plan_dir so `schemas/green.schema.json` resolves to `{plan-dir}/schemas/green.schema.json`. (Updated: 2026-03-11)
+7. Parser receives JSON from `tddy-tools submit`; deserializes summary, test results (pass/fail per test), and implementation details. `tddy-tools submit --goal green` validates against embedded schema before the workflow receives it. Agent runs `tddy-tools get-schema green` to inspect the expected format. (Updated: 2026-03-12)
 8. Update `progress.md` in the plan directory: mark passing tests as `[x]`, mark implemented skeletons as `[x]`, mark still-failing tests with `[!]` and reason
 9. Update `acceptance-tests.md` in the plan directory: update test statuses from "failing" to "passing" for tests that now pass
 10. **Completion determination**:
@@ -70,8 +70,9 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 
 #### changeset.yaml (session persistence)
 
-- Updated by the red goal with a new session entry (id, agent, tag, system_prompt_file)
-- Green goal reads the session ID from `changeset.yaml` to resume the same session for context continuity
+- Session entries and `state.session_id` are written when the first stream event with session_id arrives (not after the step completes)
+- Red goal: session entry and `state.session_id` updated via stream events
+- Green goal reads `state.session_id` from `changeset.yaml` to resume the same session for context continuity
 
 #### progress.md
 
