@@ -196,6 +196,7 @@ impl CursorBackend {
             );
         }
 
+        cmd.env("PATH", super::path_with_exe_dir());
         if let Some(ref p) = request.socket_path {
             cmd.env("TDDY_SOCKET", p);
         }

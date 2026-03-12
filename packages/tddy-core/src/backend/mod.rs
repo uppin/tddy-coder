@@ -293,6 +293,26 @@ fn default_allow_other() -> bool {
     true
 }
 
+/// Build a PATH that prepends the directory of the current executable.
+/// This ensures `tddy-tools` (built alongside `tddy-coder`) is discoverable
+/// by agents that call it as a bare command.
+pub(crate) fn path_with_exe_dir() -> std::ffi::OsString {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            dirs.push(dir.to_path_buf());
+        }
+    }
+    if let Some(existing) = std::env::var_os("PATH") {
+        for p in std::env::split_paths(&existing) {
+            if !dirs.contains(&p) {
+                dirs.push(p);
+            }
+        }
+    }
+    std::env::join_paths(dirs).unwrap_or_default()
+}
+
 /// Structured clarification question from AskUserQuestion tool.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClarificationQuestion {

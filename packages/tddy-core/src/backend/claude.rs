@@ -330,6 +330,7 @@ impl ClaudeCodeBackend {
             log::debug!("[tddy-coder] system_prompt_path: {}", sp_path.display());
         }
 
+        cmd.env("PATH", super::path_with_exe_dir());
         if let Some(ref p) = request.socket_path {
             cmd.env("TDDY_SOCKET", p);
         }

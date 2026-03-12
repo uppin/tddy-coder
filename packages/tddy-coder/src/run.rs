@@ -95,7 +95,15 @@ pub fn run_main(mut args: Args) {
     })
     .expect("failed to set Ctrl+C handler");
 
-    match run_with_args(&args, shutdown) {
+    let result = run_with_args(&args, shutdown);
+
+    if let Some(sid) = args.session_id.as_ref() {
+        if let Some(dir) = session_dir_path(&args) {
+            print_session_id_on_exit(sid, &dir);
+        }
+    }
+
+    match result {
         Err(e) => {
             eprintln!("Error: {}", e);
             std::process::exit(1);
