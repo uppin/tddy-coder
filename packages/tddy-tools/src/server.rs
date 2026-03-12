@@ -3,11 +3,10 @@
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{ServerCapabilities, ServerInfo},
-    schemars, tool, tool_router,
+    schemars, tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
 use serde_json::Value;
-use std::io::IsTerminal;
 
 /// Parameters for the approval_prompt tool (Claude Code permission-prompt-tool format).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -32,25 +31,23 @@ impl PermissionServer {
         }
     }
 
-    fn is_tty() -> bool {
-        std::io::stdin().is_terminal()
-    }
-
-    /// Decide allow/deny. Non-TTY: deny. TTY: would forward via IPC (Phase 2 - deny for now).
-    fn decide(tool_name: &str, _input: &Value) -> String {
-        if Self::is_tty() {
-            serde_json::json!({
-                "behavior": "deny",
-                "message": format!("Permission denied for {} (TTY IPC not yet implemented)", tool_name)
-            })
-            .to_string()
-        } else {
-            serde_json::json!({
-                "behavior": "deny",
-                "message": format!("Permission denied for {} (non-interactive mode)", tool_name)
-            })
-            .to_string()
+    /// Decide allow/deny. Bash(tddy-tools *) is always allowed for headless permission handling.
+    /// All other tool requests are denied.
+    fn decide(tool_name: &str, input: &Value) -> String {
+        if tool_name == "Bash" {
+            let command = input
+                .get("command")
+                .and_then(|c| c.as_str())
+                .unwrap_or("");
+            if command.starts_with("tddy-tools") {
+                return serde_json::json!({ "behavior": "allow" }).to_string();
+            }
         }
+        serde_json::json!({
+            "behavior": "deny",
+            "message": format!("Permission denied for {} (not a tddy-tools command)", tool_name)
+        })
+        .to_string()
     }
 }
 
@@ -73,10 +70,58 @@ impl PermissionServer {
     }
 }
 
+#[tool_handler]
 impl rmcp::ServerHandler for PermissionServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Permission prompt tool for tddy-coder. Denies unexpected tool requests.",
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn approval_prompt_allows_bash_tddy_tools_submit() {
+        let input = serde_json::json!({
+            "command": "tddy-tools submit --goal plan --data '{\"goal\":\"plan\",\"prd\":\"# PRD\"}'"
+        });
+        let result = PermissionServer::decide("Bash", &input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["behavior"], "allow",
+            "Bash(tddy-tools submit) must be allowed for headless permission handling, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn approval_prompt_allows_bash_tddy_tools_ask() {
+        let input = serde_json::json!({
+            "command": "tddy-tools ask --data '{\"questions\":[]}'"
+        });
+        let result = PermissionServer::decide("Bash", &input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["behavior"], "allow",
+            "Bash(tddy-tools ask) must be allowed, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn approval_prompt_denies_arbitrary_bash_commands() {
+        let input = serde_json::json!({
+            "command": "rm -rf /important/data"
+        });
+        let result = PermissionServer::decide("Bash", &input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["behavior"], "deny",
+            "arbitrary Bash commands must be denied, got: {}",
+            result
+        );
     }
 }
