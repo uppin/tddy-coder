@@ -3,6 +3,7 @@
 pub mod plain;
 mod run;
 mod tty;
+mod web_server;
 
 pub use run::{run_main, run_with_args, Args, CoderArgs, DemoArgs};
 pub use tddy_core::{

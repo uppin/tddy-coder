@@ -2,6 +2,13 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-13 — Web Bundle Serving
+
+- **CLI flags**: `--web-port <PORT>` and `--web-bundle-path <PATH>` serve pre-built tddy-web static assets over HTTP. Both flags required together.
+- **Modes**: Web server runs in TUI and daemon modes alongside gRPC/LiveKit.
+- **Implementation**: axum + tower-http ServeDir; web_server module; validate_web_args for flag validation.
+- **Packages**: tddy-coder (web_server.rs, run.rs wiring, acceptance tests).
+
 ## 2026-03-13 — LiveKit ConnectRPC Transport for Browser
 
 - **tddy-livekit-web**: New TypeScript package implementing ConnectRPC Transport over LiveKit data channels. Enables browser-based ConnectRPC clients to call unary and streaming RPCs served by Rust LiveKitParticipant.
