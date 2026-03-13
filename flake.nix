@@ -42,6 +42,8 @@
           ];
           shellHook = ''
             echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node"
+          '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+            export CXXFLAGS="-include ''${SDKROOT}/usr/include/uuid/uuid.h''${CXXFLAGS:+ $CXXFLAGS}"
           '';
         };
       }
