@@ -143,6 +143,10 @@ pub struct Args {
     pub livekit_room: Option<String>,
     /// LiveKit participant identity
     pub livekit_identity: Option<String>,
+    /// When Some with web_bundle_path, HTTP server serves static files on this port.
+    pub web_port: Option<u16>,
+    /// Path to pre-built web bundle (e.g. packages/tddy-web/dist). Requires web_port.
+    pub web_bundle_path: Option<PathBuf>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -209,6 +213,14 @@ pub struct CoderArgs {
     /// LiveKit participant identity
     #[arg(long)]
     pub livekit_identity: Option<String>,
+
+    /// Port for HTTP static file server (serves --web-bundle-path). Requires --web-bundle-path.
+    #[arg(long, value_name = "PORT")]
+    pub web_port: Option<u16>,
+
+    /// Path to pre-built web bundle (e.g. packages/tddy-web/dist). Requires --web-port.
+    #[arg(long)]
+    pub web_bundle_path: Option<PathBuf>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -275,6 +287,14 @@ pub struct DemoArgs {
     /// LiveKit participant identity (server)
     #[arg(long)]
     pub livekit_identity: Option<String>,
+
+    /// Port for HTTP static file server (serves --web-bundle-path). Requires --web-bundle-path.
+    #[arg(long, value_name = "PORT")]
+    pub web_port: Option<u16>,
+
+    /// Path to pre-built web bundle (e.g. packages/tddy-web/dist). Requires --web-port.
+    #[arg(long)]
+    pub web_bundle_path: Option<PathBuf>,
 }
 
 impl From<CoderArgs> for Args {
@@ -296,6 +316,8 @@ impl From<CoderArgs> for Args {
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
             livekit_identity: a.livekit_identity,
+            web_port: a.web_port,
+            web_bundle_path: a.web_bundle_path.clone(),
         }
     }
 }
@@ -319,12 +341,24 @@ impl From<DemoArgs> for Args {
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
             livekit_identity: a.livekit_identity,
+            web_port: a.web_port,
+            web_bundle_path: a.web_bundle_path.clone(),
         }
+    }
+}
+
+/// Validate that --web-port and --web-bundle-path are both present or both absent.
+fn validate_web_args(args: &Args) -> anyhow::Result<()> {
+    match (&args.web_port, &args.web_bundle_path) {
+        (Some(_), None) => anyhow::bail!("--web-port requires --web-bundle-path"),
+        (None, Some(_)) => anyhow::bail!("--web-bundle-path requires --web-port"),
+        _ => Ok(()),
     }
 }
 
 /// Main entry point. Run the workflow with the given args.
 pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
+    validate_web_args(args)?;
     verify_tddy_tools_available(&args.agent)?;
     if args.daemon {
         return run_daemon(args, shutdown);
@@ -517,6 +551,16 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 service,
             ))
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener));
+
+        if let (Some(web_port), Some(ref web_bundle_path)) = (args.web_port, &args.web_bundle_path)
+        {
+            let path = web_bundle_path.clone();
+            tokio::spawn(async move {
+                if let Err(e) = crate::web_server::serve_web_bundle(web_port, path).await {
+                    log::error!("Web server error: {}", e);
+                }
+            });
+        }
 
         if livekit_enabled {
             let url = args.livekit_url.as_ref().unwrap().clone();
@@ -1032,6 +1076,19 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     } else {
         (None, None)
     };
+
+    if let (Some(web_port), Some(ref web_bundle_path)) = (args.web_port, &args.web_bundle_path) {
+        let path = web_bundle_path.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime for web server");
+            if let Err(e) = rt.block_on(crate::web_server::serve_web_bundle(web_port, path)) {
+                log::error!("Web server error: {}", e);
+            }
+        });
+    }
 
     let initial_prompt = args.prompt.clone();
     presenter.start_workflow(
