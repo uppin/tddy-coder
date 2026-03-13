@@ -2,7 +2,7 @@
 
 Wrapped changeset history for tddy-grpc.
 
-- **2026-03-12** [Feature] Session Lifecycle Redesign — Early changeset creation in handle_start_session before run_goal. (tddy-grpc)
+ **2026-03-12** [Feature] Session Lifecycle Redesign — Early changeset creation in handle_start_session before run_goal. (tddy-grpc)
 - **2026-03-11** [Feature] Terminal Streaming via gRPC — Proto: StreamTerminal RPC, StreamTerminalRequest, TerminalOutput. TddyRemoteService.with_terminal_bytes; stream_terminal subscribes to broadcast, streams bytes to clients. DaemonService stub returns empty stream. Integration tests: stream_terminal_returns_bytes, streamed_bytes_contain_ansi_sequences, multiple_clients_receive_same_stream, stream_terminal_returns_empty_stream_when_no_terminal_bytes. (tddy-grpc)
 - **2026-03-11** [Feature] Daemon Mode — Proto: GetSession, ListSessions, StartSession, ConfirmWorktree, SessionCreated, WorktreeElicitation. DaemonService with sessions_base and SharedBackend. Stream handler: StartSession flow (plan → PlanApproval → ApprovePlan → WorktreeElicitation → ConfirmWorktree → worktree creation → run_session). workflow_event_to_server_message, plan_approval_to_server_message. (tddy-grpc)
 - **2026-03-10** [Feature] Plan Approval Gate — Proto: ApprovePlan, ViewPlan, RefinePlan, DismissViewer intents; AppModePlanReview, AppModeMarkdownViewer. convert.rs: client_message_to_intent and intent_to_client_message for new variants. (tddy-grpc)

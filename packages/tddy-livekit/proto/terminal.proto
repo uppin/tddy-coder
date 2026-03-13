@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package terminal;
+
+service TerminalService {
+  rpc StreamTerminalIO(stream TerminalInput) returns (stream TerminalOutput);
+}
+
+message TerminalInput {
+  bytes data = 1;
+}
+
+message TerminalOutput {
+  bytes data = 1;
+}

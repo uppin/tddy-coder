@@ -9,6 +9,7 @@
 use anyhow::Result;
 use livekit::prelude::*;
 use prost::Message;
+use serial_test::serial;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -182,6 +183,7 @@ impl ThreeParticipantHarness {
 }
 
 #[tokio::test]
+#[serial]
 async fn rpc_scenarios() -> Result<()> {
     let rpc_log_dir = std::env::temp_dir().join("tddy-livekit-test-logs");
     let inner = env_logger::Builder::new()
@@ -479,6 +481,72 @@ async fn rpc_scenarios() -> Result<()> {
             assert_eq!(received[0], "alpha");
             assert_eq!(received[1], "beta");
             assert_eq!(received[2], "gamma");
+        }
+
+        harness.teardown();
+    }
+
+    // -----------------------------------------------------------------------
+    // Real-time streaming: server must process each message as it arrives,
+    // not wait for end_of_stream. Client sends msg1, receives echo, sends msg2, receives echo.
+    // -----------------------------------------------------------------------
+    {
+        let harness = TestHarness::start(&livekit, "realtime-stream-scenarios").await?;
+
+        {
+            log::debug!("scenario: real-time bidi stream - send one, receive echo, send next");
+            let (mut sender, mut rx) = harness
+                .rpc_client
+                .start_bidi_stream("test.EchoService", "EchoBidiStream")
+                .map_err(|e| anyhow::anyhow!("start bidi stream: {}", e))?;
+
+            sender
+                .send(
+                    EchoRequest {
+                        message: "first".to_string(),
+                    }
+                    .encode_to_vec(),
+                    false,
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("send first: {}", e))?;
+
+            let first_echo = tokio::time::timeout(
+                Duration::from_secs(3),
+                rx.recv(),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("timeout waiting for first echo (server should process in real-time, not wait for end_of_stream)"))?
+            .ok_or_else(|| anyhow::anyhow!("receiver closed before first echo"))?;
+            let first_bytes = first_echo.map_err(|e| anyhow::anyhow!("first echo error: {}", e))?;
+            let first_response = EchoResponse::decode(&first_bytes[..])?;
+            assert_eq!(
+                first_response.message, "first",
+                "first message should be echoed in real-time before sending second"
+            );
+
+            sender
+                .send(
+                    EchoRequest {
+                        message: "second".to_string(),
+                    }
+                    .encode_to_vec(),
+                    true,
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("send second: {}", e))?;
+
+            let second_echo = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+                .await
+                .map_err(|_| anyhow::anyhow!("timeout waiting for second echo"))?
+                .ok_or_else(|| anyhow::anyhow!("receiver closed before second echo"))?;
+            let second_bytes =
+                second_echo.map_err(|e| anyhow::anyhow!("second echo error: {}", e))?;
+            let second_response = EchoResponse::decode(&second_bytes[..])?;
+            assert_eq!(
+                second_response.message, "second",
+                "second message should be echoed"
+            );
         }
 
         harness.teardown();

@@ -15,9 +15,24 @@ pub enum RpcResult {
     ServerStream(Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status>),
 }
 
+/// Response body: either complete chunks (unary or finite stream) or a live stream.
+pub enum ResponseBody {
+    /// All chunks collected (unary or finite stream).
+    Complete(Vec<Vec<u8>>),
+    /// Live stream - participant must read and send incrementally.
+    Streaming(mpsc::Receiver<Result<Vec<u8>, Status>>),
+}
+
 /// Trait for services that can handle RPC calls.
 #[async_trait]
 pub trait RpcService: Send + Sync + 'static {
+    /// Whether this method is a bidi stream (client and server both stream).
+    /// When true, the participant processes each incoming message immediately instead of waiting for end_of_stream,
+    /// and the bridge uses handle_rpc_stream even for a single message.
+    fn is_bidi_stream(&self, _service: &str, _method: &str) -> bool {
+        false
+    }
+
     /// Handle an RPC call by service and method name (single message, unary or server-stream start).
     async fn handle_rpc(&self, service: &str, method: &str, request: &RpcRequest) -> RpcResult;
 
@@ -48,19 +63,23 @@ impl<S: RpcService> RpcBridge<S> {
         }
     }
 
+    /// Returns true if the given service/method is a bidi stream (process each message immediately).
+    pub fn is_bidi_stream(&self, service: &str, method: &str) -> bool {
+        self.service.is_bidi_stream(service, method)
+    }
+
     /// Handle a raw request payload. Returns Ok(bytes) on success, Err(Status) on RPC or decode error.
-    /// Server streaming is not yet supported and returns Status::Unimplemented.
-    pub async fn handle_request(&self, payload: &[u8]) -> Result<Vec<Vec<u8>>, Status> {
+    pub async fn handle_request(&self, payload: &[u8]) -> Result<ResponseBody, Status> {
         let request = decode_request(payload).map_err(Status::invalid_argument)?;
         self.handle_decoded_request(&request).await
     }
 
-    /// Handle a decoded RpcRequest. Returns response bytes (one for unary, multiple for streaming).
+    /// Handle a decoded RpcRequest. Returns response body (complete or streaming).
     #[allow(clippy::cloned_ref_to_slice_refs)]
     pub async fn handle_decoded_request(
         &self,
         request: &RpcRequest,
-    ) -> Result<Vec<Vec<u8>>, Status> {
+    ) -> Result<ResponseBody, Status> {
         self.handle_decoded_requests(&[request.clone()]).await
     }
 
@@ -68,7 +87,7 @@ impl<S: RpcService> RpcBridge<S> {
     pub async fn handle_decoded_requests(
         &self,
         messages: &[RpcRequest],
-    ) -> Result<Vec<Vec<u8>>, Status> {
+    ) -> Result<ResponseBody, Status> {
         let service = messages
             .first()
             .and_then(|m| m.call_metadata.as_ref())
@@ -89,7 +108,7 @@ impl<S: RpcService> RpcBridge<S> {
             messages.len()
         );
 
-        let result = if messages.len() == 1 {
+        let result = if messages.len() == 1 && !self.service.is_bidi_stream(service, method) {
             self.service.handle_rpc(service, method, &messages[0]).await
         } else {
             self.service
@@ -104,7 +123,7 @@ impl<S: RpcService> RpcBridge<S> {
                     request_id,
                     response_bytes.len()
                 );
-                Ok(vec![response_bytes])
+                Ok(ResponseBody::Complete(vec![response_bytes]))
             }
             RpcResult::Unary(Err(status)) => {
                 rpc_trace!(
@@ -114,21 +133,12 @@ impl<S: RpcService> RpcBridge<S> {
                 );
                 Err(status)
             }
-            RpcResult::ServerStream(Ok(mut rx)) => {
+            RpcResult::ServerStream(Ok(rx)) => {
                 rpc_trace!(
-                    "RpcBridge: request_id={} collecting server stream chunks",
+                    "RpcBridge: request_id={} returning live stream (no collect)",
                     request_id
                 );
-                let mut chunks = Vec::new();
-                while let Some(item) = rx.recv().await {
-                    chunks.push(item?);
-                }
-                rpc_trace!(
-                    "RpcBridge: request_id={} stream finished with {} chunk(s)",
-                    request_id,
-                    chunks.len()
-                );
-                Ok(chunks)
+                Ok(ResponseBody::Streaming(rx))
             }
             RpcResult::ServerStream(Err(status)) => {
                 rpc_trace!(

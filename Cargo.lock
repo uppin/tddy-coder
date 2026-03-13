@@ -5398,6 +5398,7 @@ dependencies = [
  "log",
  "prost 0.13.5",
  "prost-build 0.13.5",
+ "serial_test",
  "tddy-livekit-codegen",
  "tddy-livekit-testkit",
  "tokio",

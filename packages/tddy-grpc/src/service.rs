@@ -44,6 +44,7 @@ impl TddyRemoteService {
 impl TddyRemote for TddyRemoteService {
     type StreamStream = ReceiverStream<Result<ServerMessage, Status>>;
     type StreamTerminalStream = ReceiverStream<Result<TerminalOutput, Status>>;
+    type StreamTerminalIOStream = ReceiverStream<Result<TerminalOutput, Status>>;
 
     async fn stream(
         &self,
@@ -105,6 +106,40 @@ impl TddyRemote for TddyRemoteService {
                         Err(broadcast::error::RecvError::Lagged(_)) => {}
                         Err(broadcast::error::RecvError::Closed) => break,
                     }
+                }
+            });
+        } else {
+            drop(tx);
+        }
+
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn stream_terminal_io(
+        &self,
+        request: Request<Streaming<crate::gen::TerminalInput>>,
+    ) -> Result<Response<Self::StreamTerminalIOStream>, Status> {
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        let mut client_stream = request.into_inner();
+
+        if let Some(ref byte_tx) = self.terminal_byte_tx {
+            let mut byte_rx = byte_tx.subscribe();
+            tokio::spawn(async move {
+                loop {
+                    match byte_rx.recv().await {
+                        Ok(data) => {
+                            if tx.send(Ok(TerminalOutput { data })).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
+            tokio::spawn(async move {
+                while let Ok(Some(_input)) = client_stream.message().await {
+                    // Terminal input could be forwarded to PTY; for now just consume
                 }
             });
         } else {
