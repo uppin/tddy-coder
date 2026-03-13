@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Launch a LiveKit server container and print connection details for reuse.
+#
+# Usage:
+#   ./run-livekit-testkit-server
+#
+# Output (to stdout):
+#   LIVEKIT_TESTKIT_WS_URL=ws://127.0.0.1:PORT
+#   (and instructions for reuse)
+#
+# To reuse in tests:
+#   export LIVEKIT_TESTKIT_WS_URL=ws://127.0.0.1:PORT
+#   cargo test -p tddy-livekit -p tddy-livekit-testkit
+#
+# Or: eval $(./run-livekit-testkit-server)
+#
+# Requires Docker. Uses livekit/livekit-server:master with --dev mode.
+
+set -euo pipefail
+
+LIVEKIT_IMAGE="livekit/livekit-server:master"
+LIVEKIT_PORT=7880
+
+cid=$(docker run -d -p "0:${LIVEKIT_PORT}" "${LIVEKIT_IMAGE}" --dev --bind 0.0.0.0)
+trap 'docker rm -f "${cid}" 2>/dev/null || true' EXIT
+
+echo "Waiting for LiveKit HTTP endpoint..." >&2
+for _ in $(seq 1 30); do
+  port_line=$(docker port "${cid}" "${LIVEKIT_PORT}" 2>/dev/null)
+  host_port=$(echo "${port_line}" | sed -n 's/.*://p')
+  if [[ -n "${host_port:-}" ]]; then
+    if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${host_port}/" 2>/dev/null | grep -q 200; then
+      break
+    fi
+  fi
+  sleep 1
+done
+
+host_port=$(docker port "${cid}" "${LIVEKIT_PORT}" 2>/dev/null | sed -n 's/.*://p')
+if [[ -z "${host_port:-}" ]]; then
+  echo "Failed to get container port" >&2
+  exit 1
+fi
+
+ws_url="ws://127.0.0.1:${host_port}"
+
+# Don't rm on exit - user wants to keep it running
+trap - EXIT
+
+echo ""
+echo "export LIVEKIT_TESTKIT_WS_URL=${ws_url}"
+echo ""
+echo "LiveKit testkit server running at ${ws_url}"
+echo "Container ID: ${cid}"
+echo ""
+echo "To run tests against this instance:"
+echo "  export LIVEKIT_TESTKIT_WS_URL=${ws_url}"
+echo "  cargo test -p tddy-livekit -p tddy-livekit-testkit"
+echo ""
+echo "To stop: docker rm -f ${cid}"
