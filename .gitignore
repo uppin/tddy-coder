@@ -17,6 +17,7 @@ storybook-static/
 # Cypress
 cypress/screenshots/
 cypress/videos/
+cypress-debug.log
 
 # macOS
 .DS_Store

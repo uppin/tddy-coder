@@ -44,6 +44,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 - **tddy-tui**: Ratatui view layer, PresenterView implementation, key mapping
 - **tddy-grpc**: gRPC service, proto definitions, event conversion
 - **tddy-demo**: Same app with StubBackend for demos and E2E tests
+- **tddy-livekit-web**: ConnectRPC Transport over LiveKit data channels for browser clients calling Rust RPC services
 - **Claude Code CLI / Cursor**: LLM backends invoked via subprocess/API
 
 ## Change History

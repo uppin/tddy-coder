@@ -10,9 +10,7 @@
 
 mod common;
 
-use common::{
-    ctx_acceptance_tests, ctx_green, plan_dir_for_input, write_changeset_with_state,
-};
+use common::{ctx_acceptance_tests, ctx_green, plan_dir_for_input, write_changeset_with_state};
 use std::sync::Arc;
 use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
 use tddy_core::output::{create_session_dir_in, sessions_base_path};
