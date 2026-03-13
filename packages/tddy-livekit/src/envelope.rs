@@ -1,7 +1,8 @@
 //! Envelope encode/decode helpers.
 
+use tddy_rpc::Status;
+
 use crate::proto::{RpcError, RpcRequest, RpcResponse};
-use crate::status::Status;
 use prost::Message;
 
 /// Decode RpcRequest from bytes.

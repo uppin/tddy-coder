@@ -516,7 +516,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
 
     let port = args.grpc.unwrap_or(50051);
     let backend = create_backend(&args.agent, None, None);
-    let service = tddy_grpc::DaemonService::new(sessions_base, backend);
+    let service = tddy_service::DaemonService::new(sessions_base, backend);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -547,9 +547,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         log::info!("tddy-coder daemon listening on port {}", port);
 
         let server = tonic::transport::Server::builder()
-            .add_service(tddy_grpc::gen::tddy_remote_server::TddyRemoteServer::new(
-                service,
-            ))
+            .add_service(tddy_service::gen::tddy_remote_server::TddyRemoteServer::new(service))
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener));
 
         if let (Some(web_port), Some(ref web_bundle_path)) = (args.web_port, &args.web_bundle_path)
@@ -570,7 +568,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 let participant = match tddy_livekit::LiveKitParticipant::connect(
                     &url,
                     &token,
-                    tddy_livekit::EchoServiceImpl,
+                    tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl),
                     tddy_livekit::RoomOptions::default(),
                 )
                 .await
@@ -1011,8 +1009,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             intent_tx: intent_tx.clone(),
         };
         presenter = presenter.with_broadcast(event_tx);
-        let service =
-            tddy_grpc::TddyRemoteService::new(handle).with_terminal_bytes(terminal_byte_tx.clone());
+        let service = tddy_service::TddyRemoteService::new(handle)
+            .with_terminal_bytes(terminal_byte_tx.clone());
         let byte_tx_for_callback = terminal_byte_tx.clone();
         let byte_capture: Option<tddy_tui::ByteCallback> = Some(Box::new(move |buf: &[u8]| {
             let _ = byte_tx_for_callback.send(buf.to_vec());
@@ -1027,9 +1025,9 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 let listener = tokio::net::TcpListener::bind(addr).await?;
                 log::info!("gRPC server listening on port {}", port);
                 tonic::transport::Server::builder()
-                    .add_service(tddy_grpc::gen::tddy_remote_server::TddyRemoteServer::new(
-                        service,
-                    ))
+                    .add_service(
+                        tddy_service::gen::tddy_remote_server::TddyRemoteServer::new(service),
+                    )
                     .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
                     .await
                     .map_err(anyhow::Error::from)
@@ -1041,7 +1039,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         let (terminal_byte_tx, _) = tokio::sync::broadcast::channel(256);
         let (input_tx, _input_rx) = tokio::sync::mpsc::channel(64);
         let terminal_service =
-            tddy_livekit::TerminalServiceImpl::new(terminal_byte_tx.clone(), input_tx);
+            tddy_service::TerminalServiceImpl::new(terminal_byte_tx.clone(), input_tx);
         let byte_tx_for_callback = terminal_byte_tx.clone();
         let byte_capture: Option<tddy_tui::ByteCallback> = Some(Box::new(move |buf: &[u8]| {
             let _ = byte_tx_for_callback.send(buf.to_vec());
@@ -1057,7 +1055,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 match tddy_livekit::LiveKitParticipant::connect(
                     &url,
                     &token,
-                    terminal_service,
+                    tddy_service::TerminalServiceServer::new(terminal_service),
                     tddy_livekit::RoomOptions::default(),
                 )
                 .await

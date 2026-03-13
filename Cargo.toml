@@ -2,13 +2,14 @@
 resolver = "2"
 members = [
     "packages/tddy-core",
+    "packages/tddy-rpc",
     "packages/tddy-coder",
     "packages/tddy-tui",
     "packages/tddy-demo",
     "packages/tddy-tools",
-    "packages/tddy-grpc",
+    "packages/tddy-service",
     "packages/tddy-e2e",
     "packages/tddy-livekit",
-    "packages/tddy-livekit-codegen",
+    "packages/tddy-codegen",
     "packages/tddy-livekit-testkit",
 ]

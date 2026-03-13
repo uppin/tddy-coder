@@ -9,7 +9,8 @@
 //! Requires LIVEKIT_TESTKIT_WS_URL to be set or --url provided. Token must be generated
 //! externally (e.g. by livekit-server-sdk in Node.js).
 
-use tddy_livekit::{EchoServiceImpl, LiveKitParticipant, RoomOptions};
+use tddy_livekit::{LiveKitParticipant, RoomOptions};
+use tddy_service::{EchoServiceImpl, EchoServiceServer};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,10 +39,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("[echo_server] connecting to {}", url);
 
-    let participant =
-        LiveKitParticipant::connect(&url, &token, EchoServiceImpl, RoomOptions::default())
-            .await
-            .map_err(|e| format!("Connect failed: {}", e))?;
+    let participant = LiveKitParticipant::connect(
+        &url,
+        &token,
+        EchoServiceServer::new(EchoServiceImpl),
+        RoomOptions::default(),
+    )
+    .await
+    .map_err(|e| format!("Connect failed: {}", e))?;
 
     log::info!("[echo_server] connected, identity=server, event loop starting");
     log::info!("READY");

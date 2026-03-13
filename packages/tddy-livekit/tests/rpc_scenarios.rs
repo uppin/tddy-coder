@@ -13,9 +13,10 @@ use serial_test::serial;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tddy_livekit::proto::test::{EchoRequest, EchoResponse};
-use tddy_livekit::{EchoServiceImpl, LiveKitParticipant, RpcClient};
+use tddy_livekit::{LiveKitParticipant, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
+use tddy_service::proto::test::{EchoRequest, EchoResponse};
+use tddy_service::{EchoServiceImpl, EchoServiceServer};
 
 const RPC_TOPIC: &str = "tddy-rpc";
 
@@ -82,7 +83,7 @@ impl TestHarness {
         let server = LiveKitParticipant::connect(
             &url,
             &server_token,
-            EchoServiceImpl,
+            EchoServiceServer::new(EchoServiceImpl),
             RoomOptions::default(),
         )
         .await?;
@@ -133,7 +134,7 @@ impl ThreeParticipantHarness {
         let server = LiveKitParticipant::connect(
             &url,
             &server_token,
-            EchoServiceImpl,
+            EchoServiceServer::new(EchoServiceImpl),
             RoomOptions::default(),
         )
         .await?;
