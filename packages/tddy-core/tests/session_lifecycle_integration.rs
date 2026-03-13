@@ -11,8 +11,7 @@
 mod common;
 
 use common::{
-    ctx_acceptance_tests, ctx_green, plan_dir_for_input, run_goal_until_done,
-    write_changeset_with_state,
+    ctx_acceptance_tests, ctx_green, plan_dir_for_input, write_changeset_with_state,
 };
 use std::sync::Arc;
 use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
@@ -21,9 +20,7 @@ use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
-const PLAN_OUTPUT: &str = r##"{"goal":"plan","prd":"# Feature\n\n## Summary\nAuth.\n\n## Testing Plan\n### Acceptance Tests\n- [ ] Login (tests/auth.it.rs)\n\n## TODO\n- [ ] Implement"}"##;
 const ACCEPTANCE_TESTS_OUTPUT: &str = r#"{"goal":"acceptance-tests","summary":"Created 1 test.","tests":[{"name":"login","file":"tests/auth.it.rs","line":1,"status":"failing"}]}"#;
-const RED_OUTPUT: &str = r#"{"goal":"red","summary":"Created skeleton.","tests":[{"name":"auth_validates","file":"src/auth.rs","line":1,"status":"failing"}],"skeletons":[{"name":"Auth","file":"src/auth.rs","line":1,"kind":"struct"}]}"#;
 const GREEN_OUTPUT: &str = r#"{"goal":"green","summary":"Implemented.","tests":[{"name":"auth_validates","file":"src/auth.rs","line":1,"status":"passing"}],"implementations":[{"name":"Auth","file":"src/auth.rs","line":1,"kind":"struct"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}"#;
 
 /// AC1: ChangesetState has optional session_id field.
