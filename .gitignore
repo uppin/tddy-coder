@@ -8,6 +8,15 @@
 # Build artifacts
 target/
 
+# Web workspace
+node_modules/
+dist/
+.storybook-static/
+
+# Cypress
+cypress/screenshots/
+cypress/videos/
+
 # macOS
 .DS_Store
 .worktrees

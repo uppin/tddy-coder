@@ -36,9 +36,10 @@
             pkgs.protobuf
             pkgs.bzip2
             pkgs.git
+            pkgs.bun
           ];
           shellHook = ''
-            echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer"
+            echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun"
           '';
         };
       }
