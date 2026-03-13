@@ -61,6 +61,10 @@ pub struct Changeset {
     /// Whether changes were pushed to remote.
     #[serde(default)]
     pub remote_pushed: bool,
+    /// Canonical absolute path to the code repository. Persisted for resume from any directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub repo_path: Option<String>,
 }
 
 /// A single session entry (plan, acceptance-tests, or impl).
@@ -146,6 +150,7 @@ impl Default for Changeset {
             worktree: None,
             branch: None,
             remote_pushed: false,
+            repo_path: None,
         }
     }
 }

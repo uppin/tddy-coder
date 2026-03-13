@@ -81,8 +81,12 @@ fn before_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error +
     if read_changeset(&dir).is_err() {
         let _ = std::fs::create_dir_all(&dir);
         let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
+        let repo_path = context
+            .get_sync::<PathBuf>("output_dir")
+            .map(|p| p.display().to_string());
         let init_cs = Changeset {
             initial_prompt: Some(feature_input),
+            repo_path,
             ..Changeset::default()
         };
         let _ = write_changeset(&dir, &init_cs);
@@ -114,7 +118,7 @@ fn before_acceptance_tests(
     // Plan-mode sessions cannot be resumed with acceptEdits; create fresh session.
     let session_id = uuid::Uuid::new_v4().to_string();
     context.set_sync("session_id", session_id);
-    context.set_sync("is_resume", true);
+    context.set_sync("is_resume", false);
     context.set_sync("plan_dir", plan_dir.to_path_buf());
     context.set_sync("model", model);
     Ok(())

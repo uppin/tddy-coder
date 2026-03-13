@@ -75,13 +75,7 @@ fn submit_reads_from_stdin() {
 #[test]
 fn submit_malformed_json_returns_parse_error() {
     let mut cmd = tddy_tools_bin();
-    cmd.args([
-        "submit",
-        "--goal",
-        "plan",
-        "--data",
-        "not valid json {",
-    ]);
+    cmd.args(["submit", "--goal", "plan", "--data", "not valid json {"]);
     cmd.assert()
         .code(1)
         .stdout(predicates::str::contains("error"));
