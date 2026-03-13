@@ -31,8 +31,10 @@ impl PermissionServer {
         }
     }
 
-    /// Decide allow/deny. Bash(tddy-tools *) is always allowed for headless permission handling.
-    /// All other tool requests are denied.
+    /// Decide allow/deny:
+    /// - `Bash` where the command starts with `tddy-tools` → allow
+    /// - `mcp__tddy-tools__*` (our own MCP server tools) → allow
+    /// - Everything else → deny
     fn decide(tool_name: &str, input: &Value) -> String {
         if tool_name == "Bash" {
             let command = input
@@ -42,6 +44,9 @@ impl PermissionServer {
             if command.starts_with("tddy-tools") {
                 return serde_json::json!({ "behavior": "allow" }).to_string();
             }
+        }
+        if tool_name.starts_with("mcp__tddy-tools__") {
+            return serde_json::json!({ "behavior": "allow" }).to_string();
         }
         serde_json::json!({
             "behavior": "deny",
