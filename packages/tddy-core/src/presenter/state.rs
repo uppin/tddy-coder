@@ -48,6 +48,8 @@ pub enum AppMode {
     TextInput { prompt: String },
     /// Workflow complete.
     Done,
+    /// Workflow errored — user can Resume or Exit.
+    ErrorRecovery { error_message: String },
 }
 
 /// Top-level application state owned by the Presenter.
@@ -84,6 +86,19 @@ mod tests {
     fn app_mode_done() {
         let mode = AppMode::Done;
         assert!(matches!(mode, AppMode::Done));
+    }
+
+    #[test]
+    fn test_app_mode_error_recovery_construction() {
+        let mode = AppMode::ErrorRecovery {
+            error_message: "backend timeout".to_string(),
+        };
+        match mode {
+            AppMode::ErrorRecovery { ref error_message } => {
+                assert_eq!(error_message, "backend timeout");
+            }
+            _ => panic!("Expected ErrorRecovery variant"),
+        }
     }
 
     #[test]

@@ -173,6 +173,8 @@ fn app_mode_to_proto(mode: &AppMode) -> AppModeProto {
                 content: content.clone(),
             })
         }
+        // skeleton: ErrorRecovery has no proto representation yet
+        AppMode::ErrorRecovery { .. } => app_mode_proto::Variant::Done(AppModeDone {}),
     };
     AppModeProto {
         variant: Some(variant),
@@ -235,6 +237,8 @@ fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
         UserIntent::ViewPlan => Intent::ViewPlan(ViewPlan {}),
         UserIntent::RefinePlan => Intent::RefinePlan(RefinePlan {}),
         UserIntent::DismissViewer => Intent::DismissViewer(DismissViewer {}),
+        // skeleton: ResumeFromError has no proto message yet
+        UserIntent::ResumeFromError => return None,
     };
     Some(ClientMessage {
         intent: Some(intent),

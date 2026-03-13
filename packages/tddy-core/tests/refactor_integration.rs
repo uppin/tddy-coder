@@ -183,6 +183,7 @@ async fn refactor_rejects_cursor_backend() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let result = backend.invoke(req).await;

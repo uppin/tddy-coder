@@ -34,6 +34,7 @@ pub fn key_event_to_intent(
         AppMode::MultiSelect { question, .. } => multiselect_key(key, question, view_state),
         AppMode::TextInput { .. } => text_input_key(key, view_state),
         AppMode::Done => done_key(key),
+        AppMode::ErrorRecovery { .. } => error_recovery_key(key, view_state),
     }
 }
 
@@ -175,6 +176,22 @@ fn multiselect_key(
     }
 }
 
+fn error_recovery_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
+    log::debug!(
+        "error_recovery_key: code={:?} selected={}",
+        key.code,
+        vs.error_recovery_selected
+    );
+    if key.code == KeyCode::Enter {
+        match vs.error_recovery_selected {
+            0 => Some(UserIntent::ResumeFromError),
+            _ => Some(UserIntent::Quit),
+        }
+    } else {
+        None
+    }
+}
+
 fn text_input_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
     if key.code == KeyCode::Enter && !vs.text_input.is_empty() {
         Some(UserIntent::AnswerText(vs.text_input.clone()))
@@ -242,5 +259,27 @@ mod tests {
         };
         let intent = key_event_to_intent(enter_key(), &mode, &vs);
         assert!(intent.is_none());
+    }
+
+    #[test]
+    fn test_error_recovery_key_resume() {
+        let mut vs = ViewState::new();
+        vs.error_recovery_selected = 0;
+        let mode = AppMode::ErrorRecovery {
+            error_message: "some error".to_string(),
+        };
+        let intent = key_event_to_intent(enter_key(), &mode, &vs);
+        assert!(matches!(intent, Some(UserIntent::ResumeFromError)));
+    }
+
+    #[test]
+    fn test_error_recovery_key_exit() {
+        let mut vs = ViewState::new();
+        vs.error_recovery_selected = 1;
+        let mode = AppMode::ErrorRecovery {
+            error_message: "some error".to_string(),
+        };
+        let intent = key_event_to_intent(enter_key(), &mode, &vs);
+        assert!(matches!(intent, Some(UserIntent::Quit)));
     }
 }

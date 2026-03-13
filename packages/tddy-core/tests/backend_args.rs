@@ -35,6 +35,7 @@ fn request_with_both_prompts(system_prompt: &str, user_prompt: &str) -> InvokeRe
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     }
 }
 
@@ -207,6 +208,7 @@ fn request_without_system_prompt_has_user_prompt_after_p() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
     let config = ClaudeInvokeConfig {
         permission_mode: PermissionMode::Default,
@@ -370,6 +372,7 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n\n## TODO\n\n
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let _ = tokio::runtime::Runtime::new()
@@ -433,6 +436,7 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n\n## TODO\n\n
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let _ = tokio::runtime::Runtime::new()

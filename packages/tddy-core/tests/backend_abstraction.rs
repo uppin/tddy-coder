@@ -24,6 +24,7 @@ fn invoke_request_has_goal_not_permission_mode() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
     assert!(matches!(req.goal, Goal::Plan));
 }
@@ -48,6 +49,7 @@ fn invoke_request_supports_all_goal_variants() {
             inherit_stdin: false,
             extra_allowed_tools: None,
             socket_path: None,
+            plan_dir: None,
         };
         assert_eq!(
             std::mem::discriminant(&req.goal),

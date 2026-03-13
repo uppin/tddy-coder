@@ -62,7 +62,7 @@ pub fn prompt_height(text_len: u16, area_width: u16, max_height: u16) -> u16 {
         return 1;
     }
     // Ceiling division: how many lines of area_width fit text_len chars
-    let lines = (text_len + area_width - 1) / area_width;
+    let lines = text_len.div_ceil(area_width);
     let result = lines.max(1).min(max_height);
     log::trace!("prompt_height -> {result}");
     result

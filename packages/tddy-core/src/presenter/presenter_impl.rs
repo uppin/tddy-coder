@@ -243,6 +243,53 @@ impl<V: PresenterView> Presenter<V> {
             UserIntent::Quit => {
                 self.state.should_quit = true;
             }
+            UserIntent::ResumeFromError => {
+                log::info!(
+                    "ResumeFromError: looking up last session for goal {:?}",
+                    self.state.current_goal
+                );
+                let session_id = if let (Some(output_dir), Some(goal)) = (
+                    self.workflow_output_dir.as_ref(),
+                    self.state.current_goal.as_deref(),
+                ) {
+                    match crate::changeset::read_changeset(output_dir) {
+                        Ok(cs) => {
+                            let sid = crate::changeset::get_session_for_tag(&cs, goal);
+                            log::info!("ResumeFromError: session_id={:?} for tag={}", sid, goal);
+                            sid
+                        }
+                        Err(e) => {
+                            log::warn!("ResumeFromError: could not read changeset: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    log::warn!("ResumeFromError: no output_dir or goal available, spawning fresh");
+                    None
+                };
+                self.state.mode = AppMode::Running;
+                self.view.on_mode_changed(&self.state.mode);
+                self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                if let (Some(backend), Some(output_dir)) = (
+                    self.workflow_backend.clone(),
+                    self.workflow_output_dir.clone(),
+                ) {
+                    if let Some(h) = self.workflow_handle.take() {
+                        let _ = h.join();
+                    }
+                    self.spawn_workflow(
+                        backend,
+                        output_dir,
+                        None,
+                        None,
+                        self.workflow_conversation_output.clone(),
+                        self.workflow_debug_output.clone(),
+                        self.workflow_debug,
+                        session_id,
+                        self.workflow_socket_path.clone(),
+                    );
+                }
+            }
         }
     }
 
@@ -570,7 +617,18 @@ impl<V: PresenterView> Presenter<V> {
                             );
                         }
                     } else {
-                        self.state.mode = AppMode::Done;
+                        match result {
+                            Err(ref msg) => {
+                                log::info!("WorkflowComplete Err → ErrorRecovery: {}", msg);
+                                self.state.mode = AppMode::ErrorRecovery {
+                                    error_message: msg.clone(),
+                                };
+                            }
+                            Ok(_) => {
+                                log::info!("WorkflowComplete Ok → Done");
+                                self.state.mode = AppMode::Done;
+                            }
+                        }
                         self.view.on_mode_changed(&self.state.mode);
                         self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                     }
@@ -698,5 +756,69 @@ impl<V: PresenterView> Presenter<V> {
     /// Take the workflow result (if any) for printing on TUI exit.
     pub fn take_workflow_result(&mut self) -> Option<Result<WorkflowCompletePayload, String>> {
         self.workflow_result.take()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::presenter::state::{ActivityEntry, AppMode};
+
+    struct NullView;
+
+    impl PresenterView for NullView {
+        fn on_mode_changed(&mut self, _mode: &AppMode) {}
+        fn on_activity_logged(&mut self, _entry: &ActivityEntry, _log_len: usize) {}
+        fn on_goal_started(&mut self, _goal: &str) {}
+        fn on_state_changed(&mut self, _from: &str, _to: &str) {}
+        fn on_workflow_complete(&mut self, _result: &Result<WorkflowCompletePayload, String>) {}
+        fn on_agent_output(&mut self, _text: &str) {}
+        fn on_inbox_changed(&mut self, _inbox: &[String]) {}
+    }
+
+    fn make_presenter() -> Presenter<NullView> {
+        Presenter::new(NullView, "agent", "model")
+    }
+
+    fn inject_workflow_event(presenter: &mut Presenter<NullView>, event: WorkflowEvent) {
+        let (tx, rx) = mpsc::channel();
+        tx.send(event).unwrap();
+        presenter.workflow_event_rx = Some(rx);
+    }
+
+    #[test]
+    fn test_workflow_error_transitions_to_error_recovery() {
+        let mut p = make_presenter();
+        inject_workflow_event(
+            &mut p,
+            WorkflowEvent::WorkflowComplete(Err("backend timeout".to_string())),
+        );
+        p.poll_workflow();
+        assert!(
+            matches!(
+                p.state().mode,
+                AppMode::ErrorRecovery { ref error_message } if error_message == "backend timeout"
+            ),
+            "Expected ErrorRecovery mode with correct message, got {:?}",
+            p.state().mode
+        );
+    }
+
+    #[test]
+    fn test_workflow_success_transitions_to_done() {
+        let mut p = make_presenter();
+        inject_workflow_event(
+            &mut p,
+            WorkflowEvent::WorkflowComplete(Ok(WorkflowCompletePayload {
+                summary: "all done".to_string(),
+                plan_dir: None,
+            })),
+        );
+        p.poll_workflow();
+        assert!(
+            matches!(p.state().mode, AppMode::Done),
+            "Expected Done mode, got {:?}",
+            p.state().mode
+        );
     }
 }

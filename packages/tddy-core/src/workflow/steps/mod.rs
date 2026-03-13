@@ -105,6 +105,7 @@ impl Task for PlanTask {
             inherit_stdin: context.get_sync::<bool>("inherit_stdin").unwrap_or(false),
             extra_allowed_tools: context.get_sync("allowed_tools"),
             socket_path: context.get_sync("socket_path"),
+            plan_dir: context.get_sync("plan_dir"),
         };
 
         let response = self.backend.invoke(request).await.map_err(

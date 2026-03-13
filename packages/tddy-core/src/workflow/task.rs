@@ -174,9 +174,10 @@ impl Task for BackendInvokeTask {
             .get_sync::<PathBuf>("worktree_dir")
             .or_else(|| context.get_sync::<PathBuf>("output_dir"))
             .or_else(|| plan_dir.clone());
-        let is_resume = context
-            .get_sync::<bool>("is_resume")
-            .unwrap_or_else(|| context.get_sync::<String>("answers").is_some());
+        // Use Resume when is_resume is true, or when session_id exists but is_resume was cleared
+        // (e.g. Evaluate after Green — after_task clears is_resume). Use Fresh only when
+        // explicitly creating a new session (before_red, before_acceptance_tests set is_resume=false).
+        let is_resume = context.get_sync::<bool>("is_resume").unwrap_or(true);
         let session = context.get_sync::<String>("session_id").map(|id| {
             if is_resume {
                 SessionMode::Resume(id)
@@ -201,6 +202,7 @@ impl Task for BackendInvokeTask {
             inherit_stdin: context.get_sync::<bool>("inherit_stdin").unwrap_or(false),
             extra_allowed_tools: context.get_sync("allowed_tools"),
             socket_path: context.get_sync("socket_path"),
+            plan_dir: context.get_sync("plan_dir"),
         };
 
         let response = self

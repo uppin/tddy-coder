@@ -400,6 +400,12 @@ impl ClaudeCodeBackend {
         if let Some(ref p) = request.socket_path {
             cmd.env("TDDY_SOCKET", p);
         }
+        if let Some(ref p) = request.working_dir {
+            cmd.env("TDDY_REPO_DIR", p);
+        }
+        if let Some(ref p) = request.plan_dir {
+            cmd.env("TDDY_PLAN_DIR", p);
+        }
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.stdin(if request.inherit_stdin {
