@@ -23,6 +23,12 @@ pub struct LiveKitTestkit {
 impl LiveKitTestkit {
     /// Start a LiveKit server container.
     pub async fn start() -> Result<Self> {
+        log::debug!(
+            "LiveKitTestkit::start launching {}:{} container",
+            LIVEKIT_IMAGE,
+            LIVEKIT_TAG
+        );
+
         let http_wait = HttpWaitStrategy::new("/")
             .with_port(LIVEKIT_PORT.tcp())
             .with_expected_status_code(200u16);
@@ -34,6 +40,11 @@ impl LiveKitTestkit {
 
         let container: testcontainers::ContainerAsync<GenericImage> = image.start().await?;
         let host_port = container.get_host_port_ipv4(LIVEKIT_PORT.tcp()).await?;
+
+        log::debug!(
+            "LiveKitTestkit: container ready on host port {}",
+            host_port
+        );
 
         Ok(Self {
             _container: container,

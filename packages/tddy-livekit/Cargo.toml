@@ -24,3 +24,4 @@ tddy-livekit-codegen = { path = "../tddy-livekit-codegen" }
 [dev-dependencies]
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+env_logger = "0.11"

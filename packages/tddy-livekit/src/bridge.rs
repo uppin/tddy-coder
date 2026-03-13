@@ -56,17 +56,52 @@ impl<S: RpcService> RpcBridge<S> {
             .map(|m| m.method.as_str())
             .unwrap_or("");
 
+        log::debug!(
+            "RpcBridge::handle_decoded_request request_id={} {}/{}",
+            request.request_id, service, method
+        );
+
         match self.service.handle_rpc(service, method, request).await {
-            RpcResult::Unary(Ok(response_bytes)) => Ok(vec![response_bytes]),
-            RpcResult::Unary(Err(status)) => Err(status),
+            RpcResult::Unary(Ok(response_bytes)) => {
+                log::debug!(
+                    "RpcBridge: request_id={} unary OK ({} bytes)",
+                    request.request_id,
+                    response_bytes.len()
+                );
+                Ok(vec![response_bytes])
+            }
+            RpcResult::Unary(Err(status)) => {
+                log::debug!(
+                    "RpcBridge: request_id={} unary error: {}",
+                    request.request_id,
+                    status.message
+                );
+                Err(status)
+            }
             RpcResult::ServerStream(Ok(mut rx)) => {
+                log::debug!(
+                    "RpcBridge: request_id={} collecting server stream chunks",
+                    request.request_id
+                );
                 let mut chunks = Vec::new();
                 while let Some(item) = rx.recv().await {
                     chunks.push(item?);
                 }
+                log::debug!(
+                    "RpcBridge: request_id={} stream finished with {} chunk(s)",
+                    request.request_id,
+                    chunks.len()
+                );
                 Ok(chunks)
             }
-            RpcResult::ServerStream(Err(status)) => Err(status),
+            RpcResult::ServerStream(Err(status)) => {
+                log::debug!(
+                    "RpcBridge: request_id={} stream error: {}",
+                    request.request_id,
+                    status.message
+                );
+                Err(status)
+            }
         }
     }
 }
