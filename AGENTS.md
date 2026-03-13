@@ -51,15 +51,25 @@ All `./` scripts use nix dev shell via `--profile ./.nix-profile` for a consiste
 | Lint | `cargo clippy -- -D warnings` |
 | Format | `cargo fmt` |
 | Run CLI | `cargo run -p tddy-coder -- --goal plan` (reads feature from stdin) |
-| Web install | `bun install` — install web workspace dependencies |
-| Web build | `bun run build` (from root or `packages/tddy-web`) |
-| Storybook | `bun run storybook` — dev server at http://localhost:6006 |
-| Cypress component | `bun run cypress:component` (from root or `packages/tddy-web`) |
-| Cypress e2e | `bun run cypress:e2e` (from root or `packages/tddy-web`; builds Storybook, serves on ephemeral port, runs tests) |
+| Web install | `./dev bun install` — install web workspace dependencies |
+| Web build | `./dev bun run build` (from root or `packages/tddy-web`) |
+| Storybook | `./dev bun run storybook` — dev server at http://localhost:6006 |
+| Cypress component | `./dev bun run cypress:component` (from root or `packages/tddy-web`) |
+| Cypress e2e | `./dev bun run cypress:e2e` (from root or `packages/tddy-web`; builds Storybook, serves on ephemeral port, runs tests) |
 
 ### Bun Workspace
 
-The web packages live in `packages/tddy-web`. Use the nix dev shell (`./dev`) for bun and node.
+The web packages live in `packages/tddy-web`. Bun and node come from the nix dev shell.
+
+**Running bun/node with nix**
+
+Either enter the shell first, or run commands via `./dev`:
+
+```bash
+./dev                    # Enter shell, then: bun install, bun run storybook, etc.
+./dev bun install        # One-off: install deps
+./dev bun run storybook  # One-off: start Storybook
+```
 
 **Setup**
 ```bash
