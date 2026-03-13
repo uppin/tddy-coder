@@ -35,7 +35,91 @@ impl PermissionServer {
         }
     }
 
+    /// Allowed dirs from TDDY_PLAN_DIR and TDDY_REPO_DIR (canonicalized).
+    fn allowed_dirs() -> Vec<PathBuf> {
+        let plan_dir = std::env::var_os("TDDY_PLAN_DIR").map(PathBuf::from);
+        let repo_dir = std::env::var_os("TDDY_REPO_DIR").map(PathBuf::from);
+        [plan_dir, repo_dir]
+            .into_iter()
+            .flatten()
+            .filter_map(|p| std::fs::canonicalize(&p).ok())
+            .collect()
+    }
+
+    /// True if path (absolute or relative to repo) is under allowed dirs.
+    /// For non-existent paths (e.g. Write target), checks the parent directory.
+    fn path_allowed(path: &str) -> bool {
+        let allowed = Self::allowed_dirs();
+        if allowed.is_empty() {
+            return false;
+        }
+        let path = std::path::Path::new(path);
+        let resolved = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            match allowed.first() {
+                Some(base) => base.join(path),
+                None => return false,
+            }
+        };
+        let canonical = resolved
+            .canonicalize()
+            .ok()
+            .or_else(|| resolved.parent().and_then(|p| p.canonicalize().ok()));
+        canonical
+            .map(|c| allowed.iter().any(|a| c.starts_with(a)))
+            .unwrap_or(false)
+    }
+
+    /// True if all absolute paths in the command are under TDDY_PLAN_DIR or TDDY_REPO_DIR.
+    fn paths_in_command_all_allowed(command: &str) -> bool {
+        let allowed = Self::allowed_dirs();
+        if allowed.is_empty() {
+            return false;
+        }
+        for token in command.split_whitespace() {
+            let path_str = token.trim_end_matches(|c: char| "|;&<>".contains(c));
+            if path_str.starts_with('/') && !Self::path_allowed(path_str) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// True if the tool targets in-repo/plan paths or is a plan/MD submission. Pre-approve when so.
+    fn tool_in_repo_pre_allowed(tool_name: &str, input: &Value) -> bool {
+        if Self::allowed_dirs().is_empty() {
+            return false;
+        }
+        match tool_name {
+            "Write" | "Edit" | "NotebookEdit" => {
+                let path = input
+                    .get("file_path")
+                    .or_else(|| input.get("path"))
+                    .and_then(|v| v.as_str());
+                match path {
+                    Some(p) => Self::path_allowed(p),
+                    None => false,
+                }
+            }
+            "ExitPlanMode" | "EnterPlanMode" => {
+                // Plan/PRD submission or mode switch — part of tddy workflow
+                true
+            }
+            "Glob" | "Grep" | "Read" => {
+                let path = input
+                    .get("path")
+                    .or_else(|| input.get("directory"))
+                    .or_else(|| input.get("glob_pattern"))
+                    .and_then(|v| v.as_str());
+                path.is_some_and(Self::path_allowed)
+            }
+            _ => false,
+        }
+    }
+
     /// Decide allow/deny. Bash(tddy-tools *) and mcp__tddy-tools__* are always allowed.
+    /// Bash commands that only reference paths under TDDY_PLAN_DIR or TDDY_REPO_DIR are pre-allowed.
     /// For other tools: route through TDDY_SOCKET to TUI if available, else deny.
     fn decide(&self, tool_name: &str, input: &Value) -> String {
         if tool_name == "Bash" {
@@ -43,9 +127,17 @@ impl PermissionServer {
             if command.starts_with("tddy-tools") {
                 return serde_json::json!({ "behavior": "allow" }).to_string();
             }
+            // Pre-allow if all paths in command are under session/plan dir or repo
+            if Self::paths_in_command_all_allowed(command) {
+                return serde_json::json!({ "behavior": "allow" }).to_string();
+            }
         }
         // mcp__tddy-tools__* — our MCP tools, always allow
         if tool_name.starts_with("mcp__tddy-tools__") {
+            return serde_json::json!({ "behavior": "allow" }).to_string();
+        }
+        // In-repo changes, executions, plan/MD submissions — pre-allow when paths are under repo/plan
+        if Self::tool_in_repo_pre_allowed(tool_name, input) {
             return serde_json::json!({ "behavior": "allow" }).to_string();
         }
         // Unknown tool: route through TUI if socket available
@@ -161,6 +253,7 @@ impl rmcp::ServerHandler for PermissionServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn approval_prompt_allows_bash_tddy_tools_submit() {
@@ -241,6 +334,88 @@ mod tests {
         assert_eq!(
             parsed["behavior"], "deny",
             "MCP tools from unknown servers must be denied, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn approval_prompt_pre_allows_paths_in_repo_dir() {
+        let dir = std::env::temp_dir().join("tddy-preallow-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = std::fs::canonicalize(&dir).unwrap();
+        let subdir = repo.join("packages").join("tddy-core");
+        std::fs::create_dir_all(&subdir).unwrap();
+        let subdir = std::fs::canonicalize(&subdir).unwrap();
+
+        std::env::set_var("TDDY_REPO_DIR", &repo);
+        let result = {
+            let input = serde_json::json!({
+                "command": format!("ls -la {} | grep -E '\\.rs$'", subdir.display())
+            });
+            PermissionServer::new().decide("Bash", &input)
+        };
+        std::env::remove_var("TDDY_REPO_DIR");
+        std::fs::remove_dir_all(&dir).ok();
+
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["behavior"], "allow",
+            "Bash with path in TDDY_REPO_DIR must be pre-allowed, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn approval_prompt_pre_allows_write_in_repo_dir() {
+        let dir = std::env::temp_dir().join("tddy-write-preallow");
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = std::fs::canonicalize(&dir).unwrap();
+        let file_path = repo.join("src").join("lib.rs");
+        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+
+        std::env::set_var("TDDY_REPO_DIR", &repo);
+        let result = {
+            let input = serde_json::json!({
+                "file_path": file_path.display().to_string(),
+                "content": "// test"
+            });
+            PermissionServer::new().decide("Write", &input)
+        };
+        std::env::remove_var("TDDY_REPO_DIR");
+        std::fs::remove_dir_all(&dir).ok();
+
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["behavior"], "allow",
+            "Write with path in TDDY_REPO_DIR must be pre-allowed, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn approval_prompt_pre_allows_exit_plan_mode() {
+        let dir = std::env::temp_dir().join("tddy-exitplan");
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = std::fs::canonicalize(&dir).unwrap();
+
+        std::env::set_var("TDDY_REPO_DIR", &repo);
+        let result = {
+            let input = serde_json::json!({
+                "plan": "# PRD\n\n## Summary\nTest",
+                "allowedPrompts": []
+            });
+            PermissionServer::new().decide("ExitPlanMode", &input)
+        };
+        std::env::remove_var("TDDY_REPO_DIR");
+        std::fs::remove_dir_all(&dir).ok();
+
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["behavior"], "allow",
+            "ExitPlanMode must be pre-allowed when TDDY env set, got: {}",
             result
         );
     }

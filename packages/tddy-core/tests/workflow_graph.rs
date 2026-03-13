@@ -157,6 +157,7 @@ async fn stub_backend_plan_returns_valid_structured_response() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let _resp = backend.invoke(req).await.unwrap();
@@ -188,6 +189,7 @@ async fn stub_backend_acceptance_tests_returns_valid_response() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let _resp = backend.invoke(req).await.unwrap();
@@ -220,6 +222,7 @@ async fn stub_backend_red_returns_valid_response() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let _resp = backend.invoke(req).await.unwrap();
@@ -251,6 +254,7 @@ async fn stub_backend_update_docs_returns_valid_response() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let _resp = backend.invoke(req).await.unwrap();
@@ -283,6 +287,7 @@ async fn stub_backend_green_returns_valid_response() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let _resp = backend.invoke(req).await.unwrap();
@@ -314,6 +319,7 @@ async fn stub_backend_clarify_with_answers_skips_questions() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let resp = backend.invoke(req).await.unwrap();
@@ -343,6 +349,7 @@ async fn stub_backend_clarify_returns_questions() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let resp = backend.invoke(req).await.unwrap();
@@ -418,6 +425,7 @@ async fn stub_backend_fail_invoke_returns_error() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let result = backend.invoke(req).await;
@@ -444,6 +452,7 @@ async fn stub_backend_fail_parse_returns_malformed() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let resp = backend.invoke(req).await.unwrap();

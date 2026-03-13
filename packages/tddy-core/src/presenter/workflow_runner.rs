@@ -448,8 +448,8 @@ pub fn run_workflow(
 ) {
     let inherit_stdin = false;
 
-    // Resolve "." to absolute path for new sessions.
-    let output_dir = if output_dir == Path::new(".") {
+    let output_dir_was_dot = output_dir == Path::new(".");
+    let output_dir = if output_dir_was_dot {
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     } else {
         output_dir
@@ -472,11 +472,16 @@ pub fn run_workflow(
                 )));
                 return;
             }
+            let output_dir_for_plan = if output_dir_was_dot {
+                Path::new(".")
+            } else {
+                output_dir.as_path()
+            };
             match run_plan_without_output_dir(
                 &backend,
                 &event_tx,
                 &answer_rx,
-                &output_dir,
+                output_dir_for_plan,
                 &input,
                 session_id.as_deref(),
                 &model,

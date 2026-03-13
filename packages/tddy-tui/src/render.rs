@@ -61,6 +61,7 @@ fn prompt_text(state: &PresenterState, view_state: &ViewState) -> String {
         }
         AppMode::PlanReview { .. } => "Up/Down navigate  Enter select".to_string(),
         AppMode::MarkdownViewer { .. } => "Q or Esc to close".to_string(),
+        AppMode::ErrorRecovery { .. } => "Up/Down navigate  Enter select".to_string(),
     }
 }
 
@@ -401,4 +402,35 @@ fn render_inbox(
 
     let widget = Paragraph::new(lines);
     frame.render_widget(widget, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+    use tddy_core::{ActivityEntry, AppMode, PresenterState};
+
+    fn make_state(mode: AppMode) -> PresenterState {
+        PresenterState {
+            agent: "test-agent".to_string(),
+            model: "test-model".to_string(),
+            mode,
+            current_goal: None,
+            current_state: None,
+            goal_start_time: Instant::now(),
+            activity_log: Vec::new(),
+            inbox: Vec::new(),
+            should_quit: false,
+        }
+    }
+
+    #[test]
+    fn test_error_recovery_prompt_text() {
+        let state = make_state(AppMode::ErrorRecovery {
+            error_message: "timeout".to_string(),
+        });
+        let vs = ViewState::new();
+        let text = prompt_text(&state, &vs);
+        assert_eq!(text, "Up/Down navigate  Enter select");
+    }
 }

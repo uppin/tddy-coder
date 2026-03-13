@@ -308,6 +308,8 @@ pub struct InvokeRequest {
     pub extra_allowed_tools: Option<Vec<String>>,
     /// When set, backend sets TDDY_SOCKET env var for tddy-tools relay.
     pub socket_path: Option<PathBuf>,
+    /// When set, backend sets TDDY_PLAN_DIR and TDDY_REPO_DIR for tddy-tools path pre-allow.
+    pub plan_dir: Option<PathBuf>,
 }
 
 fn default_allow_other() -> bool {

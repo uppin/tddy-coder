@@ -6,8 +6,12 @@ mod common;
 
 use std::time::Duration;
 
+use std::path::Path;
 use tddy_coder::{ActivityEntry, AppMode, Presenter, PresenterView, UserIntent};
-use tddy_core::{AnyBackend, SharedBackend, StubBackend, WorkflowCompletePayload};
+use tddy_core::{
+    output::{SESSIONS_SUBDIR, TDDY_SESSIONS_DIR_ENV},
+    AnyBackend, SharedBackend, StubBackend, WorkflowCompletePayload,
+};
 
 /// Events collected by TestView for assertions.
 #[derive(Debug, Clone)]
@@ -140,6 +144,101 @@ fn full_workflow_completes_with_stub_backend() {
         "expected WorkflowComplete(Ok) in events: {:?}",
         events
     );
+}
+
+/// When output_dir is "." (TUI default), plan_dir must be under sessions_base_path (~/.tddy/sessions),
+/// not under the resolved current_dir. MDs (PRD.md, progress.md, etc.) go to plan_dir.
+#[test]
+fn plan_dir_under_sessions_base_when_output_dir_is_dot() {
+    let sessions_base = std::env::temp_dir().join("tddy-plan-dir-test-sessions");
+    let _ = std::fs::remove_dir_all(&sessions_base);
+    std::fs::create_dir_all(&sessions_base).expect("create sessions base");
+    let sessions_base_str = sessions_base.to_str().expect("path");
+    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base_str);
+
+    let repo_dir = std::env::temp_dir().join("tddy-plan-dir-test-repo");
+    let _ = std::fs::remove_dir_all(&repo_dir);
+    std::fs::create_dir_all(&repo_dir).expect("create repo dir");
+
+    let view = TestView::new();
+    let mut presenter = Presenter::new(view, "stub", "default");
+    let backend = create_stub_backend();
+
+    let original_cwd = std::env::current_dir().expect("cwd");
+    std::env::set_current_dir(&repo_dir).expect("chdir to repo");
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Auth feature".to_string()));
+    presenter.start_workflow(
+        backend,
+        std::path::PathBuf::from("."),
+        None,
+        Some("Auth feature".to_string()),
+        None,
+        None,
+        false,
+        Some(uuid::Uuid::now_v7().to_string()),
+        None,
+        None,
+    );
+
+    let mut iterations = 0;
+    let max_iterations = 500;
+    while !presenter.is_done() && iterations < max_iterations {
+        presenter.poll_workflow();
+        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+            presenter.handle_intent(UserIntent::ApprovePlan);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let _ = std::env::set_current_dir(&original_cwd);
+
+    assert!(
+        presenter.is_done(),
+        "workflow should complete within {} iterations",
+        max_iterations
+    );
+
+    let payload = presenter
+        .view_mut()
+        .events()
+        .iter()
+        .find_map(|e| match e {
+            TestEvent::WorkflowComplete(Ok(p)) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("WorkflowComplete(Ok) with payload");
+
+    let plan_dir = payload
+        .plan_dir
+        .as_ref()
+        .expect("plan_dir must be set in payload");
+
+    let expected_sessions_base = Path::new(sessions_base_str);
+    let expected_plan_parent = expected_sessions_base.join(SESSIONS_SUBDIR);
+    assert!(
+        plan_dir.starts_with(&expected_plan_parent),
+        "plan_dir {:?} must be under {}/sessions/ (sessions_base_path), not under repo {:?}",
+        plan_dir,
+        sessions_base_str,
+        repo_dir
+    );
+    assert!(
+        !plan_dir.starts_with(&repo_dir),
+        "plan_dir {:?} must NOT be under repo {:?}",
+        plan_dir,
+        repo_dir
+    );
+
+    let _ = std::fs::remove_dir_all(&sessions_base);
+    let _ = std::fs::remove_dir_all(&repo_dir);
 }
 
 /// Clarification scenario: StubBackend with CLARIFY → AnswerSelect → assert answers sent.

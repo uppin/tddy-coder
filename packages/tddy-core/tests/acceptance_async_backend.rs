@@ -25,6 +25,7 @@ async fn mock_backend_invoke_is_async() {
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let result = backend.invoke(req).await;

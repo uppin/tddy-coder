@@ -64,6 +64,33 @@ pub struct ViewState {
     pub markdown_at_end: bool,
     /// Index of the selected inline button at end of document (0=Approve, 1=Refine).
     pub markdown_end_button_selected: usize,
+    /// Selected option index in ErrorRecovery mode (0=Resume, 1=Exit).
+    pub error_recovery_selected: usize,
+}
+
+/// Byte index of the start of the character immediately before `idx`.
+/// Cursors must be byte indices for `String::insert`/`remove` to work with multi-byte UTF-8.
+fn prev_char_boundary(s: &str, idx: usize) -> usize {
+    if idx <= 1 {
+        return 0;
+    }
+    let mut i = idx - 1;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Advance byte index by one character. Returns `idx` if at end.
+fn advance_cursor_by_char(s: &str, idx: usize) -> usize {
+    if idx >= s.len() {
+        return idx;
+    }
+    s[idx..]
+        .chars()
+        .next()
+        .map(|c| idx + c.len_utf8())
+        .unwrap_or(idx)
 }
 
 impl ViewState {
@@ -108,6 +135,10 @@ impl ViewState {
                 self.markdown_end_button_selected = 0;
             }
             AppMode::Done => {}
+            AppMode::ErrorRecovery { .. } => {
+                log::debug!("on_mode_changed: ErrorRecovery — resetting error_recovery_selected");
+                self.error_recovery_selected = 0;
+            }
         }
     }
 
@@ -135,6 +166,47 @@ impl ViewState {
             }
             AppMode::TextInput { .. } => self.handle_text_input_key_view_local(key),
             AppMode::Done => self.handle_done_key_view_local(key),
+            AppMode::ErrorRecovery { .. } => self.handle_error_recovery_key_view_local(key),
+        }
+    }
+
+    fn handle_error_recovery_key_view_local(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Up => {
+                log::debug!(
+                    "error_recovery Up: {} → {}",
+                    self.error_recovery_selected,
+                    if self.error_recovery_selected == 0 {
+                        1
+                    } else {
+                        0
+                    }
+                );
+                self.error_recovery_selected = if self.error_recovery_selected == 0 {
+                    1
+                } else {
+                    0
+                };
+                true
+            }
+            KeyCode::Down => {
+                log::debug!(
+                    "error_recovery Down: {} → {}",
+                    self.error_recovery_selected,
+                    if self.error_recovery_selected >= 1 {
+                        0
+                    } else {
+                        1
+                    }
+                );
+                self.error_recovery_selected = if self.error_recovery_selected >= 1 {
+                    0
+                } else {
+                    1
+                };
+                true
+            }
+            _ => false,
         }
     }
 
@@ -214,22 +286,22 @@ impl ViewState {
         match key.code {
             KeyCode::Char(c) if !c.is_control() => {
                 self.feature_input.insert(self.feature_cursor, c);
-                self.feature_cursor += 1;
+                self.feature_cursor += c.len_utf8();
                 true
             }
             KeyCode::Backspace if self.feature_cursor > 0 => {
-                self.feature_cursor -= 1;
+                let prev = prev_char_boundary(&self.feature_input, self.feature_cursor);
+                self.feature_cursor = prev;
                 self.feature_input.remove(self.feature_cursor);
                 true
             }
             KeyCode::Left => {
-                self.feature_cursor = self.feature_cursor.saturating_sub(1);
+                self.feature_cursor = prev_char_boundary(&self.feature_input, self.feature_cursor);
                 true
             }
             KeyCode::Right => {
-                if self.feature_cursor < self.feature_input.len() {
-                    self.feature_cursor += 1;
-                }
+                self.feature_cursor =
+                    advance_cursor_by_char(&self.feature_input, self.feature_cursor);
                 true
             }
             KeyCode::PageUp => {
@@ -249,22 +321,23 @@ impl ViewState {
             InboxFocus::None => match key.code {
                 KeyCode::Char(c) if !c.is_control() => {
                     self.running_input.insert(self.running_cursor, c);
-                    self.running_cursor += 1;
+                    self.running_cursor += c.len_utf8();
                     true
                 }
                 KeyCode::Backspace if self.running_cursor > 0 => {
-                    self.running_cursor -= 1;
+                    let prev = prev_char_boundary(&self.running_input, self.running_cursor);
+                    self.running_cursor = prev;
                     self.running_input.remove(self.running_cursor);
                     true
                 }
                 KeyCode::Left => {
-                    self.running_cursor = self.running_cursor.saturating_sub(1);
+                    self.running_cursor =
+                        prev_char_boundary(&self.running_input, self.running_cursor);
                     true
                 }
                 KeyCode::Right => {
-                    if self.running_cursor < self.running_input.len() {
-                        self.running_cursor += 1;
-                    }
+                    self.running_cursor =
+                        advance_cursor_by_char(&self.running_input, self.running_cursor);
                     true
                 }
                 KeyCode::PageUp => {
@@ -499,22 +572,23 @@ impl ViewState {
         match key.code {
             KeyCode::Char(c) if !c.is_control() => {
                 self.text_input.insert(self.text_input_cursor, c);
-                self.text_input_cursor += 1;
+                self.text_input_cursor += c.len_utf8();
                 true
             }
             KeyCode::Backspace if self.text_input_cursor > 0 => {
-                self.text_input_cursor -= 1;
+                let prev = prev_char_boundary(&self.text_input, self.text_input_cursor);
+                self.text_input_cursor = prev;
                 self.text_input.remove(self.text_input_cursor);
                 true
             }
             KeyCode::Left => {
-                self.text_input_cursor = self.text_input_cursor.saturating_sub(1);
+                self.text_input_cursor =
+                    prev_char_boundary(&self.text_input, self.text_input_cursor);
                 true
             }
             KeyCode::Right => {
-                if self.text_input_cursor < self.text_input.len() {
-                    self.text_input_cursor += 1;
-                }
+                self.text_input_cursor =
+                    advance_cursor_by_char(&self.text_input, self.text_input_cursor);
                 true
             }
             KeyCode::PageUp => {
@@ -554,6 +628,27 @@ mod tests {
     }
 
     #[test]
+    fn feature_input_handles_multi_byte_utf8() {
+        let mut vs = ViewState::new();
+        vs.on_mode_changed(&AppMode::FeatureInput);
+        // Emoji is 4 bytes in UTF-8; cursor was incremented by 1 before fix, causing panic on next insert
+        let emoji = KeyEvent::new(KeyCode::Char('😀'), KeyModifiers::empty());
+        let a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty());
+        assert!(vs.handle_key_view_local(emoji, &AppMode::FeatureInput, 0));
+        assert_eq!(vs.feature_input, "😀");
+        assert_eq!(vs.feature_cursor, 4); // byte index
+        assert!(vs.handle_key_view_local(a, &AppMode::FeatureInput, 0));
+        assert_eq!(vs.feature_input, "😀a");
+        // Backspace removes 'a', Left moves to start of emoji
+        let backspace = KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty());
+        assert!(vs.handle_key_view_local(backspace, &AppMode::FeatureInput, 0));
+        assert_eq!(vs.feature_input, "😀");
+        let left = KeyEvent::new(KeyCode::Left, KeyModifiers::empty());
+        assert!(vs.handle_key_view_local(left, &AppMode::FeatureInput, 0));
+        assert_eq!(vs.feature_cursor, 0);
+    }
+
+    #[test]
     fn space_key_pages_down_in_markdown_viewer() {
         let mut vs = ViewState::new();
         let mode = AppMode::MarkdownViewer {
@@ -587,5 +682,42 @@ mod tests {
         let up = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
         vs.handle_key_view_local(up, &mode, 0);
         assert_eq!(vs.markdown_end_button_selected, 0);
+    }
+
+    #[test]
+    fn test_error_recovery_view_state_reset() {
+        let mut vs = ViewState::new();
+        vs.error_recovery_selected = 1;
+        let mode = AppMode::ErrorRecovery {
+            error_message: "failed".to_string(),
+        };
+        vs.on_mode_changed(&mode);
+        assert_eq!(vs.error_recovery_selected, 0);
+    }
+
+    #[test]
+    fn test_error_recovery_up_down_toggle() {
+        let mut vs = ViewState::new();
+        let mode = AppMode::ErrorRecovery {
+            error_message: "failed".to_string(),
+        };
+        let down = KeyEvent::new(KeyCode::Down, KeyModifiers::empty());
+        let up = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
+
+        // Start at 0, Down → 1
+        vs.handle_key_view_local(down, &mode, 0);
+        assert_eq!(vs.error_recovery_selected, 1);
+
+        // Down again → wraps to 0
+        vs.handle_key_view_local(down, &mode, 0);
+        assert_eq!(vs.error_recovery_selected, 0);
+
+        // Up from 0 → wraps to 1
+        vs.handle_key_view_local(up, &mode, 0);
+        assert_eq!(vs.error_recovery_selected, 1);
+
+        // Up from 1 → wraps to 0
+        vs.handle_key_view_local(up, &mode, 0);
+        assert_eq!(vs.error_recovery_selected, 0);
     }
 }

@@ -59,6 +59,7 @@ exit 0
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let result = tokio::runtime::Runtime::new()
@@ -151,6 +152,7 @@ exit 0
             inherit_stdin: false,
             extra_allowed_tools: None,
             socket_path: None,
+            plan_dir: None,
         };
         let _ = tokio::runtime::Runtime::new()
             .unwrap()
@@ -209,6 +211,7 @@ exit 0
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let _ = tokio::runtime::Runtime::new()
@@ -293,6 +296,7 @@ exit 0
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let _ = tokio::runtime::Runtime::new()
@@ -357,6 +361,7 @@ exit 0
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let _ = tokio::runtime::Runtime::new()
@@ -421,6 +426,7 @@ exit 0
         inherit_stdin: false,
         extra_allowed_tools: None,
         socket_path: None,
+        plan_dir: None,
     };
 
     let _ = tokio::runtime::Runtime::new()

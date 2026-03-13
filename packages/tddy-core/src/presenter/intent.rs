@@ -31,6 +31,8 @@ pub enum UserIntent {
     Scroll(i32),
     /// User requested quit.
     Quit,
+    /// User selected Resume in ErrorRecovery mode.
+    ResumeFromError,
 }
 
 #[cfg(test)]
