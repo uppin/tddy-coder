@@ -2,7 +2,7 @@
 
 ## Summary
 
-A web application that displays an interactive terminal in the browser using the ghostty-web terminal emulator. The app serves as the foundation for future streaming of the tddy-coder TUI, but starts as a generic terminal that spawns the user's default shell.
+A web application that displays an interactive terminal in the browser using the ghostty-web terminal emulator. **tddy-demo TUI streaming over LiveKit** is implemented: GhosttyTerminal component in tddy-web receives ANSI bytes via TerminalService RPC, with Cypress E2E validation. A standalone generic terminal (user's default shell over WebSocket) remains available via the Ghostty-web demo.
 
 ## Recommended Setup
 

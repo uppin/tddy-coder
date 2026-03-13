@@ -38,6 +38,7 @@
             pkgs.git
             pkgs.bun
             pkgs.nodejs_20
+            pkgs.util-linux
           ];
           shellHook = ''
             echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node"

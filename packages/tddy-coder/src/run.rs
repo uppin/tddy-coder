@@ -1019,8 +1019,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 .await
                 {
                     Ok(participant) => {
-                        println!("READY");
-                        let _ = std::io::stdout().flush();
+                        log::info!("READY");
                         participant.run().await;
                     }
                     Err(e) => {
