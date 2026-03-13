@@ -11,10 +11,14 @@ async function main() {
   const port = await getPort();
   const baseUrl = `http://localhost:${port}`;
 
-  const serve = spawn("serve", ["storybook-static", "-p", String(port)], {
-    cwd: projectRoot,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const serve = spawn(
+    "npx",
+    ["http-server", "storybook-static", "-p", String(port), "-c-1", "--cors"],
+    {
+      cwd: projectRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
 
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Server start timeout")), 30000);
