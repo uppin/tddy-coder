@@ -1,30 +1,29 @@
 #!/usr/bin/env bash
-# Remove stale Cargo build fingerprints and deps. Keeps only the newest fingerprint per crate
-# in target/debug/build, target/release/build, target/debug/deps, target/release/deps.
-# Run from repo root.
+# Remove stale Cargo build fingerprints, deps, and incremental. Keeps only the newest per crate
+# in target/debug/build, target/release/build, target/debug/deps, target/release/deps,
+# target/debug/incremental, target/release/incremental. Run from repo root.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-clean_build_dir() {
-  local build_dir="$1"
-  [[ -d "$build_dir" ]] || return 0
+clean_fingerprint_dirs() {
+  local dir="$1"
+  local suffix_sed="$2"
+  [[ -d "$dir" ]] || return 0
 
-  # Collect unique crate names (strip -{16hex} suffix from dir names)
   local crate_names
-  crate_names=$(for d in "$build_dir"/*/; do
+  crate_names=$(for d in "$dir"/*/; do
     [[ -d "$d" ]] || continue
-    basename "${d%/}" | sed -E 's/-[a-f0-9]{16}$//'
+    basename "${d%/}" | sed -E "$suffix_sed"
   done | sort -u)
 
   for crate_name in $crate_names; do
     [[ -n "$crate_name" ]] || continue
     local matches=()
-    for d in "$build_dir/${crate_name}"-*/; do
+    for d in "$dir/${crate_name}"-*/; do
       [[ -d "$d" ]] && matches+=("$d")
     done
 
     if [[ ${#matches[@]} -gt 1 ]]; then
-      # Sort by mtime, newest first; remove all but the newest
       local sorted
       sorted=($(ls -td "${matches[@]}" 2>/dev/null))
       local keep="${sorted[0]}"
@@ -75,9 +74,12 @@ clean_deps_dir() {
 }
 
 echo "Cleaning stale debug fingerprints..."
-clean_build_dir "target/debug/build"
+clean_fingerprint_dirs "target/debug/build" 's/-[a-f0-9]{16}$//'
 echo "Cleaning stale release fingerprints..."
-clean_build_dir "target/release/build"
+clean_fingerprint_dirs "target/release/build" 's/-[a-f0-9]{16}$//'
+echo "Cleaning stale incremental..."
+clean_fingerprint_dirs "target/debug/incremental" 's/-[a-z0-9]+$//'
+clean_fingerprint_dirs "target/release/incremental" 's/-[a-z0-9]+$//'
 echo "Cleaning stale deps (largest disk usage)..."
 clean_deps_dir "target/debug/deps"
 clean_deps_dir "target/release/deps"
