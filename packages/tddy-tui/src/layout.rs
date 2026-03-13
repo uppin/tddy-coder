@@ -50,12 +50,32 @@ pub fn debug_log_height(log_count: usize) -> u16 {
     }
 }
 
+/// Compute the number of terminal lines needed to display `text_len` characters
+/// at `area_width` columns wide, capped at `max_height`.
+///
+/// Returns at least 1. Returns 1 when `area_width` is 0 (safe edge case).
+pub fn prompt_height(text_len: u16, area_width: u16, max_height: u16) -> u16 {
+    log::trace!(
+        "prompt_height: text_len={text_len} area_width={area_width} max_height={max_height}"
+    );
+    if area_width == 0 || text_len == 0 {
+        return 1;
+    }
+    // Ceiling division: how many lines of area_width fit text_len chars
+    let lines = (text_len + area_width - 1) / area_width;
+    let result = lines.max(1).min(max_height);
+    log::trace!("prompt_height -> {result}");
+    result
+}
+
 /// Split the terminal area into six regions, including inbox and optional debug log.
 pub fn layout_chunks_with_inbox(
     area: Rect,
     inbox_h: u16,
     debug_log_h: u16,
+    prompt_h: u16,
 ) -> (Rect, Rect, Rect, Rect, Rect, Rect) {
+    log::trace!("layout_chunks_with_inbox: area={area:?} inbox_h={inbox_h} debug_log_h={debug_log_h} prompt_h={prompt_h}");
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -64,7 +84,7 @@ pub fn layout_chunks_with_inbox(
             Constraint::Length(inbox_h),
             Constraint::Length(1),
             Constraint::Length(debug_log_h),
-            Constraint::Length(1),
+            Constraint::Length(prompt_h),
         ])
         .split(area);
     (
@@ -135,5 +155,51 @@ mod tests {
         assert_eq!(inbox_height(3, false), 0);
         assert_eq!(inbox_height(1, true), 1);
         assert_eq!(inbox_height(10, true), 5);
+    }
+
+    // Acceptance tests for prompt_height (AC1–AC5, FR2)
+
+    #[test]
+    fn test_prompt_height_single_line() {
+        assert_eq!(prompt_height(40, 80, 10), 1);
+    }
+
+    #[test]
+    fn test_prompt_height_exact_width() {
+        assert_eq!(prompt_height(80, 80, 10), 1);
+    }
+
+    #[test]
+    fn test_prompt_height_wraps_to_two_lines() {
+        assert_eq!(prompt_height(81, 80, 10), 2);
+    }
+
+    #[test]
+    fn test_prompt_height_wraps_to_three_lines() {
+        assert_eq!(prompt_height(240, 80, 10), 3);
+    }
+
+    #[test]
+    fn test_prompt_height_capped_at_max() {
+        assert_eq!(prompt_height(1000, 80, 5), 5);
+    }
+
+    #[test]
+    fn test_prompt_height_zero_width_edge_case() {
+        assert_eq!(prompt_height(50, 0, 10), 1);
+    }
+
+    #[test]
+    fn test_prompt_height_empty_text() {
+        assert_eq!(prompt_height(0, 80, 10), 1);
+    }
+
+    #[test]
+    fn test_layout_prompt_bar_height_matches_param() {
+        let area = Rect::new(0, 0, 80, 24);
+        let prompt_h: u16 = 3;
+        let (_activity, _spacer, _status, _inbox, _debug, prompt) =
+            layout_chunks_with_inbox(area, 0, 0, prompt_h);
+        assert_eq!(prompt.height, prompt_h);
     }
 }
