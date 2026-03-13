@@ -96,7 +96,16 @@ impl TestHarness {
 
 #[tokio::test]
 async fn rpc_scenarios() -> Result<()> {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let rpc_log_dir = std::env::temp_dir().join("tddy-livekit-test-logs");
+    let inner = env_logger::Builder::new()
+        .parse_default_env()
+        .is_test(true)
+        .build();
+    let collector =
+        tddy_livekit::rpc_log::RpcTrafficCollector::wrap(&rpc_log_dir, Box::new(inner))
+            .expect("RPC traffic collector init");
+    let _ = collector.install();
+    log::debug!("rpc_scenarios: RPC traffic log at {:?}", rpc_log_dir.join("rpc-traffic.log"));
 
     log::debug!("rpc_scenarios: starting LiveKit container");
     let livekit = LiveKitTestkit::start().await?;

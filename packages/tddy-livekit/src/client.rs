@@ -9,6 +9,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::envelope::encode_request;
 use crate::proto::{CallMetadata, RpcRequest, RpcResponse};
+use crate::rpc_trace;
 use crate::status::Status;
 
 const RPC_TOPIC: &str = "tddy-rpc";
@@ -58,7 +59,7 @@ impl RpcClient {
                         Ok(response) => {
                             let request_id = response.request_id;
                             let has_error = response.error.is_some();
-                            log::debug!(
+                            rpc_trace!(
                                 "RpcClient: received response request_id={} error={} end_of_stream={} payload_len={}",
                                 request_id, has_error, response.end_of_stream, response.response_message.len()
                             );
@@ -78,13 +79,13 @@ impl RpcClient {
                                     if tx.try_send(result.clone()).is_ok() {
                                         if has_error || response.end_of_stream {
                                             streams.remove(&request_id);
-                                            log::debug!(
+                                            rpc_trace!(
                                                 "RpcClient: stream request_id={} closed (error={} end_of_stream={})",
                                                 request_id, has_error, response.end_of_stream
                                             );
                                         }
                                     } else {
-                                        log::debug!(
+                                        rpc_trace!(
                                             "RpcClient: stream try_send failed for request_id={}",
                                             request_id
                                         );
@@ -97,7 +98,7 @@ impl RpcClient {
                                     if let Some(tx) = pending.remove(&request_id) {
                                         let _ = tx.send(result);
                                     } else if !has_error {
-                                        log::debug!(
+                                        rpc_trace!(
                                             "RpcClient: no pending sender for request_id={}",
                                             request_id
                                         );
@@ -106,7 +107,7 @@ impl RpcClient {
                             }
                         }
                         Err(e) => {
-                            log::debug!("RpcClient: failed to decode response: {}", e);
+                            rpc_trace!("RpcClient: failed to decode response: {}", e);
                         }
                     }
                 }
@@ -131,7 +132,7 @@ impl RpcClient {
         request_bytes: Vec<u8>,
     ) -> Result<Vec<u8>, Status> {
         let request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
-        log::debug!(
+        rpc_trace!(
             "RpcClient::call_unary request_id={} {}/{}  ({} bytes)",
             request_id,
             service,
@@ -175,7 +176,7 @@ impl RpcClient {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        log::debug!("RpcClient::call_unary request_id={} published, awaiting response", request_id);
+        rpc_trace!("RpcClient::call_unary request_id={} published, awaiting response", request_id);
 
         rx.await
             .map_err(|_| Status::internal("response channel closed"))?
@@ -191,7 +192,7 @@ impl RpcClient {
         request_bytes: Vec<u8>,
     ) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
         let request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
-        log::debug!(
+        rpc_trace!(
             "RpcClient::call_server_stream request_id={} {}/{}  ({} bytes)",
             request_id,
             service,
@@ -235,7 +236,7 @@ impl RpcClient {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        log::debug!(
+        rpc_trace!(
             "RpcClient::call_server_stream request_id={} published, returning receiver",
             request_id
         );

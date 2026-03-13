@@ -42,65 +42,35 @@ clean_deps_dir() {
   local deps_dir="$1"
   [[ -d "$deps_dir" ]] || return 0
 
-  # Deps files: libcrate-{16hex}.rlib, crate-{16hex}, etc. Group by prefix (crate id).
-  local prefixes
-  prefixes=$(cd "$deps_dir" && for f in *; do
+  # Use Perl for single-process scan (avoids 27k+ stat subprocess calls that caused hangs).
+  # Group by prefix+hash, keep newest hash per prefix, remove stale files.
+  perl -e '
+    use File::Spec;
+    my $dir = shift;
+    opendir my $d, $dir or exit 0;
+    my @files = grep { -f File::Spec->catfile($dir, $_) } readdir $d;
+    closedir $d;
+    my %data;
+    my %best;
+    for my $f (@files) {
+      next unless $f =~ /^([a-zA-Z0-9_.-]+)-([a-f0-9]{16})/;
+      my ($prefix, $hash) = ($1, $2);
+      my $path = File::Spec->catfile($dir, $f);
+      my $m = (stat $path)[9];
+      my $k = "$prefix\0$hash";
+      if (!exists $data{$k} || $m > $data{$k}{m}) { $data{$k}{m} = $m }
+      push @{$data{$k}{paths}}, $path;
+      $best{$prefix} = { h => $hash, m => $data{$k}{m} } if $data{$k}{m} > ($best{$prefix}{m} // 0);
+    }
+    for my $k (keys %data) {
+      my ($p, $h) = split /\0/, $k, 2;
+      next if $best{$p}{h} eq $h;
+      for (@{$data{$k}{paths}}) { print $_, "\n" }
+    }
+  ' "$deps_dir" | while read -r f; do
     [[ -e "$f" ]] || continue
-    echo "$f" | sed -E 's/-[a-f0-9]{16}(\.[a-z0-9]+)?$//'
-  done | sort -u)
-
-  for prefix in $prefixes; do
-    [[ -n "$prefix" ]] || continue
-    local matches=()
-    for f in "$deps_dir/${prefix}"-*; do
-      [[ -e "$f" ]] || continue
-      # Must match -{16hex}.ext or -{16hex} (no ext)
-      [[ "$(basename "$f")" =~ ^"${prefix}"-[a-f0-9]{16}(\.[a-z0-9]+)?$ ]] && matches+=("$f")
-    done
-
-    if [[ ${#matches[@]} -eq 0 ]]; then
-      continue
-    fi
-    local hash_groups
-    hash_groups=$(printf '%s\n' "${matches[@]}" | while read -r f; do
-      basename "$f" | sed -E 's/.*-([a-f0-9]{16})(\.[a-z0-9]+)?$/\1/'
-    done | sort -u)
-    local num_hashes
-    num_hashes=$(echo "$hash_groups" | grep -c . 2>/dev/null || echo 0)
-    if [[ $num_hashes -gt 1 ]]; then
-      # Group by hash: files with same hash stay together. Keep newest hash group.
-      local hash_to_files
-      hash_to_files=$(printf '%s\n' "${matches[@]}" | while read -r f; do
-        local base
-        base=$(basename "$f")
-        local hash
-        hash=$(echo "$base" | sed -E 's/.*-([a-f0-9]{16})(\.[a-z0-9]+)?$/\1/')
-        [[ -n "$hash" ]] && echo "$hash $f"
-      done)
-      local hash_groups
-      hash_groups=$(echo "$hash_to_files" | awk '{print $1}' | sort -u)
-      local keep_hash=""
-      local newest_mtime=0
-      for h in $hash_groups; do
-        local first_file
-        first_file=$(echo "$hash_to_files" | awk -v h="$h" '$1==h {print $2; exit}')
-        [[ -z "$first_file" ]] && continue
-        local mtime
-        mtime=$(stat -f %m "$first_file" 2>/dev/null || stat -c %Y "$first_file" 2>/dev/null)
-        if [[ $mtime -gt $newest_mtime ]]; then
-          newest_mtime=$mtime
-          keep_hash=$h
-        fi
-      done
-      for h in $hash_groups; do
-        [[ "$h" == "$keep_hash" ]] && continue
-        for f in "$deps_dir/${prefix}-${h}"*; do
-          [[ -e "$f" ]] || continue
-          echo "Removing stale: $f"
-          rm -f "$f"
-        done
-      done
-    fi
+    echo "Removing stale: $f"
+    rm -f "$f"
   done
 }
 

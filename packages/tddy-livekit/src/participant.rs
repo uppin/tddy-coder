@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 
 use crate::bridge::RpcBridge;
 use crate::envelope::{decode_request, encode_response, response_from_result};
+use crate::rpc_trace;
 
 const RPC_TOPIC: &str = "tddy-rpc";
 
@@ -58,7 +59,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     continue;
                 };
                 let sender_identity = remote.identity().clone();
-                log::debug!(
+                rpc_trace!(
                     "LiveKitParticipant: incoming RPC payload from {:?} ({} bytes)",
                     sender_identity,
                     payload.len()
@@ -88,7 +89,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         let request = decode_request(payload)?;
         let request_id = request.request_id;
         let meta = request.call_metadata.as_ref();
-        log::debug!(
+        rpc_trace!(
             "LiveKitParticipant::handle_incoming request_id={} {}/{}  from {:?}",
             request_id,
             meta.map(|m| m.service.as_str()).unwrap_or("?"),
@@ -101,7 +102,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         match result {
             Ok(chunks) => {
                 let len = chunks.len();
-                log::debug!(
+                rpc_trace!(
                     "LiveKitParticipant: request_id={} produced {} response chunk(s)",
                     request_id, len
                 );
