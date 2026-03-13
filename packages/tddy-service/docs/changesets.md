@@ -1,7 +1,8 @@
 # Changesets Applied
 
-Wrapped changeset history for tddy-grpc.
+Wrapped changeset history for tddy-service.
 
+- **2026-03-13** [Architecture Change] Dual-Transport Service Codegen — Renamed tddy-grpc to tddy-service; moved echo/terminal from tddy-livekit. Service impls (EchoServiceImpl, TerminalServiceImpl, DaemonService) in tddy-service; generated RpcService server structs + tonic adapter. (tddy-service)
 - **2026-03-13** [Feature] Ghostty Terminal Proto — remote.proto: StreamTerminalIO bidi RPC, TerminalInput, TerminalOutput. TddyRemoteService/DaemonService stubs. (tddy-grpc)
 - **2026-03-12** [Feature] Session Lifecycle Redesign — Early changeset creation in handle_start_session before run_goal. (tddy-grpc)
 - **2026-03-11** [Feature] Terminal Streaming via gRPC — Proto: StreamTerminal RPC, StreamTerminalRequest, TerminalOutput. TddyRemoteService.with_terminal_bytes; stream_terminal subscribes to broadcast, streams bytes to clients. DaemonService stub returns empty stream. Integration tests: stream_terminal_returns_bytes, streamed_bytes_contain_ansi_sequences, multiple_clients_receive_same_stream, stream_terminal_returns_empty_stream_when_no_terminal_bytes. (tddy-grpc)
