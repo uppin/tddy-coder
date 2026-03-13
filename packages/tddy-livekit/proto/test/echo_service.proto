@@ -5,6 +5,8 @@ package test;
 service EchoService {
   rpc Echo(EchoRequest) returns (EchoResponse);
   rpc EchoServerStream(EchoRequest) returns (stream EchoResponse);
+  rpc EchoClientStream(stream EchoRequest) returns (EchoResponse);
+  rpc EchoBidiStream(stream EchoRequest) returns (stream EchoResponse);
 }
 
 message EchoRequest {

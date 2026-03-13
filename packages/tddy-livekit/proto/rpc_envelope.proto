@@ -10,6 +10,8 @@ message RpcRequest {
   Metadata metadata = 4;
   bool end_of_stream = 5;
   bool abort = 6;
+  // Sender's LiveKit participant identity. Server sends responses to this identity.
+  optional string sender_identity = 7;
 }
 
 // RPC response envelope (one message per LiveKit data packet)

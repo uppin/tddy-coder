@@ -100,10 +100,12 @@ All commands can be run from repo root (they use `--filter tddy-web`) or from `p
 
 Tests can reuse a running LiveKit container instead of starting one per run. Speeds up repeated test execution.
 
-**Start a reusable server:**
+**Start or reuse a server:**
 ```bash
-./run-livekit-testkit-server   # Prints LIVEKIT_TESTKIT_WS_URL=ws://127.0.0.1:PORT
+./run-livekit-testkit-server   # Reuses container "tddy-livekit-testkit" if running; prints LIVEKIT_TESTKIT_WS_URL=ws://127.0.0.1:PORT
 ```
+
+The script reuses the same container (`tddy-livekit-testkit`) across runs. No new container is created on each invocation.
 
 **Run tests against it:**
 ```bash

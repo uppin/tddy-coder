@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Launch a LiveKit server container and print connection details for reuse.
+# Launch or reuse a LiveKit server container and print connection details.
+#
+# Reuses existing container "tddy-livekit-testkit" if running. Otherwise creates it.
+# This avoids spawning a new container on each test run.
 #
 # Usage:
 #   ./run-livekit-testkit-server
@@ -12,7 +15,7 @@
 #   export LIVEKIT_TESTKIT_WS_URL=ws://127.0.0.1:PORT
 #   cargo test -p tddy-livekit -p tddy-livekit-testkit
 #
-# Or: eval $(./run-livekit-testkit-server)
+# Or: eval $(./run-livekit-testkit-server | grep '^export ')
 #
 # Requires Docker. Uses livekit/livekit-server:master with --dev mode.
 
@@ -20,41 +23,64 @@ set -euo pipefail
 
 LIVEKIT_IMAGE="livekit/livekit-server:master"
 LIVEKIT_PORT=7880
+CONTAINER_NAME="tddy-livekit-testkit"
 
-cid=$(docker run -d -p "0:${LIVEKIT_PORT}" "${LIVEKIT_IMAGE}" --dev --bind 0.0.0.0)
-trap 'docker rm -f "${cid}" 2>/dev/null || true' EXIT
-
-echo "Waiting for LiveKit HTTP endpoint..." >&2
-for _ in $(seq 1 30); do
-  port_line=$(docker port "${cid}" "${LIVEKIT_PORT}" 2>/dev/null)
-  host_port=$(echo "${port_line}" | sed -n 's/.*://p')
-  if [[ -n "${host_port:-}" ]]; then
-    if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${host_port}/" 2>/dev/null | grep -q 200; then
-      break
-    fi
+# Check for existing running container
+existing=$(docker ps -q -f "name=^${CONTAINER_NAME}$" 2>/dev/null || true)
+if [[ -n "${existing}" ]]; then
+  echo "Reusing existing LiveKit container: ${CONTAINER_NAME}" >&2
+  host_port=$(docker port "${CONTAINER_NAME}" "${LIVEKIT_PORT}" 2>/dev/null | sed -n 's/.*://p')
+  if [[ -z "${host_port:-}" ]]; then
+    echo "Failed to get port from existing container" >&2
+    exit 1
   fi
-  sleep 1
-done
+  ws_url="ws://127.0.0.1:${host_port}"
+else
+  # Check for stopped container - start it
+  stopped=$(docker ps -aq -f "name=^${CONTAINER_NAME}$" 2>/dev/null || true)
+  if [[ -n "${stopped}" ]]; then
+    echo "Starting existing container: ${CONTAINER_NAME}" >&2
+    docker start "${CONTAINER_NAME}" >/dev/null
+    sleep 2
+    host_port=$(docker port "${CONTAINER_NAME}" "${LIVEKIT_PORT}" 2>/dev/null | sed -n 's/.*://p')
+    if [[ -z "${host_port:-}" ]]; then
+      echo "Failed to get port from started container" >&2
+      exit 1
+    fi
+    ws_url="ws://127.0.0.1:${host_port}"
+  else
+    # Create new container with fixed name for reuse
+    echo "Creating new LiveKit container: ${CONTAINER_NAME}" >&2
+    docker run -d --name "${CONTAINER_NAME}" -p "0:${LIVEKIT_PORT}" "${LIVEKIT_IMAGE}" --dev --bind 0.0.0.0
 
-host_port=$(docker port "${cid}" "${LIVEKIT_PORT}" 2>/dev/null | sed -n 's/.*://p')
-if [[ -z "${host_port:-}" ]]; then
-  echo "Failed to get container port" >&2
-  exit 1
+    echo "Waiting for LiveKit HTTP endpoint..." >&2
+    for _ in $(seq 1 30); do
+      port_line=$(docker port "${CONTAINER_NAME}" "${LIVEKIT_PORT}" 2>/dev/null)
+      host_port=$(echo "${port_line}" | sed -n 's/.*://p')
+      if [[ -n "${host_port:-}" ]]; then
+        if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${host_port}/" 2>/dev/null | grep -q 200; then
+          break
+        fi
+      fi
+      sleep 1
+    done
+
+    host_port=$(docker port "${CONTAINER_NAME}" "${LIVEKIT_PORT}" 2>/dev/null | sed -n 's/.*://p')
+    if [[ -z "${host_port:-}" ]]; then
+      echo "Failed to get container port" >&2
+      exit 1
+    fi
+    ws_url="ws://127.0.0.1:${host_port}"
+  fi
 fi
-
-ws_url="ws://127.0.0.1:${host_port}"
-
-# Don't rm on exit - user wants to keep it running
-trap - EXIT
 
 echo ""
 echo "export LIVEKIT_TESTKIT_WS_URL=${ws_url}"
 echo ""
-echo "LiveKit testkit server running at ${ws_url}"
-echo "Container ID: ${cid}"
+echo "LiveKit testkit server at ${ws_url} (container: ${CONTAINER_NAME})"
 echo ""
 echo "To run tests against this instance:"
 echo "  export LIVEKIT_TESTKIT_WS_URL=${ws_url}"
 echo "  cargo test -p tddy-livekit -p tddy-livekit-testkit"
 echo ""
-echo "To stop: docker rm -f ${cid}"
+echo "To stop and remove: docker rm -f ${CONTAINER_NAME}"

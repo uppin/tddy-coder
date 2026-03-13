@@ -67,6 +67,7 @@ mod tests {
             metadata: None,
             end_of_stream: false,
             abort: false,
+            sender_identity: None,
         };
         let encoded = encode_request(request).expect("encode");
         let decoded = decode_request(&encoded).expect("decode");
@@ -76,5 +77,24 @@ mod tests {
             decoded.call_metadata.as_ref().unwrap().service,
             "test.EchoService"
         );
+    }
+
+    #[test]
+    fn envelope_encode_decode_preserves_sender_identity() {
+        let request = RpcRequest {
+            request_id: 1,
+            request_message: b"test".to_vec(),
+            call_metadata: Some(CallMetadata {
+                service: "test.EchoService".to_string(),
+                method: "Echo".to_string(),
+            }),
+            metadata: None,
+            end_of_stream: true,
+            abort: false,
+            sender_identity: Some("client".to_string()),
+        };
+        let encoded = encode_request(request).expect("encode");
+        let decoded = decode_request(&encoded).expect("decode");
+        assert_eq!(decoded.sender_identity.as_deref(), Some("client"));
     }
 }

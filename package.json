@@ -1,10 +1,11 @@
 {
   "private": true,
-  "workspaces": ["packages/tddy-web"],
+  "workspaces": ["packages/tddy-web", "packages/tddy-livekit-web"],
   "scripts": {
     "build": "bun run --filter tddy-web build",
     "storybook": "bun run --filter tddy-web storybook",
     "cypress:component": "bun run --filter tddy-web cypress:component",
-    "cypress:e2e": "bun run --filter tddy-web cypress:e2e"
+    "cypress:e2e": "bun run --filter tddy-web cypress:e2e",
+    "cleanup:test-processes": "bash scripts/cleanup-test-processes.sh"
   }
 }

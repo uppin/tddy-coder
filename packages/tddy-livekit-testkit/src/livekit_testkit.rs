@@ -108,8 +108,7 @@ impl LiveKitTestkit {
     }
 
     async fn wait_for_api_url_async(http_url: &str) -> Result<()> {
-        let client =
-            RoomClient::with_api_key(http_url, DEV_API_KEY, DEV_API_SECRET);
+        let client = RoomClient::with_api_key(http_url, DEV_API_KEY, DEV_API_SECRET);
 
         tokio::time::timeout(API_READY_TIMEOUT, async {
             loop {
@@ -123,11 +122,13 @@ impl LiveKitTestkit {
             }
         })
         .await
-        .map_err(|_| anyhow::anyhow!(
-            "LiveKit API at {} did not become ready within {:?}",
-            http_url,
-            API_READY_TIMEOUT
-        ))
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "LiveKit API at {} did not become ready within {:?}",
+                http_url,
+                API_READY_TIMEOUT
+            )
+        })
     }
 
     /// Poll ListRooms until the Twirp API responds, proving the full server

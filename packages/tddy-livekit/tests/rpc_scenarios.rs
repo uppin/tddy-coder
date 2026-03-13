@@ -9,13 +9,19 @@
 use anyhow::Result;
 use livekit::prelude::*;
 use prost::Message;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tddy_livekit::proto::test::{EchoRequest, EchoResponse};
 use tddy_livekit::{EchoServiceImpl, LiveKitParticipant, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 
+const RPC_TOPIC: &str = "tddy-rpc";
+
 const SERVER_IDENTITY: &str = "server";
 const CLIENT_IDENTITY: &str = "client";
+const CLIENT1_IDENTITY: &str = "client1";
+const CLIENT2_IDENTITY: &str = "client2";
 const PARTICIPANT_TIMEOUT: Duration = Duration::from_secs(10);
 
 async fn wait_for_participant(
@@ -25,10 +31,17 @@ async fn wait_for_participant(
 ) -> Result<()> {
     let target: ParticipantIdentity = identity.to_string().into();
     if room.remote_participants().contains_key(&target) {
-        log::debug!("wait_for_participant: {} already present", identity);
+        log::info!(
+            "[rpc_scenarios] wait_for_participant: {} already present",
+            identity
+        );
         return Ok(());
     }
-    log::debug!("wait_for_participant: waiting for {}", identity);
+    log::info!(
+        "[rpc_scenarios] wait_for_participant: waiting for {} (remote_participants={})",
+        identity,
+        room.remote_participants().len()
+    );
     tokio::time::timeout(PARTICIPANT_TIMEOUT, async {
         while let Some(event) = events.recv().await {
             if let RoomEvent::ParticipantConnected(p) = event {
@@ -37,6 +50,10 @@ async fn wait_for_participant(
                     p.identity()
                 );
                 if p.identity() == target {
+                    log::info!(
+                        "[rpc_scenarios] wait_for_participant: ParticipantConnected {:?}",
+                        p.identity()
+                    );
                     return;
                 }
             }
@@ -78,7 +95,10 @@ impl TestHarness {
 
         let rpc_events = client_room.subscribe();
         wait_for_participant(&client_room, &mut client_events, SERVER_IDENTITY).await?;
-        log::debug!("TestHarness: harness ready for room={}", room_name);
+        log::info!(
+            "[rpc_scenarios] TestHarness: harness ready for room={}",
+            room_name
+        );
 
         let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
 
@@ -94,6 +114,73 @@ impl TestHarness {
     }
 }
 
+/// Harness with server + 2 clients. Client2 counts RPC DataReceived to verify it does not receive responses meant for client1.
+struct ThreeParticipantHarness {
+    client1_rpc: RpcClient,
+    client2_rpc_received: Arc<AtomicUsize>,
+    server_handle: tokio::task::JoinHandle<()>,
+    _client2_listener: tokio::task::JoinHandle<()>,
+}
+
+impl ThreeParticipantHarness {
+    async fn start(livekit: &LiveKitTestkit, room_name: &str) -> Result<Self> {
+        let url = livekit.get_ws_url();
+        let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
+        let client1_token = livekit.generate_token(room_name, CLIENT1_IDENTITY)?;
+        let client2_token = livekit.generate_token(room_name, CLIENT2_IDENTITY)?;
+
+        let server = LiveKitParticipant::connect(
+            &url,
+            &server_token,
+            EchoServiceImpl,
+            RoomOptions::default(),
+        )
+        .await?;
+        let server_handle = tokio::spawn(async move { server.run().await });
+
+        let (client1_room, mut client1_events) =
+            Room::connect(&url, &client1_token, RoomOptions::default())
+                .await
+                .map_err(|e| anyhow::anyhow!("client1 connect: {}", e))?;
+        wait_for_participant(&client1_room, &mut client1_events, SERVER_IDENTITY).await?;
+        let client1_rpc_events = client1_room.subscribe();
+        let client1_rpc = RpcClient::new(
+            client1_room,
+            SERVER_IDENTITY.to_string(),
+            client1_rpc_events,
+        );
+
+        let (client2_room, mut client2_events) =
+            Room::connect(&url, &client2_token, RoomOptions::default())
+                .await
+                .map_err(|e| anyhow::anyhow!("client2 connect: {}", e))?;
+        wait_for_participant(&client2_room, &mut client2_events, SERVER_IDENTITY).await?;
+        let mut client2_rpc_events = client2_room.subscribe();
+        let client2_rpc_received = Arc::new(AtomicUsize::new(0));
+        let client2_rpc_received_clone = client2_rpc_received.clone();
+        let _client2_listener = tokio::spawn(async move {
+            while let Some(event) = client2_rpc_events.recv().await {
+                if let RoomEvent::DataReceived { topic, .. } = event {
+                    if topic.as_deref() == Some(RPC_TOPIC) {
+                        client2_rpc_received_clone.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            }
+        });
+
+        Ok(Self {
+            client1_rpc,
+            client2_rpc_received,
+            server_handle,
+            _client2_listener,
+        })
+    }
+
+    fn teardown(self) {
+        self.server_handle.abort();
+    }
+}
+
 #[tokio::test]
 async fn rpc_scenarios() -> Result<()> {
     let rpc_log_dir = std::env::temp_dir().join("tddy-livekit-test-logs");
@@ -101,11 +188,13 @@ async fn rpc_scenarios() -> Result<()> {
         .parse_default_env()
         .is_test(true)
         .build();
-    let collector =
-        tddy_livekit::rpc_log::RpcTrafficCollector::wrap(&rpc_log_dir, Box::new(inner))
-            .expect("RPC traffic collector init");
+    let collector = tddy_livekit::rpc_log::RpcTrafficCollector::wrap(&rpc_log_dir, Box::new(inner))
+        .expect("RPC traffic collector init");
     let _ = collector.install();
-    log::debug!("rpc_scenarios: RPC traffic log at {:?}", rpc_log_dir.join("rpc-traffic.log"));
+    log::debug!(
+        "rpc_scenarios: RPC traffic log at {:?}",
+        rpc_log_dir.join("rpc-traffic.log")
+    );
 
     log::debug!("rpc_scenarios: starting LiveKit container");
     let livekit = LiveKitTestkit::start().await?;
@@ -118,7 +207,7 @@ async fn rpc_scenarios() -> Result<()> {
 
         // --- Echo returns the same message ---
         {
-            log::debug!("scenario: echo same message");
+            log::info!("[rpc_scenarios] scenario: echo same message");
             let request = EchoRequest {
                 message: "hello world".to_string(),
             };
@@ -316,6 +405,123 @@ async fn rpc_scenarios() -> Result<()> {
             let result = first.unwrap();
             assert!(result.is_err(), "Expected error for unknown service");
         }
+
+        harness.teardown();
+    }
+
+    // -----------------------------------------------------------------------
+    // Client Streaming RPC scenarios
+    // -----------------------------------------------------------------------
+    {
+        let harness = TestHarness::start(&livekit, "client-stream-scenarios").await?;
+
+        {
+            log::debug!("scenario: client stream concatenates messages");
+            let requests = vec![
+                EchoRequest {
+                    message: "one".to_string(),
+                },
+                EchoRequest {
+                    message: "two".to_string(),
+                },
+                EchoRequest {
+                    message: "three".to_string(),
+                },
+            ];
+            let request_bytes_list: Vec<Vec<u8>> =
+                requests.iter().map(|r| r.encode_to_vec()).collect();
+            let response_bytes = harness
+                .rpc_client
+                .call_client_stream("test.EchoService", "EchoClientStream", request_bytes_list)
+                .await
+                .map_err(|e| anyhow::anyhow!("client stream: {}", e))?;
+            let response = EchoResponse::decode(&response_bytes[..])?;
+            assert_eq!(response.message, "one | two | three");
+        }
+
+        harness.teardown();
+    }
+
+    // -----------------------------------------------------------------------
+    // Bidirectional Streaming RPC scenarios
+    // -----------------------------------------------------------------------
+    {
+        let harness = TestHarness::start(&livekit, "bidi-stream-scenarios").await?;
+
+        {
+            log::debug!("scenario: bidi stream echoes each message");
+            let requests = vec![
+                EchoRequest {
+                    message: "alpha".to_string(),
+                },
+                EchoRequest {
+                    message: "beta".to_string(),
+                },
+                EchoRequest {
+                    message: "gamma".to_string(),
+                },
+            ];
+            let request_bytes_list: Vec<Vec<u8>> =
+                requests.iter().map(|r| r.encode_to_vec()).collect();
+            let mut rx = harness
+                .rpc_client
+                .call_bidi_stream("test.EchoService", "EchoBidiStream", request_bytes_list)
+                .await
+                .map_err(|e| anyhow::anyhow!("bidi stream: {}", e))?;
+
+            let mut received = Vec::new();
+            while let Some(chunk) = rx.recv().await {
+                let bytes = chunk.map_err(|e| anyhow::anyhow!("bidi chunk: {}", e))?;
+                let response = EchoResponse::decode(&bytes[..])?;
+                received.push(response.message);
+            }
+            assert_eq!(received.len(), 3);
+            assert_eq!(received[0], "alpha");
+            assert_eq!(received[1], "beta");
+            assert_eq!(received[2], "gamma");
+        }
+
+        harness.teardown();
+    }
+
+    // -----------------------------------------------------------------------
+    // Response isolation: only requesting participant receives stream responses
+    // -----------------------------------------------------------------------
+    {
+        let harness = ThreeParticipantHarness::start(&livekit, "response-isolation").await?;
+
+        log::debug!("scenario: only requesting participant receives server stream responses");
+        let request = EchoRequest {
+            message: "isolated".to_string(),
+        };
+        let mut rx = harness
+            .client1_rpc
+            .call_server_stream(
+                "test.EchoService",
+                "EchoServerStream",
+                request.encode_to_vec(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("stream call: {}", e))?;
+
+        let mut messages = Vec::new();
+        while let Some(chunk) = rx.recv().await {
+            let bytes = chunk.map_err(|e| anyhow::anyhow!("stream chunk: {}", e))?;
+            let response = EchoResponse::decode(&bytes[..])?;
+            messages.push(response.message);
+        }
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0], "isolated #1");
+        assert_eq!(messages[1], "isolated #2");
+        assert_eq!(messages[2], "isolated #3");
+
+        let client2_received = harness.client2_rpc_received.load(Ordering::SeqCst);
+        assert_eq!(
+            client2_received,
+            0,
+            "client2 must not receive any RPC responses; only the requesting participant (client1) should get the stream"
+        );
 
         harness.teardown();
     }
