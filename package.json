@@ -1,6 +1,6 @@
 {
   "private": true,
-  "workspaces": ["packages/tddy-web"],
+  "workspaces": ["packages/tddy-web", "packages/tddy-livekit-web"],
   "scripts": {
     "build": "bun run --filter tddy-web build",
     "storybook": "bun run --filter tddy-web storybook",

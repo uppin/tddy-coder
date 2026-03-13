@@ -39,10 +39,7 @@ impl RpcTrafficCollector {
         let dir = log_dir.as_ref();
         fs::create_dir_all(dir)?;
         let path = dir.join("rpc-traffic.log");
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
         Ok(Self {
             inner,
             file: Mutex::new(BufWriter::new(file)),
@@ -108,7 +105,9 @@ mod tests {
 
         struct Noop;
         impl log::Log for Noop {
-            fn enabled(&self, _: &log::Metadata) -> bool { false }
+            fn enabled(&self, _: &log::Metadata) -> bool {
+                false
+            }
             fn log(&self, _: &log::Record) {}
             fn flush(&self) {}
         }

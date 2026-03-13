@@ -35,8 +35,7 @@ impl RpcClient {
         mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
     ) -> Self {
         let pending_unary: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
-        let pending_streams: Arc<Mutex<PendingStreamMap>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let pending_streams: Arc<Mutex<PendingStreamMap>> = Arc::new(Mutex::new(HashMap::new()));
         let pending_unary_clone = pending_unary.clone();
         let pending_streams_clone = pending_streams.clone();
 
@@ -150,6 +149,7 @@ impl RpcClient {
             pending.insert(request_id, tx);
         }
 
+        let sender_identity = self.room.local_participant().identity().to_string();
         let request = RpcRequest {
             request_id,
             request_message: request_bytes,
@@ -158,8 +158,9 @@ impl RpcClient {
                 method: method.to_string(),
             }),
             metadata: None,
-            end_of_stream: false,
+            end_of_stream: true,
             abort: false,
+            sender_identity: Some(sender_identity),
         };
 
         let payload = encode_request(request).map_err(Status::internal)?;
@@ -176,7 +177,10 @@ impl RpcClient {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        rpc_trace!("RpcClient::call_unary request_id={} published, awaiting response", request_id);
+        rpc_trace!(
+            "RpcClient::call_unary request_id={} published, awaiting response",
+            request_id
+        );
 
         rx.await
             .map_err(|_| Status::internal("response channel closed"))?
@@ -210,6 +214,7 @@ impl RpcClient {
             pending.insert(request_id, tx);
         }
 
+        let sender_identity = self.room.local_participant().identity().to_string();
         let request = RpcRequest {
             request_id,
             request_message: request_bytes,
@@ -218,8 +223,9 @@ impl RpcClient {
                 method: method.to_string(),
             }),
             metadata: None,
-            end_of_stream: false,
+            end_of_stream: true,
             abort: false,
+            sender_identity: Some(sender_identity),
         };
 
         let payload = encode_request(request).map_err(Status::internal)?;
@@ -240,6 +246,168 @@ impl RpcClient {
             "RpcClient::call_server_stream request_id={} published, returning receiver",
             request_id
         );
+
+        Ok(rx)
+    }
+
+    /// Call a client streaming RPC method. Sends multiple request messages, returns single response.
+    pub async fn call_client_stream(
+        &self,
+        service: &str,
+        method: &str,
+        request_bytes_list: Vec<Vec<u8>>,
+    ) -> Result<Vec<u8>, Status> {
+        let request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
+        rpc_trace!(
+            "RpcClient::call_client_stream request_id={} {}/{}  ({} messages)",
+            request_id,
+            service,
+            method,
+            request_bytes_list.len()
+        );
+
+        let (tx, rx) = oneshot::channel();
+
+        {
+            let mut pending = self
+                .pending_unary
+                .lock()
+                .map_err(|e| Status::internal(e.to_string()))?;
+            pending.insert(request_id, tx);
+        }
+
+        let call_metadata = CallMetadata {
+            service: service.to_string(),
+            method: method.to_string(),
+        };
+        let sender_identity = self.room.local_participant().identity().to_string();
+
+        let len = request_bytes_list.len();
+        for (i, request_bytes) in request_bytes_list.into_iter().enumerate() {
+            let is_first = i == 0;
+            let is_last = i == len - 1;
+            let request = RpcRequest {
+                request_id,
+                request_message: request_bytes,
+                call_metadata: if is_first {
+                    Some(call_metadata.clone())
+                } else {
+                    None
+                },
+                metadata: None,
+                end_of_stream: is_last,
+                abort: false,
+                sender_identity: Some(sender_identity.clone()),
+            };
+
+            let payload = encode_request(request).map_err(Status::internal)?;
+            let packet = DataPacket {
+                payload,
+                topic: Some(RPC_TOPIC.to_string()),
+                reliable: true,
+                destination_identities: vec![self.target_identity.clone()],
+            };
+
+            self.room
+                .local_participant()
+                .publish_data(packet)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+        }
+
+        rx.await
+            .map_err(|_| Status::internal("response channel closed"))?
+    }
+
+    /// Call a bidirectional streaming RPC method. Sends multiple requests, returns receiver for response stream.
+    pub async fn call_bidi_stream(
+        &self,
+        service: &str,
+        method: &str,
+        request_bytes_list: Vec<Vec<u8>>,
+    ) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
+        let request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
+        rpc_trace!(
+            "RpcClient::call_bidi_stream request_id={} {}/{}  ({} messages)",
+            request_id,
+            service,
+            method,
+            request_bytes_list.len()
+        );
+
+        let (tx, rx) = mpsc::channel(32);
+
+        {
+            let mut pending = self
+                .pending_streams
+                .lock()
+                .map_err(|e| Status::internal(e.to_string()))?;
+            pending.insert(request_id, tx);
+        }
+
+        let call_metadata = CallMetadata {
+            service: service.to_string(),
+            method: method.to_string(),
+        };
+        let sender_identity = self.room.local_participant().identity().to_string();
+
+        let mut iter = request_bytes_list.into_iter().peekable();
+        let mut is_first = true;
+        while let Some(request_bytes) = iter.next() {
+            let is_last = iter.peek().is_none();
+            let request = RpcRequest {
+                request_id,
+                request_message: request_bytes,
+                call_metadata: if is_first {
+                    Some(call_metadata.clone())
+                } else {
+                    None
+                },
+                metadata: None,
+                end_of_stream: is_last,
+                abort: false,
+                sender_identity: Some(sender_identity.clone()),
+            };
+            is_first = false;
+
+            let payload = encode_request(request).map_err(Status::internal)?;
+            let packet = DataPacket {
+                payload,
+                topic: Some(RPC_TOPIC.to_string()),
+                reliable: true,
+                destination_identities: vec![self.target_identity.clone()],
+            };
+
+            self.room
+                .local_participant()
+                .publish_data(packet)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+        }
+
+        if is_first {
+            let end_request = RpcRequest {
+                request_id,
+                request_message: vec![],
+                call_metadata: Some(call_metadata),
+                metadata: None,
+                end_of_stream: true,
+                abort: false,
+                sender_identity: Some(sender_identity),
+            };
+            let payload = encode_request(end_request).map_err(Status::internal)?;
+            let packet = DataPacket {
+                payload,
+                topic: Some(RPC_TOPIC.to_string()),
+                reliable: true,
+                destination_identities: vec![self.target_identity.clone()],
+            };
+            self.room
+                .local_participant()
+                .publish_data(packet)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+        }
 
         Ok(rx)
     }
