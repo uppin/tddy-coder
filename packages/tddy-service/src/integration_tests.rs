@@ -67,6 +67,28 @@ mod codegen_acceptance {
 
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn echo_bridge_returns_not_found_for_unknown_service() {
+        let bridge = create_echo_bridge();
+        let msg = RpcMessage {
+            payload: vec![],
+            metadata: RequestMetadata::default(),
+        };
+
+        let result = bridge
+            .handle_messages("nonexistent.Service", "Echo", &[msg])
+            .await;
+
+        match &result {
+            Err(status) => assert!(
+                status.message.contains("Unknown service"),
+                "Error should mention unknown service, got: {}",
+                status.message
+            ),
+            Ok(_) => panic!("Expected error for unknown service"),
+        }
+    }
 }
 
 #[cfg(test)]

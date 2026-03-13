@@ -7,10 +7,11 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 
+use tddy_rpc::{Code, Status};
+
 use crate::envelope::encode_request;
 use crate::proto::{CallMetadata, RpcRequest, RpcResponse};
 use crate::rpc_trace;
-use crate::status::Status;
 
 const RPC_TOPIC: &str = "tddy-rpc";
 
@@ -72,7 +73,7 @@ impl RpcClient {
                             );
                             let result = if let Some(err) = response.error {
                                 Err(Status {
-                                    code: crate::status::Code::Unknown,
+                                    code: Code::Unknown,
                                     message: err.message,
                                 })
                             } else {

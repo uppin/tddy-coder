@@ -28,3 +28,12 @@
 - **tddy-e2e, tddy-core**: Tests pass (livekit feature optional for webrtc-free CI)
 - **tddy-livekit**: Build fails on macOS/Nix due to webrtc-sys `uuid_string_t` (pre-existing env issue, not plan-related)
 - **terminal_service_acceptance**: Moved to tddy-e2e; `packages/tddy-livekit/proto/terminal.proto` removed (unused)
+
+### Test Fixes (@fix-tests) 2026-03-13
+
+**Status**: All passing
+
+**Fixes applied**:
+1. **tddy-livekit client.rs**: Replaced invalid `crate::status::Status` import with `tddy_rpc::{Code, Status}` (no `status` module in tddy-livekit)
+2. **tddy-codegen**: Added service name validation in generated `handle_rpc` and `handle_rpc_stream` — unknown services now return `Status::not_found("Unknown service: {service})` instead of incorrectly matching methods
+3. **tddy-service**: Added `echo_bridge_returns_not_found_for_unknown_service` codegen acceptance test

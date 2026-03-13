@@ -520,10 +520,22 @@ fn generate_rpc_service_impl(service: &Service, buf: &mut String, rpc: &str) {
     writeln!(buf).unwrap();
     writeln!(
         buf,
-        "    async fn handle_rpc(&self, _service: &str, method: &str, message: &{}::RpcMessage) -> {}::RpcResult {{",
+        "    async fn handle_rpc(&self, service: &str, method: &str, message: &{}::RpcMessage) -> {}::RpcResult {{",
         rpc, rpc
     )
     .unwrap();
+    writeln!(
+        buf,
+        "        if service != Self::NAME {{",
+    )
+    .unwrap();
+    writeln!(
+        buf,
+        "            return {}::RpcResult::Unary(Err({}::Status::not_found(format!(\"Unknown service: {{}}\", service))));",
+        rpc, rpc
+    )
+    .unwrap();
+    writeln!(buf, "        }}").unwrap();
     let unary_methods: Vec<_> = service
         .methods
         .iter()
@@ -565,6 +577,18 @@ fn generate_rpc_service_impl(service: &Service, buf: &mut String, rpc: &str) {
         rpc, rpc
     )
     .unwrap();
+    writeln!(
+        buf,
+        "        if service != Self::NAME {{",
+    )
+    .unwrap();
+    writeln!(
+        buf,
+        "            return {}::RpcResult::Unary(Err({}::Status::not_found(format!(\"Unknown service: {{}}\", service))));",
+        rpc, rpc
+    )
+    .unwrap();
+    writeln!(buf, "        }}").unwrap();
     writeln!(buf, "        match method {{").unwrap();
     for method in &service.methods {
         if method.client_streaming {
