@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-03-13** [Feature] Web Bundle Serving — `--web-port` and `--web-bundle-path` CLI flags. When both provided, axum static file server runs alongside gRPC/LiveKit in TUI and daemon modes. validate_web_args enforces both-or-neither. web_server module with ServeDir. (tddy-coder)
 - **2026-03-13** [Feature] Ghostty Terminal LiveKit — DemoArgs: livekit_url, livekit_token, livekit_room, livekit_identity. run_full_workflow_tui: when livekit_url set, create TerminalServiceImpl, connect LiveKitParticipant, wire ByteCallback broadcast to terminal bytes. tddy-demo logs READY when connected. (tddy-coder)
 - **2026-03-13** [Bug Fix] Session and Workflow Fixes — plan_dir_under_sessions_base_when_output_dir_is_dot integration test. (tddy-coder)
 - **2026-03-12** [Feature] Session Lifecycle Redesign — Early changeset creation in run_plan_to_get_dir before run_goal_plain. (tddy-coder)
