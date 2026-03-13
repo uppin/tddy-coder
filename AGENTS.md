@@ -8,12 +8,15 @@
 |---------|------|--------------|
 | `packages/tddy-core` | Library | CodingBackend trait, Workflow state machine, output parser, Claude/Mock backends |
 | `packages/tddy-coder` | Binary | CLI: `--goal plan`, reads stdin, produces PRD.md + TODO.md |
+| `packages/tddy-web` | Web app | React dashboard for dev progress tracking (Storybook, Cypress) |
 
 ## Toolchain
 
 **Rust workspace**: Root `Cargo.toml` defines workspace members. Build/test from repo root.
 
-**Nix** provides the development environment (rustc, cargo, rustfmt, clippy, rust-analyzer).
+**Bun workspace**: Root `package.json` with `workspaces: ["packages/tddy-web"]`. Run `bun install` from repo root.
+
+**Nix** provides the development environment (rustc, cargo, rustfmt, clippy, rust-analyzer, bun).
 
 ### Setup (one-time)
 
@@ -26,14 +29,23 @@ With **direnv**: `direnv allow` once; the shell loads automatically when you `cd
 
 ### Commands
 
+All `./` scripts use nix dev shell via `--profile ./.nix-profile` for a consistent toolchain.
+
 | Action | Command |
 |--------|---------|
+| Dev shell | `./dev` — enter nix dev shell with a GC-rooted profile. With args, runs the command inside the shell (e.g. `./dev cargo clippy`) |
 | Build | `cargo build` or `cargo build -p tddy-core` / `-p tddy-coder` |
-| Release | `./release` — optimized production build (output: `target/release/tddy-coder`) |
-| Test | `cargo test` or `cargo test -p tddy-core` |
+| Release | `./release` — optimized production build (output: `target/release/tddy-coder`, `target/release/tddy-tools`) |
+| Test | `./test` — builds tddy-coder + tddy-tools, then runs all tests (output also written to `.verify-result.txt`). Supports args: `./test -p tddy-core` or `./test -- test_name` |
+| Clean | `./clean` — removes stale Cargo build fingerprints from `target/debug/build` and `target/release/build`, keeping only the newest per crate |
 | Lint | `cargo clippy -- -D warnings` |
 | Format | `cargo fmt` |
 | Run CLI | `cargo run -p tddy-coder -- --goal plan` (reads feature from stdin) |
+| Web install | `bun install` — install web workspace dependencies |
+| Web build | `bun run build` (from root or `packages/tddy-web`) |
+| Storybook | `bun run storybook` — dev server at http://localhost:6006 |
+| Cypress component | `bun run cypress:component` (from `packages/tddy-web`) |
+| Cypress e2e | `bun run cypress:e2e` (from `packages/tddy-web`; requires Storybook running) |
 
 ## Judgment Boundaries
 
