@@ -263,7 +263,7 @@ fn run_plan_without_output_dir(
     debug: bool,
     socket_path: Option<&PathBuf>,
 ) -> Option<PathBuf> {
-    let inherit_stdin = true;
+    let inherit_stdin = false;
     let (output_dir_for_ctx, session_base_opt) = if output_dir == Path::new(".") {
         match crate::output::sessions_base_path() {
             Ok(base) => {
@@ -287,11 +287,12 @@ fn run_plan_without_output_dir(
         event_tx.clone(),
     ));
     let engine = WorkflowEngine::new(backend.clone(), storage_dir, Some(hooks));
+    let repo_path_str = output_dir_for_ctx.display().to_string();
     let mut context_values = std::collections::HashMap::new();
     context_values.insert("feature_input".to_string(), serde_json::json!(input));
     context_values.insert(
         "output_dir".to_string(),
-        serde_json::to_value(output_dir_for_ctx).unwrap(),
+        serde_json::to_value(&output_dir_for_ctx).unwrap(),
     );
     if let Some(ref base) = session_base_opt {
         context_values.insert(
@@ -312,13 +313,11 @@ fn run_plan_without_output_dir(
     if let Some(ref dir) = session_dir {
         let init_cs = crate::changeset::Changeset {
             initial_prompt: Some(input.to_string()),
+            repo_path: Some(repo_path_str),
             ..crate::changeset::Changeset::default()
         };
         let _ = crate::changeset::write_changeset(dir, &init_cs);
-        context_values.insert(
-            "plan_dir".to_string(),
-            serde_json::to_value(dir).unwrap(),
-        );
+        context_values.insert("plan_dir".to_string(), serde_json::to_value(dir).unwrap());
     }
     if debug_output_path.is_none() {
         if let Some(ref dir) = session_dir {
@@ -447,7 +446,14 @@ pub fn run_workflow(
     debug: bool,
     socket_path: Option<PathBuf>,
 ) {
-    let inherit_stdin = true;
+    let inherit_stdin = false;
+
+    // Resolve "." to absolute path for new sessions.
+    let output_dir = if output_dir == Path::new(".") {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    } else {
+        output_dir
+    };
 
     let plan_dir = match plan_dir {
         Some(p) => p,
@@ -489,6 +495,13 @@ pub fn run_workflow(
         crate::resolve_log_defaults(conversation_output_path, debug_output_path, &plan_dir);
 
     let cs_pre = read_changeset(&plan_dir).ok();
+    // Use repo_path from changeset for resume from any directory; fall back to resolved output_dir.
+    let effective_output_dir = cs_pre
+        .as_ref()
+        .and_then(|c| c.repo_path.as_ref())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| output_dir.clone());
+
     let plan_needs_completion = cs_pre.as_ref().is_some_and(|c| {
         c.state.current == "Init"
             && (!plan_dir.join("PRD.md").exists() || get_session_for_tag(c, "plan").is_none())
@@ -506,15 +519,11 @@ pub fn run_workflow(
                 crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(event_tx.clone()),
             );
             let engine = WorkflowEngine::new(backend.clone(), storage_dir, Some(hooks));
-            let output_dir = plan_dir
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| plan_dir.clone());
             let mut ctx = std::collections::HashMap::new();
             ctx.insert("feature_input".to_string(), serde_json::json!(input));
             ctx.insert(
                 "output_dir".to_string(),
-                serde_json::to_value(output_dir).unwrap(),
+                serde_json::to_value(effective_output_dir.clone()).unwrap(),
             );
             ctx.insert(
                 "plan_dir".to_string(),
@@ -598,7 +607,7 @@ pub fn run_workflow(
     );
     context_values.insert(
         "output_dir".to_string(),
-        serde_json::to_value(output_dir).unwrap(),
+        serde_json::to_value(effective_output_dir).unwrap(),
     );
     context_values.insert(
         "model".to_string(),

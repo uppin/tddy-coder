@@ -44,13 +44,9 @@ async fn echo_unary_rpc_returns_same_message_over_livekit_data_channel() -> Resu
     let server_token = livekit.generate_token(ROOM, SERVER_IDENTITY)?;
     let client_token = livekit.generate_token(ROOM, CLIENT_IDENTITY)?;
 
-    let server = LiveKitParticipant::connect(
-        &url,
-        &server_token,
-        EchoServiceImpl,
-        RoomOptions::default(),
-    )
-    .await?;
+    let server =
+        LiveKitParticipant::connect(&url, &server_token, EchoServiceImpl, RoomOptions::default())
+            .await?;
     let server_handle = tokio::spawn(async move { server.run().await });
 
     let (client_room, mut client_events) =

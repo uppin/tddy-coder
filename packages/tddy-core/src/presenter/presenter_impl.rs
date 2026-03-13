@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
+use crate::backend::QuestionOption;
 use crate::toolcall::{store_submit_result, ToolCallRequest, ToolCallResponse};
 use crate::{ClarificationQuestion, SharedBackend};
 
@@ -13,6 +14,12 @@ use crate::presenter::state::{ActivityEntry, ActivityKind, AppMode, PresenterSta
 use crate::presenter::view::PresenterView;
 use crate::presenter::workflow_runner;
 use crate::presenter::{WorkflowCompletePayload, WorkflowEvent};
+
+/// Pending tool call response: Ask sends answers string, Approve sends allow/deny.
+enum PendingToolCallResponse {
+    Ask(tokio::sync::oneshot::Sender<ToolCallResponse>),
+    Approve(tokio::sync::oneshot::Sender<ToolCallResponse>),
+}
 
 /// Instruction prefix for dequeued inbox prompts.
 const QUEUED_INSTRUCTION_PREFIX: &str =
@@ -40,10 +47,10 @@ pub struct Presenter<V: PresenterView> {
     broadcast_tx: Option<tokio::sync::broadcast::Sender<PresenterEvent>>,
     /// When true, next AnswerText is refinement feedback (not clarification).
     plan_refinement_pending: bool,
-    /// Receiver for tddy-tools relay requests (Submit, Ask).
+    /// Receiver for tddy-tools relay requests (Submit, Ask, Approve).
     tool_call_rx: Option<mpsc::Receiver<ToolCallRequest>>,
-    /// When set, answers go to tool call response (Ask from tddy-tools) instead of answer_tx.
-    pending_tool_call_response_tx: Option<tokio::sync::oneshot::Sender<ToolCallResponse>>,
+    /// When set, answers go to tool call response (Ask/Approve from tddy-tools) instead of answer_tx.
+    pending_tool_call_response: Option<PendingToolCallResponse>,
     /// Stored socket path for workflow restart (dequeued prompts).
     workflow_socket_path: Option<PathBuf>,
 }
@@ -81,7 +88,7 @@ impl<V: PresenterView> Presenter<V> {
             broadcast_tx: None,
             plan_refinement_pending: false,
             tool_call_rx: None,
-            pending_tool_call_response_tx: None,
+            pending_tool_call_response: None,
             workflow_socket_path: None,
         }
     }
@@ -247,21 +254,39 @@ impl<V: PresenterView> Presenter<V> {
 
     fn send_clarification_answers(&mut self) {
         let answers = self.collect_answers();
-        let is_tool_call = self.pending_tool_call_response_tx.is_some();
-        if let Some(tx) = self.pending_tool_call_response_tx.take() {
-            let _ = tx.send(ToolCallResponse::AskAnswer {
-                answers: answers.clone(),
-            });
+        let is_approve = matches!(
+            self.pending_tool_call_response,
+            Some(PendingToolCallResponse::Approve(_))
+        );
+        let is_tool_call = self.pending_tool_call_response.is_some();
+        if let Some(pending) = self.pending_tool_call_response.take() {
+            match pending {
+                PendingToolCallResponse::Ask(tx) => {
+                    let _ = tx.send(ToolCallResponse::AskAnswer {
+                        answers: answers.clone(),
+                    });
+                }
+                PendingToolCallResponse::Approve(tx) => {
+                    let allow = self
+                        .collected_answers
+                        .first()
+                        .map(|a| a.eq_ignore_ascii_case("Allow"))
+                        .unwrap_or(false);
+                    let _ = tx.send(ToolCallResponse::ApproveResult { allow });
+                }
+            }
         } else if let Some(ref answer_tx) = self.answer_tx {
             let _ = answer_tx.send(answers.clone());
         }
         if is_tool_call {
             let preview: String = answers.chars().take(80).collect();
             let suffix = if answers.len() > 80 { "…" } else { "" };
-            self.log_activity(
-                format!("✓ ask answered: {}{}", preview, suffix),
-                ActivityKind::ToolUse,
-            );
+            let msg = if is_approve {
+                format!("✓ permission: {}{}", preview, suffix)
+            } else {
+                format!("✓ ask answered: {}{}", preview, suffix)
+            };
+            self.log_activity(msg, ActivityKind::ToolUse);
         }
     }
 
@@ -367,7 +392,58 @@ impl<V: PresenterView> Presenter<V> {
                     self.pending_questions = questions;
                     self.current_question_index = 0;
                     self.collected_answers.clear();
-                    self.pending_tool_call_response_tx = Some(response_tx);
+                    self.pending_tool_call_response =
+                        Some(PendingToolCallResponse::Ask(response_tx));
+                    self.advance_to_next_question();
+                }
+                ToolCallRequest::Approve {
+                    tool_name,
+                    input,
+                    response_tx,
+                } => {
+                    let detail = match input.get("command").and_then(|c| c.as_str()) {
+                        Some(cmd) => {
+                            if cmd.len() > 80 {
+                                format!("{}…", &cmd[..80])
+                            } else {
+                                cmd.to_string()
+                            }
+                        }
+                        None => {
+                            let s = input.to_string();
+                            if s.len() > 80 {
+                                format!("{}…", &s[..80])
+                            } else {
+                                s
+                            }
+                        }
+                    };
+                    self.log_activity(
+                        format!("⚙ Permission request: {} — {}", tool_name, detail),
+                        ActivityKind::ToolUse,
+                    );
+                    self.flush_agent_output_buffer();
+                    let question = ClarificationQuestion {
+                        header: "Permission".to_string(),
+                        question: format!("Allow {}?", detail),
+                        options: vec![
+                            QuestionOption {
+                                label: "Allow".to_string(),
+                                description: "Allow this tool".to_string(),
+                            },
+                            QuestionOption {
+                                label: "Deny".to_string(),
+                                description: "Deny this tool".to_string(),
+                            },
+                        ],
+                        multi_select: false,
+                        allow_other: false,
+                    };
+                    self.pending_questions = vec![question];
+                    self.current_question_index = 0;
+                    self.collected_answers.clear();
+                    self.pending_tool_call_response =
+                        Some(PendingToolCallResponse::Approve(response_tx));
                     self.advance_to_next_question();
                 }
             }

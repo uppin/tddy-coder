@@ -1,6 +1,8 @@
 //! Unix domain socket listener for tddy-tools relay.
 
-use super::{AskRequestWire, SubmitRequestWire, ToolCallRequest, ToolCallResponse};
+use super::{
+    ApproveRequestWire, AskRequestWire, SubmitRequestWire, ToolCallRequest, ToolCallResponse,
+};
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -124,8 +126,8 @@ async fn handle_connection(
         };
         (tool_request, response_rx)
     } else if req_type == "ask" {
-        let wire: AskRequestWire = serde_json::from_value(request)
-            .map_err(|e| format!("invalid ask request: {}", e))?;
+        let wire: AskRequestWire =
+            serde_json::from_value(request).map_err(|e| format!("invalid ask request: {}", e))?;
         toolcall_log(&format!(
             "[ask] {} question(s): {}",
             wire.questions.len(),
@@ -138,6 +140,21 @@ async fn handle_connection(
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let tool_request = ToolCallRequest::Ask {
             questions: wire.questions,
+            response_tx,
+        };
+        (tool_request, response_rx)
+    } else if req_type == "approve" {
+        let wire: ApproveRequestWire = serde_json::from_value(request)
+            .map_err(|e| format!("invalid approve request: {}", e))?;
+        toolcall_log(&format!(
+            "[approve] tool={} input_len={}",
+            wire.tool_name,
+            wire.input.to_string().len()
+        ));
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        let tool_request = ToolCallRequest::Approve {
+            tool_name: wire.tool_name,
+            input: wire.input,
             response_tx,
         };
         (tool_request, response_rx)

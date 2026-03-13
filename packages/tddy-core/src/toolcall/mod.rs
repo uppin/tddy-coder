@@ -114,6 +114,11 @@ pub enum ToolCallRequest {
         questions: Vec<ClarificationQuestion>,
         response_tx: oneshot::Sender<ToolCallResponse>,
     },
+    Approve {
+        tool_name: String,
+        input: serde_json::Value,
+        response_tx: oneshot::Sender<ToolCallResponse>,
+    },
 }
 
 /// Response to tddy-tools (internal enum; serialized to wire format).
@@ -122,6 +127,7 @@ pub enum ToolCallResponse {
     SubmitOk { goal: String },
     SubmitError { errors: Vec<String> },
     AskAnswer { answers: String },
+    ApproveResult { allow: bool },
     Error { message: String },
 }
 
@@ -136,6 +142,9 @@ impl ToolCallResponse {
             }
             ToolCallResponse::AskAnswer { answers } => {
                 serde_json::json!({"status":"ok","answers":answers})
+            }
+            ToolCallResponse::ApproveResult { allow } => {
+                serde_json::json!({"status":"ok","decision":if *allow { "allow" } else { "deny" }})
             }
             ToolCallResponse::Error { message } => {
                 serde_json::json!({"status":"error","message":message})
@@ -158,4 +167,12 @@ pub struct SubmitRequestWire {
 pub struct AskRequestWire {
     pub r#type: String,
     pub questions: Vec<ClarificationQuestion>,
+}
+
+/// Wire format for approve request (from MCP approval_prompt tool).
+#[derive(Debug, Deserialize)]
+pub struct ApproveRequestWire {
+    pub r#type: String,
+    pub tool_name: String,
+    pub input: serde_json::Value,
 }

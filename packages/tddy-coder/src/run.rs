@@ -97,14 +97,14 @@ pub fn run_main(mut args: Args) {
 
     let result = run_with_args(&args, shutdown);
 
-    if let Some(sid) = args.session_id.as_ref() {
-        if let Some(dir) = session_dir_path(&args) {
-            print_session_id_on_exit(sid, &dir);
-        }
-    }
-
     match result {
         Err(e) => {
+            // Print session info on error (e.g. SIGINT) so user knows where to find the session.
+            if let Some(sid) = args.session_id.as_ref() {
+                if let Some(dir) = session_dir_path(&args) {
+                    print_session_id_on_exit(sid, &dir);
+                }
+            }
             eprintln!("Error: {}", e);
             std::process::exit(1);
         }
@@ -1208,13 +1208,14 @@ fn run_plan_to_get_dir(
         tddy_core::output::create_session_dir_in(&base)
     }
     .context("create session dir")?;
+    let output_dir_for_ctx =
+        std::env::current_dir().context("current dir for agent working_dir")?;
     let init_cs = tddy_core::changeset::Changeset {
         initial_prompt: Some(input.clone()),
+        repo_path: Some(output_dir_for_ctx.display().to_string()),
         ..tddy_core::changeset::Changeset::default()
     };
     let _ = tddy_core::changeset::write_changeset(&plan_dir, &init_cs);
-    let output_dir_for_ctx =
-        std::env::current_dir().context("current dir for agent working_dir")?;
 
     let conv = resolve_log_defaults(args, &plan_dir);
     let ctx = build_goal_context(args, None, &conv, |c| {
