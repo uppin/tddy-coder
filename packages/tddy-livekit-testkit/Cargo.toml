@@ -10,3 +10,4 @@ livekit-api = "0.4"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net"] }
 anyhow = "1"
 log = "0.4"
+serial_test = "3"

@@ -4,12 +4,14 @@
 //! and are included in `cargo test` without any extra flags.
 
 use anyhow::Result;
+use serial_test::serial;
 use tddy_livekit_testkit::LiveKitTestkit;
 
 const TEST_ROOM: &str = "test-room";
 const TEST_IDENTITY: &str = "test-participant";
 
 #[tokio::test]
+#[serial]
 async fn livekit_testkit_starts_container_and_returns_ws_url() -> Result<()> {
     let livekit = LiveKitTestkit::start().await?;
     let url = livekit.get_ws_url();
@@ -26,6 +28,7 @@ async fn livekit_testkit_starts_container_and_returns_ws_url() -> Result<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn livekit_testkit_generates_valid_token() -> Result<()> {
     let livekit = LiveKitTestkit::start().await?;
     let token = livekit.generate_token(TEST_ROOM, TEST_IDENTITY)?;

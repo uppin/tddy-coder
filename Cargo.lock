@@ -5565,6 +5565,7 @@ dependencies = [
  "anyhow",
  "livekit-api",
  "log",
+ "serial_test",
  "testcontainers",
  "tokio",
 ]

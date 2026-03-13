@@ -17,6 +17,10 @@ use testcontainers::ImageExt;
 const LIVEKIT_IMAGE: &str = "livekit/livekit-server";
 const LIVEKIT_TAG: &str = "master";
 const LIVEKIT_PORT: u16 = 7880;
+/// ICE/TCP fallback port (required for WebRTC).
+const LIVEKIT_ICE_TCP_PORT: u16 = 7881;
+/// ICE/UDP mux port (required for WebRTC).
+const LIVEKIT_ICE_UDP_PORT: u16 = 7882;
 const DEV_API_KEY: &str = "devkey";
 const DEV_API_SECRET: &str = "secret";
 const API_READY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -82,10 +86,13 @@ impl LiveKitTestkit {
             .with_port(LIVEKIT_PORT.tcp())
             .with_expected_status_code(200u16);
 
+        // Fixed port mapping so --node-ip 127.0.0.1 ICE candidates are reachable from the host.
         let image = GenericImage::new(LIVEKIT_IMAGE, LIVEKIT_TAG)
-            .with_exposed_port(LIVEKIT_PORT.tcp())
             .with_wait_for(WaitFor::from(http_wait))
-            .with_cmd(["--dev", "--bind", "0.0.0.0"]);
+            .with_cmd(["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1"])
+            .with_mapped_port(LIVEKIT_PORT, LIVEKIT_PORT.tcp())
+            .with_mapped_port(LIVEKIT_ICE_TCP_PORT, LIVEKIT_ICE_TCP_PORT.tcp())
+            .with_mapped_port(LIVEKIT_ICE_UDP_PORT, LIVEKIT_ICE_UDP_PORT.udp());
 
         let container: testcontainers::ContainerAsync<GenericImage> = image.start().await?;
         let host_port = container.get_host_port_ipv4(LIVEKIT_PORT.tcp()).await?;
