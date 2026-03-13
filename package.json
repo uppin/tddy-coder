@@ -5,7 +5,6 @@
     "build": "bun run --filter tddy-web build",
     "storybook": "bun run --filter tddy-web storybook",
     "cypress:component": "bun run --filter tddy-web cypress:component",
-    "cypress:e2e": "bun run --filter tddy-web cypress:e2e",
-    "cleanup:test-processes": "bash scripts/cleanup-test-processes.sh"
+    "cypress:e2e": "bun run --filter tddy-web cypress:e2e"
   }
 }
