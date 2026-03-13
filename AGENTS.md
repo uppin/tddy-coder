@@ -14,9 +14,9 @@
 
 **Rust workspace**: Root `Cargo.toml` defines workspace members. Build/test from repo root.
 
-**Bun workspace**: Root `package.json` with `workspaces: ["packages/tddy-web"]`. Run `bun install` from repo root.
+**Bun workspace**: Root `package.json` with `workspaces: ["packages/tddy-web"]`. Run `bun install` from repo root. See [Bun Workspace](#bun-workspace) for build and test commands.
 
-**Nix** provides the development environment (rustc, cargo, rustfmt, clippy, rust-analyzer, bun).
+**Nix** provides the development environment (rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node).
 
 ### Setup (one-time)
 
@@ -54,8 +54,37 @@ All `./` scripts use nix dev shell via `--profile ./.nix-profile` for a consiste
 | Web install | `bun install` — install web workspace dependencies |
 | Web build | `bun run build` (from root or `packages/tddy-web`) |
 | Storybook | `bun run storybook` — dev server at http://localhost:6006 |
-| Cypress component | `bun run cypress:component` (from `packages/tddy-web`) |
-| Cypress e2e | `bun run cypress:e2e` (from `packages/tddy-web`; requires Storybook running) |
+| Cypress component | `bun run cypress:component` (from root or `packages/tddy-web`) |
+| Cypress e2e | `bun run cypress:e2e` (from root or `packages/tddy-web`; builds Storybook, serves on ephemeral port, runs tests) |
+
+### Bun Workspace
+
+The web packages live in `packages/tddy-web`. Use the nix dev shell (`./dev`) for bun and node.
+
+**Setup**
+```bash
+bun install   # From repo root; installs all workspace deps
+```
+
+**Build**
+```bash
+bun run build                    # tddy-web app → dist/
+bun run build-storybook          # Static Storybook → storybook-static/
+```
+
+**Tests**
+```bash
+bun run cypress:component        # Cypress component tests (Button, etc.)
+bun run cypress:component:debug  # Same, with DEBUG=cypress:*
+bun run cypress:e2e              # Builds Storybook, serves on ephemeral port, runs e2e tests
+```
+
+**Storybook**
+```bash
+bun run storybook                # Dev server at http://localhost:6006
+```
+
+All commands can be run from repo root (they use `--filter tddy-web`) or from `packages/tddy-web`.
 
 ### LiveKit Testkit (tddy-livekit, tddy-livekit-testkit)
 

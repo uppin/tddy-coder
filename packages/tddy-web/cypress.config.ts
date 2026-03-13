@@ -10,8 +10,10 @@ export default defineConfig({
     supportFile: "cypress/support/component.ts",
   },
   e2e: {
-    baseUrl: "http://localhost:6006",
+    baseUrl: process.env.CYPRESS_BASE_URL ?? "http://localhost:6006",
     specPattern: "cypress/e2e/**/*.cy.{ts,tsx}",
     supportFile: "cypress/support/e2e.ts",
   },
+  video: false,
+  screenshotOnRunFailure: false,
 });

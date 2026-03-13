@@ -37,9 +37,10 @@
             pkgs.bzip2
             pkgs.git
             pkgs.bun
+            pkgs.nodejs_20
           ];
           shellHook = ''
-            echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun"
+            echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node"
           '';
         };
       }
