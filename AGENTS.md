@@ -27,6 +27,16 @@ nix develop      # Enter dev shell
 
 With **direnv**: `direnv allow` once; the shell loads automatically when you `cd` into the project.
 
+### Root scripts
+
+| Script | Purpose |
+|--------|---------|
+| `./dev` | Enter nix dev shell with profile (persists across `nix gc`). With args: run command inside shell, e.g. `./dev cargo test` or `./dev echo "Hello"`. |
+| `./release` | Build optimized production binaries (tddy-coder, tddy-tools). Output: `target/release/tddy-coder`, `target/release/tddy-tools`. |
+| `./test` | Build tddy-coder + tddy-tools, run all tests. Writes output to `.verify-result.txt` (agent workaround for Cursor terminal capture). Usage: `./test` — all tests; `./test -p tddy-core` — one package; `./test -- test_name` — specific test. |
+| `./clean` | Remove stale Cargo build fingerprints, deps, incremental. Keeps newest per crate in `target/debug` and `target/release`. Frees disk space without full `cargo clean`. |
+| `./verify` | Run `cargo test` and write output to `.verify-result.txt`. Use when agent terminal capture fails; read that file for verification evidence. |
+
 ### Commands
 
 All `./` scripts use nix dev shell via `--profile ./.nix-profile` for a consistent toolchain.
@@ -46,6 +56,25 @@ All `./` scripts use nix dev shell via `--profile ./.nix-profile` for a consiste
 | Storybook | `bun run storybook` — dev server at http://localhost:6006 |
 | Cypress component | `bun run cypress:component` (from `packages/tddy-web`) |
 | Cypress e2e | `bun run cypress:e2e` (from `packages/tddy-web`; requires Storybook running) |
+
+### LiveKit Testkit (tddy-livekit, tddy-livekit-testkit)
+
+Tests can reuse a running LiveKit container instead of starting one per run. Speeds up repeated test execution.
+
+**Start a reusable server:**
+```bash
+./run-livekit-testkit-server   # Prints LIVEKIT_TESTKIT_WS_URL=ws://127.0.0.1:PORT
+```
+
+**Run tests against it:**
+```bash
+export LIVEKIT_TESTKIT_WS_URL=ws://127.0.0.1:PORT   # Use port from script output
+cargo test -p tddy-livekit -p tddy-livekit-testkit
+```
+
+Or: `eval $(./run-livekit-testkit-server | grep '^export ')` then run tests.
+
+Without the env var, tests start a fresh container via testcontainers (default).
 
 ## Judgment Boundaries
 
