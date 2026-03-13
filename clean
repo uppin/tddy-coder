@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Remove stale Cargo build fingerprints. Keeps only the newest fingerprint per crate
-# in target/debug/build and target/release/build. Run from repo root.
+# Remove stale Cargo build fingerprints and deps. Keeps only the newest fingerprint per crate
+# in target/debug/build, target/release/build, target/debug/deps, target/release/deps.
+# Run from repo root.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -37,8 +38,47 @@ clean_build_dir() {
   done
 }
 
+clean_deps_dir() {
+  local deps_dir="$1"
+  [[ -d "$deps_dir" ]] || return 0
+
+  # Use Perl for single-process scan (avoids 27k+ stat subprocess calls that caused hangs).
+  # Group by prefix+hash, keep newest hash per prefix, remove stale files.
+  perl -e '
+    use File::Spec;
+    my $dir = shift;
+    opendir my $d, $dir or exit 0;
+    my @files = grep { -f File::Spec->catfile($dir, $_) } readdir $d;
+    closedir $d;
+    my %data;
+    my %best;
+    for my $f (@files) {
+      next unless $f =~ /^([a-zA-Z0-9_.-]+)-([a-f0-9]{16})/;
+      my ($prefix, $hash) = ($1, $2);
+      my $path = File::Spec->catfile($dir, $f);
+      my $m = (stat $path)[9];
+      my $k = "$prefix\0$hash";
+      if (!exists $data{$k} || $m > $data{$k}{m}) { $data{$k}{m} = $m }
+      push @{$data{$k}{paths}}, $path;
+      $best{$prefix} = { h => $hash, m => $data{$k}{m} } if $data{$k}{m} > ($best{$prefix}{m} // 0);
+    }
+    for my $k (keys %data) {
+      my ($p, $h) = split /\0/, $k, 2;
+      next if $best{$p}{h} eq $h;
+      for (@{$data{$k}{paths}}) { print $_, "\n" }
+    }
+  ' "$deps_dir" | while read -r f; do
+    [[ -e "$f" ]] || continue
+    echo "Removing stale: $f"
+    rm -f "$f"
+  done
+}
+
 echo "Cleaning stale debug fingerprints..."
 clean_build_dir "target/debug/build"
 echo "Cleaning stale release fingerprints..."
 clean_build_dir "target/release/build"
+echo "Cleaning stale deps (largest disk usage)..."
+clean_deps_dir "target/debug/deps"
+clean_deps_dir "target/release/deps"
 echo "Done."

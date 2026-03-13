@@ -5,15 +5,17 @@ use prost::Message;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::envelope::encode_request;
 use crate::proto::{CallMetadata, RpcRequest, RpcResponse};
+use crate::rpc_trace;
 use crate::status::Status;
 
 const RPC_TOPIC: &str = "tddy-rpc";
 
 type PendingMap = HashMap<i32, oneshot::Sender<Result<Vec<u8>, Status>>>;
+type PendingStreamMap = HashMap<i32, mpsc::Sender<Result<Vec<u8>, Status>>>;
 
 /// Client for making RPC calls to a participant in a LiveKit room.
 pub struct RpcClient {
@@ -21,6 +23,7 @@ pub struct RpcClient {
     target_identity: ParticipantIdentity,
     next_request_id: AtomicI32,
     pending_unary: Arc<Mutex<PendingMap>>,
+    pending_streams: Arc<Mutex<PendingStreamMap>>,
 }
 
 impl RpcClient {
@@ -32,9 +35,13 @@ impl RpcClient {
         mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
     ) -> Self {
         let pending_unary: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
-        let pending_clone = pending_unary.clone();
+        let pending_streams: Arc<Mutex<PendingStreamMap>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let pending_unary_clone = pending_unary.clone();
+        let pending_streams_clone = pending_streams.clone();
 
         tokio::spawn(async move {
+            log::debug!("RpcClient: background event loop started");
             while let Some(event) = events.recv().await {
                 if let RoomEvent::DataReceived {
                     payload,
@@ -48,24 +55,64 @@ impl RpcClient {
                     }
                     let payload =
                         std::sync::Arc::try_unwrap(payload).unwrap_or_else(|a| (*a).clone());
-                    if let Ok(response) = RpcResponse::decode(&payload[..]) {
-                        let request_id = response.request_id;
-                        let result = if let Some(err) = response.error {
-                            Err(Status {
-                                code: crate::status::Code::Unknown,
-                                message: err.message,
-                            })
-                        } else {
-                            Ok(response.response_message)
-                        };
-                        if let Ok(mut pending) = pending_clone.lock() {
-                            if let Some(tx) = pending.remove(&request_id) {
-                                let _ = tx.send(result);
+                    match RpcResponse::decode(&payload[..]) {
+                        Ok(response) => {
+                            let request_id = response.request_id;
+                            let has_error = response.error.is_some();
+                            rpc_trace!(
+                                "RpcClient: received response request_id={} error={} end_of_stream={} payload_len={}",
+                                request_id, has_error, response.end_of_stream, response.response_message.len()
+                            );
+                            let result = if let Some(err) = response.error {
+                                Err(Status {
+                                    code: crate::status::Code::Unknown,
+                                    message: err.message,
+                                })
+                            } else {
+                                Ok(response.response_message)
+                            };
+
+                            let mut handled = false;
+                            if let Ok(mut streams) = pending_streams_clone.lock() {
+                                if let Some(tx) = streams.get(&request_id) {
+                                    handled = true;
+                                    if tx.try_send(result.clone()).is_ok() {
+                                        if has_error || response.end_of_stream {
+                                            streams.remove(&request_id);
+                                            rpc_trace!(
+                                                "RpcClient: stream request_id={} closed (error={} end_of_stream={})",
+                                                request_id, has_error, response.end_of_stream
+                                            );
+                                        }
+                                    } else {
+                                        rpc_trace!(
+                                            "RpcClient: stream try_send failed for request_id={}",
+                                            request_id
+                                        );
+                                    }
+                                }
                             }
+
+                            if !handled {
+                                if let Ok(mut pending) = pending_unary_clone.lock() {
+                                    if let Some(tx) = pending.remove(&request_id) {
+                                        let _ = tx.send(result);
+                                    } else if !has_error {
+                                        rpc_trace!(
+                                            "RpcClient: no pending sender for request_id={}",
+                                            request_id
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            rpc_trace!("RpcClient: failed to decode response: {}", e);
                         }
                     }
                 }
             }
+            log::debug!("RpcClient: background event loop ended");
         });
 
         Self {
@@ -73,6 +120,7 @@ impl RpcClient {
             target_identity: target_identity.into(),
             next_request_id: AtomicI32::new(1),
             pending_unary,
+            pending_streams,
         }
     }
 
@@ -84,6 +132,13 @@ impl RpcClient {
         request_bytes: Vec<u8>,
     ) -> Result<Vec<u8>, Status> {
         let request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
+        rpc_trace!(
+            "RpcClient::call_unary request_id={} {}/{}  ({} bytes)",
+            request_id,
+            service,
+            method,
+            request_bytes.len()
+        );
 
         let (tx, rx) = oneshot::channel();
 
@@ -121,7 +176,71 @@ impl RpcClient {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
+        rpc_trace!("RpcClient::call_unary request_id={} published, awaiting response", request_id);
+
         rx.await
             .map_err(|_| Status::internal("response channel closed"))?
+    }
+
+    /// Call a server streaming RPC method. Returns a receiver for the response stream.
+    /// Each item is a Result containing raw response bytes or a Status error.
+    /// The channel closes when the server sends end_of_stream.
+    pub async fn call_server_stream(
+        &self,
+        service: &str,
+        method: &str,
+        request_bytes: Vec<u8>,
+    ) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
+        let request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
+        rpc_trace!(
+            "RpcClient::call_server_stream request_id={} {}/{}  ({} bytes)",
+            request_id,
+            service,
+            method,
+            request_bytes.len()
+        );
+
+        let (tx, rx) = mpsc::channel(32);
+
+        {
+            let mut pending = self
+                .pending_streams
+                .lock()
+                .map_err(|e| Status::internal(e.to_string()))?;
+            pending.insert(request_id, tx);
+        }
+
+        let request = RpcRequest {
+            request_id,
+            request_message: request_bytes,
+            call_metadata: Some(CallMetadata {
+                service: service.to_string(),
+                method: method.to_string(),
+            }),
+            metadata: None,
+            end_of_stream: false,
+            abort: false,
+        };
+
+        let payload = encode_request(request).map_err(Status::internal)?;
+        let packet = DataPacket {
+            payload,
+            topic: Some(RPC_TOPIC.to_string()),
+            reliable: true,
+            destination_identities: vec![self.target_identity.clone()],
+        };
+
+        self.room
+            .local_participant()
+            .publish_data(packet)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        rpc_trace!(
+            "RpcClient::call_server_stream request_id={} published, returning receiver",
+            request_id
+        );
+
+        Ok(rx)
     }
 }

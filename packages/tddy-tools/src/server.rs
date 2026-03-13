@@ -38,7 +38,6 @@ impl PermissionServer {
     /// Decide allow/deny. Bash(tddy-tools *) and mcp__tddy-tools__* are always allowed.
     /// For other tools: route through TDDY_SOCKET to TUI if available, else deny.
     fn decide(&self, tool_name: &str, input: &Value) -> String {
-        // Bash(tddy-tools *) — always allow for headless
         if tool_name == "Bash" {
             let command = input.get("command").and_then(|c| c.as_str()).unwrap_or("");
             if command.starts_with("tddy-tools") {

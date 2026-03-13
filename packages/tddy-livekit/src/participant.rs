@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 
 use crate::bridge::RpcBridge;
 use crate::envelope::{decode_request, encode_response, response_from_result};
+use crate::rpc_trace;
 
 const RPC_TOPIC: &str = "tddy-rpc";
 
@@ -24,8 +25,13 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         service: S,
         room_options: RoomOptions,
     ) -> Result<Self, livekit::RoomError> {
+        log::debug!("LiveKitParticipant::connect url={}", url);
         let bridge = RpcBridge::new(service);
         let (room, events) = Room::connect(url, token, room_options).await?;
+        log::debug!(
+            "LiveKitParticipant: connected, local identity={:?}",
+            room.local_participant().identity()
+        );
         Ok(Self {
             room,
             bridge: Arc::new(bridge),
@@ -36,6 +42,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
     /// Run the participant event loop. Processes DataReceived events for topic "tddy-rpc"
     /// and dispatches to the RpcBridge. Returns when the room disconnects.
     pub async fn run(mut self) {
+        log::debug!("LiveKitParticipant::run event loop started");
         while let Some(event) = self.events.recv().await {
             if let RoomEvent::DataReceived {
                 payload,
@@ -52,6 +59,11 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     continue;
                 };
                 let sender_identity = remote.identity().clone();
+                rpc_trace!(
+                    "LiveKitParticipant: incoming RPC payload from {:?} ({} bytes)",
+                    sender_identity,
+                    payload.len()
+                );
                 let bridge = self.bridge.clone();
                 let local = self.room.local_participant();
                 let payload = Arc::try_unwrap(payload).unwrap_or_else(|a| (*a).clone());
@@ -65,6 +77,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                 });
             }
         }
+        log::debug!("LiveKitParticipant::run event loop ended");
     }
 
     async fn handle_incoming(
@@ -75,12 +88,24 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
     ) -> Result<(), String> {
         let request = decode_request(payload)?;
         let request_id = request.request_id;
+        let meta = request.call_metadata.as_ref();
+        rpc_trace!(
+            "LiveKitParticipant::handle_incoming request_id={} {}/{}  from {:?}",
+            request_id,
+            meta.map(|m| m.service.as_str()).unwrap_or("?"),
+            meta.map(|m| m.method.as_str()).unwrap_or("?"),
+            sender_identity
+        );
 
         let result = bridge.handle_decoded_request(&request).await;
 
         match result {
             Ok(chunks) => {
                 let len = chunks.len();
+                rpc_trace!(
+                    "LiveKitParticipant: request_id={} produced {} response chunk(s)",
+                    request_id, len
+                );
                 for (i, bytes) in chunks.into_iter().enumerate() {
                     let end_of_stream = i == len - 1;
                     let response = crate::proto::RpcResponse {

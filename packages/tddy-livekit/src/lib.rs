@@ -7,6 +7,7 @@ pub mod client;
 pub mod echo_service;
 pub mod envelope;
 pub mod participant;
+pub mod rpc_log;
 pub mod status;
 
 pub mod proto {
