@@ -9,9 +9,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::Request;
 
 use tddy_e2e::{connect_grpc, spawn_presenter_with_grpc};
-use tddy_grpc::gen::app_mode_proto;
-use tddy_grpc::gen::server_message;
-use tddy_grpc::gen::{
+use tddy_service::gen::app_mode_proto;
+use tddy_service::gen::server_message;
+use tddy_service::gen::{
     client_message, AnswerSelect, ApprovePlan, ClientMessage, SubmitFeatureInput,
 };
 

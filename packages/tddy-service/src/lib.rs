@@ -1,18 +1,35 @@
-//! tddy-grpc: gRPC remote control for tddy-coder.
+//! tddy-service: Service definitions and implementations for tddy-coder.
 //!
 //! Exposes TddyRemote service for programmatic control via bidirectional streaming:
 //! clients send UserIntent, receive PresenterView events.
+//! Also provides EchoServiceImpl and TerminalServiceImpl for LiveKit RPC transport.
 
 pub mod convert;
 pub mod daemon_service;
+pub mod echo_service;
 pub mod service;
+pub mod terminal_service;
 
 pub use convert::{client_message_to_intent, event_to_server_message};
 pub use daemon_service::DaemonService;
+pub use echo_service::{create_echo_bridge, EchoServiceImpl};
+pub use proto::terminal::TerminalServiceServer;
+pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use service::TddyRemoteService;
+pub use tddy_rpc::Status;
+pub use terminal_service::TerminalServiceImpl;
 
 pub mod gen {
     tonic::include_proto!("tddy.v1");
+}
+
+pub mod proto {
+    pub mod test {
+        include!(concat!(env!("OUT_DIR"), "/test.rs"));
+    }
+    pub mod terminal {
+        include!(concat!(env!("OUT_DIR"), "/terminal.rs"));
+    }
 }
 
 #[cfg(test)]

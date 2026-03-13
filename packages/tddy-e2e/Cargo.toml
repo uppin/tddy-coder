@@ -4,20 +4,29 @@ version = "0.1.0"
 edition = "2021"
 description = "E2E tests for tddy-coder TUI using gRPC and PTY"
 
+[features]
+default = []
+# LiveKit E2E tests — requires webrtc-sys build (can fail on some macOS/Nix setups)
+livekit = ["dep:tddy-livekit", "dep:tddy-livekit-testkit", "dep:livekit", "dep:serial_test"]
+
 [lib]
 name = "tddy_e2e"
 path = "src/lib.rs"
 
 [dependencies]
 tddy-core = { path = "../tddy-core" }
-tddy-grpc = { path = "../tddy-grpc" }
+tddy-livekit = { path = "../tddy-livekit", optional = true }
+tddy-livekit-testkit = { path = "../tddy-livekit-testkit", optional = true }
+tddy-service = { path = "../tddy-service" }
 tddy-tui = { path = "../tddy-tui" }
-ratatui = "0.30"
-tonic = "0.12"
+anyhow = "1"
+livekit = { version = "0.7", optional = true }
 prost = "0.13"
+ratatui = "0.30"
+serial_test = { version = "3", optional = true }
+termwright = "0.2"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 async-stream = "0.3"
-termwright = "0.2"
+tonic = "0.12"
 uuid = { version = "1", features = ["v4"] }
-anyhow = "1"

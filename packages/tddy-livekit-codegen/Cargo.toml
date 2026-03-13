@@ -1,8 +1,0 @@
-[package]
-name = "tddy-livekit-codegen"
-version = "0.1.0"
-edition = "2021"
-description = "Build-time codegen for tddy-livekit"
-
-[dependencies]
-prost-build = "0.13"

@@ -1,0 +1,13 @@
+[package]
+name = "tddy-codegen"
+version = "0.1.0"
+edition = "2021"
+description = "Build-time codegen for transport-agnostic RPC service traits and adapters"
+
+[dependencies]
+prost-build = "0.13"
+tonic = { version = "0.12", optional = true }
+
+[features]
+default = []
+tonic = ["dep:tonic"]

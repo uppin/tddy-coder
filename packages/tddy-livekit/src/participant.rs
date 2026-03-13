@@ -5,6 +5,8 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
+use tddy_rpc::{RequestMetadata, RpcMessage};
+
 use crate::bridge::{ResponseBody, RpcBridge};
 use crate::envelope::{decode_request, encode_response, response_from_result};
 use crate::proto::{CallMetadata, RpcRequest};
@@ -327,7 +329,26 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         };
 
         let request_end_of_stream = messages.last().map(|m| m.end_of_stream).unwrap_or(true);
-        let result = bridge.handle_decoded_requests(&messages).await;
+        let service = messages
+            .first()
+            .and_then(|m| m.call_metadata.as_ref())
+            .map(|m| m.service.as_str())
+            .unwrap_or("");
+        let method = messages
+            .first()
+            .and_then(|m| m.call_metadata.as_ref())
+            .map(|m| m.method.as_str())
+            .unwrap_or("");
+        let rpc_messages: Vec<RpcMessage> = messages
+            .iter()
+            .map(|r| RpcMessage {
+                payload: r.request_message.clone(),
+                metadata: RequestMetadata {
+                    sender_identity: r.sender_identity.clone(),
+                },
+            })
+            .collect();
+        let result = bridge.handle_messages(service, method, &rpc_messages).await;
 
         match result {
             Ok(body) => match body {

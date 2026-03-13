@@ -8,9 +8,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::Request;
 
 use tddy_e2e::{connect_grpc, spawn_presenter_with_grpc};
-use tddy_grpc::gen::app_mode_proto;
-use tddy_grpc::gen::server_message;
-use tddy_grpc::gen::{client_message, AnswerSelect, ApprovePlan, ClientMessage, QueuePrompt};
+use tddy_service::gen::app_mode_proto;
+use tddy_service::gen::server_message;
+use tddy_service::gen::{client_message, AnswerSelect, ApprovePlan, ClientMessage, QueuePrompt};
 
 #[tokio::test]
 async fn clarification_flow_submit_answer_select_workflow_completes() {

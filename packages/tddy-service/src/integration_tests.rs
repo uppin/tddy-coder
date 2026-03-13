@@ -1,5 +1,73 @@
 //! Integration tests: gRPC client sends intents, receives PresenterView events.
 //! Daemon acceptance tests: GetSession, ListSessions, daemon startup.
+//! Codegen acceptance tests: EchoServiceServer routing, RpcBridge behavior.
+
+/// Codegen acceptance tests: verify generated server struct and router behavior.
+#[cfg(test)]
+mod codegen_acceptance {
+    use prost::Message;
+
+    use crate::create_echo_bridge;
+    use crate::proto::test::{EchoRequest, EchoResponse, EchoServiceServer};
+    use tddy_rpc::{RequestMetadata, RpcMessage};
+
+    #[test]
+    fn echo_service_server_has_name_constant() {
+        assert_eq!(
+            EchoServiceServer::<crate::EchoServiceImpl>::NAME,
+            "test.EchoService"
+        );
+    }
+
+    #[test]
+    fn echo_service_server_implements_rpc_service() {
+        use tddy_rpc::RpcService;
+        let server = EchoServiceServer::new(crate::EchoServiceImpl);
+        assert!(server.is_bidi_stream("test.EchoService", "EchoBidiStream"));
+        assert!(!server.is_bidi_stream("test.EchoService", "Echo"));
+    }
+
+    #[tokio::test]
+    async fn echo_bridge_handles_unary_echo() {
+        let bridge = create_echo_bridge();
+        let req = EchoRequest {
+            message: "hello".to_string(),
+        };
+        let payload = req.encode_to_vec();
+        let msg = RpcMessage {
+            payload,
+            metadata: RequestMetadata::default(),
+        };
+
+        let result = bridge
+            .handle_messages("test.EchoService", "Echo", &[msg])
+            .await;
+
+        let body = result.expect("handle_messages should succeed");
+        let chunks = match body {
+            tddy_rpc::ResponseBody::Complete(c) => c,
+            _ => panic!("expected Complete for unary"),
+        };
+        assert_eq!(chunks.len(), 1);
+        let resp = EchoResponse::decode(&chunks[0][..]).expect("decode response");
+        assert_eq!(resp.message, "hello");
+    }
+
+    #[tokio::test]
+    async fn echo_bridge_returns_not_found_for_unknown_method() {
+        let bridge = create_echo_bridge();
+        let msg = RpcMessage {
+            payload: vec![],
+            metadata: RequestMetadata::default(),
+        };
+
+        let result = bridge
+            .handle_messages("test.EchoService", "UnknownMethod", &[msg])
+            .await;
+
+        assert!(result.is_err());
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -34,7 +102,7 @@ mod tests {
         let view = NoopView;
         let mut presenter = Presenter::new(view, "stub", "opus").with_broadcast(event_tx);
         let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
-        let output_dir = std::env::temp_dir().join("tddy-grpc-test");
+        let output_dir = std::env::temp_dir().join("tddy-service-test");
         std::fs::create_dir_all(&output_dir).unwrap();
         presenter.start_workflow(
             backend, output_dir, None, None, None, None, false, None, None, None,

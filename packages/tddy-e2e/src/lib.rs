@@ -12,8 +12,8 @@ use tokio::sync::broadcast;
 use tonic::transport::Server;
 
 use tddy_core::{AnyBackend, Presenter, PresenterHandle, SharedBackend, StubBackend};
-use tddy_grpc::gen::tddy_remote_server::TddyRemoteServer;
-use tddy_grpc::TddyRemoteService;
+use tddy_service::gen::tddy_remote_server::TddyRemoteServer;
+use tddy_service::TddyRemoteService;
 use tddy_tui::{render::draw, TuiView};
 
 use crate::test_util::NoopView;
@@ -94,11 +94,14 @@ pub fn spawn_presenter_with_grpc(
 pub async fn connect_grpc(
     port: u16,
 ) -> Result<
-    tddy_grpc::gen::tddy_remote_client::TddyRemoteClient<tonic::transport::Channel>,
+    tddy_service::gen::tddy_remote_client::TddyRemoteClient<tonic::transport::Channel>,
     tonic::transport::Error,
 > {
-    tddy_grpc::gen::tddy_remote_client::TddyRemoteClient::connect(format!("http://[::1]:{}", port))
-        .await
+    tddy_service::gen::tddy_remote_client::TddyRemoteClient::connect(format!(
+        "http://[::1]:{}",
+        port
+    ))
+    .await
 }
 
 /// Spawn Presenter with TuiView, gRPC server, and TestBackend. Runs in memory (no binary).

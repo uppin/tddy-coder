@@ -1,0 +1,29 @@
+[package]
+name = "tddy-service"
+version = "0.1.0"
+edition = "2021"
+description = "Service definitions and implementations (echo, terminal, TddyRemote) — transport-agnostic"
+
+[lib]
+name = "tddy_service"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1"
+futures-util = "0.3"
+prost = "0.13"
+serde_json = "1"
+tddy-core = { path = "../tddy-core" }
+tddy-rpc = { path = "../tddy-rpc" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net"] }
+tokio-stream = "0.1"
+tonic = "0.12"
+uuid = { version = "1", features = ["v4"] }
+
+[build-dependencies]
+prost-build = "0.13"
+tddy-codegen = { path = "../tddy-codegen", features = ["tonic"] }
+tonic-build = "0.12"
+
+[dev-dependencies]
+async-stream = "0.3"
