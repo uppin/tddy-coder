@@ -259,6 +259,22 @@ pub struct DemoArgs {
     /// Run as headless gRPC daemon (systemd-friendly)
     #[arg(long)]
     pub daemon: bool,
+
+    /// LiveKit WebSocket URL for terminal streaming (e.g. ws://127.0.0.1:7880)
+    #[arg(long)]
+    pub livekit_url: Option<String>,
+
+    /// LiveKit JWT token for server participant
+    #[arg(long)]
+    pub livekit_token: Option<String>,
+
+    /// LiveKit room name
+    #[arg(long)]
+    pub livekit_room: Option<String>,
+
+    /// LiveKit participant identity (server)
+    #[arg(long)]
+    pub livekit_identity: Option<String>,
 }
 
 impl From<CoderArgs> for Args {
@@ -299,10 +315,10 @@ impl From<DemoArgs> for Args {
             grpc: a.grpc,
             session_id: None,
             daemon: a.daemon,
-            livekit_url: None,
-            livekit_token: None,
-            livekit_room: None,
-            livekit_identity: None,
+            livekit_url: a.livekit_url,
+            livekit_token: a.livekit_token,
+            livekit_room: a.livekit_room,
+            livekit_identity: a.livekit_identity,
         }
     }
 }
@@ -937,6 +953,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     let view = tddy_tui::TuiView::new();
     let mut presenter = Presenter::new(view, &args.agent, args.model.as_deref().unwrap_or("opus"));
 
+    let livekit_enabled = args.livekit_url.is_some()
+        && args.livekit_token.is_some()
+        && args.livekit_room.is_some()
+        && args.livekit_identity.is_some();
+
     let (external_intent_rx, byte_capture) = if let Some(port) = args.grpc {
         let (event_tx, _) = tokio::sync::broadcast::channel(256);
         let (intent_tx, intent_rx) = std::sync::mpsc::channel();
@@ -972,6 +993,42 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             result.expect("gRPC server failed")
         });
         (Some(intent_rx), byte_capture)
+    } else if livekit_enabled {
+        let (terminal_byte_tx, _) = tokio::sync::broadcast::channel(256);
+        let (input_tx, _input_rx) = tokio::sync::mpsc::channel(64);
+        let terminal_service =
+            tddy_livekit::TerminalServiceImpl::new(terminal_byte_tx.clone(), input_tx);
+        let byte_tx_for_callback = terminal_byte_tx.clone();
+        let byte_capture: Option<tddy_tui::ByteCallback> = Some(Box::new(move |buf: &[u8]| {
+            let _ = byte_tx_for_callback.send(buf.to_vec());
+        }));
+        let url = args.livekit_url.clone().unwrap();
+        let token = args.livekit_token.clone().unwrap();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            rt.block_on(async {
+                match tddy_livekit::LiveKitParticipant::connect(
+                    &url,
+                    &token,
+                    terminal_service,
+                    tddy_livekit::RoomOptions::default(),
+                )
+                .await
+                {
+                    Ok(participant) => {
+                        log::info!("READY");
+                        participant.run().await;
+                    }
+                    Err(e) => {
+                        log::error!("LiveKit connect failed: {}", e);
+                    }
+                }
+            });
+        });
+        (None, byte_capture)
     } else {
         (None, None)
     };

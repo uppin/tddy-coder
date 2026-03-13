@@ -81,6 +81,10 @@ impl EchoService for EchoServiceImpl {
 
 #[async_trait]
 impl RpcService for EchoServiceImpl {
+    fn is_bidi_stream(&self, service: &str, method: &str) -> bool {
+        service == "test.EchoService" && method == "EchoBidiStream"
+    }
+
     async fn handle_rpc(
         &self,
         service: &str,

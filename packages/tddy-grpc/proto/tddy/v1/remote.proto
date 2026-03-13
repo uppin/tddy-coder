@@ -7,6 +7,7 @@ package tddy.v1;
 service TddyRemote {
   rpc Stream(stream ClientMessage) returns (stream ServerMessage);
   rpc StreamTerminal(StreamTerminalRequest) returns (stream TerminalOutput);
+  rpc StreamTerminalIO(stream TerminalInput) returns (stream TerminalOutput);
   rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
 }
@@ -14,6 +15,10 @@ service TddyRemote {
 message StreamTerminalRequest {
   uint32 cols = 1;  // desired terminal width (0 = use server default)
   uint32 rows = 2;  // desired terminal height (0 = use server default)
+}
+
+message TerminalInput {
+  bytes data = 1;  // raw keyboard/mouse bytes (escape sequences)
 }
 
 message TerminalOutput {

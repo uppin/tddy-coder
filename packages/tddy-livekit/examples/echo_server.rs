@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|e| format!("Connect failed: {}", e))?;
 
     log::info!("[echo_server] connected, identity=server, event loop starting");
-    println!("READY");
+    log::info!("READY");
 
     participant.run().await;
     Ok(())

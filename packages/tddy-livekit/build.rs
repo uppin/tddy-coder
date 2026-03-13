@@ -20,5 +20,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .service_generator(Box::new(tddy_livekit_codegen::LiveKitServiceGenerator))
         .compile_protos(&["proto/test/echo_service.proto"], &["proto"])?;
 
+    // Terminal service
+    prost_build::Config::new()
+        .out_dir(&out_dir)
+        .service_generator(Box::new(tddy_livekit_codegen::LiveKitServiceGenerator))
+        .compile_protos(&["proto/terminal.proto"], &["proto"])?;
+
     Ok(())
 }

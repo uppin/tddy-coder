@@ -5,9 +5,9 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::bridge::RpcBridge;
+use crate::bridge::{ResponseBody, RpcBridge};
 use crate::envelope::{decode_request, encode_response, response_from_result};
-use crate::proto::RpcRequest;
+use crate::proto::{CallMetadata, RpcRequest};
 use crate::rpc_trace;
 
 const RPC_TOPIC: &str = "tddy-rpc";
@@ -18,12 +18,20 @@ struct ActiveStream {
     messages: Vec<RpcRequest>,
 }
 
+/// Bidi stream metadata: service and method for continuation messages that omit call_metadata.
+struct BidiStreamMeta {
+    service: String,
+    method: String,
+}
+
 /// A LiveKit room participant that routes RPC traffic to an RpcBridge.
 pub struct LiveKitParticipant<S: crate::bridge::RpcService> {
     room: Room,
     bridge: Arc<RpcBridge<S>>,
     events: mpsc::UnboundedReceiver<RoomEvent>,
     active_streams: Arc<Mutex<HashMap<i32, ActiveStream>>>,
+    /// Bidi stream request_ids and their service/method (continuation messages omit call_metadata).
+    active_bidi: Arc<Mutex<HashMap<i32, BidiStreamMeta>>>,
     /// Payloads received with participant=None before any remote joined (race with ParticipantConnected).
     pending_data: Arc<Mutex<VecDeque<Vec<u8>>>>,
 }
@@ -48,6 +56,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             bridge: Arc::new(bridge),
             events,
             active_streams: Arc::new(Mutex::new(HashMap::new())),
+            active_bidi: Arc::new(Mutex::new(HashMap::new())),
             pending_data: Arc::new(Mutex::new(VecDeque::new())),
         })
     }
@@ -76,6 +85,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                             let bridge = self.bridge.clone();
                             let local = self.room.local_participant();
                             let active_streams = self.active_streams.clone();
+                            let active_bidi = self.active_bidi.clone();
                             let event_participant = Some(identity.clone());
                             let remote_identities = remote_identities.clone();
                             tokio::spawn(async move {
@@ -86,6 +96,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                                     &bridge,
                                     &local,
                                     &active_streams,
+                                    &active_bidi,
                                 )
                                 .await
                                 {
@@ -153,6 +164,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     let bridge = self.bridge.clone();
                     let local = self.room.local_participant();
                     let active_streams = self.active_streams.clone();
+                    let active_bidi = self.active_bidi.clone();
                     let payload = Arc::try_unwrap(payload).unwrap_or_else(|a| (*a).clone());
 
                     tokio::spawn(async move {
@@ -163,6 +175,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                             &bridge,
                             &local,
                             &active_streams,
+                            &active_bidi,
                         )
                         .await
                         {
@@ -183,6 +196,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         bridge: &RpcBridge<S>,
         local: &LocalParticipant,
         active_streams: &Mutex<HashMap<i32, ActiveStream>>,
+        active_bidi: &Mutex<HashMap<i32, BidiStreamMeta>>,
     ) -> Result<(), String> {
         let request = decode_request(payload)?;
         let request_id = request.request_id;
@@ -199,6 +213,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
 
         let to_process: Option<(Vec<RpcRequest>, ParticipantIdentity)> = {
             let mut streams = active_streams.lock().await;
+            let mut bidi = active_bidi.lock().await;
             if end_of_stream {
                 if let Some(mut stream) = streams.remove(&request_id) {
                     stream.messages.push(request);
@@ -213,16 +228,83 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                         "no response destination (sender_identity absent, multiple remotes)"
                             .to_string()
                     })?;
-                    Some((vec![request], response_identity))
+                    let request_for_bridge = if request.call_metadata.is_none() {
+                        if let Some(meta) = bidi.remove(&request_id) {
+                            let mut req = request.clone();
+                            req.call_metadata = Some(CallMetadata {
+                                service: meta.service,
+                                method: meta.method,
+                            });
+                            req
+                        } else {
+                            request
+                        }
+                    } else {
+                        request
+                    };
+                    Some((vec![request_for_bridge], response_identity))
                 }
             } else {
-                if request.call_metadata.is_some() {
+                let service = request
+                    .call_metadata
+                    .as_ref()
+                    .map(|m| m.service.as_str())
+                    .unwrap_or("");
+                let method = request
+                    .call_metadata
+                    .as_ref()
+                    .map(|m| m.method.as_str())
+                    .unwrap_or("");
+                let is_bidi = if request.call_metadata.is_some() {
+                    bridge.is_bidi_stream(service, method)
+                } else {
+                    bidi.contains_key(&request_id)
+                };
+                if is_bidi {
+                    let response_identity = resolve_response_identity(
+                        &request,
+                        event_participant.clone(),
+                        remote_identities,
+                    )
+                    .ok_or_else(|| {
+                        "no response destination for stream (sender_identity absent, multiple remotes)"
+                            .to_string()
+                    })?;
+                    let (service, method) = if let Some(meta) = request.call_metadata.as_ref() {
+                        bidi.insert(
+                            request_id,
+                            BidiStreamMeta {
+                                service: meta.service.clone(),
+                                method: meta.method.clone(),
+                            },
+                        );
+                        (meta.service.as_str(), meta.method.as_str())
+                    } else if let Some(meta) = bidi.get(&request_id) {
+                        (meta.service.as_str(), meta.method.as_str())
+                    } else {
+                        ("", "")
+                    };
+                    let request_for_bridge = if request.call_metadata.is_some() {
+                        request
+                    } else {
+                        let mut req = request.clone();
+                        req.call_metadata = Some(CallMetadata {
+                            service: service.to_string(),
+                            method: method.to_string(),
+                        });
+                        req
+                    };
+                    Some((vec![request_for_bridge], response_identity))
+                } else if request.call_metadata.is_some() {
                     let sender_identity = resolve_response_identity(
                         &request,
                         event_participant.clone(),
                         remote_identities,
                     )
-                    .ok_or_else(|| "no response destination for stream (sender_identity absent, multiple remotes)".to_string())?;
+                    .ok_or_else(|| {
+                        "no response destination for stream (sender_identity absent, multiple remotes)"
+                            .to_string()
+                    })?;
                     streams.insert(
                         request_id,
                         ActiveStream {
@@ -230,10 +312,13 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                             messages: vec![request],
                         },
                     );
+                    None
                 } else if let Some(stream) = streams.get_mut(&request_id) {
                     stream.messages.push(request);
+                    None
+                } else {
+                    None
                 }
-                None
             }
         };
 
@@ -241,44 +326,117 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             return Ok(());
         };
 
+        let request_end_of_stream = messages.last().map(|m| m.end_of_stream).unwrap_or(true);
         let result = bridge.handle_decoded_requests(&messages).await;
 
         match result {
-            Ok(chunks) => {
-                let len = chunks.len();
-                log::info!(
-                    "[echo_server] RPC request_id={} response sent ({} chunk(s))",
-                    request_id,
-                    len
-                );
-                rpc_trace!(
-                    "LiveKitParticipant: request_id={} produced {} response chunk(s)",
-                    request_id,
-                    len
-                );
-                for (i, bytes) in chunks.into_iter().enumerate() {
-                    let end_of_stream = i == len - 1;
-                    let response = crate::proto::RpcResponse {
+            Ok(body) => match body {
+                ResponseBody::Complete(chunks) => {
+                    let len = chunks.len();
+                    log::info!(
+                        "[echo_server] RPC request_id={} response sent ({} chunk(s))",
                         request_id,
-                        response_message: bytes,
-                        metadata: None,
-                        end_of_stream,
-                        error: None,
-                        trailers: None,
-                    };
-                    let encoded = encode_response(response)?;
-                    let packet = DataPacket {
-                        payload: encoded,
-                        topic: Some(RPC_TOPIC.to_string()),
-                        reliable: true,
-                        destination_identities: vec![response_identity.clone()],
-                    };
-                    local
-                        .publish_data(packet)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                        len
+                    );
+                    for (i, bytes) in chunks.into_iter().enumerate() {
+                        let end_of_stream = i == len - 1;
+                        let response = crate::proto::RpcResponse {
+                            request_id,
+                            response_message: bytes,
+                            metadata: None,
+                            end_of_stream,
+                            error: None,
+                            trailers: None,
+                        };
+                        let encoded = encode_response(response)?;
+                        let packet = DataPacket {
+                            payload: encoded,
+                            topic: Some(RPC_TOPIC.to_string()),
+                            reliable: true,
+                            destination_identities: vec![response_identity.clone()],
+                        };
+                        local
+                            .publish_data(packet)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                    }
                 }
-            }
+                ResponseBody::Streaming(mut rx) => {
+                    log::info!(
+                        "[echo_server] RPC request_id={} streaming response (spawned task)",
+                        request_id
+                    );
+                    let local = local.clone();
+                    let response_identity = response_identity.clone();
+                    let response_end_of_stream = request_end_of_stream;
+                    tokio::spawn(async move {
+                        let mut chunk_index = 0u64;
+                        let mut last_bytes: Option<Vec<u8>> = None;
+                        while let Some(item) = rx.recv().await {
+                            let bytes = match item {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    log::error!(
+                                        "Stream request_id={} chunk error: {}",
+                                        request_id,
+                                        e
+                                    );
+                                    break;
+                                }
+                            };
+                            if let Some(prev) = last_bytes.replace(bytes) {
+                                let end_of_stream = false;
+                                let response = crate::proto::RpcResponse {
+                                    request_id,
+                                    response_message: prev,
+                                    metadata: None,
+                                    end_of_stream,
+                                    error: None,
+                                    trailers: None,
+                                };
+                                if let Ok(encoded) = encode_response(response) {
+                                    let packet = DataPacket {
+                                        payload: encoded,
+                                        topic: Some(RPC_TOPIC.to_string()),
+                                        reliable: true,
+                                        destination_identities: vec![response_identity.clone()],
+                                    };
+                                    if local.publish_data(packet).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                chunk_index += 1;
+                            }
+                        }
+                        if let Some(bytes) = last_bytes {
+                            let response = crate::proto::RpcResponse {
+                                request_id,
+                                response_message: bytes,
+                                metadata: None,
+                                end_of_stream: response_end_of_stream,
+                                error: None,
+                                trailers: None,
+                            };
+                            if let Ok(encoded) = encode_response(response) {
+                                let _ = local
+                                    .publish_data(DataPacket {
+                                        payload: encoded,
+                                        topic: Some(RPC_TOPIC.to_string()),
+                                        reliable: true,
+                                        destination_identities: vec![response_identity],
+                                    })
+                                    .await;
+                            }
+                            chunk_index += 1;
+                        }
+                        log::info!(
+                            "[echo_server] RPC request_id={} stream finished ({} chunks)",
+                            request_id,
+                            chunk_index
+                        );
+                    });
+                }
+            },
             Err(status) => {
                 log::info!(
                     "[echo_server] RPC request_id={} error response: {}",
