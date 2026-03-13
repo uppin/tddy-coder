@@ -84,6 +84,32 @@ fn help_shows_web_port_and_web_bundle_path() {
     );
 }
 
+/// Retries `f` until it returns `Ok` or the timeout (5s) is reached.
+/// Yields between attempts to avoid busy-spinning.
+fn retry_until_ready<T, E>(mut f: impl FnMut() -> Result<T, E>) -> Result<T, E>
+where
+    E: std::fmt::Display,
+{
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match f() {
+            Ok(v) => return Ok(v),
+            Err(e) if std::time::Instant::now() >= deadline => return Err(e),
+            Err(_) => std::thread::yield_now(),
+        }
+    }
+}
+
+/// Kills the child process on drop (e.g. on panic or early return).
+struct KillOnDrop(std::process::Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// Daemon with --web-port and --web-bundle-path serves index.html at /.
 #[test]
 #[cfg(unix)]
@@ -111,7 +137,7 @@ fn daemon_with_web_flags_serves_index_html_at_root() {
         port
     };
 
-    let mut child = StdCommand::new(assert_cmd::cargo::cargo_bin!("tddy-coder"))
+    let child = StdCommand::new(assert_cmd::cargo::cargo_bin!("tddy-coder"))
         .env_clear()
         .env(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap())
         .args([
@@ -128,16 +154,14 @@ fn daemon_with_web_flags_serves_index_html_at_root() {
         .spawn()
         .expect("spawn tddy-coder daemon");
 
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    let _guard = KillOnDrop(child);
 
     let url = format!("http://127.0.0.1:{}/", web_port);
-    let body = reqwest::blocking::get(&url)
-        .expect("HTTP GET /")
-        .text()
-        .expect("read response body");
-
-    child.kill().expect("kill daemon");
-    let _ = child.wait();
+    let body = retry_until_ready(|| {
+        reqwest::blocking::get(&url)
+            .and_then(|r| r.text())
+    })
+    .expect("HTTP GET / within timeout");
 
     assert!(
         body.contains("Web Bundle Test"),
