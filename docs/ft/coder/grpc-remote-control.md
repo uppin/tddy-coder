@@ -76,7 +76,7 @@ The `--daemon` flag starts a headless gRPC server (no TUI) suitable for systemd 
 
 **Changeset extensions**: `worktree`, `branch`, `remote_pushed` fields.
 
-**Configuration**: Sessions base is `~/.tddy/sessions`. Port defaults to 50051 (`--grpc`). Graceful shutdown on SIGTERM.
+**Configuration**: Sessions base is `~/.tddy/sessions`. Port defaults to 50051 (`--grpc`). Graceful shutdown on SIGTERM. Optional `--web-port` and `--web-bundle-path` serve tddy-web static assets over HTTP alongside gRPC.
 
 ### 6. Terminal streaming (TUI mode)
 
