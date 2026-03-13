@@ -43,7 +43,9 @@ fn tddy_demo_sigint_prints_session_info_to_stderr() {
     // blocks on stdin — this happens AFTER the ctrlc handler is registered.
     let mut stdout = child.stdout.take().expect("stdout");
     let mut buf = [0u8; 1];
-    stdout.read_exact(&mut buf).expect("read first byte of stdout");
+    stdout
+        .read_exact(&mut buf)
+        .expect("read first byte of stdout");
 
     let pid = child.id() as i32;
     let _ = unsafe { libc::kill(pid, libc::SIGINT) };

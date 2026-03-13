@@ -11,7 +11,6 @@ const TEST_IDENTITY: &str = "test-participant";
 
 #[tokio::test]
 async fn livekit_testkit_starts_container_and_returns_ws_url() -> Result<()> {
-    eprintln!("{}", r#"{"tddy":{"marker_id":"M001","scope":"livekit_testkit_integration::livekit_testkit_starts_container_and_returns_ws_url","data":{}}}"#);
     let livekit = LiveKitTestkit::start().await?;
     let url = livekit.get_ws_url();
     assert!(
@@ -28,7 +27,6 @@ async fn livekit_testkit_starts_container_and_returns_ws_url() -> Result<()> {
 
 #[tokio::test]
 async fn livekit_testkit_generates_valid_token() -> Result<()> {
-    eprintln!("{}", r#"{"tddy":{"marker_id":"M002","scope":"livekit_testkit_integration::livekit_testkit_generates_valid_token","data":{}}}"#);
     let livekit = LiveKitTestkit::start().await?;
     let token = livekit.generate_token(TEST_ROOM, TEST_IDENTITY)?;
     assert!(!token.is_empty(), "Token should not be empty");
