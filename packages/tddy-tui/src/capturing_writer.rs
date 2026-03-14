@@ -9,6 +9,7 @@ pub type ByteCallback = Box<dyn Fn(&[u8]) + Send>;
 
 struct CapturingWriterInner {
     on_write: ByteCallback,
+    headless: bool,
 }
 
 /// Writer that forwards to stdout and invokes a callback with each written chunk.
@@ -22,21 +23,45 @@ pub struct CapturingWriter {
 impl CapturingWriter {
     pub fn new(on_write: ByteCallback) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(CapturingWriterInner { on_write })),
+            inner: Arc::new(Mutex::new(CapturingWriterInner {
+                on_write,
+                headless: false,
+            })),
+        }
+    }
+
+    /// Headless variant: only invokes callback, does not write to stdout.
+    /// Use for virtual TUI rendering where no real terminal is attached.
+    pub fn headless(on_write: ByteCallback) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(CapturingWriterInner {
+                on_write,
+                headless: true,
+            })),
         }
     }
 }
 
 impl Write for CapturingWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let n = std::io::stdout().write(buf)?;
         let inner = self.inner.lock().unwrap();
-        (inner.on_write)(&buf[..n]);
+        let n = if inner.headless {
+            (inner.on_write)(buf);
+            buf.len()
+        } else {
+            let n = std::io::stdout().write(buf)?;
+            (inner.on_write)(&buf[..n]);
+            n
+        };
         Ok(n)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        std::io::stdout().flush()
+        let inner = self.inner.lock().unwrap();
+        if !inner.headless {
+            std::io::stdout().flush()?;
+        }
+        Ok(())
     }
 }
 

@@ -1,9 +1,10 @@
 //! PresenterView trait — callbacks for state changes.
+//! Used by TuiView and apply_event in tddy-tui to map PresenterEvent to view updates.
 
 use crate::presenter::state::{ActivityEntry, AppMode};
 use crate::presenter::WorkflowCompletePayload;
 
-/// View interface. Presenter calls these methods when state changes.
+/// View interface. Consumers map PresenterEvent to these callbacks when updating local state.
 pub trait PresenterView {
     fn on_mode_changed(&mut self, mode: &AppMode);
     fn on_activity_logged(&mut self, entry: &ActivityEntry, activity_log_len: usize);
