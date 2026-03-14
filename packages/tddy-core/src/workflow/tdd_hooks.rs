@@ -12,7 +12,7 @@ use crate::error::WorkflowError;
 use crate::output::slugify_directory_name;
 use crate::output::{
     parse_acceptance_tests_response, parse_evaluate_response, parse_green_response,
-    parse_planning_response, parse_red_response, parse_refactor_response,
+    parse_planning_response_with_base, parse_red_response, parse_refactor_response,
     parse_update_docs_response, parse_validate_subagents_response, update_acceptance_tests_file,
     update_progress_file, write_acceptance_tests_file, write_artifacts, write_demo_results_file,
     write_evaluation_report, write_progress_file, write_red_output_file, PlanningOutput,
@@ -279,7 +279,7 @@ fn after_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + 
         .get_sync("parsed_planning")
         .or_else(|| {
             let output: String = context.get_sync("output")?;
-            parse_planning_response(&output).ok()
+            parse_planning_response_with_base(&output, plan_dir).ok()
         })
         .ok_or("plan after_task requires parsed_planning or parseable output in context")?;
     write_artifacts(plan_dir, &planning)?;

@@ -47,7 +47,7 @@ impl PermissionServer {
     }
 
     /// True if path (absolute or relative to repo) is under allowed dirs.
-    /// For non-existent paths (e.g. Write target), checks the parent directory.
+    /// For non-existent paths (e.g. mkdir target), walks up to find an existing ancestor.
     fn path_allowed(path: &str) -> bool {
         let allowed = Self::allowed_dirs();
         if allowed.is_empty() {
@@ -62,10 +62,16 @@ impl PermissionServer {
                 None => return false,
             }
         };
-        let canonical = resolved
-            .canonicalize()
-            .ok()
-            .or_else(|| resolved.parent().and_then(|p| p.canonicalize().ok()));
+        let canonical = resolved.canonicalize().ok().or_else(|| {
+            let mut current = resolved.as_path();
+            while let Some(parent) = current.parent() {
+                if let Ok(c) = parent.canonicalize() {
+                    return Some(c);
+                }
+                current = parent;
+            }
+            None
+        });
         canonical
             .map(|c| allowed.iter().any(|a| c.starts_with(a)))
             .unwrap_or(false)
@@ -106,6 +112,10 @@ impl PermissionServer {
                 // Plan/PRD submission or mode switch — part of tddy workflow
                 true
             }
+            "AskUserQuestion" => {
+                // Clarification flow — part of tddy workflow (matches tddy-core allowlists)
+                true
+            }
             "Glob" | "Grep" | "Read" => {
                 let path = input
                     .get("path")
@@ -121,32 +131,41 @@ impl PermissionServer {
     /// Decide allow/deny. Bash(tddy-tools *) and mcp__tddy-tools__* are always allowed.
     /// Bash commands that only reference paths under TDDY_PLAN_DIR or TDDY_REPO_DIR are pre-allowed.
     /// For other tools: route through TDDY_SOCKET to TUI if available, else deny.
+    ///
+    /// Claude Code permission-prompt-tool expects allow responses to include `updatedInput` (the
+    /// original or modified tool input). Deny responses use `behavior: "deny"` and optional `message`.
     fn decide(&self, tool_name: &str, input: &Value) -> String {
+        let allow_response = || serde_json::json!({ "behavior": "allow", "updatedInput": input });
         if tool_name == "Bash" {
             let command = input.get("command").and_then(|c| c.as_str()).unwrap_or("");
             if command.starts_with("tddy-tools") {
-                return serde_json::json!({ "behavior": "allow" }).to_string();
+                return allow_response().to_string();
             }
             // Pre-allow if all paths in command are under session/plan dir or repo
             if Self::paths_in_command_all_allowed(command) {
-                return serde_json::json!({ "behavior": "allow" }).to_string();
+                return allow_response().to_string();
             }
         }
         // mcp__tddy-tools__* — our MCP tools, always allow
         if tool_name.starts_with("mcp__tddy-tools__") {
-            return serde_json::json!({ "behavior": "allow" }).to_string();
+            return allow_response().to_string();
         }
         // In-repo changes, executions, plan/MD submissions — pre-allow when paths are under repo/plan
         if Self::tool_in_repo_pre_allowed(tool_name, input) {
-            return serde_json::json!({ "behavior": "allow" }).to_string();
+            return allow_response().to_string();
         }
         // Unknown tool: route through TUI if socket available
         if let Some(ref path) = self.socket_path {
             if let Ok(allow) = Self::relay_approve(path, tool_name, input) {
-                return serde_json::json!({
-                    "behavior": if allow { "allow" } else { "deny" }
-                })
-                .to_string();
+                return if allow {
+                    allow_response().to_string()
+                } else {
+                    serde_json::json!({
+                        "behavior": "deny",
+                        "message": format!("Permission denied for {}", tool_name)
+                    })
+                    .to_string()
+                };
             }
         }
         serde_json::json!({
@@ -368,6 +387,34 @@ mod tests {
 
     #[test]
     #[serial]
+    fn approval_prompt_pre_allows_mkdir_for_nonexistent_path_in_repo() {
+        let dir = std::env::temp_dir().join("tddy-mkdir-preallow");
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = std::fs::canonicalize(&dir).unwrap();
+        let packages = repo.join("packages");
+        std::fs::create_dir_all(&packages).unwrap();
+        let mkdir_target = repo.join("packages").join("tddy-github").join("src");
+
+        std::env::set_var("TDDY_REPO_DIR", &repo);
+        let result = {
+            let input = serde_json::json!({
+                "command": format!("mkdir -p {}", mkdir_target.display())
+            });
+            PermissionServer::new().decide("Bash", &input)
+        };
+        std::env::remove_var("TDDY_REPO_DIR");
+        std::fs::remove_dir_all(&dir).ok();
+
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["behavior"], "allow",
+            "Bash mkdir -p for path under TDDY_REPO_DIR must be pre-allowed (path may not exist yet), got: {}",
+            result
+        );
+    }
+
+    #[test]
+    #[serial]
     fn approval_prompt_pre_allows_write_in_repo_dir() {
         let dir = std::env::temp_dir().join("tddy-write-preallow");
         std::fs::create_dir_all(&dir).unwrap();
@@ -416,6 +463,36 @@ mod tests {
         assert_eq!(
             parsed["behavior"], "allow",
             "ExitPlanMode must be pre-allowed when TDDY env set, got: {}",
+            result
+        );
+        assert!(
+            parsed.get("updatedInput").is_some(),
+            "Claude Code permission-prompt-tool expects updatedInput in allow responses, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn approval_prompt_pre_allows_ask_user_question() {
+        let dir = std::env::temp_dir().join("tddy-askuser");
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = std::fs::canonicalize(&dir).unwrap();
+
+        std::env::set_var("TDDY_REPO_DIR", &repo);
+        let result = {
+            let input = serde_json::json!({
+                "questions": [{"header": "Scope", "question": "Which?", "options": [], "multiSelect": false}]
+            });
+            PermissionServer::new().decide("AskUserQuestion", &input)
+        };
+        std::env::remove_var("TDDY_REPO_DIR");
+        std::fs::remove_dir_all(&dir).ok();
+
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed["behavior"], "allow",
+            "AskUserQuestion must be pre-allowed when TDDY env set, got: {}",
             result
         );
     }

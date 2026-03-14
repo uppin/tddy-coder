@@ -396,6 +396,13 @@ impl CursorBackend {
             None
         };
 
+        if let Some(ref sink) = request.progress_sink {
+            sink.emit(&crate::stream::ProgressEvent::AgentExited {
+                exit_code,
+                goal: request.goal.submit_key().to_string(),
+            });
+        }
+
         Ok(InvokeResponse {
             output: stream_result.result_text,
             exit_code,

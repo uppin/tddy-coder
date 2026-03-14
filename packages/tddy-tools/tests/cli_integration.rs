@@ -73,6 +73,19 @@ fn submit_reads_from_stdin() {
 }
 
 #[test]
+fn submit_data_stdin_reads_json_from_stdin() {
+    let valid_json = r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X. Session state is logged for debugging.","todo":"- [ ] Task 1"}"##;
+
+    let mut cmd = tddy_tools_bin();
+    cmd.args(["submit", "--goal", "plan", "--data-stdin"])
+        .write_stdin(valid_json);
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("\"status\":\"ok\""))
+        .stdout(predicates::str::contains("\"goal\":\"plan\""));
+}
+
+#[test]
 fn submit_malformed_json_returns_parse_error() {
     let mut cmd = tddy_tools_bin();
     cmd.args(["submit", "--goal", "plan", "--data", "not valid json {"]);

@@ -9,8 +9,18 @@ use super::{
     ToolExecutor,
 };
 use crate::error::BackendError;
+use crate::stream::ProgressEvent;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+
+fn emit_agent_exited(request: &InvokeRequest, exit_code: i32) {
+    if let Some(ref sink) = request.progress_sink {
+        sink.emit(&ProgressEvent::AgentExited {
+            exit_code,
+            goal: request.goal.submit_key().to_string(),
+        });
+    }
+}
 
 fn escape_json_string(s: &str) -> String {
     s.replace('\\', "\\\\")
@@ -293,10 +303,12 @@ impl CodingBackend for StubBackend {
         }
 
         if prompt.contains(FAIL_PARSE) {
+            emit_agent_exited(&request, 0);
             return Ok(self.fail_parse_response(request.goal));
         }
 
         if prompt.contains(FAIL_SCHEMA) {
+            emit_agent_exited(&request, 0);
             return Ok(self.fail_schema_response(request.goal));
         }
 
@@ -314,6 +326,7 @@ impl CodingBackend for StubBackend {
             && !is_refinement
         {
             log::debug!("[stub] plan: returning clarification questions (no submit)");
+            emit_agent_exited(&request, 0);
             return Ok(InvokeResponse {
                 output: "Clarification needed.".to_string(),
                 exit_code: 0,
@@ -332,6 +345,7 @@ impl CodingBackend for StubBackend {
         if request.goal == Goal::AcceptanceTests && !has_answers && !prompt.contains(SKIP_QUESTIONS)
         {
             log::debug!("[stub] acceptance-tests: returning permission questions (no submit)");
+            emit_agent_exited(&request, 0);
             return Ok(InvokeResponse {
                 output: "Permission needed.".to_string(),
                 exit_code: 0,
@@ -348,7 +362,9 @@ impl CodingBackend for StubBackend {
         }
 
         log::debug!("[stub] returning response_for_goal {:?}", request.goal);
-        Ok(self.response_for_goal(request.goal))
+        let response = self.response_for_goal(request.goal);
+        emit_agent_exited(&request, response.exit_code);
+        Ok(response)
     }
 
     fn name(&self) -> &str {

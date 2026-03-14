@@ -5566,6 +5566,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-github"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-livekit"
 version = "0.1.0"
 dependencies = [
@@ -5620,6 +5628,7 @@ dependencies = [
  "serde_json",
  "tddy-codegen",
  "tddy-core",
+ "tddy-github",
  "tddy-rpc",
  "tddy-tui",
  "tokio",

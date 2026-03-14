@@ -13,7 +13,7 @@ use tddy_tui::run_virtual_tui;
 use tokio::sync::mpsc as tokio_mpsc;
 use tonic::{Request, Response, Status};
 
-use tddy_core::output::{create_session_dir_under, parse_planning_response, PlanningOutput};
+use tddy_core::output::{create_session_dir_under, parse_planning_response_with_base, PlanningOutput};
 use tddy_core::workflow::graph::{ElicitationEvent, ExecutionStatus};
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{create_worktree, SharedBackend, WorkflowEngine};
@@ -435,6 +435,14 @@ impl DaemonStreamHandler {
             CTX_PLAN_DIR.to_string(),
             serde_json::to_value(plan.clone()).unwrap(),
         );
+        let conv_path = plan.join("logs").join("conversation.jsonl");
+        if let Some(parent) = conv_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        ctx.insert(
+            "conversation_output_path".to_string(),
+            serde_json::to_value(conv_path).unwrap(),
+        );
 
         let _ = self
             .tx
@@ -488,7 +496,7 @@ impl DaemonStreamHandler {
                     .flatten()
             })
             .and_then(|s| s.context.get_sync::<String>("output"))
-            .and_then(|o| parse_planning_response(&o).ok())
+            .and_then(|o| parse_planning_response_with_base(&o, plan_dir_path).ok())
             .unwrap_or_else(|| {
                 let prd =
                     std::fs::read_to_string(plan_dir_path.join(PRD_FILENAME)).unwrap_or_default();
