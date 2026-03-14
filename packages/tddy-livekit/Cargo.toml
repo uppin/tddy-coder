@@ -12,6 +12,7 @@ path = "src/lib.rs"
 prost = "0.13"
 tddy-rpc = { path = "../tddy-rpc" }
 livekit = "0.7"
+livekit-api = "0.4"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net"] }
 async-trait = "0.1"
 dashmap = "5"

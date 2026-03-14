@@ -143,6 +143,10 @@ pub struct Args {
     pub livekit_room: Option<String>,
     /// LiveKit participant identity
     pub livekit_identity: Option<String>,
+    /// LiveKit API key for token generation (mutually exclusive with --livekit-token)
+    pub livekit_api_key: Option<String>,
+    /// LiveKit API secret for token generation (mutually exclusive with --livekit-token)
+    pub livekit_api_secret: Option<String>,
     /// When Some with web_bundle_path, HTTP server serves static files on this port.
     pub web_port: Option<u16>,
     /// Path to pre-built web bundle (e.g. packages/tddy-web/dist). Requires web_port.
@@ -213,6 +217,14 @@ pub struct CoderArgs {
     /// LiveKit participant identity
     #[arg(long)]
     pub livekit_identity: Option<String>,
+
+    /// LiveKit API key for token generation (mutually exclusive with --livekit-token)
+    #[arg(long, env = "LIVEKIT_API_KEY")]
+    pub livekit_api_key: Option<String>,
+
+    /// LiveKit API secret for token generation (mutually exclusive with --livekit-token)
+    #[arg(long, env = "LIVEKIT_API_SECRET")]
+    pub livekit_api_secret: Option<String>,
 
     /// Port for HTTP static file server (serves --web-bundle-path). Requires --web-bundle-path.
     #[arg(long, value_name = "PORT")]
@@ -288,6 +300,14 @@ pub struct DemoArgs {
     #[arg(long)]
     pub livekit_identity: Option<String>,
 
+    /// LiveKit API key for token generation (mutually exclusive with --livekit-token)
+    #[arg(long, env = "LIVEKIT_API_KEY")]
+    pub livekit_api_key: Option<String>,
+
+    /// LiveKit API secret for token generation (mutually exclusive with --livekit-token)
+    #[arg(long, env = "LIVEKIT_API_SECRET")]
+    pub livekit_api_secret: Option<String>,
+
     /// Port for HTTP static file server (serves --web-bundle-path). Requires --web-bundle-path.
     #[arg(long, value_name = "PORT")]
     pub web_port: Option<u16>,
@@ -316,6 +336,8 @@ impl From<CoderArgs> for Args {
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
             livekit_identity: a.livekit_identity,
+            livekit_api_key: a.livekit_api_key,
+            livekit_api_secret: a.livekit_api_secret,
             web_port: a.web_port,
             web_bundle_path: a.web_bundle_path.clone(),
         }
@@ -341,10 +363,44 @@ impl From<DemoArgs> for Args {
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
             livekit_identity: a.livekit_identity,
+            livekit_api_key: a.livekit_api_key,
+            livekit_api_secret: a.livekit_api_secret,
             web_port: a.web_port,
             web_bundle_path: a.web_bundle_path.clone(),
         }
     }
+}
+
+/// Validate LiveKit args: mutual exclusivity of token vs key/secret, and completeness.
+fn validate_livekit_args(args: &Args) -> anyhow::Result<()> {
+    let has_token = args.livekit_token.is_some();
+    let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
+
+    if has_token && has_key_secret {
+        anyhow::bail!(
+            "--livekit-token and --livekit-api-key/--livekit-api-secret are mutually exclusive"
+        );
+    }
+
+    let has_any_livekit = args.livekit_url.is_some()
+        || args.livekit_token.is_some()
+        || args.livekit_api_key.is_some()
+        || args.livekit_api_secret.is_some()
+        || args.livekit_room.is_some()
+        || args.livekit_identity.is_some();
+
+    let livekit_complete = args.livekit_url.is_some()
+        && (has_token || has_key_secret)
+        && args.livekit_room.is_some()
+        && args.livekit_identity.is_some();
+
+    if has_any_livekit && !livekit_complete {
+        anyhow::bail!(
+            "LiveKit requires all of: --livekit-url, (--livekit-token OR --livekit-api-key + --livekit-api-secret), --livekit-room, --livekit-identity"
+        );
+    }
+
+    Ok(())
 }
 
 /// Validate that --web-port and --web-bundle-path are both present or both absent.
@@ -359,6 +415,7 @@ fn validate_web_args(args: &Args) -> anyhow::Result<()> {
 /// Main entry point. Run the workflow with the given args.
 pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     validate_web_args(args)?;
+    validate_livekit_args(args)?;
     verify_tddy_tools_available(&args.agent)?;
     if args.daemon {
         return run_daemon(args, shutdown);
@@ -523,21 +580,12 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         .build()
         .context("create tokio runtime")?;
 
+    let has_token = args.livekit_token.is_some();
+    let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
     let livekit_enabled = args.livekit_url.is_some()
-        && args.livekit_token.is_some()
+        && (has_token || has_key_secret)
         && args.livekit_room.is_some()
         && args.livekit_identity.is_some();
-
-    if (args.livekit_url.is_some()
-        || args.livekit_token.is_some()
-        || args.livekit_room.is_some()
-        || args.livekit_identity.is_some())
-        && !livekit_enabled
-    {
-        anyhow::bail!(
-            "LiveKit requires all of: --livekit-url, --livekit-token, --livekit-room, --livekit-identity"
-        );
-    }
 
     rt.block_on(async {
         let addr: std::net::SocketAddr = ([0, 0, 0, 0], port).into();
@@ -562,37 +610,57 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
 
         if livekit_enabled {
             let url = args.livekit_url.as_ref().unwrap().clone();
-            let token = args.livekit_token.as_ref().unwrap().clone();
             let shutdown_clone = shutdown.clone();
-            tokio::spawn(async move {
-                let participant = match tddy_livekit::LiveKitParticipant::connect(
-                    &url,
-                    &token,
-                    tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl),
-                    tddy_livekit::RoomOptions::default(),
-                )
-                .await
-                {
-                    Ok(p) => {
-                        log::info!("LiveKit participant connected to room");
-                        p
-                    }
-                    Err(e) => {
-                        log::error!("LiveKit connect failed: {}", e);
-                        return;
-                    }
-                };
-                tokio::select! {
-                    _ = participant.run() => {
-                        log::info!("LiveKit participant disconnected");
-                    }
-                    _ = async {
-                        while !shutdown_clone.load(Ordering::Relaxed) {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            if has_key_secret {
+                let token_generator = tddy_livekit::TokenGenerator::new(
+                    args.livekit_api_key.as_ref().unwrap().clone(),
+                    args.livekit_api_secret.as_ref().unwrap().clone(),
+                    args.livekit_room.as_ref().unwrap().clone(),
+                    args.livekit_identity.as_ref().unwrap().clone(),
+                    std::time::Duration::from_secs(120),
+                );
+                tokio::spawn(async move {
+                    tddy_livekit::LiveKitParticipant::run_with_reconnect(
+                        &url,
+                        &token_generator,
+                        tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl),
+                        tddy_livekit::RoomOptions::default(),
+                        shutdown_clone,
+                    )
+                    .await
+                });
+            } else {
+                let token = args.livekit_token.as_ref().unwrap().clone();
+                tokio::spawn(async move {
+                    let participant = match tddy_livekit::LiveKitParticipant::connect(
+                        &url,
+                        &token,
+                        tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl),
+                        tddy_livekit::RoomOptions::default(),
+                    )
+                    .await
+                    {
+                        Ok(p) => {
+                            log::info!("LiveKit participant connected to room");
+                            p
                         }
-                    } => {}
-                }
-            });
+                        Err(e) => {
+                            log::error!("LiveKit connect failed: {}", e);
+                            return;
+                        }
+                    };
+                    tokio::select! {
+                        _ = participant.run() => {
+                            log::info!("LiveKit participant disconnected");
+                        }
+                        _ = async {
+                            while !shutdown_clone.load(Ordering::Relaxed) {
+                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                            }
+                        } => {}
+                    }
+                });
+            }
         }
 
         let shutdown_fut = async {
@@ -995,8 +1063,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     let view = tddy_tui::TuiView::new();
     let mut presenter = Presenter::new(view, &args.agent, args.model.as_deref().unwrap_or("opus"));
 
+    let has_token = args.livekit_token.is_some();
+    let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
     let livekit_enabled = args.livekit_url.is_some()
-        && args.livekit_token.is_some()
+        && (has_token || has_key_secret)
         && args.livekit_room.is_some()
         && args.livekit_identity.is_some();
 
@@ -1045,31 +1115,58 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             let _ = byte_tx_for_callback.send(buf.to_vec());
         }));
         let url = args.livekit_url.clone().unwrap();
-        let token = args.livekit_token.clone().unwrap();
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime");
-            rt.block_on(async {
-                match tddy_livekit::LiveKitParticipant::connect(
-                    &url,
-                    &token,
-                    tddy_service::TerminalServiceServer::new(terminal_service),
-                    tddy_livekit::RoomOptions::default(),
-                )
-                .await
-                {
-                    Ok(participant) => {
-                        log::info!("READY");
-                        participant.run().await;
-                    }
-                    Err(e) => {
-                        log::error!("LiveKit connect failed: {}", e);
-                    }
-                }
+        let shutdown = shutdown.clone();
+        if has_key_secret {
+            let token_generator = tddy_livekit::TokenGenerator::new(
+                args.livekit_api_key.as_ref().unwrap().clone(),
+                args.livekit_api_secret.as_ref().unwrap().clone(),
+                args.livekit_room.as_ref().unwrap().clone(),
+                args.livekit_identity.as_ref().unwrap().clone(),
+                std::time::Duration::from_secs(120),
+            );
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .expect("tokio runtime");
+                rt.block_on(async {
+                    tddy_livekit::LiveKitParticipant::run_with_reconnect(
+                        &url,
+                        &token_generator,
+                        tddy_service::TerminalServiceServer::new(terminal_service),
+                        tddy_livekit::RoomOptions::default(),
+                        shutdown,
+                    )
+                    .await
+                });
             });
-        });
+        } else {
+            let token = args.livekit_token.clone().unwrap();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .expect("tokio runtime");
+                rt.block_on(async {
+                    match tddy_livekit::LiveKitParticipant::connect(
+                        &url,
+                        &token,
+                        tddy_service::TerminalServiceServer::new(terminal_service),
+                        tddy_livekit::RoomOptions::default(),
+                    )
+                    .await
+                    {
+                        Ok(participant) => {
+                            log::info!("READY");
+                            participant.run().await;
+                        }
+                        Err(e) => {
+                            log::error!("LiveKit connect failed: {}", e);
+                        }
+                    }
+                });
+            });
+        }
         (None, byte_capture)
     } else {
         (None, None)
