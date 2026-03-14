@@ -355,6 +355,9 @@ async fn rpc_scenarios() -> Result<()> {
             let mut messages = Vec::new();
             while let Some(chunk) = rx.recv().await {
                 let bytes = chunk.map_err(|e| anyhow::anyhow!("stream chunk: {}", e))?;
+                if bytes.is_empty() {
+                    continue; // skip empty end-of-stream frame
+                }
                 let response = EchoResponse::decode(&bytes[..])?;
                 log::debug!("stream chunk: {:?}", response.message);
                 messages.push(response.message);
@@ -385,6 +388,9 @@ async fn rpc_scenarios() -> Result<()> {
             let mut sequence = Vec::new();
             while let Some(chunk) = rx.recv().await {
                 let bytes = chunk.map_err(|e| anyhow::anyhow!("stream chunk: {}", e))?;
+                if bytes.is_empty() {
+                    continue; // skip empty end-of-stream frame
+                }
                 let response = EchoResponse::decode(&bytes[..])?;
                 sequence.push(response.message.clone());
             }
@@ -488,6 +494,9 @@ async fn rpc_scenarios() -> Result<()> {
             let mut received = Vec::new();
             while let Some(chunk) = rx.recv().await {
                 let bytes = chunk.map_err(|e| anyhow::anyhow!("bidi chunk: {}", e))?;
+                if bytes.is_empty() {
+                    continue; // skip empty end-of-stream frame
+                }
                 let response = EchoResponse::decode(&bytes[..])?;
                 received.push(response.message);
             }
@@ -550,13 +559,24 @@ async fn rpc_scenarios() -> Result<()> {
                 .await
                 .map_err(|e| anyhow::anyhow!("send second: {}", e))?;
 
-            let second_echo = tokio::time::timeout(Duration::from_secs(3), rx.recv())
-                .await
-                .map_err(|_| anyhow::anyhow!("timeout waiting for second echo"))?
-                .ok_or_else(|| anyhow::anyhow!("receiver closed before second echo"))?;
-            let second_bytes =
-                second_echo.map_err(|e| anyhow::anyhow!("second echo error: {}", e))?;
-            let second_response = EchoResponse::decode(&second_bytes[..])?;
+            let second_echo = tokio::time::timeout(
+                Duration::from_secs(3),
+                async {
+                    loop {
+                        let chunk = rx
+                            .recv()
+                            .await
+                            .ok_or_else(|| anyhow::anyhow!("receiver closed before second echo"))?;
+                        let bytes = chunk.map_err(|e| anyhow::anyhow!("second echo error: {}", e))?;
+                        if !bytes.is_empty() {
+                            return Ok::<_, anyhow::Error>(bytes);
+                        }
+                    }
+                },
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("timeout waiting for second echo"))??;
+            let second_response = EchoResponse::decode(&second_echo[..])?;
             assert_eq!(
                 second_response.message, "second",
                 "second message should be echoed"
@@ -589,6 +609,9 @@ async fn rpc_scenarios() -> Result<()> {
         let mut messages = Vec::new();
         while let Some(chunk) = rx.recv().await {
             let bytes = chunk.map_err(|e| anyhow::anyhow!("stream chunk: {}", e))?;
+            if bytes.is_empty() {
+                continue; // skip empty end-of-stream frame
+            }
             let response = EchoResponse::decode(&bytes[..])?;
             messages.push(response.message);
         }

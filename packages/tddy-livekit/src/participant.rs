@@ -187,27 +187,19 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                         let remote_identities: Vec<_> =
                             self.room.remote_participants().keys().cloned().collect();
                         for payload in drained {
-                            let bridge = self.bridge.clone();
-                            let local = self.room.local_participant();
-                            let active_streams = self.active_streams.clone();
-                            let active_bidi = self.active_bidi.clone();
-                            let event_participant = Some(identity.clone());
-                            let remote_identities = remote_identities.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = Self::handle_incoming(
-                                    &payload,
-                                    event_participant,
-                                    &remote_identities,
-                                    &bridge,
-                                    &local,
-                                    &active_streams,
-                                    &active_bidi,
-                                )
-                                .await
-                                {
-                                    log::error!("RPC handle error (buffered): {}", e);
-                                }
-                            });
+                            if let Err(e) = Self::handle_incoming(
+                                &payload,
+                                Some(identity.clone()),
+                                &remote_identities,
+                                &self.bridge,
+                                &self.room.local_participant(),
+                                &self.active_streams,
+                                &self.active_bidi,
+                            )
+                            .await
+                            {
+                                log::error!("RPC handle error (buffered): {}", e);
+                            }
                         }
                     }
                 }
@@ -378,7 +370,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                         "no response destination for stream (sender_identity absent, multiple remotes)"
                             .to_string()
                     })?;
-                    let (service, method) = if let Some(meta) = request.call_metadata.as_ref() {
+                    let request_for_bridge = if let Some(meta) = request.call_metadata.as_ref() {
                         bidi.insert(
                             request_id,
                             BidiStreamMeta {
@@ -386,21 +378,16 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                                 method: meta.method.clone(),
                             },
                         );
-                        (meta.service.as_str(), meta.method.as_str())
+                        request.clone()
                     } else if let Some(meta) = bidi.get(&request_id) {
-                        (meta.service.as_str(), meta.method.as_str())
-                    } else {
-                        ("", "")
-                    };
-                    let request_for_bridge = if request.call_metadata.is_some() {
-                        request
-                    } else {
                         let mut req = request.clone();
                         req.call_metadata = Some(CallMetadata {
-                            service: service.to_string(),
-                            method: method.to_string(),
+                            service: meta.service.clone(),
+                            method: meta.method.clone(),
                         });
                         req
+                    } else {
+                        request.clone()
                     };
                     Some((vec![request_for_bridge], response_identity))
                 } else if request.call_metadata.is_some() {
@@ -444,6 +431,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             .and_then(|m| m.call_metadata.as_ref())
             .map(|m| m.method.as_str())
             .unwrap_or("");
+        let request_end_of_stream = messages.iter().any(|r| r.end_of_stream);
         let rpc_messages: Vec<RpcMessage> = messages
             .iter()
             .map(|r| RpcMessage {
@@ -495,6 +483,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     );
                     let local = local.clone();
                     let response_identity = response_identity.clone();
+                    let send_empty_end_frame = request_end_of_stream;
                     tokio::spawn(async move {
                         let mut chunk_index = 0u64;
                         while let Some(item) = rx.recv().await {
@@ -544,23 +533,25 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                             }
                             chunk_index += 1;
                         }
-                        let end_response = crate::proto::RpcResponse {
-                            request_id,
-                            response_message: vec![],
-                            metadata: None,
-                            end_of_stream: true,
-                            error: None,
-                            trailers: None,
-                        };
-                        if let Ok(encoded) = encode_response(end_response) {
-                            let _ = local
-                                .publish_data(DataPacket {
-                                    payload: encoded,
-                                    topic: Some(RPC_TOPIC.to_string()),
-                                    reliable: true,
-                                    destination_identities: vec![response_identity],
-                                })
-                                .await;
+                        if send_empty_end_frame {
+                            let end_response = crate::proto::RpcResponse {
+                                request_id,
+                                response_message: vec![],
+                                metadata: None,
+                                end_of_stream: true,
+                                error: None,
+                                trailers: None,
+                            };
+                            if let Ok(encoded) = encode_response(end_response) {
+                                let _ = local
+                                    .publish_data(DataPacket {
+                                        payload: encoded,
+                                        topic: Some(RPC_TOPIC.to_string()),
+                                        reliable: true,
+                                        destination_identities: vec![response_identity],
+                                    })
+                                    .await;
+                            }
                         }
                         log::info!(
                             "[echo_server] RPC request_id={} stream finished ({} chunks)",
