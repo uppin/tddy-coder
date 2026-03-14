@@ -27,6 +27,7 @@ tddy-core = { path = "../tddy-core" }
 tddy-tui = { path = "../tddy-tui" }
 tddy-service = { path = "../tddy-service" }
 tddy-livekit = { path = "../tddy-livekit" }
+tddy-connectrpc = { path = "../tddy-connectrpc" }
 tonic = "0.12"
 tokio-stream = "0.1"
 

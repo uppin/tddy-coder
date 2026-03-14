@@ -12,4 +12,5 @@ members = [
     "packages/tddy-livekit",
     "packages/tddy-codegen",
     "packages/tddy-livekit-testkit",
+    "packages/tddy-connectrpc",
 ]

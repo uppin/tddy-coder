@@ -63,9 +63,9 @@ fn web_bundle_path_alone_errors_with_clear_message() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// --help shows --web-port and --web-bundle-path.
+/// --help shows --web-port, --web-bundle-path, and --web-host.
 #[test]
-fn help_shows_web_port_and_web_bundle_path() {
+fn help_shows_web_port_web_bundle_path_and_web_host() {
     let mut cmd = tddy_coder_bin();
     cmd.arg("--help");
 
@@ -80,6 +80,11 @@ fn help_shows_web_port_and_web_bundle_path() {
     assert!(
         stdout.contains("--web-bundle-path"),
         "help should document --web-bundle-path: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("--web-host"),
+        "help should document --web-host: {}",
         stdout
     );
 }

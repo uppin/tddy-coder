@@ -1,0 +1,22 @@
+{
+  "name": "tddy-rust-typescript-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "npx buf generate ../tddy-service/proto",
+    "test": "CONNECTRPC_TEST_SKIP=1 bun test",
+    "test:live": "bun test",
+    "test:verbose": "CONNECTRPC_TEST_SKIP=1 bun test --verbose"
+  },
+  "dependencies": {
+    "@connectrpc/connect": "^2.0.0",
+    "@connectrpc/connect-node": "^2.0.0",
+    "@bufbuild/protobuf": "^2.2.0"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.50.0",
+    "@bufbuild/protoc-gen-es": "^2.2.0",
+    "typescript": "^5.6.0",
+    "@types/bun": "latest"
+  }
+}

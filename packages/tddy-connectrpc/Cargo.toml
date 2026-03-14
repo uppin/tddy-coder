@@ -1,0 +1,25 @@
+[package]
+name = "tddy-connectrpc"
+version = "0.1.0"
+edition = "2021"
+description = "Connect protocol HTTP transport for tddy-rpc services"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["sync", "rt", "macros"] }
+tokio-stream = "0.1"
+tddy-rpc = { path = "../tddy-rpc" }
+prost = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+bytes = "1"
+http = "1"
+futures = "0.3"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tower-service = "0.3"
+hyper = "1"
+http-body-util = "0.1"
+tddy-service = { path = "../tddy-service" }

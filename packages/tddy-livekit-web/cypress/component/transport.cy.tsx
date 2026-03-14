@@ -1,4 +1,5 @@
 import React from "react";
+import { ConnectError, Code } from "@connectrpc/connect";
 import { TransportTestHarness } from "../support/TransportTestHarness";
 
 /** Deduplicate logs (e.g. from React Strict Mode double-mount) while preserving order. */
@@ -116,7 +117,11 @@ describe("LiveKitTransport", () => {
       const logs = dedupeLogs((win as unknown as { cypressLogs?: string[] }).cypressLogs ?? []);
       const errorLog = logs.find((l) => l.includes("[TEST] error:"));
       expect(errorLog).to.exist;
-      expect(errorLog).to.match(/NOT_FOUND|Unknown|FakeMethod|unknown/i);
+
+      const err = (win as unknown as { cypressLastError?: unknown }).cypressLastError;
+      expect(err).to.exist;
+      expect(err).to.be.instanceOf(ConnectError);
+      expect((err as ConnectError).code).to.equal(Code.NotFound);
     });
   });
 

@@ -151,8 +151,29 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         log::info!("[echo_server] LiveKitParticipant event loop started");
         while let Some(event) = self.events.recv().await {
             match event {
+                RoomEvent::ConnectionStateChanged(state) => {
+                    log::info!("[LiveKit] ConnectionStateChanged {:?}", state);
+                }
+                RoomEvent::Connected {
+                    participants_with_tracks,
+                } => {
+                    log::info!(
+                        "[LiveKit] Connected ({} remote participant(s) with tracks)",
+                        participants_with_tracks.len()
+                    );
+                }
+                RoomEvent::Disconnected { reason } => {
+                    log::info!("[LiveKit] Disconnected reason={:?}", reason);
+                }
+                RoomEvent::Reconnecting => {
+                    log::info!("[LiveKit] Reconnecting");
+                }
+                RoomEvent::Reconnected => {
+                    log::info!("[LiveKit] Reconnected");
+                }
                 RoomEvent::ParticipantConnected(remote) => {
                     let identity = remote.identity().clone();
+                    log::info!("[LiveKit] ParticipantConnected {:?}", identity);
                     let drained: Vec<_> = {
                         let mut pending = self.pending_data.lock().await;
                         pending.drain(..).collect()
@@ -266,6 +287,9 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                             log::error!("RPC handle error: {}", e);
                         }
                     });
+                }
+                RoomEvent::ParticipantDisconnected(remote) => {
+                    log::info!("[LiveKit] ParticipantDisconnected {:?}", remote.identity());
                 }
                 _ => {}
             }

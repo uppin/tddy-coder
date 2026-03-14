@@ -48,6 +48,21 @@ export function GhosttyTerminalLiveKit({
     const run = async () => {
       try {
         room = new Room();
+
+        room.on(RoomEvent.Connected, () => console.log("[LiveKit] RoomEvent.Connected"));
+        room.on(RoomEvent.Disconnected, (_, reason) =>
+          console.log("[LiveKit] RoomEvent.Disconnected", reason)
+        );
+        room.on(RoomEvent.ConnectionStateChanged, (state) =>
+          console.log("[LiveKit] ConnectionStateChanged", state)
+        );
+        room.on(RoomEvent.ParticipantConnected, (participant) =>
+          console.log("[LiveKit] ParticipantConnected", participant.identity)
+        );
+        room.on(RoomEvent.ParticipantDisconnected, (participant) =>
+          console.log("[LiveKit] ParticipantDisconnected", participant.identity)
+        );
+
         await room.connect(url, token);
 
         const hasServer = () =>

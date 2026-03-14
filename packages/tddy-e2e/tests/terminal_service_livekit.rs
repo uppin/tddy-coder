@@ -12,6 +12,12 @@ async fn terminal_service_livekit_skipped() {
     // Built without livekit feature; test passes as no-op.
 }
 
+#[cfg(not(feature = "livekit"))]
+#[test]
+fn daemon_livekit_stream_terminal_io_skipped() {
+    // Built without livekit feature; test passes as no-op.
+}
+
 #[cfg(feature = "livekit")]
 mod livekit_tests {
     use anyhow::Result;
@@ -127,6 +133,155 @@ mod livekit_tests {
             std::str::from_utf8(test_bytes).unwrap(),
             received.len()
         );
+
+        Ok(())
+    }
+
+    /// Presenter with TUI and LiveKit exposes terminal service; client receives bytes from TUI buffer.
+    #[tokio::test]
+    #[serial]
+    async fn presenter_with_livekit_streams_tui_bytes_to_client() -> Result<()> {
+        let livekit = LiveKitTestkit::start().await?;
+        let url = livekit.get_ws_url();
+        let room_name = "presenter-tui-stream-test";
+
+        let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
+        let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
+
+        let (_presenter_handle, _shutdown) = tddy_e2e::spawn_presenter_with_livekit_and_tui(
+            &url,
+            &server_token,
+            Some("Build auth".to_string()),
+        );
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        let (client_room, mut client_events) =
+            Room::connect(&url, &client_token, RoomOptions::default())
+                .await
+                .map_err(|e| anyhow::anyhow!("client connect: {}", e))?;
+
+        let rpc_events = client_room.subscribe();
+        wait_for_participant(&client_room, &mut client_events, SERVER_IDENTITY).await?;
+
+        let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
+
+        let request = TerminalInput { data: vec![] };
+        let request_bytes = request.encode_to_vec();
+
+        let mut rx = rpc_client
+            .call_server_stream(
+                "terminal.TerminalService",
+                "StreamTerminalIO",
+                request_bytes,
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("StreamTerminalIO: {}", e))?;
+
+        let mut received = Vec::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(Some(chunk)) =
+                tokio::time::timeout(Duration::from_millis(500), rx.recv()).await
+            {
+                let bytes = chunk.map_err(|e| anyhow::anyhow!("chunk error: {}", e))?;
+                let output = TerminalOutput::decode(&bytes[..])?;
+                received.extend_from_slice(&output.data);
+                if received.len() >= 10 {
+                    break;
+                }
+            }
+        }
+
+        assert!(
+            received.len() >= 10,
+            "Expected to receive terminal bytes from TUI buffer (presenter via draw), got {} bytes",
+            received.len()
+        );
+
+        Ok(())
+    }
+
+    /// Daemon with LiveKit args serves TerminalService/StreamTerminalIO (regression: not EchoService).
+    #[tokio::test]
+    #[serial]
+    async fn daemon_with_livekit_serves_stream_terminal_io() -> Result<()> {
+        let livekit = LiveKitTestkit::start().await?;
+        let url = livekit.get_ws_url();
+        let room_name = "daemon-stream-test";
+
+        let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
+        let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
+
+        let sessions_base = std::env::temp_dir().join("tddy-daemon-livekit-test");
+        let _ = std::fs::remove_dir_all(&sessions_base);
+        std::fs::create_dir_all(&sessions_base).expect("create sessions base");
+
+        let tddy_coder = std::env::var("CARGO_BIN_EXE_tddy-coder").unwrap_or_else(|_| {
+            let exe = std::env::current_exe().expect("current exe");
+            let deps = exe.parent().expect("exe parent");
+            let debug = deps.parent().expect("deps parent");
+            debug.join("tddy-coder").display().to_string()
+        });
+        let daemon = std::process::Command::new(&tddy_coder)
+            .env_clear()
+            .env(
+                tddy_core::output::TDDY_SESSIONS_DIR_ENV,
+                sessions_base.to_str().unwrap(),
+            )
+            .args([
+                "--agent",
+                "stub",
+                "--daemon",
+                "--livekit-url",
+                &url,
+                "--livekit-token",
+                &server_token,
+                "--livekit-room",
+                room_name,
+                "--livekit-identity",
+                SERVER_IDENTITY,
+            ])
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("spawn tddy-coder daemon: {}", e))?;
+
+        struct KillOnDrop(std::process::Child);
+        impl Drop for KillOnDrop {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let _guard = KillOnDrop(daemon);
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        let (client_room, mut client_events) =
+            Room::connect(&url, &client_token, RoomOptions::default())
+                .await
+                .map_err(|e| anyhow::anyhow!("client connect: {}", e))?;
+
+        let rpc_events = client_room.subscribe();
+        wait_for_participant(&client_room, &mut client_events, SERVER_IDENTITY).await?;
+
+        let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
+
+        let request = TerminalInput { data: vec![] };
+        let request_bytes = request.encode_to_vec();
+
+        let _rx = rpc_client
+            .call_server_stream(
+                "terminal.TerminalService",
+                "StreamTerminalIO",
+                request_bytes,
+            )
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "StreamTerminalIO (daemon must serve TerminalService, not EchoService): {}",
+                    e
+                )
+            })?;
 
         Ok(())
     }

@@ -95,6 +95,80 @@ impl Code {
             Code::Unauthenticated => "UNAUTHENTICATED",
         }
     }
+
+    /// Parse a gRPC-like code string (e.g. "NOT_FOUND", "UNIMPLEMENTED") to Code.
+    /// Returns Code::Unknown for unrecognized strings.
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "OK" => Code::Ok,
+            "CANCELLED" => Code::Cancelled,
+            "UNKNOWN" => Code::Unknown,
+            "INVALID_ARGUMENT" => Code::InvalidArgument,
+            "DEADLINE_EXCEEDED" => Code::DeadlineExceeded,
+            "NOT_FOUND" => Code::NotFound,
+            "ALREADY_EXISTS" => Code::AlreadyExists,
+            "PERMISSION_DENIED" => Code::PermissionDenied,
+            "RESOURCE_EXHAUSTED" => Code::ResourceExhausted,
+            "FAILED_PRECONDITION" => Code::FailedPrecondition,
+            "ABORTED" => Code::Aborted,
+            "OUT_OF_RANGE" => Code::OutOfRange,
+            "UNIMPLEMENTED" => Code::Unimplemented,
+            "INTERNAL" => Code::Internal,
+            "UNAVAILABLE" => Code::Unavailable,
+            "DATA_LOSS" => Code::DataLoss,
+            "UNAUTHENTICATED" => Code::Unauthenticated,
+            _ => Code::Unknown,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn code_from_str_roundtrip() {
+        let codes = [
+            Code::Ok,
+            Code::Cancelled,
+            Code::Unknown,
+            Code::InvalidArgument,
+            Code::DeadlineExceeded,
+            Code::NotFound,
+            Code::AlreadyExists,
+            Code::PermissionDenied,
+            Code::ResourceExhausted,
+            Code::FailedPrecondition,
+            Code::Aborted,
+            Code::OutOfRange,
+            Code::Unimplemented,
+            Code::Internal,
+            Code::Unavailable,
+            Code::DataLoss,
+            Code::Unauthenticated,
+        ];
+        for code in codes {
+            let s = code.as_str();
+            assert_eq!(
+                Code::from_str(s),
+                code,
+                "from_str({:?}) should roundtrip",
+                s
+            );
+        }
+    }
+
+    #[test]
+    fn code_from_str_unknown_fallback() {
+        assert_eq!(Code::from_str(""), Code::Unknown);
+        assert_eq!(Code::from_str("INVALID_CODE"), Code::Unknown);
+        assert_eq!(Code::from_str("not_found"), Code::Unknown); // case-sensitive
+    }
+
+    #[test]
+    fn code_from_str_not_found() {
+        assert_eq!(Code::from_str("NOT_FOUND"), Code::NotFound);
+    }
 }
 
 #[cfg(feature = "tonic")]
