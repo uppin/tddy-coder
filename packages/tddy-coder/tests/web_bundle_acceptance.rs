@@ -157,11 +157,8 @@ fn daemon_with_web_flags_serves_index_html_at_root() {
     let _guard = KillOnDrop(child);
 
     let url = format!("http://127.0.0.1:{}/", web_port);
-    let body = retry_until_ready(|| {
-        reqwest::blocking::get(&url)
-            .and_then(|r| r.text())
-    })
-    .expect("HTTP GET / within timeout");
+    let body = retry_until_ready(|| reqwest::blocking::get(&url).and_then(|r| r.text()))
+        .expect("HTTP GET / within timeout");
 
     assert!(
         body.contains("Web Bundle Test"),

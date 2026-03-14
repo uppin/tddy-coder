@@ -524,11 +524,7 @@ fn generate_rpc_service_impl(service: &Service, buf: &mut String, rpc: &str) {
         rpc, rpc
     )
     .unwrap();
-    writeln!(
-        buf,
-        "        if service != Self::NAME {{",
-    )
-    .unwrap();
+    writeln!(buf, "        if service != Self::NAME {{",).unwrap();
     writeln!(
         buf,
         "            return {}::RpcResult::Unary(Err({}::Status::not_found(format!(\"Unknown service: {{}}\", service))));",
@@ -577,11 +573,7 @@ fn generate_rpc_service_impl(service: &Service, buf: &mut String, rpc: &str) {
         rpc, rpc
     )
     .unwrap();
-    writeln!(
-        buf,
-        "        if service != Self::NAME {{",
-    )
-    .unwrap();
+    writeln!(buf, "        if service != Self::NAME {{",).unwrap();
     writeln!(
         buf,
         "            return {}::RpcResult::Unary(Err({}::Status::not_found(format!(\"Unknown service: {{}}\", service))));",
