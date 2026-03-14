@@ -47,7 +47,8 @@ pub use permission::{
 };
 pub use presenter::{
     ActivityEntry, ActivityKind, AppMode, Presenter, PresenterEvent, PresenterHandle,
-    PresenterState, PresenterView, UserIntent, WorkflowCompletePayload, WorkflowEvent,
+    PresenterState, PresenterView, UserIntent, ViewConnection, WorkflowCompletePayload,
+    WorkflowEvent,
 };
 pub use stream::ProgressEvent;
 pub use workflow::{

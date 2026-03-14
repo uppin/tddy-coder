@@ -53,7 +53,7 @@ pub enum AppMode {
 }
 
 /// Top-level application state owned by the Presenter.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PresenterState {
     pub agent: String,
     pub model: String,
