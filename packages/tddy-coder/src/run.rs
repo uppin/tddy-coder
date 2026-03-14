@@ -71,6 +71,12 @@ fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
 pub fn run_main(mut args: Args) {
     args.session_id = Some(uuid::Uuid::now_v7().to_string());
 
+    // Validate args before any stderr redirect (daemon redirects stderr to a file).
+    if let Err(e) = validate_web_args(&args).and_then(|_| validate_livekit_args(&args)) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
     tddy_core::init_tddy_logger(args.debug, args.debug_output.as_deref());
     if args.debug_output.is_none() {
         if let Some(session_dir) = session_dir_path(&args) {

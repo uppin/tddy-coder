@@ -14,7 +14,7 @@ use tddy_coder::{ActivityEntry, AppMode, Presenter, UserIntent};
 use tddy_core::{
     backend::{CodingBackend, Goal, InvokeRequest, InvokeResponse},
     output::{SESSIONS_SUBDIR, TDDY_SESSIONS_DIR_ENV},
-    AnyBackend, BackendError, PresenterEvent, SharedBackend, StubBackend, WorkflowCompletePayload,
+    BackendError, PresenterEvent, SharedBackend, StubBackend, WorkflowCompletePayload,
 };
 use tokio::sync::broadcast;
 
@@ -201,7 +201,7 @@ fn full_workflow_completes_with_stub_backend() {
 fn submit_feature_input_after_completion_restarts_workflow() {
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
-    let output_dir = std::env::temp_dir().join("tddy-presenter-test-restart");
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-restart");
 
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
     presenter.start_workflow(
@@ -218,7 +218,7 @@ fn submit_feature_input_after_completion_restarts_workflow() {
     );
 
     let mut iterations = 0;
-    let max_iterations = 500;
+    let max_iterations = 4000;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
         events.drain();
@@ -237,8 +237,9 @@ fn submit_feature_input_after_completion_restarts_workflow() {
 
     assert!(
         presenter.is_done(),
-        "first workflow should complete within {} iterations",
-        max_iterations
+        "first workflow should complete within {} iterations; last mode: {:?}",
+        max_iterations,
+        presenter.state().mode
     );
     assert!(
         matches!(presenter.state().mode, AppMode::FeatureInput),
@@ -277,10 +278,12 @@ fn submit_feature_input_after_completion_restarts_workflow() {
 
     assert!(
         presenter.is_done(),
-        "second workflow should complete within {} iterations",
-        max_iterations
+        "second workflow should complete within {} iterations; last mode: {:?}",
+        max_iterations,
+        presenter.state().mode
     );
 
+    events.drain();
     let total_complete_count = events
         .events()
         .iter()
@@ -400,8 +403,7 @@ fn plan_dir_under_sessions_refine_uses_repo_as_working_dir() {
 
     let (repo_dir, _) = common::temp_dir_with_git_repo("plan-refine-repo");
 
-    let view = TestView::new();
-    let mut presenter = Presenter::new(view, "stub", "default");
+    let (mut presenter, mut events) = presenter_with_events();
     let backend = create_asserting_repo_backend();
 
     let original_cwd = std::env::current_dir().expect("cwd");
@@ -427,6 +429,7 @@ fn plan_dir_under_sessions_refine_uses_repo_as_working_dir() {
     let mut saw_error_recovery = false;
     while !presenter.is_done() && !saw_error_recovery && iterations < max_iterations {
         presenter.poll_workflow();
+        events.drain();
         if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
             plan_review_count += 1;
             if plan_review_count == 1 {
@@ -468,13 +471,13 @@ fn plan_dir_under_sessions_refine_uses_repo_as_working_dir() {
         plan_review_count >= 2,
         "expected PlanReview at least twice (initial + after refine)"
     );
-    let events = presenter.view_mut().events();
+    events.drain();
+    let evs = events.events();
     assert!(
-        events
-            .iter()
+        evs.iter()
             .any(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_)))),
         "expected WorkflowComplete(Ok); refine must use repo_path for output_dir when plan_dir is under sessions. Events: {:?}",
-        events
+        evs
     );
 }
 

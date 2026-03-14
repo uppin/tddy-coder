@@ -120,10 +120,13 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
 - [ ] Implement login endpoint
 - [ ] Implement logout endpoint"#;
         let demo_plan = r#","demo_plan":{"demo_type":"cli","setup_instructions":"Run cargo build","steps":[{"description":"Run the CLI","command_or_action":"cargo run","expected_result":"See output"}],"verification":"CLI runs without error"}"#;
+        let n = self.invocation_count.load(Ordering::SeqCst);
         let json = format!(
-            r#"{{"goal":"plan","name":"Stub Feature","prd":"{}"{}, "branch_suggestion":"feature/stub","worktree_suggestion":"feature-stub"}}"#,
+            r#"{{"goal":"plan","name":"Stub Feature","prd":"{}"{}, "branch_suggestion":"feature/stub-{}","worktree_suggestion":"feature-stub-{}"}}"#,
             escape_json_string(prd),
-            demo_plan
+            demo_plan,
+            n,
+            n
         );
         self.submit_and_respond(
             "plan",
