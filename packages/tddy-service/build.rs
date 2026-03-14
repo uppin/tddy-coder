@@ -28,5 +28,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/terminal.proto"], &["proto"])?;
 
+    // Token service (async trait + RpcService server + tonic adapter)
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: true,
+            rpc_crate_path: "tddy_rpc".to_string(),
+        }))
+        .compile_protos(&["proto/token.proto"], &["proto"])?;
+
     Ok(())
 }

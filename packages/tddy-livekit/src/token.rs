@@ -36,18 +36,29 @@ impl TokenGenerator {
 
     /// Generate a JWT access token for the configured room and identity.
     pub fn generate(&self) -> Result<String, AccessTokenError> {
+        self.generate_for(&self.room, &self.identity)
+    }
+
+    /// Generate a JWT access token for the given room and identity.
+    /// Used by TokenService to issue tokens for arbitrary callers.
+    pub fn generate_for(&self, room: &str, identity: &str) -> Result<String, AccessTokenError> {
         AccessToken::with_api_key(&self.api_key, &self.api_secret)
-            .with_identity(&self.identity)
+            .with_identity(identity)
             .with_ttl(self.ttl)
             .with_grants(VideoGrants {
                 room_join: true,
-                room: self.room.clone(),
+                room: room.to_string(),
                 can_publish: true,
                 can_subscribe: true,
                 can_publish_data: true,
                 ..Default::default()
             })
             .to_jwt()
+    }
+
+    /// Token TTL (time-to-live).
+    pub fn ttl(&self) -> Duration {
+        self.ttl
     }
 
     /// Duration after which a new token should be generated and the connection refreshed.
@@ -103,5 +114,36 @@ mod tests {
             Duration::from_secs(30),
         );
         assert_eq!(gen.time_until_refresh(), Duration::ZERO);
+    }
+
+    #[test]
+    fn token_generator_generate_for_uses_requested_room_and_identity() {
+        let gen = TokenGenerator::new(
+            DEV_API_KEY.to_string(),
+            DEV_API_SECRET.to_string(),
+            "default-room".to_string(),
+            "default-identity".to_string(),
+            Duration::from_secs(120),
+        );
+        let token = gen
+            .generate_for("other-room", "other-identity")
+            .expect("generate_for must succeed");
+        assert!(!token.is_empty());
+        assert!(
+            token.matches('.').count() >= 2,
+            "JWT has 3 parts separated by dots"
+        );
+    }
+
+    #[test]
+    fn token_generator_ttl_returns_configured_duration() {
+        let gen = TokenGenerator::new(
+            DEV_API_KEY.to_string(),
+            DEV_API_SECRET.to_string(),
+            "room".to_string(),
+            "identity".to_string(),
+            Duration::from_secs(90),
+        );
+        assert_eq!(gen.ttl(), Duration::from_secs(90));
     }
 }

@@ -23,6 +23,20 @@ use tddy_core::Presenter;
 
 use crate::disable_raw_mode;
 
+/// TokenProvider that delegates to TokenGenerator. Used when the daemon has API key/secret.
+struct LiveKitTokenProvider(std::sync::Arc<tddy_livekit::TokenGenerator>);
+
+impl tddy_service::TokenProvider for LiveKitTokenProvider {
+    fn generate_token(&self, room: &str, identity: &str) -> Result<String, String> {
+        self.0
+            .generate_for(room, identity)
+            .map_err(|e| e.to_string())
+    }
+    fn ttl_seconds(&self) -> u64 {
+        self.0.ttl().as_secs()
+    }
+}
+
 /// Verify tddy-tools binary is available. Required for claude/cursor agents.
 /// Skips when agent is stub (uses InMemoryToolExecutor).
 fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
@@ -1143,13 +1157,29 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         let url = args.livekit_url.clone().unwrap();
         let shutdown = shutdown.clone();
         if has_key_secret {
-            let token_generator = tddy_livekit::TokenGenerator::new(
+            let token_generator = std::sync::Arc::new(tddy_livekit::TokenGenerator::new(
                 args.livekit_api_key.as_ref().unwrap().clone(),
                 args.livekit_api_secret.as_ref().unwrap().clone(),
                 args.livekit_room.as_ref().unwrap().clone(),
                 args.livekit_identity.as_ref().unwrap().clone(),
                 std::time::Duration::from_secs(120),
-            );
+            ));
+            let token_provider = LiveKitTokenProvider(token_generator.clone());
+            let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
+            let terminal_server = tddy_service::TerminalServiceServer::new(terminal_service);
+            let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
+            let multi_service = tddy_rpc::MultiRpcService::new(vec![
+                tddy_rpc::ServiceEntry {
+                    name: "terminal.TerminalService",
+                    service: std::sync::Arc::new(terminal_server)
+                        as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                },
+                tddy_rpc::ServiceEntry {
+                    name: "token.TokenService",
+                    service: std::sync::Arc::new(token_server)
+                        as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                },
+            ]);
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
@@ -1158,8 +1188,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 rt.block_on(async {
                     tddy_livekit::LiveKitParticipant::run_with_reconnect(
                         &url,
-                        &token_generator,
-                        tddy_service::TerminalServiceServer::new(terminal_service),
+                        token_generator.as_ref(),
+                        multi_service,
                         tddy_livekit::RoomOptions::default(),
                         shutdown,
                     )

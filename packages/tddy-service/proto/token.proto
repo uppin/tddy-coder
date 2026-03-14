@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package token;
+
+service TokenService {
+  rpc GenerateToken(GenerateTokenRequest) returns (GenerateTokenResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+}
+
+message GenerateTokenRequest {
+  string room = 1;
+  string identity = 2;
+}
+
+message GenerateTokenResponse {
+  string token = 1;
+  uint64 ttl_seconds = 2;
+}
+
+message RefreshTokenRequest {
+  string room = 1;
+  string identity = 2;
+}
+
+message RefreshTokenResponse {
+  string token = 1;
+  uint64 ttl_seconds = 2;
+}
