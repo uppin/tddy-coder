@@ -81,7 +81,9 @@ function LiveKitConnectedStory(args: {
 }
 
 export const LiveKitConnected: StoryObj<typeof GhosttyTerminalLiveKit> = {
-  render: (args) => <LiveKitConnectedStory {...args} />,
+  render: (args: Parameters<typeof LiveKitConnectedStory>[0]) => (
+    <LiveKitConnectedStory {...args} />
+  ),
   args: {
     url: "",
     token: "",

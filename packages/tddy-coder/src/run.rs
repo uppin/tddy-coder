@@ -6,6 +6,8 @@
 use anyhow::Context;
 use clap::Parser;
 use std::io::{self, IsTerminal, Read, Write};
+#[cfg(unix)]
+use std::os::fd::IntoRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -76,6 +78,16 @@ pub fn run_main(mut args: Args) {
             let _ = std::fs::create_dir_all(&logs);
             tddy_core::redirect_debug_output(&logs.join("debug.log"));
             log::set_max_level(log::LevelFilter::Debug);
+            // Daemon runs headless (stdin/stdout/stderr = null). Redirect stderr to a real file
+            // so crossterm/terminal APIs that may probe stderr work correctly (e.g. VirtualTui).
+            #[cfg(unix)]
+            if args.daemon {
+                if let Ok(file) = std::fs::File::create(logs.join("daemon_stderr.log")) {
+                    let fd = file.into_raw_fd();
+                    let _ = unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
+                    let _ = unsafe { libc::close(fd) };
+                }
+            }
         }
     }
 
@@ -681,9 +693,39 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         {
             let path = web_bundle_path.clone();
             let web_host = args.web_host.as_deref().unwrap_or("0.0.0.0").to_string();
-            let rpc_router = Some(tddy_connectrpc::connect_router(
-                tddy_service::create_echo_bridge(),
-            ));
+            let rpc_router = if has_key_secret {
+                let token_generator = std::sync::Arc::new(tddy_livekit::TokenGenerator::new(
+                    args.livekit_api_key.as_ref().unwrap().clone(),
+                    args.livekit_api_secret.as_ref().unwrap().clone(),
+                    args.livekit_room.as_ref().unwrap().clone(),
+                    args.livekit_identity.as_ref().unwrap().clone(),
+                    std::time::Duration::from_secs(120),
+                ));
+                let token_provider = LiveKitTokenProvider(token_generator);
+                let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
+                let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
+                let echo_server =
+                    tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl);
+                let multi = tddy_rpc::MultiRpcService::new(vec![
+                    tddy_rpc::ServiceEntry {
+                        name: "test.EchoService",
+                        service: std::sync::Arc::new(echo_server)
+                            as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                    },
+                    tddy_rpc::ServiceEntry {
+                        name: "token.TokenService",
+                        service: std::sync::Arc::new(token_server)
+                            as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                    },
+                ]);
+                Some(tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
+                    multi,
+                )))
+            } else {
+                Some(tddy_connectrpc::connect_router(
+                    tddy_service::create_echo_bridge(),
+                ))
+            };
             tokio::spawn(async move {
                 if let Err(e) =
                     crate::web_server::serve_web_bundle(&web_host, web_port, path, rpc_router).await
@@ -706,10 +748,6 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     args.livekit_identity.as_ref().unwrap().clone(),
                     std::time::Duration::from_secs(120),
                 );
-                let (terminal_byte_tx, _) = tokio::sync::broadcast::channel(256);
-                let (input_tx, _) = tokio::sync::mpsc::channel(64);
-                let terminal_service =
-                    tddy_service::TerminalServiceImpl::new(terminal_byte_tx, input_tx);
                 tokio::spawn(async move {
                     tddy_livekit::LiveKitParticipant::run_with_reconnect(
                         &url,
@@ -722,10 +760,6 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 });
             } else {
                 let token = args.livekit_token.as_ref().unwrap().clone();
-                let (terminal_byte_tx, _) = tokio::sync::broadcast::channel(256);
-                let (input_tx, _) = tokio::sync::mpsc::channel(64);
-                let terminal_service =
-                    tddy_service::TerminalServiceImpl::new(terminal_byte_tx, input_tx);
                 tokio::spawn(async move {
                     let participant = match tddy_livekit::LiveKitParticipant::connect(
                         &url,
@@ -1287,9 +1321,38 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     if let (Some(web_port), Some(ref web_bundle_path)) = (args.web_port, &args.web_bundle_path) {
         let path = web_bundle_path.clone();
         let web_host = args.web_host.as_deref().unwrap_or("0.0.0.0").to_string();
-        let rpc_router = Some(tddy_connectrpc::connect_router(
-            tddy_service::create_echo_bridge(),
-        ));
+        let rpc_router = if has_key_secret {
+            let token_generator = std::sync::Arc::new(tddy_livekit::TokenGenerator::new(
+                args.livekit_api_key.as_ref().unwrap().clone(),
+                args.livekit_api_secret.as_ref().unwrap().clone(),
+                args.livekit_room.as_ref().unwrap().clone(),
+                args.livekit_identity.as_ref().unwrap().clone(),
+                std::time::Duration::from_secs(120),
+            ));
+            let token_provider = LiveKitTokenProvider(token_generator);
+            let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
+            let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
+            let echo_server = tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl);
+            let multi = tddy_rpc::MultiRpcService::new(vec![
+                tddy_rpc::ServiceEntry {
+                    name: "test.EchoService",
+                    service: std::sync::Arc::new(echo_server)
+                        as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                },
+                tddy_rpc::ServiceEntry {
+                    name: "token.TokenService",
+                    service: std::sync::Arc::new(token_server)
+                        as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                },
+            ]);
+            Some(tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
+                multi,
+            )))
+        } else {
+            Some(tddy_connectrpc::connect_router(
+                tddy_service::create_echo_bridge(),
+            ))
+        };
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()

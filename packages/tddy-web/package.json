@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "generate": "bunx buf generate ../tddy-service/proto",
     "build": "bun build ./index.html --outdir dist",
     "storybook": "storybook dev -p 6006 --host 0.0.0.0",
     "build-storybook": "storybook build",
@@ -11,18 +12,23 @@
     "cypress:component:debug": "DEBUG=cypress:* bun run cypress:component",
     "cypress:e2e": "bun run build-storybook && start-server-and-test 'npx http-server storybook-static -p 9786 -c-1 --cors' http://localhost:9786/iframe.html 'ELECTRON_EXTRA_LAUNCH_ARGS=\"--disable-gpu --no-sandbox\" CYPRESS_BASE_URL=http://localhost:9786 cypress run --e2e'",
     "cypress:e2e:spec": "bun run build-storybook && start-server-and-test 'npx http-server storybook-static -p 9786 -c-1 --cors' http://localhost:9786/iframe.html 'ELECTRON_EXTRA_LAUNCH_ARGS=\"--disable-gpu --no-sandbox\" CYPRESS_BASE_URL=http://localhost:9786 cypress run --e2e --spec \"${CYPRESS_SPEC:-cypress/e2e/ghostty-terminal.cy.ts}\"'",
+    "cypress:e2e:connect": "bun run build && cypress run --e2e --spec cypress/e2e/app-connect-flow.cy.ts",
     "cypress:serve": "bun run build-storybook && ./run-cypress-serve.sh"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.2.0",
     "@connectrpc/connect": "^2.0.0",
+    "@connectrpc/connect-web": "^2.0.0",
     "ghostty-web": "^0.4.0",
     "livekit-client": "^2.17.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@bufbuild/buf": "^1.50.0",
+    "@bufbuild/protoc-gen-es": "^2.2.0",
     "@storybook/addon-docs": "^9.0.0",
+    "@storybook/react": "^9.0.0",
     "livekit-server-sdk": "^2.15.0",
     "tddy-livekit-web": "workspace:*",
     "@storybook/react-vite": "^9.0.0",

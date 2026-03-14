@@ -8,9 +8,24 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use prost::Message;
 use tddy_connectrpc::connect_router;
+use tddy_rpc::RpcBridge;
 use tddy_service::create_echo_bridge;
 use tddy_service::proto::test::{EchoRequest, EchoResponse};
+use tddy_service::proto::token::{GenerateTokenRequest, GenerateTokenResponse};
+use tddy_service::{TokenProvider, TokenServiceImpl, TokenServiceServer};
 use tower::ServiceExt;
+
+/// Test TokenProvider that returns a deterministic token for acceptance tests.
+struct TestTokenProvider;
+
+impl TokenProvider for TestTokenProvider {
+    fn generate_token(&self, room: &str, identity: &str) -> Result<String, String> {
+        Ok(format!("test-jwt-{}-{}", room, identity))
+    }
+    fn ttl_seconds(&self) -> u64 {
+        600
+    }
+}
 
 /// Unary RPC with protobuf binary: POST /rpc/test.EchoService/Echo
 /// Expect: 200 OK, Content-Type: application/proto, body = protobuf EchoResponse
@@ -249,4 +264,50 @@ async fn bidi_stream_echo_returns_stream_of_echoes() {
     let resp2 = EchoResponse::decode(&frames[1][..]).expect("decode second");
     assert_eq!(resp1.message, "x");
     assert_eq!(resp2.message, "y");
+}
+
+/// TokenService via Connect-RPC: POST /rpc/token.TokenService/GenerateToken
+/// Expect: 200 OK, Content-Type: application/proto, body = protobuf GenerateTokenResponse
+#[tokio::test]
+async fn token_service_generate_token_returns_200_with_token_and_ttl() {
+    let token_service = TokenServiceImpl::new(TestTokenProvider);
+    let token_server = TokenServiceServer::new(token_service);
+    let app = connect_router(RpcBridge::new(token_server));
+
+    let req = GenerateTokenRequest {
+        room: "my-room".to_string(),
+        identity: "client".to_string(),
+    };
+    let body_bytes = req.encode_to_vec();
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/rpc/token.TokenService/GenerateToken")
+        .header("Content-Type", "application/proto")
+        .header("Connect-Protocol-Version", "1")
+        .body(Body::from(body_bytes))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Expected 200 OK for GenerateToken"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("Content-Type")
+            .and_then(|v| v.to_str().ok()),
+        Some("application/proto"),
+        "Response Content-Type should be application/proto"
+    );
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let resp = GenerateTokenResponse::decode(&body[..]).expect("decode response");
+    assert_eq!(resp.token, "test-jwt-my-room-client");
+    assert_eq!(resp.ttl_seconds, 600);
 }

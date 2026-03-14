@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
+use ratatui::{TerminalOptions, Viewport};
 use tokio::sync::mpsc;
 
 use tddy_core::{AppMode, PresenterEvent, PresenterState, PresenterView, UserIntent, ViewConnection};
@@ -42,7 +44,9 @@ pub fn run_virtual_tui(
         };
         let writer = CapturingWriter::headless(Box::new(on_write));
         let backend = CrosstermBackend::new(writer);
-        let mut terminal = match Terminal::new(backend) {
+        // Use fixed viewport to avoid crossterm::terminal::size() which fails without a TTY (daemon/headless).
+        let viewport = Viewport::Fixed(Rect::new(0, 0, 80, 24));
+        let mut terminal = match Terminal::with_options(backend, TerminalOptions { viewport }) {
             Ok(t) => t,
             Err(e) => {
                 log::error!("VirtualTui: failed to create terminal: {}", e);
