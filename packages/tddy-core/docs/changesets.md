@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-core.
 
+- **2026-03-14** [Feature] Workflow Restart on Completion — WorkflowComplete handler transitions to FeatureInput instead of Done when inbox empty. SubmitFeatureInput detects dead channel via send() failure, calls restart_workflow(). is_done() checks workflow_result.is_some(). Inbox dequeue clears workflow_result. Unit test: success → FeatureInput. (tddy-core)
 - **2026-03-13** [Bug Fix] Session and Workflow Fixes — is_resume defaults to true when not set (fixes Evaluate "Session ID already in use"). plan_dir under sessions_base when output_dir is "." (pass "." to run_plan_without_output_dir). Error recovery elicitation (AppMode::ErrorRecovery, Resume/Exit). inherit_stdin=false. (tddy-core)
 - **2026-03-12** [Refactor] Schema via tddy-tools — Removed schema module from tddy-core. All schema logic (embedded schemas, validation, get-schema) lives in tddy-tools. No schema files written to disk. ProcessToolExecutor invokes `tddy-tools submit --goal <goal> --data '<json>'`. tdd_hooks no longer calls write_schema_to_dir. Removed include_dir and jsonschema dependencies. System prompts instruct agent to use `tddy-tools submit --goal X` and `tddy-tools get-schema X`. (tddy-core)
 - **2026-03-12** [Refactor] SessionMode enum — Replaced `session_id: Option<String>` + `is_resume: bool` on InvokeRequest with `session: Option<SessionMode>`. SessionMode::Fresh(id) maps to --session-id; SessionMode::Resume(id) maps to --resume. Single type expresses session identity and mode. (tddy-core)

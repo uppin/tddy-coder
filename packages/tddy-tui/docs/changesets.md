@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-tui.
 
+- **2026-03-14** [Feature] Workflow Restart on Completion — VirtualTui apply_event for WorkflowComplete sets mode to FeatureInput instead of Done. (tddy-tui)
 - **2026-03-13** [Bug Fix] Session and Workflow Fixes — Error recovery elicitation (red prompt, Resume/Exit). Auto-grow prompt bar. UTF-8 cursor handling. div_ceil in layout. (tddy-tui)
 - **2026-03-11** [Feature] Terminal Streaming via gRPC — CapturingWriter with ByteCallback for capturing ratatui/crossterm output. run_event_loop accepts optional byte_capture; uses CapturingWriter (no-op when None) for all terminal writes. Unit tests: write_captures_bytes, clone_shares_callback, flush_delegates_to_stdout. (tddy-tui)
 - **2026-03-10** [Feature] Plan Approval Gate — view_state: plan_review_selected, markdown_scroll_offset; key_map: plan_review_key, markdown_viewer_key; render: render_plan_review, MarkdownViewer with tui-markdown; layout: question_height for PlanReview. tui-markdown 0.3, ratatui 0.30. (tddy-tui)
