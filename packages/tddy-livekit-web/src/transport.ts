@@ -12,7 +12,14 @@ import {
   type DescMethodStreaming,
   type MessageInitShape,
 } from "@bufbuild/protobuf";
-import type { Transport, UnaryResponse, StreamResponse } from "@connectrpc/connect";
+import {
+  ConnectError,
+  Code,
+  type Transport,
+  type UnaryResponse,
+  type StreamResponse,
+} from "@connectrpc/connect";
+import { codeFromString } from "@connectrpc/connect/protocol-connect";
 import { RoomEvent, type Room } from "livekit-client";
 import {
   RpcRequestSchema,
@@ -20,6 +27,7 @@ import {
   CallMetadataSchema,
   type RpcRequest,
   type RpcResponse,
+  type RpcError,
 } from "./gen/rpc_envelope_pb.js";
 import { AsyncQueue } from "./async-queue.js";
 
@@ -50,6 +58,13 @@ function metadataToHeaders(metadata?: { values?: Record<string, string> }): Head
     });
   }
   return headers;
+}
+
+/** Maps RpcError code string (e.g. "NOT_FOUND") to Connect Code enum. Falls back to Code.Unknown. */
+function rpcErrorToConnectError(err: RpcError): ConnectError {
+  const normalized = err.code.toLowerCase().replace(/^cancelled$/, "canceled");
+  const code = codeFromString(normalized) ?? Code.Unknown;
+  return new ConnectError(err.message, code);
 }
 
 export interface LiveKitTransportOptions {
@@ -96,7 +111,7 @@ export class LiveKitTransport implements Transport {
         const streamQueue = this.pendingStreams.get(requestId);
         if (streamQueue) {
           if (response.error) {
-            streamQueue.fail(new Error(`RPC Error [${response.error.code}]: ${response.error.message}`));
+            streamQueue.fail(rpcErrorToConnectError(response.error));
             this.pendingStreams.delete(requestId);
           } else {
             if (response.responseMessage && response.responseMessage.length > 0) {
@@ -206,7 +221,7 @@ export class LiveKitTransport implements Transport {
       _signal?.removeEventListener("abort", onAbort);
 
       if (response.error) {
-        throw new Error(`RPC Error [${response.error.code}]: ${response.error.message}`);
+        throw rpcErrorToConnectError(response.error);
       }
 
       if (!response.responseMessage || response.responseMessage.length === 0) {
@@ -311,7 +326,7 @@ export class LiveKitTransport implements Transport {
     const response = await responsePromise;
 
     if (response.error) {
-      throw new Error(`RPC Error [${response.error.code}]: ${response.error.message}`);
+      throw rpcErrorToConnectError(response.error);
     }
 
     const outputMessage = fromBinary(method.output as any, response.responseMessage);

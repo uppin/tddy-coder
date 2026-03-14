@@ -2,24 +2,34 @@
 //!
 //! Used when --web-port and --web-bundle-path are both provided.
 
-use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use axum::Router;
 use tower_http::services::ServeDir;
 
-/// Serve static files from `bundle_path` on the given `port`.
-/// Binds to 0.0.0.0 so the server is reachable from other hosts.
-pub async fn serve_web_bundle(port: u16, bundle_path: PathBuf) -> anyhow::Result<()> {
+/// Serve static files from `bundle_path` on the given `host` and `port`.
+/// When `rpc_router` is provided, it is merged before the static file fallback (e.g. ConnectRPC at /rpc).
+pub async fn serve_web_bundle(
+    host: impl AsRef<str>,
+    port: u16,
+    bundle_path: PathBuf,
+    rpc_router: Option<Router>,
+) -> anyhow::Result<()> {
+    let host = host.as_ref();
     let service = ServeDir::new(&bundle_path).append_index_html_on_directories(true);
-    let app = Router::new().fallback_service(service);
-    let addr: SocketAddr = ([0, 0, 0, 0], port).into();
+    let mut app = Router::new();
+    if let Some(rpc) = rpc_router {
+        app = app.merge(rpc);
+    }
+    app = app.fallback_service(service);
+    let addr = (host, port);
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .map_err(|e| anyhow::anyhow!("bind web server port {}: {}", port, e))?;
+        .map_err(|e| anyhow::anyhow!("bind web server {}:{}: {}", host, port, e))?;
     log::info!(
-        "Web server serving {} on port {}",
+        "Web server serving {} on {}:{}",
         bundle_path.display(),
+        host,
         port
     );
     axum::serve(listener, app)

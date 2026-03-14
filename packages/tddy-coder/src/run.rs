@@ -147,6 +147,8 @@ pub struct Args {
     pub web_port: Option<u16>,
     /// Path to pre-built web bundle (e.g. packages/tddy-web/dist). Requires web_port.
     pub web_bundle_path: Option<PathBuf>,
+    /// Host to bind web server (e.g. 127.0.0.1 or 0.0.0.0). Default: 0.0.0.0 when web server is enabled.
+    pub web_host: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -221,6 +223,10 @@ pub struct CoderArgs {
     /// Path to pre-built web bundle (e.g. packages/tddy-web/dist). Requires --web-port.
     #[arg(long)]
     pub web_bundle_path: Option<PathBuf>,
+
+    /// Host to bind web server (e.g. 127.0.0.1 or 0.0.0.0). Default: 0.0.0.0 when web server is enabled.
+    #[arg(long, value_name = "HOST")]
+    pub web_host: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -295,6 +301,10 @@ pub struct DemoArgs {
     /// Path to pre-built web bundle (e.g. packages/tddy-web/dist). Requires --web-port.
     #[arg(long)]
     pub web_bundle_path: Option<PathBuf>,
+
+    /// Host to bind web server (e.g. 127.0.0.1 or 0.0.0.0). Default: 0.0.0.0 when web server is enabled.
+    #[arg(long, value_name = "HOST")]
+    pub web_host: Option<String>,
 }
 
 impl From<CoderArgs> for Args {
@@ -318,6 +328,7 @@ impl From<CoderArgs> for Args {
             livekit_identity: a.livekit_identity,
             web_port: a.web_port,
             web_bundle_path: a.web_bundle_path.clone(),
+            web_host: a.web_host.clone(),
         }
     }
 }
@@ -343,6 +354,7 @@ impl From<DemoArgs> for Args {
             livekit_identity: a.livekit_identity,
             web_port: a.web_port,
             web_bundle_path: a.web_bundle_path.clone(),
+            web_host: a.web_host.clone(),
         }
     }
 }
@@ -553,8 +565,14 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         if let (Some(web_port), Some(ref web_bundle_path)) = (args.web_port, &args.web_bundle_path)
         {
             let path = web_bundle_path.clone();
+            let web_host = args.web_host.as_deref().unwrap_or("0.0.0.0").to_string();
+            let rpc_router = Some(tddy_connectrpc::connect_router(
+                tddy_service::create_echo_bridge(),
+            ));
             tokio::spawn(async move {
-                if let Err(e) = crate::web_server::serve_web_bundle(web_port, path).await {
+                if let Err(e) =
+                    crate::web_server::serve_web_bundle(&web_host, web_port, path, rpc_router).await
+                {
                     log::error!("Web server error: {}", e);
                 }
             });
@@ -564,11 +582,15 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             let url = args.livekit_url.as_ref().unwrap().clone();
             let token = args.livekit_token.as_ref().unwrap().clone();
             let shutdown_clone = shutdown.clone();
+            let (terminal_byte_tx, _) = tokio::sync::broadcast::channel(256);
+            let (input_tx, _) = tokio::sync::mpsc::channel(64);
+            let terminal_service =
+                tddy_service::TerminalServiceImpl::new(terminal_byte_tx.clone(), input_tx);
             tokio::spawn(async move {
                 let participant = match tddy_livekit::LiveKitParticipant::connect(
                     &url,
                     &token,
-                    tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl),
+                    tddy_service::TerminalServiceServer::new(terminal_service),
                     tddy_livekit::RoomOptions::default(),
                 )
                 .await
@@ -1077,12 +1099,18 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
 
     if let (Some(web_port), Some(ref web_bundle_path)) = (args.web_port, &args.web_bundle_path) {
         let path = web_bundle_path.clone();
+        let web_host = args.web_host.as_deref().unwrap_or("0.0.0.0").to_string();
+        let rpc_router = Some(tddy_connectrpc::connect_router(
+            tddy_service::create_echo_bridge(),
+        ));
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("tokio runtime for web server");
-            if let Err(e) = rt.block_on(crate::web_server::serve_web_bundle(web_port, path)) {
+            if let Err(e) = rt.block_on(crate::web_server::serve_web_bundle(
+                &web_host, web_port, path, rpc_router,
+            )) {
                 log::error!("Web server error: {}", e);
             }
         });

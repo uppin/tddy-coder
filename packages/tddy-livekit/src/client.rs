@@ -73,7 +73,7 @@ impl RpcClient {
                             );
                             let result = if let Some(err) = response.error {
                                 Err(Status {
-                                    code: Code::Unknown,
+                                    code: Code::from_str(&err.code),
                                     message: err.message,
                                 })
                             } else {

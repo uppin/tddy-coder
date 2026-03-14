@@ -5476,6 +5476,7 @@ dependencies = [
  "log",
  "reqwest 0.12.28",
  "serde_json",
+ "tddy-connectrpc",
  "tddy-core",
  "tddy-livekit",
  "tddy-service",
@@ -5485,6 +5486,28 @@ dependencies = [
  "tonic 0.12.3",
  "tower-http",
  "uuid",
+]
+
+[[package]]
+name = "tddy-connectrpc"
+version = "0.1.0"
+dependencies = [
+ "axum 0.8.8",
+ "bytes",
+ "futures",
+ "http 1.4.0",
+ "http-body-util",
+ "hyper 1.8.1",
+ "log",
+ "prost 0.13.5",
+ "serde",
+ "serde_json",
+ "tddy-rpc",
+ "tddy-service",
+ "tokio",
+ "tokio-stream",
+ "tower 0.5.3",
+ "tower-service",
 ]
 
 [[package]]
@@ -5522,6 +5545,7 @@ name = "tddy-e2e"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_cmd",
  "async-stream",
  "livekit",
  "prost 0.13.5",

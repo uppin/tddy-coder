@@ -180,6 +180,7 @@ export function TransportTestHarness({
         console.log(`[TEST] error: ${err.message}`);
         setErrorMsg(err.message);
         setStatus("error");
+        (window as unknown as { cypressLastError?: unknown }).cypressLastError = e;
       } finally {
         if (room) {
           room.disconnect();

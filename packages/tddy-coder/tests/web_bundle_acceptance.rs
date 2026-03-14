@@ -63,9 +63,9 @@ fn web_bundle_path_alone_errors_with_clear_message() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// --help shows --web-port and --web-bundle-path.
+/// --help shows --web-port, --web-bundle-path, and --web-host.
 #[test]
-fn help_shows_web_port_and_web_bundle_path() {
+fn help_shows_web_port_web_bundle_path_and_web_host() {
     let mut cmd = tddy_coder_bin();
     cmd.arg("--help");
 
@@ -80,6 +80,11 @@ fn help_shows_web_port_and_web_bundle_path() {
     assert!(
         stdout.contains("--web-bundle-path"),
         "help should document --web-bundle-path: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("--web-host"),
+        "help should document --web-host: {}",
         stdout
     );
 }
@@ -157,11 +162,8 @@ fn daemon_with_web_flags_serves_index_html_at_root() {
     let _guard = KillOnDrop(child);
 
     let url = format!("http://127.0.0.1:{}/", web_port);
-    let body = retry_until_ready(|| {
-        reqwest::blocking::get(&url)
-            .and_then(|r| r.text())
-    })
-    .expect("HTTP GET / within timeout");
+    let body = retry_until_ready(|| reqwest::blocking::get(&url).and_then(|r| r.text()))
+        .expect("HTTP GET / within timeout");
 
     assert!(
         body.contains("Web Bundle Test"),

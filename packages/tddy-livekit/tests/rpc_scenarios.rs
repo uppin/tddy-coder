@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tddy_livekit::{LiveKitParticipant, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
+use tddy_rpc::Code;
 use tddy_service::proto::test::{EchoRequest, EchoResponse};
 use tddy_service::{EchoServiceImpl, EchoServiceServer};
 
@@ -272,7 +273,7 @@ async fn rpc_scenarios() -> Result<()> {
             }
         }
 
-        // --- Unknown service returns an RPC error ---
+        // --- Unknown service returns an RPC error with appropriate code (NOT_FOUND, not UNKNOWN) ---
         {
             log::debug!("scenario: unknown service");
             let request = EchoRequest {
@@ -289,9 +290,15 @@ async fn rpc_scenarios() -> Result<()> {
                 "Error should mention unknown service, got: {}",
                 err.message
             );
+            assert_eq!(
+                err.code,
+                Code::NotFound,
+                "Error code should be NotFound (gRPC-like), got {:?}",
+                err.code
+            );
         }
 
-        // --- Unknown method returns an RPC error ---
+        // --- Unknown method returns an RPC error with appropriate code (NOT_FOUND, not UNKNOWN) ---
         {
             log::debug!("scenario: unknown method");
             let request = EchoRequest {
@@ -311,6 +318,12 @@ async fn rpc_scenarios() -> Result<()> {
                 err.message.contains("Unknown method"),
                 "Error should mention unknown method, got: {}",
                 err.message
+            );
+            assert_eq!(
+                err.code,
+                Code::NotFound,
+                "Error code should be NotFound (gRPC-like), got {:?}",
+                err.code
             );
         }
 
