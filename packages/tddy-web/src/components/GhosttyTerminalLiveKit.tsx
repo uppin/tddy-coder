@@ -28,6 +28,8 @@ export interface GhosttyTerminalLiveKitProps {
   showBufferTextForTest?: boolean;
   /** When true, skip Ghostty rendering and log RPC received data to console; expose count for test assertion. */
   debugMode?: boolean;
+  /** When true, log data flows and lifecycle events to console for debugging. */
+  debugLogging?: boolean;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -38,7 +40,11 @@ export function GhosttyTerminalLiveKit({
   roomName = "terminal-e2e",
   showBufferTextForTest = false,
   debugMode = false,
+  debugLogging = false,
 }: GhosttyTerminalLiveKitProps) {
+  const log = debugLogging
+    ? (...args: unknown[]) => console.log("[GhosttyLiveKit]", ...args)
+    : () => {};
   const termRef = useRef<GhosttyTerminalHandle>(null);
   const inputQueueRef = useRef<Uint8Array[]>([]);
   const outputBufferRef = useRef<Uint8Array[]>([]);
@@ -54,6 +60,7 @@ export function GhosttyTerminalLiveKit({
   const [errorMsg, setErrorMsg] = useState("");
   const [rpcReceivedCount, setRpcReceivedCount] = useState(0);
   const [rpcReceivedSample, setRpcReceivedSample] = useState("");
+  const [firstOutputReceived, setFirstOutputReceived] = useState(false);
 
   useEffect(() => {
     let room: Room | null = null;
@@ -100,8 +107,12 @@ export function GhosttyTerminalLiveKit({
 
         room = new Room();
 
-        room.on(RoomEvent.Connected, () => console.log("[LiveKit] RoomEvent.Connected"));
+        room.on(RoomEvent.Connected, () => {
+          log("lifecycle: RoomEvent.Connected");
+          console.log("[LiveKit] RoomEvent.Connected");
+        });
         room.on(RoomEvent.Disconnected, async (reason) => {
+          log("lifecycle: RoomEvent.Disconnected", reason);
           console.log("[LiveKit] RoomEvent.Disconnected", reason);
           if (!cancelled && getToken && latestTokenRef.current) {
             try {
@@ -121,7 +132,9 @@ export function GhosttyTerminalLiveKit({
           console.log("[LiveKit] ParticipantDisconnected", participant.identity)
         );
 
+        log("lifecycle: connecting to room");
         await room.connect(url, initialToken);
+        log("lifecycle: room connected");
 
         const hasServer = () =>
           Array.from(room!.remoteParticipants.values()).some(
@@ -143,21 +156,26 @@ export function GhosttyTerminalLiveKit({
           };
           room!.on(RoomEvent.ParticipantConnected, handler);
         });
+        log("lifecycle: server participant found");
 
         const transport = createLiveKitTransport({
           room: room!,
           targetIdentity: SERVER_IDENTITY,
-          debug: debugMode,
+          debug: debugMode || debugLogging,
         });
+        log("lifecycle: transport created");
 
         const client = createClient(TerminalService, transport);
 
         const queue = inputQueueRef.current;
         async function* inputGen() {
+          log("dataflow: inputGen started, yielding empty init");
           yield create(TerminalInputSchema, { data: new Uint8Array(0) });
           while (true) {
             if (queue.length > 0) {
               const data = queue.shift()!;
+              const preview = new TextDecoder().decode(data.slice(0, 40));
+              log("dataflow: inputGen yielding", data.length, "bytes", JSON.stringify(preview));
               yield create(TerminalInputSchema, { data });
             } else {
               await new Promise((r) => setTimeout(r, 100));
@@ -165,6 +183,7 @@ export function GhosttyTerminalLiveKit({
           }
         }
 
+        log("lifecycle: starting streamTerminalIO");
         const stream = client.streamTerminalIO(inputGen());
 
         (async () => {
@@ -174,18 +193,28 @@ export function GhosttyTerminalLiveKit({
             for await (const output of stream) {
               if (output.data.length === 0) continue;
               count++;
+              const preview = new TextDecoder().decode(output.data.slice(0, 60));
               if (debugMode) {
-                console.log("[GhosttyTerminalLiveKit] RPC chunk #", count, "bytes:", output.data.length, "sample:", new TextDecoder().decode(output.data.slice(0, 80)));
+                console.log("[GhosttyTerminalLiveKit] RPC chunk #", count, "bytes:", output.data.length, "sample:", preview);
                 sample = new TextDecoder().decode(output.data.slice(0, 200));
                 setRpcReceivedCount(count);
                 setRpcReceivedSample(sample);
               }
               if (!debugMode) {
+                if (count === 1) {
+                  setFirstOutputReceived(true);
+                  log("dataflow: first RPC output received");
+                }
                 const decoded = new TextDecoder().decode(output.data);
                 streamedTextRef.current += decoded;
-                if (termReadyRef.current && termRef.current) {
+                const ready = termReadyRef.current;
+                const hasTerm = !!termRef.current;
+                log("dataflow: RPC output chunk #", count, "bytes:", output.data.length, "termReady:", ready, "hasTerm:", hasTerm, "preview:", JSON.stringify(preview));
+                if (ready && termRef.current) {
+                  log("dataflow: writing to term");
                   termRef.current.write(output.data);
                 } else {
+                  log("dataflow: buffering (outputBuffer length:", outputBufferRef.current.length + 1, ")");
                   outputBufferRef.current.push(output.data);
                 }
                 if (showBufferTextForTest) {
@@ -194,12 +223,15 @@ export function GhosttyTerminalLiveKit({
                 }
               }
             }
+            log("lifecycle: stream ended");
           } catch (e) {
+            log("lifecycle: stream error", e);
             console.error("Stream error:", e);
           }
         })();
 
         setStatus("connected");
+        log("lifecycle: status=connected");
 
         if (showBufferTextForTest && !debugMode) {
           bufferInterval = setInterval(() => {
@@ -224,7 +256,7 @@ export function GhosttyTerminalLiveKit({
       if (bufferInterval) clearInterval(bufferInterval);
       if (room) room.disconnect();
     };
-  }, [url, token, getToken, ttlSecondsProp, roomName, showBufferTextForTest, debugMode]);
+  }, [url, token, getToken, ttlSecondsProp, roomName, showBufferTextForTest, debugMode, debugLogging]);
 
   return (
     <div>
@@ -243,24 +275,31 @@ export function GhosttyTerminalLiveKit({
         ) : (
           <GhosttyTerminal
             ref={termRef}
+            debugLogging={debugLogging}
             onReady={() => {
               termReadyRef.current = true;
               const buf = outputBufferRef.current;
               outputBufferRef.current = [];
               const term = termRef.current;
+              log("lifecycle: onReady, flushing buffer", buf.length, "chunks");
               if (term) {
                 for (const chunk of buf) {
+                  log("dataflow: onReady flush write", chunk.length, "bytes");
                   term.write(chunk);
                 }
               }
             }}
             onData={(data) => {
-              const encoder = new TextEncoder();
-              inputQueueRef.current.push(encoder.encode(data));
+              const encoded = new TextEncoder().encode(data);
+              inputQueueRef.current.push(encoded);
+              log("dataflow: onData received", data.length, "chars, queue length:", inputQueueRef.current.length, "preview:", JSON.stringify(data.slice(0, 20)));
             }}
           />
         )}
       </div>
+      {firstOutputReceived && (
+        <div data-testid="first-output-received" style={{ display: "none" }} aria-hidden />
+      )}
       {showBufferTextForTest && (
         <>
           <div data-testid="streamed-byte-count" style={{ display: "none" }} aria-hidden>

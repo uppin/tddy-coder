@@ -11,9 +11,11 @@ path = "src/lib.rs"
 [dependencies]
 prost = "0.13"
 tddy-rpc = { path = "../tddy-rpc" }
+tddy-service = { path = "../tddy-service" }
 livekit = "0.7"
 livekit-api = "0.4"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net"] }
+tokio-stream = "0.1"
 async-trait = "0.1"
 dashmap = "5"
 log = { version = "0.4", features = ["std"] }

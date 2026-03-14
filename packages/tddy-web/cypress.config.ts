@@ -1,4 +1,5 @@
 import { defineConfig } from "cypress";
+import { createRequire } from "module";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -17,6 +18,11 @@ const ROOM_NAME = "terminal-e2e";
 function getTddyDemoPath(): string {
   const repoRoot = path.resolve(__dirname, "../..");
   return path.join(repoRoot, "target", "debug", "tddy-demo");
+}
+
+function getEchoTerminalPath(): string {
+  const repoRoot = path.resolve(__dirname, "../..");
+  return path.join(repoRoot, "target", "debug", "examples", "echo_terminal");
 }
 
 function getTddyCoderPath(): string {
@@ -50,6 +56,7 @@ export default defineConfig({
     setupNodeEvents(on) {
       let terminalServerProcess: ReturnType<typeof spawn> | null = null;
       let tddyCoderProcess: ReturnType<typeof spawn> | null = null;
+      let echoTerminalProcess: ReturnType<typeof spawn> | null = null;
 
       const stopTerminalServer = () => {
         if (terminalServerProcess) {
@@ -65,9 +72,17 @@ export default defineConfig({
         }
       };
 
+      const stopEchoTerminal = () => {
+        if (echoTerminalProcess) {
+          echoTerminalProcess.kill("SIGTERM");
+          echoTerminalProcess = null;
+        }
+      };
+
       on("after:run", () => {
         stopTerminalServer();
         stopTddyCoder();
+        stopEchoTerminal();
       });
 
       on("task", {
@@ -212,6 +227,155 @@ export default defineConfig({
         stopTerminalServer() {
           stopTerminalServer();
           return null;
+        },
+
+        async startEchoTerminal() {
+          const wsUrl = process.env.LIVEKIT_TESTKIT_WS_URL;
+          if (!wsUrl || wsUrl.trim() === "") {
+            throw new Error(
+              "LIVEKIT_TESTKIT_WS_URL must be set. Run ./run-livekit-testkit-server and export the URL."
+            );
+          }
+
+          const serverToken = new AccessToken(DEV_API_KEY, DEV_API_SECRET, {
+            identity: SERVER_IDENTITY,
+          });
+          serverToken.addGrant({
+            roomJoin: true,
+            room: ROOM_NAME,
+            canPublish: true,
+            canSubscribe: true,
+          });
+          const token = await serverToken.toJwt();
+
+          const binaryPath = getEchoTerminalPath();
+          if (!fs.existsSync(binaryPath)) {
+            throw new Error(
+              `echo_terminal binary not found at ${binaryPath}. Run: cargo build -p tddy-livekit --example echo_terminal`
+            );
+          }
+
+          return new Promise<{
+            url: string;
+            clientToken: string;
+            roomName: string;
+            echoTerminalLogPath?: string;
+          }>((resolve, reject) => {
+            const logDir = process.env.TMPDIR ?? os.tmpdir();
+            const echoLogPath = path.join(
+              logDir,
+              `echo_terminal-e2e-${Date.now()}.log`
+            );
+            const echoLogStream = fs.createWriteStream(echoLogPath, {
+              flags: "a",
+            });
+
+            const repoRoot = path.resolve(__dirname, "../..");
+            echoTerminalProcess = spawn(
+              binaryPath,
+              ["--url", wsUrl, "--token", token, "--room", ROOM_NAME],
+              {
+                stdio: ["ignore", "pipe", "pipe"],
+                cwd: repoRoot,
+                env: { ...process.env, RUST_LOG: "info" },
+              }
+            );
+
+            let output = "";
+            let resolved = false;
+
+            const writeEchoLog = (data: string | Buffer) => {
+              echoLogStream.write(data);
+            };
+            const timeout = setTimeout(() => {
+              if (!resolved) {
+                resolved = true;
+                stopEchoTerminal();
+                reject(new Error("echo_terminal did not print READY within 15s"));
+              }
+            }, 15000);
+
+            const checkReady = () => {
+              if (output.includes("READY") && !resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                const clientToken = new AccessToken(DEV_API_KEY, DEV_API_SECRET, {
+                  identity: CLIENT_IDENTITY,
+                });
+                clientToken.addGrant({
+                  roomJoin: true,
+                  room: ROOM_NAME,
+                  canPublish: true,
+                  canSubscribe: true,
+                });
+                clientToken.toJwt().then((clientJwt) => {
+                  resolve({
+                    url: wsUrl,
+                    clientToken: clientJwt,
+                    roomName: ROOM_NAME,
+                    echoTerminalLogPath: echoLogPath,
+                  });
+                });
+              }
+            };
+
+            echoTerminalProcess.stdout?.on("data", (data) => {
+              writeEchoLog(data);
+              output += data.toString();
+              checkReady();
+            });
+            echoTerminalProcess.stderr?.on("data", (data) => {
+              writeEchoLog(data);
+              output += data.toString();
+              checkReady();
+            });
+            echoTerminalProcess.on("error", (err) => {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                reject(err);
+              }
+            });
+          });
+        },
+
+        stopEchoTerminal() {
+          stopEchoTerminal();
+          return null;
+        },
+
+        log(message: string) {
+          console.log(message);
+          return null;
+        },
+
+        readLogFile(filePath: string): string {
+          try {
+            return fs.readFileSync(filePath, "utf-8");
+          } catch {
+            return `(could not read ${filePath})`;
+          }
+        },
+
+        async ocrScreenshot(imagePath: string): Promise<string> {
+          const require = createRequire(import.meta.url);
+          const { createWorker } = require("tesseract.js");
+          const pkgDir = __dirname;
+          const fullPath = path.isAbsolute(imagePath)
+            ? imagePath
+            : path.join(pkgDir, imagePath);
+          if (!fs.existsSync(fullPath)) {
+            throw new Error(`OCR: image not found at ${fullPath}`);
+          }
+          const worker = await createWorker("eng");
+          try {
+            const {
+              data: { text },
+            } = await worker.recognize(fullPath);
+            return text ?? "";
+          } finally {
+            await worker.terminate();
+          }
         },
 
         async startTddyCoderForConnectFlow() {
