@@ -6,6 +6,8 @@
 use anyhow::Context;
 use clap::Parser;
 use std::io::{self, IsTerminal, Read, Write};
+#[cfg(unix)]
+use std::os::fd::IntoRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -76,6 +78,16 @@ pub fn run_main(mut args: Args) {
             let _ = std::fs::create_dir_all(&logs);
             tddy_core::redirect_debug_output(&logs.join("debug.log"));
             log::set_max_level(log::LevelFilter::Debug);
+            // Daemon runs headless (stdin/stdout/stderr = null). Redirect stderr to a real file
+            // so crossterm/terminal APIs that may probe stderr work correctly (e.g. VirtualTui).
+            #[cfg(unix)]
+            if args.daemon {
+                if let Ok(file) = std::fs::File::create(logs.join("daemon_stderr.log")) {
+                    let fd = file.into_raw_fd();
+                    let _ = unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
+                    let _ = unsafe { libc::close(fd) };
+                }
+            }
         }
     }
 
@@ -736,10 +748,6 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     args.livekit_identity.as_ref().unwrap().clone(),
                     std::time::Duration::from_secs(120),
                 );
-                let (terminal_byte_tx, _) = tokio::sync::broadcast::channel(256);
-                let (input_tx, _) = tokio::sync::mpsc::channel(64);
-                let terminal_service =
-                    tddy_service::TerminalServiceImpl::new(terminal_byte_tx, input_tx);
                 tokio::spawn(async move {
                     tddy_livekit::LiveKitParticipant::run_with_reconnect(
                         &url,
@@ -752,10 +760,6 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 });
             } else {
                 let token = args.livekit_token.as_ref().unwrap().clone();
-                let (terminal_byte_tx, _) = tokio::sync::broadcast::channel(256);
-                let (input_tx, _) = tokio::sync::mpsc::channel(64);
-                let terminal_service =
-                    tddy_service::TerminalServiceImpl::new(terminal_byte_tx, input_tx);
                 tokio::spawn(async move {
                     let participant = match tddy_livekit::LiveKitParticipant::connect(
                         &url,

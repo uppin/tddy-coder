@@ -192,7 +192,6 @@ mod livekit_tests {
             SERVER_IDENTITY.to_string(),
             client2_rpc_events,
         );
->>>>>>> feat/per-connection-virtual-tui
 
         let request = TerminalInput { data: vec![] };
         let request_bytes = request.encode_to_vec();
@@ -283,6 +282,9 @@ mod livekit_tests {
                 tddy_core::output::TDDY_SESSIONS_DIR_ENV,
                 sessions_base.to_str().unwrap(),
             )
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .args([
                 "--agent",
                 "stub",
@@ -323,7 +325,7 @@ mod livekit_tests {
         let request = TerminalInput { data: vec![] };
         let request_bytes = request.encode_to_vec();
 
-        let _rx = rpc_client
+        let mut rx = rpc_client
             .call_server_stream(
                 "terminal.TerminalService",
                 "StreamTerminalIO",
@@ -336,6 +338,28 @@ mod livekit_tests {
                     e
                 )
             })?;
+
+        let mut received = Vec::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(Some(chunk)) =
+                tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            {
+                if let Ok(bytes) = chunk {
+                    let output = TerminalOutput::decode(&bytes[..])?;
+                    received.extend_from_slice(&output.data);
+                }
+            }
+            if received.len() > 50 {
+                break;
+            }
+        }
+
+        assert!(
+            received.len() > 50,
+            "daemon VirtualTui should stream ANSI bytes to client, got {} bytes (0 = headless/TTY bug)",
+            received.len()
+        );
 
         Ok(())
     }

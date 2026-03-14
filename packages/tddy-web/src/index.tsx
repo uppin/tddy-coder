@@ -114,7 +114,7 @@ function ConnectedTerminal({
         getToken={getToken}
         ttlSeconds={ttlSeconds}
         roomName={roomName}
-        debugMode={true}
+        debugMode={false}
       />
     </div>
   );
