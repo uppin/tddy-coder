@@ -11,7 +11,6 @@ use crate::{ClarificationQuestion, SharedBackend};
 use crate::presenter::intent::UserIntent;
 use crate::presenter::presenter_events::{PresenterEvent, ViewConnection};
 use crate::presenter::state::{ActivityEntry, ActivityKind, AppMode, PresenterState};
-use crate::presenter::view::PresenterView;
 use crate::presenter::workflow_runner;
 use crate::presenter::{WorkflowCompletePayload, WorkflowEvent};
 
@@ -26,9 +25,9 @@ const QUEUED_INSTRUCTION_PREFIX: &str =
     "[QUEUED] The following prompt was queued while you were busy. Please address it:\n\n";
 
 /// Presenter: owns state, receives UserIntents, orchestrates workflow thread.
-pub struct Presenter<V: PresenterView> {
+/// Views observe state via connect_view() → ViewConnection (broadcast events).
+pub struct Presenter {
     state: PresenterState,
-    view: V,
     workflow_event_rx: Option<mpsc::Receiver<WorkflowEvent>>,
     answer_tx: Option<mpsc::Sender<String>>,
     workflow_backend: Option<SharedBackend>,
@@ -57,9 +56,9 @@ pub struct Presenter<V: PresenterView> {
     workflow_socket_path: Option<PathBuf>,
 }
 
-impl<V: PresenterView> Presenter<V> {
+impl Presenter {
     /// Create a new Presenter in FeatureInput mode.
-    pub fn new(view: V, agent: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(agent: impl Into<String>, model: impl Into<String>) -> Self {
         let state = PresenterState {
             agent: agent.into(),
             model: model.into(),
@@ -73,7 +72,6 @@ impl<V: PresenterView> Presenter<V> {
         };
         Presenter {
             state,
-            view,
             workflow_event_rx: None,
             answer_tx: None,
             workflow_backend: None,
@@ -144,14 +142,12 @@ impl<V: PresenterView> Presenter<V> {
                         let _ = tx.send("Approve".to_string());
                     }
                     self.state.mode = AppMode::Running;
-                    self.view.on_mode_changed(&self.state.mode);
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 } else if matches!(self.state.mode, AppMode::MarkdownViewer { .. }) {
                     if let Some(ref tx) = self.answer_tx {
                         let _ = tx.send("Approve".to_string());
                     }
                     self.state.mode = AppMode::Running;
-                    self.view.on_mode_changed(&self.state.mode);
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
             }
@@ -160,7 +156,6 @@ impl<V: PresenterView> Presenter<V> {
                     self.state.mode = AppMode::MarkdownViewer {
                         content: prd_content.clone(),
                     };
-                    self.view.on_mode_changed(&self.state.mode);
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
             }
@@ -169,7 +164,6 @@ impl<V: PresenterView> Presenter<V> {
                 self.state.mode = AppMode::TextInput {
                     prompt: "Enter refinement feedback:".to_string(),
                 };
-                self.view.on_mode_changed(&self.state.mode);
                 self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
             }
             UserIntent::DismissViewer => {
@@ -177,7 +171,6 @@ impl<V: PresenterView> Presenter<V> {
                     self.state.mode = AppMode::PlanReview {
                         prd_content: content.clone(),
                     };
-                    self.view.on_mode_changed(&self.state.mode);
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
             }
@@ -226,7 +219,6 @@ impl<V: PresenterView> Presenter<V> {
                         let _ = tx.send(text);
                     }
                     self.state.mode = AppMode::Running;
-                    self.view.on_mode_changed(&self.state.mode);
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 } else {
                     self.collected_answers.push(text);
@@ -240,21 +232,18 @@ impl<V: PresenterView> Presenter<V> {
             UserIntent::QueuePrompt(text) => {
                 if !text.is_empty() {
                     self.state.inbox.push(text);
-                    self.view.on_inbox_changed(&self.state.inbox);
                     self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
                 }
             }
             UserIntent::EditInboxItem { index, text } => {
                 if index < self.state.inbox.len() {
                     self.state.inbox[index] = text;
-                    self.view.on_inbox_changed(&self.state.inbox);
                     self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
                 }
             }
             UserIntent::DeleteInboxItem(index) => {
                 if index < self.state.inbox.len() {
                     self.state.inbox.remove(index);
-                    self.view.on_inbox_changed(&self.state.inbox);
                     self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
                 }
             }
@@ -289,7 +278,6 @@ impl<V: PresenterView> Presenter<V> {
                     None
                 };
                 self.state.mode = AppMode::Running;
-                self.view.on_mode_changed(&self.state.mode);
                 self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 if let (Some(backend), Some(output_dir)) = (
                     self.workflow_backend.clone(),
@@ -365,7 +353,6 @@ impl<V: PresenterView> Presenter<V> {
     fn advance_to_next_question(&mut self) {
         if self.current_question_index >= self.pending_questions.len() {
             self.state.mode = AppMode::Running;
-            self.view.on_mode_changed(&self.state.mode);
             self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
         } else {
             let q = self.pending_questions[self.current_question_index].clone();
@@ -383,7 +370,6 @@ impl<V: PresenterView> Presenter<V> {
                     total_questions: total,
                 };
             }
-            self.view.on_mode_changed(&self.state.mode);
             self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
         }
     }
@@ -398,8 +384,6 @@ impl<V: PresenterView> Presenter<V> {
     fn log_activity(&mut self, text: String, kind: ActivityKind) {
         let entry = ActivityEntry { text, kind };
         self.state.activity_log.push(entry.clone());
-        self.view
-            .on_activity_logged(&entry, self.state.activity_log.len());
         self.broadcast(PresenterEvent::ActivityLogged(entry));
     }
 
@@ -560,8 +544,6 @@ impl<V: PresenterView> Presenter<V> {
                         },
                     };
                     self.state.activity_log.push(entry.clone());
-                    self.view
-                        .on_activity_logged(&entry, self.state.activity_log.len());
                     self.broadcast(PresenterEvent::ActivityLogged(entry));
                 }
                 WorkflowEvent::StateChange { from, to } => {
@@ -571,9 +553,6 @@ impl<V: PresenterView> Presenter<V> {
                         kind: ActivityKind::StateChange,
                     };
                     self.state.activity_log.push(entry.clone());
-                    self.view
-                        .on_activity_logged(&entry, self.state.activity_log.len());
-                    self.view.on_state_changed(&from, &to);
                     self.broadcast(PresenterEvent::ActivityLogged(entry));
                     self.broadcast(PresenterEvent::StateChanged {
                         from: from.clone(),
@@ -585,10 +564,8 @@ impl<V: PresenterView> Presenter<V> {
                     self.state.goal_start_time = std::time::Instant::now();
                     if matches!(self.state.mode, AppMode::FeatureInput) {
                         self.state.mode = AppMode::Running;
-                        self.view.on_mode_changed(&self.state.mode);
                         self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                     }
-                    self.view.on_goal_started(&goal);
                     self.broadcast(PresenterEvent::GoalStarted(goal.clone()));
                 }
                 WorkflowEvent::ClarificationNeeded { questions } => {
@@ -601,21 +578,17 @@ impl<V: PresenterView> Presenter<V> {
                 WorkflowEvent::PlanApprovalNeeded { prd_content } => {
                     self.flush_agent_output_buffer();
                     self.state.mode = AppMode::PlanReview { prd_content };
-                    self.view.on_mode_changed(&self.state.mode);
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
                 WorkflowEvent::WorkflowComplete(result) => {
                     self.flush_agent_output_buffer();
                     self.workflow_result = Some(result.clone());
-                    self.view.on_workflow_complete(&result);
                     self.broadcast(PresenterEvent::WorkflowComplete(result.clone()));
                     if result.is_ok() && !self.state.inbox.is_empty() {
                         let item = self.state.inbox.remove(0);
                         let prefixed = format!("{}{}", QUEUED_INSTRUCTION_PREFIX, item);
-                        self.view.on_inbox_changed(&self.state.inbox);
                         self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
                         self.state.mode = AppMode::Running;
-                        self.view.on_mode_changed(&self.state.mode);
                         self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                         // Workflow thread has exited; restart with dequeued prompt
                         if let (Some(backend), Some(output_dir)) = (
@@ -650,7 +623,6 @@ impl<V: PresenterView> Presenter<V> {
                                 self.state.mode = AppMode::Done;
                             }
                         }
-                        self.view.on_mode_changed(&self.state.mode);
                         self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                     }
                 }
@@ -666,15 +638,12 @@ impl<V: PresenterView> Presenter<V> {
                                     kind: ActivityKind::AgentOutput,
                                 };
                                 self.state.activity_log.push(entry.clone());
-                                self.view
-                                    .on_activity_logged(&entry, self.state.activity_log.len());
                                 self.broadcast(PresenterEvent::ActivityLogged(entry));
                             }
                         } else {
                             self.agent_output_buffer.push_str(part);
                         }
                     }
-                    self.view.on_agent_output(&text);
                     self.broadcast(PresenterEvent::AgentOutput(text.clone()));
                 }
             }
@@ -759,16 +728,6 @@ impl<V: PresenterView> Presenter<V> {
         &self.state
     }
 
-    /// Reference to the view.
-    pub fn view(&self) -> &V {
-        &self.view
-    }
-
-    /// Mutable reference to the view (for tests to extract events).
-    pub fn view_mut(&mut self) -> &mut V {
-        &mut self.view
-    }
-
     /// True when workflow is complete and TUI can exit.
     pub fn is_done(&self) -> bool {
         matches!(self.state.mode, AppMode::Done)
@@ -783,25 +742,13 @@ impl<V: PresenterView> Presenter<V> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::presenter::state::{ActivityEntry, AppMode};
+    use crate::presenter::state::AppMode;
 
-    struct NullView;
-
-    impl PresenterView for NullView {
-        fn on_mode_changed(&mut self, _mode: &AppMode) {}
-        fn on_activity_logged(&mut self, _entry: &ActivityEntry, _log_len: usize) {}
-        fn on_goal_started(&mut self, _goal: &str) {}
-        fn on_state_changed(&mut self, _from: &str, _to: &str) {}
-        fn on_workflow_complete(&mut self, _result: &Result<WorkflowCompletePayload, String>) {}
-        fn on_agent_output(&mut self, _text: &str) {}
-        fn on_inbox_changed(&mut self, _inbox: &[String]) {}
+    fn make_presenter() -> Presenter {
+        Presenter::new("agent", "model")
     }
 
-    fn make_presenter() -> Presenter<NullView> {
-        Presenter::new(NullView, "agent", "model")
-    }
-
-    fn inject_workflow_event(presenter: &mut Presenter<NullView>, event: WorkflowEvent) {
+    fn inject_workflow_event(presenter: &mut Presenter, event: WorkflowEvent) {
         let (tx, rx) = mpsc::channel();
         tx.send(event).unwrap();
         presenter.workflow_event_rx = Some(rx);

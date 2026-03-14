@@ -15,4 +15,4 @@ pub use intent::UserIntent;
 pub use presenter_events::{PresenterEvent, PresenterHandle, ViewConnection};
 pub use presenter_impl::Presenter;
 pub use state::{ActivityEntry, ActivityKind, AppMode, PresenterState};
-pub use view::{NoopView, PresenterView};
+pub use view::PresenterView;

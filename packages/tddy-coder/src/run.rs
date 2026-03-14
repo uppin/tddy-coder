@@ -19,7 +19,7 @@ use tddy_core::{
 
 use crate::plain;
 use crate::tty::should_run_tui;
-use tddy_core::{NoopView, Presenter};
+use tddy_core::Presenter;
 
 use crate::disable_raw_mode;
 
@@ -585,9 +585,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         if livekit_enabled {
             let (event_tx, _) = tokio::sync::broadcast::channel(256);
             let (intent_tx, intent_rx) = std::sync::mpsc::channel();
-            let view = NoopView;
             let mut presenter =
-                Presenter::new(view, &args.agent, args.model.as_deref().unwrap_or("opus"))
+                Presenter::new(&args.agent, args.model.as_deref().unwrap_or("opus"))
                     .with_broadcast(event_tx)
                     .with_intent_sender(intent_tx);
             let output_dir = sessions_base.join("tddy-daemon-session");
@@ -1116,8 +1115,12 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         Err(_) => (None, None),
     };
     let backend = create_backend(&args.agent, socket_path.as_deref(), None);
-    let view = tddy_tui::TuiView::new();
-    let mut presenter = Presenter::new(view, &args.agent, args.model.as_deref().unwrap_or("opus"));
+
+    let (event_tx, _) = tokio::sync::broadcast::channel(256);
+    let (intent_tx, intent_rx) = std::sync::mpsc::channel();
+    let mut presenter = Presenter::new(&args.agent, args.model.as_deref().unwrap_or("opus"))
+        .with_broadcast(event_tx.clone())
+        .with_intent_sender(intent_tx.clone());
 
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
@@ -1126,21 +1129,18 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         && args.livekit_room.is_some()
         && args.livekit_identity.is_some();
 
-    let (external_intent_rx, byte_capture) = if let Some(port) = args.grpc {
-        let (event_tx, _) = tokio::sync::broadcast::channel(256);
-        let (intent_tx, intent_rx) = std::sync::mpsc::channel();
-        let (terminal_byte_tx, _) = tokio::sync::broadcast::channel(256);
+    let byte_capture: Option<tddy_tui::ByteCallback> = if let Some(port) = args.grpc {
         let handle = tddy_core::PresenterHandle {
             event_tx: event_tx.clone(),
             intent_tx: intent_tx.clone(),
         };
-        presenter = presenter.with_broadcast(event_tx);
+        let (terminal_byte_tx, _) = tokio::sync::broadcast::channel(256);
         let service = tddy_service::TddyRemoteService::new(handle)
             .with_terminal_bytes(terminal_byte_tx.clone());
         let byte_tx_for_callback = terminal_byte_tx.clone();
-        let byte_capture: Option<tddy_tui::ByteCallback> = Some(Box::new(move |buf: &[u8]| {
+        let capture: tddy_tui::ByteCallback = Box::new(move |buf: &[u8]| {
             let _ = byte_tx_for_callback.send(buf.to_vec());
-        }));
+        });
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -1160,16 +1160,16 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             });
             result.expect("gRPC server failed")
         });
-        (Some(intent_rx), byte_capture)
+        Some(capture)
     } else if livekit_enabled {
         let (terminal_byte_tx, _) = tokio::sync::broadcast::channel(256);
         let (input_tx, _input_rx) = tokio::sync::mpsc::channel(64);
         let terminal_service =
             tddy_service::TerminalServiceImpl::new(terminal_byte_tx.clone(), input_tx);
         let byte_tx_for_callback = terminal_byte_tx.clone();
-        let byte_capture: Option<tddy_tui::ByteCallback> = Some(Box::new(move |buf: &[u8]| {
+        let byte_capture = Some(Box::new(move |buf: &[u8]| {
             let _ = byte_tx_for_callback.send(buf.to_vec());
-        }));
+        }) as tddy_tui::ByteCallback);
         let url = args.livekit_url.clone().unwrap();
         let shutdown = shutdown.clone();
         if has_key_secret {
@@ -1223,9 +1223,9 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 });
             });
         }
-        (None, byte_capture)
+        byte_capture
     } else {
-        (None, None)
+        None
     };
 
     if let (Some(web_port), Some(ref web_bundle_path)) = (args.web_port, &args.web_bundle_path) {
@@ -1255,13 +1255,32 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         tool_call_rx,
     );
 
-    tddy_tui::run_event_loop(
-        &mut presenter,
-        shutdown.as_ref(),
-        external_intent_rx,
-        byte_capture,
-        args.debug,
-    )?;
+    let conn = presenter
+        .connect_view()
+        .expect("connect_view requires broadcast and intent_tx");
+    let shutdown_for_thread = shutdown.clone();
+    let presenter_handle = std::thread::spawn(move || {
+        let mut p = presenter;
+        for _ in 0..100_000 {
+            if shutdown_for_thread.load(Ordering::Relaxed) {
+                break;
+            }
+            while let Ok(intent) = intent_rx.try_recv() {
+                p.handle_intent(intent);
+            }
+            p.poll_tool_calls();
+            p.poll_workflow();
+            if p.state().should_quit {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        p
+    });
+
+    tddy_tui::run_event_loop(conn, shutdown.as_ref(), byte_capture, args.debug)?;
+
+    let presenter = presenter_handle.join().expect("presenter thread panicked");
 
     if let Some(result) = presenter.take_workflow_result() {
         match &result {

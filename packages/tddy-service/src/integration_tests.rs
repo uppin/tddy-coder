@@ -110,7 +110,7 @@ mod tests {
     use tddy_core::AnyBackend;
     use tddy_core::{Presenter, PresenterHandle, SharedBackend, StubBackend};
 
-    use crate::test_util::{spawn_server_and_connect, NoopView};
+    use crate::test_util::spawn_server_and_connect;
 
     #[tokio::test]
     async fn test_submit_feature_input_triggers_goal_started_and_mode_changed() {
@@ -121,8 +121,9 @@ mod tests {
             intent_tx: intent_tx.clone(),
         };
 
-        let view = NoopView;
-        let mut presenter = Presenter::new(view, "stub", "opus").with_broadcast(event_tx);
+        let mut presenter = Presenter::new("stub", "opus")
+            .with_broadcast(event_tx)
+            .with_intent_sender(intent_tx);
         let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
         let output_dir = std::env::temp_dir().join("tddy-service-test");
         std::fs::create_dir_all(&output_dir).unwrap();

@@ -16,9 +16,7 @@ use tddy_core::ViewConnection;
 use tddy_core::{AnyBackend, Presenter, PresenterHandle, SharedBackend, StubBackend};
 use tddy_service::gen::tddy_remote_server::TddyRemoteServer;
 use tddy_service::TddyRemoteService;
-use tddy_tui::{render::draw, TuiView};
-
-use crate::test_util::NoopView;
+use tddy_tui::{render::draw, apply_event, TuiView};
 
 pub mod test_util;
 
@@ -34,8 +32,9 @@ pub fn spawn_presenter_with_grpc(
         intent_tx: intent_tx.clone(),
     };
 
-    let view = NoopView;
-    let mut presenter = Presenter::new(view, "stub", "opus").with_broadcast(event_tx);
+    let mut presenter = Presenter::new("stub", "opus")
+        .with_broadcast(event_tx)
+        .with_intent_sender(intent_tx);
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
     let output_dir = std::env::temp_dir().join(format!("tddy-e2e-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&output_dir).unwrap();
@@ -123,8 +122,9 @@ pub fn spawn_presenter_with_grpc_and_tui(
         intent_tx: intent_tx.clone(),
     };
 
-    let view = TuiView::new();
-    let mut presenter = Presenter::new(view, "stub", "opus").with_broadcast(event_tx);
+    let mut presenter = Presenter::new("stub", "opus")
+        .with_broadcast(event_tx.clone())
+        .with_intent_sender(intent_tx.clone());
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
     let output_dir =
         std::env::temp_dir().join(format!("tddy-e2e-tui-test-{}", uuid::Uuid::new_v4()));
@@ -142,14 +142,19 @@ pub fn spawn_presenter_with_grpc_and_tui(
         None,
     );
 
+    let conn = presenter.connect_view().expect("connect_view");
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = shutdown.clone();
     let screen_buffer = Arc::new(Mutex::new(String::new()));
     let screen_buffer_clone = screen_buffer.clone();
 
-    let presenter_handle = thread::spawn(move || {
+    let _tui_handle = thread::spawn(move || {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+
+        let mut state = conn.state_snapshot;
+        let mut view = TuiView::new();
+        let mut event_rx = conn.event_rx;
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -158,18 +163,34 @@ pub fn spawn_presenter_with_grpc_and_tui(
             if shutdown_clone.load(Ordering::Relaxed) {
                 break;
             }
-            while let Ok(intent) = intent_rx.try_recv() {
-                presenter.handle_intent(intent);
+            while let Ok(ev) = event_rx.try_recv() {
+                apply_event(&mut state, &mut view, ev);
             }
-            let state = presenter.state();
-            let view = presenter.view();
             terminal
-                .draw(|f| draw(f, state, view.view_state(), false))
+                .draw(|f| draw(f, &state, view.view_state(), false))
                 .unwrap();
             if let Ok(mut buf) = screen_buffer_clone.lock() {
                 *buf = format!("{}", terminal.backend());
             }
-            presenter.poll_workflow();
+            thread::sleep(Duration::from_millis(10));
+        }
+    });
+
+    let shutdown_for_presenter = shutdown.clone();
+    let presenter_handle = thread::spawn(move || {
+        let mut p = presenter;
+        for _ in 0..1000 {
+            if shutdown_for_presenter.load(Ordering::Relaxed) {
+                break;
+            }
+            while let Ok(intent) = intent_rx.try_recv() {
+                p.handle_intent(intent);
+            }
+            p.poll_tool_calls();
+            p.poll_workflow();
+            if p.state().should_quit {
+                break;
+            }
             thread::sleep(Duration::from_millis(10));
         }
     });
@@ -211,8 +232,7 @@ pub fn spawn_presenter_with_view_connection_factory(
 ) {
     let (event_tx, _) = broadcast::channel(256);
     let (intent_tx, intent_rx) = mpsc::channel();
-    let view = NoopView;
-    let mut presenter = Presenter::new(view, "stub", "opus")
+    let mut presenter = Presenter::new("stub", "opus")
         .with_broadcast(event_tx.clone())
         .with_intent_sender(intent_tx.clone());
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
@@ -275,8 +295,7 @@ pub fn spawn_presenter_with_terminal_service(
         intent_tx: intent_tx.clone(),
     };
 
-    let view = NoopView;
-    let mut presenter = Presenter::new(view, "stub", "opus")
+    let mut presenter = Presenter::new("stub", "opus")
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx);
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));

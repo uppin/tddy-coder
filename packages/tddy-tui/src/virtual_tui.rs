@@ -113,7 +113,7 @@ pub fn run_virtual_tui(
     });
 }
 
-fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: PresenterEvent) {
+pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: PresenterEvent) {
     use std::time::Instant;
 
     match ev {
