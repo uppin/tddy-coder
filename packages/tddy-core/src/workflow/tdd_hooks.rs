@@ -27,6 +27,7 @@ use crate::workflow::{
     acceptance_tests, evaluate, green, prepend_context_header, red, refactor, update_docs,
     validate_subagents,
 };
+use crate::{setup_worktree_for_session, workflow::find_git_root};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -95,6 +96,36 @@ fn before_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error +
     Ok(())
 }
 
+/// Ensure worktree exists before acceptance-tests. Creates from origin/master if needed.
+/// Sets worktree_dir in context; sends WorktreeSwitched when event_tx is set.
+fn ensure_worktree_for_acceptance_tests(
+    plan_dir: &Path,
+    context: &Context,
+    event_tx: Option<&mpsc::Sender<WorkflowEvent>>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if context.get_sync::<PathBuf>("worktree_dir").is_some() {
+        return Ok(());
+    }
+    let cs = read_changeset(plan_dir).map_err(|e| e.to_string())?;
+    if let Some(ref wt) = cs.worktree {
+        context.set_sync("worktree_dir", PathBuf::from(wt));
+        return Ok(());
+    }
+    let output_dir: PathBuf = context
+        .get_sync("output_dir")
+        .ok_or("output_dir required for worktree creation")?;
+    let repo_root = find_git_root(&output_dir);
+    let worktree_path = setup_worktree_for_session(&repo_root, plan_dir)
+        .map_err(|e| format!("worktree creation failed: {}", e))?;
+    context.set_sync("worktree_dir", worktree_path.clone());
+    if let Some(ref tx) = event_tx {
+        let _ = tx.send(WorkflowEvent::WorktreeSwitched {
+            path: worktree_path,
+        });
+    }
+    Ok(())
+}
+
 fn before_acceptance_tests(
     plan_dir: &Path,
     context: &Context,
@@ -112,7 +143,10 @@ fn before_acceptance_tests(
         Some(a) => acceptance_tests::build_followup_prompt(&prd, a),
         None => acceptance_tests::build_prompt(&prd),
     };
-    let prompt = prepend_context_header(prompt, Some(plan_dir));
+    let repo_dir: Option<PathBuf> = context
+        .get_sync("worktree_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let prompt = prepend_context_header(prompt, Some(plan_dir), repo_dir.as_deref());
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", acceptance_tests::system_prompt());
     // Plan-mode sessions cannot be resumed with acceptEdits; create fresh session.
@@ -140,7 +174,10 @@ fn before_red(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + 
         Some(a) => red::build_followup_prompt(&prd, &at, a),
         None => red::build_prompt(&prd, &at),
     };
-    let prompt = prepend_context_header(prompt, Some(plan_dir));
+    let repo_dir: Option<PathBuf> = context
+        .get_sync("worktree_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let prompt = prepend_context_header(prompt, Some(plan_dir), repo_dir.as_deref());
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", red::system_prompt());
     context.set_sync("plan_dir", plan_dir.to_path_buf());
@@ -294,6 +331,8 @@ fn after_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + 
     cs.name = planning.name.clone();
     cs.initial_prompt = Some(feature_input);
     cs.discovery = planning.discovery.clone();
+    cs.branch_suggestion = planning.branch_suggestion.clone();
+    cs.worktree_suggestion = planning.worktree_suggestion.clone();
     let session_exists = cs.sessions.iter().any(|s| s.id == session_id);
     if session_exists {
         update_state(&mut cs, "Planned");
@@ -515,7 +554,14 @@ impl RunnerHooks for TddWorkflowHooks {
 
         match task_id {
             "plan" => before_plan(&plan_dir, context)?,
-            "acceptance-tests" => before_acceptance_tests(&plan_dir, context)?,
+            "acceptance-tests" => {
+                ensure_worktree_for_acceptance_tests(
+                    &plan_dir,
+                    context,
+                    self.event_tx.as_ref(),
+                )?;
+                before_acceptance_tests(&plan_dir, context)?;
+            }
             "red" => before_red(&plan_dir, context)?,
             "green" => before_green(&plan_dir, context)?,
             "demo" => before_demo(&plan_dir, context)?,

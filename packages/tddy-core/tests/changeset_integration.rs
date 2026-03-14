@@ -13,7 +13,7 @@ use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
 use common::{
     ctx_acceptance_tests, ctx_plan, ctx_red, get_plan_dir_from_session, plan_dir_for_input,
-    run_goal_until_done, run_plan,
+    run_goal_until_done, run_plan, temp_dir_with_git_repo,
 };
 use fixtures::*;
 
@@ -659,9 +659,7 @@ async fn changeset_yaml_sessions_array_tracks_all_sessions() {
     backend.push_ok(REFACTOR_JSON);
     backend.push_ok(UPDATE_DOCS_JSON); // red goal -> green -> ... -> refactor -> update-docs
 
-    let output_dir = std::env::temp_dir().join("tddy-changeset-sessions");
-    let _ = std::fs::remove_dir_all(&output_dir);
-    std::fs::create_dir_all(&output_dir).unwrap();
+    let (output_dir, _) = temp_dir_with_git_repo("changeset-sessions", "Build auth");
 
     let storage_dir = std::env::temp_dir().join("tddy-changeset-sessions-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -681,7 +679,7 @@ async fn changeset_yaml_sessions_array_tracks_all_sessions() {
     )
     .ok();
 
-    let ctx = ctx_acceptance_tests(plan_path.clone(), None, false);
+    let ctx = ctx_acceptance_tests(plan_path.clone(), Some(output_dir.clone()), None, false);
     let _ = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();

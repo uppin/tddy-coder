@@ -14,10 +14,11 @@ use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
 use common::{
     ctx_acceptance_tests, ctx_demo, ctx_evaluate, ctx_green, ctx_red, run_goal_until_done, run_plan,
+    temp_dir_with_git_repo,
 };
 
 /// Plan output as JSON (tddy-tools submit format). MockBackend stores via store_submit_result.
-const PLAN_OUTPUT: &str = r##"{"goal":"plan","prd":"# Feature PRD\n\n## Summary\nUser authentication system with login and logout.\n\n## Testing Plan\n\n### Test Level\nIntegration - changes how auth component interacts with session storage.\n\n### Acceptance Tests\n- [ ] **Integration**: Login stores session token (packages/auth/tests/session.it.rs)\n\n## TODO\n\n- [ ] Create auth module"}"##;
+const PLAN_OUTPUT: &str = r##"{"goal":"plan","prd":"# Feature PRD\n\n## Summary\nUser authentication system with login and logout.\n\n## Testing Plan\n\n### Test Level\nIntegration - changes how auth component interacts with session storage.\n\n### Acceptance Tests\n- [ ] **Integration**: Login stores session token (packages/auth/tests/session.it.rs)\n\n## TODO\n\n- [ ] Create auth module","branch_suggestion":"feature/auth","worktree_suggestion":"feature-auth"}"##;
 
 const GREEN_OUTPUT_ALL_PASS: &str = r#"{"goal":"green","summary":"All 3 tests passing.","tests":[{"name":"test_auth","file":"src/auth.rs","line":42,"status":"passing"}],"implementations":[{"name":"AuthService","file":"src/auth.rs","line":10,"kind":"struct"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}"#;
 
@@ -39,9 +40,7 @@ const UPDATE_DOCS_OUTPUT: &str =
 async fn setup_plan_dir_with_green_complete(
     label: &str,
 ) -> (std::path::PathBuf, WorkflowEngine, Arc<MockBackend>) {
-    let output_dir = std::env::temp_dir().join(format!("tddy-demo-{}", label));
-    let _ = std::fs::remove_dir_all(&output_dir);
-    std::fs::create_dir_all(&output_dir).expect("create output dir");
+    let (output_dir, _) = temp_dir_with_git_repo(&format!("demo-{}", label), "Build auth");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
@@ -62,7 +61,7 @@ async fn setup_plan_dir_with_green_complete(
         .expect("plan");
 
     // Run each step with run_goal (single step) so we stop at GreenComplete.
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let r = engine.run_goal("acceptance-tests", ctx).await.unwrap();
     assert!(
         matches!(r.status, ExecutionStatus::Paused { .. }),

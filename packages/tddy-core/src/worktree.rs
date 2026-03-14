@@ -5,15 +5,38 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::changeset::{read_changeset, write_changeset};
+
 /// Path to the worktrees directory under repo root.
 pub fn worktree_dir(repo_root: &Path) -> PathBuf {
     repo_root.join(".worktrees")
 }
 
+/// Fetch origin/master. Must succeed before creating worktree from origin/master.
+pub fn fetch_origin_master(repo_root: &Path) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["fetch", "origin", "master"])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git fetch: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git fetch origin master failed: {}", stderr));
+    }
+    Ok(())
+}
+
 /// Create a new git worktree. Returns the absolute path to the worktree.
 ///
-/// Runs `git worktree add .worktrees/<name> -b <branch>`.
-pub fn create_worktree(repo_root: &Path, name: &str, branch: &str) -> Result<PathBuf, String> {
+/// When `start_point` is `Some("origin/master")`, creates the branch from that ref.
+/// Otherwise uses HEAD.
+pub fn create_worktree(
+    repo_root: &Path,
+    name: &str,
+    branch: &str,
+    start_point: Option<&str>,
+) -> Result<PathBuf, String> {
     let worktrees = worktree_dir(repo_root);
     std::fs::create_dir_all(&worktrees).map_err(|e| format!("create worktrees dir: {}", e))?;
 
@@ -25,14 +48,19 @@ pub fn create_worktree(repo_root: &Path, name: &str, branch: &str) -> Result<Pat
         ));
     }
 
+    let mut args = vec![
+        "worktree",
+        "add",
+        worktree_path.to_str().unwrap(),
+        "-b",
+        branch,
+    ];
+    if let Some(sp) = start_point {
+        args.push(sp);
+    }
+
     let output = Command::new("git")
-        .args([
-            "worktree",
-            "add",
-            worktree_path.to_str().unwrap(),
-            "-b",
-            branch,
-        ])
+        .args(&args)
         .current_dir(repo_root)
         .output()
         .map_err(|e| format!("git worktree add: {}", e))?;
@@ -43,6 +71,54 @@ pub fn create_worktree(repo_root: &Path, name: &str, branch: &str) -> Result<Pat
     }
 
     Ok(worktree_path.canonicalize().unwrap_or(worktree_path))
+}
+
+/// Create worktree for a session from origin/master. Fetches first, then creates,
+/// updates changeset with worktree, branch, repo_path. Returns the worktree path.
+pub fn setup_worktree_for_session(repo_root: &Path, plan_dir: &Path) -> Result<PathBuf, String> {
+    let mut cs = read_changeset(plan_dir).map_err(|e| e.to_string())?;
+
+    let branch = cs
+        .branch_suggestion
+        .clone()
+        .or(cs.branch.clone())
+        .or_else(|| {
+            cs.name
+                .as_ref()
+                .map(|n| format!("feature/{}", slugify_for_branch(n)))
+        })
+        .ok_or("no branch suggestion or name for worktree")?;
+
+    let worktree_name = cs
+        .worktree_suggestion
+        .clone()
+        .or_else(|| cs.name.as_ref().map(|n| slugify_for_worktree(n)))
+        .ok_or("no worktree suggestion or name for worktree")?;
+
+    fetch_origin_master(repo_root)?;
+    let worktree_path = create_worktree(repo_root, &worktree_name, &branch, Some("origin/master"))?;
+
+    cs.worktree = Some(worktree_path.to_string_lossy().to_string());
+    cs.branch = Some(branch);
+    cs.repo_path = Some(worktree_path.to_string_lossy().to_string());
+    write_changeset(plan_dir, &cs).map_err(|e| e.to_string())?;
+
+    Ok(worktree_path)
+}
+
+fn slugify_for_branch(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn slugify_for_worktree(name: &str) -> String {
+    slugify_for_branch(name)
 }
 
 /// Info about an existing worktree.

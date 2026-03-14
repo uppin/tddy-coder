@@ -71,6 +71,12 @@ fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
 pub fn run_main(mut args: Args) {
     args.session_id = Some(uuid::Uuid::now_v7().to_string());
 
+    // Validate args before any stderr redirect (daemon redirects stderr to a file).
+    if let Err(e) = validate_web_args(&args).and_then(|_| validate_livekit_args(&args)) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
     tddy_core::init_tddy_logger(args.debug, args.debug_output.as_deref());
     if args.debug_output.is_none() {
         if let Some(session_dir) = session_dir_path(&args) {
@@ -889,9 +895,11 @@ fn build_goal_context(
     ctx.insert("debug".to_string(), serde_json::json!(args.debug));
     if let Some(p) = plan_dir {
         ctx.insert("plan_dir".to_string(), serde_json::to_value(p).unwrap());
-        let output_dir = std::env::current_dir()
+        // Repo root is stored in changeset.repo_path (set when plan started). Use it for worktree creation.
+        let output_dir = tddy_core::read_changeset(p)
             .ok()
-            .or_else(|| p.parent().map(|x| x.to_path_buf()))
+            .and_then(|cs| cs.repo_path.map(PathBuf::from))
+            .or_else(|| std::env::current_dir().ok())
             .unwrap_or_else(|| PathBuf::from("."));
         ctx.insert(
             "output_dir".to_string(),
@@ -1482,21 +1490,14 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         .trim()
         .to_string();
     let conv = resolve_log_defaults(args, &plan_dir);
-    let output_dir = plan_dir
-        .parent()
-        .map(|p| p.to_path_buf())
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
+    // output_dir comes from build_goal_context (repo_path in changeset); do not overwrite with plan_dir.parent()
+    // — plan_dir under ~/.tddy/sessions/ would make parent wrong for worktree creation.
     let context_values = build_goal_context(args, Some(&plan_dir), &conv, |c| {
         c.insert(
             "feature_input".to_string(),
             serde_json::json!(feature_input),
         );
         c.insert("run_demo".to_string(), serde_json::json!(run_demo));
-        c.insert(
-            "output_dir".to_string(),
-            serde_json::to_value(output_dir).unwrap(),
-        );
     });
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -1649,17 +1650,10 @@ fn run_plan_to_complete(
     plan_dir: &PathBuf,
     shutdown: &AtomicBool,
 ) -> anyhow::Result<PathBuf> {
-    let output_dir = plan_dir
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| plan_dir.clone());
+    // output_dir from build_goal_context (repo_path in changeset); plan_dir.parent() wrong when under ~/.tddy/sessions/
     let conv = resolve_log_defaults(args, plan_dir);
     let ctx = build_goal_context(args, Some(plan_dir), &conv, |c| {
         c.insert("feature_input".to_string(), serde_json::json!(input));
-        c.insert(
-            "output_dir".to_string(),
-            serde_json::to_value(output_dir).unwrap(),
-        );
     });
     run_goal_plain(args, backend, "plan", ctx, false, shutdown)?;
     Ok(plan_dir.clone())
@@ -1680,10 +1674,7 @@ fn run_plan_refinement(
     let session_id_for_refine = read_changeset(plan_dir)
         .ok()
         .and_then(|c| get_session_for_tag(&c, "plan"));
-    let output_dir = plan_dir
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| plan_dir.to_path_buf());
+    // output_dir from build_goal_context (repo_path in changeset); plan_dir.parent() wrong when under ~/.tddy/sessions/
     let refine_storage = std::env::temp_dir().join("tddy-flowrunner-refine-session");
     std::fs::create_dir_all(&refine_storage).context("create refine session dir")?;
     let refine_hooks = std::sync::Arc::new(tddy_core::workflow::tdd_hooks::TddWorkflowHooks::new());
@@ -1694,10 +1685,6 @@ fn run_plan_refinement(
         c.insert(
             "feature_input".to_string(),
             serde_json::json!(feature_input),
-        );
-        c.insert(
-            "output_dir".to_string(),
-            serde_json::to_value(&output_dir).unwrap(),
         );
         c.insert(
             "refinement_feedback".to_string(),

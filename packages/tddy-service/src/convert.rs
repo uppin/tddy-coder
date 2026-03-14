@@ -70,7 +70,9 @@ pub fn workflow_event_to_server_message(event: WorkflowEvent) -> Option<ServerMe
                 })),
             }),
         }),
-        WorkflowEvent::Progress(_) | WorkflowEvent::ClarificationNeeded { .. } => return None,
+        WorkflowEvent::Progress(_)
+        | WorkflowEvent::ClarificationNeeded { .. }
+        | WorkflowEvent::WorktreeSwitched { .. } => return None,
     };
     Some(ServerMessage { event: Some(event) })
 }

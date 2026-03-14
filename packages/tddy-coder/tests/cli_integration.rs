@@ -368,30 +368,13 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
 #[test]
 #[cfg(unix)]
 fn cli_accepts_goal_acceptance_tests_with_plan_dir() {
-    let tmp = std::env::temp_dir().join("tddy-cli-at-goal-test");
-    let _ = std::fs::create_dir_all(&tmp);
-
-    let plan_dir = tmp.join("plan-output");
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = common::temp_dir_with_git_repo("at-goal-test");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
-    let changeset = r#"version: 1
-models: {}
-sessions:
-  - id: "fake-sess"
-    agent: claude
-    tag: plan
-    created_at: "2026-03-07T10:00:00Z"
-state:
-  current: Planned
-  updated_at: "2026-03-07T10:00:00Z"
-  history: []
-artifacts: {}
-"#;
-    std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
+    common::write_changeset_for_plan_session(&plan_dir, "fake-sess", &output_dir);
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
+        .env(TDDY_SESSIONS_DIR_ENV, output_dir.parent().unwrap().to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -418,7 +401,7 @@ artifacts: {}
         stdout
     );
 
-    let _ = std::fs::remove_dir_all(&tmp);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 #[test]
@@ -620,37 +603,18 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
     use std::collections::HashMap;
     use std::sync::Arc;
     use tddy_core::changeset::read_changeset;
-    use tddy_core::output::slugify_directory_name;
     use tddy_core::workflow::graph::ExecutionStatus;
     use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
     use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
-    let output_dir = std::env::temp_dir().join("tddy-cli-full-wf-validate-refactor");
-    let _ = std::fs::remove_dir_all(&output_dir);
-    std::fs::create_dir_all(&output_dir).expect("create output dir");
-
-    let plan_dir = output_dir.join(slugify_directory_name("Build auth system"));
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = common::temp_dir_with_git_repo("full-wf-validate-refactor");
     std::fs::write(
         plan_dir.join("PRD.md"),
         "# Feature PRD\n## Summary\nAuth system.",
     )
     .expect("write PRD");
     std::fs::write(plan_dir.join("TODO.md"), "- [ ] Task 1").expect("write TODO");
-    let changeset = r#"version: 1
-models: {}
-sessions:
-  - id: "sess-plan-1"
-    agent: claude
-    tag: plan
-    created_at: "2026-03-07T10:00:00Z"
-state:
-  current: Planned
-  updated_at: "2026-03-07T10:00:00Z"
-  history: []
-artifacts: {}
-"#;
-    std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
+    common::write_changeset_for_plan_session(&plan_dir, "sess-plan-1", &output_dir);
 
     const ACCEPTANCE_TESTS: &str = r#"{"goal":"acceptance-tests","summary":"Tests ready.","test_command":"cargo test","tests":[{"name":"t1","file":"test.rs","line":1,"status":"pass","kind":"unit"}]}"#;
     const RED: &str = r#"{"goal":"red","summary":"Failing tests written.","tests":[{"name":"t1","file":"test.rs","line":1,"status":"fail","kind":"unit"}],"skeletons":[],"markers":[],"marker_results":[]}"#;
@@ -722,7 +686,7 @@ artifacts: {}
         "state should be DocsUpdated after full workflow"
     );
 
-    let _ = std::fs::remove_dir_all(&output_dir);
+    let _ = std::fs::remove_dir_all(output_dir.parent().unwrap());
 }
 
 // ── Acceptance tests for Stable session dir PRD: R1, R4 ──────────────────────

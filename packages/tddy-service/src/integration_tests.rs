@@ -632,9 +632,9 @@ mod daemon_tests {
             matches!(
                 event,
                 Some(crate::gen::server_message::Event::SessionCreated(_))
-                    | Some(crate::gen::server_message::Event::WorktreeElicitation(_))
+                    | Some(crate::gen::server_message::Event::ModeChanged(_))
             ),
-            "expected SessionCreated or WorktreeElicitation, got {:?}",
+            "expected SessionCreated or ModeChanged (plan approval), got {:?}",
             event
         );
 

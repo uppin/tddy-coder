@@ -294,36 +294,33 @@ const KNOWN_ARTIFACTS: &[&str] = &[
 ];
 
 /// Build the context header string listing absolute paths to existing `.md` artifacts
-/// in `plan_dir`. Returns an empty string when `plan_dir` is `None` or no files exist.
-pub fn build_context_header(plan_dir: Option<&Path>) -> String {
-    let dir = match plan_dir {
-        None => {
-            log::debug!("[build_context_header] plan_dir is None — skipping header");
-            return String::new();
-        }
-        Some(d) => d,
-    };
-
-    log::debug!("[build_context_header] scanning {:?} for artifacts", dir);
-
+/// in `plan_dir`, and optionally `repo_dir` (the current working directory for the agent).
+/// Returns an empty string when both `plan_dir` and `repo_dir` yield no content.
+pub fn build_context_header(plan_dir: Option<&Path>, repo_dir: Option<&Path>) -> String {
     let mut lines: Vec<String> = Vec::new();
-    for artifact in KNOWN_ARTIFACTS {
-        let path = dir.join(artifact);
-        if path.exists() {
-            let canonical = std::fs::canonicalize(&path).unwrap_or(path);
-            log::debug!(
-                "[build_context_header] found artifact: {}",
-                canonical.display()
-            );
-            lines.push(format!("{}: {}", artifact, canonical.display()));
+
+    if let Some(rd) = repo_dir {
+        let canonical = std::fs::canonicalize(rd).unwrap_or_else(|_| rd.to_path_buf());
+        lines.push(format!("repo_dir: {}", canonical.display()));
+    }
+
+    if let Some(dir) = plan_dir {
+        log::debug!("[build_context_header] scanning {:?} for artifacts", dir);
+        for artifact in KNOWN_ARTIFACTS {
+            let path = dir.join(artifact);
+            if path.exists() {
+                let canonical = std::fs::canonicalize(&path).unwrap_or(path);
+                log::debug!(
+                    "[build_context_header] found artifact: {}",
+                    canonical.display()
+                );
+                lines.push(format!("{}: {}", artifact, canonical.display()));
+            }
         }
     }
 
     if lines.is_empty() {
-        log::debug!(
-            "[build_context_header] no artifacts found in {:?} — empty header",
-            dir
-        );
+        log::debug!("[build_context_header] no content — empty header");
         return String::new();
     }
 
@@ -340,8 +337,12 @@ pub fn build_context_header(plan_dir: Option<&Path>) -> String {
 }
 
 /// Prepend the context header to `prompt`. When the header is empty, returns `prompt` unchanged.
-pub fn prepend_context_header(prompt: String, plan_dir: Option<&Path>) -> String {
-    let header = build_context_header(plan_dir);
+pub fn prepend_context_header(
+    prompt: String,
+    plan_dir: Option<&Path>,
+    repo_dir: Option<&Path>,
+) -> String {
+    let header = build_context_header(plan_dir, repo_dir);
     if header.is_empty() {
         log::debug!("[prepend_context_header] no header — prompt unchanged");
         return prompt;
@@ -542,7 +543,7 @@ mod context_header_tests {
         let dir = temp_dir("lists-existing");
         fs::write(dir.join("PRD.md"), "# PRD").unwrap();
 
-        let header = build_context_header(Some(&dir));
+        let header = build_context_header(Some(&dir), None);
 
         assert!(
             header.starts_with("**CRITICAL FOR CONTEXT AND SUMMARY**\n"),
@@ -562,7 +563,7 @@ mod context_header_tests {
         fs::write(dir.join("PRD.md"), "# PRD").unwrap();
         // acceptance-tests.md is NOT created
 
-        let header = build_context_header(Some(&dir));
+        let header = build_context_header(Some(&dir), None);
 
         assert!(header.contains("PRD.md:"), "should list PRD.md");
         assert!(
@@ -580,7 +581,7 @@ mod context_header_tests {
         let dir = temp_dir("empty-dir");
         // No .md files
 
-        let header = build_context_header(Some(&dir));
+        let header = build_context_header(Some(&dir), None);
 
         assert!(
             header.is_empty(),
@@ -595,7 +596,7 @@ mod context_header_tests {
 
     #[test]
     fn test_context_header_empty_for_none_plan_dir() {
-        let header = build_context_header(None);
+        let header = build_context_header(None, None);
 
         assert!(
             header.is_empty(),
@@ -610,7 +611,7 @@ mod context_header_tests {
         let dir = temp_dir("abs-paths");
         fs::write(dir.join("PRD.md"), "# PRD").unwrap();
 
-        let header = build_context_header(Some(&dir));
+        let header = build_context_header(Some(&dir), None);
 
         let prd_line = header
             .lines()
@@ -640,7 +641,7 @@ mod context_header_tests {
         fs::write(dir.join("PRD.md"), "# PRD").unwrap();
 
         let original = "Do the task.".to_string();
-        let result = prepend_context_header(original.clone(), Some(&dir));
+        let result = prepend_context_header(original.clone(), Some(&dir), None);
 
         assert!(
             result.starts_with("<context-reminder>"),
@@ -674,7 +675,7 @@ mod context_header_tests {
         let dir = temp_dir("wrap-tags");
         fs::write(dir.join("PRD.md"), "# PRD").unwrap();
 
-        let result = prepend_context_header("Task.".to_string(), Some(&dir));
+        let result = prepend_context_header("Task.".to_string(), Some(&dir), None);
 
         assert!(
             result.starts_with("<context-reminder>\n"),
@@ -705,7 +706,7 @@ mod context_header_tests {
         )
         .unwrap();
 
-        let header = build_context_header(Some(&dir));
+        let header = build_context_header(Some(&dir), None);
 
         assert!(
             header.contains("refactoring-plan.md:"),
@@ -725,7 +726,7 @@ mod context_header_tests {
         // No .md files → build_context_header returns ""
 
         let original = "Do the task.".to_string();
-        let result = prepend_context_header(original.clone(), Some(&dir));
+        let result = prepend_context_header(original.clone(), Some(&dir), None);
 
         assert_eq!(
             result, original,

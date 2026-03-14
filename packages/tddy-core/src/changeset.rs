@@ -55,9 +55,15 @@ pub struct Changeset {
     /// Git worktree path for this session (e.g. .worktrees/feature-auth).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree: Option<String>,
-    /// Branch name for this session.
+    /// Branch name for this session (set after worktree creation).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// Suggested branch name from plan agent (e.g. "feature/auth"). Used for worktree creation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_suggestion: Option<String>,
+    /// Suggested worktree directory name from plan agent (e.g. "feature-auth"). Used for worktree creation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree_suggestion: Option<String>,
     /// Whether changes were pushed to remote.
     #[serde(default)]
     pub remote_pushed: bool,
@@ -149,6 +155,8 @@ impl Default for Changeset {
             discovery: None,
             worktree: None,
             branch: None,
+            branch_suggestion: None,
+            worktree_suggestion: None,
             remote_pushed: false,
             repo_path: None,
         }

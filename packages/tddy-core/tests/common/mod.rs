@@ -15,16 +15,48 @@ pub fn plan_dir_for_input(parent: &std::path::Path, input: &str) -> PathBuf {
     parent.join(slugify_directory_name(input))
 }
 
+/// Create a temp directory with a git repo (init, commit, origin/master) for worktree tests.
+/// Returns (output_dir, plan_dir) where output_dir = base/repo (repo root) and plan_dir = base/slug.
+/// Plan dir is next to repo, not inside it, so it's clear plan storage is separate from the repo.
+pub fn temp_dir_with_git_repo(label: &str, input: &str) -> (PathBuf, PathBuf) {
+    let base = std::env::temp_dir().join(format!("tddy-{}-{}", label, std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let output_dir = base.join("repo");
+    std::fs::create_dir_all(&output_dir).expect("create repo dir");
+
+    let run = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(&output_dir)
+            .output()
+            .expect("git command");
+    };
+    run(&["init"]);
+    run(&["config", "user.email", "test@test.com"]);
+    run(&["config", "user.name", "Test"]);
+    std::fs::write(output_dir.join("README"), "initial").expect("write README");
+    run(&["add", "README"]);
+    run(&["commit", "-m", "initial"]);
+    run(&["branch", "-M", "master"]);
+    run(&["remote", "add", "origin", output_dir.to_str().unwrap()]);
+    run(&["push", "-u", "origin", "master"]);
+
+    let plan_dir = plan_dir_for_input(&base, input);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    (output_dir, plan_dir)
+}
+
 /// Build context for plan goal.
-/// output_dir is the repo root (parent of plan_dir); agent runs in output_dir to discover Cargo.toml, etc.
-/// plan_dir is output_dir/slug; defaults to output_dir.join(slugify(feature_input)) if not provided.
+/// output_dir is the repo root; agent runs in output_dir to discover Cargo.toml, etc.
+/// plan_dir is base/slug (next to repo), where base = output_dir.parent(); plan storage is separate from repo.
 pub fn ctx_plan(
     feature_input: &str,
     output_dir: PathBuf,
     answers: Option<&str>,
     conversation_output_path: Option<PathBuf>,
 ) -> HashMap<String, serde_json::Value> {
-    let plan_dir = plan_dir_for_input(&output_dir, feature_input);
+    let base = output_dir.parent().unwrap_or(&output_dir);
+    let plan_dir = plan_dir_for_input(base, feature_input);
     let mut m = HashMap::new();
     m.insert(
         "feature_input".to_string(),
@@ -51,17 +83,22 @@ pub fn ctx_plan(
 }
 
 /// Build context for acceptance-tests goal.
+/// output_dir: repo root (required for worktree creation in before_acceptance_tests hook).
 /// run_demo: when true, green will transition to demo (used when running full chain).
 pub fn ctx_acceptance_tests(
     plan_dir: PathBuf,
+    output_dir: Option<PathBuf>,
     answers: Option<&str>,
     run_demo: bool,
 ) -> HashMap<String, serde_json::Value> {
     let mut m = HashMap::new();
     m.insert(
         "plan_dir".to_string(),
-        serde_json::to_value(plan_dir).unwrap(),
+        serde_json::to_value(plan_dir.clone()).unwrap(),
     );
+    if let Some(ref d) = output_dir {
+        m.insert("output_dir".to_string(), serde_json::to_value(d).unwrap());
+    }
     m.insert("run_demo".to_string(), serde_json::json!(run_demo));
     if let Some(a) = answers {
         m.insert("answers".to_string(), serde_json::json!(a));
@@ -185,6 +222,7 @@ pub async fn run_plan(
 }
 
 /// Run plan with optional conversation_output_path for raw agent output.
+/// Plan dir is created under output_dir.parent() (base), next to repo, not inside it.
 pub async fn run_plan_with_conversation_output(
     engine: &WorkflowEngine,
     input: &str,
@@ -192,7 +230,8 @@ pub async fn run_plan_with_conversation_output(
     answers: Option<&str>,
     conversation_output_path: Option<PathBuf>,
 ) -> Result<(PathBuf, String), Box<dyn std::error::Error + Send + Sync>> {
-    let plan_dir = plan_dir_for_input(output_dir, input);
+    let base = output_dir.parent().unwrap_or(output_dir);
+    let plan_dir = plan_dir_for_input(base, input);
     std::fs::create_dir_all(&plan_dir)?;
     let init_cs = Changeset {
         initial_prompt: Some(input.to_string()),
@@ -219,45 +258,43 @@ pub async fn run_plan_with_conversation_output(
 }
 
 /// Write a minimal changeset.yaml with Planned state for a plan session.
+/// Includes branch_suggestion and worktree_suggestion for worktree creation.
 pub fn write_changeset_for_plan_session(plan_dir: &std::path::Path, session_id: &str) {
-    let changeset = format!(
-        r#"version: 1
-models: {{}}
-sessions:
-  - id: "{}"
-    agent: claude
-    tag: plan
-    created_at: "2026-03-07T10:00:00Z"
-state:
-  current: Planned
-  updated_at: "2026-03-07T10:00:00Z"
-  history: []
-artifacts: {{}}
-"#,
-        session_id
-    );
-    std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
+    let mut cs = Changeset::default();
+    cs.name = Some("feature".to_string());
+    cs.sessions = vec![tddy_core::changeset::SessionEntry {
+        id: session_id.to_string(),
+        agent: "claude".to_string(),
+        tag: "plan".to_string(),
+        created_at: "2026-03-07T10:00:00Z".to_string(),
+        system_prompt_file: None,
+    }];
+    cs.state.current = "Planned".to_string();
+    cs.state.updated_at = "2026-03-07T10:00:00Z".to_string();
+    cs.state.history = vec![];
+    cs.branch_suggestion = Some("feature/test".to_string());
+    cs.worktree_suggestion = Some("feature-test".to_string());
+    write_changeset(plan_dir, &cs).expect("write changeset");
 }
 
 /// Write a minimal changeset.yaml with custom state.
+/// Includes branch_suggestion and worktree_suggestion for worktree creation.
 pub fn write_changeset_with_state(plan_dir: &std::path::Path, state: &str, session_id: &str) {
-    let changeset = format!(
-        r#"version: 1
-models: {{}}
-sessions:
-  - id: "{}"
-    agent: claude
-    tag: plan
-    created_at: "2026-03-07T10:00:00Z"
-state:
-  current: {}
-  updated_at: "2026-03-07T10:00:00Z"
-  history: []
-artifacts: {{}}
-"#,
-        session_id, state
-    );
-    std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
+    let mut cs = Changeset::default();
+    cs.name = Some("feature".to_string());
+    cs.sessions = vec![tddy_core::changeset::SessionEntry {
+        id: session_id.to_string(),
+        agent: "claude".to_string(),
+        tag: "plan".to_string(),
+        created_at: "2026-03-07T10:00:00Z".to_string(),
+        system_prompt_file: None,
+    }];
+    cs.state.current = state.to_string();
+    cs.state.updated_at = "2026-03-07T10:00:00Z".to_string();
+    cs.state.history = vec![];
+    cs.branch_suggestion = Some("feature/test".to_string());
+    cs.worktree_suggestion = Some("feature-test".to_string());
+    write_changeset(plan_dir, &cs).expect("write changeset");
 }
 
 /// Write a minimal evaluation-report.md to plan_dir (for validate goal prerequisite).

@@ -589,6 +589,14 @@ impl Presenter {
                     self.state.mode = AppMode::PlanReview { prd_content };
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
+                WorkflowEvent::WorktreeSwitched { ref path } => {
+                    let entry = ActivityEntry {
+                        text: format!("Worktree: {}", path.display()),
+                        kind: ActivityKind::Info,
+                    };
+                    self.state.activity_log.push(entry.clone());
+                    self.broadcast(PresenterEvent::ActivityLogged(entry));
+                }
                 WorkflowEvent::WorkflowComplete(result) => {
                     self.flush_agent_output_buffer();
                     self.workflow_result = Some(result.clone());
@@ -599,7 +607,9 @@ impl Presenter {
                         self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
                         self.state.mode = AppMode::Running;
                         self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
-                        // Workflow thread has exited; restart with dequeued prompt
+                        // Workflow thread has exited; restart with dequeued prompt.
+                        // Pass plan_dir so we resume in the same session (avoids re-creating worktree).
+                        let plan_dir = result.as_ref().ok().and_then(|p| p.plan_dir.clone());
                         if let (Some(backend), Some(output_dir)) = (
                             self.workflow_backend.clone(),
                             self.workflow_output_dir.clone(),
@@ -611,7 +621,7 @@ impl Presenter {
                             self.spawn_workflow(
                                 backend,
                                 output_dir,
-                                None,
+                                plan_dir,
                                 Some(prefixed),
                                 self.workflow_conversation_output.clone(),
                                 self.workflow_debug_output.clone(),

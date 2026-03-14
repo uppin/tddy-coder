@@ -12,7 +12,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **UserIntent**: SubmitFeatureInput, AnswerSelect, AnswerMultiSelect, AnswerText, QueuePrompt, etc.
 - **PresenterState**: agent, model, mode (AppMode), activity_log, inbox, should_quit.
 - **PresenterView**: Trait with callbacks: on_mode_changed, on_activity_logged, on_goal_started, on_state_changed, on_workflow_complete, on_agent_output, on_inbox_changed.
-- **workflow_runner**: Runs full TDD workflow in background thread; sends events via mpsc; receives answers for clarification. Polls `tool_call_rx` for tddy-tools relay requests (Submit, Ask). Writes refactoring-plan.md when StubBackend (validate does not write files).
+- **workflow_runner**: Runs full TDD workflow in background thread; sends events via mpsc; receives answers for clarification. After plan approval, creates worktree via `setup_worktree_for_session` (when start_goal is acceptance-tests and no worktree exists), sends `WorkflowEvent::WorktreeSwitched`, sets `worktree_dir` in context. Polls `tool_call_rx` for tddy-tools relay requests (Submit, Ask). Writes refactoring-plan.md when StubBackend (validate does not write files).
 
 ### Backend (`backend/`)
 
@@ -23,9 +23,24 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **ClarificationQuestion**: Structured question type from AskUserQuestion tool events or `<clarification-questions>` text block (header, question, options, multi_select).
 - **ClaudeInvokeConfig**: Claude-specific config (permission_mode, allowed_tools, permission_prompt_tool, mcp_config_path) derived from goal internally.
 
+### Worktree (`worktree.rs`)
+
+- **setup_worktree_for_session**: Fetches `origin/master`, creates a git worktree from that ref, updates changeset with `worktree`, `branch`, `repo_path`. Used by TUI and daemon after plan approval.
+- **fetch_origin_master**: Runs `git fetch origin master`; failure is a hard error (no fallback).
+- **create_worktree**: Creates worktree with optional `start_point` (e.g. `origin/master`). Worktrees live in `.worktrees/` relative to repo root.
+- **ensure_worktree_for_acceptance_tests**: Uses `output_dir` from context (must be main repo root). Calls `find_git_root(&output_dir)` to locate `.git`; fallback to `output_dir.parent()`. After creation, `cs.repo_path` is overwritten with worktree path; later goals use `worktree_dir`.
+
+**Repo root resolution** (where `output_dir`/`repo_path` comes from):
+
+| Entry point | Repo root source |
+|-------------|-------------------|
+| TUI `run_plan_without_output_dir` | `current_dir()` when `output_dir == "."`; otherwise `output_dir` param. Stored in changeset at plan start. |
+| CLI `run_plan_with_session_dir` | `current_dir()` |
+| CLI `build_goal_context` (plan_dir set) | `read_changeset(plan_dir).repo_path` with fallback to `current_dir()` |
+
 ### Changeset (`changeset.rs`)
 
-- **Changeset**: Unified manifest in plan directory. Replaces `.session` and `.impl-session`. Contains name, initial_prompt, clarification_qa, models, sessions (with system_prompt_file per session), state, artifacts, discovery.
+- **Changeset**: Unified manifest in plan directory. Replaces `.session` and `.impl-session`. Contains name, initial_prompt, clarification_qa, models, sessions (with system_prompt_file per session), state, artifacts, discovery, worktree, branch, branch_suggestion, worktree_suggestion, repo_path.
 - **SessionEntry**: id, agent, tag, created_at, system_prompt_file (path to system prompt for this session).
 - **ClarificationQa**: Question and answer pairs from planning clarification.
 - **read_changeset / write_changeset**: Load and persist changeset.yaml.
@@ -58,7 +73,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **TddWorkflowHooks**: Implements `elicitation_after_task` for plan task: returns `PlanApproval` when PRD.md exists in plan dir.
 - **WorkflowState**: Init, Planning, Planned, AcceptanceTesting, AcceptanceTestsReady, RedTesting, RedTestsReady, GreenImplementing, GreenComplete, DemoRunning, DemoComplete, Evaluating, Evaluated, Validating, ValidateComplete, Refactoring, RefactorComplete, UpdatingDocs, DocsUpdated, Failed.
 - **Workflow**: Orchestrates plan, acceptance-tests, red, green, evaluate, validate, and refactor steps with session continuity for Q&A followup. Each goal calls `validate_and_retry` after invoke: validates JSON against schema, retries once with validation errors on failure.
-- **Context header**: `build_context_header` and `prepend_context_header` prepend a `<context-reminder>` block to agent prompts when plan_dir contains `.md` artifacts. Lists absolute paths to PRD.md, TODO.md, acceptance-tests.md, progress.md, etc. Omitted when plan_dir is None or no artifacts exist. Plan, acceptance-tests, and red goals use it.
+- **Context header**: `build_context_header` and `prepend_context_header` prepend a `<context-reminder>` block to agent prompts when plan_dir contains `.md` artifacts. Lists absolute paths to PRD.md, TODO.md, acceptance-tests.md, progress.md, etc. When `repo_dir` is provided (worktree or output dir), includes `repo_dir: <absolute path>` so agents know their working directory. Omitted when plan_dir is None and repo_dir is None. Plan, acceptance-tests, and red goals use it.
 - **planning**: System prompt (structured-response format) and user prompt construction. Staging at output_dir/dir_name or `$HOME/.tddy/sessions/{uuid}/` when output_dir omitted. Writes system prompt to plan dir; stores initial_prompt and clarification_qa in changeset. Persists questions when ClarificationNeeded; pairs with answers on follow-up. Discovery uses `name` (human-readable changeset name) in planning prompt.
 - **acceptance_tests**: System prompt for test creation and verification; parses test summary and run instructions; writes acceptance-tests.md; appends session to changeset.
 - **red**: System prompt for skeleton code and failing lower-level tests; parses RedOutput; writes red-output.md and progress.md; appends impl session to changeset.

@@ -5467,6 +5467,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "async-trait",
  "axum 0.8.8",
  "clap",
  "crossterm",
@@ -5476,6 +5477,7 @@ dependencies = [
  "log",
  "reqwest 0.12.28",
  "serde_json",
+ "serial_test",
  "tddy-connectrpc",
  "tddy-core",
  "tddy-livekit",

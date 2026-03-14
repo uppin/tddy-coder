@@ -18,6 +18,8 @@ use tddy_service::gen::tddy_remote_server::TddyRemoteServer;
 use tddy_service::TddyRemoteService;
 use tddy_tui::{apply_event, render::draw, TuiView};
 
+use crate::test_util::{temp_dir_with_git_repo, NoopView};
+
 pub mod test_util;
 
 /// Spawn a Presenter with StubBackend and gRPC server. Returns (join_handle, port, shutdown_flag).
@@ -36,8 +38,7 @@ pub fn spawn_presenter_with_grpc(
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx);
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
-    let output_dir = std::env::temp_dir().join(format!("tddy-e2e-test-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&output_dir).unwrap();
+    let output_dir = temp_dir_with_git_repo("grpc");
     presenter.start_workflow(
         backend,
         output_dir,
@@ -126,9 +127,7 @@ pub fn spawn_presenter_with_grpc_and_tui(
         .with_broadcast(event_tx.clone())
         .with_intent_sender(intent_tx.clone());
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
-    let output_dir =
-        std::env::temp_dir().join(format!("tddy-e2e-tui-test-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&output_dir).unwrap();
+    let output_dir = temp_dir_with_git_repo("grpc-tui");
     presenter.start_workflow(
         backend,
         output_dir,
@@ -236,8 +235,7 @@ pub fn spawn_presenter_with_view_connection_factory(
         .with_broadcast(event_tx.clone())
         .with_intent_sender(intent_tx.clone());
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
-    let output_dir = std::env::temp_dir().join(format!("tddy-e2e-vt-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&output_dir).unwrap();
+    let output_dir = temp_dir_with_git_repo("livekit-tui");
     presenter.start_workflow(
         backend,
         output_dir,
