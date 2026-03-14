@@ -15,6 +15,36 @@ pub fn plan_dir_for_input(parent: &std::path::Path, input: &str) -> PathBuf {
     parent.join(slugify_directory_name(input))
 }
 
+/// Create a temp directory with a git repo (init, commit, origin/master) for worktree tests.
+/// Returns (output_dir, plan_dir) where output_dir is the repo root and plan_dir = output_dir/slug.
+pub fn temp_dir_with_git_repo(label: &str, input: &str) -> (PathBuf, PathBuf) {
+    let base = std::env::temp_dir().join(format!("tddy-{}-{}", label, std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let output_dir = base.join("repo");
+    std::fs::create_dir_all(&output_dir).expect("create repo dir");
+
+    let run = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(&output_dir)
+            .output()
+            .expect("git command");
+    };
+    run(&["init"]);
+    run(&["config", "user.email", "test@test.com"]);
+    run(&["config", "user.name", "Test"]);
+    std::fs::write(output_dir.join("README"), "initial").expect("write README");
+    run(&["add", "README"]);
+    run(&["commit", "-m", "initial"]);
+    run(&["branch", "-M", "master"]);
+    run(&["remote", "add", "origin", output_dir.to_str().unwrap()]);
+    run(&["push", "-u", "origin", "master"]);
+
+    let plan_dir = plan_dir_for_input(&output_dir, input);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    (output_dir, plan_dir)
+}
+
 /// Build context for plan goal.
 /// output_dir is the repo root (parent of plan_dir); agent runs in output_dir to discover Cargo.toml, etc.
 /// plan_dir is output_dir/slug; defaults to output_dir.join(slugify(feature_input)) if not provided.

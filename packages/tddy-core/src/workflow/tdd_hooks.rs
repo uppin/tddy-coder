@@ -27,6 +27,7 @@ use crate::workflow::{
     acceptance_tests, evaluate, green, prepend_context_header, red, refactor, update_docs,
     validate_subagents,
 };
+use crate::{setup_worktree_for_session, workflow::find_git_root};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -92,6 +93,37 @@ fn before_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error +
         let _ = write_changeset(&dir, &init_cs);
     }
     read_changeset(&dir).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Ensure worktree exists before acceptance-tests. Creates from origin/master if needed.
+/// Sets worktree_dir in context; sends WorktreeSwitched when event_tx is set.
+fn ensure_worktree_for_acceptance_tests(
+    plan_dir: &Path,
+    context: &Context,
+    event_tx: Option<&mpsc::Sender<WorkflowEvent>>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if context.get_sync::<PathBuf>("worktree_dir").is_some() {
+        return Ok(());
+    }
+    let cs = read_changeset(plan_dir).map_err(|e| e.to_string())?;
+    if let Some(ref wt) = cs.worktree {
+        context.set_sync("worktree_dir", PathBuf::from(wt));
+        return Ok(());
+    }
+    let output_dir: PathBuf = match context.get_sync("output_dir") {
+        Some(d) => d,
+        None => return Ok(()), // No output_dir (e.g. integration tests) — skip worktree creation
+    };
+    let repo_root = find_git_root(&output_dir);
+    let worktree_path = setup_worktree_for_session(&repo_root, plan_dir)
+        .map_err(|e| format!("worktree creation failed: {}", e))?;
+    context.set_sync("worktree_dir", worktree_path.clone());
+    if let Some(ref tx) = event_tx {
+        let _ = tx.send(WorkflowEvent::WorktreeSwitched {
+            path: worktree_path,
+        });
+    }
     Ok(())
 }
 
@@ -523,7 +555,14 @@ impl RunnerHooks for TddWorkflowHooks {
 
         match task_id {
             "plan" => before_plan(&plan_dir, context)?,
-            "acceptance-tests" => before_acceptance_tests(&plan_dir, context)?,
+            "acceptance-tests" => {
+                ensure_worktree_for_acceptance_tests(
+                    &plan_dir,
+                    context,
+                    self.event_tx.as_ref(),
+                )?;
+                before_acceptance_tests(&plan_dir, context)?;
+            }
             "red" => before_red(&plan_dir, context)?,
             "green" => before_green(&plan_dir, context)?,
             "demo" => before_demo(&plan_dir, context)?,
