@@ -11,7 +11,8 @@ use std::sync::mpsc;
 use crate::workflow::graph::{ElicitationEvent, ExecutionResult, ExecutionStatus};
 use crate::{
     get_session_for_tag, next_goal_for_state, parse_refactor_response, parse_update_docs_response,
-    read_changeset, ClarificationQuestion, SharedBackend, WorkflowEngine,
+    read_changeset, setup_worktree_for_session, ClarificationQuestion, SharedBackend,
+    WorkflowEngine,
 };
 
 use super::{WorkflowCompletePayload, WorkflowEvent};
@@ -597,6 +598,29 @@ pub fn run_workflow(
         .and_then(|c| next_goal_for_state(&c.state.current))
         .unwrap_or("plan");
 
+    // Create worktree after plan approval when we're about to run acceptance-tests and no worktree yet.
+    let worktree_dir =
+        if start_goal == "acceptance-tests" && cs.as_ref().is_none_or(|c| c.worktree.is_none()) {
+            let repo_root = crate::workflow::find_git_root(&effective_output_dir);
+            match setup_worktree_for_session(&repo_root, &plan_dir) {
+                Ok(wt) => {
+                    let _ = event_tx.send(WorkflowEvent::WorktreeSwitched { path: wt.clone() });
+                    Some(wt)
+                }
+                Err(e) => {
+                    let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(format!(
+                        "worktree creation failed: {}",
+                        e
+                    ))));
+                    return;
+                }
+            }
+        } else {
+            cs.as_ref()
+                .and_then(|c| c.worktree.as_ref())
+                .map(PathBuf::from)
+        };
+
     let storage_dir = std::env::temp_dir().join(TUI_SESSION_DIR);
     std::fs::create_dir_all(&storage_dir).ok();
     let hooks = std::sync::Arc::new(crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(
@@ -612,8 +636,14 @@ pub fn run_workflow(
     );
     context_values.insert(
         "output_dir".to_string(),
-        serde_json::to_value(effective_output_dir).unwrap(),
+        serde_json::to_value(worktree_dir.as_ref().unwrap_or(&effective_output_dir)).unwrap(),
     );
+    if let Some(ref wt) = worktree_dir {
+        context_values.insert(
+            "worktree_dir".to_string(),
+            serde_json::to_value(wt).unwrap(),
+        );
+    }
     context_values.insert(
         "model".to_string(),
         serde_json::to_value(model.clone()).unwrap(),

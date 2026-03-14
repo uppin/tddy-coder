@@ -61,16 +61,16 @@ Replace the single `V: PresenterView` generic with a broadcast channel pattern:
 The `--daemon` flag starts a headless gRPC server (no TUI) suitable for systemd deployment. The process runs indefinitely and serves multiple sessions sequentially.
 
 **Session lifecycle via gRPC**:
-- **Stream RPC**: Clients send `StartSession` with a prompt; daemon creates a session, runs the plan step, streams events (SessionCreated, PlanApproval, WorktreeElicitation, WorkflowComplete). Client responds with `ApprovePlan` and `ConfirmWorktree` to drive the elicitation flow.
+- **Stream RPC**: Clients send `StartSession` with a prompt; daemon creates a session, runs the plan step, streams events (SessionCreated, ModeChanged with PlanReview for plan approval, WorkflowComplete). Client responds with `ApprovePlan`; the daemon automatically creates a worktree from `origin/master` and continues the workflow.
 - **GetSession**: Returns session status (Active, Completed, Failed) by reading changeset.yaml from disk.
 - **ListSessions**: Lists all sessions with their status.
 
 **Session states**: Pending, Active, WaitingForInput, Completed, Failed.
 
 **Git worktree management**:
-- Each session gets a git worktree via `git worktree add`. Worktrees live in `.worktrees/` relative to the repo root.
-- The worktree path is persisted in `changeset.yaml` (`worktree` field). The agent's working directory is set to the worktree path for post-plan steps.
-- Branch and worktree names are suggested by the agent in the plan output (`branch_suggestion`, `worktree_suggestion`); the client confirms or modifies via the WorktreeElicitation elicitation.
+- Each session gets a git worktree via `git worktree add` from `origin/master` (after `git fetch`). Worktrees live in `.worktrees/` relative to the repo root.
+- The worktree path is persisted in `changeset.yaml` (`worktree`, `branch`, `repo_path`). The agent's working directory is set to the worktree path for post-plan steps.
+- Branch and worktree names come from the plan agent's `branch_suggestion` and `worktree_suggestion`; worktree creation is automatic after plan approval (no separate elicitation).
 
 **Agent commit & push**: The final workflow step's system prompt instructs the agent to commit all changes and push to the remote branch. The branch name is established during session creation and stored in the changeset.
 

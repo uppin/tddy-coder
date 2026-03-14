@@ -57,4 +57,7 @@ pub use workflow::{
     AcceptanceTestsOptions, DemoOptions, EvaluateOptions, GreenOptions, PlanOptions, RedOptions,
     RefactorOptions, UpdateDocsOptions, ValidateOptions,
 };
-pub use worktree::{create_worktree, list_worktrees, worktree_dir, WorktreeInfo};
+pub use worktree::{
+    create_worktree, fetch_origin_master, list_worktrees, setup_worktree_for_session, worktree_dir,
+    WorktreeInfo,
+};

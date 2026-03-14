@@ -10,16 +10,16 @@ use tokio::sync::mpsc as tokio_mpsc;
 use tonic::{Request, Response, Status};
 
 use tddy_core::output::{create_session_dir_under, parse_planning_response, PlanningOutput};
+use tddy_core::read_changeset;
 use tddy_core::workflow::graph::{ElicitationEvent, ExecutionStatus};
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
-use tddy_core::{create_worktree, SharedBackend, WorkflowEngine};
-use tddy_core::{read_changeset, write_changeset};
+use tddy_core::{setup_worktree_for_session, SharedBackend, WorkflowEngine};
 
 use crate::convert::{plan_approval_to_server_message, workflow_event_to_server_message};
 use crate::gen::{
     client_message, server_message, tddy_remote_server::TddyRemote, GetSessionRequest,
     GetSessionResponse, ListSessionsRequest, ListSessionsResponse, ServerMessage, SessionCreated,
-    SessionInfo, WorkflowComplete, WorktreeElicitation,
+    SessionInfo, WorkflowComplete,
 };
 
 // --- Constants ---
@@ -241,10 +241,6 @@ impl TddyRemote for DaemonService {
 enum DaemonStreamState {
     Idle,
     WaitingApprovePlan,
-    WaitingConfirmWorktree {
-        suggested_branch: String,
-        suggested_worktree: String,
-    },
     PlanComplete,
 }
 
@@ -302,25 +298,11 @@ impl DaemonStreamHandler {
                 }
                 DaemonStreamState::WaitingApprovePlan => {
                     if let Some(client_message::Intent::ApprovePlan(_)) = msg.intent {
-                        self.handle_approve_plan().await;
+                        if self.handle_approve_plan().await {
+                            break;
+                        }
                     }
                     false
-                }
-                DaemonStreamState::WaitingConfirmWorktree {
-                    suggested_branch,
-                    suggested_worktree,
-                } => {
-                    if let Some(client_message::Intent::ConfirmWorktree(confirm)) = msg.intent {
-                        self.handle_confirm_worktree(
-                            suggested_branch.clone(),
-                            suggested_worktree.clone(),
-                            &confirm,
-                        )
-                        .await;
-                        true
-                    } else {
-                        false
-                    }
                 }
                 DaemonStreamState::PlanComplete => unreachable!(),
             };
@@ -424,13 +406,17 @@ impl DaemonStreamHandler {
         false
     }
 
-    async fn handle_approve_plan(&mut self) {
+    /// After plan approval, create worktree from origin/master and run the rest of the workflow.
+    /// Returns true if the run loop should break (e.g. on error).
+    async fn handle_approve_plan(&mut self) -> bool {
         let plan_dir_path = self.plan_dir.as_ref().unwrap();
-        let rt = tokio::runtime::Handle::current();
+        let repo = self.repo_root.as_ref().unwrap();
+
         let planning: PlanningOutput = self
             .engine
             .as_ref()
             .and_then(|e| {
+                let rt = tokio::runtime::Handle::current();
                 rt.block_on(e.get_session(self.session_id.as_ref().unwrap()))
                     .ok()
                     .flatten()
@@ -450,64 +436,29 @@ impl DaemonStreamHandler {
                 }
             });
 
-        let suggested_branch = planning
-            .branch_suggestion
-            .clone()
-            .unwrap_or_else(|| DEFAULT_BRANCH_SUGGESTION.to_string());
-        let suggested_worktree = planning
-            .worktree_suggestion
-            .clone()
-            .or_else(|| planning.name.clone())
-            .unwrap_or_else(|| DEFAULT_WORKTREE_SUGGESTION.to_string());
+        let mut cs = read_changeset(plan_dir_path).unwrap_or_default();
+        if cs.branch_suggestion.is_none() {
+            cs.branch_suggestion = planning
+                .branch_suggestion
+                .clone()
+                .or_else(|| Some(DEFAULT_BRANCH_SUGGESTION.to_string()));
+        }
+        if cs.worktree_suggestion.is_none() {
+            cs.worktree_suggestion = planning
+                .worktree_suggestion
+                .clone()
+                .or_else(|| planning.name.clone())
+                .or_else(|| Some(DEFAULT_WORKTREE_SUGGESTION.to_string()));
+        }
+        let _ = tddy_core::changeset::write_changeset(plan_dir_path, &cs);
 
-        let _ = self
-            .tx
-            .send(Ok(ServerMessage {
-                event: Some(server_message::Event::WorktreeElicitation(
-                    WorktreeElicitation {
-                        suggested_branch: suggested_branch.clone(),
-                        suggested_worktree: suggested_worktree.clone(),
-                    },
-                )),
-            }))
-            .await;
-        self.state = DaemonStreamState::WaitingConfirmWorktree {
-            suggested_branch,
-            suggested_worktree,
-        };
-    }
-
-    async fn handle_confirm_worktree(
-        &mut self,
-        suggested_branch: String,
-        suggested_worktree: String,
-        confirm: &crate::gen::ConfirmWorktree,
-    ) {
-        let branch = if confirm.branch.is_empty() {
-            suggested_branch
-        } else {
-            confirm.branch.clone()
-        };
-        let worktree_name = if confirm.worktree_name.is_empty() {
-            suggested_worktree
-        } else {
-            confirm.worktree_name.clone()
-        };
-
-        let repo = self.repo_root.as_ref().unwrap();
-        let worktree_path = match create_worktree(repo, &worktree_name, &branch) {
+        let worktree_path = match setup_worktree_for_session(repo, plan_dir_path) {
             Ok(p) => p,
             Err(e) => {
                 send_workflow_complete(&self.tx, false, e).await;
-                return;
+                return true;
             }
         };
-
-        let plan_dir_path = self.plan_dir.as_ref().unwrap();
-        let mut cs = read_changeset(plan_dir_path).unwrap_or_default();
-        cs.branch = Some(branch.clone());
-        cs.worktree = Some(worktree_path.to_string_lossy().to_string());
-        let _ = write_changeset(plan_dir_path, &cs);
 
         let eng = self.engine.as_ref().unwrap();
         let sid = self.session_id.as_ref().unwrap();
@@ -517,13 +468,17 @@ impl DaemonStreamHandler {
             serde_json::to_value(worktree_path.clone()).unwrap(),
         );
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(eng.update_session_context(sid, updates))
-            .map_err(|e| Status::internal(format!("update session: {}", e)))
-            .unwrap();
+        if rt
+            .block_on(eng.update_session_context(sid, updates))
+            .is_err()
+        {
+            send_workflow_complete(&self.tx, false, "update session context".to_string()).await;
+            return true;
+        }
 
         let tx = self.tx.clone();
-        let rt = tokio::runtime::Handle::current();
         rt.block_on(Self::run_session_until_complete(&tx, eng, sid));
+        true
     }
 
     async fn run_session_until_complete(

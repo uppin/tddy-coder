@@ -112,7 +112,10 @@ fn before_acceptance_tests(
         Some(a) => acceptance_tests::build_followup_prompt(&prd, a),
         None => acceptance_tests::build_prompt(&prd),
     };
-    let prompt = prepend_context_header(prompt, Some(plan_dir));
+    let repo_dir: Option<PathBuf> = context
+        .get_sync("worktree_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let prompt = prepend_context_header(prompt, Some(plan_dir), repo_dir.as_deref());
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", acceptance_tests::system_prompt());
     // Plan-mode sessions cannot be resumed with acceptEdits; create fresh session.
@@ -140,7 +143,10 @@ fn before_red(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + 
         Some(a) => red::build_followup_prompt(&prd, &at, a),
         None => red::build_prompt(&prd, &at),
     };
-    let prompt = prepend_context_header(prompt, Some(plan_dir));
+    let repo_dir: Option<PathBuf> = context
+        .get_sync("worktree_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let prompt = prepend_context_header(prompt, Some(plan_dir), repo_dir.as_deref());
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", red::system_prompt());
     context.set_sync("plan_dir", plan_dir.to_path_buf());
@@ -294,6 +300,8 @@ fn after_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + 
     cs.name = planning.name.clone();
     cs.initial_prompt = Some(feature_input);
     cs.discovery = planning.discovery.clone();
+    cs.branch_suggestion = planning.branch_suggestion.clone();
+    cs.worktree_suggestion = planning.worktree_suggestion.clone();
     let session_exists = cs.sessions.iter().any(|s| s.id == session_id);
     if session_exists {
         update_state(&mut cs, "Planned");

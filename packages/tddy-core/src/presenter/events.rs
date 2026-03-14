@@ -30,4 +30,8 @@ pub enum WorkflowEvent {
     },
     WorkflowComplete(Result<WorkflowCompletePayload, String>),
     AgentOutput(String),
+    /// Worktree created and switched after plan approval. Path is the worktree directory.
+    WorktreeSwitched {
+        path: PathBuf,
+    },
 }

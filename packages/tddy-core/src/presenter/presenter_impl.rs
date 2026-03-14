@@ -583,6 +583,16 @@ impl<V: PresenterView> Presenter<V> {
                     self.view.on_mode_changed(&self.state.mode);
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
+                WorkflowEvent::WorktreeSwitched { ref path } => {
+                    let entry = ActivityEntry {
+                        text: format!("Worktree: {}", path.display()),
+                        kind: ActivityKind::Info,
+                    };
+                    self.state.activity_log.push(entry.clone());
+                    self.view
+                        .on_activity_logged(&entry, self.state.activity_log.len());
+                    self.broadcast(PresenterEvent::ActivityLogged(entry));
+                }
                 WorkflowEvent::WorkflowComplete(result) => {
                     self.flush_agent_output_buffer();
                     self.workflow_result = Some(result.clone());

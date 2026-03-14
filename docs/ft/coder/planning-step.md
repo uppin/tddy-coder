@@ -134,6 +134,8 @@ Includes setup instructions and verification criteria. Written to `demo-plan.md`
 
 Unified manifest in the plan directory:
 - `name`: One-liner PRD name (decided by the plan agent)
+- `branch_suggestion`: Git branch name suggested by the plan agent (e.g. "feature/auth"). Used for worktree creation after plan approval.
+- `worktree_suggestion`: Worktree directory name suggested by the plan agent (e.g. "feature-auth"). Used for `git worktree add` after plan approval.
 - `initial_prompt`: User's goal/feature description from stdin
 - `clarification_qa`: Questions asked during planning and user's answers (empty if no clarification)
 - `sessions`: Array of session entries (id, agent, tag, created_at, system_prompt_file)

@@ -31,9 +31,9 @@ The TODO section is part of the PRD body, not a separate field. Example:
 
 **name** (optional): A short, human-readable name for the changeset (e.g. "Auth Feature", "Stable session dir"). This appears in changeset.yaml and helps identify the session; the session directory itself is a UUID managed by the system.
 
-**branch_suggestion** (optional): When running in daemon mode, suggest a git branch name for the feature (e.g. "feature/auth", "feat/stable-session-dir"). Used for worktree creation.
+**branch_suggestion**: Suggest a git branch name for the feature (e.g. "feature/auth", "feat/stable-session-dir"). Used for worktree creation after plan approval. Always provide this.
 
-**worktree_suggestion** (optional): When running in daemon mode, suggest a worktree directory name (e.g. "feature-auth"). Used for git worktree add.
+**worktree_suggestion**: Suggest a worktree directory name (e.g. "feature-auth"). Used for `git worktree add`. Always provide this.
 
 **discovery** (optional): Inspect the project to populate toolchain (e.g. rust, cargo, node), scripts (test, lint), doc_locations, relevant_code paths, and test_infrastructure. The working directory is the project root; read Cargo.toml, package.json, packages/, etc. directly. The plan schema path is provided in the user prompt.
 

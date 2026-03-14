@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-service.
 
+- **2026-03-14** [Feature] Worktree-per-Workflow Daemon Migration — Removed WaitingConfirmWorktree state and handle_confirm_worktree. handle_approve_plan calls setup_worktree_for_session directly; worktree created from origin/master after ApprovePlan. No WorktreeElicitation or ConfirmWorktree flow. (tddy-service)
 - **2026-03-13** [Architecture Change] Dual-Transport Service Codegen — Renamed tddy-grpc to tddy-service; moved echo/terminal from tddy-livekit. Service impls (EchoServiceImpl, TerminalServiceImpl, DaemonService) in tddy-service; generated RpcService server structs + tonic adapter. (tddy-service)
 - **2026-03-13** [Feature] Ghostty Terminal Proto — remote.proto: StreamTerminalIO bidi RPC, TerminalInput, TerminalOutput. TddyRemoteService/DaemonService stubs. (tddy-grpc)
 - **2026-03-12** [Feature] Session Lifecycle Redesign — Early changeset creation in handle_start_session before run_goal. (tddy-grpc)
