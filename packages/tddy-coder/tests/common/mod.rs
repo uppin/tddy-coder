@@ -16,7 +16,8 @@ fn set_tddy_sessions_dir_for_tests() {
 }
 
 /// Create a temp directory with a git repo (init, commit, origin/master).
-/// Returns (output_dir, plan_dir) where output_dir is the repo root and plan_dir = output_dir/plan.
+/// Returns (output_dir, plan_dir) where output_dir = base/repo (repo root) and plan_dir = base/plan.
+/// Plan dir is next to repo, not inside it, so it's clear plan storage is separate from the repo.
 /// Use output_dir for start_workflow when the workflow will run acceptance-tests (worktree creation).
 pub fn temp_dir_with_git_repo(label: &str) -> (PathBuf, PathBuf) {
     let base = std::env::temp_dir().join(format!("tddy-cli-{}-{}", label, std::process::id()));
@@ -41,7 +42,7 @@ pub fn temp_dir_with_git_repo(label: &str) -> (PathBuf, PathBuf) {
     run(&["remote", "add", "origin", output_dir.to_str().unwrap()]);
     run(&["push", "-u", "origin", "master"]);
 
-    let plan_dir = output_dir.join("plan");
+    let plan_dir = base.join("plan");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     (output_dir, plan_dir)
 }

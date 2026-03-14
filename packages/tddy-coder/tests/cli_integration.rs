@@ -401,7 +401,7 @@ fn cli_accepts_goal_acceptance_tests_with_plan_dir() {
         stdout
     );
 
-    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap().parent().unwrap());
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 #[test]

@@ -4,6 +4,7 @@
 
 mod common;
 
+use serial_test::serial;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -197,6 +198,7 @@ fn full_workflow_completes_with_stub_backend() {
 /// When output_dir is "." (TUI default), plan_dir must be under sessions_base_path (~/.tddy/sessions),
 /// not under the resolved current_dir. MDs (PRD.md, progress.md, etc.) go to plan_dir.
 #[test]
+#[serial]
 fn plan_dir_under_sessions_base_when_output_dir_is_dot() {
     let sessions_base = std::env::temp_dir().join("tddy-plan-dir-test-sessions");
     let _ = std::fs::remove_dir_all(&sessions_base);
@@ -291,6 +293,7 @@ fn plan_dir_under_sessions_base_when_output_dir_is_dot() {
 /// When plan_dir is under sessions (output_dir "."), RefinePlan must use repo_path from changeset
 /// for output_dir, not plan_dir.parent(). AssertingRepoBackend fails if plan working_dir lacks .git.
 #[test]
+#[serial]
 fn plan_dir_under_sessions_refine_uses_repo_as_working_dir() {
     let sessions_base = std::env::temp_dir().join("tddy-plan-refine-sessions");
     let _ = std::fs::remove_dir_all(&sessions_base);

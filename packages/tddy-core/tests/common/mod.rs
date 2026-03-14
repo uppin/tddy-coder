@@ -16,7 +16,8 @@ pub fn plan_dir_for_input(parent: &std::path::Path, input: &str) -> PathBuf {
 }
 
 /// Create a temp directory with a git repo (init, commit, origin/master) for worktree tests.
-/// Returns (output_dir, plan_dir) where output_dir is the repo root and plan_dir = output_dir/slug.
+/// Returns (output_dir, plan_dir) where output_dir = base/repo (repo root) and plan_dir = base/slug.
+/// Plan dir is next to repo, not inside it, so it's clear plan storage is separate from the repo.
 pub fn temp_dir_with_git_repo(label: &str, input: &str) -> (PathBuf, PathBuf) {
     let base = std::env::temp_dir().join(format!("tddy-{}-{}", label, std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
@@ -40,21 +41,22 @@ pub fn temp_dir_with_git_repo(label: &str, input: &str) -> (PathBuf, PathBuf) {
     run(&["remote", "add", "origin", output_dir.to_str().unwrap()]);
     run(&["push", "-u", "origin", "master"]);
 
-    let plan_dir = plan_dir_for_input(&output_dir, input);
+    let plan_dir = plan_dir_for_input(&base, input);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     (output_dir, plan_dir)
 }
 
 /// Build context for plan goal.
-/// output_dir is the repo root (parent of plan_dir); agent runs in output_dir to discover Cargo.toml, etc.
-/// plan_dir is output_dir/slug; defaults to output_dir.join(slugify(feature_input)) if not provided.
+/// output_dir is the repo root; agent runs in output_dir to discover Cargo.toml, etc.
+/// plan_dir is base/slug (next to repo), where base = output_dir.parent(); plan storage is separate from repo.
 pub fn ctx_plan(
     feature_input: &str,
     output_dir: PathBuf,
     answers: Option<&str>,
     conversation_output_path: Option<PathBuf>,
 ) -> HashMap<String, serde_json::Value> {
-    let plan_dir = plan_dir_for_input(&output_dir, feature_input);
+    let base = output_dir.parent().unwrap_or(&output_dir);
+    let plan_dir = plan_dir_for_input(base, feature_input);
     let mut m = HashMap::new();
     m.insert(
         "feature_input".to_string(),
@@ -220,6 +222,7 @@ pub async fn run_plan(
 }
 
 /// Run plan with optional conversation_output_path for raw agent output.
+/// Plan dir is created under output_dir.parent() (base), next to repo, not inside it.
 pub async fn run_plan_with_conversation_output(
     engine: &WorkflowEngine,
     input: &str,
@@ -227,7 +230,8 @@ pub async fn run_plan_with_conversation_output(
     answers: Option<&str>,
     conversation_output_path: Option<PathBuf>,
 ) -> Result<(PathBuf, String), Box<dyn std::error::Error + Send + Sync>> {
-    let plan_dir = plan_dir_for_input(output_dir, input);
+    let base = output_dir.parent().unwrap_or(output_dir);
+    let plan_dir = plan_dir_for_input(base, input);
     std::fs::create_dir_all(&plan_dir)?;
     let init_cs = Changeset {
         initial_prompt: Some(input.to_string()),
