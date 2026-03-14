@@ -49,6 +49,65 @@ pub trait RpcService: Send + Sync + 'static {
     }
 }
 
+/// Entry for MultiRpcService: service name (e.g. "terminal.TerminalService") and the service.
+pub struct ServiceEntry {
+    pub name: &'static str,
+    pub service: Arc<dyn RpcService>,
+}
+
+/// Multiplexer that dispatches RPC calls to multiple services by service name.
+/// Used when a single participant serves multiple RPC services (e.g. Terminal + Token).
+pub struct MultiRpcService {
+    entries: Vec<ServiceEntry>,
+}
+
+impl MultiRpcService {
+    pub fn new(entries: Vec<ServiceEntry>) -> Self {
+        Self { entries }
+    }
+
+    fn find_service(&self, service: &str) -> Option<&Arc<dyn RpcService>> {
+        self.entries
+            .iter()
+            .find(|e| e.name == service)
+            .map(|e| &e.service)
+    }
+}
+
+#[async_trait]
+impl RpcService for MultiRpcService {
+    fn is_bidi_stream(&self, service: &str, method: &str) -> bool {
+        self.find_service(service)
+            .map(|s| s.is_bidi_stream(service, method))
+            .unwrap_or(false)
+    }
+
+    async fn handle_rpc(&self, service: &str, method: &str, message: &RpcMessage) -> RpcResult {
+        match self.find_service(service) {
+            Some(s) => s.handle_rpc(service, method, message).await,
+            None => RpcResult::Unary(Err(Status::not_found(format!(
+                "Unknown service: {}",
+                service
+            )))),
+        }
+    }
+
+    async fn handle_rpc_stream(
+        &self,
+        service: &str,
+        method: &str,
+        messages: &[RpcMessage],
+    ) -> RpcResult {
+        match self.find_service(service) {
+            Some(s) => s.handle_rpc_stream(service, method, messages).await,
+            None => RpcResult::Unary(Err(Status::not_found(format!(
+                "Unknown service: {}",
+                service
+            )))),
+        }
+    }
+}
+
 /// Bridge that routes RPC messages to a service.
 /// Receives already-extracted service/method and RpcMessage slices from the transport layer.
 pub struct RpcBridge<S: RpcService> {

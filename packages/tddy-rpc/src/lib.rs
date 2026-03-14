@@ -5,7 +5,7 @@ pub mod message;
 pub mod status;
 pub mod types;
 
-pub use bridge::{ResponseBody, RpcBridge, RpcResult, RpcService};
+pub use bridge::{MultiRpcService, ResponseBody, RpcBridge, RpcResult, RpcService, ServiceEntry};
 pub use message::{RequestMetadata, RpcMessage};
 pub use status::{Code, Status};
 pub use types::{Request, Response, Streaming};

@@ -91,6 +91,94 @@ mod codegen_acceptance {
     }
 }
 
+/// TokenService acceptance tests: verify GenerateToken and RefreshToken via RpcBridge.
+#[cfg(test)]
+mod token_service_acceptance {
+    use prost::Message;
+
+    use crate::proto::token::{GenerateTokenRequest, GenerateTokenResponse, TokenServiceServer};
+    use crate::token_service::{TokenProvider, TokenServiceImpl};
+    use tddy_rpc::{RequestMetadata, RpcMessage};
+
+    struct MockTokenProvider;
+
+    impl TokenProvider for MockTokenProvider {
+        fn generate_token(&self, room: &str, identity: &str) -> Result<String, String> {
+            Ok(format!("mock-token-{}-{}", room, identity))
+        }
+        fn ttl_seconds(&self) -> u64 {
+            120
+        }
+    }
+
+    #[test]
+    fn token_service_server_has_name_constant() {
+        assert_eq!(
+            TokenServiceServer::<TokenServiceImpl<MockTokenProvider>>::NAME,
+            "token.TokenService"
+        );
+    }
+
+    #[tokio::test]
+    async fn token_service_generate_token_returns_token_and_ttl() {
+        let server = TokenServiceServer::new(TokenServiceImpl::new(MockTokenProvider));
+        let bridge = tddy_rpc::RpcBridge::new(server);
+
+        let req = GenerateTokenRequest {
+            room: "test-room".to_string(),
+            identity: "test-identity".to_string(),
+        };
+        let msg = RpcMessage {
+            payload: req.encode_to_vec(),
+            metadata: RequestMetadata::default(),
+        };
+
+        let result = bridge
+            .handle_messages("token.TokenService", "GenerateToken", &[msg])
+            .await;
+
+        let body = result.expect("handle_messages should succeed");
+        let chunks = match body {
+            tddy_rpc::ResponseBody::Complete(c) => c,
+            _ => panic!("expected Complete for unary"),
+        };
+        assert_eq!(chunks.len(), 1);
+        let resp = GenerateTokenResponse::decode(&chunks[0][..]).expect("decode response");
+        assert_eq!(resp.token, "mock-token-test-room-test-identity");
+        assert_eq!(resp.ttl_seconds, 120);
+    }
+
+    #[tokio::test]
+    async fn token_service_refresh_token_returns_token_and_ttl() {
+        let server = TokenServiceServer::new(TokenServiceImpl::new(MockTokenProvider));
+        let bridge = tddy_rpc::RpcBridge::new(server);
+
+        let req = crate::proto::token::RefreshTokenRequest {
+            room: "other-room".to_string(),
+            identity: "other-identity".to_string(),
+        };
+        let msg = RpcMessage {
+            payload: req.encode_to_vec(),
+            metadata: RequestMetadata::default(),
+        };
+
+        let result = bridge
+            .handle_messages("token.TokenService", "RefreshToken", &[msg])
+            .await;
+
+        let body = result.expect("handle_messages should succeed");
+        let chunks = match body {
+            tddy_rpc::ResponseBody::Complete(c) => c,
+            _ => panic!("expected Complete for unary"),
+        };
+        assert_eq!(chunks.len(), 1);
+        let resp = crate::proto::token::RefreshTokenResponse::decode(&chunks[0][..])
+            .expect("decode response");
+        assert_eq!(resp.token, "mock-token-other-room-other-identity");
+        assert_eq!(resp.ttl_seconds, 120);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};

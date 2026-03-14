@@ -16,6 +16,7 @@ path = "src/lib.rs"
 [dependencies]
 tddy-core = { path = "../tddy-core" }
 tddy-livekit = { path = "../tddy-livekit", optional = true }
+tddy-rpc = { path = "../tddy-rpc" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit", optional = true }
 tddy-service = { path = "../tddy-service" }
 tddy-tui = { path = "../tddy-tui" }
