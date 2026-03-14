@@ -24,6 +24,8 @@ export interface GhosttyTerminalProps {
   onBell?: () => void;
   onTitleChange?: (title: string) => void;
   onReady?: () => void;
+  /** When true, log write/onData and lifecycle to console. */
+  debugLogging?: boolean;
 }
 
 export interface GhosttyTerminalHandle {
@@ -47,9 +49,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       onBell,
       onTitleChange,
       onReady,
+      debugLogging = false,
     },
     ref
   ) {
+    const log = debugLogging
+      ? (...args: unknown[]) => console.log("[GhosttyTerminal]", ...args)
+      : () => {};
     const containerRef = useRef<HTMLDivElement>(null);
     const termRef = useRef<Terminal | null>(null);
     const [ready, setReady] = useState(false);
@@ -60,8 +66,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       let isMounted = true;
 
       async function setup() {
+        log("lifecycle: init");
         await init();
         if (!isMounted || !containerRef.current) return;
+        log("lifecycle: creating Terminal");
 
         const term = new Terminal({
           cols,
@@ -78,7 +86,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
         const disposables: { dispose: () => void }[] = [];
         if (onData) {
-          disposables.push(term.onData(onData));
+          disposables.push(
+            term.onData((data) => {
+              log("dataflow: onData received", data.length, "chars", JSON.stringify(data.slice(0, 30)));
+              onData(data);
+            })
+          );
         }
         if (onResize) {
           disposables.push(term.onResize(({ cols: c, rows: r }) => onResize({ cols: c, rows: r })));
@@ -92,6 +105,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         disposablesRef.current = disposables;
 
         term.open(containerRef.current);
+        log("lifecycle: term opened, calling onReady");
         setReady(true);
         onReady?.();
 
@@ -127,6 +141,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     useImperativeHandle(ref, () => ({
       write(data: string | Uint8Array) {
+        const len = typeof data === "string" ? data.length : data.length;
+        log("dataflow: write", len, "bytes", typeof data === "string" ? JSON.stringify(data.slice(0, 40)) : "(Uint8Array)");
         termRef.current?.write(data);
       },
       clear() {

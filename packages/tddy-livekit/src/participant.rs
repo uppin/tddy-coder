@@ -434,7 +434,6 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             return Ok(());
         };
 
-        let request_end_of_stream = messages.last().map(|m| m.end_of_stream).unwrap_or(true);
         let service = messages
             .first()
             .and_then(|m| m.call_metadata.as_ref())
@@ -490,15 +489,14 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                 }
                 ResponseBody::Streaming(mut rx) => {
                     log::info!(
-                        "[echo_server] RPC request_id={} streaming response (spawned task)",
-                        request_id
+                        "[echo_server] RPC request_id={} streaming response (spawned task) response_identity={:?}",
+                        request_id,
+                        response_identity
                     );
                     let local = local.clone();
                     let response_identity = response_identity.clone();
-                    let response_end_of_stream = request_end_of_stream;
                     tokio::spawn(async move {
                         let mut chunk_index = 0u64;
-                        let mut last_bytes: Option<Vec<u8>> = None;
                         while let Some(item) = rx.recv().await {
                             let bytes = match item {
                                 Ok(b) => b,
@@ -511,50 +509,58 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                                     break;
                                 }
                             };
-                            if let Some(prev) = last_bytes.replace(bytes) {
-                                let end_of_stream = false;
-                                let response = crate::proto::RpcResponse {
-                                    request_id,
-                                    response_message: prev,
-                                    metadata: None,
-                                    end_of_stream,
-                                    error: None,
-                                    trailers: None,
-                                };
-                                if let Ok(encoded) = encode_response(response) {
-                                    let packet = DataPacket {
-                                        payload: encoded,
-                                        topic: Some(RPC_TOPIC.to_string()),
-                                        reliable: true,
-                                        destination_identities: vec![response_identity.clone()],
-                                    };
-                                    if local.publish_data(packet).await.is_err() {
-                                        break;
-                                    }
-                                }
-                                chunk_index += 1;
-                            }
-                        }
-                        if let Some(bytes) = last_bytes {
+                            log::info!(
+                                "[echo_server] RPC request_id={} stream chunk #{} received ({} bytes)",
+                                request_id,
+                                chunk_index + 1,
+                                bytes.len()
+                            );
                             let response = crate::proto::RpcResponse {
                                 request_id,
                                 response_message: bytes,
                                 metadata: None,
-                                end_of_stream: response_end_of_stream,
+                                end_of_stream: false,
                                 error: None,
                                 trailers: None,
                             };
                             if let Ok(encoded) = encode_response(response) {
-                                let _ = local
-                                    .publish_data(DataPacket {
-                                        payload: encoded,
-                                        topic: Some(RPC_TOPIC.to_string()),
-                                        reliable: true,
-                                        destination_identities: vec![response_identity],
-                                    })
-                                    .await;
+                                let len = encoded.len();
+                                let packet = DataPacket {
+                                    payload: encoded,
+                                    topic: Some(RPC_TOPIC.to_string()),
+                                    reliable: true,
+                                    destination_identities: vec![response_identity.clone()],
+                                };
+                                if local.publish_data(packet).await.is_err() {
+                                    log::error!("[echo_server] RPC request_id={} publish_data failed", request_id);
+                                    break;
+                                }
+                                log::info!(
+                                    "[echo_server] RPC request_id={} published chunk #{} ({} bytes)",
+                                    request_id,
+                                    chunk_index + 1,
+                                    len
+                                );
                             }
                             chunk_index += 1;
+                        }
+                        let end_response = crate::proto::RpcResponse {
+                            request_id,
+                            response_message: vec![],
+                            metadata: None,
+                            end_of_stream: true,
+                            error: None,
+                            trailers: None,
+                        };
+                        if let Ok(encoded) = encode_response(end_response) {
+                            let _ = local
+                                .publish_data(DataPacket {
+                                    payload: encoded,
+                                    topic: Some(RPC_TOPIC.to_string()),
+                                    reliable: true,
+                                    destination_identities: vec![response_identity],
+                                })
+                                .await;
                         }
                         log::info!(
                             "[echo_server] RPC request_id={} stream finished ({} chunks)",
