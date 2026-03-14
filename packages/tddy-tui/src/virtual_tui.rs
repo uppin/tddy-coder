@@ -16,7 +16,9 @@ use ratatui::Terminal;
 use ratatui::{TerminalOptions, Viewport};
 use tokio::sync::mpsc;
 
-use tddy_core::{AppMode, PresenterEvent, PresenterState, PresenterView, UserIntent, ViewConnection};
+use tddy_core::{
+    AppMode, PresenterEvent, PresenterState, PresenterView, UserIntent, ViewConnection,
+};
 
 use crate::capturing_writer::CapturingWriter;
 use crate::key_map::key_event_to_intent;
@@ -148,7 +150,7 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
         }
         PresenterEvent::WorkflowComplete(ref result) => {
             state.mode = match result {
-                Ok(_) => AppMode::Done,
+                Ok(_) => AppMode::FeatureInput,
                 Err(_) => AppMode::ErrorRecovery {
                     error_message: result.as_ref().err().cloned().unwrap_or_default(),
                 },

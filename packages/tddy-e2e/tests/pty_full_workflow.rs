@@ -163,10 +163,11 @@ async fn pty_full_workflow_asserts_each_state_transition() {
                             let mut seen = false;
                             for _ in 0..200 {
                                 let screen = screen_buffer.lock().unwrap().clone();
-                                // Accept any of: final prompt bar ("Workflow complete"), completion
-                                // summary ("Plan dir:", etc.), or status bar showing RefactorComplete
-                                // (race: gRPC can arrive before presenter switches mode to Done)
+                                // Accept any of: FeatureInput prompt ("Type your feature description"),
+                                // completion summary ("Plan dir:", etc.), or status bar showing RefactorComplete
+                                // (race: gRPC can arrive before presenter switches mode to FeatureInput)
                                 if screen.contains("Plan dir:")
+                                    || screen.contains("Type your feature description")
                                     || screen.contains("Workflow complete")
                                     || screen.contains("Tasks completed")
                                     || screen.contains("Tests passing")

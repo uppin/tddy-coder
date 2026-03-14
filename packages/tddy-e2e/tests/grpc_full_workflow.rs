@@ -120,6 +120,29 @@ async fn full_workflow_with_clarification_completes() {
         "Expected workflow to complete successfully, got error: {}",
         workflow_message
     );
+
+    // Acceptance: gRPC clients see FeatureInput after completion (not Done)
+    let mut seen_feature_input_after_complete = false;
+    for _ in 0..50 {
+        match tokio::time::timeout(Duration::from_millis(100), stream.message()).await {
+            Ok(Ok(Some(msg))) => {
+                if let Some(server_message::Event::ModeChanged(mc)) = msg.event {
+                    if let Some(mode) = &mc.mode {
+                        if matches!(mode.variant, Some(app_mode_proto::Variant::FeatureInput(_))) {
+                            seen_feature_input_after_complete = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            Ok(Ok(None)) => break,
+            _ => {}
+        }
+    }
+    assert!(
+        seen_feature_input_after_complete,
+        "gRPC clients should receive ModeChanged(FeatureInput) after WorkflowComplete"
+    );
 }
 
 /// Full workflow with StubBackend: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor.

@@ -16,7 +16,7 @@ use tddy_core::ViewConnection;
 use tddy_core::{AnyBackend, Presenter, PresenterHandle, SharedBackend, StubBackend};
 use tddy_service::gen::tddy_remote_server::TddyRemoteServer;
 use tddy_service::TddyRemoteService;
-use tddy_tui::{render::draw, apply_event, TuiView};
+use tddy_tui::{apply_event, render::draw, TuiView};
 
 pub mod test_util;
 

@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-03-14** [Feature] Workflow Restart on Completion — presenter_integration: full_workflow_completes_with_stub_backend asserts mode FeatureInput after completion; submit_feature_input_after_completion_restarts_workflow test. (tddy-coder)
 - **2026-03-14** [Feature] LiveKit Token Generation — `--livekit-api-key`, `--livekit-api-secret` (or LIVEKIT_API_KEY, LIVEKIT_API_SECRET env). Mutual exclusivity with `--livekit-token`. validate_livekit_args. Daemon and TUI use TokenGenerator + run_with_reconnect when key/secret set. Clap env feature. (tddy-coder)
 - **2026-03-13** [Feature] Web Bundle Serving — `--web-port` and `--web-bundle-path` CLI flags. When both provided, axum static file server runs alongside gRPC/LiveKit in TUI and daemon modes. validate_web_args enforces both-or-neither. web_server module with ServeDir. (tddy-coder)
 - **2026-03-13** [Feature] Ghostty Terminal LiveKit — DemoArgs: livekit_url, livekit_token, livekit_room, livekit_identity. run_full_workflow_tui: when livekit_url set, create TerminalServiceImpl, connect LiveKitParticipant, wire ByteCallback broadcast to terminal bytes. tddy-demo logs READY when connected. (tddy-coder)
