@@ -5594,6 +5594,7 @@ dependencies = [
  "tddy-codegen",
  "tddy-core",
  "tddy-rpc",
+ "tddy-tui",
  "tokio",
  "tokio-stream",
  "tonic 0.12.3",
@@ -5630,6 +5631,7 @@ dependencies = [
  "log",
  "ratatui",
  "tddy-core",
+ "tokio",
  "tui-markdown",
 ]
 

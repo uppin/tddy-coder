@@ -9,7 +9,7 @@ use crate::toolcall::{store_submit_result, ToolCallRequest, ToolCallResponse};
 use crate::{ClarificationQuestion, SharedBackend};
 
 use crate::presenter::intent::UserIntent;
-use crate::presenter::presenter_events::PresenterEvent;
+use crate::presenter::presenter_events::{PresenterEvent, ViewConnection};
 use crate::presenter::state::{ActivityEntry, ActivityKind, AppMode, PresenterState};
 use crate::presenter::view::PresenterView;
 use crate::presenter::workflow_runner;
@@ -45,6 +45,8 @@ pub struct Presenter<V: PresenterView> {
     workflow_handle: Option<thread::JoinHandle<()>>,
     /// When set, events are broadcast for gRPC subscribers.
     broadcast_tx: Option<tokio::sync::broadcast::Sender<PresenterEvent>>,
+    /// When set, connect_view() returns this for external views to send intents.
+    intent_tx: Option<mpsc::Sender<UserIntent>>,
     /// When true, next AnswerText is refinement feedback (not clarification).
     plan_refinement_pending: bool,
     /// Receiver for tddy-tools relay requests (Submit, Ask, Approve).
@@ -86,6 +88,7 @@ impl<V: PresenterView> Presenter<V> {
             agent_output_buffer: String::new(),
             workflow_handle: None,
             broadcast_tx: None,
+            intent_tx: None,
             plan_refinement_pending: false,
             tool_call_rx: None,
             pending_tool_call_response: None,
@@ -97,6 +100,24 @@ impl<V: PresenterView> Presenter<V> {
     pub fn with_broadcast(mut self, tx: tokio::sync::broadcast::Sender<PresenterEvent>) -> Self {
         self.broadcast_tx = Some(tx);
         self
+    }
+
+    /// Enable connect_view() by providing an intent sender for external views.
+    pub fn with_intent_sender(mut self, tx: mpsc::Sender<UserIntent>) -> Self {
+        self.intent_tx = Some(tx);
+        self
+    }
+
+    /// Create a new view connection: state snapshot + event subscription + intent sender.
+    /// Returns None if broadcast or intent_tx is not configured.
+    pub fn connect_view(&self) -> Option<ViewConnection> {
+        let broadcast_tx = self.broadcast_tx.as_ref()?;
+        let intent_tx = self.intent_tx.clone()?;
+        Some(ViewConnection {
+            state_snapshot: self.state.clone(),
+            event_rx: broadcast_tx.subscribe(),
+            intent_tx,
+        })
     }
 
     fn broadcast(&self, event: PresenterEvent) {
@@ -819,6 +840,49 @@ mod tests {
             matches!(p.state().mode, AppMode::Done),
             "Expected Done mode, got {:?}",
             p.state().mode
+        );
+    }
+
+    #[test]
+    fn connect_view_returns_none_without_broadcast() {
+        let p = make_presenter();
+        assert!(p.connect_view().is_none());
+    }
+
+    #[test]
+    fn connect_view_returns_none_without_intent_tx() {
+        let (tx, _) = tokio::sync::broadcast::channel(16);
+        let p = make_presenter().with_broadcast(tx);
+        assert!(p.connect_view().is_none());
+    }
+
+    #[test]
+    fn connect_view_returns_connection_with_matching_snapshot() {
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        let (intent_tx, _) = mpsc::channel();
+        let p = make_presenter()
+            .with_broadcast(event_tx)
+            .with_intent_sender(intent_tx);
+        let conn = p.connect_view().expect("connect_view should return Some");
+        assert_eq!(conn.state_snapshot.agent, "agent");
+        assert_eq!(conn.state_snapshot.model, "model");
+        assert!(matches!(conn.state_snapshot.mode, AppMode::FeatureInput));
+    }
+
+    #[test]
+    fn connect_view_event_rx_receives_broadcast_events() {
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        let (intent_tx, _) = mpsc::channel();
+        let p = make_presenter()
+            .with_broadcast(event_tx.clone())
+            .with_intent_sender(intent_tx);
+        let mut conn = p.connect_view().expect("connect_view should return Some");
+        let _ = event_tx.send(PresenterEvent::GoalStarted("plan".to_string()));
+        let ev = conn.event_rx.try_recv();
+        assert!(
+            matches!(ev, Ok(PresenterEvent::GoalStarted(ref g)) if g == "plan"),
+            "Expected GoalStarted event, got {:?}",
+            ev
         );
     }
 }

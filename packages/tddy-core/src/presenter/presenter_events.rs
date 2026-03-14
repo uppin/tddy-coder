@@ -1,10 +1,13 @@
 //! PresenterEvent — events broadcast to gRPC subscribers (and other listeners).
 //! PresenterHandle — bridge between Presenter and gRPC service.
+//! ViewConnection — snapshot + event subscription for per-connection virtual TUIs.
 
 use std::sync::mpsc;
 
+use tokio::sync::broadcast;
+
 use crate::presenter::intent::UserIntent;
-use crate::presenter::state::{ActivityEntry, AppMode};
+use crate::presenter::state::{ActivityEntry, AppMode, PresenterState};
 
 /// Events the Presenter broadcasts to subscribers (e.g. gRPC clients).
 /// Mirrors PresenterView callbacks for remote observation.
@@ -23,5 +26,16 @@ pub enum PresenterEvent {
 /// Handle passed to gRPC service: broadcast sender for events, mpsc sender for intents.
 pub struct PresenterHandle {
     pub event_tx: tokio::sync::broadcast::Sender<PresenterEvent>,
+    pub intent_tx: mpsc::Sender<UserIntent>,
+}
+
+/// Connection for a newly attached view (e.g. per-connection virtual TUI).
+/// Provides state snapshot and event subscription so the view can initialize and receive updates.
+pub struct ViewConnection {
+    /// Current state at connection time; view uses this for initial render.
+    pub state_snapshot: PresenterState,
+    /// Subscription to live events; view updates its local state from these.
+    pub event_rx: broadcast::Receiver<PresenterEvent>,
+    /// Sender for UserIntents; view forwards user input here.
     pub intent_tx: mpsc::Sender<UserIntent>,
 }

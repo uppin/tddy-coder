@@ -22,7 +22,9 @@ mod livekit_tests {
     use tddy_livekit::{LiveKitParticipant, RpcClient};
     use tddy_livekit_testkit::LiveKitTestkit;
     use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
-    use tddy_service::{TerminalServiceImpl, TerminalServiceServer};
+    use tddy_service::{
+        TerminalServiceImpl, TerminalServiceImplPerConnection, TerminalServiceServer,
+    };
 
     const SERVER_IDENTITY: &str = "server";
     const CLIENT_IDENTITY: &str = "client";
@@ -126,6 +128,122 @@ mod livekit_tests {
             "Expected to receive terminal bytes containing {:?}, got {} bytes",
             std::str::from_utf8(test_bytes).unwrap(),
             received.len()
+        );
+
+        Ok(())
+    }
+
+    /// Two LiveKit clients with independent VirtualTui streams.
+    /// Each client gets its own stream; client 1 disconnect does not affect client 2.
+    #[tokio::test]
+    #[serial]
+    async fn two_livekit_clients_get_independent_terminal_streams() -> Result<()> {
+        let livekit = LiveKitTestkit::start().await?;
+        let url = livekit.get_ws_url();
+        let room_name = "terminal-two-clients-test";
+
+        let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
+        const CLIENT1_IDENTITY: &str = "client1";
+        const CLIENT2_IDENTITY: &str = "client2";
+
+        let client1_token = livekit.generate_token(room_name, CLIENT1_IDENTITY)?;
+        let client2_token = livekit.generate_token(room_name, CLIENT2_IDENTITY)?;
+
+        let (_presenter_handle, factory, _shutdown) =
+            tddy_e2e::spawn_presenter_with_view_connection_factory(Some("feature".to_string()));
+
+        let terminal_service = TerminalServiceImplPerConnection::new(factory);
+
+        let server = LiveKitParticipant::connect(
+            &url,
+            &server_token,
+            TerminalServiceServer::new(terminal_service),
+            RoomOptions::default(),
+        )
+        .await?;
+        let server_handle = tokio::spawn(async move { server.run().await });
+
+        let (client1_room, mut client1_events) =
+            Room::connect(&url, &client1_token, RoomOptions::default())
+                .await
+                .map_err(|e| anyhow::anyhow!("client1 connect: {}", e))?;
+        wait_for_participant(&client1_room, &mut client1_events, SERVER_IDENTITY).await?;
+        let client1_rpc_events = client1_room.subscribe();
+        let client1_rpc = RpcClient::new(
+            client1_room,
+            SERVER_IDENTITY.to_string(),
+            client1_rpc_events,
+        );
+
+        let (client2_room, mut client2_events) =
+            Room::connect(&url, &client2_token, RoomOptions::default())
+                .await
+                .map_err(|e| anyhow::anyhow!("client2 connect: {}", e))?;
+        wait_for_participant(&client2_room, &mut client2_events, SERVER_IDENTITY).await?;
+        let client2_rpc_events = client2_room.subscribe();
+        let client2_rpc = RpcClient::new(
+            client2_room,
+            SERVER_IDENTITY.to_string(),
+            client2_rpc_events,
+        );
+
+        let request = TerminalInput { data: vec![] };
+        let request_bytes = request.encode_to_vec();
+
+        let mut rx1 = client1_rpc
+            .call_server_stream(
+                "terminal.TerminalService",
+                "StreamTerminalIO",
+                request_bytes.clone(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("client1 StreamTerminalIO: {}", e))?;
+
+        let mut rx2 = client2_rpc
+            .call_server_stream(
+                "terminal.TerminalService",
+                "StreamTerminalIO",
+                request_bytes,
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("client2 StreamTerminalIO: {}", e))?;
+
+        let mut received1 = Vec::new();
+        let mut received2 = Vec::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(Some(chunk)) =
+                tokio::time::timeout(Duration::from_millis(200), rx1.recv()).await
+            {
+                if let Ok(bytes) = chunk {
+                    let output = TerminalOutput::decode(&bytes[..])?;
+                    received1.extend_from_slice(&output.data);
+                }
+            }
+            if let Ok(Some(chunk)) =
+                tokio::time::timeout(Duration::from_millis(200), rx2.recv()).await
+            {
+                if let Ok(bytes) = chunk {
+                    let output = TerminalOutput::decode(&bytes[..])?;
+                    received2.extend_from_slice(&output.data);
+                }
+            }
+            if received1.len() > 50 && received2.len() > 50 {
+                break;
+            }
+        }
+
+        server_handle.abort();
+
+        assert!(
+            received1.len() > 50,
+            "client1 should receive ANSI bytes, got {}",
+            received1.len()
+        );
+        assert!(
+            received2.len() > 50,
+            "client2 should receive ANSI bytes, got {}",
+            received2.len()
         );
 
         Ok(())

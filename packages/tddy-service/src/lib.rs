@@ -17,7 +17,7 @@ pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use service::TddyRemoteService;
 pub use tddy_rpc::Status;
-pub use terminal_service::TerminalServiceImpl;
+pub use terminal_service::{TerminalServiceImpl, TerminalServiceImplPerConnection};
 
 pub mod gen {
     tonic::include_proto!("tddy.v1");

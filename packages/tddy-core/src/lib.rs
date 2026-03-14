@@ -46,8 +46,9 @@ pub use permission::{
     validate_subagents_allowlist,
 };
 pub use presenter::{
-    ActivityEntry, ActivityKind, AppMode, Presenter, PresenterEvent, PresenterHandle,
-    PresenterState, PresenterView, UserIntent, WorkflowCompletePayload, WorkflowEvent,
+    ActivityEntry, ActivityKind, AppMode, NoopView, Presenter, PresenterEvent, PresenterHandle,
+    PresenterState, PresenterView, UserIntent, ViewConnection, WorkflowCompletePayload,
+    WorkflowEvent,
 };
 pub use stream::ProgressEvent;
 pub use workflow::{

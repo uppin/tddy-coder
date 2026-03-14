@@ -8,7 +8,7 @@ use clap::Parser;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     get_session_for_tag, next_goal_for_state, parse_acceptance_tests_response,
@@ -19,7 +19,7 @@ use tddy_core::{
 
 use crate::plain;
 use crate::tty::should_run_tui;
-use tddy_core::Presenter;
+use tddy_core::{NoopView, Presenter};
 
 use crate::disable_raw_mode;
 
@@ -573,19 +573,73 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
 
     let port = args.grpc.unwrap_or(50051);
     let backend = create_backend(&args.agent, None, None);
-    let service = tddy_service::DaemonService::new(sessions_base, backend);
-
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .context("create tokio runtime")?;
-
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
     let livekit_enabled = args.livekit_url.is_some()
         && (has_token || has_key_secret)
         && args.livekit_room.is_some()
         && args.livekit_identity.is_some();
+
+    let mut service = tddy_service::DaemonService::new(sessions_base.clone(), backend.clone());
+    let terminal_service_for_livekit: Option<tddy_service::TerminalServiceImplPerConnection> =
+        if livekit_enabled {
+            let (event_tx, _) = tokio::sync::broadcast::channel(256);
+            let (intent_tx, intent_rx) = std::sync::mpsc::channel();
+            let view = NoopView;
+            let mut presenter =
+                Presenter::new(view, &args.agent, args.model.as_deref().unwrap_or("opus"))
+                    .with_broadcast(event_tx)
+                    .with_intent_sender(intent_tx);
+            let output_dir = sessions_base.join("tddy-daemon-session");
+            let _ = std::fs::create_dir_all(&output_dir);
+            presenter.start_workflow(
+                backend,
+                output_dir,
+                None,
+                Some("feature".to_string()),
+                None,
+                None,
+                false,
+                None,
+                None,
+                None,
+            );
+            let presenter = Arc::new(Mutex::new(presenter));
+            let presenter_for_factory = presenter.clone();
+            let factory = Arc::new(move || {
+                presenter_for_factory
+                    .lock()
+                    .ok()
+                    .and_then(|p| p.connect_view())
+            });
+            service = service.with_view_connection_factory(factory.clone());
+            let shutdown_for_thread = shutdown.clone();
+            let presenter_for_thread = presenter.clone();
+            std::thread::spawn(move || {
+                for _ in 0..100_000 {
+                    if shutdown_for_thread.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    while let Ok(intent) = intent_rx.try_recv() {
+                        if let Ok(mut p) = presenter_for_thread.lock() {
+                            p.handle_intent(intent);
+                        }
+                    }
+                    if let Ok(mut p) = presenter_for_thread.lock() {
+                        p.poll_workflow();
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            });
+            Some(tddy_service::TerminalServiceImplPerConnection::new(factory))
+        } else {
+            None
+        };
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("create tokio runtime")?;
 
     rt.block_on(async {
         let addr: std::net::SocketAddr = ([0, 0, 0, 0], port).into();
@@ -611,6 +665,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         if livekit_enabled {
             let url = args.livekit_url.as_ref().unwrap().clone();
             let shutdown_clone = shutdown.clone();
+            let terminal_service =
+                terminal_service_for_livekit.expect("terminal_service set when livekit_enabled");
             if has_key_secret {
                 let token_generator = tddy_livekit::TokenGenerator::new(
                     args.livekit_api_key.as_ref().unwrap().clone(),
@@ -623,7 +679,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     tddy_livekit::LiveKitParticipant::run_with_reconnect(
                         &url,
                         &token_generator,
-                        tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl),
+                        tddy_service::TerminalServiceServer::new(terminal_service),
                         tddy_livekit::RoomOptions::default(),
                         shutdown_clone,
                     )
@@ -635,7 +691,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     let participant = match tddy_livekit::LiveKitParticipant::connect(
                         &url,
                         &token,
-                        tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl),
+                        tddy_service::TerminalServiceServer::new(terminal_service),
                         tddy_livekit::RoomOptions::default(),
                     )
                     .await

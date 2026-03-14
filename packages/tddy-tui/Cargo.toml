@@ -15,6 +15,7 @@ crossterm = "0.29"
 tui-markdown = "0.3"
 log = "0.4"
 anyhow = "1"
+tokio = { version = "1", features = ["rt", "sync", "time"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
