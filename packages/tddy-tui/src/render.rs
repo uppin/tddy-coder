@@ -408,7 +408,7 @@ fn render_inbox(
 mod tests {
     use super::*;
     use std::time::Instant;
-    use tddy_core::{ActivityEntry, AppMode, PresenterState};
+    use tddy_core::{AppMode, PresenterState};
 
     fn make_state(mode: AppMode) -> PresenterState {
         PresenterState {

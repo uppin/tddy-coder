@@ -98,7 +98,7 @@ When `--grpc` is set with TUI, the gRPC server exposes `StreamTerminal` RPC:
 
 1. `tddy-demo --grpc` starts both TUI and gRPC server
 2. A gRPC client can connect and send a `SubmitFeatureInput` intent
-3. The gRPC client receives `PresenterView` events (mode changes, activity log entries, etc.) as the workflow progresses
+3. The gRPC client receives `PresenterView` events (mode changes, activity log entries, etc.) as the workflow progresses. When a workflow completes with an empty inbox, clients receive `ModeChanged(FeatureInput)` and can immediately send a new `SubmitFeatureInput` to start another workflow
 4. The TUI and gRPC client see the same state — sending an intent from either side updates both
 5. Tests in `tddy-grpc` verify bidirectional event flow using an in-process gRPC client connected to a test Presenter instance
 6. `cargo test -p tddy-grpc` passes with all acceptance tests

@@ -19,7 +19,7 @@ pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
 pub use service::TddyRemoteService;
 pub use tddy_rpc::Status;
-pub use terminal_service::TerminalServiceImpl;
+pub use terminal_service::{TerminalServiceImpl, TerminalServiceImplPerConnection};
 pub use token_service::{TokenProvider, TokenServiceImpl};
 
 pub mod gen {
@@ -44,25 +44,6 @@ mod integration_tests;
 
 #[cfg(test)]
 mod test_util {
-    use tddy_core::{ActivityEntry, AppMode, PresenterView};
-
-    /// Minimal PresenterView for tests (no-op).
-    pub struct NoopView;
-
-    impl PresenterView for NoopView {
-        fn on_mode_changed(&mut self, _mode: &AppMode) {}
-        fn on_activity_logged(&mut self, _entry: &ActivityEntry, _activity_log_len: usize) {}
-        fn on_goal_started(&mut self, _goal: &str) {}
-        fn on_state_changed(&mut self, _from: &str, _to: &str) {}
-        fn on_workflow_complete(
-            &mut self,
-            _result: &Result<tddy_core::WorkflowCompletePayload, String>,
-        ) {
-        }
-        fn on_agent_output(&mut self, _text: &str) {}
-        fn on_inbox_changed(&mut self, _inbox: &[String]) {}
-    }
-
     /// Spawn a gRPC server on an ephemeral port. Returns the endpoint URL
     /// and the server's JoinHandle. Yields once to let the server start.
     pub async fn spawn_server(

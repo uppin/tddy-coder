@@ -53,6 +53,7 @@ function LiveKitConnectedStory(args: {
   roomName?: string;
   showBufferTextForTest?: boolean;
   debugMode?: boolean;
+  debugLogging?: boolean;
 }) {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const url = params?.get("url") ?? args.url ?? "";
@@ -60,6 +61,7 @@ function LiveKitConnectedStory(args: {
   const roomName = params?.get("roomName") ?? args.roomName ?? "terminal-e2e";
   const showBufferTextForTest = args.showBufferTextForTest ?? true;
   const debugMode = args.debugMode ?? params?.get("debugMode") === "1";
+  const debugLogging = args.debugLogging ?? params?.get("debugLogging") === "1";
 
   if (!url || !token) {
     return (
@@ -76,12 +78,15 @@ function LiveKitConnectedStory(args: {
       roomName={roomName}
       showBufferTextForTest={showBufferTextForTest}
       debugMode={debugMode}
+      debugLogging={debugLogging}
     />
   );
 }
 
 export const LiveKitConnected: StoryObj<typeof GhosttyTerminalLiveKit> = {
-  render: (args) => <LiveKitConnectedStory {...args} />,
+  render: (args: Parameters<typeof LiveKitConnectedStory>[0]) => (
+    <LiveKitConnectedStory {...args} />
+  ),
   args: {
     url: "",
     token: "",
@@ -92,5 +97,27 @@ export const LiveKitConnected: StoryObj<typeof GhosttyTerminalLiveKit> = {
     url: { control: "text" },
     token: { control: "text" },
     roomName: { control: "text" },
+  },
+};
+
+/** Minimal LiveKit terminal for echo E2E: only loads terminal RPC, no debug panel. OCR asserts on rendered output. Add ?debugLogging=1 to URL for data flow logs. */
+export const LiveKitEcho: StoryObj<typeof GhosttyTerminalLiveKit> = {
+  render: (args: Parameters<typeof LiveKitConnectedStory>[0]) => (
+    <LiveKitConnectedStory
+      {...args}
+      showBufferTextForTest={false}
+      debugMode={false}
+      debugLogging={args.debugLogging}
+    />
+  ),
+  args: {
+    url: "",
+    token: "",
+    roomName: "terminal-e2e",
+  },
+  argTypes: {
+    url: { control: false },
+    token: { control: false },
+    roomName: { control: false },
   },
 };

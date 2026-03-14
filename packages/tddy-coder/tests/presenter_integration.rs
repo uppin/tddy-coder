@@ -1,4 +1,4 @@
-//! Integration tests: Presenter with TestView and StubBackend.
+//! Integration tests: Presenter with broadcast event collection and StubBackend.
 //!
 //! Scenario-based tests that drive the full workflow without a terminal.
 
@@ -10,14 +10,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tddy_coder::{ActivityEntry, AppMode, Presenter, PresenterView, UserIntent};
+use tddy_coder::{ActivityEntry, AppMode, Presenter, UserIntent};
 use tddy_core::{
     backend::{CodingBackend, Goal, InvokeRequest, InvokeResponse},
     output::{SESSIONS_SUBDIR, TDDY_SESSIONS_DIR_ENV},
-    BackendError, SharedBackend, StubBackend, WorkflowCompletePayload,
+    AnyBackend, BackendError, PresenterEvent, SharedBackend, StubBackend, WorkflowCompletePayload,
 };
+use tokio::sync::broadcast;
 
-/// Events collected by TestView for assertions.
+/// Events collected from broadcast for assertions.
 #[derive(Debug, Clone)]
 pub enum TestEvent {
     ModeChanged(AppMode),
@@ -29,59 +30,52 @@ pub enum TestEvent {
     InboxChanged(Vec<String>),
 }
 
-/// TestView: implements PresenterView and collects all events.
-pub struct TestView {
-    pub events: Vec<TestEvent>,
+fn presenter_event_to_test_event(ev: PresenterEvent) -> Option<TestEvent> {
+    match ev {
+        PresenterEvent::ModeChanged(mode) => Some(TestEvent::ModeChanged(mode)),
+        PresenterEvent::ActivityLogged(entry) => Some(TestEvent::ActivityLogged(entry)),
+        PresenterEvent::GoalStarted(goal) => Some(TestEvent::GoalStarted(goal)),
+        PresenterEvent::StateChanged { from, to } => Some(TestEvent::StateChanged { from, to }),
+        PresenterEvent::WorkflowComplete(result) => Some(TestEvent::WorkflowComplete(result)),
+        PresenterEvent::AgentOutput(text) => Some(TestEvent::AgentOutput(text)),
+        PresenterEvent::InboxChanged(inbox) => Some(TestEvent::InboxChanged(inbox)),
+        PresenterEvent::IntentReceived(_) => None,
+    }
 }
 
-impl TestView {
-    pub fn new() -> Self {
-        TestView { events: Vec::new() }
+/// Collects events from broadcast receiver. Call drain() during the loop to accumulate.
+struct EventCollector {
+    rx: broadcast::Receiver<PresenterEvent>,
+    events: Vec<TestEvent>,
+}
+
+impl EventCollector {
+    fn new(rx: broadcast::Receiver<PresenterEvent>) -> Self {
+        Self {
+            rx,
+            events: Vec::new(),
+        }
     }
 
-    pub fn events(&self) -> &[TestEvent] {
+    fn drain(&mut self) {
+        while let Ok(ev) = self.rx.try_recv() {
+            if let Some(te) = presenter_event_to_test_event(ev) {
+                self.events.push(te);
+            }
+        }
+    }
+
+    fn events(&self) -> &[TestEvent] {
         &self.events
     }
 }
 
-impl Default for TestView {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl PresenterView for TestView {
-    fn on_mode_changed(&mut self, mode: &AppMode) {
-        self.events.push(TestEvent::ModeChanged(mode.clone()));
-    }
-
-    fn on_activity_logged(&mut self, entry: &ActivityEntry, _activity_log_len: usize) {
-        self.events.push(TestEvent::ActivityLogged(entry.clone()));
-    }
-
-    fn on_goal_started(&mut self, goal: &str) {
-        self.events.push(TestEvent::GoalStarted(goal.to_string()));
-    }
-
-    fn on_state_changed(&mut self, from: &str, to: &str) {
-        self.events.push(TestEvent::StateChanged {
-            from: from.to_string(),
-            to: to.to_string(),
-        });
-    }
-
-    fn on_workflow_complete(&mut self, result: &Result<WorkflowCompletePayload, String>) {
-        self.events
-            .push(TestEvent::WorkflowComplete(result.clone()));
-    }
-
-    fn on_agent_output(&mut self, text: &str) {
-        self.events.push(TestEvent::AgentOutput(text.to_string()));
-    }
-
-    fn on_inbox_changed(&mut self, inbox: &[String]) {
-        self.events.push(TestEvent::InboxChanged(inbox.to_vec()));
-    }
+/// Creates a Presenter with broadcast and an EventCollector for assertions.
+fn presenter_with_events() -> (Presenter, EventCollector) {
+    let (event_tx, event_rx) = broadcast::channel(256);
+    let presenter = Presenter::new("stub", "default").with_broadcast(event_tx);
+    let collector = EventCollector::new(event_rx);
+    (presenter, collector)
 }
 
 fn create_stub_backend() -> SharedBackend {
@@ -135,8 +129,7 @@ fn create_asserting_repo_backend() -> SharedBackend {
 /// Full workflow scenario: SubmitFeatureInput → run to completion → assert WorkflowComplete(Ok).
 #[test]
 fn full_workflow_completes_with_stub_backend() {
-    let view = TestView::new();
-    let mut presenter = Presenter::new(view, "stub", "default");
+    let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-full");
 
@@ -158,6 +151,7 @@ fn full_workflow_completes_with_stub_backend() {
     let max_iterations = 4000;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
+        events.drain();
         if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
             presenter.handle_intent(UserIntent::ApprovePlan);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
@@ -178,20 +172,123 @@ fn full_workflow_completes_with_stub_backend() {
         presenter.state().mode
     );
 
-    let events = presenter.view_mut().events();
+    events.drain();
+    let evs = events.events();
     assert!(
-        events
-            .iter()
+        evs.iter()
             .any(|e| matches!(e, TestEvent::GoalStarted(g) if g == "plan")),
         "expected GoalStarted(plan) in events: {:?}",
-        events
+        evs
     );
     assert!(
-        events
-            .iter()
+        evs.iter()
             .any(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_)))),
         "expected WorkflowComplete(Ok) in events: {:?}",
-        events
+        evs
+    );
+
+    // Acceptance: success completion transitions to FeatureInput (not Done)
+    assert!(
+        matches!(presenter.state().mode, AppMode::FeatureInput),
+        "after workflow completion, mode should be FeatureInput (ready for new workflow), got {:?}",
+        presenter.state().mode
+    );
+}
+
+/// Acceptance: SubmitFeatureInput after completion spawns new workflow.
+/// Workflow completes -> FeatureInput -> user submits new feature -> new workflow runs to completion.
+#[test]
+fn submit_feature_input_after_completion_restarts_workflow() {
+    let (mut presenter, mut events) = presenter_with_events();
+    let backend = create_stub_backend();
+    let output_dir = std::env::temp_dir().join("tddy-presenter-test-restart");
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
+    presenter.start_workflow(
+        backend.clone(),
+        output_dir.clone(),
+        None,
+        Some("Build auth".to_string()),
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+    );
+
+    let mut iterations = 0;
+    let max_iterations = 500;
+    while !presenter.is_done() && iterations < max_iterations {
+        presenter.poll_workflow();
+        events.drain();
+        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+            presenter.handle_intent(UserIntent::ApprovePlan);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        presenter.is_done(),
+        "first workflow should complete within {} iterations",
+        max_iterations
+    );
+    assert!(
+        matches!(presenter.state().mode, AppMode::FeatureInput),
+        "after first completion, mode should be FeatureInput"
+    );
+
+    events.drain();
+    let first_complete_count = events
+        .events()
+        .iter()
+        .filter(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_))))
+        .count();
+    assert_eq!(
+        first_complete_count, 1,
+        "expected exactly one WorkflowComplete(Ok) so far"
+    );
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth 2".to_string()));
+
+    iterations = 0;
+    while !presenter.is_done() && iterations < max_iterations {
+        presenter.poll_workflow();
+        events.drain();
+        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+            presenter.handle_intent(UserIntent::ApprovePlan);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        presenter.is_done(),
+        "second workflow should complete within {} iterations",
+        max_iterations
+    );
+
+    let total_complete_count = events
+        .events()
+        .iter()
+        .filter(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_))))
+        .count();
+    assert_eq!(
+        total_complete_count, 2,
+        "expected two WorkflowComplete(Ok) events (one per workflow)"
     );
 }
 
@@ -208,8 +305,7 @@ fn plan_dir_under_sessions_base_when_output_dir_is_dot() {
 
     let (repo_dir, _) = common::temp_dir_with_git_repo("plan-dir-test");
 
-    let view = TestView::new();
-    let mut presenter = Presenter::new(view, "stub", "default");
+    let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
 
     let original_cwd = std::env::current_dir().expect("cwd");
@@ -233,6 +329,7 @@ fn plan_dir_under_sessions_base_when_output_dir_is_dot() {
     let max_iterations = 4000;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
+        events.drain();
         if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
             presenter.handle_intent(UserIntent::ApprovePlan);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
@@ -255,8 +352,8 @@ fn plan_dir_under_sessions_base_when_output_dir_is_dot() {
         presenter.state().mode
     );
 
-    let payload = presenter
-        .view_mut()
+    events.drain();
+    let payload = events
         .events()
         .iter()
         .find_map(|e| match e {
@@ -384,8 +481,7 @@ fn plan_dir_under_sessions_refine_uses_repo_as_working_dir() {
 /// Clarification scenario: StubBackend with CLARIFY → AnswerSelect → assert answers sent.
 #[test]
 fn clarification_roundtrip_sends_answers() {
-    let view = TestView::new();
-    let mut presenter = Presenter::new(view, "stub", "default");
+    let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-clarify");
 
@@ -406,6 +502,7 @@ fn clarification_roundtrip_sends_answers() {
     let max_iterations = 4000;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
+        events.drain();
         if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
             presenter.handle_intent(UserIntent::ApprovePlan);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
@@ -425,14 +522,15 @@ fn clarification_roundtrip_sends_answers() {
         max_iterations,
         presenter.state().mode
     );
-    let events = presenter.view_mut().events();
+    events.drain();
+    let evs = events.events();
     assert!(
-        events.iter().any(
+        evs.iter().any(
             |e| matches!(e, TestEvent::ModeChanged(AppMode::Select { .. }))
                 || matches!(e, TestEvent::ModeChanged(AppMode::PlanReview { .. }))
         ),
         "expected Select mode during clarification: {:?}",
-        events
+        evs
     );
     let result = presenter
         .take_workflow_result()
@@ -447,8 +545,7 @@ fn clarification_roundtrip_sends_answers() {
 /// Inbox scenario: QueuePrompt during Running → WorkflowComplete → assert dequeued.
 #[test]
 fn inbox_queue_and_dequeue() {
-    let view = TestView::new();
-    let mut presenter = Presenter::new(view, "stub", "default");
+    let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-inbox");
 
@@ -471,6 +568,7 @@ fn inbox_queue_and_dequeue() {
     let mut queued = false;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
+        events.drain();
         // Handle intents; approve sets Running, so we can queue in same iteration.
         if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
             presenter.handle_intent(UserIntent::ApprovePlan);
@@ -494,21 +592,20 @@ fn inbox_queue_and_dequeue() {
         max_iterations,
         presenter.state().mode
     );
-    let events = presenter.view_mut().events();
+    events.drain();
+    let evs = events.events();
     assert!(
-        events
-            .iter()
+        evs.iter()
             .any(|e| matches!(e, TestEvent::InboxChanged(inbox) if inbox.len() == 1)),
         "expected InboxChanged with 1 item: {:?}",
-        events
+        evs
     );
 }
 
 /// Plan approval: After plan completes, PlanReview mode appears. ApprovePlan proceeds to next step.
 #[test]
 fn plan_approval_approve_proceeds_to_next_step() {
-    let view = TestView::new();
-    let mut presenter = Presenter::new(view, "stub", "default");
+    let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-plan-approve");
 
@@ -530,6 +627,7 @@ fn plan_approval_approve_proceeds_to_next_step() {
     let max_iterations = 4000;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
+        events.drain();
         if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
             presenter.handle_intent(UserIntent::ApprovePlan);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
@@ -549,28 +647,26 @@ fn plan_approval_approve_proceeds_to_next_step() {
         max_iterations,
         presenter.state().mode
     );
-    let events = presenter.view_mut().events();
+    events.drain();
+    let evs = events.events();
     assert!(
-        events
-            .iter()
+        evs.iter()
             .any(|e| matches!(e, TestEvent::ModeChanged(AppMode::PlanReview { .. }))),
         "expected PlanReview mode: {:?}",
-        events
+        evs
     );
     assert!(
-        events
-            .iter()
+        evs.iter()
             .any(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_)))),
         "expected WorkflowComplete(Ok): {:?}",
-        events
+        evs
     );
 }
 
 /// Plan approval: ViewPlan opens MarkdownViewer, DismissViewer returns to PlanReview, ApprovePlan proceeds.
 #[test]
 fn plan_approval_view_then_approve() {
-    let view = TestView::new();
-    let mut presenter = Presenter::new(view, "stub", "default");
+    let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-plan-view");
 
@@ -593,6 +689,7 @@ fn plan_approval_view_then_approve() {
     let mut viewed = false;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
+        events.drain();
         if matches!(presenter.state().mode, AppMode::MarkdownViewer { .. }) {
             if !viewed {
                 presenter.handle_intent(UserIntent::DismissViewer);
@@ -621,21 +718,20 @@ fn plan_approval_view_then_approve() {
         max_iterations,
         presenter.state().mode
     );
-    let events = presenter.view_mut().events();
+    events.drain();
+    let evs = events.events();
     assert!(
-        events
-            .iter()
+        evs.iter()
             .any(|e| matches!(e, TestEvent::ModeChanged(AppMode::MarkdownViewer { .. }))),
         "expected MarkdownViewer mode: {:?}",
-        events
+        evs
     );
 }
 
 /// Plan approval: RefinePlan enters TextInput, AnswerText sends feedback, plan re-runs, approval re-appears.
 #[test]
 fn plan_approval_refine_re_shows_approval() {
-    let view = TestView::new();
-    let mut presenter = Presenter::new(view, "stub", "default");
+    let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-plan-refine");
 
@@ -658,6 +754,7 @@ fn plan_approval_refine_re_shows_approval() {
     let mut plan_review_count = 0;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
+        events.drain();
         if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
             plan_review_count += 1;
             if plan_review_count == 1 {
@@ -694,8 +791,7 @@ fn plan_approval_refine_re_shows_approval() {
 /// Asserts presenter is_done() and PlanReview appears exactly once (no return to PlanReview after viewer approval).
 #[test]
 fn plan_approval_from_markdown_viewer() {
-    let view = TestView::new();
-    let mut presenter = Presenter::new(view, "stub", "default");
+    let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-viewer-approve");
 
@@ -718,6 +814,7 @@ fn plan_approval_from_markdown_viewer() {
     let mut approved_from_viewer = false;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
+        events.drain();
         if matches!(presenter.state().mode, AppMode::PlanReview { .. }) && !approved_from_viewer {
             presenter.handle_intent(UserIntent::ViewPlan);
         } else if matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
@@ -742,23 +839,23 @@ fn plan_approval_from_markdown_viewer() {
         presenter.state().mode
     );
 
-    let events = presenter.view_mut().events();
-    let plan_review_count = events
+    events.drain();
+    let evs = events.events();
+    let plan_review_count = evs
         .iter()
         .filter(|e| matches!(e, TestEvent::ModeChanged(AppMode::PlanReview { .. })))
         .count();
     assert_eq!(
         plan_review_count, 1,
         "PlanReview should appear exactly once when approving directly from viewer: {:?}",
-        events
+        evs
     );
 }
 
 /// Error scenario: StubBackend with FAIL_INVOKE → assert WorkflowComplete(Err).
 #[test]
 fn workflow_error_propagates() {
-    let view = TestView::new();
-    let mut presenter = Presenter::new(view, "stub", "default");
+    let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let output_dir = std::env::temp_dir().join("tddy-presenter-test-error");
 
@@ -782,16 +879,17 @@ fn workflow_error_propagates() {
     let max_iterations = 200;
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
+        events.drain();
         iterations += 1;
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    let events = presenter.view_mut().events();
+    events.drain();
+    let evs = events.events();
     assert!(
-        events
-            .iter()
+        evs.iter()
             .any(|e| matches!(e, TestEvent::WorkflowComplete(Err(_)))),
         "expected WorkflowComplete(Err) for FAIL_INVOKE: {:?}",
-        events
+        evs
     );
 }

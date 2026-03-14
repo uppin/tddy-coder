@@ -115,9 +115,19 @@ export class LiveKitTransport implements Transport {
             this.pendingStreams.delete(requestId);
           } else {
             if (response.responseMessage && response.responseMessage.length > 0) {
+              if (this.debug) {
+                console.log(
+                  `[LiveKitTransport] stream chunk request_id=${requestId} bytes=${response.responseMessage.length} endOfStream=${response.endOfStream}`
+                );
+              }
               streamQueue.enqueue(response.responseMessage);
             }
             if (response.endOfStream) {
+              if (this.debug) {
+                console.log(
+                  `[LiveKitTransport] stream ended request_id=${requestId}`
+                );
+              }
               streamQueue.close();
               this.pendingStreams.delete(requestId);
             }

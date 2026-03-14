@@ -12,7 +12,7 @@ pub use events::WorkflowCompletePayload;
 pub use events::WorkflowEvent;
 
 pub use intent::UserIntent;
-pub use presenter_events::{PresenterEvent, PresenterHandle};
+pub use presenter_events::{PresenterEvent, PresenterHandle, ViewConnection};
 pub use presenter_impl::Presenter;
 pub use state::{ActivityEntry, ActivityKind, AppMode, PresenterState};
 pub use view::PresenterView;

@@ -1,21 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { createClient } from "@connectrpc/connect";
+import { createConnectTransport } from "@connectrpc/connect-web";
 import { GhosttyTerminalLiveKit } from "./components/GhosttyTerminalLiveKit";
+import { TokenService } from "./gen/token_pb";
 
-function getParamsFromUrl(): { url: string; token: string; roomName: string } {
+function getParamsFromUrl(): { url: string; identity: string; roomName: string } {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   return {
     url: params?.get("url") ?? "",
-    token: params?.get("token") ?? "",
+    identity: params?.get("identity") ?? "",
     roomName: params?.get("roomName") ?? "terminal-e2e",
   };
 }
 
-function pushParamsToUrl(url: string, token: string, roomName: string): void {
+function pushParamsToUrl(url: string, identity: string, roomName: string): void {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams();
   if (url) params.set("url", url);
-  if (token) params.set("token", token);
+  if (identity) params.set("identity", identity);
   if (roomName) params.set("roomName", roomName);
   const search = params.toString();
   const newUrl = search ? `${window.location.pathname}?${search}` : window.location.pathname;
@@ -39,24 +42,104 @@ const inputStyle = {
 
 const labelStyle = { display: "block", marginBottom: 4, fontWeight: 500 };
 
-function App() {
+function createTokenClient() {
+  const transport = createConnectTransport({
+    baseUrl:
+      typeof window !== "undefined"
+        ? `${window.location.origin}/rpc`
+        : "",
+    useBinaryFormat: true,
+  });
+  return createClient(TokenService, transport);
+}
+
+function ConnectedTerminal({
+  url,
+  identity,
+  roomName,
+}: {
+  url: string;
+  identity: string;
+  roomName: string;
+}) {
+  const client = useMemo(() => createTokenClient(), []);
+  const [initialToken, setInitialToken] = useState<string | null>(null);
+  const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    client
+      .generateToken({ room: roomName, identity })
+      .then((res) => {
+        setInitialToken(res.token);
+        setTtlSeconds(res.ttlSeconds);
+      })
+      .catch((e) => {
+        setError(
+          e instanceof Error
+            ? e.message
+            : "Token fetch failed. Ensure tddy-coder is running with --livekit-api-key and --livekit-api-secret."
+        );
+      });
+  }, [client, roomName, identity]);
+
+  const getToken = useMemo(
+    () => async () => {
+      const res = await client.refreshToken({ room: roomName, identity });
+      return { token: res.token, ttlSeconds: res.ttlSeconds };
+    },
+    [client, roomName, identity]
+  );
+
+  if (error) {
+    return (
+      <div style={{ padding: 24 }}>
+        <div data-testid="livekit-error">{error}</div>
+      </div>
+    );
+  }
+  if (!initialToken || ttlSeconds === null) {
+    return (
+      <div style={{ padding: 24 }}>
+        <div data-testid="livekit-status">connecting</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+      <GhosttyTerminalLiveKit
+        url={url}
+        token={initialToken}
+        getToken={getToken}
+        ttlSeconds={ttlSeconds}
+        roomName={roomName}
+        debugMode={false}
+      />
+    </div>
+  );
+}
+
+export function App() {
   const [url, setUrl] = useState("");
-  const [token, setToken] = useState("");
+  const [identity, setIdentity] = useState("");
   const [roomName, setRoomName] = useState("terminal-e2e");
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const { url: u, token: t, roomName: r } = getParamsFromUrl();
+    const { url: u, identity: i, roomName: r } = getParamsFromUrl();
     setUrl(u);
-    setToken(t);
+    setIdentity(i);
     setRoomName(r);
   }, []);
 
-  if (connected && url && token) {
+  if (connected && url && identity) {
     return (
-      <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-        <GhosttyTerminalLiveKit url={url} token={token} roomName={roomName} debugMode={true} />
-      </div>
+      <ConnectedTerminal
+        url={url}
+        identity={identity}
+        roomName={roomName}
+      />
     );
   }
 
@@ -66,8 +149,8 @@ function App() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (url && token) {
-            pushParamsToUrl(url, token, roomName);
+          if (url && identity) {
+            pushParamsToUrl(url, identity, roomName);
             setConnected(true);
           }
         }}
@@ -77,21 +160,23 @@ function App() {
         </label>
         <input
           id="livekit-url"
+          data-testid="livekit-url"
           type="text"
           placeholder="ws://192.168.1.10:7880"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           style={inputStyle}
         />
-        <label style={labelStyle} htmlFor="livekit-token">
-          Token
+        <label style={labelStyle} htmlFor="livekit-identity">
+          Identity
         </label>
         <input
-          id="livekit-token"
-          type="password"
-          placeholder="JWT access token"
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
+          id="livekit-identity"
+          data-testid="livekit-identity"
+          type="text"
+          placeholder="client"
+          value={identity}
+          onChange={(e) => setIdentity(e.target.value)}
           style={inputStyle}
         />
         <label style={labelStyle} htmlFor="livekit-room">
@@ -99,19 +184,20 @@ function App() {
         </label>
         <input
           id="livekit-room"
+          data-testid="livekit-room"
           type="text"
           placeholder="terminal-e2e"
           value={roomName}
           onChange={(e) => setRoomName(e.target.value)}
           style={inputStyle}
         />
-        <button type="submit" disabled={!url || !token}>
+        <button type="submit" disabled={!url || !identity}>
           Connect
         </button>
       </form>
       <p style={{ marginTop: 16, fontSize: 13, color: "#666" }}>
-        Generate a client token:{" "}
-        <code>lk token create --api-key devkey --api-secret secret --room {roomName || "terminal-e2e"} --identity client --join</code>
+        Token is fetched from the server via Connect-RPC. Ensure tddy-coder is running with
+        --livekit-api-key and --livekit-api-secret.
       </p>
     </div>
   );

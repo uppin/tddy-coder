@@ -1,14 +1,15 @@
 //! TddyRemote gRPC service implementation.
 
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc as tokio_mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::codec::Streaming;
 use tonic::{Request, Response, Status};
 
-use tddy_core::PresenterEvent;
-use tddy_core::PresenterHandle;
+use tddy_core::{PresenterEvent, PresenterHandle, ViewConnection};
+use tddy_tui::run_virtual_tui;
 
 use crate::convert::{client_message_to_intent, event_to_server_message};
 use crate::gen::{
@@ -23,6 +24,7 @@ pub struct TddyRemoteService {
     event_tx: broadcast::Sender<PresenterEvent>,
     intent_tx: mpsc::Sender<tddy_core::UserIntent>,
     terminal_byte_tx: Option<broadcast::Sender<Vec<u8>>>,
+    view_connection_factory: Option<Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>>,
 }
 
 impl TddyRemoteService {
@@ -31,11 +33,21 @@ impl TddyRemoteService {
             event_tx: handle.event_tx,
             intent_tx: handle.intent_tx,
             terminal_byte_tx: None,
+            view_connection_factory: None,
         }
     }
 
     pub fn with_terminal_bytes(mut self, tx: broadcast::Sender<Vec<u8>>) -> Self {
         self.terminal_byte_tx = Some(tx);
+        self
+    }
+
+    /// Use per-connection VirtualTui instead of shared broadcast for stream_terminal_io.
+    pub fn with_view_connection_factory(
+        mut self,
+        factory: Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>,
+    ) -> Self {
+        self.view_connection_factory = Some(factory);
         self
     }
 }
@@ -122,7 +134,33 @@ impl TddyRemote for TddyRemoteService {
         let (tx, rx) = tokio::sync::mpsc::channel(64);
         let mut client_stream = request.into_inner();
 
-        if let Some(ref byte_tx) = self.terminal_byte_tx {
+        if let Some(ref factory) = self.view_connection_factory {
+            if let Some(conn) = factory() {
+                let (output_tx, mut output_rx) = tokio_mpsc::channel(64);
+                let (input_tx, input_rx) = tokio_mpsc::channel(64);
+                let shutdown = Arc::new(AtomicBool::new(false));
+                let shutdown_clone = shutdown.clone();
+
+                run_virtual_tui(conn, output_tx, input_rx, shutdown_clone);
+
+                tokio::spawn(async move {
+                    while let Ok(Some(msg)) = client_stream.message().await {
+                        if !msg.data.is_empty() {
+                            let _ = input_tx.send(msg.data).await;
+                        }
+                    }
+                    shutdown.store(true, Ordering::Relaxed);
+                });
+
+                tokio::spawn(async move {
+                    while let Some(bytes) = output_rx.recv().await {
+                        if tx.send(Ok(TerminalOutput { data: bytes })).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        } else if let Some(ref byte_tx) = self.terminal_byte_tx {
             let mut byte_rx = byte_tx.subscribe();
             tokio::spawn(async move {
                 loop {

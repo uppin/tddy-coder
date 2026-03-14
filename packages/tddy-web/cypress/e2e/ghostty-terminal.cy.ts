@@ -31,14 +31,18 @@ describe("Ghostty Terminal E2E", () => {
       this.skip();
       return;
     }
-    return cy
-      .task("startTerminalServer")
-      .then((result: { url: string; clientToken: string; roomName: string; serverLogPath?: string }) => {
-        serverUrl = result.url;
-        clientToken = result.clientToken;
-        roomName = result.roomName;
-        serverLogPath = result.serverLogPath;
-      });
+    return cy.task("startTerminalServer").then((result) => {
+      const r = result as {
+        url: string;
+        clientToken: string;
+        roomName: string;
+        serverLogPath?: string;
+      };
+      serverUrl = r.url;
+      clientToken = r.clientToken;
+      roomName = r.roomName;
+      serverLogPath = r.serverLogPath;
+    });
   });
 
   after(function () {
