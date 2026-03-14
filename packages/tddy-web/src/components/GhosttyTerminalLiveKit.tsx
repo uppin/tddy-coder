@@ -11,9 +11,19 @@ import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 
 const SERVER_IDENTITY = "server";
 
+export interface TokenResult {
+  token: string;
+  ttlSeconds: bigint;
+}
+
 export interface GhosttyTerminalLiveKitProps {
   url: string;
-  token: string;
+  /** Pre-generated JWT token. When both token and getToken provided, used for initial connect; getToken used for refresh. */
+  token?: string;
+  /** Callback to fetch/refresh token from Connect-RPC. When provided with token, used for refresh only; otherwise for initial + refresh. */
+  getToken?: () => Promise<TokenResult>;
+  /** TTL in seconds for refresh schedule. Required when both token and getToken provided. */
+  ttlSeconds?: bigint;
   roomName?: string;
   showBufferTextForTest?: boolean;
   /** When true, skip Ghostty rendering and log RPC received data to console; expose count for test assertion. */
@@ -23,6 +33,8 @@ export interface GhosttyTerminalLiveKitProps {
 export function GhosttyTerminalLiveKit({
   url,
   token,
+  getToken,
+  ttlSeconds: ttlSecondsProp,
   roomName = "terminal-e2e",
   showBufferTextForTest = false,
   debugMode = false,
@@ -32,6 +44,8 @@ export function GhosttyTerminalLiveKit({
   const outputBufferRef = useRef<Uint8Array[]>([]);
   const streamedTextRef = useRef("");
   const termReadyRef = useRef(false);
+  const latestTokenRef = useRef<string | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<"connecting" | "connected" | "error">(
     "connecting"
   );
@@ -44,15 +58,59 @@ export function GhosttyTerminalLiveKit({
   useEffect(() => {
     let room: Room | null = null;
     let bufferInterval: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
 
     const run = async () => {
       try {
+        let initialToken: string;
+        let ttlSecondsForRefresh: bigint | null = null;
+        if (token && getToken && ttlSecondsProp !== undefined) {
+          initialToken = token;
+          latestTokenRef.current = token;
+          ttlSecondsForRefresh = ttlSecondsProp;
+        } else if (getToken) {
+          const result = await getToken();
+          initialToken = result.token;
+          latestTokenRef.current = result.token;
+          ttlSecondsForRefresh = result.ttlSeconds;
+        } else if (token) {
+          initialToken = token;
+        } else {
+          throw new Error("Either token or getToken must be provided");
+        }
+
+        if (getToken && ttlSecondsForRefresh !== null) {
+          const ttlMs = Number(ttlSecondsForRefresh) * 1000;
+          const refreshInMs = Math.max(0, ttlMs - 60 * 1000);
+          const scheduleRefresh = (delayMs: number) => {
+            refreshTimerRef.current = setTimeout(async () => {
+              try {
+                const next = await getToken();
+                latestTokenRef.current = next.token;
+                const nextTtlMs = Number(next.ttlSeconds) * 1000;
+                const nextRefreshMs = Math.max(0, nextTtlMs - 60 * 1000);
+                scheduleRefresh(nextRefreshMs);
+              } catch (e) {
+                console.warn("[GhosttyTerminalLiveKit] Token refresh failed:", e);
+              }
+            }, delayMs);
+          };
+          scheduleRefresh(refreshInMs);
+        }
+
         room = new Room();
 
         room.on(RoomEvent.Connected, () => console.log("[LiveKit] RoomEvent.Connected"));
-        room.on(RoomEvent.Disconnected, (_, reason) =>
-          console.log("[LiveKit] RoomEvent.Disconnected", reason)
-        );
+        room.on(RoomEvent.Disconnected, async (reason) => {
+          console.log("[LiveKit] RoomEvent.Disconnected", reason);
+          if (!cancelled && getToken && latestTokenRef.current) {
+            try {
+              await room!.connect(url, latestTokenRef.current);
+            } catch (e) {
+              console.warn("[GhosttyTerminalLiveKit] Reconnect failed:", e);
+            }
+          }
+        });
         room.on(RoomEvent.ConnectionStateChanged, (state) =>
           console.log("[LiveKit] ConnectionStateChanged", state)
         );
@@ -63,7 +121,7 @@ export function GhosttyTerminalLiveKit({
           console.log("[LiveKit] ParticipantDisconnected", participant.identity)
         );
 
-        await room.connect(url, token);
+        await room.connect(url, initialToken);
 
         const hasServer = () =>
           Array.from(room!.remoteParticipants.values()).some(
@@ -161,10 +219,12 @@ export function GhosttyTerminalLiveKit({
     run();
 
     return () => {
+      cancelled = true;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       if (bufferInterval) clearInterval(bufferInterval);
       if (room) room.disconnect();
     };
-  }, [url, token, roomName, showBufferTextForTest, debugMode]);
+  }, [url, token, getToken, ttlSecondsProp, roomName, showBufferTextForTest, debugMode]);
 
   return (
     <div>

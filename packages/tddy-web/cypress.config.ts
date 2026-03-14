@@ -19,6 +19,18 @@ function getTddyDemoPath(): string {
   return path.join(repoRoot, "target", "debug", "tddy-demo");
 }
 
+function getTddyCoderPath(): string {
+  const repoRoot = path.resolve(__dirname, "../..");
+  const release = path.join(repoRoot, "target", "release", "tddy-coder");
+  const debug = path.join(repoRoot, "target", "debug", "tddy-coder");
+  return fs.existsSync(release) ? release : debug;
+}
+
+function getWebBundlePath(): string {
+  const pkgDir = path.resolve(__dirname, "..");
+  return path.join(pkgDir, "dist");
+}
+
 export default defineConfig({
   component: {
     devServer: {
@@ -37,6 +49,7 @@ export default defineConfig({
     },
     setupNodeEvents(on) {
       let terminalServerProcess: ReturnType<typeof spawn> | null = null;
+      let tddyCoderProcess: ReturnType<typeof spawn> | null = null;
 
       const stopTerminalServer = () => {
         if (terminalServerProcess) {
@@ -45,8 +58,16 @@ export default defineConfig({
         }
       };
 
+      const stopTddyCoder = () => {
+        if (tddyCoderProcess) {
+          tddyCoderProcess.kill("SIGTERM");
+          tddyCoderProcess = null;
+        }
+      };
+
       on("after:run", () => {
         stopTerminalServer();
+        stopTddyCoder();
       });
 
       on("task", {
@@ -190,6 +211,91 @@ export default defineConfig({
         },
         stopTerminalServer() {
           stopTerminalServer();
+          return null;
+        },
+
+        async startTddyCoderForConnectFlow() {
+          const wsUrl = process.env.LIVEKIT_TESTKIT_WS_URL;
+          if (!wsUrl || wsUrl.trim() === "") {
+            throw new Error(
+              "LIVEKIT_TESTKIT_WS_URL must be set. Run ./run-livekit-testkit-server and export the URL."
+            );
+          }
+
+          const binaryPath = getTddyCoderPath();
+          if (!fs.existsSync(binaryPath)) {
+            throw new Error(
+              `tddy-coder binary not found. Run: cargo build -p tddy-coder`
+            );
+          }
+
+          const webBundlePath = getWebBundlePath();
+          if (!fs.existsSync(webBundlePath)) {
+            throw new Error(
+              `Web bundle not found at ${webBundlePath}. Run: bun run build`
+            );
+          }
+
+          const webPort = 8889;
+          const baseUrl = `http://127.0.0.1:${webPort}`;
+
+          return new Promise<{ baseUrl: string }>((resolve, reject) => {
+            const repoRoot = path.resolve(__dirname, "../..");
+            tddyCoderProcess = spawn(
+              binaryPath,
+              [
+                "--daemon",
+                "--livekit-url",
+                wsUrl,
+                "--livekit-api-key",
+                DEV_API_KEY,
+                "--livekit-api-secret",
+                DEV_API_SECRET,
+                "--livekit-room",
+                ROOM_NAME,
+                "--livekit-identity",
+                SERVER_IDENTITY,
+                "--web-port",
+                String(webPort),
+                "--web-host",
+                "127.0.0.1",
+                "--web-bundle-path",
+                webBundlePath,
+              ],
+              {
+                stdio: ["ignore", "pipe", "pipe"],
+                cwd: repoRoot,
+                env: { ...process.env, RUST_LOG: "info" },
+              }
+            );
+
+            const timeout = setTimeout(() => {
+              stopTddyCoder();
+              reject(new Error("tddy-coder web server did not become ready within 15s"));
+            }, 15000);
+
+            const interval = setInterval(() => {
+              fetch(`${baseUrl}/`)
+                .then((r) => {
+                  if (r.ok) {
+                    clearInterval(interval);
+                    clearTimeout(timeout);
+                    resolve({ baseUrl });
+                  }
+                })
+                .catch(() => {});
+            }, 300);
+
+            tddyCoderProcess.on("error", (err) => {
+              clearInterval(interval);
+              clearTimeout(timeout);
+              reject(err);
+            });
+          });
+        },
+
+        stopTddyCoderForConnectFlow() {
+          stopTddyCoder();
           return null;
         },
       });
