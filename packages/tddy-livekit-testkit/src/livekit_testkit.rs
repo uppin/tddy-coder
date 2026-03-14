@@ -86,13 +86,14 @@ impl LiveKitTestkit {
             .with_port(LIVEKIT_PORT.tcp())
             .with_expected_status_code(200u16);
 
-        // Fixed port mapping so --node-ip 127.0.0.1 ICE candidates are reachable from the host.
+        // Use ephemeral host ports to avoid conflicts when 7880 is already in use
+        // (e.g. from ./run-livekit-testkit-server). Set LIVEKIT_TESTKIT_WS_URL to reuse.
         let image = GenericImage::new(LIVEKIT_IMAGE, LIVEKIT_TAG)
+            .with_exposed_port(LIVEKIT_PORT.tcp())
+            .with_exposed_port(LIVEKIT_ICE_TCP_PORT.tcp())
+            .with_exposed_port(LIVEKIT_ICE_UDP_PORT.udp())
             .with_wait_for(WaitFor::from(http_wait))
-            .with_cmd(["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1"])
-            .with_mapped_port(LIVEKIT_PORT, LIVEKIT_PORT.tcp())
-            .with_mapped_port(LIVEKIT_ICE_TCP_PORT, LIVEKIT_ICE_TCP_PORT.tcp())
-            .with_mapped_port(LIVEKIT_ICE_UDP_PORT, LIVEKIT_ICE_UDP_PORT.udp());
+            .with_cmd(["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1"]);
 
         let container: testcontainers::ContainerAsync<GenericImage> = image.start().await?;
         let host_port = container.get_host_port_ipv4(LIVEKIT_PORT.tcp()).await?;

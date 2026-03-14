@@ -29,6 +29,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 | **Update Docs** | Reads planning artifacts and updates target repo documentation per repo guidelines |
 | **TUI** | Full ratatui interface: activity log, status bar, inbox, clarification prompts, plan approval |
 | **gRPC** | `--grpc` exposes bidirectional streaming for programmatic control (E2E tests, automation); `StreamTerminal` streams raw TUI bytes for remote viewing |
+| **LiveKit** | `--livekit-url`, `--livekit-room`, `--livekit-identity` with either `--livekit-token` or `--livekit-api-key`/`--livekit-api-secret`. Key/secret generate tokens locally and auto-refresh before expiry. |
 | **Web Bundle** | `--web-port` and `--web-bundle-path` serve pre-built tddy-web static assets over HTTP (TUI and daemon modes) |
 
 ## Feature Documents

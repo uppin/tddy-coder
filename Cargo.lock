@@ -5572,6 +5572,7 @@ dependencies = [
  "dashmap 5.5.3",
  "env_logger",
  "livekit",
+ "livekit-api",
  "log",
  "prost 0.13.5",
  "prost-build 0.13.5",

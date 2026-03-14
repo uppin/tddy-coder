@@ -8,6 +8,7 @@ pub mod client;
 pub mod envelope;
 pub mod participant;
 pub mod rpc_log;
+pub mod token;
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/rpc.rs"));
@@ -19,3 +20,4 @@ pub use envelope::{decode_request, encode_request, encode_response, response_fro
 pub use livekit::prelude::RoomOptions;
 pub use participant::LiveKitParticipant;
 pub use tddy_rpc::Status;
+pub use token::TokenGenerator;

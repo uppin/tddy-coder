@@ -2,7 +2,9 @@
 
 use livekit::prelude::*;
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 
 use tddy_rpc::{RequestMetadata, RpcMessage};
@@ -11,6 +13,7 @@ use crate::bridge::{ResponseBody, RpcBridge};
 use crate::envelope::{decode_request, encode_response, response_from_result};
 use crate::proto::{CallMetadata, RpcRequest};
 use crate::rpc_trace;
+use crate::token::TokenGenerator;
 
 const RPC_TOPIC: &str = "tddy-rpc";
 
@@ -61,6 +64,85 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             active_bidi: Arc::new(Mutex::new(HashMap::new())),
             pending_data: Arc::new(Mutex::new(VecDeque::new())),
         })
+    }
+
+    /// Connect to a LiveKit room using a pre-built RpcBridge.
+    /// Used by run_with_reconnect to share the same bridge across reconnection cycles.
+    pub(crate) async fn connect_with_bridge(
+        url: &str,
+        token: &str,
+        bridge: Arc<RpcBridge<S>>,
+        room_options: RoomOptions,
+    ) -> Result<Self, livekit::RoomError> {
+        log::debug!("LiveKitParticipant::connect_with_bridge url={}", url);
+        let (room, events) = Room::connect(url, token, room_options).await?;
+        log::info!(
+            "[echo_server] LiveKitParticipant connected, identity={:?}",
+            room.local_participant().identity()
+        );
+        Ok(Self {
+            room,
+            bridge,
+            events,
+            active_streams: Arc::new(Mutex::new(HashMap::new())),
+            active_bidi: Arc::new(Mutex::new(HashMap::new())),
+            pending_data: Arc::new(Mutex::new(VecDeque::new())),
+        })
+    }
+
+    /// Run the participant with automatic token refresh. Generates a token, connects,
+    /// runs the event loop until TTL-60s elapses, then reconnects with a fresh token.
+    /// Exits when the room disconnects or when `shutdown` becomes true.
+    pub async fn run_with_reconnect(
+        url: &str,
+        token_generator: &TokenGenerator,
+        service: S,
+        room_options: RoomOptions,
+        shutdown: Arc<AtomicBool>,
+    ) {
+        let bridge = Arc::new(RpcBridge::new(service));
+        loop {
+            let token = match token_generator.generate() {
+                Ok(t) => t,
+                Err(e) => {
+                    log::error!("Token generation failed: {}", e);
+                    return;
+                }
+            };
+            let participant =
+                match Self::connect_with_bridge(url, &token, bridge.clone(), room_options.clone())
+                    .await
+                {
+                    Ok(p) => {
+                        log::info!("READY");
+                        p
+                    }
+                    Err(e) => {
+                        log::error!("LiveKit connect failed: {}", e);
+                        return;
+                    }
+                };
+            let refresh_delay = token_generator.time_until_refresh();
+            let shutdown_clone = shutdown.clone();
+            tokio::select! {
+                _ = participant.run() => {
+                    log::info!("LiveKit participant disconnected");
+                    break;
+                }
+                _ = tokio::time::sleep(refresh_delay) => {
+                    log::info!("Token expiring, reconnecting with fresh token");
+                    continue;
+                }
+                _ = async {
+                    while !shutdown_clone.load(Ordering::Relaxed) {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                } => {
+                    log::info!("LiveKit shutdown requested");
+                    break;
+                }
+            }
+        }
     }
 
     /// Run the participant event loop. Processes DataReceived events for topic "tddy-rpc"
