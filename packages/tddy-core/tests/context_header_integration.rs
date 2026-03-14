@@ -11,7 +11,9 @@ use std::sync::Arc;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
-use common::{ctx_acceptance_tests, ctx_red, run_plan, write_changeset_for_plan_session};
+use common::{
+    ctx_acceptance_tests, ctx_red, run_plan, temp_dir_with_git_repo, write_changeset_for_plan_session,
+};
 use fixtures::{PLAN_JSON, RED_JSON_VALID};
 
 const ACCEPTANCE_TESTS_JSON: &str = r#"{"goal":"acceptance-tests","summary":"Created 1 test. Failing.","tests":[{"name":"test_foo","file":"src/foo.rs","line":1,"status":"failing"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test test_foo"}"#;
@@ -21,9 +23,7 @@ const ACCEPTANCE_TESTS_JSON: &str = r#"{"goal":"acceptance-tests","summary":"Cre
 /// Acceptance-tests prompt must start with the context header when PRD.md exists.
 #[tokio::test]
 async fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
-    let plan_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-prd");
-    let _ = std::fs::remove_dir_all(&plan_dir);
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = temp_dir_with_git_repo("ctx-hdr-at-prd", "feature");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-ctx-hdr-1");
 
@@ -38,7 +38,7 @@ async fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let _ = engine.run_goal("acceptance-tests", ctx).await.unwrap();
 
     let invocations = backend.invocations();
@@ -55,7 +55,7 @@ async fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
         "acceptance-tests prompt must contain marker inside context-reminder"
     );
 
-    let _ = std::fs::remove_dir_all(&plan_dir);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 // ── AC4: paths in header are absolute ─────────────────────────────────────────
@@ -63,9 +63,7 @@ async fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
 /// Context header must list PRD.md with an absolute path.
 #[tokio::test]
 async fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
-    let plan_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-abs");
-    let _ = std::fs::remove_dir_all(&plan_dir);
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = temp_dir_with_git_repo("ctx-hdr-at-abs", "feature");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-ctx-hdr-2");
 
@@ -80,7 +78,7 @@ async fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let _ = engine.run_goal("acceptance-tests", ctx).await.unwrap();
 
     let invocations = backend.invocations();
@@ -108,7 +106,7 @@ async fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
         path_str
     );
 
-    let _ = std::fs::remove_dir_all(&plan_dir);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 // ── AC3: missing artifacts not listed ─────────────────────────────────────────
@@ -116,9 +114,7 @@ async fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
 /// Context header must NOT mention artifacts that don't exist yet.
 #[tokio::test]
 async fn acceptance_tests_prompt_header_omits_missing_artifacts() {
-    let plan_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-omit");
-    let _ = std::fs::remove_dir_all(&plan_dir);
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = temp_dir_with_git_repo("ctx-hdr-at-omit", "feature");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-ctx-hdr-3");
 
@@ -133,7 +129,7 @@ async fn acceptance_tests_prompt_header_omits_missing_artifacts() {
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let _ = engine.run_goal("acceptance-tests", ctx).await.unwrap();
 
     let invocations = backend.invocations();
@@ -148,7 +144,7 @@ async fn acceptance_tests_prompt_header_omits_missing_artifacts() {
         "header must NOT list acceptance-tests.md when it does not exist"
     );
 
-    let _ = std::fs::remove_dir_all(&plan_dir);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 // ── header format: blank line separates header from prompt body ───────────────
@@ -156,9 +152,7 @@ async fn acceptance_tests_prompt_header_omits_missing_artifacts() {
 /// Header block must be followed by a blank line before the original prompt content.
 #[tokio::test]
 async fn acceptance_tests_prompt_header_separated_from_body_by_blank_line() {
-    let plan_dir = std::env::temp_dir().join("tddy-ctx-hdr-at-blank");
-    let _ = std::fs::remove_dir_all(&plan_dir);
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = temp_dir_with_git_repo("ctx-hdr-at-blank", "feature");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-ctx-hdr-blank");
 
@@ -173,7 +167,7 @@ async fn acceptance_tests_prompt_header_separated_from_body_by_blank_line() {
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let _ = engine.run_goal("acceptance-tests", ctx).await.unwrap();
 
     let invocations = backend.invocations();
@@ -201,7 +195,7 @@ async fn acceptance_tests_prompt_header_separated_from_body_by_blank_line() {
         "header section must contain marker inside tags"
     );
 
-    let _ = std::fs::remove_dir_all(&plan_dir);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 // ── AC1: red phase prompt includes header with multiple artifacts ─────────────

@@ -606,7 +606,9 @@ impl<V: PresenterView> Presenter<V> {
                         self.state.mode = AppMode::Running;
                         self.view.on_mode_changed(&self.state.mode);
                         self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
-                        // Workflow thread has exited; restart with dequeued prompt
+                        // Workflow thread has exited; restart with dequeued prompt.
+                        // Pass plan_dir so we resume in the same session (avoids re-creating worktree).
+                        let plan_dir = result.as_ref().ok().and_then(|p| p.plan_dir.clone());
                         if let (Some(backend), Some(output_dir)) = (
                             self.workflow_backend.clone(),
                             self.workflow_output_dir.clone(),
@@ -617,7 +619,7 @@ impl<V: PresenterView> Presenter<V> {
                             self.spawn_workflow(
                                 backend,
                                 output_dir,
-                                None,
+                                plan_dir,
                                 Some(prefixed),
                                 self.workflow_conversation_output.clone(),
                                 self.workflow_debug_output.clone(),

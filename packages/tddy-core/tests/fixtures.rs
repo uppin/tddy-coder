@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-pub const PLAN_JSON: &str = "{\"goal\":\"plan\",\"prd\":\"# Feature PRD\\n\\n## Summary\\nUser authentication system with login and logout.\\n\\n## Acceptance Criteria\\n- [ ] Login with email/password\\n- [ ] Logout clears session\\n\\n## TODO\\n\\n- [ ] Create auth module\\n- [ ] Implement login endpoint\\n- [ ] Implement logout endpoint\\n- [ ] Add session management\"}";
+pub const PLAN_JSON: &str = "{\"goal\":\"plan\",\"prd\":\"# Feature PRD\\n\\n## Summary\\nUser authentication system with login and logout.\\n\\n## Acceptance Criteria\\n- [ ] Login with email/password\\n- [ ] Logout clears session\\n\\n## TODO\\n\\n- [ ] Create auth module\\n- [ ] Implement login endpoint\\n- [ ] Implement logout endpoint\\n- [ ] Add session management\",\"branch_suggestion\":\"feature/auth\",\"worktree_suggestion\":\"feature-auth\"}";
 
 pub const PLAN_JSON_WITH_DISCOVERY: &str = r##"{"goal":"plan","prd":"# PRD\n## Summary\nAuth feature.\n\n## TODO\n\n- [ ] Task 1","discovery":{"toolchain":{"rust":"1.78.0","cargo":"from Cargo.toml"},"scripts":{"test":"cargo test","lint":"cargo clippy"},"doc_locations":["docs/ft/","packages/*/docs/"],"relevant_code":[{"path":"src/workflow/mod.rs","reason":"state machine"}],"test_infrastructure":{"runner":"cargo test","conventions":"tests/*.rs"}},"demo_plan":{"demo_type":"cli","setup_instructions":"Run cargo build","steps":[{"description":"Run the CLI","command_or_action":"cargo run","expected_result":"See output"}],"verification":"CLI runs without error"}}"##;
 

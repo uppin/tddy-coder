@@ -10,7 +10,10 @@
 
 mod common;
 
-use common::{ctx_acceptance_tests, ctx_green, plan_dir_for_input, write_changeset_with_state};
+use common::{
+    ctx_acceptance_tests, ctx_green, plan_dir_for_input, temp_dir_with_git_repo,
+    write_changeset_with_state,
+};
 use std::sync::Arc;
 use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
 use tddy_core::output::{create_session_dir_in, sessions_base_path};
@@ -70,12 +73,7 @@ async fn changeset_exists_before_workflow_starts() {
 /// Plan-mode sessions cannot be resumed; acceptance-tests must use a new session.
 #[tokio::test]
 async fn acceptance_tests_creates_fresh_session_no_crash() {
-    let output_dir = std::env::temp_dir().join("tddy-session-lifecycle-ac3");
-    let _ = std::fs::remove_dir_all(&output_dir);
-    std::fs::create_dir_all(&output_dir).expect("create");
-
-    let plan_dir = plan_dir_for_input(&output_dir, "Auth feature");
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = temp_dir_with_git_repo("session-lifecycle-ac3", "Auth feature");
 
     std::fs::write(
         plan_dir.join("PRD.md"),
@@ -95,7 +93,7 @@ async fn acceptance_tests_creates_fresh_session_no_crash() {
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let result = engine.run_goal("acceptance-tests", ctx).await;
 
     assert!(
@@ -110,7 +108,7 @@ async fn acceptance_tests_creates_fresh_session_no_crash() {
         result.status
     );
 
-    let _ = std::fs::remove_dir_all(&output_dir);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 /// AC4: Green step resumes from state.session_id (not from get_session_for_tag).

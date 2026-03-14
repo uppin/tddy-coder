@@ -164,9 +164,11 @@ impl Task for BackendInvokeTask {
         &self,
         context: Context,
     ) -> Result<TaskResult, Box<dyn std::error::Error + Send + Sync>> {
+        // Prefer prompt (set by before_* hooks, e.g. followup with answers) over feature_input.
+        // Hooks like before_acceptance_tests set prompt when resuming from clarification.
         let prompt: String = context
-            .get_sync("feature_input")
-            .or_else(|| context.get_sync("prompt"))
+            .get_sync("prompt")
+            .or_else(|| context.get_sync("feature_input"))
             .unwrap_or_else(|| "Add a feature".to_string());
 
         let plan_dir: Option<PathBuf> = context.get_sync("plan_dir");

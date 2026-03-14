@@ -111,10 +111,9 @@ fn ensure_worktree_for_acceptance_tests(
         context.set_sync("worktree_dir", PathBuf::from(wt));
         return Ok(());
     }
-    let output_dir: PathBuf = match context.get_sync("output_dir") {
-        Some(d) => d,
-        None => return Ok(()), // No output_dir (e.g. integration tests) — skip worktree creation
-    };
+    let output_dir: PathBuf = context
+        .get_sync("output_dir")
+        .ok_or("output_dir required for worktree creation")?;
     let repo_root = find_git_root(&output_dir);
     let worktree_path = setup_worktree_for_session(&repo_root, plan_dir)
         .map_err(|e| format!("worktree creation failed: {}", e))?;

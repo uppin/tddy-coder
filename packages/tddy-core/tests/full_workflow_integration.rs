@@ -94,9 +94,7 @@ async fn full_workflow_chains_all_steps() {
 /// StubBackend always asks clarification (plan) and permission (acceptance-tests).
 #[tokio::test]
 async fn full_workflow_with_stub_backend_reaches_green_complete() {
-    let output_dir = std::env::temp_dir().join("tddy-full-workflow-stub");
-    let _ = std::fs::remove_dir_all(&output_dir);
-    std::fs::create_dir_all(&output_dir).expect("create output dir");
+    let (output_dir, _) = temp_dir_with_git_repo("full-workflow-stub", "Add a feature");
 
     let backend = Arc::new(StubBackend::new());
     let storage_dir = std::env::temp_dir().join("tddy-full-stub-engine");
@@ -122,14 +120,14 @@ async fn full_workflow_with_stub_backend_reaches_green_complete() {
     .await
     .expect("plan should succeed with clarification answer");
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir.clone()), None, false);
     let result = engine.run_goal("acceptance-tests", ctx).await.unwrap();
     assert!(
         matches!(result.status, ExecutionStatus::WaitingForInput { .. }),
         "acceptance-tests should ask permission first"
     );
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some("Yes"), false);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir.clone()), Some("Yes"), false);
     let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();
@@ -171,9 +169,7 @@ fn next_goal_for_state_maps_states_correctly() {
 /// Resume from Planned: skip plan, run acceptance-tests -> red -> green -> evaluate -> validate -> refactor.
 #[tokio::test]
 async fn full_workflow_resume_from_planned() {
-    let plan_dir = std::env::temp_dir().join("tddy-full-resume-planned");
-    let _ = std::fs::remove_dir_all(&plan_dir);
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = temp_dir_with_git_repo("full-resume-planned", "Build auth");
     std::fs::write(
         plan_dir.join("PRD.md"),
         "# PRD\n## Testing Plan\n\n## TODO\n\n- [ ] Task 1",
@@ -198,7 +194,7 @@ async fn full_workflow_resume_from_planned() {
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();
@@ -210,7 +206,7 @@ async fn full_workflow_resume_from_planned() {
         "plan skipped; at, red, green, evaluate, validate, refactor, update-docs"
     );
 
-    let _ = std::fs::remove_dir_all(&plan_dir);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 /// Resume from AcceptanceTestsReady: skip plan and acceptance-tests, run red -> green -> evaluate -> validate -> refactor -> update-docs.
@@ -271,9 +267,7 @@ const DEMO_OUTPUT: &str = r#"{"goal":"demo","summary":"Demo ran successfully. CL
 /// AC1, AC7: Full workflow chains plan → acceptance-tests → red → green → demo → evaluate → validate → refactor
 #[tokio::test]
 async fn full_workflow_includes_demo_and_evaluate() {
-    let output_dir = std::env::temp_dir().join("tddy-full-wf-demo-evaluate");
-    let _ = std::fs::remove_dir_all(&output_dir);
-    std::fs::create_dir_all(&output_dir).expect("create output dir");
+    let (output_dir, _) = temp_dir_with_git_repo("full-wf-demo-evaluate", "Build auth");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
@@ -304,7 +298,7 @@ async fn full_workflow_includes_demo_and_evaluate() {
     )
     .expect("write demo-plan.md");
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, true);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir.clone()), None, true);
     let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();
@@ -322,9 +316,7 @@ async fn full_workflow_includes_demo_and_evaluate() {
 /// AC2, AC3: Full workflow where demo is skipped proceeds green → evaluate → validate → refactor → update-docs.
 #[tokio::test]
 async fn full_workflow_skip_demo_goes_to_evaluate() {
-    let output_dir = std::env::temp_dir().join("tddy-full-wf-skip-demo");
-    let _ = std::fs::remove_dir_all(&output_dir);
-    std::fs::create_dir_all(&output_dir).expect("create output dir");
+    let (output_dir, _) = temp_dir_with_git_repo("full-wf-skip-demo", "Build auth");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
@@ -348,7 +340,7 @@ async fn full_workflow_skip_demo_goes_to_evaluate() {
         .await
         .expect("plan should succeed");
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir.clone()), None, false);
     let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();
@@ -498,9 +490,7 @@ const UPDATE_DOCS_OUTPUT: &str =
 /// Phase 5 / PRD R7: Full workflow chains all 9 steps (plan through update-docs).
 #[tokio::test]
 async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
-    let output_dir = std::env::temp_dir().join("tddy-full-wf-8-steps");
-    let _ = std::fs::remove_dir_all(&output_dir);
-    std::fs::create_dir_all(&output_dir).expect("create output dir");
+    let (output_dir, _) = temp_dir_with_git_repo("full-wf-8-steps", "Build auth");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
@@ -531,7 +521,7 @@ async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
     )
     .expect("write demo-plan.md");
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, true);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir.clone()), None, true);
     let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();
@@ -771,9 +761,7 @@ async fn full_workflow_resumes_after_elicitation_approval() {
 /// Phase 5: Full workflow with skipped demo still includes validate, refactor, and update-docs.
 #[tokio::test]
 async fn full_workflow_skip_demo_includes_validate_and_refactor() {
-    let output_dir = std::env::temp_dir().join("tddy-full-wf-skip-demo-8");
-    let _ = std::fs::remove_dir_all(&output_dir);
-    std::fs::create_dir_all(&output_dir).expect("create output dir");
+    let (output_dir, _) = temp_dir_with_git_repo("full-wf-skip-demo-8", "Build auth");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
@@ -797,7 +785,7 @@ async fn full_workflow_skip_demo_includes_validate_and_refactor() {
         .await
         .expect("plan");
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir.clone()), None, false);
     let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();

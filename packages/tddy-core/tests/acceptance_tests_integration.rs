@@ -11,7 +11,9 @@ use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
-use common::{ctx_acceptance_tests, run_plan};
+use common::{
+    ctx_acceptance_tests, run_plan, temp_dir_with_git_repo, write_changeset_for_plan_session,
+};
 
 /// Plan output as JSON (tddy-tools submit format).
 const PLAN_JSON_OUTPUT: &str = "{\"goal\":\"plan\",\"prd\":\"# Feature PRD\\n\\n## Summary\\nUser authentication system with login and logout.\\n\\n## Testing Plan\\n\\n### Test Level\\nIntegration - changes how auth component interacts with session storage.\\n\\n### Acceptance Tests\\n- [ ] **Integration**: Login stores session token (packages/auth/tests/session.it.rs)\\n- [ ] **Integration**: Logout clears session (packages/auth/tests/session.it.rs)\\n\\n## TODO\\n\\n- [ ] Create auth module\\n- [ ] Implement login endpoint\"}";
@@ -21,10 +23,7 @@ const ACCEPTANCE_TESTS_JSON_OUTPUT: &str = r#"{"goal":"acceptance-tests","summar
 
 #[tokio::test]
 async fn acceptance_tests_workflow_reads_plan_dir_and_invokes_backend_with_resumed_session() {
-    let plan_dir = std::env::temp_dir().join("tddy-at-plan-dir-1");
-    let _ = std::fs::remove_dir_all(&plan_dir);
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
-
+    let (output_dir, plan_dir) = temp_dir_with_git_repo("at-plan-dir-1", "feature");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan\n- Test 1").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-resume-123");
 
@@ -39,7 +38,7 @@ async fn acceptance_tests_workflow_reads_plan_dir_and_invokes_backend_with_resum
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let context = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let context = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let result = engine.run_goal("acceptance-tests", context).await.unwrap();
 
     assert!(
@@ -61,14 +60,12 @@ async fn acceptance_tests_workflow_reads_plan_dir_and_invokes_backend_with_resum
     assert_eq!(output.tests[0].file, "packages/auth/tests/session.it.rs");
     assert_eq!(output.tests[0].status, "failing");
 
-    let _ = std::fs::remove_dir_all(&plan_dir);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 #[tokio::test]
 async fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_ready_states() {
-    let plan_dir = std::env::temp_dir().join("tddy-at-plan-dir-2");
-    let _ = std::fs::remove_dir_all(&plan_dir);
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = temp_dir_with_git_repo("at-plan-dir-2", "feature");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-456");
 
@@ -83,7 +80,7 @@ async fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_rea
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let context = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let context = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let result = engine.run_goal("acceptance-tests", context).await.unwrap();
 
     assert!(
@@ -98,14 +95,12 @@ async fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_rea
         "changeset state should be AcceptanceTestsReady"
     );
 
-    let _ = std::fs::remove_dir_all(&plan_dir);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 #[tokio::test]
 async fn acceptance_tests_workflow_returns_error_when_plan_dir_missing_prd() {
-    let plan_dir = std::env::temp_dir().join("tddy-at-plan-dir-no-prd");
-    let _ = std::fs::remove_dir_all(&plan_dir);
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = temp_dir_with_git_repo("at-plan-dir-no-prd", "feature");
     std::fs::write(plan_dir.join(".session"), "sess-789").expect("write .session");
 
     let backend = Arc::new(MockBackend::new());
@@ -117,19 +112,17 @@ async fn acceptance_tests_workflow_returns_error_when_plan_dir_missing_prd() {
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let context = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let context = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let result = engine.run_goal("acceptance-tests", context).await;
 
     assert!(result.is_err(), "expected Error when PRD missing, got Ok");
 
-    let _ = std::fs::remove_dir_all(&plan_dir);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 #[tokio::test]
 async fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
-    let plan_dir = std::env::temp_dir().join("tddy-at-plan-dir-no-session");
-    let _ = std::fs::remove_dir_all(&plan_dir);
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = temp_dir_with_git_repo("at-plan-dir-no-session", "feature");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
 
     let backend = Arc::new(MockBackend::new());
@@ -141,7 +134,7 @@ async fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let context = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let context = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let result = engine.run_goal("acceptance-tests", context).await;
 
     assert!(
@@ -149,14 +142,12 @@ async fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
         "expected Error when changeset missing, got Ok"
     );
 
-    let _ = std::fs::remove_dir_all(&plan_dir);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 #[tokio::test]
 async fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
-    let plan_dir = std::env::temp_dir().join("tddy-at-allowlist-test");
-    let _ = std::fs::remove_dir_all(&plan_dir);
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = temp_dir_with_git_repo("at-allowlist-test", "feature");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-allowlist");
 
@@ -171,7 +162,7 @@ async fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let context = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let context = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let _ = engine.run_goal("acceptance-tests", context).await.unwrap();
 
     let invocations = backend.invocations();
@@ -183,7 +174,7 @@ async fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
         "InvokeRequest should have goal AcceptanceTests"
     );
 
-    let _ = std::fs::remove_dir_all(&plan_dir);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 #[tokio::test]
@@ -221,9 +212,7 @@ async fn plan_workflow_passes_goal_to_invoke_request() {
 
 #[tokio::test]
 async fn acceptance_tests_workflow_writes_acceptance_tests_md_to_plan_dir() {
-    let plan_dir = std::env::temp_dir().join("tddy-at-writes-md");
-    let _ = std::fs::remove_dir_all(&plan_dir);
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let (output_dir, plan_dir) = temp_dir_with_git_repo("at-writes-md", "feature");
     std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_plan_session(&plan_dir, "sess-writes-md");
 
@@ -238,7 +227,7 @@ async fn acceptance_tests_workflow_writes_acceptance_tests_md_to_plan_dir() {
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let context = ctx_acceptance_tests(plan_dir.clone(), None, false);
+    let context = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir), None, false);
     let _ = engine.run_goal("acceptance-tests", context).await.unwrap();
 
     let md_path = plan_dir.join("acceptance-tests.md");
@@ -269,7 +258,7 @@ async fn acceptance_tests_workflow_writes_acceptance_tests_md_to_plan_dir() {
         "acceptance-tests.md should contain How to run a single or selected tests section"
     );
 
-    let _ = std::fs::remove_dir_all(&plan_dir);
+    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
 }
 
 #[tokio::test]
@@ -301,24 +290,4 @@ async fn plan_workflow_writes_session_file_to_output_directory() {
     assert!(content.contains("state:"));
 
     let _ = std::fs::remove_dir_all(&output_dir);
-}
-
-fn write_changeset_for_plan_session(plan_dir: &std::path::Path, session_id: &str) {
-    let changeset = format!(
-        r#"version: 1
-models: {{}}
-sessions:
-  - id: "{}"
-    agent: claude
-    tag: plan
-    created_at: "2026-03-07T10:00:00Z"
-state:
-  current: Planned
-  updated_at: "2026-03-07T10:00:00Z"
-  history: []
-artifacts: {{}}
-"#,
-        session_id
-    );
-    std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
 }

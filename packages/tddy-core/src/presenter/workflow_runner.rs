@@ -151,9 +151,11 @@ fn handle_elicitation(
                 let session_id_for_refine = read_changeset(plan_dir)
                     .ok()
                     .and_then(|c| get_session_for_tag(&c, "plan"));
-                let output_dir_refine = plan_dir
-                    .parent()
-                    .map(|p| p.to_path_buf())
+                let output_dir_refine = read_changeset(plan_dir)
+                    .ok()
+                    .and_then(|c| c.repo_path.clone())
+                    .map(PathBuf::from)
+                    .or_else(|| plan_dir.parent().map(|p| p.to_path_buf()))
                     .unwrap_or_else(|| plan_dir.to_path_buf());
                 let refine_storage = std::env::temp_dir().join("tddy-flowrunner-refine-session");
                 std::fs::create_dir_all(&refine_storage).ok();
@@ -447,6 +449,7 @@ pub fn run_workflow(
     socket_path: Option<PathBuf>,
 ) {
     let inherit_stdin = false;
+    let initial_prompt_for_ctx = initial_prompt.clone();
 
     let output_dir_was_dot = output_dir == Path::new(".");
     let output_dir = if output_dir_was_dot {
@@ -625,6 +628,9 @@ pub fn run_workflow(
             "worktree_dir".to_string(),
             serde_json::to_value(wt).unwrap(),
         );
+    }
+    if let Some(ref prompt) = initial_prompt_for_ctx {
+        context_values.insert("feature_input".to_string(), serde_json::json!(prompt));
     }
     context_values.insert(
         "model".to_string(),
