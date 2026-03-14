@@ -14,7 +14,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
-use tddy_core::{AppMode, PresenterEvent, PresenterState, PresenterView, ViewConnection};
+use tddy_core::{AppMode, PresenterEvent, PresenterState, PresenterView, UserIntent, ViewConnection};
 
 use crate::capturing_writer::CapturingWriter;
 use crate::key_map::key_event_to_intent;
@@ -153,6 +153,9 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
         }
         PresenterEvent::AgentOutput(text) => {
             view.on_agent_output(&text);
+        }
+        PresenterEvent::IntentReceived(UserIntent::Quit) => {
+            state.should_quit = true;
         }
         PresenterEvent::IntentReceived(_) => {}
     }

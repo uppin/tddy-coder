@@ -1280,7 +1280,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
 
     tddy_tui::run_event_loop(conn, shutdown.as_ref(), byte_capture, args.debug)?;
 
-    let presenter = presenter_handle.join().expect("presenter thread panicked");
+    let mut presenter = presenter_handle.join().expect("presenter thread panicked");
 
     if let Some(result) = presenter.take_workflow_result() {
         match &result {
