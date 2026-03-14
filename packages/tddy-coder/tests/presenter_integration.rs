@@ -126,8 +126,7 @@ fn full_workflow_completes_with_stub_backend() {
     events.drain();
     let evs = events.events();
     assert!(
-        evs
-            .iter()
+        evs.iter()
             .any(|e| matches!(e, TestEvent::GoalStarted(g) if g == "plan")),
         "expected GoalStarted(plan) in events: {:?}",
         evs
@@ -137,6 +136,110 @@ fn full_workflow_completes_with_stub_backend() {
             .any(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_)))),
         "expected WorkflowComplete(Ok) in events: {:?}",
         evs
+    );
+
+    // Acceptance: success completion transitions to FeatureInput (not Done)
+    assert!(
+        matches!(presenter.state().mode, AppMode::FeatureInput),
+        "after workflow completion, mode should be FeatureInput (ready for new workflow), got {:?}",
+        presenter.state().mode
+    );
+}
+
+/// Acceptance: SubmitFeatureInput after completion spawns new workflow.
+/// Workflow completes -> FeatureInput -> user submits new feature -> new workflow runs to completion.
+#[test]
+fn submit_feature_input_after_completion_restarts_workflow() {
+    let (mut presenter, mut events) = presenter_with_events();
+    let backend = create_stub_backend();
+    let output_dir = std::env::temp_dir().join("tddy-presenter-test-restart");
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
+    presenter.start_workflow(
+        backend.clone(),
+        output_dir.clone(),
+        None,
+        Some("Build auth".to_string()),
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+    );
+
+    let mut iterations = 0;
+    let max_iterations = 500;
+    while !presenter.is_done() && iterations < max_iterations {
+        presenter.poll_workflow();
+        events.drain();
+        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+            presenter.handle_intent(UserIntent::ApprovePlan);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        presenter.is_done(),
+        "first workflow should complete within {} iterations",
+        max_iterations
+    );
+    assert!(
+        matches!(presenter.state().mode, AppMode::FeatureInput),
+        "after first completion, mode should be FeatureInput"
+    );
+
+    events.drain();
+    let first_complete_count = events
+        .events()
+        .iter()
+        .filter(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_))))
+        .count();
+    assert_eq!(
+        first_complete_count, 1,
+        "expected exactly one WorkflowComplete(Ok) so far"
+    );
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth 2".to_string()));
+
+    iterations = 0;
+    while !presenter.is_done() && iterations < max_iterations {
+        presenter.poll_workflow();
+        events.drain();
+        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+            presenter.handle_intent(UserIntent::ApprovePlan);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        presenter.is_done(),
+        "second workflow should complete within {} iterations",
+        max_iterations
+    );
+
+    let total_complete_count = events
+        .events()
+        .iter()
+        .filter(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_))))
+        .count();
+    assert_eq!(
+        total_complete_count, 2,
+        "expected two WorkflowComplete(Ok) events (one per workflow)"
     );
 }
 

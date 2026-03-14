@@ -129,10 +129,19 @@ impl Presenter {
         self.broadcast(PresenterEvent::IntentReceived(intent.clone()));
         match intent {
             UserIntent::SubmitFeatureInput(text) => {
-                if !text.is_empty() {
-                    if let Some(ref tx) = self.answer_tx {
-                        let _ = tx.send(text);
+                if text.is_empty() {
+                    return;
+                }
+                let text_for_restart = if let Some(ref tx) = self.answer_tx {
+                    match tx.send(text) {
+                        Ok(()) => None,
+                        Err(std::sync::mpsc::SendError(t)) => Some(t),
                     }
+                } else {
+                    Some(text)
+                };
+                if let Some(prompt) = text_for_restart {
+                    self.restart_workflow(prompt);
                 }
             }
             UserIntent::ApprovePlan => {
@@ -598,6 +607,7 @@ impl Presenter {
                             if let Some(h) = self.workflow_handle.take() {
                                 let _ = h.join();
                             }
+                            self.workflow_result = None;
                             self.spawn_workflow(
                                 backend,
                                 output_dir,
@@ -619,8 +629,10 @@ impl Presenter {
                                 };
                             }
                             Ok(_) => {
-                                log::info!("WorkflowComplete Ok → Done");
-                                self.state.mode = AppMode::Done;
+                                log::info!(
+                                    "WorkflowComplete Ok → FeatureInput (ready for new workflow)"
+                                );
+                                self.state.mode = AppMode::FeatureInput;
                             }
                         }
                         self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
@@ -685,6 +697,31 @@ impl Presenter {
         );
     }
 
+    fn restart_workflow(&mut self, prompt: String) {
+        if let (Some(backend), Some(output_dir)) = (
+            self.workflow_backend.clone(),
+            self.workflow_output_dir.clone(),
+        ) {
+            if let Some(h) = self.workflow_handle.take() {
+                let _ = h.join();
+            }
+            self.workflow_result = None;
+            self.state.mode = AppMode::Running;
+            self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+            self.spawn_workflow(
+                backend,
+                output_dir,
+                None,
+                Some(prompt),
+                self.workflow_conversation_output.clone(),
+                self.workflow_debug_output.clone(),
+                self.workflow_debug,
+                None,
+                self.workflow_socket_path.clone(),
+            );
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn spawn_workflow(
         &mut self,
@@ -728,9 +765,9 @@ impl Presenter {
         &self.state
     }
 
-    /// True when workflow is complete and TUI can exit.
+    /// True when workflow is complete (workflow_result is set).
     pub fn is_done(&self) -> bool {
-        matches!(self.state.mode, AppMode::Done)
+        self.workflow_result.is_some()
     }
 
     /// Take the workflow result (if any) for printing on TUI exit.
@@ -773,7 +810,7 @@ mod tests {
     }
 
     #[test]
-    fn test_workflow_success_transitions_to_done() {
+    fn test_workflow_success_transitions_to_feature_input() {
         let mut p = make_presenter();
         inject_workflow_event(
             &mut p,
@@ -784,8 +821,8 @@ mod tests {
         );
         p.poll_workflow();
         assert!(
-            matches!(p.state().mode, AppMode::Done),
-            "Expected Done mode, got {:?}",
+            matches!(p.state().mode, AppMode::FeatureInput),
+            "Expected FeatureInput mode (ready for new workflow), got {:?}",
             p.state().mode
         );
     }
