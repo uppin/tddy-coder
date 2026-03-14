@@ -347,3 +347,37 @@ exit 0
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// --livekit-token and --livekit-api-key/--livekit-api-secret are mutually exclusive.
+#[test]
+fn livekit_token_and_api_key_mutually_exclusive() {
+    let mut cmd = tddy_coder_bin();
+    cmd.args([
+        "--daemon",
+        "--livekit-url",
+        "ws://localhost:7880",
+        "--livekit-token",
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OSwiaXNzIjoiZGV2a2V5IiwibmJmIjowLCJzdWIiOiJ0ZXN0In0.x",
+        "--livekit-room",
+        "test",
+        "--livekit-identity",
+        "server",
+        "--livekit-api-key",
+        "devkey",
+        "--livekit-api-secret",
+        "secret",
+    ]);
+
+    let output = cmd.output().expect("run tddy-coder");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !output.status.success(),
+        "providing both --livekit-token and --livekit-api-key/secret should fail"
+    );
+    assert!(
+        stderr.contains("mutually exclusive"),
+        "error should mention mutual exclusivity, stderr: {}",
+        stderr
+    );
+}

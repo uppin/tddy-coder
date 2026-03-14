@@ -1,4 +1,4 @@
-    //! Terminal service implementation for streaming TUI bytes.
+//! Terminal service implementation for streaming TUI bytes.
 
 use async_trait::async_trait;
 use tokio::sync::{broadcast, mpsc};
