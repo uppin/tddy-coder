@@ -54,6 +54,8 @@ pub struct Presenter {
     pending_tool_call_response: Option<PendingToolCallResponse>,
     /// Stored socket path for workflow restart (dequeued prompts).
     workflow_socket_path: Option<PathBuf>,
+    /// Parent Claude Code session ID to persist in changeset.yaml.
+    main_session_id: Option<String>,
 }
 
 impl Presenter {
@@ -69,6 +71,7 @@ impl Presenter {
             activity_log: Vec::new(),
             inbox: Vec::new(),
             should_quit: false,
+            exit_action: None,
         };
         Presenter {
             state,
@@ -91,7 +94,14 @@ impl Presenter {
             tool_call_rx: None,
             pending_tool_call_response: None,
             workflow_socket_path: None,
+            main_session_id: None,
         }
+    }
+
+    /// Set the parent Claude Code session ID to persist in changeset.yaml.
+    pub fn with_main_session_id(mut self, id: Option<String>) -> Self {
+        self.main_session_id = id;
+        self
     }
 
     /// Enable broadcast of PresenterEvents (for gRPC subscribers).
@@ -262,6 +272,35 @@ impl Presenter {
             UserIntent::Quit => {
                 self.state.should_quit = true;
             }
+            UserIntent::ContinueWithAgent => {
+                log::info!(
+                    "ContinueWithAgent: looking up session for goal {:?}",
+                    self.state.current_goal
+                );
+                let session_id = if let Some(output_dir) = self.workflow_output_dir.as_ref() {
+                    match crate::changeset::read_changeset(output_dir) {
+                        Ok(cs) => cs.state.session_id.clone(),
+                        Err(e) => {
+                            log::warn!("ContinueWithAgent: could not read changeset: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    log::warn!("ContinueWithAgent: no output_dir available");
+                    None
+                };
+                if let Some(sid) = session_id {
+                    self.state.exit_action =
+                        Some(crate::presenter::state::ExitAction::ContinueWithAgent {
+                            session_id: sid,
+                        });
+                    self.state.should_quit = true;
+                } else {
+                    log::warn!(
+                        "ContinueWithAgent: no session_id available, staying in ErrorRecovery"
+                    );
+                }
+            }
             UserIntent::ResumeFromError => {
                 log::info!(
                     "ResumeFromError: looking up last session for goal {:?}",
@@ -305,6 +344,7 @@ impl Presenter {
                         self.workflow_debug,
                         session_id,
                         self.workflow_socket_path.clone(),
+                        self.main_session_id.clone(),
                     );
                 }
             }
@@ -628,6 +668,7 @@ impl Presenter {
                                 self.workflow_debug,
                                 None,
                                 self.workflow_socket_path.clone(),
+                                self.main_session_id.clone(),
                             );
                         }
                     } else {
@@ -704,6 +745,7 @@ impl Presenter {
             debug,
             session_id,
             socket_path,
+            self.main_session_id.clone(),
         );
     }
 
@@ -728,6 +770,7 @@ impl Presenter {
                 self.workflow_debug,
                 None,
                 self.workflow_socket_path.clone(),
+                self.main_session_id.clone(),
             );
         }
     }
@@ -744,6 +787,7 @@ impl Presenter {
         debug: bool,
         session_id: Option<String>,
         socket_path: Option<PathBuf>,
+        main_session_id: Option<String>,
     ) {
         let (event_tx, event_rx) = mpsc::channel();
         let (answer_tx, answer_rx) = mpsc::channel();
@@ -762,6 +806,7 @@ impl Presenter {
                 debug_output_path,
                 debug,
                 socket_path,
+                main_session_id,
             );
         });
 

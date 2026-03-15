@@ -79,6 +79,7 @@ fn before_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error +
         plan_dir.to_path_buf()
     };
     // Create changeset if missing (session_base path or tests that bypass entry paths).
+    let main_session_id: Option<String> = context.get_sync("main_session_id");
     if read_changeset(&dir).is_err() {
         let _ = std::fs::create_dir_all(&dir);
         let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
@@ -88,9 +89,18 @@ fn before_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error +
         let init_cs = Changeset {
             initial_prompt: Some(feature_input),
             repo_path,
+            main_session_id,
             ..Changeset::default()
         };
         let _ = write_changeset(&dir, &init_cs);
+    } else if let Ok(mut cs) = read_changeset(&dir) {
+        // Backfill main_session_id if not already set (e.g. resumed session).
+        if cs.main_session_id.is_none() {
+            if let Some(msid) = main_session_id {
+                cs.main_session_id = Some(msid);
+                let _ = write_changeset(&dir, &cs);
+            }
+        }
     }
     read_changeset(&dir).map_err(|e| e.to_string())?;
     Ok(())
@@ -118,7 +128,7 @@ fn ensure_worktree_for_acceptance_tests(
     let worktree_path = setup_worktree_for_session(&repo_root, plan_dir)
         .map_err(|e| format!("worktree creation failed: {}", e))?;
     context.set_sync("worktree_dir", worktree_path.clone());
-    if let Some(ref tx) = event_tx {
+    if let Some(tx) = event_tx {
         let _ = tx.send(WorkflowEvent::WorktreeSwitched {
             path: worktree_path,
         });
@@ -555,11 +565,7 @@ impl RunnerHooks for TddWorkflowHooks {
         match task_id {
             "plan" => before_plan(&plan_dir, context)?,
             "acceptance-tests" => {
-                ensure_worktree_for_acceptance_tests(
-                    &plan_dir,
-                    context,
-                    self.event_tx.as_ref(),
-                )?;
+                ensure_worktree_for_acceptance_tests(&plan_dir, context, self.event_tx.as_ref())?;
                 before_acceptance_tests(&plan_dir, context)?;
             }
             "red" => before_red(&plan_dir, context)?,

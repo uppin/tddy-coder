@@ -264,6 +264,7 @@ fn run_plan_without_output_dir(
     debug_output_path: Option<&Path>,
     debug: bool,
     socket_path: Option<&PathBuf>,
+    main_session_id: Option<&str>,
 ) -> Option<PathBuf> {
     let inherit_stdin = false;
     let (output_dir_for_ctx, session_base_opt) = if output_dir == Path::new(".") {
@@ -305,6 +306,9 @@ fn run_plan_without_output_dir(
     if let Some(sid) = session_id {
         context_values.insert("session_id".to_string(), serde_json::json!(sid));
     }
+    if let Some(msid) = main_session_id {
+        context_values.insert("main_session_id".to_string(), serde_json::json!(msid));
+    }
     let session_dir = match (&session_base_opt, session_id) {
         (Some(base), Some(sid)) => Some(
             crate::output::create_session_dir_with_id(base, sid)
@@ -316,6 +320,7 @@ fn run_plan_without_output_dir(
         let init_cs = crate::changeset::Changeset {
             initial_prompt: Some(input.to_string()),
             repo_path: Some(repo_path_str),
+            main_session_id: main_session_id.map(|s| s.to_string()),
             ..crate::changeset::Changeset::default()
         };
         let _ = crate::changeset::write_changeset(dir, &init_cs);
@@ -447,6 +452,7 @@ pub fn run_workflow(
     debug_output_path: Option<PathBuf>,
     debug: bool,
     socket_path: Option<PathBuf>,
+    main_session_id: Option<String>,
 ) {
     let inherit_stdin = false;
     let initial_prompt_for_ctx = initial_prompt.clone();
@@ -492,6 +498,7 @@ pub fn run_workflow(
                 debug_output_path.as_deref(),
                 debug,
                 socket_path.as_ref(),
+                main_session_id.as_deref(),
             ) {
                 Some(p) => p,
                 None => return,
@@ -825,6 +832,7 @@ mod tests {
             None,
             None,
             false,
+            None,
             None,
         );
 

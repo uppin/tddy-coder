@@ -199,6 +199,8 @@ pub struct Args {
     pub github_stub: bool,
     /// Pre-register code:user mappings for stub (e.g. "test-code:testuser")
     pub github_stub_codes: Option<String>,
+    /// Parent Claude Code session ID (persisted in changeset.yaml for resume)
+    pub main_session_id: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -317,6 +319,10 @@ pub struct CoderArgs {
     /// Pre-register stub code:user mappings (e.g. "test-code:testuser")
     #[arg(long)]
     pub github_stub_codes: Option<String>,
+
+    /// Parent Claude Code session ID (persisted in changeset.yaml for resume)
+    #[arg(long)]
+    pub main_session_id: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -468,6 +474,7 @@ impl From<CoderArgs> for Args {
             github_redirect_uri: a.github_redirect_uri,
             github_stub: a.github_stub,
             github_stub_codes: a.github_stub_codes,
+            main_session_id: a.main_session_id,
         }
     }
 }
@@ -503,6 +510,7 @@ impl From<DemoArgs> for Args {
             github_redirect_uri: a.github_redirect_uri,
             github_stub: a.github_stub,
             github_stub_codes: a.github_stub_codes,
+            main_session_id: None,
         }
     }
 }
@@ -549,9 +557,7 @@ fn validate_web_args(args: &Args) -> anyhow::Result<()> {
 }
 
 /// Build an optional AuthService RPC entry based on CLI args.
-fn build_auth_service_entry(
-    args: &Args,
-) -> Option<tddy_rpc::ServiceEntry> {
+fn build_auth_service_entry(args: &Args) -> Option<tddy_rpc::ServiceEntry> {
     if args.github_stub {
         let client_id = args.github_client_id.as_deref().unwrap_or("stub-client-id");
         // In stub mode with a web server, return a callback URL on the same origin
@@ -589,9 +595,7 @@ fn build_auth_service_entry(
             name: "auth.AuthService",
             service: std::sync::Arc::new(auth_server) as std::sync::Arc<dyn tddy_rpc::RpcService>,
         })
-    } else if let (Some(id), Some(secret)) =
-        (&args.github_client_id, &args.github_client_secret)
-    {
+    } else if let (Some(id), Some(secret)) = (&args.github_client_id, &args.github_client_secret) {
         let redirect_uri = args.github_redirect_uri.clone().unwrap_or_else(|| {
             if let Some(ref public_url) = args.web_public_url {
                 format!("{}/auth/callback", public_url.trim_end_matches('/'))
@@ -916,8 +920,14 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             };
             let client_config = build_client_config(args);
             tokio::spawn(async move {
-                if let Err(e) =
-                    crate::web_server::serve_web_bundle(&web_host, web_port, path, rpc_router, Some(client_config)).await
+                if let Err(e) = crate::web_server::serve_web_bundle(
+                    &web_host,
+                    web_port,
+                    path,
+                    rpc_router,
+                    Some(client_config),
+                )
+                .await
                 {
                     log::error!("Web server error: {}", e);
                 }
@@ -1385,7 +1395,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     let (intent_tx, intent_rx) = std::sync::mpsc::channel();
     let mut presenter = Presenter::new(&args.agent, args.model.as_deref().unwrap_or("opus"))
         .with_broadcast(event_tx.clone())
-        .with_intent_sender(intent_tx.clone());
+        .with_intent_sender(intent_tx.clone())
+        .with_main_session_id(args.main_session_id.clone());
 
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
@@ -1565,7 +1576,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 .build()
                 .expect("tokio runtime for web server");
             if let Err(e) = rt.block_on(crate::web_server::serve_web_bundle(
-                &web_host, web_port, path, rpc_router, Some(client_config),
+                &web_host,
+                web_port,
+                path,
+                rpc_router,
+                Some(client_config),
             )) {
                 log::error!("Web server error: {}", e);
             }
@@ -1612,6 +1627,28 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     tddy_tui::run_event_loop(conn, shutdown.as_ref(), byte_capture, args.debug)?;
 
     let mut presenter = presenter_handle.join().expect("presenter thread panicked");
+
+    // If user chose "Continue with agent", exec into claude --resume <session_id>.
+    if let Some(tddy_core::ExitAction::ContinueWithAgent { ref session_id }) =
+        presenter.state().exit_action
+    {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            let err = std::process::Command::new("claude")
+                .arg("--resume")
+                .arg(session_id)
+                .exec();
+            // exec() only returns on error
+            eprintln!("Failed to exec claude: {}", err);
+            std::process::exit(1);
+        }
+        #[cfg(not(unix))]
+        {
+            eprintln!("Continue with agent is only supported on Unix platforms");
+            std::process::exit(1);
+        }
+    }
 
     if let Some(result) = presenter.take_workflow_result() {
         match &result {

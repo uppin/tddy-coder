@@ -12,8 +12,9 @@ pub fn question_height(mode: &AppMode) -> u16 {
             // header(1) + question(1) + options + Other(1) when allow_other
             2 + question.options.len() as u16 + if question.allow_other { 1 } else { 0 }
         }
-        AppMode::TextInput { .. } => 2,  // prompt + blank
-        AppMode::PlanReview { .. } => 4, // header + 3 options (View, Approve, Refine)
+        AppMode::TextInput { .. } => 2,     // prompt + blank
+        AppMode::PlanReview { .. } => 4,    // header + 3 options (View, Approve, Refine)
+        AppMode::ErrorRecovery { .. } => 5, // error line + blank + 3 options (Resume, Continue, Exit)
         _ => 0,
     }
 }

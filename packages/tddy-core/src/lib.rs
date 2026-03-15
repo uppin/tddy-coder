@@ -46,7 +46,7 @@ pub use permission::{
     validate_subagents_allowlist,
 };
 pub use presenter::{
-    ActivityEntry, ActivityKind, AppMode, Presenter, PresenterEvent, PresenterHandle,
+    ActivityEntry, ActivityKind, AppMode, ExitAction, Presenter, PresenterEvent, PresenterHandle,
     PresenterState, PresenterView, UserIntent, ViewConnection, WorkflowCompletePayload,
     WorkflowEvent,
 };

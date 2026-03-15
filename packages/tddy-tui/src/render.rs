@@ -128,6 +128,9 @@ pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &mut ViewStat
             AppMode::PlanReview { .. } => {
                 render_plan_review(frame, state, view_state, dynamic_area);
             }
+            AppMode::ErrorRecovery { .. } => {
+                render_error_recovery(frame, state, view_state, dynamic_area);
+            }
             _ => {
                 render_inbox(frame, state, view_state, dynamic_area);
             }
@@ -371,6 +374,57 @@ fn render_plan_review(
     frame.render_widget(widget, area);
 }
 
+/// Render error recovery: error message + 3 selectable options.
+fn render_error_recovery(
+    frame: &mut Frame,
+    state: &PresenterState,
+    view_state: &ViewState,
+    area: ratatui::layout::Rect,
+) {
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+
+    if area.height == 0 {
+        return;
+    }
+
+    let error_msg = match &state.mode {
+        AppMode::ErrorRecovery { error_message } => error_message.as_str(),
+        _ => "Unknown error",
+    };
+
+    let options = ["Resume", "Continue with agent", "Exit"];
+
+    let highlight = Style::default().add_modifier(Modifier::REVERSED);
+    let normal = Style::default();
+    let error_style = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
+
+    let mut lines = vec![
+        Line::from(Span::styled(format!("Error: {}", error_msg), error_style)),
+        Line::from(""),
+    ];
+
+    for (i, label) in options.iter().enumerate() {
+        let prefix = if view_state.error_recovery_selected == i {
+            "> "
+        } else {
+            "  "
+        };
+        let style = if view_state.error_recovery_selected == i {
+            highlight
+        } else {
+            normal
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", prefix, label),
+            style,
+        )));
+    }
+
+    let widget = Paragraph::new(lines);
+    frame.render_widget(widget, area);
+}
+
 /// Render inbox items.
 fn render_inbox(
     frame: &mut Frame,
@@ -420,7 +474,7 @@ fn render_inbox(
 mod tests {
     use super::*;
     use std::time::Instant;
-    use tddy_core::{AppMode, PresenterState};
+    use tddy_core::{AppMode, ExitAction, PresenterState};
 
     fn make_state(mode: AppMode) -> PresenterState {
         PresenterState {
@@ -433,6 +487,7 @@ mod tests {
             activity_log: Vec::new(),
             inbox: Vec::new(),
             should_quit: false,
+            exit_action: None,
         }
     }
 
