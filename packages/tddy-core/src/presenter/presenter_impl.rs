@@ -54,7 +54,7 @@ pub struct Presenter {
     pending_tool_call_response: Option<PendingToolCallResponse>,
     /// Stored socket path for workflow restart (dequeued prompts).
     workflow_socket_path: Option<PathBuf>,
-    /// Parent Claude Code session ID to persist in changeset.yaml.
+    /// Parent Claude Code session ID (auto-detected from CLAUDE_SESSION_ID env var).
     main_session_id: Option<String>,
 }
 
@@ -94,14 +94,8 @@ impl Presenter {
             tool_call_rx: None,
             pending_tool_call_response: None,
             workflow_socket_path: None,
-            main_session_id: None,
+            main_session_id: std::env::var("CLAUDE_SESSION_ID").ok(),
         }
-    }
-
-    /// Set the parent Claude Code session ID to persist in changeset.yaml.
-    pub fn with_main_session_id(mut self, id: Option<String>) -> Self {
-        self.main_session_id = id;
-        self
     }
 
     /// Enable broadcast of PresenterEvents (for gRPC subscribers).

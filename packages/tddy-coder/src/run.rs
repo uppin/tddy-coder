@@ -199,8 +199,6 @@ pub struct Args {
     pub github_stub: bool,
     /// Pre-register code:user mappings for stub (e.g. "test-code:testuser")
     pub github_stub_codes: Option<String>,
-    /// Parent Claude Code session ID (persisted in changeset.yaml for resume)
-    pub main_session_id: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -319,10 +317,6 @@ pub struct CoderArgs {
     /// Pre-register stub code:user mappings (e.g. "test-code:testuser")
     #[arg(long)]
     pub github_stub_codes: Option<String>,
-
-    /// Parent Claude Code session ID (persisted in changeset.yaml for resume)
-    #[arg(long)]
-    pub main_session_id: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -474,7 +468,6 @@ impl From<CoderArgs> for Args {
             github_redirect_uri: a.github_redirect_uri,
             github_stub: a.github_stub,
             github_stub_codes: a.github_stub_codes,
-            main_session_id: a.main_session_id,
         }
     }
 }
@@ -510,7 +503,6 @@ impl From<DemoArgs> for Args {
             github_redirect_uri: a.github_redirect_uri,
             github_stub: a.github_stub,
             github_stub_codes: a.github_stub_codes,
-            main_session_id: None,
         }
     }
 }
@@ -1395,8 +1387,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     let (intent_tx, intent_rx) = std::sync::mpsc::channel();
     let mut presenter = Presenter::new(&args.agent, args.model.as_deref().unwrap_or("opus"))
         .with_broadcast(event_tx.clone())
-        .with_intent_sender(intent_tx.clone())
-        .with_main_session_id(args.main_session_id.clone());
+        .with_intent_sender(intent_tx.clone());
 
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
