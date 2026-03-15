@@ -5,7 +5,7 @@
 //! Processes client input bytes into UserIntents.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -38,16 +38,15 @@ pub fn run_virtual_tui(
         let mut view = TuiView::new();
         let mut input_buf: Vec<u8> = Vec::new();
 
-        let write_count = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        // Collect each draw()'s raw ANSI output into a buffer so we can diff
+        // against the previous frame and only send bytes when content changed.
+        let frame_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let on_write = {
-            let tx = output_tx.clone();
-            let wc = write_count.clone();
-            move |buf: &[u8]| {
-                let n = wc.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if n < 5 || n % 100 == 0 {
-                    eprintln!("[BIDI_TRACE] on_write: chunk#{} ({} bytes)", n, buf.len());
+            let buf = frame_buf.clone();
+            move |bytes: &[u8]| {
+                if let Ok(mut b) = buf.lock() {
+                    b.extend_from_slice(bytes);
                 }
-                let _ = tx.blocking_send(buf.to_vec());
             }
         };
         let writer = CapturingWriter::headless(Box::new(on_write));
@@ -62,31 +61,66 @@ pub fn run_virtual_tui(
             }
         };
 
-        let render = |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
-                      state: &PresenterState,
-                      view: &mut TuiView| {
-            if let Err(e) = term.draw(|f| draw(f, state, view.view_state_mut(), false)) {
-                log::debug!("VirtualTui: draw error: {}", e);
-            }
-        };
+        let mut prev_frame: Vec<u8> = Vec::new();
 
-        render(&mut terminal, &state, &mut view);
+        // Render a frame: draw into the buffer, compare with the previous frame,
+        // and only send bytes to the output channel if content actually changed.
+        // This avoids sending cursor-only control sequences from ratatui's draw()
+        // on identical frames, which would flood the network stream.
+        let render_and_send =
+            |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
+             state: &PresenterState,
+             view: &mut TuiView,
+             frame_buf: &Arc<Mutex<Vec<u8>>>,
+             prev_frame: &mut Vec<u8>,
+             output_tx: &mpsc::Sender<Vec<u8>>| {
+                {
+                    let mut b = frame_buf.lock().unwrap();
+                    b.clear();
+                }
+                if let Err(e) = term.draw(|f| draw(f, state, view.view_state_mut(), false)) {
+                    log::debug!("VirtualTui: draw error: {}", e);
+                    return;
+                }
+                let current_frame = {
+                    let b = frame_buf.lock().unwrap();
+                    b.clone()
+                };
+                if current_frame != *prev_frame {
+                    log::trace!(
+                        "virtual_tui: frame changed ({} bytes), sending",
+                        current_frame.len()
+                    );
+                    let _ = output_tx.blocking_send(current_frame.clone());
+                    *prev_frame = current_frame;
+                }
+            };
+
+        render_and_send(
+            &mut terminal,
+            &state,
+            &mut view,
+            &frame_buf,
+            &mut prev_frame,
+            &output_tx,
+        );
 
         let mut input_rx = input_rx;
         let mut event_rx = conn.event_rx;
         let intent_tx = conn.intent_tx;
 
-        log::trace!("[BIDI_TRACE] virtual_tui: entering main loop");
-        let mut loop_count: u64 = 0;
+        // Periodic render interval to keep animations alive (spinner, elapsed timer),
+        // matching the real TUI event loop (event_loop.rs:69) which draws every ~50ms.
+        let render_interval = Duration::from_millis(200);
+        let mut last_render = std::time::Instant::now();
+
         while !shutdown.load(Ordering::Relaxed) {
-            loop_count += 1;
             let mut updated = false;
 
             while let Ok(ev) = event_rx.try_recv() {
-                eprintln!(
-                    "[BIDI_TRACE] virtual_tui: loop#{} received PresenterEvent: {:?}",
-                    loop_count,
-                    std::mem::discriminant(&ev),
+                log::trace!(
+                    "virtual_tui: received PresenterEvent: {:?}",
+                    std::mem::discriminant(&ev)
                 );
                 apply_event(&mut state, &mut view, ev);
                 updated = true;
@@ -95,15 +129,11 @@ pub fn run_virtual_tui(
             loop {
                 match input_rx.try_recv() {
                     Ok(bytes) if !bytes.is_empty() => {
-                        eprintln!(
-                            "[BIDI_TRACE] virtual_tui: loop#{} received input bytes ({} bytes): {:?}",
-                            loop_count, bytes.len(), &bytes
-                        );
+                        log::trace!("virtual_tui: received input ({} bytes)", bytes.len());
                         input_buf.extend_from_slice(&bytes);
                         while let Some((key, consumed)) = parse_key_from_buf(&mut input_buf) {
                             log::trace!(
-                                "[BIDI_TRACE] virtual_tui: loop#{} parsed key={:?}, mode={:?}",
-                                loop_count,
+                                "virtual_tui: parsed key={:?}, mode={:?}",
                                 key.code,
                                 state.mode
                             );
@@ -114,50 +144,45 @@ pub fn run_virtual_tui(
                                 inbox_len,
                             );
                             if view_consumed {
-                                eprintln!(
-                                    "[BIDI_TRACE] virtual_tui: loop#{} key={:?} consumed by view-local handler (mode={:?})",
-                                    loop_count, key.code, state.mode
+                                log::trace!(
+                                    "virtual_tui: key={:?} consumed by view-local handler",
+                                    key.code
                                 );
                                 updated = true;
                             } else if let Some(intent) =
                                 key_event_to_intent(key, &state.mode, view.view_state())
                             {
-                                eprintln!(
-                                    "[BIDI_TRACE] virtual_tui: loop#{} sending intent={:?} (mode={:?})",
-                                    loop_count, intent, state.mode
-                                );
+                                log::trace!("virtual_tui: sending intent={:?}", intent);
                                 let _ = intent_tx.send(intent);
-                            } else {
-                                eprintln!(
-                                    "[BIDI_TRACE] virtual_tui: loop#{} key={:?} produced no intent for mode={:?}",
-                                    loop_count, key.code, state.mode
-                                );
                             }
                             input_buf.drain(..consumed);
                         }
                     }
                     Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                        log::trace!(
-                            "[BIDI_TRACE] virtual_tui: loop#{} input_rx closed",
-                            loop_count
-                        );
+                        log::trace!("virtual_tui: input_rx closed");
                         break;
                     }
                     _ => break,
                 }
             }
 
-            if updated {
-                eprintln!("[BIDI_TRACE] virtual_tui: loop#{} re-rendering (mode={:?})", loop_count, state.mode);
-                render(&mut terminal, &state, &mut view);
+            // Render on events/input immediately, or periodically to keep the
+            // spinner and elapsed timer alive.
+            if updated || last_render.elapsed() >= render_interval {
+                render_and_send(
+                    &mut terminal,
+                    &state,
+                    &mut view,
+                    &frame_buf,
+                    &mut prev_frame,
+                    &output_tx,
+                );
+                last_render = std::time::Instant::now();
             }
 
             thread::sleep(Duration::from_millis(10));
         }
-        log::trace!(
-            "[BIDI_TRACE] virtual_tui: main loop exited after {} iterations",
-            loop_count
-        );
+        log::trace!("virtual_tui: main loop exited");
     });
 }
 

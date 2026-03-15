@@ -29,6 +29,9 @@ ratatui = "0.30"
 serial_test = { version = "3", optional = true }
 termwright = "0.2"
 strip-ansi-escapes = "0.2"
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.29"
+futures-util = "0.3"
 vt100 = "0.15"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
