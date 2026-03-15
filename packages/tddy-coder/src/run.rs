@@ -1619,27 +1619,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
 
     let mut presenter = presenter_handle.join().expect("presenter thread panicked");
 
-    // If user chose "Continue with agent", exec into claude --resume <session_id>.
-    if let Some(tddy_core::ExitAction::ContinueWithAgent { ref session_id }) =
-        presenter.state().exit_action
-    {
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            let err = std::process::Command::new("claude")
-                .arg("--resume")
-                .arg(session_id)
-                .exec();
-            // exec() only returns on error
-            eprintln!("Failed to exec claude: {}", err);
-            std::process::exit(1);
-        }
-        #[cfg(not(unix))]
-        {
-            eprintln!("Continue with agent is only supported on Unix platforms");
-            std::process::exit(1);
-        }
-    }
+    // TODO: if exit_action is ContinueWithAgent, exec into claude --resume <session_id>
 
     if let Some(result) = presenter.take_workflow_result() {
         match &result {

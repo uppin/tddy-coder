@@ -14,7 +14,7 @@ pub fn question_height(mode: &AppMode) -> u16 {
         }
         AppMode::TextInput { .. } => 2,     // prompt + blank
         AppMode::PlanReview { .. } => 4,    // header + 3 options (View, Approve, Refine)
-        AppMode::ErrorRecovery { .. } => 5, // error line + blank + 3 options (Resume, Continue, Exit)
+        // TODO: allocate height for ErrorRecovery options
         _ => 0,
     }
 }
@@ -193,6 +193,18 @@ mod tests {
     #[test]
     fn test_prompt_height_empty_text() {
         assert_eq!(prompt_height(0, 80, 10), 1);
+    }
+
+    #[test]
+    fn test_question_height_error_recovery_mode() {
+        let mode = AppMode::ErrorRecovery {
+            error_message: "test error".to_string(),
+        };
+        assert_eq!(
+            question_height(&mode),
+            5,
+            "ErrorRecovery should have height 5: error + blank + 3 options"
+        );
     }
 
     #[test]

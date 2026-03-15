@@ -264,33 +264,7 @@ impl Presenter {
                 self.state.should_quit = true;
             }
             UserIntent::ContinueWithAgent => {
-                log::info!(
-                    "ContinueWithAgent: looking up session for goal {:?}",
-                    self.state.current_goal
-                );
-                let session_id = if let Some(output_dir) = self.workflow_output_dir.as_ref() {
-                    match crate::changeset::read_changeset(output_dir) {
-                        Ok(cs) => cs.state.session_id.clone(),
-                        Err(e) => {
-                            log::warn!("ContinueWithAgent: could not read changeset: {}", e);
-                            None
-                        }
-                    }
-                } else {
-                    log::warn!("ContinueWithAgent: no output_dir available");
-                    None
-                };
-                if let Some(sid) = session_id {
-                    self.state.exit_action =
-                        Some(crate::presenter::state::ExitAction::ContinueWithAgent {
-                            session_id: sid,
-                        });
-                    self.state.should_quit = true;
-                } else {
-                    log::warn!(
-                        "ContinueWithAgent: no session_id available, staying in ErrorRecovery"
-                    );
-                }
+                // TODO: implement — read session_id from changeset, set exit_action, quit
             }
             UserIntent::ResumeFromError => {
                 log::info!(
@@ -335,7 +309,6 @@ impl Presenter {
                         self.workflow_debug,
                         session_id,
                         self.workflow_socket_path.clone(),
-
                     );
                 }
             }
@@ -659,7 +632,6 @@ impl Presenter {
                                 self.workflow_debug,
                                 None,
                                 self.workflow_socket_path.clone(),
-        
                             );
                         }
                     } else {
@@ -867,6 +839,75 @@ mod tests {
             "Expected FeatureInput mode (ready for new workflow), got {:?}",
             p.state().mode
         );
+    }
+
+    #[test]
+    fn continue_with_agent_sets_exit_action_and_quits_when_session_available() {
+        let mut p = make_presenter();
+
+        // Create a temp dir with a changeset that has a session_id.
+        let tmp = std::env::temp_dir().join("tddy-test-continue-agent-exit");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let mut cs = crate::changeset::Changeset::default();
+        cs.state.session_id = Some("agent-session-42".to_string());
+        crate::changeset::write_changeset(&tmp, &cs).unwrap();
+
+        // Set up presenter with output_dir pointing to changeset location.
+        p.workflow_output_dir = Some(tmp.clone());
+
+        // Put presenter in ErrorRecovery mode (precondition for this intent).
+        p.state.mode = AppMode::ErrorRecovery {
+            error_message: "test error".to_string(),
+        };
+
+        p.handle_intent(UserIntent::ContinueWithAgent);
+
+        assert!(
+            p.state().should_quit,
+            "ContinueWithAgent should set should_quit when session is available"
+        );
+        assert!(
+            matches!(
+                p.state().exit_action,
+                Some(crate::presenter::state::ExitAction::ContinueWithAgent { ref session_id })
+                if session_id == "agent-session-42"
+            ),
+            "exit_action should be ContinueWithAgent with the session_id from changeset, got {:?}",
+            p.state().exit_action
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn continue_with_agent_stays_in_error_recovery_when_no_session() {
+        let mut p = make_presenter();
+
+        // Create a temp dir with a changeset that has NO session_id.
+        let tmp = std::env::temp_dir().join("tddy-test-continue-agent-no-session");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let cs = crate::changeset::Changeset::default(); // session_id is None
+        crate::changeset::write_changeset(&tmp, &cs).unwrap();
+
+        p.workflow_output_dir = Some(tmp.clone());
+        p.state.mode = AppMode::ErrorRecovery {
+            error_message: "test error".to_string(),
+        };
+
+        p.handle_intent(UserIntent::ContinueWithAgent);
+
+        assert!(
+            !p.state().should_quit,
+            "ContinueWithAgent should NOT quit when no session_id is available"
+        );
+        assert!(
+            p.state().exit_action.is_none(),
+            "exit_action should remain None when no session_id"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
