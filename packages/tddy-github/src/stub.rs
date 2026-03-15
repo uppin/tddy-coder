@@ -55,10 +55,7 @@ impl StubGitHubProvider {
 impl GitHubOAuthProvider for StubGitHubProvider {
     fn authorize_url(&self) -> (String, String) {
         let state = Uuid::new_v4().to_string();
-        self.pending_states
-            .lock()
-            .unwrap()
-            .insert(state.clone());
+        self.pending_states.lock().unwrap().insert(state.clone());
 
         let url = if let Some(ref callback_url) = self.callback_redirect_url {
             // In e2e mode: return a URL that goes directly to the app's callback

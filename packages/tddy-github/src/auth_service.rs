@@ -145,9 +145,10 @@ mod tests {
             tddy_rpc::ResponseBody::Complete(c) => c,
             _ => panic!("expected Complete"),
         };
-        let auth_url_resp =
-            <GetAuthUrlResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
-        assert!(auth_url_resp.authorize_url.contains("client_id=test-client-id"));
+        let auth_url_resp = <GetAuthUrlResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
+        assert!(auth_url_resp
+            .authorize_url
+            .contains("client_id=test-client-id"));
         let state = auth_url_resp.state;
 
         // 2. ExchangeCode

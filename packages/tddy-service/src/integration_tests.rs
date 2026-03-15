@@ -9,7 +9,7 @@ mod codegen_acceptance {
 
     use crate::create_echo_bridge;
     use crate::proto::test::{EchoRequest, EchoResponse, EchoServiceServer};
-    use tddy_rpc::{RequestMetadata, RpcMessage};
+    use tddy_rpc::{RequestMetadata, ResponseBody, RpcMessage};
 
     #[test]
     fn echo_service_server_has_name_constant() {
@@ -88,6 +88,263 @@ mod codegen_acceptance {
             ),
             Ok(_) => panic!("Expected error for unknown service"),
         }
+    }
+
+    #[tokio::test]
+    async fn start_bidi_stream_echoes_all_messages_through_single_handler() {
+        let bridge = create_echo_bridge();
+        let (tx, rx) = tokio::sync::mpsc::channel::<RpcMessage>(64);
+
+        for msg_text in ["alpha", "beta", "gamma"] {
+            let req = EchoRequest {
+                message: msg_text.to_string(),
+            };
+            tx.send(RpcMessage {
+                payload: req.encode_to_vec(),
+                metadata: RequestMetadata::default(),
+            })
+            .await
+            .unwrap();
+        }
+        drop(tx);
+
+        let result = bridge
+            .start_bidi_stream("test.EchoService", "EchoBidiStream", rx)
+            .await;
+        let handle = result.expect("start_bidi_stream should succeed");
+
+        let mut rx = match handle.output {
+            ResponseBody::Streaming(rx) => rx,
+            ResponseBody::Complete(_) => panic!("expected Streaming response"),
+        };
+
+        let mut received = Vec::new();
+        while let Some(chunk) = rx.recv().await {
+            let bytes = chunk.expect("stream chunk should succeed");
+            let resp = EchoResponse::decode(&bytes[..]).expect("decode response");
+            received.push(resp.message);
+        }
+        assert_eq!(received, vec!["alpha #1", "beta #2", "gamma #3"]);
+    }
+
+    #[tokio::test]
+    async fn start_bidi_stream_returns_not_found_for_unknown_service() {
+        let bridge = create_echo_bridge();
+        let (_tx, rx) = tokio::sync::mpsc::channel::<RpcMessage>(1);
+        match bridge.start_bidi_stream("unknown.Svc", "Foo", rx).await {
+            Err(status) => assert!(
+                status.message.contains("Unknown service"),
+                "expected 'Unknown service' in error, got: {}",
+                status.message
+            ),
+            Ok(_) => panic!("expected error for unknown service"),
+        }
+    }
+
+    #[tokio::test]
+    async fn start_bidi_stream_returns_not_found_for_unknown_method() {
+        let bridge = create_echo_bridge();
+        let (_tx, rx) = tokio::sync::mpsc::channel::<RpcMessage>(1);
+        match bridge
+            .start_bidi_stream("test.EchoService", "NonExistent", rx)
+            .await
+        {
+            Err(status) => assert!(
+                status.message.contains("Unknown method"),
+                "expected 'Unknown method' in error, got: {}",
+                status.message
+            ),
+            Ok(_) => panic!("expected error for unknown method"),
+        }
+    }
+}
+
+/// Stateful bidi tests: verify a single handler instance processes all messages.
+#[cfg(test)]
+mod bidi_session_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use prost::Message;
+    use tokio::sync::mpsc;
+    use tokio_stream::wrappers::ReceiverStream;
+
+    use crate::proto::test::{EchoRequest, EchoResponse, EchoService, EchoServiceServer};
+    use tddy_rpc::{
+        Request, RequestMetadata, Response, ResponseBody, RpcMessage, Status, Streaming,
+    };
+
+    struct CountingEchoService {
+        bidi_handler_count: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl EchoService for CountingEchoService {
+        type EchoServerStreamStream = ReceiverStream<Result<EchoResponse, Status>>;
+        type EchoBidiStreamStream = ReceiverStream<Result<EchoResponse, Status>>;
+
+        async fn echo(
+            &self,
+            request: Request<EchoRequest>,
+        ) -> Result<Response<EchoResponse>, Status> {
+            Ok(Response::new(EchoResponse {
+                message: request.into_inner().message,
+                timestamp: 0,
+            }))
+        }
+
+        async fn echo_server_stream(
+            &self,
+            _request: Request<EchoRequest>,
+        ) -> Result<Response<Self::EchoServerStreamStream>, Status> {
+            Err(Status::unimplemented("not used in this test"))
+        }
+
+        async fn echo_client_stream(
+            &self,
+            _request: Request<Streaming<EchoRequest>>,
+        ) -> Result<Response<EchoResponse>, Status> {
+            Err(Status::unimplemented("not used in this test"))
+        }
+
+        async fn echo_bidi_stream(
+            &self,
+            request: Request<Streaming<EchoRequest>>,
+        ) -> Result<Response<Self::EchoBidiStreamStream>, Status> {
+            self.bidi_handler_count.fetch_add(1, Ordering::SeqCst);
+            let stream = request.into_inner();
+            let (tx, rx) = mpsc::channel(16);
+            let handler_id = self.bidi_handler_count.load(Ordering::SeqCst);
+            tokio::spawn(async move {
+                futures_util::pin_mut!(stream);
+                let mut seq = 0u32;
+                while let Some(item) = futures_util::stream::StreamExt::next(&mut stream).await {
+                    match item {
+                        Ok(req) => {
+                            seq += 1;
+                            let _ = tx
+                                .send(Ok(EchoResponse {
+                                    message: format!(
+                                        "handler={} seq={} msg={}",
+                                        handler_id, seq, req.message
+                                    ),
+                                    timestamp: 0,
+                                }))
+                                .await;
+                        }
+                        Err(e) => {
+                            let _ = tx.send(Err(e)).await;
+                        }
+                    }
+                }
+            });
+            Ok(Response::new(ReceiverStream::new(rx)))
+        }
+    }
+
+    #[tokio::test]
+    async fn single_bidi_handler_processes_all_messages_sequentially() {
+        let handler_count = Arc::new(AtomicUsize::new(0));
+        let service = CountingEchoService {
+            bidi_handler_count: handler_count.clone(),
+        };
+        let bridge = tddy_rpc::RpcBridge::new(EchoServiceServer::new(service));
+
+        let (tx, rx) = mpsc::channel::<RpcMessage>(64);
+        for text in ["first", "second", "third"] {
+            tx.send(RpcMessage {
+                payload: EchoRequest {
+                    message: text.to_string(),
+                }
+                .encode_to_vec(),
+                metadata: RequestMetadata::default(),
+            })
+            .await
+            .unwrap();
+        }
+        drop(tx);
+
+        let handle = bridge
+            .start_bidi_stream("test.EchoService", "EchoBidiStream", rx)
+            .await
+            .expect("start_bidi_stream should succeed");
+
+        let mut output_rx = match handle.output {
+            ResponseBody::Streaming(rx) => rx,
+            ResponseBody::Complete(_) => panic!("expected Streaming"),
+        };
+
+        let mut received = Vec::new();
+        while let Some(chunk) = output_rx.recv().await {
+            let bytes = chunk.expect("chunk should succeed");
+            let resp = EchoResponse::decode(&bytes[..]).expect("decode");
+            received.push(resp.message);
+        }
+
+        assert_eq!(
+            handler_count.load(Ordering::SeqCst),
+            1,
+            "exactly one bidi handler should be created"
+        );
+        assert_eq!(received.len(), 3);
+        assert_eq!(received[0], "handler=1 seq=1 msg=first");
+        assert_eq!(received[1], "handler=1 seq=2 msg=second");
+        assert_eq!(received[2], "handler=1 seq=3 msg=third");
+    }
+
+    #[tokio::test]
+    async fn two_separate_bidi_sessions_get_independent_handlers() {
+        let handler_count = Arc::new(AtomicUsize::new(0));
+        let service = CountingEchoService {
+            bidi_handler_count: handler_count.clone(),
+        };
+        let bridge = Arc::new(tddy_rpc::RpcBridge::new(EchoServiceServer::new(service)));
+
+        let mut all_received = Vec::new();
+        for session_msgs in [&["a", "b"][..], &["x", "y"]] {
+            let (tx, rx) = mpsc::channel::<RpcMessage>(64);
+            for text in session_msgs {
+                tx.send(RpcMessage {
+                    payload: EchoRequest {
+                        message: text.to_string(),
+                    }
+                    .encode_to_vec(),
+                    metadata: RequestMetadata::default(),
+                })
+                .await
+                .unwrap();
+            }
+            drop(tx);
+
+            let handle = bridge
+                .start_bidi_stream("test.EchoService", "EchoBidiStream", rx)
+                .await
+                .expect("start_bidi_stream should succeed");
+
+            let mut output_rx = match handle.output {
+                ResponseBody::Streaming(rx) => rx,
+                ResponseBody::Complete(_) => panic!("expected Streaming"),
+            };
+
+            let mut session_received = Vec::new();
+            while let Some(chunk) = output_rx.recv().await {
+                let bytes = chunk.expect("chunk should succeed");
+                let resp = EchoResponse::decode(&bytes[..]).expect("decode");
+                session_received.push(resp.message);
+            }
+            all_received.push(session_received);
+        }
+
+        assert_eq!(
+            handler_count.load(Ordering::SeqCst),
+            2,
+            "two separate sessions should create two handlers"
+        );
+        assert_eq!(all_received[0][0], "handler=1 seq=1 msg=a");
+        assert_eq!(all_received[0][1], "handler=1 seq=2 msg=b");
+        assert_eq!(all_received[1][0], "handler=2 seq=1 msg=x");
+        assert_eq!(all_received[1][1], "handler=2 seq=2 msg=y");
     }
 }
 
@@ -291,185 +548,6 @@ mod tests {
             has_mode_changed,
             "Expected ModeChanged event, got: {:?}",
             events
-        );
-    }
-}
-
-/// StreamTerminal acceptance tests: terminal byte streaming via gRPC.
-#[cfg(test)]
-mod stream_terminal_tests {
-    use std::sync::mpsc;
-
-    use tokio::sync::broadcast;
-    use tonic::transport::Server;
-    use tonic::Request;
-
-    use crate::gen::tddy_remote_server::TddyRemoteServer;
-    use crate::gen::StreamTerminalRequest;
-    use crate::test_util::spawn_server_and_connect;
-    use crate::TddyRemoteService;
-    use tddy_core::PresenterHandle;
-
-    fn service_with_terminal_bytes() -> (TddyRemoteService, broadcast::Sender<Vec<u8>>) {
-        let (byte_tx, _) = broadcast::channel::<Vec<u8>>(256);
-        let (event_tx, _) = broadcast::channel(256);
-        let (intent_tx, _) = mpsc::channel();
-        let handle = PresenterHandle {
-            event_tx,
-            intent_tx,
-        };
-        let service = TddyRemoteService::new(handle).with_terminal_bytes(byte_tx.clone());
-        (service, byte_tx)
-    }
-
-    fn service_without_terminal_bytes() -> TddyRemoteService {
-        let (event_tx, _) = broadcast::channel(256);
-        let (intent_tx, _) = mpsc::channel();
-        let handle = PresenterHandle {
-            event_tx,
-            intent_tx,
-        };
-        TddyRemoteService::new(handle)
-    }
-
-    #[tokio::test]
-    async fn stream_terminal_returns_bytes() {
-        let (service, byte_tx) = service_with_terminal_bytes();
-        let router = Server::builder().add_service(TddyRemoteServer::new(service));
-        let mut client = spawn_server_and_connect(router).await;
-
-        let mut stream = client
-            .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        let _ = byte_tx.send(b"hello terminal".to_vec());
-
-        let mut received_bytes = Vec::new();
-        for _ in 0..20 {
-            match tokio::time::timeout(std::time::Duration::from_millis(100), stream.message())
-                .await
-            {
-                Ok(Ok(Some(msg))) => received_bytes.extend_from_slice(&msg.data),
-                Ok(Ok(None)) => break,
-                _ => {}
-            }
-        }
-
-        assert!(
-            !received_bytes.is_empty(),
-            "Expected at least one TerminalOutput with non-empty bytes, got none"
-        );
-    }
-
-    #[tokio::test]
-    async fn streamed_bytes_contain_ansi_sequences() {
-        let (service, byte_tx) = service_with_terminal_bytes();
-        let router = Server::builder().add_service(TddyRemoteServer::new(service));
-        let mut client = spawn_server_and_connect(router).await;
-
-        let mut stream = client
-            .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        let _ = byte_tx.send(b"\x1b[2J\x1b[H".to_vec());
-
-        let mut all_bytes = Vec::new();
-        for _ in 0..20 {
-            match tokio::time::timeout(std::time::Duration::from_millis(100), stream.message())
-                .await
-            {
-                Ok(Ok(Some(msg))) => all_bytes.extend_from_slice(&msg.data),
-                Ok(Ok(None)) => break,
-                _ => {}
-            }
-        }
-
-        let has_csi = all_bytes.windows(2).any(|w| w == b"\x1b[");
-        assert!(
-            has_csi,
-            "Expected ANSI CSI escape sequences (\\x1b[) in streamed bytes, got: {:?}",
-            &all_bytes[..all_bytes.len().min(100)]
-        );
-    }
-
-    #[tokio::test]
-    async fn multiple_clients_receive_same_stream() {
-        let (service, byte_tx) = service_with_terminal_bytes();
-        let (endpoint, _server) = crate::test_util::spawn_server(
-            Server::builder().add_service(TddyRemoteServer::new(service)),
-        )
-        .await;
-
-        let mut client1 =
-            crate::gen::tddy_remote_client::TddyRemoteClient::connect(endpoint.clone())
-                .await
-                .unwrap();
-        let mut client2 = crate::gen::tddy_remote_client::TddyRemoteClient::connect(endpoint)
-            .await
-            .unwrap();
-
-        let mut stream1 = client1
-            .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
-            .await
-            .unwrap()
-            .into_inner();
-        let mut stream2 = client2
-            .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        let _ = byte_tx.send(b"\x1b[2J\x1b[H".to_vec());
-
-        let msg1 =
-            match tokio::time::timeout(std::time::Duration::from_millis(100), stream1.message())
-                .await
-            {
-                Ok(Ok(Some(m))) => Some(m),
-                _ => None,
-            };
-        let msg2 =
-            match tokio::time::timeout(std::time::Duration::from_millis(100), stream2.message())
-                .await
-            {
-                Ok(Ok(Some(m))) => Some(m),
-                _ => None,
-            };
-
-        assert_eq!(
-            msg1.as_ref().map(|m| m.data.as_slice()),
-            msg2.as_ref().map(|m| m.data.as_slice()),
-            "Both clients should receive the same bytes"
-        );
-        assert!(
-            msg1.as_ref().map_or(false, |m| !m.data.is_empty()),
-            "Both clients should receive non-empty bytes"
-        );
-    }
-
-    #[tokio::test]
-    async fn stream_terminal_returns_empty_stream_when_no_terminal_bytes() {
-        let service = service_without_terminal_bytes();
-        let router = Server::builder().add_service(TddyRemoteServer::new(service));
-        let mut client = spawn_server_and_connect(router).await;
-
-        let mut stream = client
-            .stream_terminal(Request::new(StreamTerminalRequest { cols: 0, rows: 0 }))
-            .await
-            .unwrap()
-            .into_inner();
-
-        let first =
-            tokio::time::timeout(std::time::Duration::from_millis(50), stream.message()).await;
-
-        assert!(
-            matches!(first, Ok(Ok(None))),
-            "Stream without terminal bytes should end immediately with None, got: {:?}",
-            first
         );
     }
 }

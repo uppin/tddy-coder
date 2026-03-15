@@ -127,7 +127,12 @@ async fn full_workflow_with_stub_backend_reaches_green_complete() {
         "acceptance-tests should ask permission first"
     );
 
-    let ctx = ctx_acceptance_tests(plan_dir.clone(), Some(output_dir.clone()), Some("Yes"), false);
+    let ctx = ctx_acceptance_tests(
+        plan_dir.clone(),
+        Some(output_dir.clone()),
+        Some("Yes"),
+        false,
+    );
     let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();

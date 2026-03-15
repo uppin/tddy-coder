@@ -54,6 +54,8 @@ pub struct Presenter {
     pending_tool_call_response: Option<PendingToolCallResponse>,
     /// Stored socket path for workflow restart (dequeued prompts).
     workflow_socket_path: Option<PathBuf>,
+    /// Pre-set worktree dir to skip git fetch/worktree creation in hooks.
+    workflow_worktree_dir: Option<PathBuf>,
 }
 
 impl Presenter {
@@ -92,6 +94,7 @@ impl Presenter {
             tool_call_rx: None,
             pending_tool_call_response: None,
             workflow_socket_path: None,
+            workflow_worktree_dir: None,
         }
     }
 
@@ -104,6 +107,12 @@ impl Presenter {
     /// Enable connect_view() by providing an intent sender for external views.
     pub fn with_intent_sender(mut self, tx: mpsc::Sender<UserIntent>) -> Self {
         self.intent_tx = Some(tx);
+        self
+    }
+
+    /// Pre-set worktree dir so the workflow skips git fetch / worktree creation.
+    pub fn with_worktree_dir(mut self, dir: PathBuf) -> Self {
+        self.workflow_worktree_dir = Some(dir);
         self
     }
 
@@ -326,6 +335,7 @@ impl Presenter {
                         self.workflow_debug,
                         session_id,
                         self.workflow_socket_path.clone(),
+                        self.workflow_worktree_dir.clone(),
                     );
                 }
             }
@@ -663,6 +673,7 @@ impl Presenter {
                                 self.workflow_debug,
                                 None,
                                 self.workflow_socket_path.clone(),
+                                self.workflow_worktree_dir.clone(),
                             );
                         }
                     } else {
@@ -743,6 +754,7 @@ impl Presenter {
             debug,
             session_id,
             socket_path,
+            self.workflow_worktree_dir.clone(),
         );
     }
 
@@ -767,6 +779,7 @@ impl Presenter {
                 self.workflow_debug,
                 None,
                 self.workflow_socket_path.clone(),
+                self.workflow_worktree_dir.clone(),
             );
         }
     }
@@ -783,6 +796,7 @@ impl Presenter {
         debug: bool,
         session_id: Option<String>,
         socket_path: Option<PathBuf>,
+        worktree_dir: Option<PathBuf>,
     ) {
         let (event_tx, event_rx) = mpsc::channel();
         let (answer_tx, answer_rx) = mpsc::channel();
@@ -801,6 +815,7 @@ impl Presenter {
                 debug_output_path,
                 debug,
                 socket_path,
+                worktree_dir,
             );
         });
 

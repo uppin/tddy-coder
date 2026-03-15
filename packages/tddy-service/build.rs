@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/test/echo_service.proto"], &["proto"])?;
 
-    // Terminal service
+    // Terminal service (async trait + RpcService server for LiveKit/tddy-rpc)
     prost_build::Config::new()
         .out_dir(std::env::var("OUT_DIR")?)
         .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
@@ -26,6 +26,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
         }))
+        .compile_protos(&["proto/terminal.proto"], &["proto"])?;
+
+    // Terminal service (tonic gRPC server/client, reusing prost message types)
+    let tonic_terminal_dir = format!("{}/tonic_terminal", std::env::var("OUT_DIR")?);
+    std::fs::create_dir_all(&tonic_terminal_dir)?;
+    tonic_build::configure()
+        .build_server(true)
+        .build_client(true)
+        .out_dir(&tonic_terminal_dir)
+        .extern_path(
+            ".terminal.TerminalInput",
+            "crate::proto::terminal::TerminalInput",
+        )
+        .extern_path(
+            ".terminal.TerminalOutput",
+            "crate::proto::terminal::TerminalOutput",
+        )
         .compile_protos(&["proto/terminal.proto"], &["proto"])?;
 
     // Token service (async trait + RpcService server + tonic adapter)

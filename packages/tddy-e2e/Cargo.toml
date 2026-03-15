@@ -21,11 +21,15 @@ tddy-livekit-testkit = { path = "../tddy-livekit-testkit", optional = true }
 tddy-service = { path = "../tddy-service" }
 tddy-tui = { path = "../tddy-tui" }
 anyhow = "1"
+env_logger = "0.11"
+log = "0.4"
 livekit = { version = "0.7", optional = true }
 prost = "0.13"
 ratatui = "0.30"
 serial_test = { version = "3", optional = true }
 termwright = "0.2"
+strip-ansi-escapes = "0.2"
+vt100 = "0.15"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 async-stream = "0.3"

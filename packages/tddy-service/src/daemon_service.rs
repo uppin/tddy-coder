@@ -3,12 +3,8 @@
 //! Implements GetSession, ListSessions, and Stream (StartSession flow).
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
-
-use tddy_core::ViewConnection;
-use tddy_tui::run_virtual_tui;
 
 use tokio::sync::mpsc as tokio_mpsc;
 use tonic::{Request, Response, Status};
@@ -96,7 +92,6 @@ fn spawn_event_forwarder(
 pub struct DaemonService {
     sessions_base: PathBuf,
     backend: SharedBackend,
-    view_connection_factory: Option<Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>>,
 }
 
 impl DaemonService {
@@ -104,17 +99,7 @@ impl DaemonService {
         Self {
             sessions_base,
             backend,
-            view_connection_factory: None,
         }
-    }
-
-    /// Use per-connection VirtualTui for StreamTerminalIO (when LiveKit/presenter enabled).
-    pub fn with_view_connection_factory(
-        mut self,
-        factory: Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>,
-    ) -> Self {
-        self.view_connection_factory = Some(factory);
-        self
     }
 
     /// Derive session status from changeset state.
@@ -137,10 +122,6 @@ impl DaemonService {
 #[tonic::async_trait]
 impl TddyRemote for DaemonService {
     type StreamStream = tokio_stream::wrappers::ReceiverStream<Result<ServerMessage, Status>>;
-    type StreamTerminalStream =
-        tokio_stream::wrappers::ReceiverStream<Result<crate::gen::TerminalOutput, Status>>;
-    type StreamTerminalIOStream =
-        tokio_stream::wrappers::ReceiverStream<Result<crate::gen::TerminalOutput, Status>>;
 
     async fn stream(
         &self,
@@ -154,65 +135,6 @@ impl TddyRemote for DaemonService {
             tx,
         );
         tokio::spawn(handler.run());
-        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
-            rx,
-        )))
-    }
-
-    async fn stream_terminal(
-        &self,
-        _request: Request<crate::gen::StreamTerminalRequest>,
-    ) -> Result<Response<Self::StreamTerminalStream>, Status> {
-        let (tx, rx) = tokio_mpsc::channel(64);
-        drop(tx);
-        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
-            rx,
-        )))
-    }
-
-    async fn stream_terminal_io(
-        &self,
-        request: Request<tonic::codec::Streaming<crate::gen::TerminalInput>>,
-    ) -> Result<Response<Self::StreamTerminalIOStream>, Status> {
-        let (tx, rx) = tokio_mpsc::channel(64);
-        let mut client_stream = request.into_inner();
-
-        if let Some(ref factory) = self.view_connection_factory {
-            if let Some(conn) = factory() {
-                let (output_tx, mut output_rx) = tokio_mpsc::channel(64);
-                let (input_tx, input_rx) = tokio_mpsc::channel(64);
-                let shutdown = Arc::new(AtomicBool::new(false));
-                let shutdown_clone = shutdown.clone();
-
-                run_virtual_tui(conn, output_tx, input_rx, shutdown_clone);
-
-                tokio::spawn(async move {
-                    while let Ok(Some(msg)) = client_stream.message().await {
-                        if !msg.data.is_empty() {
-                            let _ = input_tx.send(msg.data).await;
-                        }
-                    }
-                    shutdown.store(true, Ordering::Relaxed);
-                });
-
-                tokio::spawn(async move {
-                    while let Some(bytes) = output_rx.recv().await {
-                        if tx
-                            .send(Ok(crate::gen::TerminalOutput { data: bytes }))
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                });
-            } else {
-                drop(tx);
-            }
-        } else {
-            drop(tx);
-        }
-
         Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
             rx,
         )))
