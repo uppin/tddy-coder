@@ -19,6 +19,9 @@ cypress/screenshots/
 cypress/videos/
 cypress-debug.log
 
+# Environment
+.env
+
 # macOS
 .DS_Store
 .worktrees

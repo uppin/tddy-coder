@@ -4,9 +4,8 @@
   "type": "module",
   "scripts": {
     "generate": "npx buf generate ../tddy-service/proto",
-    "test": "CONNECTRPC_TEST_SKIP=1 bun test",
-    "test:live": "bun test",
-    "test:verbose": "CONNECTRPC_TEST_SKIP=1 bun test --verbose"
+    "test": "bun test",
+    "test:verbose": "bun test --verbose"
   },
   "dependencies": {
     "@connectrpc/connect": "^2.0.0",

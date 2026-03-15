@@ -1,0 +1,17 @@
+daemon: true
+
+livekit:
+  url: ws://127.0.0.1:7880
+  api_key: devkey
+  api_secret: secret
+  room: terminal-e2e
+  identity: server
+
+web:
+  port: 8899
+  host: 127.0.0.1
+  bundle_path: packages/tddy-web/dist
+
+github:
+  stub: true
+  stub_codes: "test-code:testuser"

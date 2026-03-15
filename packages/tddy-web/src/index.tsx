@@ -57,14 +57,30 @@ function createTokenClient() {
   return createClient(TokenService, transport);
 }
 
+const disconnectButtonStyle = {
+  position: "absolute" as const,
+  top: 8,
+  right: 8,
+  padding: "4px 12px",
+  fontSize: 12,
+  cursor: "pointer",
+  backgroundColor: "rgba(0,0,0,0.6)",
+  color: "#ccc",
+  border: "1px solid #555",
+  borderRadius: 4,
+  zIndex: 10,
+};
+
 function ConnectedTerminal({
   url,
   identity,
   roomName,
+  onDisconnect,
 }: {
   url: string;
   identity: string;
   roomName: string;
+  onDisconnect: () => void;
 }) {
   const client = useMemo(() => createTokenClient(), []);
   const [initialToken, setInitialToken] = useState<string | null>(null);
@@ -111,7 +127,14 @@ function ConnectedTerminal({
   }
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", position: "relative" }}>
+      <button
+        data-testid="disconnect-button"
+        onClick={onDisconnect}
+        style={disconnectButtonStyle}
+      >
+        Disconnect
+      </button>
       <GhosttyTerminalLiveKit
         url={url}
         token={initialToken}
@@ -132,10 +155,21 @@ function ConnectionForm() {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const { url: u, identity: i, roomName: r } = getParamsFromUrl();
-    setUrl(u);
-    setIdentity(i);
-    setRoomName(r);
+    // URL params take priority, then server config, then defaults
+    const params = getParamsFromUrl();
+
+    fetch("/api/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((config: { livekit_url?: string; livekit_room?: string } | null) => {
+        setUrl(params.url || config?.livekit_url || "");
+        setIdentity(params.identity || "");
+        setRoomName(params.roomName || config?.livekit_room || "terminal-e2e");
+      })
+      .catch(() => {
+        setUrl(params.url);
+        setIdentity(params.identity);
+        setRoomName(params.roomName || "terminal-e2e");
+      });
   }, []);
 
   if (connected && url && identity) {
@@ -144,6 +178,7 @@ function ConnectionForm() {
         url={url}
         identity={identity}
         roomName={roomName}
+        onDisconnect={() => setConnected(false)}
       />
     );
   }
