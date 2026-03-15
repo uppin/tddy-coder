@@ -572,6 +572,10 @@ impl Presenter {
                             text: "Session connected".to_string(),
                             kind: ActivityKind::Info,
                         },
+                        crate::ProgressEvent::AgentExited { exit_code, goal } => ActivityEntry {
+                            text: format!("Agent exited (code {}) for {}", exit_code, goal),
+                            kind: ActivityKind::Info,
+                        },
                     };
                     self.state.activity_log.push(entry.clone());
                     self.broadcast(PresenterEvent::ActivityLogged(entry));
@@ -609,6 +613,16 @@ impl Presenter {
                     self.flush_agent_output_buffer();
                     self.state.mode = AppMode::PlanReview { prd_content };
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                    // Resync goal/state in case client missed GoalStarted/StateChanged due to broadcast Lagged
+                    if let Some(ref g) = self.state.current_goal {
+                        self.broadcast(PresenterEvent::GoalStarted(g.clone()));
+                    }
+                    if let Some(ref s) = self.state.current_state {
+                        self.broadcast(PresenterEvent::StateChanged {
+                            from: "Planning".to_string(),
+                            to: s.clone(),
+                        });
+                    }
                 }
                 WorkflowEvent::WorktreeSwitched { ref path } => {
                     let entry = ActivityEntry {
@@ -655,6 +669,10 @@ impl Presenter {
                         match result {
                             Err(ref msg) => {
                                 log::info!("WorkflowComplete Err → ErrorRecovery: {}", msg);
+                                self.log_activity(
+                                    format!("Workflow failed: {}", msg),
+                                    ActivityKind::Info,
+                                );
                                 self.state.mode = AppMode::ErrorRecovery {
                                     error_message: msg.clone(),
                                 };

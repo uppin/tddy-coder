@@ -25,6 +25,11 @@ pub enum ProgressEvent {
     },
     /// Agent session started; session_id from first system/init stream event.
     SessionStarted { session_id: String },
+    /// Agent process exited; goal identifies the step (e.g. "plan", "acceptance-tests").
+    AgentExited {
+        exit_code: i32,
+        goal: String,
+    },
 }
 
 /// Result of processing an NDJSON stream from an agent CLI.

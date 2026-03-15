@@ -5,6 +5,7 @@
 
 use super::{ClarificationQuestion, CodingBackend, InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
+use crate::stream::ProgressEvent;
 use crate::toolcall::SubmitResultChannel;
 use std::collections::VecDeque;
 use std::sync::RwLock;
@@ -125,6 +126,13 @@ impl CodingBackend for MockBackend {
         if response.questions.is_empty() {
             self.submit_channel
                 .store(request.goal.submit_key(), &response.output);
+        }
+
+        if let Some(ref sink) = request.progress_sink {
+            sink.emit(&ProgressEvent::AgentExited {
+                exit_code: response.exit_code,
+                goal: request.goal.submit_key().to_string(),
+            });
         }
 
         Ok(response)

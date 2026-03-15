@@ -19,6 +19,10 @@ pub struct SubmitArgs {
     /// JSON data (alternative to stdin).
     #[arg(long)]
     pub data: Option<String>,
+
+    /// Read JSON from stdin. Use with pipe or heredoc to avoid shell escaping issues.
+    #[arg(long)]
+    pub data_stdin: bool,
 }
 
 /// Ask clarification questions. Blocks until user answers in TUI.
@@ -91,7 +95,7 @@ pub struct AskResponse {
 
 /// Exit codes: 0=success, 1=general failure, 2=usage error, 3=validation error
 pub fn run_submit(args: SubmitArgs) -> Result<()> {
-    let json_str = read_input(&args.data)?;
+    let json_str = read_input(&args.data, args.data_stdin)?;
 
     let data: serde_json::Value = serde_json::from_str(&json_str).map_err(|e| {
         output_error(&format!("invalid JSON: {}", e), 1);
@@ -122,7 +126,12 @@ pub fn run_submit(args: SubmitArgs) -> Result<()> {
     Ok(())
 }
 
-fn read_input(data_arg: &Option<String>) -> Result<String> {
+fn read_input(data_arg: &Option<String>, data_stdin: bool) -> Result<String> {
+    if data_stdin {
+        let mut buf = String::new();
+        io::stdin().read_to_string(&mut buf)?;
+        return Ok(buf);
+    }
     if let Some(ref s) = data_arg {
         return Ok(s.clone());
     }
@@ -231,7 +240,7 @@ fn relay_submit(
 }
 
 pub fn run_ask(args: AskArgs) -> Result<()> {
-    let json_str = read_input(&args.data)?;
+    let json_str = read_input(&args.data, false)?;
 
     let parsed: serde_json::Value = serde_json::from_str(&json_str).map_err(|e| {
         output_error(&format!("invalid JSON: {}", e), 1);

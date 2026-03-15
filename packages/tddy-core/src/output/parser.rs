@@ -52,16 +52,39 @@ struct StructuredPlan {
 
 /// Parse LLM planning response. JSON must come from tddy-tools submit (no inline parsing).
 pub fn parse_planning_response(s: &str) -> Result<PlanningOutput, ParseError> {
+    parse_planning_response_impl(s, None)
+}
+
+/// Like parse_planning_response but resolves `prd` when it is a path to an MD file (relative to base_path).
+pub fn parse_planning_response_with_base(
+    s: &str,
+    _base_path: &std::path::Path,
+) -> Result<PlanningOutput, ParseError> {
+    parse_planning_response_impl(s, Some(_base_path))
+}
+
+fn parse_planning_response_impl(
+    s: &str,
+    _base_path: Option<&std::path::Path>,
+) -> Result<PlanningOutput, ParseError> {
     let s = s.trim();
     let parsed: StructuredPlan = serde_json::from_str(s)
         .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
     if parsed.goal.as_deref() != Some("plan") {
         return Err(ParseError::Malformed("goal is not plan".into()));
     }
-    let prd = parsed
+    let mut prd = parsed
         .prd
         .filter(|x| !x.trim().is_empty())
         .ok_or_else(|| ParseError::Malformed("prd missing or empty".into()))?;
+    if let Some(base) = _base_path {
+        let path = base.join(prd.trim());
+        if path.exists() && path.is_file() {
+            prd = std::fs::read_to_string(&path).map_err(|e| {
+                ParseError::Malformed(format!("failed to read prd file {}: {}", path.display(), e))
+            })?;
+        }
+    }
     Ok(PlanningOutput {
         prd,
         name: parsed.name.filter(|s| !s.is_empty()),

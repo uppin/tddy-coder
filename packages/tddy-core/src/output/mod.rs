@@ -5,7 +5,8 @@ mod writer;
 
 pub use parser::{
     parse_acceptance_tests_response, parse_demo_response, parse_evaluate_response,
-    parse_green_response, parse_planning_response, parse_red_response, parse_refactor_response,
+    parse_green_response, parse_planning_response, parse_planning_response_with_base,
+    parse_red_response, parse_refactor_response,
     parse_update_docs_response, parse_validate_subagents_response, AcceptanceTestInfo,
     AcceptanceTestsOutput, DemoOutput, DemoPlan, DemoResults, DemoStep, EvaluateAffectedTest,
     EvaluateBuildResult, EvaluateChangedFile, EvaluateChangesetSync, EvaluateFileAnalyzed,
