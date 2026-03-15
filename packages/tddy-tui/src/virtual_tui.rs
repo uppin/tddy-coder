@@ -5,7 +5,7 @@
 //! Processes client input bytes into UserIntents.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -38,10 +38,15 @@ pub fn run_virtual_tui(
         let mut view = TuiView::new();
         let mut input_buf: Vec<u8> = Vec::new();
 
+        // Collect each draw()'s raw ANSI output into a buffer so we can diff
+        // against the previous frame and only send bytes when content changed.
+        let frame_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let on_write = {
-            let tx = output_tx.clone();
-            move |buf: &[u8]| {
-                let _ = tx.blocking_send(buf.to_vec());
+            let buf = frame_buf.clone();
+            move |bytes: &[u8]| {
+                if let Ok(mut b) = buf.lock() {
+                    b.extend_from_slice(bytes);
+                }
             }
         };
         let writer = CapturingWriter::headless(Box::new(on_write));
@@ -56,66 +61,127 @@ pub fn run_virtual_tui(
             }
         };
 
-        let render = |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
-                      state: &PresenterState,
-                      view: &mut TuiView| {
+        let mut prev_frame: Vec<u8> = Vec::new();
+
+        // Render a frame: draw into the buffer, compare with the previous frame,
+        // and only send bytes to the output channel if content actually changed.
+        // This avoids sending cursor-only control sequences from ratatui's draw()
+        // on identical frames, which would flood the network stream.
+        let render_and_send = |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
+                               state: &PresenterState,
+                               view: &mut TuiView,
+                               frame_buf: &Arc<Mutex<Vec<u8>>>,
+                               prev_frame: &mut Vec<u8>,
+                               output_tx: &mpsc::Sender<Vec<u8>>| {
+            {
+                let mut b = frame_buf.lock().unwrap();
+                b.clear();
+            }
             if let Err(e) = term.draw(|f| draw(f, state, view.view_state_mut(), false)) {
                 log::debug!("VirtualTui: draw error: {}", e);
-            }
-        };
-
-        render(&mut terminal, &state, &mut view);
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build();
-        let rt = match rt {
-            Ok(r) => r,
-            Err(e) => {
-                log::error!("VirtualTui: failed to create runtime: {}", e);
                 return;
             }
+            let current_frame = {
+                let b = frame_buf.lock().unwrap();
+                b.clone()
+            };
+            if current_frame != *prev_frame {
+                log::trace!(
+                    "virtual_tui: frame changed ({} bytes), sending",
+                    current_frame.len()
+                );
+                let _ = output_tx.blocking_send(current_frame.clone());
+                *prev_frame = current_frame;
+            }
         };
+
+        render_and_send(
+            &mut terminal,
+            &state,
+            &mut view,
+            &frame_buf,
+            &mut prev_frame,
+            &output_tx,
+        );
 
         let mut input_rx = input_rx;
         let mut event_rx = conn.event_rx;
         let intent_tx = conn.intent_tx;
 
+        // Periodic render interval to keep animations alive (spinner, elapsed timer),
+        // matching the real TUI event loop (event_loop.rs:69) which draws every ~50ms.
+        let render_interval = Duration::from_millis(200);
+        let mut last_render = std::time::Instant::now();
+
         while !shutdown.load(Ordering::Relaxed) {
             let mut updated = false;
 
             while let Ok(ev) = event_rx.try_recv() {
+                log::trace!(
+                    "virtual_tui: received PresenterEvent: {:?}",
+                    std::mem::discriminant(&ev)
+                );
                 apply_event(&mut state, &mut view, ev);
                 updated = true;
             }
 
             loop {
-                match rt.block_on(tokio::time::timeout(
-                    Duration::from_millis(0),
-                    input_rx.recv(),
-                )) {
-                    Ok(Some(bytes)) if !bytes.is_empty() => {
+                match input_rx.try_recv() {
+                    Ok(bytes) if !bytes.is_empty() => {
+                        log::trace!("virtual_tui: received input ({} bytes)", bytes.len());
                         input_buf.extend_from_slice(&bytes);
                         while let Some((key, consumed)) = parse_key_from_buf(&mut input_buf) {
-                            if let Some(intent) =
+                            log::trace!(
+                                "virtual_tui: parsed key={:?}, mode={:?}",
+                                key.code,
+                                state.mode
+                            );
+                            let inbox_len = state.inbox.len();
+                            let view_consumed = view.view_state_mut().handle_key_view_local(
+                                key,
+                                &state.mode,
+                                inbox_len,
+                            );
+                            if view_consumed {
+                                log::trace!(
+                                    "virtual_tui: key={:?} consumed by view-local handler",
+                                    key.code
+                                );
+                                updated = true;
+                            } else if let Some(intent) =
                                 key_event_to_intent(key, &state.mode, view.view_state())
                             {
+                                log::trace!("virtual_tui: sending intent={:?}", intent);
                                 let _ = intent_tx.send(intent);
                             }
                             input_buf.drain(..consumed);
                         }
                     }
-                    Ok(None) => break,
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        log::trace!("virtual_tui: input_rx closed");
+                        break;
+                    }
                     _ => break,
                 }
             }
 
-            if updated {
-                render(&mut terminal, &state, &mut view);
+            // Render on events/input immediately, or periodically to keep the
+            // spinner and elapsed timer alive.
+            if updated || last_render.elapsed() >= render_interval {
+                render_and_send(
+                    &mut terminal,
+                    &state,
+                    &mut view,
+                    &frame_buf,
+                    &mut prev_frame,
+                    &output_tx,
+                );
+                last_render = std::time::Instant::now();
             }
 
             thread::sleep(Duration::from_millis(10));
         }
+        log::trace!("virtual_tui: main loop exited");
     });
 }
 

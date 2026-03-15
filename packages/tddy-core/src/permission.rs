@@ -135,7 +135,10 @@ mod tests {
     #[test]
     fn all_allowlists_include_ask_user_question() {
         assert_allowlist_contains_ask_user_question(&plan_allowlist(), "plan");
-        assert_allowlist_contains_ask_user_question(&acceptance_tests_allowlist(), "acceptance-tests");
+        assert_allowlist_contains_ask_user_question(
+            &acceptance_tests_allowlist(),
+            "acceptance-tests",
+        );
         assert_allowlist_contains_ask_user_question(&red_allowlist(), "red");
         assert_allowlist_contains_ask_user_question(&green_allowlist(), "green");
         assert_allowlist_contains_ask_user_question(&demo_allowlist(), "demo");

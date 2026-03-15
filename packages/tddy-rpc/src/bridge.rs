@@ -21,6 +21,13 @@ pub enum ResponseBody {
     Streaming(mpsc::Receiver<Result<Vec<u8>, Status>>),
 }
 
+/// Handle returned by `start_bidi_stream`: the streaming response body from the handler.
+/// The input channel is owned by the caller (participant) and created before calling this.
+pub struct BidiStreamOutput {
+    /// The streaming response body (output from the handler).
+    pub output: ResponseBody,
+}
+
 /// Trait for services that can handle RPC calls.
 /// The transport layer passes already-extracted service/method names and RpcMessage slices.
 #[async_trait]
@@ -46,6 +53,18 @@ pub trait RpcService: Send + Sync + 'static {
         } else {
             RpcResult::Unary(Err(Status::unimplemented("streaming not supported")))
         }
+    }
+
+    /// Start a bidi stream session. The caller creates the mpsc channel and stores the sender
+    /// before calling this. This method consumes the receiver, wires it to the handler, and
+    /// returns the streaming output. The caller pushes subsequent messages via the sender.
+    async fn start_bidi_stream(
+        &self,
+        _service: &str,
+        _method: &str,
+        _input_rx: mpsc::Receiver<RpcMessage>,
+    ) -> Result<BidiStreamOutput, Status> {
+        Err(Status::unimplemented("bidi streaming not supported"))
     }
 }
 
@@ -106,6 +125,18 @@ impl RpcService for MultiRpcService {
             )))),
         }
     }
+
+    async fn start_bidi_stream(
+        &self,
+        service: &str,
+        method: &str,
+        input_rx: mpsc::Receiver<RpcMessage>,
+    ) -> Result<BidiStreamOutput, Status> {
+        match self.find_service(service) {
+            Some(s) => s.start_bidi_stream(service, method, input_rx).await,
+            None => Err(Status::not_found(format!("Unknown service: {}", service))),
+        }
+    }
 }
 
 /// Bridge that routes RPC messages to a service.
@@ -124,6 +155,18 @@ impl<S: RpcService> RpcBridge<S> {
     /// Returns true if the given service/method is a bidi stream.
     pub fn is_bidi_stream(&self, service: &str, method: &str) -> bool {
         self.service.is_bidi_stream(service, method)
+    }
+
+    /// Start a bidi stream session. Delegates to the service's `start_bidi_stream`.
+    pub async fn start_bidi_stream(
+        &self,
+        service: &str,
+        method: &str,
+        input_rx: mpsc::Receiver<RpcMessage>,
+    ) -> Result<BidiStreamOutput, Status> {
+        self.service
+            .start_bidi_stream(service, method, input_rx)
+            .await
     }
 
     /// Handle a batch of RPC messages.

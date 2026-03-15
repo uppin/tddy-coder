@@ -106,6 +106,22 @@ pub async fn connect_grpc(
     .await
 }
 
+/// Connect a tonic terminal gRPC client to the given port.
+pub async fn connect_terminal_grpc(
+    port: u16,
+) -> Result<
+    tddy_service::tonic_terminal::terminal_service_client::TerminalServiceClient<
+        tonic::transport::Channel,
+    >,
+    tonic::transport::Error,
+> {
+    tddy_service::tonic_terminal::terminal_service_client::TerminalServiceClient::connect(format!(
+        "http://[::1]:{}",
+        port
+    ))
+    .await
+}
+
 /// Spawn Presenter with TuiView, gRPC server, and TestBackend. Runs in memory (no binary).
 /// Returns (join_handle, port, shutdown, screen_buffer) where screen_buffer is the rendered TUI.
 pub fn spawn_presenter_with_grpc_and_tui(
@@ -220,7 +236,7 @@ pub fn spawn_presenter_with_grpc_and_tui(
 }
 
 /// Spawn Presenter with view connection factory. Returns (presenter_handle, factory, shutdown).
-/// Use the factory to create TerminalServiceImplPerConnection for LiveKit or TddyRemoteService for gRPC.
+/// Use the factory to create TerminalServiceVirtualTui for LiveKit or tonic terminal server for gRPC.
 #[cfg(feature = "livekit")]
 pub fn spawn_presenter_with_view_connection_factory(
     initial_prompt: Option<String>,
@@ -231,11 +247,14 @@ pub fn spawn_presenter_with_view_connection_factory(
 ) {
     let (event_tx, _) = broadcast::channel(256);
     let (intent_tx, intent_rx) = mpsc::channel();
+    let output_dir =
+        std::env::temp_dir().join(format!("tddy-e2e-livekit-tui-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&output_dir).unwrap();
     let mut presenter = Presenter::new("stub", "opus")
         .with_broadcast(event_tx.clone())
-        .with_intent_sender(intent_tx.clone());
+        .with_intent_sender(intent_tx.clone())
+        .with_worktree_dir(output_dir.clone());
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
-    let output_dir = temp_dir_with_git_repo("livekit-tui");
     presenter.start_workflow(
         backend,
         output_dir,
@@ -282,7 +301,8 @@ pub fn spawn_presenter_with_view_connection_factory(
 }
 
 /// Spawn Presenter with per-connection VirtualTui (stream_terminal_io creates a VirtualTui per client).
-/// Returns (presenter_handle, port, shutdown) for gRPC TddyRemoteServer.
+/// Serves both TddyRemoteServer and tonic TerminalServiceServer on the same gRPC port.
+/// Returns (presenter_handle, port, shutdown).
 pub fn spawn_presenter_with_terminal_service(
     initial_prompt: Option<String>,
 ) -> (thread::JoinHandle<()>, u16, Arc<AtomicBool>) {
@@ -293,12 +313,13 @@ pub fn spawn_presenter_with_terminal_service(
         intent_tx: intent_tx.clone(),
     };
 
-    let mut presenter = Presenter::new("stub", "opus")
+    let presenter = Presenter::new("stub", "opus")
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx);
-    let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
     let output_dir = std::env::temp_dir().join(format!("tddy-e2e-vt-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&output_dir).unwrap();
+    let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+    let mut presenter = presenter.with_worktree_dir(output_dir.clone());
     presenter.start_workflow(
         backend,
         output_dir,
@@ -314,12 +335,13 @@ pub fn spawn_presenter_with_terminal_service(
 
     let presenter = Arc::new(Mutex::new(presenter));
     let presenter_for_factory = presenter.clone();
-    let factory = Arc::new(move || {
-        presenter_for_factory
-            .lock()
-            .ok()
-            .and_then(|p| p.connect_view())
-    });
+    let factory: Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync> =
+        Arc::new(move || {
+            presenter_for_factory
+                .lock()
+                .ok()
+                .and_then(|p| p.connect_view())
+        });
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = shutdown.clone();
@@ -330,6 +352,7 @@ pub fn spawn_presenter_with_terminal_service(
                 break;
             }
             while let Ok(intent) = intent_rx.try_recv() {
+                log::trace!("presenter: received intent={:?}", intent);
                 if let Ok(mut p) = presenter_for_thread.lock() {
                     p.handle_intent(intent);
                 }
@@ -341,12 +364,13 @@ pub fn spawn_presenter_with_terminal_service(
         }
     });
 
-    let service = TddyRemoteService::new(handle).with_view_connection_factory(factory);
+    let terminal_svc = tddy_service::TerminalServiceVirtualTui::new(factory);
     let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
     let (port_tx, port_rx) = std::sync::mpsc::channel();
 
     let _server_handle = thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
             .enable_all()
             .build()
             .unwrap();
@@ -355,7 +379,10 @@ pub fn spawn_presenter_with_terminal_service(
         port_tx.send(port).unwrap();
         rt.block_on(async {
             Server::builder()
-                .add_service(TddyRemoteServer::new(service))
+                .add_service(TddyRemoteServer::new(TddyRemoteService::new(handle)))
+                .add_service(
+                    tddy_service::tonic_terminal::terminal_service_server::TerminalServiceServer::new(terminal_svc),
+                )
                 .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
                 .await
         })

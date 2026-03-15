@@ -1,10 +1,15 @@
-//! Terminal service implementation for streaming TUI bytes.
+//! Terminal service: single VirtualTui-per-connection implementation.
+//!
+//! `start_virtual_tui_session` is the ONE entry point for creating a VirtualTui
+//! streaming session. `TerminalServiceVirtualTui` is the sole `TerminalService`
+//! trait impl — used directly for LiveKit (via `TerminalServiceServer` / RpcService)
+//! and for gRPC (via the tonic-generated `TerminalServiceServer` from `tonic_terminal`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use tddy_core::ViewConnection;
@@ -13,101 +18,95 @@ use tddy_tui::run_virtual_tui;
 
 use crate::proto::terminal::{TerminalInput, TerminalOutput, TerminalService};
 
-/// Terminal service implementation.
-/// Streams terminal output from a broadcast channel and forwards input to a sink.
-pub struct TerminalServiceImpl {
-    output_tx: broadcast::Sender<Vec<u8>>,
-    input_tx: mpsc::Sender<Vec<u8>>,
+/// A running VirtualTui session: send keyboard bytes via `input_tx`,
+/// receive ANSI output bytes via `output_rx`, signal `shutdown` to stop.
+pub struct VirtualTuiSession {
+    pub input_tx: mpsc::Sender<Vec<u8>>,
+    pub output_rx: mpsc::Receiver<Vec<u8>>,
+    pub shutdown: Arc<AtomicBool>,
 }
 
-impl TerminalServiceImpl {
-    /// Create a new TerminalServiceImpl (shared broadcast mode).
-    /// - `output_tx`: broadcast sender for terminal output bytes (ANSI from TUI)
-    /// - `input_tx`: sink for terminal input bytes (keyboard/mouse from client)
-    pub fn new(output_tx: broadcast::Sender<Vec<u8>>, input_tx: mpsc::Sender<Vec<u8>>) -> Self {
-        Self {
-            output_tx,
-            input_tx,
-        }
-    }
+/// The ONE entry point for creating a VirtualTui streaming session.
+/// Calls the factory to obtain a `ViewConnection`, creates channels,
+/// and spawns the VirtualTui thread.
+pub fn start_virtual_tui_session(
+    factory: &(dyn Fn() -> Option<ViewConnection> + Send + Sync),
+) -> Option<VirtualTuiSession> {
+    let conn = factory()?;
+    log::trace!(
+        "[BIDI_TRACE] start_virtual_tui_session: ViewConnection obtained, starting VirtualTui"
+    );
+    let (output_tx, output_rx) = mpsc::channel(64);
+    let (input_tx, input_rx) = mpsc::channel(64);
+    let shutdown = Arc::new(AtomicBool::new(false));
+    run_virtual_tui(conn, output_tx, input_rx, shutdown.clone());
+    Some(VirtualTuiSession {
+        input_tx,
+        output_rx,
+        shutdown,
+    })
 }
 
-/// Per-connection variant: creates a VirtualTui for each StreamTerminalIO call.
-pub struct TerminalServiceImplPerConnection {
+/// Per-connection VirtualTui terminal service.
+/// Each `stream_terminal_io` call creates its own VirtualTui instance.
+pub struct TerminalServiceVirtualTui {
     factory: Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>,
 }
 
-impl TerminalServiceImplPerConnection {
-    /// Create a per-connection TerminalService.
-    /// - `factory`: called on each connection to get ViewConnection (snapshot + events + intents)
+impl TerminalServiceVirtualTui {
     pub fn new(factory: Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>) -> Self {
         Self { factory }
     }
 }
 
 #[async_trait]
-impl TerminalService for TerminalServiceImpl {
+impl TerminalService for TerminalServiceVirtualTui {
     type StreamTerminalIoStream = ReceiverStream<Result<TerminalOutput, Status>>;
 
     async fn stream_terminal_io(
         &self,
         request: Request<Streaming<TerminalInput>>,
     ) -> Result<Response<Self::StreamTerminalIoStream>, Status> {
-        let stream = request.into_inner();
-        let input_tx = self.input_tx.clone();
+        let session = start_virtual_tui_session(&*self.factory)
+            .ok_or_else(|| Status::internal("connect_view not available"))?;
 
-        tokio::spawn(async move {
-            futures_util::pin_mut!(stream);
-            while let Some(item) = futures_util::stream::StreamExt::next(&mut stream).await {
-                if let Ok(req) = item {
-                    if !req.data.is_empty() {
-                        let _ = input_tx.send(req.data).await;
-                    }
-                }
-            }
-        });
-
-        let mut output_rx = self.output_tx.subscribe();
-        let (tx, rx) = mpsc::channel(64);
-
-        tokio::spawn(async move {
-            while let Ok(bytes) = output_rx.recv().await {
-                let _ = tx.send(Ok(TerminalOutput { data: bytes })).await;
-            }
-        });
-
-        Ok(Response::new(ReceiverStream::new(rx)))
-    }
-}
-
-#[async_trait]
-impl TerminalService for TerminalServiceImplPerConnection {
-    type StreamTerminalIoStream = ReceiverStream<Result<TerminalOutput, Status>>;
-
-    async fn stream_terminal_io(
-        &self,
-        request: Request<Streaming<TerminalInput>>,
-    ) -> Result<Response<Self::StreamTerminalIoStream>, Status> {
-        let conn =
-            (self.factory)().ok_or_else(|| Status::internal("connect_view not available"))?;
+        let VirtualTuiSession {
+            input_tx,
+            mut output_rx,
+            shutdown,
+        } = session;
 
         let client_stream = request.into_inner();
-        let (output_tx, mut output_rx) = mpsc::channel(64);
-        let (input_tx, input_rx) = mpsc::channel(64);
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let shutdown_clone = shutdown.clone();
-
-        run_virtual_tui(conn, output_tx, input_rx, shutdown_clone);
-
         tokio::spawn(async move {
+            log::trace!("[BIDI_TRACE] terminal_service: input-forwarding task started");
+            let mut input_count: u64 = 0;
             futures_util::pin_mut!(client_stream);
             while let Some(item) = futures_util::stream::StreamExt::next(&mut client_stream).await {
-                if let Ok(req) = item {
-                    if !req.data.is_empty() {
-                        let _ = input_tx.send(req.data).await;
+                input_count += 1;
+                match item {
+                    Ok(req) if !req.data.is_empty() => {
+                        if let Err(e) = input_tx.send(req.data).await {
+                            log::error!(
+                                "[BIDI_TRACE] terminal_service: input_tx.send FAILED #{}: {}",
+                                input_count,
+                                e
+                            );
+                        }
                     }
+                    Err(e) => {
+                        log::error!(
+                            "[BIDI_TRACE] terminal_service: stream error on input #{}: {}",
+                            input_count,
+                            e
+                        );
+                    }
+                    _ => {}
                 }
             }
+            log::trace!(
+                "[BIDI_TRACE] terminal_service: input stream ended after {} inputs",
+                input_count
+            );
             shutdown.store(true, Ordering::Relaxed);
         });
 
@@ -121,5 +120,65 @@ impl TerminalService for TerminalServiceImplPerConnection {
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+}
+
+/// Tonic gRPC implementation for `TerminalServiceVirtualTui`.
+/// Delegates to `start_virtual_tui_session` — same path as the LiveKit impl.
+#[tonic::async_trait]
+impl crate::tonic_terminal::terminal_service_server::TerminalService for TerminalServiceVirtualTui {
+    type StreamTerminalIOStream = ReceiverStream<Result<TerminalOutput, tonic::Status>>;
+
+    async fn stream_terminal_io(
+        &self,
+        request: tonic::Request<tonic::Streaming<TerminalInput>>,
+    ) -> Result<tonic::Response<Self::StreamTerminalIOStream>, tonic::Status> {
+        let session = start_virtual_tui_session(&*self.factory)
+            .ok_or_else(|| tonic::Status::internal("connect_view not available"))?;
+
+        let VirtualTuiSession {
+            input_tx,
+            mut output_rx,
+            shutdown,
+        } = session;
+
+        let mut client_stream = request.into_inner();
+        tokio::spawn(async move {
+            log::trace!("tonic terminal_service: input-forwarding task started");
+            let mut input_count: u64 = 0;
+            while let Ok(Some(msg)) = client_stream.message().await {
+                input_count += 1;
+                if !msg.data.is_empty() {
+                    log::trace!(
+                        "tonic: forwarding input #{} ({} bytes)",
+                        input_count,
+                        msg.data.len()
+                    );
+                    if let Err(e) = input_tx.send(msg.data).await {
+                        log::error!(
+                            "tonic: input_tx.send FAILED #{}: {}",
+                            input_count, e
+                        );
+                    }
+                }
+            }
+            log::trace!(
+                "tonic: input stream ended after {} inputs",
+                input_count
+            );
+            shutdown.store(true, Ordering::Relaxed);
+        });
+
+        let (tx, rx) = mpsc::channel(64);
+        tokio::spawn(async move {
+            while let Some(bytes) = output_rx.recv().await {
+                if tx.send(Ok(TerminalOutput { data: bytes })).await.is_err() {
+                    break;
+                }
+            }
+            log::trace!("tonic output: stream ended");
+        });
+
+        Ok(tonic::Response::new(ReceiverStream::new(rx)))
     }
 }

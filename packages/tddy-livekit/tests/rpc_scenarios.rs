@@ -7,6 +7,8 @@
 //! Debug:    RUST_LOG=debug cargo test -p tddy-livekit --test rpc_scenarios -- --nocapture
 
 use anyhow::Result;
+use async_trait::async_trait;
+use futures_util::StreamExt;
 use livekit::prelude::*;
 use prost::Message;
 use serial_test::serial;
@@ -16,8 +18,10 @@ use std::time::Duration;
 use tddy_livekit::{LiveKitParticipant, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Code;
-use tddy_service::proto::test::{EchoRequest, EchoResponse};
+use tddy_service::proto::test::{EchoRequest, EchoResponse, EchoService};
 use tddy_service::{EchoServiceImpl, EchoServiceServer};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 
 const RPC_TOPIC: &str = "tddy-rpc";
 
@@ -65,6 +69,125 @@ async fn wait_for_participant(
     .await
     .map_err(|_| anyhow::anyhow!("Timed out waiting for participant '{}'", identity))?;
     Ok(())
+}
+
+/// Bidi echo service that counts handler invocations and includes sequence numbers.
+/// If multiple handlers are created for a single bidi session (the bug), each
+/// handler reports seq=1 with an independent handler_id. A correctly-managed
+/// session produces sequential `seq` values from a single handler.
+struct CountingEchoService {
+    bidi_handler_count: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl EchoService for CountingEchoService {
+    type EchoServerStreamStream = ReceiverStream<Result<EchoResponse, tddy_rpc::Status>>;
+    type EchoBidiStreamStream = ReceiverStream<Result<EchoResponse, tddy_rpc::Status>>;
+
+    async fn echo(
+        &self,
+        request: tddy_rpc::Request<EchoRequest>,
+    ) -> Result<tddy_rpc::Response<EchoResponse>, tddy_rpc::Status> {
+        Ok(tddy_rpc::Response::new(EchoResponse {
+            message: request.into_inner().message,
+            timestamp: 0,
+        }))
+    }
+
+    async fn echo_server_stream(
+        &self,
+        _request: tddy_rpc::Request<EchoRequest>,
+    ) -> Result<tddy_rpc::Response<Self::EchoServerStreamStream>, tddy_rpc::Status> {
+        Err(tddy_rpc::Status::unimplemented("not used"))
+    }
+
+    async fn echo_client_stream(
+        &self,
+        _request: tddy_rpc::Request<tddy_rpc::Streaming<EchoRequest>>,
+    ) -> Result<tddy_rpc::Response<EchoResponse>, tddy_rpc::Status> {
+        Err(tddy_rpc::Status::unimplemented("not used"))
+    }
+
+    async fn echo_bidi_stream(
+        &self,
+        request: tddy_rpc::Request<tddy_rpc::Streaming<EchoRequest>>,
+    ) -> Result<tddy_rpc::Response<Self::EchoBidiStreamStream>, tddy_rpc::Status> {
+        let handler_id = self.bidi_handler_count.fetch_add(1, Ordering::SeqCst) + 1;
+        let stream = request.into_inner();
+        let (tx, rx) = mpsc::channel(16);
+        tokio::spawn(async move {
+            futures_util::pin_mut!(stream);
+            let mut seq = 0u32;
+            while let Some(item) = stream.next().await {
+                match item {
+                    Ok(req) => {
+                        seq += 1;
+                        let _ = tx
+                            .send(Ok(EchoResponse {
+                                message: format!(
+                                    "handler={} seq={} msg={}",
+                                    handler_id, seq, req.message
+                                ),
+                                timestamp: 0,
+                            }))
+                            .await;
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(e)).await;
+                    }
+                }
+            }
+        });
+        Ok(tddy_rpc::Response::new(ReceiverStream::new(rx)))
+    }
+}
+
+struct CountingHarness {
+    rpc_client: RpcClient,
+    handler_count: Arc<AtomicUsize>,
+    server_handle: tokio::task::JoinHandle<()>,
+}
+
+impl CountingHarness {
+    async fn start(livekit: &LiveKitTestkit, room_name: &str) -> Result<Self> {
+        let url = livekit.get_ws_url();
+        let handler_count = Arc::new(AtomicUsize::new(0));
+
+        let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
+        let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
+
+        let service = CountingEchoService {
+            bidi_handler_count: handler_count.clone(),
+        };
+        let server = LiveKitParticipant::connect(
+            &url,
+            &server_token,
+            EchoServiceServer::new(service),
+            RoomOptions::default(),
+        )
+        .await?;
+        let server_handle = tokio::spawn(async move { server.run().await });
+
+        let (client_room, mut client_events) =
+            Room::connect(&url, &client_token, RoomOptions::default())
+                .await
+                .map_err(|e| anyhow::anyhow!("client connect: {}", e))?;
+
+        let rpc_events = client_room.subscribe();
+        wait_for_participant(&client_room, &mut client_events, SERVER_IDENTITY).await?;
+
+        let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
+
+        Ok(Self {
+            rpc_client,
+            handler_count,
+            server_handle,
+        })
+    }
+
+    fn teardown(self) {
+        self.server_handle.abort();
+    }
 }
 
 struct TestHarness {
@@ -501,9 +624,9 @@ async fn rpc_scenarios() -> Result<()> {
                 received.push(response.message);
             }
             assert_eq!(received.len(), 3);
-            assert_eq!(received[0], "alpha");
-            assert_eq!(received[1], "beta");
-            assert_eq!(received[2], "gamma");
+            assert_eq!(received[0], "alpha #1");
+            assert_eq!(received[1], "beta #2");
+            assert_eq!(received[2], "gamma #3");
         }
 
         harness.teardown();
@@ -544,8 +667,8 @@ async fn rpc_scenarios() -> Result<()> {
             let first_bytes = first_echo.map_err(|e| anyhow::anyhow!("first echo error: {}", e))?;
             let first_response = EchoResponse::decode(&first_bytes[..])?;
             assert_eq!(
-                first_response.message, "first",
-                "first message should be echoed in real-time before sending second"
+                first_response.message, "first #1",
+                "first message should be echoed in real-time with seq=1 before sending second"
             );
 
             sender
@@ -559,27 +682,24 @@ async fn rpc_scenarios() -> Result<()> {
                 .await
                 .map_err(|e| anyhow::anyhow!("send second: {}", e))?;
 
-            let second_echo = tokio::time::timeout(
-                Duration::from_secs(3),
-                async {
-                    loop {
-                        let chunk = rx
-                            .recv()
-                            .await
-                            .ok_or_else(|| anyhow::anyhow!("receiver closed before second echo"))?;
-                        let bytes = chunk.map_err(|e| anyhow::anyhow!("second echo error: {}", e))?;
-                        if !bytes.is_empty() {
-                            return Ok::<_, anyhow::Error>(bytes);
-                        }
+            let second_echo = tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    let chunk = rx
+                        .recv()
+                        .await
+                        .ok_or_else(|| anyhow::anyhow!("receiver closed before second echo"))?;
+                    let bytes = chunk.map_err(|e| anyhow::anyhow!("second echo error: {}", e))?;
+                    if !bytes.is_empty() {
+                        return Ok::<_, anyhow::Error>(bytes);
                     }
-                },
-            )
+                }
+            })
             .await
             .map_err(|_| anyhow::anyhow!("timeout waiting for second echo"))??;
             let second_response = EchoResponse::decode(&second_echo[..])?;
             assert_eq!(
-                second_response.message, "second",
-                "second message should be echoed"
+                second_response.message, "second #2",
+                "second message should be echoed with seq=2 (same Streaming instance)"
             );
         }
 
@@ -626,6 +746,75 @@ async fn rpc_scenarios() -> Result<()> {
             client2_received,
             0,
             "client2 must not receive any RPC responses; only the requesting participant (client1) should get the stream"
+        );
+
+        harness.teardown();
+    }
+
+    // -----------------------------------------------------------------------
+    // Stateful bidi: verify single handler per session (reproduces session bug)
+    // -----------------------------------------------------------------------
+    {
+        let harness = CountingHarness::start(&livekit, "stateful-bidi-scenarios").await?;
+
+        // Send 3 messages via real-time bidi stream. With correct session management,
+        // one handler processes all 3 with incrementing seq. With the bug (new handler per
+        // message), each response has seq=1 from a different handler.
+        {
+            log::debug!("scenario: stateful bidi - single handler for all messages");
+            let (mut sender, mut rx) = harness
+                .rpc_client
+                .start_bidi_stream("test.EchoService", "EchoBidiStream")
+                .map_err(|e| anyhow::anyhow!("start bidi stream: {}", e))?;
+
+            for (i, text) in ["first", "second", "third"].iter().enumerate() {
+                let is_last = i == 2;
+                sender
+                    .send(
+                        EchoRequest {
+                            message: text.to_string(),
+                        }
+                        .encode_to_vec(),
+                        is_last,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("send {}: {}", text, e))?;
+
+                let echo = tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        let chunk = rx
+                            .recv()
+                            .await
+                            .ok_or_else(|| anyhow::anyhow!("receiver closed before echo"))?;
+                        let bytes = chunk.map_err(|e| anyhow::anyhow!("echo error: {}", e))?;
+                        if !bytes.is_empty() {
+                            return Ok::<_, anyhow::Error>(bytes);
+                        }
+                    }
+                })
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!(
+                        "timeout waiting for echo of '{}' (handler_count={})",
+                        text,
+                        harness.handler_count.load(Ordering::SeqCst)
+                    )
+                })??;
+                let response = EchoResponse::decode(&echo[..])?;
+                assert_eq!(
+                    response.message,
+                    format!("handler=1 seq={} msg={}", i + 1, text),
+                    "message {} should come from handler=1 with seq={}",
+                    text,
+                    i + 1
+                );
+            }
+        }
+
+        assert_eq!(
+            harness.handler_count.load(Ordering::SeqCst),
+            1,
+            "exactly one bidi handler should be created for a single stream session"
         );
 
         harness.teardown();

@@ -447,6 +447,7 @@ pub fn run_workflow(
     debug_output_path: Option<PathBuf>,
     debug: bool,
     socket_path: Option<PathBuf>,
+    worktree_dir: Option<PathBuf>,
 ) {
     let inherit_stdin = false;
     let initial_prompt_for_ctx = initial_prompt.clone();
@@ -600,11 +601,12 @@ pub fn run_workflow(
         .and_then(|c| next_goal_for_state(&c.state.current))
         .unwrap_or("plan");
 
-    // Worktree creation happens in before_acceptance_tests hook (post-plan). Use existing worktree from changeset when resuming.
-    let worktree_dir = cs
-        .as_ref()
-        .and_then(|c| c.worktree.as_ref())
-        .map(PathBuf::from);
+    // Pre-set worktree_dir (from Presenter) takes priority; otherwise use changeset value (resume).
+    let worktree_dir = worktree_dir.or_else(|| {
+        cs.as_ref()
+            .and_then(|c| c.worktree.as_ref())
+            .map(PathBuf::from)
+    });
 
     let storage_dir = std::env::temp_dir().join(TUI_SESSION_DIR);
     std::fs::create_dir_all(&storage_dir).ok();
@@ -825,6 +827,7 @@ mod tests {
             None,
             None,
             false,
+            None,
             None,
         );
 

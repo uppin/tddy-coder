@@ -5,15 +5,15 @@
 
 use std::time::Duration;
 
-use tddy_e2e::{connect_grpc, spawn_presenter_with_terminal_service};
+use tddy_e2e::{connect_terminal_grpc, spawn_presenter_with_terminal_service};
 
 #[tokio::test]
 async fn two_grpc_clients_get_independent_terminal_streams() {
     let (_handle, port, _shutdown) =
         spawn_presenter_with_terminal_service(Some("feature".to_string()));
 
-    let client1 = connect_grpc(port).await.expect("client1 connect");
-    let client2 = connect_grpc(port).await.expect("client2 connect");
+    let client1 = connect_terminal_grpc(port).await.expect("client1 connect");
+    let client2 = connect_terminal_grpc(port).await.expect("client2 connect");
 
     let (tx1, mut rx1) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     let (tx2, mut rx2) = tokio::sync::mpsc::channel::<Vec<u8>>(64);

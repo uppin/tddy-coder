@@ -28,11 +28,20 @@ export interface GhosttyTerminalProps {
   debugLogging?: boolean;
 }
 
+export interface BufferLineInfo {
+  /** Plain text of this line (trailing whitespace trimmed). */
+  text: string;
+  /** True if any cell on this line has reverse-video (isInverse). */
+  hasInverse: boolean;
+}
+
 export interface GhosttyTerminalHandle {
   write(data: string | Uint8Array): void;
   clear(): void;
   focus(): void;
   getBufferText?(): string;
+  /** Return per-line text + attribute info from the active buffer. */
+  getBufferLines?(): BufferLineInfo[];
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
@@ -86,6 +95,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
         const disposables: { dispose: () => void }[] = [];
         if (onData) {
+          console.log("[GhosttyTerminal] keyboard event listener attached (onData)");
           disposables.push(
             term.onData((data) => {
               log("dataflow: onData received", data.length, "chars", JSON.stringify(data.slice(0, 30)));
@@ -133,11 +143,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       }
     }, [initialContent, ready]);
 
-    useEffect(() => {
-      if (onData && termRef.current) {
-        termRef.current.onData(onData);
-      }
-    }, [onData]);
+    // Note: onData is registered once in the setup useEffect above (line 97-104).
+    // Do NOT re-register here — that would cause duplicate events for each keystroke.
 
     useImperativeHandle(ref, () => ({
       write(data: string | Uint8Array) {
@@ -164,6 +171,31 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           return text;
         } catch {
           return "";
+        }
+      },
+      getBufferLines() {
+        const term = termRef.current;
+        if (!term || !term.buffer?.active) return [];
+        try {
+          const buffer = term.buffer.active;
+          const lines: BufferLineInfo[] = [];
+          for (let y = 0; y < buffer.length; y++) {
+            const line = buffer.getLine(y);
+            if (!line) continue;
+            const text = line.translateToString(true); // trimRight
+            let hasInverse = false;
+            for (let x = 0; x < line.length; x++) {
+              const cell = line.getCell(x);
+              if (cell && cell.isInverse()) {
+                hasInverse = true;
+                break;
+              }
+            }
+            lines.push({ text, hasInverse });
+          }
+          return lines;
+        } catch {
+          return [];
         }
       },
     }));

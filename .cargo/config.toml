@@ -1,0 +1,8 @@
+# Required for libwebrtc on macOS: ObjC categories must be loaded.
+# Without this, Room::connect crashes with NSInvalidArgumentException in
+# RTCVideoEncoderVP9/PeerConnectionFactory (livekit/rust-sdks#340).
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-ObjC"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-ObjC"]

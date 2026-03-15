@@ -262,8 +262,8 @@ async fn bidi_stream_echo_returns_stream_of_echoes() {
     assert_eq!(frames.len(), 2, "Should have two echo responses");
     let resp1 = EchoResponse::decode(&frames[0][..]).expect("decode first");
     let resp2 = EchoResponse::decode(&frames[1][..]).expect("decode second");
-    assert_eq!(resp1.message, "x");
-    assert_eq!(resp2.message, "y");
+    assert_eq!(resp1.message, "x #1");
+    assert_eq!(resp2.message, "y #2");
 }
 
 /// TokenService via Connect-RPC: POST /rpc/token.TokenService/GenerateToken

@@ -2,7 +2,7 @@
 //!
 //! Exposes TddyRemote service for programmatic control via bidirectional streaming:
 //! clients send UserIntent, receive PresenterView events.
-//! Also provides EchoServiceImpl and TerminalServiceImpl for LiveKit RPC transport.
+//! Also provides EchoServiceImpl and TerminalServiceVirtualTui for LiveKit/gRPC terminal streaming.
 
 pub mod convert;
 pub mod daemon_service;
@@ -20,7 +20,9 @@ pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
 pub use service::TddyRemoteService;
 pub use tddy_rpc::Status;
-pub use terminal_service::{TerminalServiceImpl, TerminalServiceImplPerConnection};
+pub use terminal_service::{
+    start_virtual_tui_session, TerminalServiceVirtualTui, VirtualTuiSession,
+};
 pub use token_service::{TokenProvider, TokenServiceImpl};
 
 pub mod gen {
@@ -42,6 +44,13 @@ pub mod proto {
     pub mod auth {
         include!(concat!(env!("OUT_DIR"), "/auth.rs"));
     }
+}
+
+/// Tonic-generated gRPC server/client for terminal.proto.
+/// Uses the same message types as `proto::terminal` (via extern_path).
+pub mod tonic_terminal {
+    #![allow(unused_imports, clippy::all)]
+    include!(concat!(env!("OUT_DIR"), "/tonic_terminal/terminal.rs"));
 }
 
 #[cfg(test)]

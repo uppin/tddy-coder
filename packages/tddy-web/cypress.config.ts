@@ -95,7 +95,7 @@ export default defineConfig({
       });
 
       on("task", {
-        async startTerminalServer() {
+        async startTerminalServer(options?: { prompt?: string } | null) {
           const wsUrl = process.env.LIVEKIT_TESTKIT_WS_URL;
           if (!wsUrl || wsUrl.trim() === "") {
             throw new Error(
@@ -132,12 +132,13 @@ export default defineConfig({
             const logStream = fs.createWriteStream(logPath, { flags: "a" });
 
             const repoRoot = path.resolve(__dirname, "../..");
+            const prompt = options?.prompt ?? "testfeature SKIP_QUESTIONS";
             const cmd = [
               binaryPath,
               "--agent",
               "stub",
               "--prompt",
-              "testfeature SKIP_QUESTIONS",
+              prompt,
               "--livekit-url",
               wsUrl,
               "--livekit-token",
@@ -161,12 +162,18 @@ export default defineConfig({
               logStream.write(data);
             };
 
-            let stdout = "";
+            let output = "";
             let resolved = false;
-            terminalServerProcess.stdout?.on("data", (data) => {
-              writeLog(data);
-              stdout += data.toString();
-              if (stdout.includes("READY") && !resolved) {
+
+            // tddy-demo enters TUI mode via `script` (PTY). It never prints "READY" —
+            // it renders ratatui ANSI frames. Detect readiness by looking for either:
+            // - EnterAlternateScreen (\x1b[?1049h) — TUI is rendering
+            // - Enough output bytes (>200) — the initial frame has been sent
+            // - "Session:" in stderr — workflow has started
+            const checkReady = () => {
+              const hasTuiOutput = output.includes("\x1b[?1049h") || output.length > 200;
+              const hasSession = output.includes("Session:");
+              if ((hasTuiOutput || hasSession) && !resolved) {
                 resolved = true;
                 clearTimeout(timeout);
                 const clientToken = new AccessToken(DEV_API_KEY, DEV_API_SECRET, {
@@ -187,33 +194,18 @@ export default defineConfig({
                   });
                 });
               }
+            };
+
+            terminalServerProcess.stdout?.on("data", (data) => {
+              writeLog(data);
+              output += data.toString();
+              checkReady();
             });
 
             terminalServerProcess.stderr?.on("data", (data) => {
               writeLog(data);
-              const s = data.toString();
-              stdout += s;
-              if (stdout.includes("READY") && !resolved) {
-                resolved = true;
-                clearTimeout(timeout);
-                const clientToken = new AccessToken(DEV_API_KEY, DEV_API_SECRET, {
-                  identity: CLIENT_IDENTITY,
-                });
-                clientToken.addGrant({
-                  roomJoin: true,
-                  room: ROOM_NAME,
-                  canPublish: true,
-                  canSubscribe: true,
-                });
-                clientToken.toJwt().then((clientJwt) => {
-                  resolve({
-                    url: wsUrl,
-                    clientToken: clientJwt,
-                    roomName: ROOM_NAME,
-                    serverLogPath: logPath,
-                  });
-                });
-              }
+              output += data.toString();
+              checkReady();
             });
 
             terminalServerProcess.on("error", (err) => {
@@ -228,7 +220,7 @@ export default defineConfig({
                 resolved = true;
                 terminalServerProcess?.kill("SIGTERM");
                 terminalServerProcess = null;
-                reject(new Error("tddy-demo did not print READY within 15s"));
+                reject(new Error(`tddy-demo did not become ready within 15s (output: ${output.length} bytes)`));
               }
             }, 15000);
           });

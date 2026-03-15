@@ -82,12 +82,14 @@ impl EchoService for EchoServiceImpl {
         let (tx, rx) = mpsc::channel(16);
         tokio::spawn(async move {
             futures_util::pin_mut!(stream);
+            let mut seq = 0u32;
             while let Some(item) = futures_util::stream::StreamExt::next(&mut stream).await {
                 match item {
                     Ok(req) => {
+                        seq += 1;
                         let _ = tx
                             .send(Ok(EchoResponse {
-                                message: req.message,
+                                message: format!("{} #{}", req.message, seq),
                                 timestamp: 0,
                             }))
                             .await;

@@ -122,9 +122,12 @@ impl Task for PlanTask {
 
         if let Some(output) = output_to_store {
             context.set_sync("output", output.clone());
-            let planning = parse_planning_response_with_base(&output, &plan_dir).map_err(|e: ParseError| {
-                Box::new(WorkflowError::ParseError(e)) as Box<dyn std::error::Error + Send + Sync>
-            })?;
+            let planning = parse_planning_response_with_base(&output, &plan_dir).map_err(
+                |e: ParseError| {
+                    Box::new(WorkflowError::ParseError(e))
+                        as Box<dyn std::error::Error + Send + Sync>
+                },
+            )?;
 
             context.set_sync("parsed_planning", planning);
             context.set_sync("plan_dir", plan_dir.clone());

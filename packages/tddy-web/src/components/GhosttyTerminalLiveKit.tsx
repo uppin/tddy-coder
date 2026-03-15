@@ -11,6 +11,32 @@ import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 
 const SERVER_IDENTITY = "server";
 
+/** Human-readable description of a terminal input byte sequence. */
+function describeKey(bytes: Uint8Array): string {
+  if (bytes.length === 1) {
+    const b = bytes[0];
+    if (b === 0x0d) return "Enter";
+    if (b === 0x1b) return "Esc";
+    if (b === 0x09) return "Tab";
+    if (b === 0x7f) return "Backspace";
+    if (b === 0x03) return "Ctrl+C";
+    if (b < 0x20) return `Ctrl+${String.fromCharCode(b + 0x40)}`;
+    if (b >= 0x20 && b < 0x7f) return `'${String.fromCharCode(b)}'`;
+  }
+  if (bytes.length === 3 && bytes[0] === 0x1b && bytes[1] === 0x5b) {
+    const c = bytes[2];
+    if (c === 0x41) return "Up";
+    if (c === 0x42) return "Down";
+    if (c === 0x43) return "Right";
+    if (c === 0x44) return "Left";
+  }
+  if (bytes.length === 4 && bytes[0] === 0x1b && bytes[1] === 0x5b && bytes[3] === 0x7e) {
+    if (bytes[2] === 0x35) return "PageUp";
+    if (bytes[2] === 0x36) return "PageDown";
+  }
+  return `raw(${bytes.length})`;
+}
+
 export interface TokenResult {
   token: string;
   ttlSeconds: bigint;
@@ -61,6 +87,7 @@ export function GhosttyTerminalLiveKit({
   const [rpcReceivedCount, setRpcReceivedCount] = useState(0);
   const [rpcReceivedSample, setRpcReceivedSample] = useState("");
   const [firstOutputReceived, setFirstOutputReceived] = useState(false);
+  const [highlightedLine, setHighlightedLine] = useState("");
 
   useEffect(() => {
     let room: Room | null = null;
@@ -235,10 +262,16 @@ export function GhosttyTerminalLiveKit({
 
         if (showBufferTextForTest && !debugMode) {
           bufferInterval = setInterval(() => {
-            const streamed = streamedTextRef.current;
+            // Prefer Ghostty's parsed buffer (clean text) over raw streamed ANSI.
             const fromBuffer = termRef.current?.getBufferText?.() ?? "";
-            const text = streamed || fromBuffer;
+            const text = fromBuffer || streamedTextRef.current;
             setBufferText(text);
+
+            const lines = termRef.current?.getBufferLines?.() ?? [];
+            const inverseLine = lines.find((l) => l.hasInverse && l.text.trim().length > 0);
+            if (inverseLine) {
+              setHighlightedLine(inverseLine.text);
+            }
           }, 200);
         }
       } catch (e) {
@@ -259,12 +292,12 @@ export function GhosttyTerminalLiveKit({
   }, [url, token, getToken, ttlSecondsProp, roomName, showBufferTextForTest, debugMode, debugLogging]);
 
   return (
-    <div>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div data-testid="livekit-status">{status}</div>
       {status === "error" && (
         <div data-testid="livekit-error">{errorMsg}</div>
       )}
-      <div style={{ height: 300 }}>
+      <div style={{ flex: 1, minHeight: 0 }}>
         {debugMode ? (
           <div data-testid="rpc-debug-panel">
             <div data-testid="rpc-received-count">{rpcReceivedCount}</div>
@@ -292,7 +325,8 @@ export function GhosttyTerminalLiveKit({
             onData={(data) => {
               const encoded = new TextEncoder().encode(data);
               inputQueueRef.current.push(encoded);
-              log("dataflow: onData received", data.length, "chars, queue length:", inputQueueRef.current.length, "preview:", JSON.stringify(data.slice(0, 20)));
+              const keyName = describeKey(encoded);
+              console.log("[terminal→server]", keyName, `(${encoded.length} bytes)`, Array.from(encoded));
             }}
           />
         )}
@@ -311,6 +345,13 @@ export function GhosttyTerminalLiveKit({
             aria-hidden
           >
             {bufferText}
+          </div>
+          <div
+            data-testid="terminal-highlighted-line"
+            style={{ display: "none" }}
+            aria-hidden
+          >
+            {highlightedLine}
           </div>
         </>
       )}

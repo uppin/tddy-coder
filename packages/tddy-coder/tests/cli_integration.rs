@@ -374,7 +374,10 @@ fn cli_accepts_goal_acceptance_tests_with_plan_dir() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .env(TDDY_SESSIONS_DIR_ENV, output_dir.parent().unwrap().to_str().unwrap())
+        .env(
+            TDDY_SESSIONS_DIR_ENV,
+            output_dir.parent().unwrap().to_str().unwrap(),
+        )
         .args([
             "--agent",
             "stub",
