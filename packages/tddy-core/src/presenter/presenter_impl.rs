@@ -54,8 +54,6 @@ pub struct Presenter {
     pending_tool_call_response: Option<PendingToolCallResponse>,
     /// Stored socket path for workflow restart (dequeued prompts).
     workflow_socket_path: Option<PathBuf>,
-    /// Parent Claude Code session ID (auto-detected from CLAUDE_SESSION_ID env var).
-    main_session_id: Option<String>,
 }
 
 impl Presenter {
@@ -94,7 +92,6 @@ impl Presenter {
             tool_call_rx: None,
             pending_tool_call_response: None,
             workflow_socket_path: None,
-            main_session_id: std::env::var("CLAUDE_SESSION_ID").ok(),
         }
     }
 
@@ -338,7 +335,7 @@ impl Presenter {
                         self.workflow_debug,
                         session_id,
                         self.workflow_socket_path.clone(),
-                        self.main_session_id.clone(),
+
                     );
                 }
             }
@@ -662,7 +659,7 @@ impl Presenter {
                                 self.workflow_debug,
                                 None,
                                 self.workflow_socket_path.clone(),
-                                self.main_session_id.clone(),
+        
                             );
                         }
                     } else {
@@ -739,7 +736,6 @@ impl Presenter {
             debug,
             session_id,
             socket_path,
-            self.main_session_id.clone(),
         );
     }
 
@@ -764,7 +760,6 @@ impl Presenter {
                 self.workflow_debug,
                 None,
                 self.workflow_socket_path.clone(),
-                self.main_session_id.clone(),
             );
         }
     }
@@ -781,7 +776,6 @@ impl Presenter {
         debug: bool,
         session_id: Option<String>,
         socket_path: Option<PathBuf>,
-        main_session_id: Option<String>,
     ) {
         let (event_tx, event_rx) = mpsc::channel();
         let (answer_tx, answer_rx) = mpsc::channel();
@@ -800,7 +794,6 @@ impl Presenter {
                 debug_output_path,
                 debug,
                 socket_path,
-                main_session_id,
             );
         });
 

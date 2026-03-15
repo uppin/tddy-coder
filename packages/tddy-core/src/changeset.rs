@@ -71,10 +71,6 @@ pub struct Changeset {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub repo_path: Option<String>,
-    /// Session ID of the parent Claude Code session that invoked tddy-coder.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(default)]
-    pub main_session_id: Option<String>,
 }
 
 /// A single session entry (plan, acceptance-tests, or impl).
@@ -163,7 +159,6 @@ impl Default for Changeset {
             worktree_suggestion: None,
             remote_pushed: false,
             repo_path: None,
-            main_session_id: None,
         }
     }
 }
@@ -304,52 +299,6 @@ pub fn clarification_qa_from_backend(
 }
 
 /// Append a session and update state.
-///
-/// # Tests
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn main_session_id_roundtrip() {
-        let tmp = std::env::temp_dir().join("tddy-changeset-main-session-id");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-
-        let mut cs = Changeset::default();
-        cs.main_session_id = Some("parent-claude-session-abc".to_string());
-        write_changeset(&tmp, &cs).unwrap();
-
-        let loaded = read_changeset(&tmp).unwrap();
-        assert_eq!(
-            loaded.main_session_id.as_deref(),
-            Some("parent-claude-session-abc")
-        );
-    }
-
-    #[test]
-    fn main_session_id_absent_by_default() {
-        let cs = Changeset::default();
-        assert!(cs.main_session_id.is_none());
-    }
-
-    #[test]
-    fn main_session_id_omitted_when_none() {
-        let tmp = std::env::temp_dir().join("tddy-changeset-main-session-omit");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-
-        let cs = Changeset::default();
-        write_changeset(&tmp, &cs).unwrap();
-
-        let yaml = std::fs::read_to_string(tmp.join("changeset.yaml")).unwrap();
-        assert!(
-            !yaml.contains("main_session_id"),
-            "main_session_id should be omitted when None"
-        );
-    }
-}
-
 pub fn append_session_and_update_state(
     changeset: &mut Changeset,
     session_id: String,
