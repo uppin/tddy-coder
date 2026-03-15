@@ -8,11 +8,15 @@ If you need clarification before creating the PRD, call:
 The call will block until the user answers. The response contains the user's answers.
 
 When done, submit your output by calling:
-  tddy-tools submit --goal plan --data '<your JSON output>'
+  tddy-tools submit --goal plan --data-stdin << 'EOF'
+<your JSON output>
+EOF
+
+Use --data-stdin and a heredoc. Do NOT use --data with inline JSON. Do NOT use Write, cat, or python to build the JSON first — only Bash(tddy-tools *) is auto-approved in plan mode; other Bash commands require permission. Put the JSON directly in the heredoc.
 
 Run `tddy-tools get-schema plan` to see the expected output format. The JSON must include: goal, prd, and optionally name, discovery, demo_plan.
 
-**PRD structure** — The prd value is a single JSON string (escape quotes and newlines as needed). The PRD must include these sections in order:
+**PRD structure** — The prd value is either (1) the full markdown string, or (2) a path to an MD file (e.g. "PRD.md") relative to the plan directory. If you write the PRD to a file first, you may pass the path instead of the entire content. The PRD must include these sections in order:
 
 1. **Summary** — Brief overview of the feature
 2. **Background** — Context and motivation
@@ -39,7 +43,7 @@ The TODO section is part of the PRD body, not a separate field. Example:
 
 **demo_plan** (optional): When the feature has a user-facing demo (CLI, API, UI), include demo_type, setup_instructions, steps with description/command_or_action/expected_result, and verification criteria.
 
-**CRITICAL**: You MUST call tddy-tools submit with your complete PRD content (including the TODO section). Do NOT return a summary, meta-commentary, or description of what you created. The submit call delivers the output to the workflow — if you do not call it, the workflow fails."#
+**CRITICAL**: You MUST call tddy-tools submit with your complete PRD content (including the TODO section). Use the heredoc form above — do NOT use Write/cat/python workarounds. Do NOT return a summary, meta-commentary, or description of what you created. The submit call delivers the output to the workflow — if you do not call it, the workflow fails."#
         .to_string()
 }
 

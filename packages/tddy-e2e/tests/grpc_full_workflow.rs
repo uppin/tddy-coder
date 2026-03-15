@@ -154,8 +154,10 @@ async fn full_workflow_asserts_each_state_transition() {
     const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
         ("Init", "Planning"),
         ("Planning", "Planned"),
+        ("Planning", "Planned"), // resync on PlanReview
         ("Planned", "Planning"),
         ("Planning", "Planned"),
+        ("Planning", "Planned"), // resync on PlanReview
         ("Planned", "AcceptanceTesting"),
         ("AcceptanceTesting", "AcceptanceTestsReady"),
         ("AcceptanceTestsReady", "RedTesting"),
@@ -176,8 +178,10 @@ async fn full_workflow_asserts_each_state_transition() {
     const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
         ("Init", "Planning"),
         ("Planning", "Planned"),
+        ("Planning", "Planned"), // resync on PlanReview
         ("Planned", "Planning"),
         ("Planning", "Planned"),
+        ("Planning", "Planned"), // resync on PlanReview
         ("Planned", "AcceptanceTesting"),
         ("AcceptanceTesting", "AcceptanceTestsReady"),
         ("AcceptanceTestsReady", "RedTesting"),

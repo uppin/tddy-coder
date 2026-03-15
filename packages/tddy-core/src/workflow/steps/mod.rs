@@ -6,7 +6,7 @@
 use crate::backend::{CodingBackend, Goal, InvokeRequest};
 use crate::error::{BackendError, ParseError, WorkflowError};
 use crate::output::{
-    create_session_dir_in, create_session_dir_with_id, parse_planning_response,
+    create_session_dir_in, create_session_dir_with_id, parse_planning_response_with_base,
     slugify_directory_name,
 };
 use crate::toolcall::take_submit_result_for_goal;
@@ -122,7 +122,7 @@ impl Task for PlanTask {
 
         if let Some(output) = output_to_store {
             context.set_sync("output", output.clone());
-            let planning = parse_planning_response(&output).map_err(|e: ParseError| {
+            let planning = parse_planning_response_with_base(&output, &plan_dir).map_err(|e: ParseError| {
                 Box::new(WorkflowError::ParseError(e)) as Box<dyn std::error::Error + Send + Sync>
             })?;
 

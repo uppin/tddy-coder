@@ -16,12 +16,15 @@ use tddy_service::gen::{
     client_message, AnswerSelect, ApprovePlan, ClientMessage, SubmitFeatureInput,
 };
 
-/// With demo: 20 transitions. Without demo: 18. Plan approval adds (Planned→Planning→Planned).
+/// With demo: 22 transitions. Without demo: 20. Plan approval adds (Planned→Planning→Planned).
+/// PlanReview resync adds duplicate (Planning→Planned) after each plan review.
 const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
     ("Init", "Planning"),
     ("Planning", "Planned"),
+    ("Planning", "Planned"), // resync on PlanReview
     ("Planned", "Planning"),
     ("Planning", "Planned"),
+    ("Planning", "Planned"), // resync on PlanReview
     ("Planned", "AcceptanceTesting"),
     ("AcceptanceTesting", "AcceptanceTestsReady"),
     ("AcceptanceTestsReady", "RedTesting"),
@@ -42,8 +45,10 @@ const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
 const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
     ("Init", "Planning"),
     ("Planning", "Planned"),
+    ("Planning", "Planned"), // resync on PlanReview
     ("Planned", "Planning"),
     ("Planning", "Planned"),
+    ("Planning", "Planned"), // resync on PlanReview
     ("Planned", "AcceptanceTesting"),
     ("AcceptanceTesting", "AcceptanceTestsReady"),
     ("AcceptanceTestsReady", "RedTesting"),

@@ -1,9 +1,30 @@
 //! Integration tests for output parser and writer.
 
+use std::path::Path;
 use tddy_core::output::{
     parse_acceptance_tests_response, parse_evaluate_response, parse_planning_response,
-    parse_red_response, parse_update_docs_response,
+    parse_planning_response_with_base, parse_red_response, parse_update_docs_response,
 };
+
+#[test]
+fn parse_planning_response_resolves_prd_path_to_file_content() {
+    let plan_dir = std::env::temp_dir().join("tddy-parse-prd-path-test");
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create dir");
+
+    let prd_content = "# PRD\n\n## Summary\nFeature from file\n\n## TODO\n\n- [ ] Task 1";
+    std::fs::write(plan_dir.join("PRD.md"), prd_content).expect("write PRD.md");
+
+    let json = r##"{"goal":"plan","prd":"PRD.md"}"##;
+    let out = parse_planning_response_with_base(json, Path::new(&plan_dir)).expect("should parse");
+    assert!(
+        out.prd.contains("Feature from file"),
+        "prd should contain file content, got: {}",
+        out.prd
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
 
 #[test]
 fn parse_planning_response_accepts_valid_json() {

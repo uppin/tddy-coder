@@ -187,6 +187,24 @@ fn full_workflow_completes_with_stub_backend() {
         evs
     );
 
+    let activity_texts: Vec<&str> = evs
+        .iter()
+        .filter_map(|e| {
+            if let TestEvent::ActivityLogged(entry) = e {
+                Some(entry.text.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        activity_texts
+            .iter()
+            .any(|t| t.to_lowercase().contains("exited")),
+        "expected activity log to contain an entry that the agent exited, got: {:?}",
+        activity_texts
+    );
+
     // Acceptance: success completion transitions to FeatureInput (not Done)
     assert!(
         matches!(presenter.state().mode, AppMode::FeatureInput),
@@ -894,5 +912,23 @@ fn workflow_error_propagates() {
             .any(|e| matches!(e, TestEvent::WorkflowComplete(Err(_)))),
         "expected WorkflowComplete(Err) for FAIL_INVOKE: {:?}",
         evs
+    );
+
+    let activity_texts: Vec<&str> = evs
+        .iter()
+        .filter_map(|e| {
+            if let TestEvent::ActivityLogged(entry) = e {
+                Some(entry.text.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        activity_texts
+            .iter()
+            .any(|t| t.to_lowercase().contains("fail") || t.to_lowercase().contains("error")),
+        "expected activity log to contain an entry indicating the workflow failure, got: {:?}",
+        activity_texts
     );
 }

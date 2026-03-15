@@ -18,7 +18,7 @@ use tddy_service::gen::tddy_remote_server::TddyRemoteServer;
 use tddy_service::TddyRemoteService;
 use tddy_tui::{apply_event, render::draw, TuiView};
 
-use crate::test_util::{temp_dir_with_git_repo, NoopView};
+use crate::test_util::temp_dir_with_git_repo;
 
 pub mod test_util;
 
@@ -166,7 +166,7 @@ pub fn spawn_presenter_with_grpc_and_tui(
                 apply_event(&mut state, &mut view, ev);
             }
             terminal
-                .draw(|f| draw(f, &state, view.view_state(), false))
+                .draw(|f| draw(f, &state, view.view_state_mut(), false))
                 .unwrap();
             if let Ok(mut buf) = screen_buffer_clone.lock() {
                 *buf = format!("{}", terminal.backend());
