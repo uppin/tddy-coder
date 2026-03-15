@@ -21,6 +21,13 @@ pub struct ActivityEntry {
     pub kind: ActivityKind,
 }
 
+/// Action to perform after TUI exits (e.g. exec into claude terminal).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExitAction {
+    /// User chose "Continue with agent" — exec into `claude --resume <session_id>`.
+    ContinueWithAgent { session_id: String },
+}
+
 /// The current interaction mode (minimal — no input buffers).
 #[derive(Debug, Clone)]
 pub enum AppMode {
@@ -64,6 +71,8 @@ pub struct PresenterState {
     pub activity_log: Vec<ActivityEntry>,
     pub inbox: Vec<String>,
     pub should_quit: bool,
+    /// When set, the TUI caller should perform this action after exit.
+    pub exit_action: Option<ExitAction>,
 }
 
 #[cfg(test)]
@@ -86,6 +95,35 @@ mod tests {
     fn app_mode_done() {
         let mode = AppMode::Done;
         assert!(matches!(mode, AppMode::Done));
+    }
+
+    #[test]
+    fn test_exit_action_continue_with_agent() {
+        let action = ExitAction::ContinueWithAgent {
+            session_id: "abc-123".to_string(),
+        };
+        match action {
+            ExitAction::ContinueWithAgent { ref session_id } => {
+                assert_eq!(session_id, "abc-123");
+            }
+        }
+    }
+
+    #[test]
+    fn test_presenter_state_exit_action_default_none() {
+        let state = PresenterState {
+            agent: "test".to_string(),
+            model: "test".to_string(),
+            mode: AppMode::FeatureInput,
+            current_goal: None,
+            current_state: None,
+            goal_start_time: std::time::Instant::now(),
+            activity_log: Vec::new(),
+            inbox: Vec::new(),
+            should_quit: false,
+            exit_action: None,
+        };
+        assert!(state.exit_action.is_none());
     }
 
     #[test]

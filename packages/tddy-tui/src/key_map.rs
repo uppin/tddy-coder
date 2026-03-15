@@ -185,6 +185,7 @@ fn error_recovery_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
     if key.code == KeyCode::Enter {
         match vs.error_recovery_selected {
             0 => Some(UserIntent::ResumeFromError),
+            1 => Some(UserIntent::ContinueWithAgent),
             _ => Some(UserIntent::Quit),
         }
     } else {
@@ -273,9 +274,20 @@ mod tests {
     }
 
     #[test]
-    fn test_error_recovery_key_exit() {
+    fn test_error_recovery_key_continue_with_agent() {
         let mut vs = ViewState::new();
         vs.error_recovery_selected = 1;
+        let mode = AppMode::ErrorRecovery {
+            error_message: "some error".to_string(),
+        };
+        let intent = key_event_to_intent(enter_key(), &mode, &vs);
+        assert!(matches!(intent, Some(UserIntent::ContinueWithAgent)));
+    }
+
+    #[test]
+    fn test_error_recovery_key_exit() {
+        let mut vs = ViewState::new();
+        vs.error_recovery_selected = 2;
         let mode = AppMode::ErrorRecovery {
             error_message: "some error".to_string(),
         };

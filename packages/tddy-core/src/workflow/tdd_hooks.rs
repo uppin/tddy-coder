@@ -118,7 +118,7 @@ fn ensure_worktree_for_acceptance_tests(
     let worktree_path = setup_worktree_for_session(&repo_root, plan_dir)
         .map_err(|e| format!("worktree creation failed: {}", e))?;
     context.set_sync("worktree_dir", worktree_path.clone());
-    if let Some(ref tx) = event_tx {
+    if let Some(tx) = event_tx {
         let _ = tx.send(WorkflowEvent::WorktreeSwitched {
             path: worktree_path,
         });
@@ -555,11 +555,7 @@ impl RunnerHooks for TddWorkflowHooks {
         match task_id {
             "plan" => before_plan(&plan_dir, context)?,
             "acceptance-tests" => {
-                ensure_worktree_for_acceptance_tests(
-                    &plan_dir,
-                    context,
-                    self.event_tx.as_ref(),
-                )?;
+                ensure_worktree_for_acceptance_tests(&plan_dir, context, self.event_tx.as_ref())?;
                 before_acceptance_tests(&plan_dir, context)?;
             }
             "red" => before_red(&plan_dir, context)?,

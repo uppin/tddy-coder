@@ -128,6 +128,9 @@ pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &mut ViewStat
             AppMode::PlanReview { .. } => {
                 render_plan_review(frame, state, view_state, dynamic_area);
             }
+            AppMode::ErrorRecovery { .. } => {
+                render_error_recovery(frame, state, view_state, dynamic_area);
+            }
             _ => {
                 render_inbox(frame, state, view_state, dynamic_area);
             }
@@ -371,6 +374,50 @@ fn render_plan_review(
     frame.render_widget(widget, area);
 }
 
+/// Render error recovery: error message + 3 selectable options.
+fn render_error_recovery(
+    frame: &mut Frame,
+    state: &PresenterState,
+    view_state: &ViewState,
+    area: ratatui::layout::Rect,
+) {
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+
+    if area.height == 0 {
+        return;
+    }
+
+    let error_msg = match &state.mode {
+        AppMode::ErrorRecovery { error_message } => error_message.as_str(),
+        _ => return,
+    };
+
+    let options = ["Resume", "Continue with agent", "Exit"];
+    let highlight = Style::default().add_modifier(Modifier::REVERSED);
+    let normal = Style::default();
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!("Error: {}", error_msg),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+
+    for (i, label) in options.iter().enumerate() {
+        let selected = view_state.error_recovery_selected == i;
+        let prefix = if selected { "> " } else { "  " };
+        let style = if selected { highlight } else { normal };
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", prefix, label),
+            style,
+        )));
+    }
+
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
 /// Render inbox items.
 fn render_inbox(
     frame: &mut Frame,
@@ -433,6 +480,7 @@ mod tests {
             activity_log: Vec::new(),
             inbox: Vec::new(),
             should_quit: false,
+            exit_action: None,
         }
     }
 
@@ -444,5 +492,54 @@ mod tests {
         let vs = ViewState::new();
         let text = prompt_text(&state, &vs);
         assert_eq!(text, "Up/Down navigate  Enter select");
+    }
+
+    #[test]
+    fn test_render_error_recovery_shows_three_options() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(60, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let state = make_state(AppMode::ErrorRecovery {
+            error_message: "backend timeout".to_string(),
+        });
+        let vs = ViewState::new(); // error_recovery_selected defaults to 0
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render_error_recovery(frame, &state, &vs, area);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer().clone();
+        let content: String = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+            .collect();
+
+        assert!(
+            content.contains("Resume"),
+            "Error recovery should render 'Resume' option, got: {}",
+            content.trim()
+        );
+        assert!(
+            content.contains("Continue with agent"),
+            "Error recovery should render 'Continue with agent' option, got: {}",
+            content.trim()
+        );
+        assert!(
+            content.contains("Exit"),
+            "Error recovery should render 'Exit' option, got: {}",
+            content.trim()
+        );
+        assert!(
+            content.contains("backend timeout"),
+            "Error recovery should render the error message, got: {}",
+            content.trim()
+        );
     }
 }

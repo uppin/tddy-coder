@@ -241,6 +241,8 @@ fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
         UserIntent::DismissViewer => Intent::DismissViewer(DismissViewer {}),
         // skeleton: ResumeFromError has no proto message yet
         UserIntent::ResumeFromError => return None,
+        // skeleton: ContinueWithAgent has no proto message yet
+        UserIntent::ContinueWithAgent => return None,
     };
     Some(ClientMessage {
         intent: Some(intent),

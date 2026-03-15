@@ -173,38 +173,21 @@ impl ViewState {
     }
 
     fn handle_error_recovery_key_view_local(&mut self, key: KeyEvent) -> bool {
+        const OPTIONS: usize = 3;
         match key.code {
             KeyCode::Up => {
-                log::debug!(
-                    "error_recovery Up: {} → {}",
-                    self.error_recovery_selected,
-                    if self.error_recovery_selected == 0 {
-                        1
-                    } else {
-                        0
-                    }
-                );
                 self.error_recovery_selected = if self.error_recovery_selected == 0 {
-                    1
+                    OPTIONS - 1
                 } else {
-                    0
+                    self.error_recovery_selected - 1
                 };
                 true
             }
             KeyCode::Down => {
-                log::debug!(
-                    "error_recovery Down: {} → {}",
-                    self.error_recovery_selected,
-                    if self.error_recovery_selected >= 1 {
-                        0
-                    } else {
-                        1
-                    }
-                );
-                self.error_recovery_selected = if self.error_recovery_selected >= 1 {
+                self.error_recovery_selected = if self.error_recovery_selected >= OPTIONS - 1 {
                     0
                 } else {
-                    1
+                    self.error_recovery_selected + 1
                 };
                 true
             }
@@ -698,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn test_error_recovery_up_down_toggle() {
+    fn test_error_recovery_up_down_three_options() {
         let mut vs = ViewState::new();
         let mode = AppMode::ErrorRecovery {
             error_message: "failed".to_string(),
@@ -706,19 +689,27 @@ mod tests {
         let down = KeyEvent::new(KeyCode::Down, KeyModifiers::empty());
         let up = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
 
-        // Start at 0, Down → 1
+        // Start at 0 (Resume), Down → 1 (Continue with agent)
         vs.handle_key_view_local(down, &mode, 0);
         assert_eq!(vs.error_recovery_selected, 1);
 
-        // Down again → wraps to 0
+        // Down → 2 (Exit)
+        vs.handle_key_view_local(down, &mode, 0);
+        assert_eq!(vs.error_recovery_selected, 2);
+
+        // Down → wraps to 0
         vs.handle_key_view_local(down, &mode, 0);
         assert_eq!(vs.error_recovery_selected, 0);
 
-        // Up from 0 → wraps to 1
+        // Up from 0 → wraps to 2
+        vs.handle_key_view_local(up, &mode, 0);
+        assert_eq!(vs.error_recovery_selected, 2);
+
+        // Up from 2 → 1
         vs.handle_key_view_local(up, &mode, 0);
         assert_eq!(vs.error_recovery_selected, 1);
 
-        // Up from 1 → wraps to 0
+        // Up from 1 → 0
         vs.handle_key_view_local(up, &mode, 0);
         assert_eq!(vs.error_recovery_selected, 0);
     }

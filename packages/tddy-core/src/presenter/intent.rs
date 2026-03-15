@@ -33,6 +33,8 @@ pub enum UserIntent {
     Quit,
     /// User selected Resume in ErrorRecovery mode.
     ResumeFromError,
+    /// User selected "Continue with agent" in ErrorRecovery mode.
+    ContinueWithAgent,
 }
 
 #[cfg(test)]
