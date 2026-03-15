@@ -67,7 +67,9 @@ fn prompt_text(state: &PresenterState, view_state: &ViewState) -> String {
 
 /// Draw the TUI layout: activity log, status bar, prompt bar.
 /// When `debug` is true, the debug log area is shown; otherwise it is hidden.
-pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &ViewState, debug: bool) {
+const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
+
+pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &mut ViewState, debug: bool) {
     let is_running = matches!(state.mode, AppMode::Running);
     let inbox_h = inbox_height(state.inbox.len(), is_running);
     let question_h = question_height(&state.mode);
@@ -166,6 +168,16 @@ pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &ViewState, d
     if prompt_bar.height > 0 {
         let widget = Paragraph::new(prompt_text_str.as_str()).wrap(Wrap { trim: false });
         frame.render_widget(widget, prompt_bar);
+    }
+
+    // Spinner in the top-right corner (~5 rotations/sec at 50ms poll rate)
+    if area.width >= 2 && area.height >= 1 {
+        let spinner_char = SPINNER_FRAMES[(view_state.spinner_tick / 4) % SPINNER_FRAMES.len()];
+        let spinner_area = ratatui::layout::Rect::new(area.width - 2, 0, 1, 1);
+        let spinner = Paragraph::new(spinner_char.to_string())
+            .style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray));
+        frame.render_widget(spinner, spinner_area);
+        view_state.spinner_tick = view_state.spinner_tick.wrapping_add(1);
     }
 }
 

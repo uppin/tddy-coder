@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package auth;
+
+service AuthService {
+  rpc GetAuthUrl(GetAuthUrlRequest) returns (GetAuthUrlResponse);
+  rpc ExchangeCode(ExchangeCodeRequest) returns (ExchangeCodeResponse);
+  rpc GetAuthStatus(GetAuthStatusRequest) returns (GetAuthStatusResponse);
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+}
+
+message GetAuthUrlRequest {}
+message GetAuthUrlResponse {
+  string authorize_url = 1;
+  string state = 2;
+}
+
+message ExchangeCodeRequest {
+  string code = 1;
+  string state = 2;
+}
+message ExchangeCodeResponse {
+  string session_token = 1;
+  GitHubUser user = 2;
+}
+
+message GetAuthStatusRequest {
+  string session_token = 1;
+}
+message GetAuthStatusResponse {
+  bool authenticated = 1;
+  GitHubUser user = 2;
+}
+
+message LogoutRequest {
+  string session_token = 1;
+}
+message LogoutResponse {}
+
+message GitHubUser {
+  string login = 1;
+  string avatar_url = 2;
+  string name = 3;
+  uint64 id = 4;
+}

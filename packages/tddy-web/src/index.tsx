@@ -4,6 +4,10 @@ import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { GhosttyTerminalLiveKit } from "./components/GhosttyTerminalLiveKit";
 import { TokenService } from "./gen/token_pb";
+import { useAuth } from "./hooks/useAuth";
+import { GitHubLoginButton } from "./components/GitHubLoginButton";
+import { AuthCallback } from "./components/AuthCallback";
+import { UserAvatar } from "./components/UserAvatar";
 
 function getParamsFromUrl(): { url: string; identity: string; roomName: string } {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
@@ -53,14 +57,30 @@ function createTokenClient() {
   return createClient(TokenService, transport);
 }
 
+const disconnectButtonStyle = {
+  position: "absolute" as const,
+  top: 8,
+  right: 8,
+  padding: "4px 12px",
+  fontSize: 12,
+  cursor: "pointer",
+  backgroundColor: "rgba(0,0,0,0.6)",
+  color: "#ccc",
+  border: "1px solid #555",
+  borderRadius: 4,
+  zIndex: 10,
+};
+
 function ConnectedTerminal({
   url,
   identity,
   roomName,
+  onDisconnect,
 }: {
   url: string;
   identity: string;
   roomName: string;
+  onDisconnect: () => void;
 }) {
   const client = useMemo(() => createTokenClient(), []);
   const [initialToken, setInitialToken] = useState<string | null>(null);
@@ -107,7 +127,14 @@ function ConnectedTerminal({
   }
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", position: "relative" }}>
+      <button
+        data-testid="disconnect-button"
+        onClick={onDisconnect}
+        style={disconnectButtonStyle}
+      >
+        Disconnect
+      </button>
       <GhosttyTerminalLiveKit
         url={url}
         token={initialToken}
@@ -120,17 +147,29 @@ function ConnectedTerminal({
   );
 }
 
-export function App() {
+function ConnectionForm() {
+  const { user, isAuthenticated, login, logout } = useAuth();
   const [url, setUrl] = useState("");
   const [identity, setIdentity] = useState("");
   const [roomName, setRoomName] = useState("terminal-e2e");
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const { url: u, identity: i, roomName: r } = getParamsFromUrl();
-    setUrl(u);
-    setIdentity(i);
-    setRoomName(r);
+    // URL params take priority, then server config, then defaults
+    const params = getParamsFromUrl();
+
+    fetch("/api/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((config: { livekit_url?: string; livekit_room?: string } | null) => {
+        setUrl(params.url || config?.livekit_url || "");
+        setIdentity(params.identity || "");
+        setRoomName(params.roomName || config?.livekit_room || "terminal-e2e");
+      })
+      .catch(() => {
+        setUrl(params.url);
+        setIdentity(params.identity);
+        setRoomName(params.roomName || "terminal-e2e");
+      });
   }, []);
 
   if (connected && url && identity) {
@@ -139,13 +178,27 @@ export function App() {
         url={url}
         identity={identity}
         roomName={roomName}
+        onDisconnect={() => setConnected(false)}
       />
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div style={formStyle}>
+        <h1>tddy-web</h1>
+        <p style={{ marginBottom: 16, fontSize: 14, color: "#444" }}>
+          Sign in with GitHub to access the terminal.
+        </p>
+        <GitHubLoginButton onClick={login} />
+      </div>
     );
   }
 
   return (
     <div style={formStyle}>
       <h1>tddy-web</h1>
+      {user && <UserAvatar user={user} onLogout={logout} />}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -201,6 +254,16 @@ export function App() {
       </p>
     </div>
   );
+}
+
+export function App() {
+  const path = typeof window !== "undefined" ? window.location.pathname : "/";
+
+  if (path === "/auth/callback") {
+    return <AuthCallback />;
+  }
+
+  return <ConnectionForm />;
 }
 
 const root = document.getElementById("root");

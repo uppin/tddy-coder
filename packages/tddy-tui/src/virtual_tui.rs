@@ -58,13 +58,13 @@ pub fn run_virtual_tui(
 
         let render = |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
                       state: &PresenterState,
-                      view: &TuiView| {
-            if let Err(e) = term.draw(|f| draw(f, state, view.view_state(), false)) {
+                      view: &mut TuiView| {
+            if let Err(e) = term.draw(|f| draw(f, state, view.view_state_mut(), false)) {
                 log::debug!("VirtualTui: draw error: {}", e);
             }
         };
 
-        render(&mut terminal, &state, &view);
+        render(&mut terminal, &state, &mut view);
 
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -111,7 +111,7 @@ pub fn run_virtual_tui(
             }
 
             if updated {
-                render(&mut terminal, &state, &view);
+                render(&mut terminal, &state, &mut view);
             }
 
             thread::sleep(Duration::from_millis(10));

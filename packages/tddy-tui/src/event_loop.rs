@@ -66,7 +66,7 @@ pub fn run_event_loop(
             apply_event(&mut state, &mut view, ev);
         }
 
-        terminal.draw(|f| draw(f, &state, view.view_state(), debug))?;
+        terminal.draw(|f| draw(f, &state, view.view_state_mut(), debug))?;
 
         if state.should_quit {
             break;

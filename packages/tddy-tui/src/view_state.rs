@@ -66,6 +66,8 @@ pub struct ViewState {
     pub markdown_end_button_selected: usize,
     /// Selected option index in ErrorRecovery mode (0=Resume, 1=Exit).
     pub error_recovery_selected: usize,
+    /// Frame counter for the spinner animation.
+    pub spinner_tick: usize,
 }
 
 /// Byte index of the start of the character immediately before `idx`.

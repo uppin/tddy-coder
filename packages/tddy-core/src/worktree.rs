@@ -106,6 +106,34 @@ pub fn setup_worktree_for_session(repo_root: &Path, plan_dir: &Path) -> Result<P
     Ok(worktree_path)
 }
 
+/// Remove an existing worktree. Uses `git worktree remove --force`.
+pub fn remove_worktree(repo_root: &Path, worktree_path: &Path) -> Result<(), String> {
+    let output = Command::new("git")
+        .args([
+            "worktree",
+            "remove",
+            "--force",
+            worktree_path.to_str().unwrap_or(""),
+        ])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git worktree remove: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // If git worktree remove fails (e.g. not registered), fall back to removing the directory
+        log::debug!(
+            "git worktree remove failed ({}), removing directory directly",
+            stderr.trim()
+        );
+        if worktree_path.exists() {
+            std::fs::remove_dir_all(worktree_path)
+                .map_err(|e| format!("remove worktree dir: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
 fn slugify_for_branch(name: &str) -> String {
     name.to_lowercase()
         .chars()

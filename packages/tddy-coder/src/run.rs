@@ -179,12 +179,26 @@ pub struct Args {
     pub livekit_api_key: Option<String>,
     /// LiveKit API secret for token generation (mutually exclusive with --livekit-token)
     pub livekit_api_secret: Option<String>,
+    /// Public LiveKit URL for browser clients (e.g. ws://192.168.1.10:7880). Defaults to livekit_url.
+    pub livekit_public_url: Option<String>,
     /// When Some with web_bundle_path, HTTP server serves static files on this port.
     pub web_port: Option<u16>,
     /// Path to pre-built web bundle (e.g. packages/tddy-web/dist). Requires web_port.
     pub web_bundle_path: Option<PathBuf>,
     /// Host to bind web server (e.g. 127.0.0.1 or 0.0.0.0). Default: 0.0.0.0 when web server is enabled.
     pub web_host: Option<String>,
+    /// Public URL for browser-facing redirects (e.g. http://192.168.1.10:8899).
+    pub web_public_url: Option<String>,
+    /// GitHub OAuth client ID
+    pub github_client_id: Option<String>,
+    /// GitHub OAuth client secret
+    pub github_client_secret: Option<String>,
+    /// GitHub OAuth redirect URI (default: http://localhost:{web_port}/auth/callback)
+    pub github_redirect_uri: Option<String>,
+    /// Use stub GitHub provider instead of real GitHub
+    pub github_stub: bool,
+    /// Pre-register code:user mappings for stub (e.g. "test-code:testuser")
+    pub github_stub_codes: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -192,6 +206,10 @@ pub struct Args {
 #[command(name = "tddy-coder")]
 #[command(about = "TDD-driven coder for PRD-based development workflow")]
 pub struct CoderArgs {
+    /// Path to YAML config file (e.g. -c config.yaml). CLI args override config values.
+    #[arg(short = 'c', long = "config")]
+    pub config: Option<PathBuf>,
+
     /// Goal to execute: plan, acceptance-tests, red, green, demo, evaluate, validate, refactor. Omit to run full workflow.
     #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
     pub goal: Option<String>,
@@ -260,6 +278,10 @@ pub struct CoderArgs {
     #[arg(long, env = "LIVEKIT_API_SECRET")]
     pub livekit_api_secret: Option<String>,
 
+    /// Public LiveKit URL for browser clients (e.g. ws://192.168.1.10:7880). Defaults to --livekit-url.
+    #[arg(long)]
+    pub livekit_public_url: Option<String>,
+
     /// Port for HTTP static file server (serves --web-bundle-path). Requires --web-bundle-path.
     #[arg(long, value_name = "PORT")]
     pub web_port: Option<u16>,
@@ -271,6 +293,30 @@ pub struct CoderArgs {
     /// Host to bind web server (e.g. 127.0.0.1 or 0.0.0.0). Default: 0.0.0.0 when web server is enabled.
     #[arg(long, value_name = "HOST")]
     pub web_host: Option<String>,
+
+    /// Public URL for browser-facing redirects (e.g. http://192.168.1.10:8899)
+    #[arg(long)]
+    pub web_public_url: Option<String>,
+
+    /// GitHub OAuth client ID
+    #[arg(long, env = "GITHUB_CLIENT_ID")]
+    pub github_client_id: Option<String>,
+
+    /// GitHub OAuth client secret
+    #[arg(long, env = "GITHUB_CLIENT_SECRET")]
+    pub github_client_secret: Option<String>,
+
+    /// GitHub OAuth redirect URI (default: http://localhost:{web_port}/auth/callback)
+    #[arg(long)]
+    pub github_redirect_uri: Option<String>,
+
+    /// Use stub GitHub OAuth provider (for testing)
+    #[arg(long)]
+    pub github_stub: bool,
+
+    /// Pre-register stub code:user mappings (e.g. "test-code:testuser")
+    #[arg(long)]
+    pub github_stub_codes: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -278,6 +324,10 @@ pub struct CoderArgs {
 #[command(name = "tddy-demo")]
 #[command(about = "Same app as tddy-coder with StubBackend (identical TUI, CLI, workflow)")]
 pub struct DemoArgs {
+    /// Path to YAML config file (e.g. -c config.yaml). CLI args override config values.
+    #[arg(short = 'c', long = "config")]
+    pub config: Option<PathBuf>,
+
     /// Goal to execute: plan, acceptance-tests, red, green, demo, evaluate, validate, refactor. Omit to run full workflow.
     #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
     pub goal: Option<String>,
@@ -346,6 +396,10 @@ pub struct DemoArgs {
     #[arg(long, env = "LIVEKIT_API_SECRET")]
     pub livekit_api_secret: Option<String>,
 
+    /// Public LiveKit URL for browser clients (e.g. ws://192.168.1.10:7880). Defaults to --livekit-url.
+    #[arg(long)]
+    pub livekit_public_url: Option<String>,
+
     /// Port for HTTP static file server (serves --web-bundle-path). Requires --web-bundle-path.
     #[arg(long, value_name = "PORT")]
     pub web_port: Option<u16>,
@@ -357,6 +411,30 @@ pub struct DemoArgs {
     /// Host to bind web server (e.g. 127.0.0.1 or 0.0.0.0). Default: 0.0.0.0 when web server is enabled.
     #[arg(long, value_name = "HOST")]
     pub web_host: Option<String>,
+
+    /// Public URL for browser-facing redirects (e.g. http://192.168.1.10:8899)
+    #[arg(long)]
+    pub web_public_url: Option<String>,
+
+    /// GitHub OAuth client ID
+    #[arg(long, env = "GITHUB_CLIENT_ID")]
+    pub github_client_id: Option<String>,
+
+    /// GitHub OAuth client secret
+    #[arg(long, env = "GITHUB_CLIENT_SECRET")]
+    pub github_client_secret: Option<String>,
+
+    /// GitHub OAuth redirect URI (default: http://localhost:{web_port}/auth/callback)
+    #[arg(long)]
+    pub github_redirect_uri: Option<String>,
+
+    /// Use stub GitHub OAuth provider (for testing)
+    #[arg(long)]
+    pub github_stub: bool,
+
+    /// Pre-register stub code:user mappings (e.g. "test-code:testuser")
+    #[arg(long)]
+    pub github_stub_codes: Option<String>,
 }
 
 impl From<CoderArgs> for Args {
@@ -380,9 +458,16 @@ impl From<CoderArgs> for Args {
             livekit_identity: a.livekit_identity,
             livekit_api_key: a.livekit_api_key,
             livekit_api_secret: a.livekit_api_secret,
+            livekit_public_url: a.livekit_public_url,
             web_port: a.web_port,
             web_bundle_path: a.web_bundle_path.clone(),
             web_host: a.web_host.clone(),
+            web_public_url: a.web_public_url,
+            github_client_id: a.github_client_id,
+            github_client_secret: a.github_client_secret,
+            github_redirect_uri: a.github_redirect_uri,
+            github_stub: a.github_stub,
+            github_stub_codes: a.github_stub_codes,
         }
     }
 }
@@ -408,9 +493,16 @@ impl From<DemoArgs> for Args {
             livekit_identity: a.livekit_identity,
             livekit_api_key: a.livekit_api_key,
             livekit_api_secret: a.livekit_api_secret,
+            livekit_public_url: a.livekit_public_url,
             web_port: a.web_port,
             web_bundle_path: a.web_bundle_path.clone(),
             web_host: a.web_host.clone(),
+            web_public_url: a.web_public_url,
+            github_client_id: a.github_client_id,
+            github_client_secret: a.github_client_secret,
+            github_redirect_uri: a.github_redirect_uri,
+            github_stub: a.github_stub,
+            github_stub_codes: a.github_stub_codes,
         }
     }
 }
@@ -453,6 +545,81 @@ fn validate_web_args(args: &Args) -> anyhow::Result<()> {
         (Some(_), None) => anyhow::bail!("--web-port requires --web-bundle-path"),
         (None, Some(_)) => anyhow::bail!("--web-bundle-path requires --web-port"),
         _ => Ok(()),
+    }
+}
+
+/// Build an optional AuthService RPC entry based on CLI args.
+fn build_auth_service_entry(
+    args: &Args,
+) -> Option<tddy_rpc::ServiceEntry> {
+    if args.github_stub {
+        let client_id = args.github_client_id.as_deref().unwrap_or("stub-client-id");
+        // In stub mode with a web server, return a callback URL on the same origin
+        // so the browser stays on the same domain (no cross-origin redirect to github.com).
+        // Use web_public_url if set, otherwise derive from host+port.
+        let stub = if let Some(ref public_url) = args.web_public_url {
+            let callback_url = format!("{}/auth/callback", public_url.trim_end_matches('/'));
+            tddy_github::StubGitHubProvider::new_with_callback(&callback_url, client_id)
+        } else if let Some(port) = args.web_port {
+            let host = args.web_host.as_deref().unwrap_or("127.0.0.1");
+            let callback_url = format!("http://{}:{}/auth/callback", host, port);
+            tddy_github::StubGitHubProvider::new_with_callback(&callback_url, client_id)
+        } else {
+            tddy_github::StubGitHubProvider::new("https://github.com", client_id)
+        };
+        if let Some(ref codes) = args.github_stub_codes {
+            for mapping in codes.split(',') {
+                let parts: Vec<&str> = mapping.splitn(2, ':').collect();
+                if parts.len() == 2 {
+                    stub.register_code(
+                        parts[0],
+                        tddy_github::GitHubUser {
+                            id: 1,
+                            login: parts[1].to_string(),
+                            avatar_url: format!("https://github.com/{}.png", parts[1]),
+                            name: parts[1].to_string(),
+                        },
+                    );
+                }
+            }
+        }
+        let auth_service_impl = tddy_github::AuthServiceImpl::new(stub);
+        let auth_server = tddy_service::AuthServiceServer::new(auth_service_impl);
+        Some(tddy_rpc::ServiceEntry {
+            name: "auth.AuthService",
+            service: std::sync::Arc::new(auth_server) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+        })
+    } else if let (Some(id), Some(secret)) =
+        (&args.github_client_id, &args.github_client_secret)
+    {
+        let redirect_uri = args.github_redirect_uri.clone().unwrap_or_else(|| {
+            if let Some(ref public_url) = args.web_public_url {
+                format!("{}/auth/callback", public_url.trim_end_matches('/'))
+            } else {
+                let port = args.web_port.unwrap_or(8080);
+                format!("http://localhost:{}/auth/callback", port)
+            }
+        });
+        let real = tddy_github::RealGitHubProvider::new(id, secret, &redirect_uri);
+        let auth_service_impl = tddy_github::AuthServiceImpl::new(real);
+        let auth_server = tddy_service::AuthServiceServer::new(auth_service_impl);
+        Some(tddy_rpc::ServiceEntry {
+            name: "auth.AuthService",
+            service: std::sync::Arc::new(auth_server) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+        })
+    } else {
+        None
+    }
+}
+
+/// Build client config for the web frontend (served at /api/config).
+fn build_client_config(args: &Args) -> crate::web_server::ClientConfig {
+    crate::web_server::ClientConfig {
+        livekit_url: args
+            .livekit_public_url
+            .clone()
+            .or_else(|| args.livekit_url.clone()),
+        livekit_room: args.livekit_room.clone(),
     }
 }
 
@@ -712,7 +879,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
                 let echo_server =
                     tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl);
-                let multi = tddy_rpc::MultiRpcService::new(vec![
+                let mut entries = vec![
                     tddy_rpc::ServiceEntry {
                         name: "test.EchoService",
                         service: std::sync::Arc::new(echo_server)
@@ -723,18 +890,34 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         service: std::sync::Arc::new(token_server)
                             as std::sync::Arc<dyn tddy_rpc::RpcService>,
                     },
-                ]);
+                ];
+                if let Some(auth_entry) = build_auth_service_entry(args) {
+                    entries.push(auth_entry);
+                }
+                let multi = tddy_rpc::MultiRpcService::new(entries);
                 Some(tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
                     multi,
                 )))
             } else {
-                Some(tddy_connectrpc::connect_router(
-                    tddy_service::create_echo_bridge(),
-                ))
+                let echo_server =
+                    tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl);
+                let mut entries = vec![tddy_rpc::ServiceEntry {
+                    name: "test.EchoService",
+                    service: std::sync::Arc::new(echo_server)
+                        as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                }];
+                if let Some(auth_entry) = build_auth_service_entry(args) {
+                    entries.push(auth_entry);
+                }
+                let multi = tddy_rpc::MultiRpcService::new(entries);
+                Some(tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
+                    multi,
+                )))
             };
+            let client_config = build_client_config(args);
             tokio::spawn(async move {
                 if let Err(e) =
-                    crate::web_server::serve_web_bundle(&web_host, web_port, path, rpc_router).await
+                    crate::web_server::serve_web_bundle(&web_host, web_port, path, rpc_router, Some(client_config)).await
                 {
                     log::error!("Web server error: {}", e);
                 }
@@ -1341,7 +1524,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
             let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
             let echo_server = tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl);
-            let multi = tddy_rpc::MultiRpcService::new(vec![
+            let mut entries = vec![
                 tddy_rpc::ServiceEntry {
                     name: "test.EchoService",
                     service: std::sync::Arc::new(echo_server)
@@ -1352,22 +1535,37 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     service: std::sync::Arc::new(token_server)
                         as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
-            ]);
+            ];
+            if let Some(auth_entry) = build_auth_service_entry(args) {
+                entries.push(auth_entry);
+            }
+            let multi = tddy_rpc::MultiRpcService::new(entries);
             Some(tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
                 multi,
             )))
         } else {
-            Some(tddy_connectrpc::connect_router(
-                tddy_service::create_echo_bridge(),
-            ))
+            let echo_server = tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl);
+            let mut entries = vec![tddy_rpc::ServiceEntry {
+                name: "test.EchoService",
+                service: std::sync::Arc::new(echo_server)
+                    as std::sync::Arc<dyn tddy_rpc::RpcService>,
+            }];
+            if let Some(auth_entry) = build_auth_service_entry(args) {
+                entries.push(auth_entry);
+            }
+            let multi = tddy_rpc::MultiRpcService::new(entries);
+            Some(tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
+                multi,
+            )))
         };
+        let client_config = build_client_config(args);
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("tokio runtime for web server");
             if let Err(e) = rt.block_on(crate::web_server::serve_web_bundle(
-                &web_host, web_port, path, rpc_router,
+                &web_host, web_port, path, rpc_router, Some(client_config),
             )) {
                 log::error!("Web server error: {}", e);
             }

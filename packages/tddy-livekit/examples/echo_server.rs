@@ -49,7 +49,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .map_err(|e| format!("Connect failed: {}", e))?;
 
     log::info!("[echo_server] connected, identity=server, event loop starting");
-    log::info!("READY");
+    // Print READY to stdout (not via log::info which goes to stderr)
+    // so that test infrastructure (Cypress) can detect readiness on stdout.
+    println!("READY");
 
     participant.run().await;
     Ok(())

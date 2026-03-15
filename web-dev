@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# Start tddy-coder daemon (RPC backend) + Vite dev server (HMR frontend).
+#
+# Vite proxies /rpc → tddy-coder daemon. Edit React code and see changes instantly.
+#
+# Usage: ./web-dev                        # uses dev.config.yaml
+#        ./web-dev -c my-config.yaml      # custom config
+#        ./web-dev --github-stub          # extra CLI overrides
+#
+# Environment variables:
+#   WEB_HOST    — Host to bind Vite (default: 127.0.0.1)
+#   VITE_PORT   — Port for Vite dev server (default: 5173)
+#
+# Press Ctrl+C to stop both servers.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+# Load .env if present (does not override already-set env vars)
+if [ -f .env ]; then
+  while IFS='=' read -r key value; do
+    # Skip comments and blank lines
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    # Strip surrounding quotes from value
+    value="${value%\"}" ; value="${value#\"}"
+    value="${value%\'}" ; value="${value#\'}"
+    # Only set if not already in environment
+    if [ -z "${!key+x}" ]; then
+      export "$key=$value"
+    fi
+  done < .env
+fi
+
+WEB_HOST="${WEB_HOST:-127.0.0.1}"
+VITE_PORT="${VITE_PORT:-5173}"
+CONFIG="${CONFIG:-dev.config.yaml}"
+
+# Find tddy-demo binary (prefer over tddy-coder for dev)
+find_binary() {
+  local debug="target/debug/tddy-demo"
+  local release="target/release/tddy-demo"
+  if [ -f "$debug" ]; then echo "$debug"; return; fi
+  if [ -f "$release" ]; then echo "$release"; return; fi
+  echo "tddy-demo binary not found. Run: cargo build -p tddy-demo" >&2
+  exit 1
+}
+
+binary=$(find_binary)
+
+# If user didn't pass -c/--config, prepend the default config
+daemon_args=()
+has_config=false
+for arg in "$@"; do
+  if [ "$arg" = "-c" ] || [ "$arg" = "--config" ]; then
+    has_config=true
+    break
+  fi
+done
+if [ "$has_config" = false ] && [ -f "$CONFIG" ]; then
+  daemon_args+=("-c" "$CONFIG")
+fi
+
+# Pass through all user args (may include -c, --github-stub, etc.)
+daemon_args+=("$@")
+
+# WEB_HOST env overrides config's web.host (CLI args beat config)
+daemon_args+=("--web-host" "$WEB_HOST")
+
+# WEB_PUBLIC_URL env overrides config's web.public_url
+if [ -n "${WEB_PUBLIC_URL:-}" ]; then
+  daemon_args+=("--web-public-url" "$WEB_PUBLIC_URL")
+fi
+
+# LIVEKIT_PUBLIC_URL env overrides config's livekit.public_url
+if [ -n "${LIVEKIT_PUBLIC_URL:-}" ]; then
+  daemon_args+=("--livekit-public-url" "$LIVEKIT_PUBLIC_URL")
+fi
+
+# Read daemon port from config for the Vite proxy.
+# The config's web.port is what the daemon listens on.
+DAEMON_PORT=$(grep -A5 '^web:' "$CONFIG" 2>/dev/null | grep 'port:' | head -1 | awk '{print $2}')
+DAEMON_PORT="${DAEMON_PORT:-8899}"
+
+echo "=== Starting tddy-coder daemon on :${DAEMON_PORT} (config: ${CONFIG}) ==="
+exec nix develop --profile ./.nix-profile --impure -c bash -c '
+  set -e
+  binary="$1"; shift
+  vite_port="$1"; shift
+  daemon_port="$1"; shift
+  web_host="$1"; shift
+
+  # Start daemon in background
+  "$binary" "$@" &
+  daemon_pid=$!
+
+  # Wait for daemon to be ready
+  for i in $(seq 1 30); do
+    if curl -s -o /dev/null "http://127.0.0.1:${daemon_port}/"; then
+      break
+    fi
+    sleep 0.5
+  done
+
+  echo ""
+  echo "=== Starting Vite dev server on ${web_host}:${vite_port} ==="
+  echo "=== Open http://${web_host}:${vite_port} ==="
+  echo ""
+
+  # Start Vite dev server with DAEMON_PORT for proxy config
+  cd packages/tddy-web
+  DAEMON_PORT="$daemon_port" npx vite --port "$vite_port" --host "$web_host" &
+  vite_pid=$!
+
+  # Wait for either to exit
+  wait_exit() {
+    wait -n "$daemon_pid" "$vite_pid" 2>/dev/null || true
+    kill "$daemon_pid" "$vite_pid" 2>/dev/null || true
+    wait 2>/dev/null
+  }
+  trap wait_exit INT TERM
+  wait_exit
+' -- "$binary" "$VITE_PORT" "$DAEMON_PORT" "$WEB_HOST" "${daemon_args[@]}"

@@ -1,0 +1,36 @@
+# tddy-coder configuration
+# Usage: tddy-coder -c config.yaml
+# CLI args override values from this file.
+
+# agent: claude          # claude, cursor, or stub
+# model: sonnet          # Model name for Claude Code CLI
+# daemon: true           # Run as headless daemon (no TUI)
+# debug: false
+# goal: plan             # plan, acceptance-tests, red, green, demo, etc.
+# plan_dir: ./plans/my-feature
+# prompt: "my feature description"
+
+# LiveKit configuration (for terminal streaming)
+# livekit:
+#   url: ws://127.0.0.1:7880
+#   api_key: devkey
+#   api_secret: secret
+#   room: my-room
+#   identity: server
+#   # OR use a pre-generated token instead of api_key/api_secret:
+#   # token: eyJ...
+
+# Web server configuration
+# web:
+#   port: 8888
+#   host: 0.0.0.0
+#   bundle_path: packages/tddy-web/dist
+
+# GitHub OAuth configuration
+# github:
+#   client_id: your-github-client-id
+#   client_secret: your-github-client-secret
+#   redirect_uri: http://localhost:8888/auth/callback
+#   # For testing with the in-memory stub:
+#   # stub: true
+#   # stub_codes: "test-code:testuser"
