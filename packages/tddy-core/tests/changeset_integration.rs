@@ -82,11 +82,11 @@ async fn plan_discovery_includes_toolchain_and_scripts() {
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON_WITH_DISCOVERY);
 
-    let output_dir = std::env::temp_dir().join("tddy-plan-discovery");
+    let output_dir = std::env::temp_dir().join("tddy-plan-toolchain-discovery");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).unwrap();
 
-    let storage_dir = std::env::temp_dir().join("tddy-plan-discovery-engine");
+    let storage_dir = std::env::temp_dir().join("tddy-plan-toolchain-discovery-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
     let engine = WorkflowEngine::new(
         SharedBackend::from_arc(backend),
@@ -94,7 +94,7 @@ async fn plan_discovery_includes_toolchain_and_scripts() {
         Some(Arc::new(TddWorkflowHooks::new())),
     );
 
-    let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
+    let (output_path, _) = run_plan(&engine, "Build auth toolchain", &output_dir, None)
         .await
         .expect("planning should succeed");
 
