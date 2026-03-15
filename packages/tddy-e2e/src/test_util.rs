@@ -7,8 +7,12 @@ use tddy_core::{ActivityEntry, AppMode, PresenterView};
 /// Create a temp directory with an initialized git repo (init, commit, origin/master).
 /// Required for workflow steps that create worktrees (e.g. acceptance-tests).
 pub fn temp_dir_with_git_repo(label: &str) -> PathBuf {
-    let base = std::env::temp_dir()
-        .join(format!("tddy-e2e-{}-{}-{}", label, std::process::id(), uuid::Uuid::new_v4()));
+    let base = std::env::temp_dir().join(format!(
+        "tddy-e2e-{}-{}-{}",
+        label,
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
     let _ = std::fs::remove_dir_all(&base);
     let output_dir = base.join("repo");
     std::fs::create_dir_all(&output_dir).expect("create repo dir");

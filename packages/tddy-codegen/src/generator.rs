@@ -308,7 +308,7 @@ fn generate_per_method_struct(service: &Service, method: &Method, buf: &mut Stri
             .unwrap();
             writeln!(buf, "            Ok(resp) => {{",).unwrap();
             writeln!(buf, "                let stream = resp.into_inner();",).unwrap();
-            writeln!(buf, "                let (tx, rx) = mpsc::channel(16);",).unwrap();
+            writeln!(buf, "                let (tx, rx) = mpsc::channel(256);",).unwrap();
             writeln!(buf, "                tokio::spawn(async move {{",).unwrap();
             writeln!(buf, "                    let mut stream = stream;",).unwrap();
             writeln!(
@@ -448,7 +448,7 @@ fn generate_per_method_struct(service: &Service, method: &Method, buf: &mut Stri
             .unwrap();
             writeln!(buf, "            Ok(resp) => {{",).unwrap();
             writeln!(buf, "                let stream = resp.into_inner();",).unwrap();
-            writeln!(buf, "                let (tx, rx) = mpsc::channel(16);",).unwrap();
+            writeln!(buf, "                let (tx, rx) = mpsc::channel(256);",).unwrap();
             writeln!(buf, "                tokio::spawn(async move {{",).unwrap();
             writeln!(buf, "                    let mut stream = stream;",).unwrap();
             writeln!(
@@ -607,7 +607,154 @@ fn generate_rpc_service_impl(service: &Service, buf: &mut String, rpc: &str) {
     .unwrap();
     writeln!(buf, "        }}").unwrap();
     writeln!(buf, "    }}").unwrap();
+
+    if !bidi_methods.is_empty() {
+        generate_start_bidi_stream(service, buf, rpc);
+    }
+
     writeln!(buf, "}}").unwrap();
+}
+
+fn generate_start_bidi_stream(service: &Service, buf: &mut String, rpc: &str) {
+    writeln!(buf).unwrap();
+    writeln!(
+        buf,
+        "    async fn start_bidi_stream(&self, service: &str, method: &str, mut input_rx: mpsc::Receiver<{}::RpcMessage>) -> Result<{}::BidiStreamOutput, {}::Status> {{",
+        rpc, rpc, rpc
+    ).unwrap();
+    writeln!(buf, "        if service != Self::NAME {{").unwrap();
+    writeln!(
+        buf,
+        "            return Err({}::Status::not_found(format!(\"Unknown service: {{}}\", service)));",
+        rpc
+    )
+    .unwrap();
+    writeln!(buf, "        }}").unwrap();
+    writeln!(buf, "        match method {{").unwrap();
+
+    for method in &service.methods {
+        if !(method.client_streaming && method.server_streaming) {
+            continue;
+        }
+        let method_snake = to_snake_case(&method.name);
+        let proto_name = method_proto_name(method);
+        let input = &method.input_type;
+
+        writeln!(buf, "            \"{}\" => {{", proto_name).unwrap();
+        // Create channel for decoded items (fed into Streaming)
+        writeln!(
+            buf,
+            "                let (item_tx, item_rx) = mpsc::channel::<Result<{}, {}::Status>>(64);",
+            input, rpc
+        )
+        .unwrap();
+        // Spawn decoder task: reads RpcMessage from input_rx, decodes, forwards to item_tx
+        writeln!(buf, "                tokio::spawn(async move {{").unwrap();
+        writeln!(
+            buf,
+            "                    log::trace!(\"[BIDI_TRACE] codegen decoder: task started for {}\");",
+            method_snake
+        ).unwrap();
+        writeln!(buf, "                    let mut msg_count: u64 = 0;").unwrap();
+        writeln!(
+            buf,
+            "                    while let Some(msg) = input_rx.recv().await {{"
+        )
+        .unwrap();
+        writeln!(buf, "                        msg_count += 1;").unwrap();
+        writeln!(
+            buf,
+            "                        log::trace!(\"[BIDI_TRACE] codegen decoder: msg #{{}}, payload_len={{}}\", msg_count, msg.payload.len());"
+        ).unwrap();
+        writeln!(
+            buf,
+            "                        if msg.payload.is_empty() {{ log::trace!(\"[BIDI_TRACE] codegen decoder: skipping empty payload msg #{{}}\", msg_count); continue; }}"
+        )
+        .unwrap();
+        writeln!(
+            buf,
+            "                        match {}::decode(&msg.payload[..]) {{",
+            input
+        )
+        .unwrap();
+        writeln!(
+            buf,
+            "                            Ok(decoded) => {{ log::trace!(\"[BIDI_TRACE] codegen decoder: decoded msg #{{}}, forwarding to item_tx\", msg_count); if item_tx.send(Ok(decoded)).await.is_err() {{ log::trace!(\"[BIDI_TRACE] codegen decoder: item_tx closed, breaking\"); break; }} }}"
+        ).unwrap();
+        writeln!(
+            buf,
+            "                            Err(e) => {{ log::error!(\"[BIDI_TRACE] codegen decoder: decode error msg #{{}}: {{}}\", msg_count, e); let _ = item_tx.send(Err({}::Status::invalid_argument(e.to_string()))).await; break; }}",
+            rpc
+        ).unwrap();
+        writeln!(buf, "                        }}").unwrap();
+        writeln!(buf, "                    }}").unwrap();
+        writeln!(
+            buf,
+            "                    log::trace!(\"[BIDI_TRACE] codegen decoder: task ended, processed {{}} msgs\", msg_count);"
+        ).unwrap();
+        writeln!(buf, "                }});").unwrap();
+        // Create Streaming from the decoded item receiver
+        writeln!(
+            buf,
+            "                let streaming = {}::Streaming::new(tokio_stream::wrappers::ReceiverStream::new(item_rx));",
+            rpc
+        ).unwrap();
+        writeln!(
+            buf,
+            "                let request = {}::Request::new(streaming);",
+            rpc
+        )
+        .unwrap();
+        // Call the service handler once
+        writeln!(
+            buf,
+            "                match self.inner.{}(request).await {{",
+            method_snake
+        )
+        .unwrap();
+        writeln!(buf, "                    Ok(resp) => {{").unwrap();
+        writeln!(
+            buf,
+            "                        let stream = resp.into_inner();"
+        )
+        .unwrap();
+        writeln!(
+            buf,
+            "                        let (tx, rx) = mpsc::channel(256);"
+        )
+        .unwrap();
+        writeln!(buf, "                        tokio::spawn(async move {{").unwrap();
+        writeln!(buf, "                            let mut stream = stream;").unwrap();
+        writeln!(
+            buf,
+            "                            while let Some(item) = stream.next().await {{"
+        )
+        .unwrap();
+        writeln!(
+            buf,
+            "                                let _ = tx.send(item.map(|r| r.encode_to_vec())).await;"
+        ).unwrap();
+        writeln!(buf, "                            }}").unwrap();
+        writeln!(buf, "                        }});").unwrap();
+        writeln!(
+            buf,
+            "                        Ok({}::BidiStreamOutput {{ output: {}::ResponseBody::Streaming(rx) }})",
+            rpc, rpc
+        ).unwrap();
+        writeln!(buf, "                    }}").unwrap();
+        writeln!(buf, "                    Err(e) => Err(e),").unwrap();
+        writeln!(buf, "                }}").unwrap();
+        writeln!(buf, "            }}").unwrap();
+    }
+
+    writeln!(
+        buf,
+        "            _ => Err({}::Status::not_found(format!(\"Unknown method: {{}}\", method))),",
+        rpc
+    )
+    .unwrap();
+    writeln!(buf, "        }}").unwrap();
+    writeln!(buf, "    }}").unwrap();
 }
 
 fn bidi_matches_arms(methods: &[String]) -> String {

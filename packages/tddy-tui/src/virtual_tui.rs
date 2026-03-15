@@ -38,9 +38,15 @@ pub fn run_virtual_tui(
         let mut view = TuiView::new();
         let mut input_buf: Vec<u8> = Vec::new();
 
+        let write_count = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         let on_write = {
             let tx = output_tx.clone();
+            let wc = write_count.clone();
             move |buf: &[u8]| {
+                let n = wc.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if n < 5 || n % 100 == 0 {
+                    eprintln!("[BIDI_TRACE] on_write: chunk#{} ({} bytes)", n, buf.len());
+                }
                 let _ = tx.blocking_send(buf.to_vec());
             }
         };
@@ -66,56 +72,92 @@ pub fn run_virtual_tui(
 
         render(&mut terminal, &state, &mut view);
 
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build();
-        let rt = match rt {
-            Ok(r) => r,
-            Err(e) => {
-                log::error!("VirtualTui: failed to create runtime: {}", e);
-                return;
-            }
-        };
-
         let mut input_rx = input_rx;
         let mut event_rx = conn.event_rx;
         let intent_tx = conn.intent_tx;
 
+        log::trace!("[BIDI_TRACE] virtual_tui: entering main loop");
+        let mut loop_count: u64 = 0;
         while !shutdown.load(Ordering::Relaxed) {
+            loop_count += 1;
             let mut updated = false;
 
             while let Ok(ev) = event_rx.try_recv() {
+                eprintln!(
+                    "[BIDI_TRACE] virtual_tui: loop#{} received PresenterEvent: {:?}",
+                    loop_count,
+                    std::mem::discriminant(&ev),
+                );
                 apply_event(&mut state, &mut view, ev);
                 updated = true;
             }
 
             loop {
-                match rt.block_on(tokio::time::timeout(
-                    Duration::from_millis(0),
-                    input_rx.recv(),
-                )) {
-                    Ok(Some(bytes)) if !bytes.is_empty() => {
+                match input_rx.try_recv() {
+                    Ok(bytes) if !bytes.is_empty() => {
+                        eprintln!(
+                            "[BIDI_TRACE] virtual_tui: loop#{} received input bytes ({} bytes): {:?}",
+                            loop_count, bytes.len(), &bytes
+                        );
                         input_buf.extend_from_slice(&bytes);
                         while let Some((key, consumed)) = parse_key_from_buf(&mut input_buf) {
-                            if let Some(intent) =
+                            log::trace!(
+                                "[BIDI_TRACE] virtual_tui: loop#{} parsed key={:?}, mode={:?}",
+                                loop_count,
+                                key.code,
+                                state.mode
+                            );
+                            let inbox_len = state.inbox.len();
+                            let view_consumed = view.view_state_mut().handle_key_view_local(
+                                key,
+                                &state.mode,
+                                inbox_len,
+                            );
+                            if view_consumed {
+                                eprintln!(
+                                    "[BIDI_TRACE] virtual_tui: loop#{} key={:?} consumed by view-local handler (mode={:?})",
+                                    loop_count, key.code, state.mode
+                                );
+                                updated = true;
+                            } else if let Some(intent) =
                                 key_event_to_intent(key, &state.mode, view.view_state())
                             {
+                                eprintln!(
+                                    "[BIDI_TRACE] virtual_tui: loop#{} sending intent={:?} (mode={:?})",
+                                    loop_count, intent, state.mode
+                                );
                                 let _ = intent_tx.send(intent);
+                            } else {
+                                eprintln!(
+                                    "[BIDI_TRACE] virtual_tui: loop#{} key={:?} produced no intent for mode={:?}",
+                                    loop_count, key.code, state.mode
+                                );
                             }
                             input_buf.drain(..consumed);
                         }
                     }
-                    Ok(None) => break,
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        log::trace!(
+                            "[BIDI_TRACE] virtual_tui: loop#{} input_rx closed",
+                            loop_count
+                        );
+                        break;
+                    }
                     _ => break,
                 }
             }
 
             if updated {
+                eprintln!("[BIDI_TRACE] virtual_tui: loop#{} re-rendering (mode={:?})", loop_count, state.mode);
                 render(&mut terminal, &state, &mut view);
             }
 
             thread::sleep(Duration::from_millis(10));
         }
+        log::trace!(
+            "[BIDI_TRACE] virtual_tui: main loop exited after {} iterations",
+            loop_count
+        );
     });
 }
 

@@ -45,10 +45,7 @@ impl RealGitHubProvider {
 impl GitHubOAuthProvider for RealGitHubProvider {
     fn authorize_url(&self) -> (String, String) {
         let state = Uuid::new_v4().to_string();
-        self.pending_states
-            .lock()
-            .unwrap()
-            .insert(state.clone());
+        self.pending_states.lock().unwrap().insert(state.clone());
         let url = format!(
             "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&state={}&scope=read:user",
             self.client_id, self.redirect_uri, state
@@ -92,7 +89,10 @@ impl GitHubOAuthProvider for RealGitHubProvider {
         let user_resp = self
             .http_client
             .get("https://api.github.com/user")
-            .header("Authorization", format!("Bearer {}", token_data.access_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", token_data.access_token),
+            )
             .header("User-Agent", "tddy-github")
             .send()
             .await

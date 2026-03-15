@@ -12,7 +12,8 @@ use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
 use common::{
-    ctx_acceptance_tests, ctx_red, run_plan, temp_dir_with_git_repo, write_changeset_for_plan_session,
+    ctx_acceptance_tests, ctx_red, run_plan, temp_dir_with_git_repo,
+    write_changeset_for_plan_session,
 };
 use fixtures::{PLAN_JSON, RED_JSON_VALID};
 
