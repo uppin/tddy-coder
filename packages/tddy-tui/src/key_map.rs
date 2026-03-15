@@ -183,9 +183,9 @@ fn error_recovery_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
         vs.error_recovery_selected
     );
     if key.code == KeyCode::Enter {
-        // TODO: add ContinueWithAgent at index 1
         match vs.error_recovery_selected {
             0 => Some(UserIntent::ResumeFromError),
+            1 => Some(UserIntent::ContinueWithAgent),
             _ => Some(UserIntent::Quit),
         }
     } else {

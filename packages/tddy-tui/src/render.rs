@@ -374,14 +374,48 @@ fn render_plan_review(
     frame.render_widget(widget, area);
 }
 
-/// Render error recovery: error message + selectable options.
+/// Render error recovery: error message + 3 selectable options.
 fn render_error_recovery(
-    _frame: &mut Frame,
-    _state: &PresenterState,
-    _view_state: &ViewState,
-    _area: ratatui::layout::Rect,
+    frame: &mut Frame,
+    state: &PresenterState,
+    view_state: &ViewState,
+    area: ratatui::layout::Rect,
 ) {
-    // TODO: render error message + 3 options (Resume, Continue with agent, Exit)
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+
+    if area.height == 0 {
+        return;
+    }
+
+    let error_msg = match &state.mode {
+        AppMode::ErrorRecovery { error_message } => error_message.as_str(),
+        _ => return,
+    };
+
+    let options = ["Resume", "Continue with agent", "Exit"];
+    let highlight = Style::default().add_modifier(Modifier::REVERSED);
+    let normal = Style::default();
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!("Error: {}", error_msg),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+
+    for (i, label) in options.iter().enumerate() {
+        let selected = view_state.error_recovery_selected == i;
+        let prefix = if selected { "> " } else { "  " };
+        let style = if selected { highlight } else { normal };
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", prefix, label),
+            style,
+        )));
+    }
+
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 /// Render inbox items.

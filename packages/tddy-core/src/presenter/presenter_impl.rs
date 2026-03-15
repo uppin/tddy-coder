@@ -264,7 +264,24 @@ impl Presenter {
                 self.state.should_quit = true;
             }
             UserIntent::ContinueWithAgent => {
-                // TODO: implement — read session_id from changeset, set exit_action, quit
+                let session_id = if let Some(output_dir) = self.workflow_output_dir.as_ref() {
+                    match crate::changeset::read_changeset(output_dir) {
+                        Ok(cs) => cs.state.session_id.clone(),
+                        Err(e) => {
+                            log::warn!("ContinueWithAgent: could not read changeset: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                if let Some(sid) = session_id {
+                    self.state.exit_action =
+                        Some(crate::presenter::state::ExitAction::ContinueWithAgent {
+                            session_id: sid,
+                        });
+                    self.state.should_quit = true;
+                }
             }
             UserIntent::ResumeFromError => {
                 log::info!(

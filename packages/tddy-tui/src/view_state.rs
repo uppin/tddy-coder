@@ -173,21 +173,21 @@ impl ViewState {
     }
 
     fn handle_error_recovery_key_view_local(&mut self, key: KeyEvent) -> bool {
-        // TODO: expand to 3 options (Resume, Continue with agent, Exit)
+        const OPTIONS: usize = 3;
         match key.code {
             KeyCode::Up => {
                 self.error_recovery_selected = if self.error_recovery_selected == 0 {
-                    1
+                    OPTIONS - 1
                 } else {
-                    0
+                    self.error_recovery_selected - 1
                 };
                 true
             }
             KeyCode::Down => {
-                self.error_recovery_selected = if self.error_recovery_selected >= 1 {
+                self.error_recovery_selected = if self.error_recovery_selected >= OPTIONS - 1 {
                     0
                 } else {
-                    1
+                    self.error_recovery_selected + 1
                 };
                 true
             }

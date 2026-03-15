@@ -14,7 +14,7 @@ pub fn question_height(mode: &AppMode) -> u16 {
         }
         AppMode::TextInput { .. } => 2,     // prompt + blank
         AppMode::PlanReview { .. } => 4,    // header + 3 options (View, Approve, Refine)
-        // TODO: allocate height for ErrorRecovery options
+        AppMode::ErrorRecovery { .. } => 5, // error + blank + 3 options
         _ => 0,
     }
 }
