@@ -53,7 +53,9 @@ async fn drain_output(
             Err(_) => {
                 log::trace!(
                     "[BIDI_TRACE] test drain_output: phase={} quiet after {} chunks, {} bytes",
-                    phase, chunk_count, received.len()
+                    phase,
+                    chunk_count,
+                    received.len()
                 );
                 break;
             }
@@ -175,10 +177,7 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
     // After scope question → PlanReview appears (View / Approve / Refine).
     // Enter answers scope, Down navigates to "Approve", Enter approves.
     let sender = tokio::spawn(async move {
-        input_tx
-            .send(TerminalInput { data: vec![] })
-            .await
-            .unwrap();
+        input_tx.send(TerminalInput { data: vec![] }).await.unwrap();
         tokio::time::sleep(Duration::from_millis(1000)).await;
 
         eprintln!("[TEST-INPUT] sending Enter (answer scope)");
@@ -320,9 +319,7 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
     let mut all_raw = initial_output;
     for (key, label) in inputs {
         input_tx
-            .send(TerminalInput {
-                data: key.to_vec(),
-            })
+            .send(TerminalInput { data: key.to_vec() })
             .await
             .map_err(|e| anyhow::anyhow!("send {}: {}", label, e))?;
 
@@ -515,7 +512,10 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
         }
     }
     let after_screen = parser.screen().contents();
-    eprintln!("[TEST] after Down + periodic renders — screen:\n{}", after_screen);
+    eprintln!(
+        "[TEST] after Down + periodic renders — screen:\n{}",
+        after_screen
+    );
     if !chunks_with_selection_reset.is_empty() {
         eprintln!(
             "[TEST] WARNING: {} chunks showed selection reset to first option!",

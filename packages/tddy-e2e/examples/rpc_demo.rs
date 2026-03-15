@@ -24,9 +24,9 @@ use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 
 use tddy_core::backend::{AnyBackend, SharedBackend, StubBackend};
 use tddy_core::Presenter;
-use tddy_service::{start_virtual_tui_session, VirtualTuiSession};
 #[cfg(feature = "livekit")]
 use tddy_service::TerminalServiceVirtualTui;
+use tddy_service::{start_virtual_tui_session, VirtualTuiSession};
 use tddy_tui::raw::{disable_raw_mode, enable_raw_mode_keep_sig};
 
 #[derive(Parser)]
@@ -86,8 +86,7 @@ fn start_backend(
     let presenter = Presenter::new("stub", "opus")
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx);
-    let output_dir =
-        std::env::temp_dir().join(format!("tddy-rpc-demo-{}", uuid::Uuid::new_v4()));
+    let output_dir = std::env::temp_dir().join(format!("tddy-rpc-demo-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&output_dir).unwrap();
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
     let mut presenter = presenter.with_worktree_dir(output_dir.clone());
@@ -354,10 +353,12 @@ fn connect_livekit(
         let _ = key_tx.blocking_send(bytes);
     });
 
-    let recv = Box::new(move || match output_rx.recv_timeout(Duration::from_millis(50)) {
-        Ok(bytes) => Some(bytes),
-        Err(_) => None,
-    });
+    let recv = Box::new(
+        move || match output_rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(bytes) => Some(bytes),
+            Err(_) => None,
+        },
+    );
 
     // Keep the runtime alive (it owns the spawned tasks)
     std::mem::forget(rt);
@@ -427,9 +428,7 @@ fn main() -> anyhow::Result<()> {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
-                if key.code == KeyCode::Char('c')
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
+                if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     break;
                 }
                 let bytes = encode_key(key);

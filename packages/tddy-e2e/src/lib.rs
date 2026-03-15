@@ -247,10 +247,8 @@ pub fn spawn_presenter_with_view_connection_factory(
 ) {
     let (event_tx, _) = broadcast::channel(256);
     let (intent_tx, intent_rx) = mpsc::channel();
-    let output_dir = std::env::temp_dir().join(format!(
-        "tddy-e2e-livekit-tui-{}",
-        uuid::Uuid::new_v4()
-    ));
+    let output_dir =
+        std::env::temp_dir().join(format!("tddy-e2e-livekit-tui-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&output_dir).unwrap();
     let mut presenter = Presenter::new("stub", "opus")
         .with_broadcast(event_tx.clone())
@@ -354,7 +352,7 @@ pub fn spawn_presenter_with_terminal_service(
                 break;
             }
             while let Ok(intent) = intent_rx.try_recv() {
-                eprintln!("[BIDI_TRACE] presenter: received intent={:?}", intent);
+                log::trace!("presenter: received intent={:?}", intent);
                 if let Ok(mut p) = presenter_for_thread.lock() {
                     p.handle_intent(intent);
                 }

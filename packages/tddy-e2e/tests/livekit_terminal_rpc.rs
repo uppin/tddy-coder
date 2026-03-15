@@ -235,8 +235,7 @@ mod livekit_tests {
             .await
             .map_err(|e| anyhow::anyhow!("send init: {}", e))?;
 
-        let initial_output =
-            drain_output(&mut rx, Duration::from_secs(3), "init").await?;
+        let initial_output = drain_output(&mut rx, Duration::from_secs(3), "init").await?;
         let initial_text = ansi_to_text(&initial_output);
         eprintln!(
             "[TEST] livekit init: {} bytes, text_len={}, preview={:?}",
@@ -264,10 +263,7 @@ mod livekit_tests {
         for (key, label) in inputs {
             eprintln!("[TEST-INPUT] livekit: sending {}", label);
             sender
-                .send(
-                    TerminalInput { data: key.to_vec() }.encode_to_vec(),
-                    false,
-                )
+                .send(TerminalInput { data: key.to_vec() }.encode_to_vec(), false)
                 .await
                 .map_err(|e| anyhow::anyhow!("send {}: {}", label, e))?;
 
@@ -386,8 +382,7 @@ mod livekit_tests {
             .await
             .map_err(|e| anyhow::anyhow!("send init: {}", e))?;
 
-        let initial_output =
-            drain_output(&mut rx, Duration::from_secs(3), "ghostty-init").await?;
+        let initial_output = drain_output(&mut rx, Duration::from_secs(3), "ghostty-init").await?;
         for chunk in initial_output.chunks(256) {
             viewer.feed(chunk);
         }
@@ -411,10 +406,7 @@ mod livekit_tests {
         let mut all_raw = initial_output;
         for (key, label) in inputs {
             sender
-                .send(
-                    TerminalInput { data: key.to_vec() }.encode_to_vec(),
-                    false,
-                )
+                .send(TerminalInput { data: key.to_vec() }.encode_to_vec(), false)
                 .await
                 .map_err(|e| anyhow::anyhow!("send {}: {}", label, e))?;
 

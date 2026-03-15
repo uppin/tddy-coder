@@ -301,6 +301,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         log::debug!("LiveKitParticipant::run event loop ended");
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_incoming(
         payload: &[u8],
         event_participant: Option<ParticipantIdentity>,

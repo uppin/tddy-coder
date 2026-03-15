@@ -67,34 +67,33 @@ pub fn run_virtual_tui(
         // and only send bytes to the output channel if content actually changed.
         // This avoids sending cursor-only control sequences from ratatui's draw()
         // on identical frames, which would flood the network stream.
-        let render_and_send =
-            |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
-             state: &PresenterState,
-             view: &mut TuiView,
-             frame_buf: &Arc<Mutex<Vec<u8>>>,
-             prev_frame: &mut Vec<u8>,
-             output_tx: &mpsc::Sender<Vec<u8>>| {
-                {
-                    let mut b = frame_buf.lock().unwrap();
-                    b.clear();
-                }
-                if let Err(e) = term.draw(|f| draw(f, state, view.view_state_mut(), false)) {
-                    log::debug!("VirtualTui: draw error: {}", e);
-                    return;
-                }
-                let current_frame = {
-                    let b = frame_buf.lock().unwrap();
-                    b.clone()
-                };
-                if current_frame != *prev_frame {
-                    log::trace!(
-                        "virtual_tui: frame changed ({} bytes), sending",
-                        current_frame.len()
-                    );
-                    let _ = output_tx.blocking_send(current_frame.clone());
-                    *prev_frame = current_frame;
-                }
+        let render_and_send = |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
+                               state: &PresenterState,
+                               view: &mut TuiView,
+                               frame_buf: &Arc<Mutex<Vec<u8>>>,
+                               prev_frame: &mut Vec<u8>,
+                               output_tx: &mpsc::Sender<Vec<u8>>| {
+            {
+                let mut b = frame_buf.lock().unwrap();
+                b.clear();
+            }
+            if let Err(e) = term.draw(|f| draw(f, state, view.view_state_mut(), false)) {
+                log::debug!("VirtualTui: draw error: {}", e);
+                return;
+            }
+            let current_frame = {
+                let b = frame_buf.lock().unwrap();
+                b.clone()
             };
+            if current_frame != *prev_frame {
+                log::trace!(
+                    "virtual_tui: frame changed ({} bytes), sending",
+                    current_frame.len()
+                );
+                let _ = output_tx.blocking_send(current_frame.clone());
+                *prev_frame = current_frame;
+            }
+        };
 
         render_and_send(
             &mut terminal,

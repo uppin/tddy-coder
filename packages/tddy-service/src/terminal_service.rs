@@ -144,32 +144,26 @@ impl crate::tonic_terminal::terminal_service_server::TerminalService for Termina
 
         let mut client_stream = request.into_inner();
         tokio::spawn(async move {
-            log::trace!("[BIDI_TRACE] tonic terminal_service: input-forwarding task started");
+            log::trace!("tonic terminal_service: input-forwarding task started");
             let mut input_count: u64 = 0;
             while let Ok(Some(msg)) = client_stream.message().await {
                 input_count += 1;
                 if !msg.data.is_empty() {
-                    eprintln!(
-                        "[BIDI_TRACE] tonic: forwarding input #{} ({} bytes): {:?}",
+                    log::trace!(
+                        "tonic: forwarding input #{} ({} bytes)",
                         input_count,
-                        msg.data.len(),
-                        &msg.data
+                        msg.data.len()
                     );
                     if let Err(e) = input_tx.send(msg.data).await {
-                        eprintln!(
-                            "[BIDI_TRACE] tonic: input_tx.send FAILED #{}: {}",
+                        log::error!(
+                            "tonic: input_tx.send FAILED #{}: {}",
                             input_count, e
                         );
                     }
-                } else {
-                    eprintln!(
-                        "[BIDI_TRACE] tonic: input #{} is empty (init), skipping",
-                        input_count
-                    );
                 }
             }
-            eprintln!(
-                "[BIDI_TRACE] tonic: input stream ended after {} inputs",
+            log::trace!(
+                "tonic: input stream ended after {} inputs",
                 input_count
             );
             shutdown.store(true, Ordering::Relaxed);
@@ -177,18 +171,12 @@ impl crate::tonic_terminal::terminal_service_server::TerminalService for Termina
 
         let (tx, rx) = mpsc::channel(64);
         tokio::spawn(async move {
-            let mut fwd_count: u64 = 0;
             while let Some(bytes) = output_rx.recv().await {
-                fwd_count += 1;
-                if fwd_count <= 5 || fwd_count % 100 == 0 {
-                    eprintln!("[BIDI_TRACE] tonic output: fwd#{} ({} bytes)", fwd_count, bytes.len());
-                }
                 if tx.send(Ok(TerminalOutput { data: bytes })).await.is_err() {
-                    eprintln!("[BIDI_TRACE] tonic output: tx.send failed at fwd#{}", fwd_count);
                     break;
                 }
             }
-            eprintln!("[BIDI_TRACE] tonic output: stream ended after {} fwds", fwd_count);
+            log::trace!("tonic output: stream ended");
         });
 
         Ok(tonic::Response::new(ReceiverStream::new(rx)))
