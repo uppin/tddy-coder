@@ -14,6 +14,7 @@ pub mod token_service;
 pub use convert::{client_message_to_intent, event_to_server_message};
 pub use daemon_service::DaemonService;
 pub use echo_service::{create_echo_bridge, EchoServiceImpl};
+pub use proto::auth::AuthServiceServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
@@ -36,6 +37,10 @@ pub mod proto {
     #[allow(unused_imports, unused_variables)]
     pub mod token {
         include!(concat!(env!("OUT_DIR"), "/token.rs"));
+    }
+    #[allow(unused_imports, unused_variables)]
+    pub mod auth {
+        include!(concat!(env!("OUT_DIR"), "/auth.rs"));
     }
 }
 

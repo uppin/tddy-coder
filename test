@@ -8,8 +8,48 @@ set -e
 cd "$(dirname "$0")"
 export TDDY_SESSIONS_DIR="${TMPDIR:-/tmp}/tddy-test-sessions"
 
-exec nix develop --profile ./.nix-profile -c bash -c '
+nix develop --profile ./.nix-profile -c bash -c '
   set -e
-  cargo build -p tddy-coder -p tddy-tools
+  cargo build -p tddy-coder -p tddy-tools -p tddy-livekit --examples
   cargo test "$@" -- --test-threads=1 2>&1 | tee .verify-result.txt
 ' -- "$@"
+rust_exit=$?
+
+# Run TypeScript tests after Rust tests (only when running all tests, not filtered)
+if [ $# -eq 0 ] && [ $rust_exit -eq 0 ]; then
+  # Auto-start LiveKit testkit if not already provided
+  livekit_auto=false
+  if [ -z "${LIVEKIT_TESTKIT_WS_URL:-}" ]; then
+    echo ""
+    echo "=== Starting LiveKit testkit ==="
+    livekit_existed=$(docker ps -q -f "name=^tddy-livekit-testkit$" 2>/dev/null || true)
+    lk_output=$(./run-livekit-testkit-server 2>/dev/null || true)
+    lk_url=$(echo "$lk_output" | grep '^export LIVEKIT_TESTKIT_WS_URL=' | sed 's/^export LIVEKIT_TESTKIT_WS_URL=//')
+    if [ -n "$lk_url" ]; then
+      export LIVEKIT_TESTKIT_WS_URL="$lk_url"
+      # Only auto-stop if we created the container (it wasn't already running)
+      [ -z "$livekit_existed" ] && livekit_auto=true
+    else
+      echo "Warning: failed to start LiveKit testkit, some tests may be skipped" >&2
+    fi
+  fi
+
+  echo ""
+  echo "=== TypeScript tests (LIVEKIT_TESTKIT_WS_URL=${LIVEKIT_TESTKIT_WS_URL:-unset}) ==="
+  nix develop --profile ./.nix-profile --impure -c bash -c '
+    set -e
+    bun install --frozen-lockfile 2>/dev/null || bun install
+    bun run test
+  ' 2>&1 | tee -a .verify-result.txt
+  ts_exit=${PIPESTATUS[0]}
+
+  if [ "$livekit_auto" = true ]; then
+    echo ""
+    echo "=== Stopping LiveKit testkit ==="
+    docker rm -f tddy-livekit-testkit >/dev/null 2>&1 || true
+  fi
+
+  exit $ts_exit
+fi
+
+exit $rust_exit

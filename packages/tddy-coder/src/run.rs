@@ -185,6 +185,16 @@ pub struct Args {
     pub web_bundle_path: Option<PathBuf>,
     /// Host to bind web server (e.g. 127.0.0.1 or 0.0.0.0). Default: 0.0.0.0 when web server is enabled.
     pub web_host: Option<String>,
+    /// GitHub OAuth client ID
+    pub github_client_id: Option<String>,
+    /// GitHub OAuth client secret
+    pub github_client_secret: Option<String>,
+    /// GitHub OAuth redirect URI (default: http://localhost:{web_port}/auth/callback)
+    pub github_redirect_uri: Option<String>,
+    /// Use stub GitHub provider instead of real GitHub
+    pub github_stub: bool,
+    /// Pre-register code:user mappings for stub (e.g. "test-code:testuser")
+    pub github_stub_codes: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -271,6 +281,26 @@ pub struct CoderArgs {
     /// Host to bind web server (e.g. 127.0.0.1 or 0.0.0.0). Default: 0.0.0.0 when web server is enabled.
     #[arg(long, value_name = "HOST")]
     pub web_host: Option<String>,
+
+    /// GitHub OAuth client ID
+    #[arg(long, env = "GITHUB_CLIENT_ID")]
+    pub github_client_id: Option<String>,
+
+    /// GitHub OAuth client secret
+    #[arg(long, env = "GITHUB_CLIENT_SECRET")]
+    pub github_client_secret: Option<String>,
+
+    /// GitHub OAuth redirect URI (default: http://localhost:{web_port}/auth/callback)
+    #[arg(long)]
+    pub github_redirect_uri: Option<String>,
+
+    /// Use stub GitHub OAuth provider (for testing)
+    #[arg(long)]
+    pub github_stub: bool,
+
+    /// Pre-register stub code:user mappings (e.g. "test-code:testuser")
+    #[arg(long)]
+    pub github_stub_codes: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -357,6 +387,26 @@ pub struct DemoArgs {
     /// Host to bind web server (e.g. 127.0.0.1 or 0.0.0.0). Default: 0.0.0.0 when web server is enabled.
     #[arg(long, value_name = "HOST")]
     pub web_host: Option<String>,
+
+    /// GitHub OAuth client ID
+    #[arg(long, env = "GITHUB_CLIENT_ID")]
+    pub github_client_id: Option<String>,
+
+    /// GitHub OAuth client secret
+    #[arg(long, env = "GITHUB_CLIENT_SECRET")]
+    pub github_client_secret: Option<String>,
+
+    /// GitHub OAuth redirect URI (default: http://localhost:{web_port}/auth/callback)
+    #[arg(long)]
+    pub github_redirect_uri: Option<String>,
+
+    /// Use stub GitHub OAuth provider (for testing)
+    #[arg(long)]
+    pub github_stub: bool,
+
+    /// Pre-register stub code:user mappings (e.g. "test-code:testuser")
+    #[arg(long)]
+    pub github_stub_codes: Option<String>,
 }
 
 impl From<CoderArgs> for Args {
@@ -383,6 +433,11 @@ impl From<CoderArgs> for Args {
             web_port: a.web_port,
             web_bundle_path: a.web_bundle_path.clone(),
             web_host: a.web_host.clone(),
+            github_client_id: a.github_client_id,
+            github_client_secret: a.github_client_secret,
+            github_redirect_uri: a.github_redirect_uri,
+            github_stub: a.github_stub,
+            github_stub_codes: a.github_stub_codes,
         }
     }
 }
@@ -411,6 +466,11 @@ impl From<DemoArgs> for Args {
             web_port: a.web_port,
             web_bundle_path: a.web_bundle_path.clone(),
             web_host: a.web_host.clone(),
+            github_client_id: a.github_client_id,
+            github_client_secret: a.github_client_secret,
+            github_redirect_uri: a.github_redirect_uri,
+            github_stub: a.github_stub,
+            github_stub_codes: a.github_stub_codes,
         }
     }
 }
@@ -453,6 +513,62 @@ fn validate_web_args(args: &Args) -> anyhow::Result<()> {
         (Some(_), None) => anyhow::bail!("--web-port requires --web-bundle-path"),
         (None, Some(_)) => anyhow::bail!("--web-bundle-path requires --web-port"),
         _ => Ok(()),
+    }
+}
+
+/// Build an optional AuthService RPC entry based on CLI args.
+fn build_auth_service_entry(
+    args: &Args,
+) -> Option<tddy_rpc::ServiceEntry> {
+    if args.github_stub {
+        let client_id = args.github_client_id.as_deref().unwrap_or("stub-client-id");
+        // In stub mode with a web server, return a callback URL on the same origin
+        // so the browser stays on the same domain (no cross-origin redirect to github.com).
+        let stub = if let Some(port) = args.web_port {
+            let host = args.web_host.as_deref().unwrap_or("127.0.0.1");
+            let callback_url = format!("http://{}:{}/auth/callback", host, port);
+            tddy_github::StubGitHubProvider::new_with_callback(&callback_url, client_id)
+        } else {
+            tddy_github::StubGitHubProvider::new("https://github.com", client_id)
+        };
+        if let Some(ref codes) = args.github_stub_codes {
+            for mapping in codes.split(',') {
+                let parts: Vec<&str> = mapping.splitn(2, ':').collect();
+                if parts.len() == 2 {
+                    stub.register_code(
+                        parts[0],
+                        tddy_github::GitHubUser {
+                            id: 1,
+                            login: parts[1].to_string(),
+                            avatar_url: format!("https://github.com/{}.png", parts[1]),
+                            name: parts[1].to_string(),
+                        },
+                    );
+                }
+            }
+        }
+        let auth_service_impl = tddy_github::AuthServiceImpl::new(stub);
+        let auth_server = tddy_service::AuthServiceServer::new(auth_service_impl);
+        Some(tddy_rpc::ServiceEntry {
+            name: "auth.AuthService",
+            service: std::sync::Arc::new(auth_server) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+        })
+    } else if let (Some(id), Some(secret)) =
+        (&args.github_client_id, &args.github_client_secret)
+    {
+        let redirect_uri = args.github_redirect_uri.clone().unwrap_or_else(|| {
+            let port = args.web_port.unwrap_or(8080);
+            format!("http://localhost:{}/auth/callback", port)
+        });
+        let real = tddy_github::RealGitHubProvider::new(id, secret, &redirect_uri);
+        let auth_service_impl = tddy_github::AuthServiceImpl::new(real);
+        let auth_server = tddy_service::AuthServiceServer::new(auth_service_impl);
+        Some(tddy_rpc::ServiceEntry {
+            name: "auth.AuthService",
+            service: std::sync::Arc::new(auth_server) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+        })
+    } else {
+        None
     }
 }
 
@@ -712,7 +828,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
                 let echo_server =
                     tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl);
-                let multi = tddy_rpc::MultiRpcService::new(vec![
+                let mut entries = vec![
                     tddy_rpc::ServiceEntry {
                         name: "test.EchoService",
                         service: std::sync::Arc::new(echo_server)
@@ -723,7 +839,11 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         service: std::sync::Arc::new(token_server)
                             as std::sync::Arc<dyn tddy_rpc::RpcService>,
                     },
-                ]);
+                ];
+                if let Some(auth_entry) = build_auth_service_entry(args) {
+                    entries.push(auth_entry);
+                }
+                let multi = tddy_rpc::MultiRpcService::new(entries);
                 Some(tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
                     multi,
                 )))
@@ -1341,7 +1461,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
             let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
             let echo_server = tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl);
-            let multi = tddy_rpc::MultiRpcService::new(vec![
+            let mut entries = vec![
                 tddy_rpc::ServiceEntry {
                     name: "test.EchoService",
                     service: std::sync::Arc::new(echo_server)
@@ -1352,7 +1472,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     service: std::sync::Arc::new(token_server)
                         as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
-            ]);
+            ];
+            if let Some(auth_entry) = build_auth_service_entry(args) {
+                entries.push(auth_entry);
+            }
+            let multi = tddy_rpc::MultiRpcService::new(entries);
             Some(tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
                 multi,
             )))

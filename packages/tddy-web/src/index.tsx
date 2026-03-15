@@ -4,6 +4,10 @@ import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { GhosttyTerminalLiveKit } from "./components/GhosttyTerminalLiveKit";
 import { TokenService } from "./gen/token_pb";
+import { useAuth } from "./hooks/useAuth";
+import { GitHubLoginButton } from "./components/GitHubLoginButton";
+import { AuthCallback } from "./components/AuthCallback";
+import { UserAvatar } from "./components/UserAvatar";
 
 function getParamsFromUrl(): { url: string; identity: string; roomName: string } {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
@@ -120,7 +124,8 @@ function ConnectedTerminal({
   );
 }
 
-export function App() {
+function ConnectionForm() {
+  const { user, isAuthenticated, login, logout } = useAuth();
   const [url, setUrl] = useState("");
   const [identity, setIdentity] = useState("");
   const [roomName, setRoomName] = useState("terminal-e2e");
@@ -143,9 +148,22 @@ export function App() {
     );
   }
 
+  if (!isAuthenticated) {
+    return (
+      <div style={formStyle}>
+        <h1>tddy-web</h1>
+        <p style={{ marginBottom: 16, fontSize: 14, color: "#444" }}>
+          Sign in with GitHub to access the terminal.
+        </p>
+        <GitHubLoginButton onClick={login} />
+      </div>
+    );
+  }
+
   return (
     <div style={formStyle}>
       <h1>tddy-web</h1>
+      {user && <UserAvatar user={user} onLogout={logout} />}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -201,6 +219,16 @@ export function App() {
       </p>
     </div>
   );
+}
+
+export function App() {
+  const path = typeof window !== "undefined" ? window.location.pathname : "/";
+
+  if (path === "/auth/callback") {
+    return <AuthCallback />;
+  }
+
+  return <ConnectionForm />;
 }
 
 const root = document.getElementById("root");

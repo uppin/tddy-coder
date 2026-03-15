@@ -57,6 +57,7 @@ export default defineConfig({
       let terminalServerProcess: ReturnType<typeof spawn> | null = null;
       let tddyCoderProcess: ReturnType<typeof spawn> | null = null;
       let echoTerminalProcess: ReturnType<typeof spawn> | null = null;
+      let authFlowProcess: ReturnType<typeof spawn> | null = null;
 
       const stopTerminalServer = () => {
         if (terminalServerProcess) {
@@ -79,10 +80,18 @@ export default defineConfig({
         }
       };
 
+      const stopAuthFlow = () => {
+        if (authFlowProcess) {
+          authFlowProcess.kill("SIGTERM");
+          authFlowProcess = null;
+        }
+      };
+
       on("after:run", () => {
         stopTerminalServer();
         stopTddyCoder();
         stopEchoTerminal();
+        stopAuthFlow();
       });
 
       on("task", {
@@ -460,6 +469,94 @@ export default defineConfig({
 
         stopTddyCoderForConnectFlow() {
           stopTddyCoder();
+          return null;
+        },
+
+        async startTddyCoderForAuthFlow() {
+          const wsUrl = process.env.LIVEKIT_TESTKIT_WS_URL;
+          if (!wsUrl || wsUrl.trim() === "") {
+            throw new Error(
+              "LIVEKIT_TESTKIT_WS_URL must be set. Run ./run-livekit-testkit-server and export the URL."
+            );
+          }
+
+          const binaryPath = getTddyCoderPath();
+          if (!fs.existsSync(binaryPath)) {
+            throw new Error(
+              `tddy-coder binary not found. Run: cargo build -p tddy-coder`
+            );
+          }
+
+          const webBundlePath = getWebBundlePath();
+          if (!fs.existsSync(webBundlePath)) {
+            throw new Error(
+              `Web bundle not found at ${webBundlePath}. Run: bun run build`
+            );
+          }
+
+          const webPort = 8890;
+          const baseUrl = `http://127.0.0.1:${webPort}`;
+
+          return new Promise<{ baseUrl: string }>((resolve, reject) => {
+            const repoRoot = path.resolve(__dirname, "../..");
+            authFlowProcess = spawn(
+              binaryPath,
+              [
+                "--daemon",
+                "--livekit-url",
+                wsUrl,
+                "--livekit-api-key",
+                DEV_API_KEY,
+                "--livekit-api-secret",
+                DEV_API_SECRET,
+                "--livekit-room",
+                ROOM_NAME,
+                "--livekit-identity",
+                SERVER_IDENTITY,
+                "--web-port",
+                String(webPort),
+                "--web-host",
+                "127.0.0.1",
+                "--web-bundle-path",
+                webBundlePath,
+                "--github-stub",
+                "--github-stub-codes",
+                "test-code:testuser",
+              ],
+              {
+                stdio: ["ignore", "pipe", "pipe"],
+                cwd: repoRoot,
+                env: { ...process.env, RUST_LOG: "info" },
+              }
+            );
+
+            const timeout = setTimeout(() => {
+              stopAuthFlow();
+              reject(new Error("tddy-coder (auth flow) did not become ready within 15s"));
+            }, 15000);
+
+            const interval = setInterval(() => {
+              fetch(`${baseUrl}/`)
+                .then((r) => {
+                  if (r.ok) {
+                    clearInterval(interval);
+                    clearTimeout(timeout);
+                    resolve({ baseUrl });
+                  }
+                })
+                .catch(() => {});
+            }, 300);
+
+            authFlowProcess.on("error", (err) => {
+              clearInterval(interval);
+              clearTimeout(timeout);
+              reject(err);
+            });
+          });
+        },
+
+        stopTddyCoderForAuthFlow() {
+          stopAuthFlow();
           return null;
         },
       });

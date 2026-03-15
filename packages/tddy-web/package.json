@@ -13,6 +13,7 @@
     "cypress:e2e": "bun run build-storybook && start-server-and-test 'npx http-server storybook-static -p 9786 -c-1 --cors' http://localhost:9786/iframe.html 'ELECTRON_EXTRA_LAUNCH_ARGS=\"--disable-gpu --no-sandbox\" CYPRESS_BASE_URL=http://localhost:9786 cypress run --e2e'",
     "cypress:e2e:spec": "bun run build-storybook && start-server-and-test 'npx http-server storybook-static -p 9786 -c-1 --cors' http://localhost:9786/iframe.html 'ELECTRON_EXTRA_LAUNCH_ARGS=\"--disable-gpu --no-sandbox\" CYPRESS_BASE_URL=http://localhost:9786 cypress run --e2e --spec \"${CYPRESS_SPEC:-cypress/e2e/ghostty-terminal.cy.ts}\"'",
     "cypress:e2e:connect": "bun run build && cypress run --e2e --spec cypress/e2e/app-connect-flow.cy.ts",
+    "cypress:e2e:auth": "bun run build && node cypress/scripts/run-auth-e2e.mjs",
     "cypress:serve": "bun run build-storybook && ./run-cypress-serve.sh"
   },
   "dependencies": {

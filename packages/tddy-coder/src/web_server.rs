@@ -5,10 +5,11 @@
 use std::path::PathBuf;
 
 use axum::Router;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 /// Serve static files from `bundle_path` on the given `host` and `port`.
 /// When `rpc_router` is provided, it is merged before the static file fallback (e.g. ConnectRPC at /rpc).
+/// Unmatched routes fall back to index.html for SPA client-side routing.
 pub async fn serve_web_bundle(
     host: impl AsRef<str>,
     port: u16,
@@ -16,7 +17,10 @@ pub async fn serve_web_bundle(
     rpc_router: Option<Router>,
 ) -> anyhow::Result<()> {
     let host = host.as_ref();
-    let service = ServeDir::new(&bundle_path).append_index_html_on_directories(true);
+    let index_path = bundle_path.join("index.html");
+    let service = ServeDir::new(&bundle_path)
+        .append_index_html_on_directories(true)
+        .fallback(ServeFile::new(&index_path));
     let mut app = Router::new();
     if let Some(rpc) = rpc_router {
         app = app.merge(rpc);

@@ -23,8 +23,6 @@ set -euo pipefail
 
 LIVEKIT_IMAGE="livekit/livekit-server:master"
 LIVEKIT_PORT=7880
-LIVEKIT_ICE_TCP_PORT=7881
-LIVEKIT_ICE_UDP_PORT=7882
 CONTAINER_NAME="tddy-livekit-testkit"
 
 # Check for existing running container
@@ -52,13 +50,13 @@ else
     ws_url="ws://127.0.0.1:${host_port}"
   else
     # Create new container with fixed name for reuse.
-    # Expose WebRTC ICE ports (7881 TCP, 7882 UDP) with fixed mapping so advertised
-    # candidates work. --node-ip 127.0.0.1 so ICE uses localhost.
+    # All ports use dynamic mapping (0:PORT) to avoid conflicts.
+    # --node-ip 127.0.0.1 so ICE uses localhost.
     echo "Creating new LiveKit container: ${CONTAINER_NAME}" >&2
     docker run -d --name "${CONTAINER_NAME}" \
       -p "0:${LIVEKIT_PORT}" \
-      -p "${LIVEKIT_ICE_TCP_PORT}:${LIVEKIT_ICE_TCP_PORT}" \
-      -p "${LIVEKIT_ICE_UDP_PORT}:${LIVEKIT_ICE_UDP_PORT}/udp" \
+      -p "0:7881" \
+      -p "0:7882/udp" \
       "${LIVEKIT_IMAGE}" --dev --bind 0.0.0.0 --node-ip 127.0.0.1
 
     echo "Waiting for LiveKit HTTP endpoint..." >&2
@@ -86,13 +84,9 @@ echo ""
 echo "export LIVEKIT_TESTKIT_WS_URL=${ws_url}"
 echo ""
 echo "LiveKit testkit server at ${ws_url} (container: ${CONTAINER_NAME})"
-echo "WebRTC ICE ports: ${LIVEKIT_ICE_TCP_PORT} (TCP), ${LIVEKIT_ICE_UDP_PORT} (UDP)"
 echo ""
 echo "To run tests against this instance:"
 echo "  export LIVEKIT_TESTKIT_WS_URL=${ws_url}"
 echo "  cargo test -p tddy-livekit -p tddy-livekit-testkit"
 echo ""
 echo "To stop and remove: docker rm -f ${CONTAINER_NAME}"
-echo ""
-echo "If WebRTC fails (e.g. browser clients), ensure ports ${LIVEKIT_ICE_TCP_PORT} and ${LIVEKIT_ICE_UDP_PORT} are free."
-echo "Remove and recreate the container if it was created before WebRTC ports were added."
