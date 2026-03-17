@@ -56,6 +56,8 @@ export interface GhosttyTerminalLiveKitProps {
   debugMode?: boolean;
   /** When true, log data flows and lifecycle events to console for debugging. */
   debugLogging?: boolean;
+  /** Called with a function to send Ctrl+C (\x03) to the terminal. Used by overlay button. */
+  onRegisterSendCtrlC?: (send: () => void) => void;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -67,6 +69,7 @@ export function GhosttyTerminalLiveKit({
   showBufferTextForTest = false,
   debugMode = false,
   debugLogging = false,
+  onRegisterSendCtrlC,
 }: GhosttyTerminalLiveKitProps) {
   const log = debugLogging
     ? (...args: unknown[]) => console.log("[GhosttyLiveKit]", ...args)
@@ -291,6 +294,14 @@ export function GhosttyTerminalLiveKit({
     };
   }, [url, token, getToken, ttlSecondsProp, roomName, showBufferTextForTest, debugMode, debugLogging]);
 
+  useEffect(() => {
+    if (onRegisterSendCtrlC) {
+      onRegisterSendCtrlC(() => {
+        inputQueueRef.current.push(new Uint8Array([0x03]));
+      });
+    }
+  }, [onRegisterSendCtrlC]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div data-testid="livekit-status">{status}</div>
@@ -320,7 +331,12 @@ export function GhosttyTerminalLiveKit({
                   log("dataflow: onReady flush write", chunk.length, "bytes");
                   term.write(chunk);
                 }
+                term.focus();
               }
+            }}
+            onResize={(size) => {
+              const seq = `\x1b]resize;${size.cols};${size.rows}\x07`;
+              inputQueueRef.current.push(new TextEncoder().encode(seq));
             }}
             onData={(data) => {
               const encoded = new TextEncoder().encode(data);

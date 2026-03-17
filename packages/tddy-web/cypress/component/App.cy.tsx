@@ -135,5 +135,21 @@ describe("App", () => {
     cy.wait("@generateToken");
     cy.get("[data-testid='livekit-status']", { timeout: 5000 }).should("exist");
     cy.get("#livekit-url").should("not.exist");
+
+    // Acceptance: when connected, overlay shows Disconnect and Ctrl+C buttons
+    cy.get("[data-testid='disconnect-button']").should("exist").and("have.text", "Disconnect");
+    cy.get("[data-testid='ctrl-c-button']").should("exist");
+
+    // Acceptance: connected terminal container is fullscreen (100vw x 100vh)
+    cy.get("[data-testid='connected-terminal-container']")
+      .should("exist")
+      .then(($el) => {
+        const rect = $el[0].getBoundingClientRect();
+        expect(rect.width).to.be.greaterThan(0);
+        expect(rect.height).to.be.greaterThan(0);
+        // Fullscreen: container should fill viewport (allow small tolerance)
+        expect(rect.width).to.equal(Cypress.config("viewportWidth"));
+        expect(rect.height).to.equal(Cypress.config("viewportHeight"));
+      });
   });
 });

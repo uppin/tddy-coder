@@ -18,7 +18,7 @@ use std::thread;
 use std::time::Duration;
 
 use clap::Parser;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 
@@ -32,6 +32,10 @@ use tddy_tui::raw::{disable_raw_mode, enable_raw_mode_keep_sig};
 #[derive(Parser)]
 #[command(name = "rpc-demo", about = "VirtualTui RPC demo")]
 struct Args {
+    /// Enable mouse/touch mode: capture mouse events and relay SGR sequences to backend.
+    #[arg(long)]
+    mouse: bool,
+
     /// LiveKit server URL (e.g. ws://127.0.0.1:7880). Enables LiveKit transport.
     #[arg(long)]
     livekit_url: Option<String>,
@@ -51,6 +55,23 @@ struct Args {
     /// LiveKit client identity
     #[arg(long, default_value = "client")]
     livekit_identity: String,
+}
+
+/// Encode a crossterm mouse event into SGR bytes for VirtualTui's mouse parser.
+/// Format: ESC [ < pb ; px ; py M (press) or m (release). px, py are 1-based.
+fn encode_mouse(ev: crossterm::event::MouseEvent) -> Vec<u8> {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let (pb, release) = match ev.kind {
+        MouseEventKind::Down(MouseButton::Left) => (0u8, false),
+        MouseEventKind::Up(MouseButton::Left) => (0u8, true),
+        MouseEventKind::ScrollUp => (64, false),
+        MouseEventKind::ScrollDown => (65, false),
+        _ => return vec![],
+    };
+    let px = ev.column.saturating_add(1);
+    let py = ev.row.saturating_add(1);
+    let end = if release { b'm' } else { b'M' };
+    format!("\x1b[<{pb};{px};{py}{}", end as char).into_bytes()
 }
 
 /// Encode a crossterm key event into raw bytes for VirtualTui's key parser.
@@ -150,8 +171,9 @@ struct TerminalIO {
 /// In-process mode: direct VirtualTuiSession channels.
 fn connect_in_process(
     factory: &(dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync),
+    mouse: bool,
 ) -> anyhow::Result<TerminalIO> {
-    let session = start_virtual_tui_session(factory)
+    let session = start_virtual_tui_session(factory, mouse)
         .ok_or_else(|| anyhow::anyhow!("connect_view not available"))?;
     let VirtualTuiSession {
         input_tx,
@@ -197,6 +219,7 @@ fn connect_livekit(
     factory: Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>,
     args: &Args,
     shutdown: &Arc<AtomicBool>,
+    mouse: bool,
 ) -> anyhow::Result<TerminalIO> {
     use livekit::prelude::*;
     use prost::Message;
@@ -238,7 +261,7 @@ fn connect_livekit(
     .map_err(|e| anyhow::anyhow!("client token: {}", e))?;
 
     // Start server participant
-    let terminal_service = TerminalServiceVirtualTui::new(factory);
+    let terminal_service = TerminalServiceVirtualTui::new(factory, mouse);
     let shutdown_server = shutdown.clone();
     let url_s = url.clone();
     rt.spawn(async move {
@@ -381,6 +404,7 @@ fn main() -> anyhow::Result<()> {
     let factory = start_backend(&shutdown);
 
     let use_livekit = args.livekit_url.is_some();
+    let mouse = args.mouse;
     let mut io = if use_livekit {
         #[cfg(feature = "livekit")]
         {
@@ -388,7 +412,7 @@ fn main() -> anyhow::Result<()> {
                 "[rpc_demo] Connecting via LiveKit: {}",
                 args.livekit_url.as_ref().unwrap()
             );
-            connect_livekit(factory, &args, &shutdown)?
+            connect_livekit(factory, &args, &shutdown, mouse)?
         }
         #[cfg(not(feature = "livekit"))]
         {
@@ -399,7 +423,7 @@ fn main() -> anyhow::Result<()> {
         }
     } else {
         eprintln!("[rpc_demo] In-process mode (no --livekit-url)");
-        connect_in_process(&*factory)?
+        connect_in_process(&*factory, mouse)?
     };
 
     // --- Frontend: real terminal ---
@@ -413,8 +437,11 @@ fn main() -> anyhow::Result<()> {
     enable_raw_mode_keep_sig()?;
     let mut stdout = std::io::stdout();
     execute!(&mut stdout, EnterAlternateScreen)?;
+    if mouse {
+        execute!(&mut stdout, EnableMouseCapture)?;
+    }
 
-    // Main loop: poll keyboard + drain output
+    // Main loop: poll keyboard + mouse + drain output
     while !shutdown.load(Ordering::Relaxed) {
         // Drain output → stdout
         while let Some(bytes) = (io.recv)() {
@@ -422,19 +449,28 @@ fn main() -> anyhow::Result<()> {
             let _ = stdout.flush();
         }
 
-        // Poll keyboard
+        // Poll keyboard and mouse
         if event::poll(Duration::from_millis(10)).unwrap_or(false) {
-            if let Ok(Event::Key(key)) = event::read() {
-                if key.kind != KeyEventKind::Press {
-                    continue;
+            match event::read() {
+                Ok(Event::Key(key)) => {
+                    if key.kind != KeyEventKind::Press {
+                        continue;
+                    }
+                    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                        break;
+                    }
+                    let bytes = encode_key(key);
+                    if !bytes.is_empty() {
+                        (io.send)(bytes);
+                    }
                 }
-                if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                    break;
+                Ok(Event::Mouse(mouse_ev)) if mouse => {
+                    let bytes = encode_mouse(mouse_ev);
+                    if !bytes.is_empty() {
+                        (io.send)(bytes);
+                    }
                 }
-                let bytes = encode_key(key);
-                if !bytes.is_empty() {
-                    (io.send)(bytes);
-                }
+                _ => {}
             }
         }
     }
@@ -445,6 +481,9 @@ fn main() -> anyhow::Result<()> {
         vt_shutdown.store(true, Ordering::Relaxed);
     }
 
+    if mouse {
+        execute!(std::io::stdout(), DisableMouseCapture)?;
+    }
     execute!(std::io::stdout(), LeaveAlternateScreen)?;
     disable_raw_mode()?;
 
