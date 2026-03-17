@@ -10,6 +10,7 @@ use std::thread;
 use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::execute;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
@@ -22,6 +23,7 @@ use tddy_core::{
 
 use crate::capturing_writer::CapturingWriter;
 use crate::key_map::key_event_to_intent;
+use crate::mouse_map::{handle_mouse_event, LayoutAreas};
 use crate::render::draw;
 use crate::tui_view::TuiView;
 
@@ -32,6 +34,7 @@ pub fn run_virtual_tui(
     output_tx: mpsc::Sender<Vec<u8>>,
     input_rx: mpsc::Receiver<Vec<u8>>,
     shutdown: Arc<AtomicBool>,
+    mouse: bool,
 ) {
     thread::spawn(move || {
         let mut state = conn.state_snapshot;
@@ -67,17 +70,26 @@ pub fn run_virtual_tui(
         // and only send bytes to the output channel if content actually changed.
         // This avoids sending cursor-only control sequences from ratatui's draw()
         // on identical frames, which would flood the network stream.
+        let mut layout_areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+        };
         let render_and_send = |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
                                state: &PresenterState,
                                view: &mut TuiView,
                                frame_buf: &Arc<Mutex<Vec<u8>>>,
                                prev_frame: &mut Vec<u8>,
-                               output_tx: &mpsc::Sender<Vec<u8>>| {
+                               output_tx: &mpsc::Sender<Vec<u8>>,
+                               layout_areas: &mut LayoutAreas| {
             {
                 let mut b = frame_buf.lock().unwrap();
                 b.clear();
             }
-            if let Err(e) = term.draw(|f| draw(f, state, view.view_state_mut(), false)) {
+            if let Err(e) = term.draw(|f| {
+                draw(f, state, view.view_state_mut(), false, Some(layout_areas))
+            }) {
                 log::debug!("VirtualTui: draw error: {}", e);
                 return;
             }
@@ -102,7 +114,24 @@ pub fn run_virtual_tui(
             &frame_buf,
             &mut prev_frame,
             &output_tx,
+            &mut layout_areas,
         );
+
+        if mouse {
+            {
+                let mut b = frame_buf.lock().unwrap();
+                b.clear();
+            }
+            if execute!(terminal.backend_mut(), crossterm::event::EnableMouseCapture).is_ok() {
+                let seq = {
+                    let b = frame_buf.lock().unwrap();
+                    b.clone()
+                };
+                if !seq.is_empty() {
+                    let _ = output_tx.blocking_send(seq);
+                }
+            }
+        }
 
         let mut input_rx = input_rx;
         let mut event_rx = conn.event_rx;
@@ -130,6 +159,31 @@ pub fn run_virtual_tui(
                     Ok(bytes) if !bytes.is_empty() => {
                         log::trace!("virtual_tui: received input ({} bytes)", bytes.len());
                         input_buf.extend_from_slice(&bytes);
+                        while let Some((cols, rows, consumed)) = parse_resize_from_buf(&input_buf) {
+                            if let Err(e) = terminal.resize(Rect::new(0, 0, cols, rows)) {
+                                log::debug!("virtual_tui: resize error: {}", e);
+                            }
+                            input_buf.drain(..consumed);
+                            updated = true;
+                        }
+                        if mouse {
+                            while let Some((mouse_ev, consumed)) = parse_mouse_from_buf(&input_buf) {
+                                log::trace!("virtual_tui: parsed mouse={:?}", mouse_ev.kind);
+                                let normalized =
+                                    crate::mouse_map::normalize_mouse_coords_for_local(mouse_ev);
+                                if let Some(intent) = handle_mouse_event(
+                                    normalized,
+                                    &state.mode,
+                                    view.view_state_mut(),
+                                    &layout_areas,
+                                    state.inbox.len(),
+                                ) {
+                                    let _ = intent_tx.send(intent);
+                                }
+                                input_buf.drain(..consumed);
+                                updated = true;
+                            }
+                        }
                         while let Some((key, consumed)) = parse_key_from_buf(&mut input_buf) {
                             log::trace!(
                                 "virtual_tui: parsed key={:?}, mode={:?}",
@@ -175,6 +229,7 @@ pub fn run_virtual_tui(
                     &frame_buf,
                     &mut prev_frame,
                     &output_tx,
+                    &mut layout_areas,
                 );
                 last_render = std::time::Instant::now();
             }
@@ -231,6 +286,86 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
         }
         PresenterEvent::IntentReceived(_) => {}
     }
+}
+
+/// Parse resize escape sequence from buffer. Format: \x1b]resize;{cols};{rows}\x07
+/// Returns (cols, rows, bytes_consumed) or None if incomplete/not found.
+fn parse_resize_from_buf(buf: &[u8]) -> Option<(u16, u16, usize)> {
+    let prefix = b"\x1b]resize;";
+    if buf.len() < prefix.len() || !buf.starts_with(prefix) {
+        return None;
+    }
+    let rest = &buf[prefix.len()..];
+    let semicolon = rest.iter().position(|&b| b == b';')?;
+    let cols_str = std::str::from_utf8(&rest[..semicolon]).ok()?;
+    let cols: u16 = cols_str.parse().ok()?;
+    let after_semicolon = &rest[semicolon + 1..];
+    let bel = after_semicolon.iter().position(|&b| b == 0x07)?;
+    let rows_str = std::str::from_utf8(&after_semicolon[..bel]).ok()?;
+    let rows: u16 = rows_str.parse().ok()?;
+    let consumed = prefix.len() + semicolon + 1 + bel + 1;
+    Some((cols, rows, consumed))
+}
+
+/// Parse SGR mouse sequence from buffer. Format: ESC [ < Pb ; Px ; Py M or m
+/// Returns (MouseEvent, bytes_consumed) or None if incomplete/not found.
+fn parse_mouse_from_buf(buf: &[u8]) -> Option<(crossterm::event::MouseEvent, usize)> {
+    use crossterm::event::{MouseEvent, MouseEventKind};
+    let prefix = b"\x1b[<";
+    if buf.len() < prefix.len() + 5 || !buf.starts_with(prefix) {
+        return None;
+    }
+    let mut pos = prefix.len();
+    let mut rest = &buf[pos..];
+
+    let mut i = 0;
+    while i < rest.len() && rest[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == 0 || i >= rest.len() || rest[i] != b';' {
+        return None;
+    }
+    let pb: u8 = std::str::from_utf8(&rest[..i]).ok()?.parse().ok()?;
+    pos += i + 1;
+    rest = &buf[pos..];
+    i = 0;
+    while i < rest.len() && rest[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == 0 || i >= rest.len() || rest[i] != b';' {
+        return None;
+    }
+    let px: u16 = std::str::from_utf8(&rest[..i]).ok()?.parse().ok()?;
+    pos += i + 1;
+    rest = &buf[pos..];
+    i = 0;
+    while i < rest.len() && (rest[i].is_ascii_digit() || rest[i] == b' ') {
+        i += 1;
+    }
+    if i == 0 || i >= rest.len() {
+        return None;
+    }
+    let py: u16 = std::str::from_utf8(&rest[..i])
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    let last = rest[i];
+    let kind = match (pb, last) {
+        (0, b'M') => MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        (0, b'm') => MouseEventKind::Up(crossterm::event::MouseButton::Left),
+        (64, b'M') => MouseEventKind::ScrollUp,
+        (65, b'M') => MouseEventKind::ScrollDown,
+        _ => return None,
+    };
+    let consumed = pos + i + 1;
+    let event = MouseEvent {
+        kind,
+        column: px.saturating_sub(1),
+        row: py.saturating_sub(1),
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    };
+    Some((event, consumed))
 }
 
 /// Parse one key event from the buffer. Returns (KeyEvent, bytes_consumed) or None if incomplete.
@@ -419,5 +554,55 @@ mod tests {
         let (key, n) = parse_key_from_buf(&mut buf).unwrap();
         assert_eq!(n, 1);
         assert_eq!(key.code, KeyCode::Tab);
+    }
+
+    #[test]
+    fn parse_resize_sequence() {
+        // \x1b]resize;120;30\x07
+        let buf = vec![0x1b, b']', b'r', b'e', b's', b'i', b'z', b'e', b';', b'1', b'2', b'0', b';', b'3', b'0', 0x07];
+        let (cols, rows, consumed) = parse_resize_from_buf(&buf).unwrap();
+        assert_eq!(cols, 120);
+        assert_eq!(rows, 30);
+        assert_eq!(consumed, 16);
+    }
+
+    #[test]
+    fn parse_sgr_mouse_press() {
+        // ESC [ < 0 ; 10 ; 5 M (left click at col 10, row 5)
+        let buf = vec![0x1b, b'[', b'<', b'0', b';', b'1', b'0', b';', b'5', b' ', b'M'];
+        let (event, consumed) = parse_mouse_from_buf(&buf).unwrap();
+        assert_eq!(consumed, 11);
+        assert_eq!(event.row, 4); // 0-based
+        assert_eq!(event.column, 9); // 0-based
+        assert!(matches!(event.kind, crossterm::event::MouseEventKind::Down(_)));
+    }
+
+    #[test]
+    fn parse_sgr_mouse_scroll_down() {
+        // ESC [ < 65 ; 1 ; 1 M (scroll down)
+        let buf = vec![0x1b, b'[', b'<', b'6', b'5', b';', b'1', b';', b'1', b' ', b'M'];
+        let (event, consumed) = parse_mouse_from_buf(&buf).unwrap();
+        assert_eq!(consumed, 11);
+        assert!(matches!(event.kind, crossterm::event::MouseEventKind::ScrollDown));
+    }
+
+    #[test]
+    fn keys_after_mouse_release_are_still_parsed() {
+        let mut buf = vec![
+            0x1b, b'[', b'<', b'0', b';', b'1', b'0', b';', b'5', b' ', b'M',
+            0x1b, b'[', b'<', b'0', b';', b'1', b'0', b';', b'5', b' ', b'm',
+            b'a',
+        ];
+
+        let (mouse1, consumed1) = parse_mouse_from_buf(&buf).unwrap();
+        assert!(matches!(mouse1.kind, crossterm::event::MouseEventKind::Down(_)));
+        buf.drain(..consumed1);
+
+        let (mouse2, consumed2) = parse_mouse_from_buf(&buf).unwrap();
+        assert!(matches!(mouse2.kind, crossterm::event::MouseEventKind::Up(_)));
+        buf.drain(..consumed2);
+
+        let (key, _) = parse_key_from_buf(&mut buf).unwrap();
+        assert_eq!(key.code, KeyCode::Char('a'));
     }
 }

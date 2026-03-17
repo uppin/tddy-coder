@@ -6,6 +6,7 @@ use std::time::Duration;
 use crossterm::cursor::Show;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::execute;
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -29,6 +30,7 @@ pub fn run_event_loop(
     shutdown: &AtomicBool,
     byte_capture: Option<ByteCallback>,
     debug: bool,
+    mouse: bool,
 ) -> anyhow::Result<()> {
     if shutdown.load(Ordering::Relaxed) {
         return Ok(());
@@ -47,6 +49,9 @@ pub fn run_event_loop(
     let on_write = byte_capture.unwrap_or_else(|| Box::new(noop) as ByteCallback);
     let mut writer = CapturingWriter::new(on_write);
     execute!(&mut writer, EnterAlternateScreen)?;
+    if mouse {
+        execute!(&mut writer, EnableMouseCapture)?;
+    }
     let mut writer_for_execute = writer.clone();
     let backend = CrosstermBackend::new(writer);
     let mut terminal = Terminal::new(backend)?;
@@ -66,15 +71,30 @@ pub fn run_event_loop(
             apply_event(&mut state, &mut view, ev);
         }
 
-        terminal.draw(|f| draw(f, &state, view.view_state_mut(), debug))?;
+        let mut layout_areas = crate::mouse_map::LayoutAreas {
+            activity_log: ratatui::layout::Rect::default(),
+            dynamic_area: ratatui::layout::Rect::default(),
+            status_bar: ratatui::layout::Rect::default(),
+            prompt_bar: ratatui::layout::Rect::default(),
+        };
+        terminal.draw(|f| {
+            draw(
+                f,
+                &state,
+                view.view_state_mut(),
+                debug,
+                Some(&mut layout_areas),
+            )
+        })?;
 
         if state.should_quit {
             break;
         }
 
-        // Poll crossterm for key events
+        // Poll crossterm for key and mouse events
         if event::poll(Duration::from_millis(50)).unwrap_or(false) {
-            if let Ok(Event::Key(key)) = event::read() {
+            match event::read() {
+                Ok(Event::Key(key)) => {
                 if key.kind == KeyEventKind::Press
                     && key.code == KeyCode::Char('c')
                     && key
@@ -105,10 +125,28 @@ pub fn run_event_loop(
                         let _ = intent_tx.send(intent);
                     }
                 }
+                }
+                Ok(Event::Mouse(mouse_ev)) if mouse => {
+                    let normalized =
+                        crate::mouse_map::normalize_mouse_coords_for_local(mouse_ev);
+                    if let Some(intent) = crate::mouse_map::handle_mouse_event(
+                        normalized,
+                        &state.mode,
+                        view.view_state_mut(),
+                        &layout_areas,
+                        state.inbox.len(),
+                    ) {
+                        let _ = intent_tx.send(intent);
+                    }
+                }
+                _ => {}
             }
         }
     }
 
+    if mouse {
+        execute!(&mut writer_for_execute, DisableMouseCapture)?;
+    }
     execute!(&mut writer_for_execute, LeaveAlternateScreen, Show)?;
     disable_raw_mode()?;
 

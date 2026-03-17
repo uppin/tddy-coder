@@ -182,7 +182,7 @@ pub fn spawn_presenter_with_grpc_and_tui(
                 apply_event(&mut state, &mut view, ev);
             }
             terminal
-                .draw(|f| draw(f, &state, view.view_state_mut(), false))
+                .draw(|f| draw(f, &state, view.view_state_mut(), false, None))
                 .unwrap();
             if let Ok(mut buf) = screen_buffer_clone.lock() {
                 *buf = format!("{}", terminal.backend());
@@ -364,7 +364,7 @@ pub fn spawn_presenter_with_terminal_service(
         }
     });
 
-    let terminal_svc = tddy_service::TerminalServiceVirtualTui::new(factory);
+    let terminal_svc = tddy_service::TerminalServiceVirtualTui::new(factory, false);
     let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();
     let (port_tx, port_rx) = std::sync::mpsc::channel();
 

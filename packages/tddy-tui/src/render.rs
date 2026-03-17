@@ -8,6 +8,7 @@ use tddy_core::{ActivityEntry, AppMode, PresenterState};
 use crate::layout::{
     debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_height, question_height,
 };
+use crate::mouse_map::LayoutAreas;
 use crate::ui::{format_status_bar, status_bar_style_for_goal};
 use crate::view_state::{InboxFocus, ViewState};
 
@@ -69,7 +70,14 @@ fn prompt_text(state: &PresenterState, view_state: &ViewState) -> String {
 /// When `debug` is true, the debug log area is shown; otherwise it is hidden.
 const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
 
-pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &mut ViewState, debug: bool) {
+/// Draw the TUI. When `layout_areas` is Some, stores the layout rects for mouse hit-testing.
+pub fn draw(
+    frame: &mut Frame,
+    state: &PresenterState,
+    view_state: &mut ViewState,
+    debug: bool,
+    layout_areas: Option<&mut LayoutAreas>,
+) {
     let is_running = matches!(state.mode, AppMode::Running);
     let inbox_h = inbox_height(state.inbox.len(), is_running);
     let question_h = question_height(&state.mode);
@@ -90,6 +98,15 @@ pub fn draw(frame: &mut Frame, state: &PresenterState, view_state: &mut ViewStat
 
     let (activity_log, _status_spacer, dynamic_area, status_bar, debug_log, prompt_bar) =
         layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
+
+    if let Some(areas) = layout_areas {
+        *areas = LayoutAreas {
+            activity_log,
+            dynamic_area,
+            status_bar,
+            prompt_bar,
+        };
+    }
 
     if activity_log.height > 0 {
         match &state.mode {

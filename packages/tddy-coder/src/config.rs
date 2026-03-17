@@ -35,6 +35,8 @@ pub struct Config {
     #[serde(default)]
     pub daemon: Option<bool>,
     #[serde(default)]
+    pub mouse: Option<bool>,
+    #[serde(default)]
     pub livekit: Option<LiveKitConfig>,
     #[serde(default)]
     pub web: Option<WebConfig>,
@@ -140,6 +142,9 @@ pub fn merge_config_into_args(args: &mut Args, config: Config) {
     }
     if !args.daemon {
         args.daemon = config.daemon.unwrap_or(false);
+    }
+    if !args.mouse {
+        args.mouse = config.mouse.unwrap_or(false);
     }
 
     // LiveKit
@@ -312,6 +317,7 @@ github:
             github_redirect_uri: None,
             github_stub: false,
             github_stub_codes: None,
+            mouse: false,
         };
         merge_config_into_args(&mut args, config);
         // CLI set model=opus, config has model=sonnet → opus wins
