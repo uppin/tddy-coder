@@ -87,9 +87,9 @@ pub fn run_virtual_tui(
                 let mut b = frame_buf.lock().unwrap();
                 b.clear();
             }
-            if let Err(e) = term.draw(|f| {
-                draw(f, state, view.view_state_mut(), false, Some(layout_areas))
-            }) {
+            if let Err(e) =
+                term.draw(|f| draw(f, state, view.view_state_mut(), false, Some(layout_areas)))
+            {
                 log::debug!("VirtualTui: draw error: {}", e);
                 return;
             }
@@ -167,7 +167,8 @@ pub fn run_virtual_tui(
                             updated = true;
                         }
                         if mouse {
-                            while let Some((mouse_ev, consumed)) = parse_mouse_from_buf(&input_buf) {
+                            while let Some((mouse_ev, consumed)) = parse_mouse_from_buf(&input_buf)
+                            {
                                 log::trace!("virtual_tui: parsed mouse={:?}", mouse_ev.kind);
                                 let normalized =
                                     crate::mouse_map::normalize_mouse_coords_for_local(mouse_ev);
@@ -345,11 +346,7 @@ fn parse_mouse_from_buf(buf: &[u8]) -> Option<(crossterm::event::MouseEvent, usi
     if i == 0 || i >= rest.len() {
         return None;
     }
-    let py: u16 = std::str::from_utf8(&rest[..i])
-        .ok()?
-        .trim()
-        .parse()
-        .ok()?;
+    let py: u16 = std::str::from_utf8(&rest[..i]).ok()?.trim().parse().ok()?;
     let last = rest[i];
     let kind = match (pb, last) {
         (0, b'M') => MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -477,7 +474,11 @@ fn parse_key_from_buf(buf: &mut [u8]) -> Option<(KeyEvent, usize)> {
     }
     if buf[0] == 0x7f {
         return Some((
-            KeyEvent::new_with_kind(KeyCode::Backspace, KeyModifiers::empty(), KeyEventKind::Press),
+            KeyEvent::new_with_kind(
+                KeyCode::Backspace,
+                KeyModifiers::empty(),
+                KeyEventKind::Press,
+            ),
             1,
         ));
     }
@@ -559,7 +560,10 @@ mod tests {
     #[test]
     fn parse_resize_sequence() {
         // \x1b]resize;120;30\x07
-        let buf = vec![0x1b, b']', b'r', b'e', b's', b'i', b'z', b'e', b';', b'1', b'2', b'0', b';', b'3', b'0', 0x07];
+        let buf = vec![
+            0x1b, b']', b'r', b'e', b's', b'i', b'z', b'e', b';', b'1', b'2', b'0', b';', b'3',
+            b'0', 0x07,
+        ];
         let (cols, rows, consumed) = parse_resize_from_buf(&buf).unwrap();
         assert_eq!(cols, 120);
         assert_eq!(rows, 30);
@@ -569,37 +573,52 @@ mod tests {
     #[test]
     fn parse_sgr_mouse_press() {
         // ESC [ < 0 ; 10 ; 5 M (left click at col 10, row 5)
-        let buf = vec![0x1b, b'[', b'<', b'0', b';', b'1', b'0', b';', b'5', b' ', b'M'];
+        let buf = vec![
+            0x1b, b'[', b'<', b'0', b';', b'1', b'0', b';', b'5', b' ', b'M',
+        ];
         let (event, consumed) = parse_mouse_from_buf(&buf).unwrap();
         assert_eq!(consumed, 11);
         assert_eq!(event.row, 4); // 0-based
         assert_eq!(event.column, 9); // 0-based
-        assert!(matches!(event.kind, crossterm::event::MouseEventKind::Down(_)));
+        assert!(matches!(
+            event.kind,
+            crossterm::event::MouseEventKind::Down(_)
+        ));
     }
 
     #[test]
     fn parse_sgr_mouse_scroll_down() {
         // ESC [ < 65 ; 1 ; 1 M (scroll down)
-        let buf = vec![0x1b, b'[', b'<', b'6', b'5', b';', b'1', b';', b'1', b' ', b'M'];
+        let buf = vec![
+            0x1b, b'[', b'<', b'6', b'5', b';', b'1', b';', b'1', b' ', b'M',
+        ];
         let (event, consumed) = parse_mouse_from_buf(&buf).unwrap();
         assert_eq!(consumed, 11);
-        assert!(matches!(event.kind, crossterm::event::MouseEventKind::ScrollDown));
+        assert!(matches!(
+            event.kind,
+            crossterm::event::MouseEventKind::ScrollDown
+        ));
     }
 
     #[test]
     fn keys_after_mouse_release_are_still_parsed() {
         let mut buf = vec![
-            0x1b, b'[', b'<', b'0', b';', b'1', b'0', b';', b'5', b' ', b'M',
-            0x1b, b'[', b'<', b'0', b';', b'1', b'0', b';', b'5', b' ', b'm',
-            b'a',
+            0x1b, b'[', b'<', b'0', b';', b'1', b'0', b';', b'5', b' ', b'M', 0x1b, b'[', b'<',
+            b'0', b';', b'1', b'0', b';', b'5', b' ', b'm', b'a',
         ];
 
         let (mouse1, consumed1) = parse_mouse_from_buf(&buf).unwrap();
-        assert!(matches!(mouse1.kind, crossterm::event::MouseEventKind::Down(_)));
+        assert!(matches!(
+            mouse1.kind,
+            crossterm::event::MouseEventKind::Down(_)
+        ));
         buf.drain(..consumed1);
 
         let (mouse2, consumed2) = parse_mouse_from_buf(&buf).unwrap();
-        assert!(matches!(mouse2.kind, crossterm::event::MouseEventKind::Up(_)));
+        assert!(matches!(
+            mouse2.kind,
+            crossterm::event::MouseEventKind::Up(_)
+        ));
         buf.drain(..consumed2);
 
         let (key, _) = parse_key_from_buf(&mut buf).unwrap();

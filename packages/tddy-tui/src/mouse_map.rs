@@ -52,8 +52,9 @@ pub fn handle_mouse_event(
                 _ => 0,
             };
             if rect_contains(&areas.activity_log, col, row) {
-                view_state.scroll_offset =
-                    view_state.scroll_offset.saturating_add_signed(delta as isize);
+                view_state.scroll_offset = view_state
+                    .scroll_offset
+                    .saturating_add_signed(delta as isize);
                 return None;
             }
             if rect_contains(&areas.dynamic_area, col, row) {
@@ -99,14 +100,12 @@ fn scroll_dynamic_area(
             None
         }
         AppMode::PlanReview { .. } => {
-            let new_idx =
-                (view_state.plan_review_selected as i32 + delta).clamp(0, 2) as usize;
+            let new_idx = (view_state.plan_review_selected as i32 + delta).clamp(0, 2) as usize;
             view_state.plan_review_selected = new_idx;
             None
         }
         AppMode::ErrorRecovery { .. } => {
-            let new_idx =
-                (view_state.error_recovery_selected as i32 + delta).clamp(0, 2) as usize;
+            let new_idx = (view_state.error_recovery_selected as i32 + delta).clamp(0, 2) as usize;
             view_state.error_recovery_selected = new_idx;
             None
         }
@@ -188,8 +187,8 @@ fn click_dynamic_area(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::MouseButton;
     use crate::layout::{layout_chunks_with_inbox, question_height};
+    use crossterm::event::MouseButton;
     use ratatui::layout::Rect;
 
     fn areas_80x24() -> LayoutAreas {

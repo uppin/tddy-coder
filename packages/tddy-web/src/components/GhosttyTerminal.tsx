@@ -90,6 +90,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             background: "#1a1b26",
             foreground: "#a9b1d6",
           },
+          scrollback: 0,
         });
 
         termRef.current = term;

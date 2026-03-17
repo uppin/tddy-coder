@@ -78,15 +78,11 @@ The `--daemon` flag starts a headless gRPC server (no TUI) suitable for systemd 
 
 **Configuration**: Sessions base is `~/.tddy/sessions`. Port defaults to 50051 (`--grpc`). Graceful shutdown on SIGTERM. Optional `--web-port` and `--web-bundle-path` serve tddy-web static assets over HTTP alongside gRPC. When using LiveKit, `--livekit-api-key` and `--livekit-api-secret` (or env vars) generate tokens locally and auto-refresh by reconnecting before expiry; `--livekit-token` is an alternative for pre-generated tokens.
 
-### 6. Terminal streaming (TUI mode)
+### 6. Terminal streaming (TUI mode and daemon)
 
-When `--grpc` is set with TUI, the gRPC server exposes `StreamTerminal` RPC:
+**StreamTerminal** (TUI mode with `--grpc`): Server-streaming RPC delivers raw ANSI bytes from ratatui/crossterm. Multiple clients share one broadcast; slow clients may miss frames.
 
-- **StreamTerminal**: Server-streaming RPC that delivers raw ANSI bytes from ratatui/crossterm rendering
-- **TerminalOutput**: Message with `bytes data` — the exact byte stream a terminal would see
-- **Use case**: Remote TUI viewer; clients pipe bytes into a terminal emulator to render the TUI remotely
-- **Broadcast**: Multiple clients can subscribe; slow clients may miss frames (acceptable for terminal streaming)
-- **Capture**: `CapturingWriter` in tddy-tui wraps stdout and invokes a callback on each write; tddy-coder wires a broadcast channel to `TddyRemoteService::with_terminal_bytes`
+**StreamTerminalIO** (daemon with LiveKit or gRPC): Per-connection virtual TUI. Each RPC connection gets its own headless ratatui instance (`VirtualTui`) via `ViewConnection`. Presenter exposes `connect_view()` → state snapshot + event_rx + intent_tx. Client keyboard input is parsed by the virtual TUI into `UserIntent`s. When the client disconnects, the virtual TUI is stopped. `TerminalServiceImplPerConnection` and `TddyRemoteService::with_view_connection_factory` create one VirtualTui per `StreamTerminalIO` call. Daemon with LiveKit exposes TerminalService (per-connection VirtualTui) instead of EchoService.
 
 ### 7. Codegen tooling
 

@@ -2,6 +2,8 @@
 
 Wrapped changeset history for tddy-tui.
 
+- **2026-03-17** [Feature] Terminal UX Fullscreen Touch — Mouse capture, mouse_map hit-testing, SGR mouse parsing, resize sequence parsing, dynamic viewport. EnableMouseCapture in event_loop and virtual_tui. (tddy-tui)
+- **2026-03-14** [Feature] Per-Connection Virtual TUI — VirtualTui run_virtual_tui(), headless ratatui, CapturingWriter headless(). Per-connection thread, event subscription, key parsing. (tddy-tui)
 - **2026-03-14** [Feature] Workflow Restart on Completion — VirtualTui apply_event for WorkflowComplete sets mode to FeatureInput instead of Done. (tddy-tui)
 - **2026-03-13** [Bug Fix] Session and Workflow Fixes — Error recovery elicitation (red prompt, Resume/Exit). Auto-grow prompt bar. UTF-8 cursor handling. div_ceil in layout. (tddy-tui)
 - **2026-03-11** [Feature] Terminal Streaming via gRPC — CapturingWriter with ByteCallback for capturing ratatui/crossterm output. run_event_loop accepts optional byte_capture; uses CapturingWriter (no-op when None) for all terminal writes. Unit tests: write_captures_bytes, clone_shares_callback, flush_delegates_to_stdout. (tddy-tui)

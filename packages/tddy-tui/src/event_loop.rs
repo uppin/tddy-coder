@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use crossterm::cursor::Show;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use crossterm::execute;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -95,40 +95,39 @@ pub fn run_event_loop(
         if event::poll(Duration::from_millis(50)).unwrap_or(false) {
             match event::read() {
                 Ok(Event::Key(key)) => {
-                if key.kind == KeyEventKind::Press
-                    && key.code == KeyCode::Char('c')
-                    && key
-                        .modifiers
-                        .contains(crossterm::event::KeyModifiers::CONTROL)
-                {
-                    shutdown.store(true, Ordering::Relaxed);
-                    tddy_core::kill_child_process();
-                    continue;
-                }
+                    if key.kind == KeyEventKind::Press
+                        && key.code == KeyCode::Char('c')
+                        && key
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL)
+                    {
+                        shutdown.store(true, Ordering::Relaxed);
+                        tddy_core::kill_child_process();
+                        continue;
+                    }
 
-                let inbox_len = state.inbox.len();
-                let mode = state.mode.clone();
-                let cursor = view.view_state().inbox_cursor;
-                let edit_item = state.inbox.get(cursor).cloned();
+                    let inbox_len = state.inbox.len();
+                    let mode = state.mode.clone();
+                    let cursor = view.view_state().inbox_cursor;
+                    let edit_item = state.inbox.get(cursor).cloned();
 
-                let vs = view.view_state_mut();
-                let was_list = matches!(vs.inbox_focus, crate::view_state::InboxFocus::List);
-                let consumed = vs.handle_key_view_local(key, &mode, inbox_len);
-                if was_list
-                    && matches!(vs.inbox_focus, crate::view_state::InboxFocus::Editing)
-                    && vs.inbox_edit_buffer.is_empty()
-                {
-                    vs.inbox_edit_buffer = edit_item.unwrap_or_default();
-                }
-                if !consumed {
-                    if let Some(intent) = key_event_to_intent(key, &mode, view.view_state()) {
-                        let _ = intent_tx.send(intent);
+                    let vs = view.view_state_mut();
+                    let was_list = matches!(vs.inbox_focus, crate::view_state::InboxFocus::List);
+                    let consumed = vs.handle_key_view_local(key, &mode, inbox_len);
+                    if was_list
+                        && matches!(vs.inbox_focus, crate::view_state::InboxFocus::Editing)
+                        && vs.inbox_edit_buffer.is_empty()
+                    {
+                        vs.inbox_edit_buffer = edit_item.unwrap_or_default();
+                    }
+                    if !consumed {
+                        if let Some(intent) = key_event_to_intent(key, &mode, view.view_state()) {
+                            let _ = intent_tx.send(intent);
+                        }
                     }
                 }
-                }
                 Ok(Event::Mouse(mouse_ev)) if mouse => {
-                    let normalized =
-                        crate::mouse_map::normalize_mouse_coords_for_local(mouse_ev);
+                    let normalized = crate::mouse_map::normalize_mouse_coords_for_local(mouse_ev);
                     if let Some(intent) = crate::mouse_map::handle_mouse_event(
                         normalized,
                         &state.mode,

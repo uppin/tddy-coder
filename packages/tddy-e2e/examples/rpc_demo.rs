@@ -18,7 +18,9 @@ use std::thread;
 use std::time::Duration;
 
 use clap::Parser;
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 
@@ -456,7 +458,9 @@ fn main() -> anyhow::Result<()> {
                     if key.kind != KeyEventKind::Press {
                         continue;
                     }
-                    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    if key.code == KeyCode::Char('c')
+                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
                         break;
                     }
                     let bytes = encode_key(key);
