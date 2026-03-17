@@ -2,6 +2,8 @@
 
 Wrapped changeset history for tddy-service.
 
+- **2026-03-14** [Feature] Per-Connection Virtual TUI — TerminalServiceImplPerConnection, DaemonService/TddyRemoteService with_view_connection_factory. stream_terminal_io creates VirtualTui per connection. (tddy-service)
+- **2026-03-17** [Feature] Terminal UX Fullscreen Touch — Thread mouse flag to TerminalServiceVirtualTui and run_virtual_tui. (tddy-service)
 - **2026-03-14** [Feature] TokenService RPC — token.proto, TokenServiceImpl, TokenProvider trait. TokenService allows callers to generate and refresh LiveKit access tokens without holding API credentials. Delegates to TokenGenerator via TokenProvider. Integration tests: token_service_acceptance. (tddy-service)
 - **2026-03-14** [Feature] Worktree-per-Workflow Daemon Migration — Removed WaitingConfirmWorktree state and handle_confirm_worktree. handle_approve_plan calls setup_worktree_for_session directly; worktree created from origin/master after ApprovePlan. No WorktreeElicitation or ConfirmWorktree flow. (tddy-service)
 - **2026-03-13** [Architecture Change] Dual-Transport Service Codegen — Renamed tddy-grpc to tddy-service; moved echo/terminal from tddy-livekit. Service impls (EchoServiceImpl, TerminalServiceImpl, DaemonService) in tddy-service; generated RpcService server structs + tonic adapter. (tddy-service)

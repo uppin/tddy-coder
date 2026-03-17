@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
@@ -9,21 +9,23 @@ import { GitHubLoginButton } from "./components/GitHubLoginButton";
 import { AuthCallback } from "./components/AuthCallback";
 import { UserAvatar } from "./components/UserAvatar";
 
-function getParamsFromUrl(): { url: string; identity: string; roomName: string } {
+function getParamsFromUrl(): { url: string; identity: string; roomName: string; debugLogging: boolean } {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   return {
     url: params?.get("url") ?? "",
     identity: params?.get("identity") ?? "",
     roomName: params?.get("roomName") ?? "terminal-e2e",
+    debugLogging: params?.get("debug") === "1" || params?.get("debugLogging") === "1",
   };
 }
 
-function pushParamsToUrl(url: string, identity: string, roomName: string): void {
+function pushParamsToUrl(url: string, identity: string, roomName: string, debugLogging?: boolean): void {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams();
   if (url) params.set("url", url);
   if (identity) params.set("identity", identity);
   if (roomName) params.set("roomName", roomName);
+  if (debugLogging) params.set("debug", "1");
   const search = params.toString();
   const newUrl = search ? `${window.location.pathname}?${search}` : window.location.pathname;
   window.history.replaceState(null, "", newUrl);
@@ -57,10 +59,9 @@ function createTokenClient() {
   return createClient(TokenService, transport);
 }
 
-const disconnectButtonStyle = {
+const overlayButtonStyle = {
   position: "absolute" as const,
   top: 8,
-  right: 8,
   padding: "4px 12px",
   fontSize: 12,
   cursor: "pointer",
@@ -69,23 +70,29 @@ const disconnectButtonStyle = {
   border: "1px solid #555",
   borderRadius: 4,
   zIndex: 10,
-};
+} as const;
+
+const disconnectButtonStyle = { ...overlayButtonStyle, right: 8 } as const;
+const ctrlCButtonStyle = { ...overlayButtonStyle, right: 72 } as const;
 
 function ConnectedTerminal({
   url,
   identity,
   roomName,
+  debugLogging,
   onDisconnect,
 }: {
   url: string;
   identity: string;
   roomName: string;
+  debugLogging?: boolean;
   onDisconnect: () => void;
 }) {
   const client = useMemo(() => createTokenClient(), []);
   const [initialToken, setInitialToken] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const sendCtrlCRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     client
@@ -127,7 +134,24 @@ function ConnectedTerminal({
   }
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", position: "relative" }}>
+    <div
+      data-testid="connected-terminal-container"
+      style={{
+        position: "fixed",
+        inset: 0,
+        margin: 0,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <button
+        data-testid="ctrl-c-button"
+        onClick={() => sendCtrlCRef.current?.()}
+        style={ctrlCButtonStyle}
+      >
+        Ctrl+C
+      </button>
       <button
         data-testid="disconnect-button"
         onClick={onDisconnect}
@@ -142,6 +166,10 @@ function ConnectedTerminal({
         ttlSeconds={ttlSeconds}
         roomName={roomName}
         debugMode={false}
+        debugLogging={debugLogging ?? false}
+        onRegisterSendCtrlC={(send) => {
+          sendCtrlCRef.current = send;
+        }}
       />
     </div>
   );
@@ -152,6 +180,7 @@ function ConnectionForm() {
   const [url, setUrl] = useState("");
   const [identity, setIdentity] = useState("");
   const [roomName, setRoomName] = useState("terminal-e2e");
+  const [debugLogging, setDebugLogging] = useState(false);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -164,11 +193,13 @@ function ConnectionForm() {
         setUrl(params.url || config?.livekit_url || "");
         setIdentity(params.identity || "");
         setRoomName(params.roomName || config?.livekit_room || "terminal-e2e");
+        setDebugLogging(params.debugLogging);
       })
       .catch(() => {
         setUrl(params.url);
         setIdentity(params.identity);
         setRoomName(params.roomName || "terminal-e2e");
+        setDebugLogging(params.debugLogging);
       });
   }, []);
 
@@ -178,6 +209,7 @@ function ConnectionForm() {
         url={url}
         identity={identity}
         roomName={roomName}
+        debugLogging={debugLogging}
         onDisconnect={() => setConnected(false)}
       />
     );
@@ -203,7 +235,7 @@ function ConnectionForm() {
         onSubmit={(e) => {
           e.preventDefault();
           if (url && identity) {
-            pushParamsToUrl(url, identity, roomName);
+            pushParamsToUrl(url, identity, roomName, debugLogging);
             setConnected(true);
           }
         }}
@@ -244,6 +276,14 @@ function ConnectionForm() {
           onChange={(e) => setRoomName(e.target.value)}
           style={inputStyle}
         />
+        <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+          <input
+            type="checkbox"
+            checked={debugLogging}
+            onChange={(e) => setDebugLogging(e.target.checked)}
+          />
+          Debug logging (mouse events, data flow)
+        </label>
         <button type="submit" disabled={!url || !identity}>
           Connect
         </button>

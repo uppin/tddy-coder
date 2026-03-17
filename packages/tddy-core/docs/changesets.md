@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-core.
 
+- **2026-03-14** [Feature] Per-Connection Virtual TUI — ViewConnection, connect_view(), NoopView. Presenter decoupled from single view; views subscribe via connect_view for state snapshot + event_rx + intent_tx. (tddy-core)
 - **2026-03-14** [Bug Fix] Clarification Prompt Preference — BackendInvokeTask prefers `prompt` over `feature_input` when both exist. Fixes clarification loop: before_* hooks (e.g. before_acceptance_tests) set prompt with follow-up when resuming from clarification; prompt was previously ignored in favor of feature_input. (tddy-core)
 - **2026-03-14** [Feature] Worktree Path Validation — Path logic validated: repo_path set at plan start; build_goal_context uses repo_path from changeset; ensure_worktree_for_acceptance_tests uses output_dir from context. Presenter and E2E tests use temp_dir_with_git_repo for worktree creation. (tddy-core)
 - **2026-03-14** [Feature] Worktree-per-Workflow — Automatic worktree creation after plan approval. fetch_origin_master, create_worktree with start_point, setup_worktree_for_session. build_context_header/prepend_context_header gain repo_dir for agent working directory. WorkflowEvent::WorktreeSwitched; activity log shows worktree path. workflow_runner and daemon use shared core; daemon removes WorktreeElicitation/ConfirmWorktree flow. Planning prompt requires branch_suggestion and worktree_suggestion. (tddy-core)

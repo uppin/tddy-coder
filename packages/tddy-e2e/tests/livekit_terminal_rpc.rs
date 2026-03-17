@@ -76,7 +76,7 @@ mod livekit_tests {
         let (_presenter_handle, factory, _shutdown) =
             tddy_e2e::spawn_presenter_with_view_connection_factory(Some("Build auth".to_string()));
 
-        let terminal_service = TerminalServiceVirtualTui::new(factory);
+        let terminal_service = TerminalServiceVirtualTui::new(factory, false);
 
         let server = LiveKitParticipant::connect(
             &url,
@@ -199,7 +199,7 @@ mod livekit_tests {
         let (_presenter_handle, factory, shutdown) =
             tddy_e2e::spawn_presenter_with_view_connection_factory(Some("Build auth".to_string()));
 
-        let terminal_service = TerminalServiceVirtualTui::new(factory);
+        let terminal_service = TerminalServiceVirtualTui::new(factory, false);
 
         let server = LiveKitParticipant::connect(
             &url,
@@ -349,7 +349,7 @@ mod livekit_tests {
         let (_presenter_handle, factory, shutdown) =
             tddy_e2e::spawn_presenter_with_view_connection_factory(Some("Build auth".to_string()));
 
-        let terminal_service = TerminalServiceVirtualTui::new(factory);
+        let terminal_service = TerminalServiceVirtualTui::new(factory, false);
 
         let server = LiveKitParticipant::connect(
             &url,

@@ -25,10 +25,17 @@ tddy-coder currently operates as a CLI/TUI application. To enable remote observa
 - **PTY**: Server-side PTY spawning the user's default `$SHELL`
 - **Communication**: WebSocket between browser (ghostty-web Terminal) and server (PTY process)
 
-## Future Scope (Not in this version)
+## Connected Terminal UX
 
-- Streaming tddy-coder TUI instead of a generic shell
+When the terminal connects and renders, it supports:
+
+- **Fullscreen**: Fills 100% of the viewport (width and height). Overlay buttons: Disconnect and Ctrl+C.
+- **Auto-focus**: Keyboard focus is set on the terminal when ready. User can type immediately.
+- **Adaptive size**: FitAddon auto-sizes the terminal to its container. Resize events are sent to the virtual TUI via `\x1b]resize;{cols};{rows}\x07`.
+- **Touch/mouse mode**: When `--mouse` is set on tddy-coder, the TUI sends EnableMouseCapture. GhosttyTerminal encodes SGR mouse sequences `\x1b[<Pb;Px;PyM/m` (press/release) and forwards them via onData. Click-to-select and scroll work.
+
+## Future Scope
+
 - Multi-session support
 - Authentication and access control
-- Terminal resize synchronization
 - Session persistence and reconnection

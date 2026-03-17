@@ -199,6 +199,8 @@ pub struct Args {
     pub github_stub: bool,
     /// Pre-register code:user mappings for stub (e.g. "test-code:testuser")
     pub github_stub_codes: Option<String>,
+    /// Enable mouse/touch mode in the TUI
+    pub mouse: bool,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -317,6 +319,10 @@ pub struct CoderArgs {
     /// Pre-register stub code:user mappings (e.g. "test-code:testuser")
     #[arg(long)]
     pub github_stub_codes: Option<String>,
+
+    /// Enable mouse/touch mode in the TUI
+    #[arg(long)]
+    pub mouse: bool,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -435,6 +441,10 @@ pub struct DemoArgs {
     /// Pre-register stub code:user mappings (e.g. "test-code:testuser")
     #[arg(long)]
     pub github_stub_codes: Option<String>,
+
+    /// Enable mouse/touch mode in the TUI
+    #[arg(long)]
+    pub mouse: bool,
 }
 
 impl From<CoderArgs> for Args {
@@ -468,6 +478,7 @@ impl From<CoderArgs> for Args {
             github_redirect_uri: a.github_redirect_uri,
             github_stub: a.github_stub,
             github_stub_codes: a.github_stub_codes,
+            mouse: a.mouse,
         }
     }
 }
@@ -503,6 +514,7 @@ impl From<DemoArgs> for Args {
             github_redirect_uri: a.github_redirect_uri,
             github_stub: a.github_stub,
             github_stub_codes: a.github_stub_codes,
+            mouse: a.mouse,
         }
     }
 }
@@ -859,7 +871,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         if let Some(ref factory) = view_factory {
             grpc_router = grpc_router.add_service(
                 tddy_service::tonic_terminal::terminal_service_server::TerminalServiceServer::new(
-                    tddy_service::TerminalServiceVirtualTui::new(factory.clone()),
+                    tddy_service::TerminalServiceVirtualTui::new(factory.clone(), args.mouse),
                 ),
             );
         }
@@ -940,7 +952,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             let factory = view_factory
                 .clone()
                 .expect("factory set when livekit_enabled");
-            let terminal_service = tddy_service::TerminalServiceVirtualTui::new(factory);
+            let terminal_service =
+                tddy_service::TerminalServiceVirtualTui::new(factory, args.mouse);
             if has_key_secret {
                 let token_generator = tddy_livekit::TokenGenerator::new(
                     args.livekit_api_key.as_ref().unwrap().clone(),
@@ -1422,7 +1435,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             intent_tx: intent_tx.clone(),
         };
         let service = tddy_service::TddyRemoteService::new(handle);
-        let terminal_svc = tddy_service::TerminalServiceVirtualTui::new(view_factory.clone());
+        let terminal_svc =
+            tddy_service::TerminalServiceVirtualTui::new(view_factory.clone(), args.mouse);
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -1448,7 +1462,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     }
 
     if livekit_enabled {
-        let terminal_service = tddy_service::TerminalServiceVirtualTui::new(view_factory.clone());
+        let terminal_service =
+            tddy_service::TerminalServiceVirtualTui::new(view_factory.clone(), args.mouse);
         let url = args.livekit_url.clone().unwrap();
         let shutdown = shutdown.clone();
         if has_key_secret {
@@ -1629,7 +1644,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         }
     });
 
-    tddy_tui::run_event_loop(conn, shutdown.as_ref(), None, args.debug)?;
+    tddy_tui::run_event_loop(conn, shutdown.as_ref(), None, args.debug, args.mouse)?;
 
     presenter_handle.join().expect("presenter thread panicked");
 

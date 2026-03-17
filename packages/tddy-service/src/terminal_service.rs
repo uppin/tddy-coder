@@ -31,6 +31,7 @@ pub struct VirtualTuiSession {
 /// and spawns the VirtualTui thread.
 pub fn start_virtual_tui_session(
     factory: &(dyn Fn() -> Option<ViewConnection> + Send + Sync),
+    mouse: bool,
 ) -> Option<VirtualTuiSession> {
     let conn = factory()?;
     log::trace!(
@@ -39,7 +40,7 @@ pub fn start_virtual_tui_session(
     let (output_tx, output_rx) = mpsc::channel(64);
     let (input_tx, input_rx) = mpsc::channel(64);
     let shutdown = Arc::new(AtomicBool::new(false));
-    run_virtual_tui(conn, output_tx, input_rx, shutdown.clone());
+    run_virtual_tui(conn, output_tx, input_rx, shutdown.clone(), mouse);
     Some(VirtualTuiSession {
         input_tx,
         output_rx,
@@ -51,11 +52,15 @@ pub fn start_virtual_tui_session(
 /// Each `stream_terminal_io` call creates its own VirtualTui instance.
 pub struct TerminalServiceVirtualTui {
     factory: Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>,
+    mouse: bool,
 }
 
 impl TerminalServiceVirtualTui {
-    pub fn new(factory: Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>) -> Self {
-        Self { factory }
+    pub fn new(
+        factory: Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>,
+        mouse: bool,
+    ) -> Self {
+        Self { factory, mouse }
     }
 }
 
@@ -67,7 +72,7 @@ impl TerminalService for TerminalServiceVirtualTui {
         &self,
         request: Request<Streaming<TerminalInput>>,
     ) -> Result<Response<Self::StreamTerminalIoStream>, Status> {
-        let session = start_virtual_tui_session(&*self.factory)
+        let session = start_virtual_tui_session(&*self.factory, self.mouse)
             .ok_or_else(|| Status::internal("connect_view not available"))?;
 
         let VirtualTuiSession {
@@ -133,7 +138,7 @@ impl crate::tonic_terminal::terminal_service_server::TerminalService for Termina
         &self,
         request: tonic::Request<tonic::Streaming<TerminalInput>>,
     ) -> Result<tonic::Response<Self::StreamTerminalIOStream>, tonic::Status> {
-        let session = start_virtual_tui_session(&*self.factory)
+        let session = start_virtual_tui_session(&*self.factory, self.mouse)
             .ok_or_else(|| tonic::Status::internal("connect_view not available"))?;
 
         let VirtualTuiSession {
@@ -155,17 +160,11 @@ impl crate::tonic_terminal::terminal_service_server::TerminalService for Termina
                         msg.data.len()
                     );
                     if let Err(e) = input_tx.send(msg.data).await {
-                        log::error!(
-                            "tonic: input_tx.send FAILED #{}: {}",
-                            input_count, e
-                        );
+                        log::error!("tonic: input_tx.send FAILED #{}: {}", input_count, e);
                     }
                 }
             }
-            log::trace!(
-                "tonic: input stream ended after {} inputs",
-                input_count
-            );
+            log::trace!("tonic: input stream ended after {} inputs", input_count);
             shutdown.store(true, Ordering::Relaxed);
         });
 

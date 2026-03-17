@@ -45,6 +45,21 @@ fn create_fake_tddy_tools(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Acceptance: --mouse flag is accepted by CLI for enabling mouse/touch mode in TUI.
+#[test]
+fn cli_accepts_mouse_flag() {
+    let mut cmd = tddy_coder_bin();
+    cmd.arg("--help");
+
+    let output = cmd.output().expect("run tddy-coder --help");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--mouse") || stdout.contains("mouse"),
+        "--mouse flag should appear in help output, stdout: {}",
+        stdout
+    );
+}
+
 /// AC4: CLI argument parsing accepts `--goal evaluate`.
 #[test]
 fn cli_accepts_evaluate_goal() {

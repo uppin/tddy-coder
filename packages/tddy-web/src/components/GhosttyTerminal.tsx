@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { init, Terminal } from "ghostty-web";
+import { init, Terminal, FitAddon } from "ghostty-web";
 
 export interface GhosttyTerminalTheme {
   background?: string;
@@ -67,6 +67,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       : () => {};
     const containerRef = useRef<HTMLDivElement>(null);
     const termRef = useRef<Terminal | null>(null);
+    const fitAddonRef = useRef<FitAddon | null>(null);
     const [ready, setReady] = useState(false);
 
     const disposablesRef = useRef<{ dispose: () => void }[]>([]);
@@ -89,6 +90,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             background: "#1a1b26",
             foreground: "#a9b1d6",
           },
+          scrollback: 0,
         });
 
         termRef.current = term;
@@ -115,6 +117,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         disposablesRef.current = disposables;
 
         term.open(containerRef.current);
+
+        const fitAddon = new FitAddon();
+        term.loadAddon(fitAddon);
+        fitAddonRef.current = fitAddon;
+        fitAddon.fit();
+        fitAddon.observeResize();
+
         log("lifecycle: term opened, calling onReady");
         setReady(true);
         onReady?.();
@@ -128,6 +137,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
       return () => {
         isMounted = false;
+        fitAddonRef.current?.dispose();
+        fitAddonRef.current = null;
         disposablesRef.current.forEach((d) => d.dispose());
         disposablesRef.current = [];
         if (termRef.current) {
@@ -142,6 +153,77 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         termRef.current.write(initialContent);
       }
     }, [initialContent, ready]);
+
+    // Mouse/touch forwarding when hasMouseTracking (SGR sequences via onData)
+    useEffect(() => {
+      if (!ready || !containerRef.current || !termRef.current || !onData) return;
+      const container = containerRef.current;
+      const term = termRef.current;
+      console.log("[GhosttyTerminal] mouse listeners attached to container", { ready, hasContainer: !!container, hasTerm: !!term });
+
+      const toCellCoords = (offsetX: number, offsetY: number): { col: number; row: number } | null => {
+        const rect = container.getBoundingClientRect();
+        const c = term.cols;
+        const r = term.rows;
+        if (c <= 0 || r <= 0) return null;
+        const cellW = rect.width / c;
+        const cellH = rect.height / r;
+        const col = Math.floor(offsetX / cellW) + 1;
+        const row = Math.floor(offsetY / cellH) + 1;
+        return { col: Math.max(1, Math.min(col, c)), row: Math.max(1, Math.min(row, r)) };
+      };
+
+      const sendSgr = (pb: number, col: number, row: number, release: boolean) => {
+        const end = release ? "m" : "M";
+        onData(`\x1b[<${pb};${col};${row}${end}`);
+      };
+
+      const onMouseDown = (e: MouseEvent) => {
+        const coords = toCellCoords(e.offsetX, e.offsetY);
+        const tracking = term.hasMouseTracking?.() ?? false;
+        console.log("[GhosttyTerminal] mousedown", { col: coords?.col, row: coords?.row, offsetX: e.offsetX, offsetY: e.offsetY, hasMouseTracking: tracking });
+        if (!tracking) return;
+        if (coords) {
+          log("mouse mousedown", "col=", coords.col, "row=", coords.row, "offsetX=", e.offsetX, "offsetY=", e.offsetY);
+          sendSgr(0, coords.col, coords.row, false);
+        }
+      };
+      const onMouseUp = (e: MouseEvent) => {
+        const coords = toCellCoords(e.offsetX, e.offsetY);
+        const tracking = term.hasMouseTracking?.() ?? false;
+        console.log("[GhosttyTerminal] mouseup", { col: coords?.col, row: coords?.row, hasMouseTracking: tracking });
+        if (!tracking) return;
+        if (coords) {
+          log("mouse mouseup", "col=", coords.col, "row=", coords.row, "offsetX=", e.offsetX, "offsetY=", e.offsetY);
+          sendSgr(0, coords.col, coords.row, true);
+        }
+      };
+      const onWheel = (e: WheelEvent) => {
+        const rect = container.getBoundingClientRect();
+        const offsetX = e.clientX - rect.left;
+        const offsetY = e.clientY - rect.top;
+        const coords = toCellCoords(offsetX, offsetY);
+        const tracking = term.hasMouseTracking?.() ?? false;
+        console.log("[GhosttyTerminal] wheel", { col: coords?.col, row: coords?.row, deltaY: e.deltaY, hasMouseTracking: tracking });
+        if (!tracking) return;
+        if (coords) {
+          log("mouse wheel", "col=", coords.col, "row=", coords.row, "deltaY=", e.deltaY);
+          const pb = e.deltaY < 0 ? 64 : 65;
+          sendSgr(pb, coords.col, coords.row, false);
+        }
+        e.preventDefault();
+      };
+
+      container.addEventListener("mousedown", onMouseDown);
+      container.addEventListener("mouseup", onMouseUp);
+      container.addEventListener("wheel", onWheel, { passive: false });
+
+      return () => {
+        container.removeEventListener("mousedown", onMouseDown);
+        container.removeEventListener("mouseup", onMouseUp);
+        container.removeEventListener("wheel", onWheel);
+      };
+    }, [ready, onData]);
 
     // Note: onData is registered once in the setup useEffect above (line 97-104).
     // Do NOT re-register here — that would cause duplicate events for each keystroke.
