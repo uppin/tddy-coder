@@ -340,6 +340,18 @@ fn parse_key_from_buf(buf: &mut [u8]) -> Option<(KeyEvent, usize)> {
             1,
         ));
     }
+    if buf[0] == 0x7f {
+        return Some((
+            KeyEvent::new_with_kind(KeyCode::Backspace, KeyModifiers::empty(), KeyEventKind::Press),
+            1,
+        ));
+    }
+    if buf[0] == b'\t' {
+        return Some((
+            KeyEvent::new_with_kind(KeyCode::Tab, KeyModifiers::empty(), KeyEventKind::Press),
+            1,
+        ));
+    }
     if buf[0].is_ascii() && !buf[0].is_ascii_control() {
         return Some((
             KeyEvent::new_with_kind(
@@ -379,5 +391,33 @@ mod tests {
         let (key, n) = parse_key_from_buf(&mut buf).unwrap();
         assert_eq!(n, 4);
         assert_eq!(key.code, KeyCode::PageDown);
+    }
+
+    #[test]
+    fn parse_backspace() {
+        let mut buf = vec![0x7f];
+        let (key, n) = parse_key_from_buf(&mut buf).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(key.code, KeyCode::Backspace);
+    }
+
+    #[test]
+    fn keys_after_backspace_are_still_parsed() {
+        let mut buf = vec![0x7f, b'a'];
+
+        let (key1, consumed1) = parse_key_from_buf(&mut buf).unwrap();
+        assert_eq!(key1.code, KeyCode::Backspace);
+        buf.drain(..consumed1);
+
+        let (key2, _) = parse_key_from_buf(&mut buf).unwrap();
+        assert_eq!(key2.code, KeyCode::Char('a'));
+    }
+
+    #[test]
+    fn parse_tab() {
+        let mut buf = vec![b'\t'];
+        let (key, n) = parse_key_from_buf(&mut buf).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(key.code, KeyCode::Tab);
     }
 }
