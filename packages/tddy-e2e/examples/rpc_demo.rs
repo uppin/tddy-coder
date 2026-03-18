@@ -18,13 +18,12 @@ use std::thread;
 use std::time::Duration;
 
 use clap::Parser;
-use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 
 use tddy_core::backend::{AnyBackend, SharedBackend, StubBackend};
+use tddy_e2e::rpc_frontend::{encode_resize, event_to_bytes};
 use tddy_core::Presenter;
 #[cfg(feature = "livekit")]
 use tddy_service::TerminalServiceVirtualTui;
@@ -57,46 +56,6 @@ struct Args {
     /// LiveKit client identity
     #[arg(long, default_value = "client")]
     livekit_identity: String,
-}
-
-/// Encode a crossterm mouse event into SGR bytes for VirtualTui's mouse parser.
-/// Format: ESC [ < pb ; px ; py M (press) or m (release). px, py are 1-based.
-fn encode_mouse(ev: crossterm::event::MouseEvent) -> Vec<u8> {
-    use crossterm::event::{MouseButton, MouseEventKind};
-    let (pb, release) = match ev.kind {
-        MouseEventKind::Down(MouseButton::Left) => (0u8, false),
-        MouseEventKind::Up(MouseButton::Left) => (0u8, true),
-        MouseEventKind::ScrollUp => (64, false),
-        MouseEventKind::ScrollDown => (65, false),
-        _ => return vec![],
-    };
-    let px = ev.column.saturating_add(1);
-    let py = ev.row.saturating_add(1);
-    let end = if release { b'm' } else { b'M' };
-    format!("\x1b[<{pb};{px};{py}{}", end as char).into_bytes()
-}
-
-/// Encode a crossterm key event into raw bytes for VirtualTui's key parser.
-fn encode_key(key: crossterm::event::KeyEvent) -> Vec<u8> {
-    match key.code {
-        KeyCode::Enter => vec![b'\r'],
-        KeyCode::Up => vec![0x1b, b'[', b'A'],
-        KeyCode::Down => vec![0x1b, b'[', b'B'],
-        KeyCode::PageUp => vec![0x1b, b'[', b'5', b'~'],
-        KeyCode::PageDown => vec![0x1b, b'[', b'6', b'~'],
-        KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            vec![c as u8 & 0x1f]
-        }
-        KeyCode::Char(c) => {
-            let mut buf = [0u8; 4];
-            let s = c.encode_utf8(&mut buf);
-            s.as_bytes().to_vec()
-        }
-        KeyCode::Backspace => vec![0x7f],
-        KeyCode::Esc => vec![0x1b],
-        KeyCode::Tab => vec![b'\t'],
-        _ => vec![],
-    }
 }
 
 /// Start the Presenter + StubBackend + workflow, return the factory for creating VirtualTui sessions.
@@ -443,6 +402,11 @@ fn main() -> anyhow::Result<()> {
         execute!(&mut stdout, EnableMouseCapture)?;
     }
 
+    // Send initial terminal size so VirtualTui matches the real terminal from the start.
+    if let Ok((cols, rows)) = crossterm::terminal::size() {
+        (io.send)(encode_resize(cols, rows));
+    }
+
     // Main loop: poll keyboard + mouse + drain output
     while !shutdown.load(Ordering::Relaxed) {
         // Drain output → stdout
@@ -451,30 +415,19 @@ fn main() -> anyhow::Result<()> {
             let _ = stdout.flush();
         }
 
-        // Poll keyboard and mouse
+        // Poll keyboard, mouse, and resize
         if event::poll(Duration::from_millis(10)).unwrap_or(false) {
             match event::read() {
-                Ok(Event::Key(key)) => {
-                    if key.kind != KeyEventKind::Press {
-                        continue;
-                    }
-                    if key.code == KeyCode::Char('c')
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
-                    {
-                        break;
-                    }
-                    let bytes = encode_key(key);
-                    if !bytes.is_empty() {
+                Ok(Event::Mouse(_)) if !mouse => {}
+                Ok(ev) => {
+                    if let Some(bytes) = event_to_bytes(&ev) {
+                        if bytes == [3] {
+                            break; // Ctrl+C
+                        }
                         (io.send)(bytes);
                     }
                 }
-                Ok(Event::Mouse(mouse_ev)) if mouse => {
-                    let bytes = encode_mouse(mouse_ev);
-                    if !bytes.is_empty() {
-                        (io.send)(bytes);
-                    }
-                }
-                _ => {}
+                Err(_) => {}
             }
         }
     }

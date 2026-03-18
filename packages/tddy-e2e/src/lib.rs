@@ -20,6 +20,7 @@ use tddy_tui::{apply_event, render::draw, TuiView};
 
 use crate::test_util::temp_dir_with_git_repo;
 
+pub mod rpc_frontend;
 pub mod test_util;
 
 /// Spawn a Presenter with StubBackend and gRPC server. Returns (join_handle, port, shutdown_flag).

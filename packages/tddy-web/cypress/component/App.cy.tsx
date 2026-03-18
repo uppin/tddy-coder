@@ -152,4 +152,89 @@ describe("App", () => {
         expect(rect.height).to.equal(Cypress.config("viewportHeight"));
       });
   });
+
+  it("shows mobile keyboard button when connected on touch-capable device", () => {
+    cy.viewport(375, 667);
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAuthAsAuthenticated();
+
+    const mockToken = "mock-jwt-from-rpc";
+    const mockTtl = 600;
+    const generateBody = mockTokenResponse(mockToken, mockTtl);
+    const refreshBody = mockRefreshResponse(mockToken, mockTtl);
+    cy.intercept("POST", "**/rpc/token.TokenService/GenerateToken", (req) => {
+      req.reply({
+        statusCode: 200,
+        headers: { "Content-Type": "application/proto" },
+        body: toArrayBuffer(generateBody),
+      });
+    }).as("generateToken");
+    cy.intercept("POST", "**/rpc/token.TokenService/RefreshToken", (req) => {
+      req.reply({
+        statusCode: 200,
+        headers: { "Content-Type": "application/proto" },
+        body: toArrayBuffer(refreshBody),
+      });
+    }).as("refreshToken");
+
+    cy.mount(<App />);
+    cy.wait("@getAuthStatus");
+    cy.get("#livekit-url", { timeout: 5000 }).type("ws://localhost:7880");
+    cy.get("[data-testid='livekit-identity']").type("client");
+    cy.get("#livekit-room").clear().type("terminal-e2e");
+    cy.get("button[type='submit']").click();
+
+    cy.wait("@generateToken");
+    cy.get("[data-testid='connected-terminal-container']", { timeout: 5000 }).should("exist");
+    cy.get("[data-testid='build-id']", { timeout: 2000 }).should("exist");
+
+    // Acceptance: on mobile (touch-capable), keyboard button appears at bottom when keyboard closed
+    cy.get("[data-testid='mobile-keyboard-button']", { timeout: 5000 }).should("exist");
+  });
+
+  it("tapping terminal on mobile when keyboard closed does not focus terminal (button stays visible)", () => {
+    cy.viewport(375, 667);
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAuthAsAuthenticated();
+
+    const mockToken = "mock-jwt-from-rpc";
+    const mockTtl = 600;
+    const generateBody = mockTokenResponse(mockToken, mockTtl);
+    const refreshBody = mockRefreshResponse(mockToken, mockTtl);
+    cy.intercept("POST", "**/rpc/token.TokenService/GenerateToken", (req) => {
+      req.reply({
+        statusCode: 200,
+        headers: { "Content-Type": "application/proto" },
+        body: toArrayBuffer(generateBody),
+      });
+    }).as("generateToken");
+    cy.intercept("POST", "**/rpc/token.TokenService/RefreshToken", (req) => {
+      req.reply({
+        statusCode: 200,
+        headers: { "Content-Type": "application/proto" },
+        body: toArrayBuffer(refreshBody),
+      });
+    }).as("refreshToken");
+
+    cy.mount(<App />);
+    cy.wait("@getAuthStatus");
+    cy.get("#livekit-url", { timeout: 5000 }).type("ws://localhost:7880");
+    cy.get("[data-testid='livekit-identity']").type("client");
+    cy.get("#livekit-room").clear().type("terminal-e2e");
+    cy.get("button[type='submit']").click();
+
+    cy.wait("@generateToken");
+    cy.get("[data-testid='connected-terminal-container']", { timeout: 5000 }).should("exist");
+    cy.get("[data-testid='mobile-keyboard-button']", { timeout: 5000 }).should("exist");
+
+    cy.get("[data-testid='ghostty-terminal']", { timeout: 5000 }).click("center");
+    cy.document().then((doc) => {
+      const active = doc.activeElement;
+      const terminal = doc.querySelector("[data-testid='ghostty-terminal']");
+      expect(
+        terminal && active && terminal.contains(active),
+        "terminal should not receive focus when tapped on mobile (keyboard closed)"
+      ).to.be.false;
+    });
+  });
 });

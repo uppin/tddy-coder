@@ -26,6 +26,8 @@ export interface GhosttyTerminalProps {
   onReady?: () => void;
   /** When true, log write/onData and lifecycle to console. */
   debugLogging?: boolean;
+  /** When true, prevent terminal from receiving focus on pointer/touch events (e.g. mobile when keyboard closed). */
+  preventFocusOnTap?: boolean;
 }
 
 export interface BufferLineInfo {
@@ -59,6 +61,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       onTitleChange,
       onReady,
       debugLogging = false,
+      preventFocusOnTap = false,
     },
     ref
   ) {
@@ -214,16 +217,85 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         e.preventDefault();
       };
 
+      // Capture-phase touch handlers run before preventFocus — ensures SGR is sent for interactive TUI
+      const onTouchStartCapture = (e: TouchEvent) => {
+        if (e.changedTouches.length === 0) return;
+        const t = e.changedTouches[0];
+        const rect = container.getBoundingClientRect();
+        const offsetX = t.clientX - rect.left;
+        const offsetY = t.clientY - rect.top;
+        const coords = toCellCoords(offsetX, offsetY);
+        const tracking = term.hasMouseTracking?.() ?? false;
+        if (tracking && coords) {
+          sendSgr(0, coords.col, coords.row, false);
+        }
+      };
+      const onTouchEndCapture = (e: TouchEvent) => {
+        if (e.changedTouches.length === 0) return;
+        const t = e.changedTouches[0];
+        const rect = container.getBoundingClientRect();
+        const offsetX = t.clientX - rect.left;
+        const offsetY = t.clientY - rect.top;
+        const coords = toCellCoords(offsetX, offsetY);
+        const tracking = term.hasMouseTracking?.() ?? false;
+        if (tracking && coords) {
+          sendSgr(0, coords.col, coords.row, true);
+        }
+      };
+
       container.addEventListener("mousedown", onMouseDown);
       container.addEventListener("mouseup", onMouseUp);
       container.addEventListener("wheel", onWheel, { passive: false });
+      container.addEventListener("touchstart", onTouchStartCapture, { capture: true });
+      container.addEventListener("touchend", onTouchEndCapture, { capture: true });
 
       return () => {
         container.removeEventListener("mousedown", onMouseDown);
         container.removeEventListener("mouseup", onMouseUp);
         container.removeEventListener("wheel", onWheel);
+        container.removeEventListener("touchstart", onTouchStartCapture, { capture: true });
+        container.removeEventListener("touchend", onTouchEndCapture, { capture: true });
       };
     }, [ready, onData]);
+
+    // Prevent focus on pointer/touch/click when preventFocusOnTap (e.g. mobile, keyboard closed).
+    // Touch events still propagate to SGR forwarding (bubble phase) — preventDefault does not stop propagation.
+    useEffect(() => {
+      const container = containerRef.current;
+      if (!container || !preventFocusOnTap) return;
+      const preventFocus = (e: Event) => {
+        e.preventDefault();
+        // Blur after all handlers run — library may call focus() in its mousedown handler
+        queueMicrotask(() => {
+          const active = document.activeElement;
+          if (active && container.contains(active)) {
+            (active as HTMLElement).blur();
+          }
+        });
+      };
+      container.addEventListener("pointerdown", preventFocus, { capture: true });
+      container.addEventListener("mousedown", preventFocus, { capture: true });
+      container.addEventListener("touchstart", preventFocus, { capture: true, passive: false });
+      container.addEventListener("click", preventFocus, { capture: true });
+      return () => {
+        container.removeEventListener("pointerdown", preventFocus, { capture: true });
+        container.removeEventListener("mousedown", preventFocus, { capture: true });
+        container.removeEventListener("touchstart", preventFocus, { capture: true, passive: false });
+        container.removeEventListener("click", preventFocus, { capture: true });
+      };
+    }, [preventFocusOnTap]);
+
+    // Set textarea readonly when preventFocusOnTap — prevents mobile keyboard from opening on tap
+    useEffect(() => {
+      if (!ready || !termRef.current) return;
+      const textarea = termRef.current.textarea;
+      if (!textarea) return;
+      if (preventFocusOnTap) {
+        textarea.setAttribute("readonly", "");
+      } else {
+        textarea.removeAttribute("readonly");
+      }
+    }, [ready, preventFocusOnTap]);
 
     // Note: onData is registered once in the setup useEffect above (line 97-104).
     // Do NOT re-register here — that would cause duplicate events for each keystroke.
@@ -238,7 +310,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         termRef.current?.clear();
       },
       focus() {
-        termRef.current?.focus();
+        const term = termRef.current;
+        if (!term) return;
+        term.textarea?.removeAttribute("readonly");
+        term.focus();
       },
       getBufferText() {
         const term = termRef.current;
@@ -286,7 +361,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       <div
         data-testid="ghostty-terminal"
         ref={containerRef}
-        style={{ width: "100%", height: "100%", minHeight: 200 }}
+        style={{
+          width: "100%",
+          height: "100%",
+          minHeight: 200,
+        }}
       />
     );
   }

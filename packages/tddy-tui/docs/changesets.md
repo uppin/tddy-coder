@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-tui.
 
+- **2026-03-18** [Bug Fix] Terminal Resize Support — Event::Resize handling in event_loop with terminal.clear(); apply_resize in virtual_tui (resize, clear, prev_frame.clear). Unit tests: apply_resize_clears_prev_frame, resize_and_clear_then_draw_produces_correct_frame_area. (tddy-tui)
 - **2026-03-17** [Feature] Terminal UX Fullscreen Touch — Mouse capture, mouse_map hit-testing, SGR mouse parsing, resize sequence parsing, dynamic viewport. EnableMouseCapture in event_loop and virtual_tui. (tddy-tui)
 - **2026-03-14** [Feature] Per-Connection Virtual TUI — VirtualTui run_virtual_tui(), headless ratatui, CapturingWriter headless(). Per-connection thread, event subscription, key parsing. (tddy-tui)
 - **2026-03-14** [Feature] Workflow Restart on Completion — VirtualTui apply_event for WorkflowComplete sets mode to FeatureInput instead of Done. (tddy-tui)
