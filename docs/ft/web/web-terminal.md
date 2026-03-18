@@ -40,7 +40,9 @@ On touch-capable devices or narrow viewports (width &lt; 768px):
 
 - **Keyboard-aware resize**: The terminal container uses the Visual Viewport API. When the virtual keyboard opens, the container shrinks to fit the visible area above the keyboard; when it closes, the terminal fills the screen again.
 - **Manual keyboard button**: A floating "Keyboard" button appears at the bottom center. Tapping it focuses the terminal (opens the virtual keyboard). The button hides while the keyboard is open and reappears when it closes.
-- **Touch forwarding**: Tap-to-click works for TUI menus and interactive elements via SGR mouse sequences.
+- **Focus prevention**: Tapping the terminal does not open the keyboard. The terminal uses `preventFocusOnTap` (event prevention + readonly textarea) so the keyboard opens only when the user taps the Keyboard button.
+- **Touch forwarding**: Tap-to-click works for TUI menus and interactive elements. Capture-phase touch handlers send SGR mouse sequences before focus prevention, so interactive TUIs (vim, htop) receive correct mouse events.
+- **Build ID**: A build timestamp is shown in the top-left when connected for cache verification on mobile.
 
 ## Future Scope
 
