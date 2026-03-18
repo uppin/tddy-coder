@@ -3,8 +3,41 @@ import { createRoot } from "react-dom/client";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { GhosttyTerminalLiveKit } from "./components/GhosttyTerminalLiveKit";
+import { BUILD_ID } from "./buildId";
+
+function HmrOverlay() {
+  const [count, setCount] = useState(0);
+  const meta = import.meta as { hot?: { on: (event: string, cb: () => void) => (() => void) | void } };
+  const hot = meta.hot;
+  useEffect(() => {
+    if (!hot) return;
+    const dispose = hot.on("vite:afterUpdate", () => setCount((c) => c + 1));
+    return () => {
+      if (typeof dispose === "function") dispose();
+    };
+  }, [hot]);
+  if (!hot) return null;
+  return (
+    <span
+      data-testid="hmr-count"
+      style={{
+        position: "fixed",
+        bottom: 8,
+        left: 8,
+        fontSize: 10,
+        color: "#888",
+        zIndex: 9999,
+        fontFamily: "monospace",
+      }}
+    >
+      HMR: {count}
+    </span>
+  );
+}
+
 import { TokenService } from "./gen/token_pb";
 import { useAuth } from "./hooks/useAuth";
+import { useVisualViewport } from "./hooks/useVisualViewport";
 import { GitHubLoginButton } from "./components/GitHubLoginButton";
 import { AuthCallback } from "./components/AuthCallback";
 import { UserAvatar } from "./components/UserAvatar";
@@ -75,6 +108,21 @@ const overlayButtonStyle = {
 const disconnectButtonStyle = { ...overlayButtonStyle, right: 8 } as const;
 const ctrlCButtonStyle = { ...overlayButtonStyle, right: 72 } as const;
 
+const mobileKeyboardButtonStyle = {
+  position: "absolute" as const,
+  bottom: 16,
+  left: "50%",
+  transform: "translateX(-50%)",
+  padding: "10px 20px",
+  fontSize: 14,
+  cursor: "pointer",
+  backgroundColor: "rgba(0,0,0,0.7)",
+  color: "#fff",
+  border: "1px solid #555",
+  borderRadius: 8,
+  zIndex: 10,
+} as const;
+
 function ConnectedTerminal({
   url,
   identity,
@@ -93,6 +141,11 @@ function ConnectedTerminal({
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
   const sendCtrlCRef = useRef<(() => void) | null>(null);
+  const focusTerminalRef = useRef<(() => void) | null>(null);
+  const { height: viewportHeight, isKeyboardOpen } = useVisualViewport();
+  const isMobile =
+    typeof window !== "undefined" &&
+    (("ontouchstart" in window) || window.innerWidth < 768);
 
   useEffect(() => {
     client
@@ -138,7 +191,10 @@ function ConnectedTerminal({
       data-testid="connected-terminal-container"
       style={{
         position: "fixed",
-        inset: 0,
+        top: 0,
+        left: 0,
+        right: 0,
+        height: viewportHeight,
         margin: 0,
         overflow: "hidden",
         display: "flex",
@@ -159,6 +215,19 @@ function ConnectedTerminal({
       >
         Disconnect
       </button>
+      <span
+        data-testid="build-id"
+        style={{
+          ...overlayButtonStyle,
+          left: 8,
+          right: "auto",
+          fontSize: 10,
+          color: "#888",
+          cursor: "default",
+        }}
+      >
+        {BUILD_ID}
+      </span>
       <GhosttyTerminalLiveKit
         url={url}
         token={initialToken}
@@ -167,10 +236,24 @@ function ConnectedTerminal({
         roomName={roomName}
         debugMode={false}
         debugLogging={debugLogging ?? false}
+        autoFocus={!isMobile}
+        preventFocusOnTap={isMobile && !isKeyboardOpen}
         onRegisterSendCtrlC={(send) => {
           sendCtrlCRef.current = send;
         }}
+        onRegisterFocus={(focus) => {
+          focusTerminalRef.current = focus;
+        }}
       />
+      {isMobile && !isKeyboardOpen && (
+        <button
+          data-testid="mobile-keyboard-button"
+          onClick={() => focusTerminalRef.current?.()}
+          style={mobileKeyboardButtonStyle}
+        >
+          Keyboard
+        </button>
+      )}
     </div>
   );
 }
@@ -299,11 +382,12 @@ function ConnectionForm() {
 export function App() {
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
 
-  if (path === "/auth/callback") {
-    return <AuthCallback />;
-  }
-
-  return <ConnectionForm />;
+  return (
+    <>
+      {path === "/auth/callback" ? <AuthCallback /> : <ConnectionForm />}
+      <HmrOverlay />
+    </>
+  );
 }
 
 const root = document.getElementById("root");

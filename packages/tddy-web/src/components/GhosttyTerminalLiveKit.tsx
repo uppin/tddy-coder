@@ -58,6 +58,12 @@ export interface GhosttyTerminalLiveKitProps {
   debugLogging?: boolean;
   /** Called with a function to send Ctrl+C (\x03) to the terminal. Used by overlay button. */
   onRegisterSendCtrlC?: (send: () => void) => void;
+  /** Called with a function to focus the terminal. Used by mobile keyboard button. */
+  onRegisterFocus?: (focus: () => void) => void;
+  /** When false, do not auto-focus terminal on ready (e.g. for mobile to avoid opening keyboard). Default true. */
+  autoFocus?: boolean;
+  /** When true, prevent terminal from receiving focus on pointer/touch (e.g. mobile when keyboard closed). */
+  preventFocusOnTap?: boolean;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -70,6 +76,9 @@ export function GhosttyTerminalLiveKit({
   debugMode = false,
   debugLogging = false,
   onRegisterSendCtrlC,
+  onRegisterFocus,
+  autoFocus = true,
+  preventFocusOnTap = false,
 }: GhosttyTerminalLiveKitProps) {
   const log = debugLogging
     ? (...args: unknown[]) => console.log("[GhosttyLiveKit]", ...args)
@@ -302,6 +311,14 @@ export function GhosttyTerminalLiveKit({
     }
   }, [onRegisterSendCtrlC]);
 
+  useEffect(() => {
+    if (onRegisterFocus) {
+      onRegisterFocus(() => {
+        termRef.current?.focus();
+      });
+    }
+  }, [onRegisterFocus]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div data-testid="livekit-status">{status}</div>
@@ -320,6 +337,7 @@ export function GhosttyTerminalLiveKit({
           <GhosttyTerminal
             ref={termRef}
             debugLogging={debugLogging}
+            preventFocusOnTap={preventFocusOnTap}
             onReady={() => {
               termReadyRef.current = true;
               const buf = outputBufferRef.current;
@@ -331,7 +349,9 @@ export function GhosttyTerminalLiveKit({
                   log("dataflow: onReady flush write", chunk.length, "bytes");
                   term.write(chunk);
                 }
-                term.focus();
+                if (autoFocus !== false) {
+                  term.focus();
+                }
               }
             }}
             onResize={(size) => {
