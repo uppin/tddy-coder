@@ -138,6 +138,9 @@ pub fn run_event_loop(
                         let _ = intent_tx.send(intent);
                     }
                 }
+                Ok(Event::Resize(_, _)) => {
+                    terminal.clear()?;
+                }
                 _ => {}
             }
         }

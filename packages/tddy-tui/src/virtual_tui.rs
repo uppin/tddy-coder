@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::execute;
-use ratatui::backend::CrosstermBackend;
+use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Rect;
 use ratatui::Terminal;
 use ratatui::{TerminalOptions, Viewport};
@@ -102,7 +102,19 @@ pub fn run_virtual_tui(
                     "virtual_tui: frame changed ({} bytes), sending",
                     current_frame.len()
                 );
-                let _ = output_tx.blocking_send(current_frame.clone());
+                // When prev_frame is empty (initial render or post-resize), prepend clear
+                // so the remote vt100 parser starts with a clean slate. Otherwise shrink→grow
+                // leaves old content visible and the final screen shows duplicated status bars.
+                let to_send: Vec<u8> = if prev_frame.is_empty() {
+                    const CLEAR_AND_HOME: &[u8] = b"\x1b[2J\x1b[H";
+                    let mut out = Vec::with_capacity(CLEAR_AND_HOME.len() + current_frame.len());
+                    out.extend_from_slice(CLEAR_AND_HOME);
+                    out.extend_from_slice(&current_frame);
+                    out
+                } else {
+                    current_frame.clone()
+                };
+                let _ = output_tx.blocking_send(to_send);
                 *prev_frame = current_frame;
             }
         };
@@ -160,9 +172,7 @@ pub fn run_virtual_tui(
                         log::trace!("virtual_tui: received input ({} bytes)", bytes.len());
                         input_buf.extend_from_slice(&bytes);
                         while let Some((cols, rows, consumed)) = parse_resize_from_buf(&input_buf) {
-                            if let Err(e) = terminal.resize(Rect::new(0, 0, cols, rows)) {
-                                log::debug!("virtual_tui: resize error: {}", e);
-                            }
+                            apply_resize(&mut terminal, &mut prev_frame, cols, rows);
                             input_buf.drain(..consumed);
                             updated = true;
                         }
@@ -239,6 +249,23 @@ pub fn run_virtual_tui(
         }
         log::trace!("virtual_tui: main loop exited");
     });
+}
+
+/// Apply resize: resize terminal, clear buffers, reset prev_frame.
+/// Ensures the next render sends a full frame to the remote client.
+fn apply_resize<B: Backend>(
+    terminal: &mut Terminal<B>,
+    prev_frame: &mut Vec<u8>,
+    cols: u16,
+    rows: u16,
+) {
+    if let Err(e) = terminal.resize(Rect::new(0, 0, cols, rows)) {
+        log::debug!("virtual_tui: resize error: {}", e);
+    }
+    if let Err(e) = terminal.clear() {
+        log::debug!("virtual_tui: clear after resize error: {}", e);
+    }
+    prev_frame.clear();
 }
 
 pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: PresenterEvent) {
@@ -598,6 +625,51 @@ mod tests {
             event.kind,
             crossterm::event::MouseEventKind::ScrollDown
         ));
+    }
+
+    #[test]
+    fn apply_resize_clears_prev_frame() {
+        use ratatui::backend::TestBackend;
+        use ratatui::{TerminalOptions, Viewport};
+
+        let backend = TestBackend::new(80, 24);
+        let viewport = Viewport::Fixed(Rect::new(0, 0, 80, 24));
+        let mut terminal = Terminal::with_options(backend, TerminalOptions { viewport }).unwrap();
+
+        let mut prev_frame = vec![1u8, 2, 3];
+        apply_resize(&mut terminal, &mut prev_frame, 60, 12);
+
+        assert!(
+            prev_frame.is_empty(),
+            "apply_resize must clear prev_frame so next render sends full frame"
+        );
+    }
+
+    #[test]
+    fn resize_and_clear_then_draw_produces_correct_frame_area() {
+        use ratatui::backend::TestBackend;
+        use ratatui::widgets::Paragraph;
+        use ratatui::{TerminalOptions, Viewport};
+
+        // Use Fixed viewport (like virtual_tui) so resize() updates dimensions.
+        // Verifies resize+clear+draw contract: frame area matches resized dimensions.
+        let backend = TestBackend::new(80, 24);
+        let viewport = Viewport::Fixed(Rect::new(0, 0, 80, 24));
+        let mut terminal = Terminal::with_options(backend, TerminalOptions { viewport }).unwrap();
+
+        terminal.resize(Rect::new(0, 0, 60, 12)).unwrap();
+        terminal.clear().unwrap();
+
+        let mut frame_area = Rect::default();
+        terminal
+            .draw(|f| {
+                frame_area = f.area();
+                f.render_widget(Paragraph::new("x"), frame_area);
+            })
+            .unwrap();
+
+        assert_eq!(frame_area.width, 60, "frame width should match resize");
+        assert_eq!(frame_area.height, 12, "frame height should match resize");
     }
 
     #[test]

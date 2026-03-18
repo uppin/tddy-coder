@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use strip_ansi_escapes::strip;
+use tddy_e2e::rpc_frontend::encode_resize;
 use tddy_e2e::{connect_terminal_grpc, spawn_presenter_with_terminal_service};
 use tddy_service::proto::terminal::TerminalInput;
 use vt100::Parser;
@@ -551,6 +552,66 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
          {} out of {} chunks showed the selection back on 'Email/password' (the blink bug).",
         chunks_with_selection_reset.len(),
         chunk_idx
+    );
+
+    Ok(())
+}
+
+/// Bug reproduction: when shrinking and growing the terminal by 10 rows, the final
+/// visible screen should show "PgUp/PgDn scroll" exactly once. Resize artifacts
+/// (duplicate status bars, scrollback accumulation, or layout glitches) can cause
+/// it to appear multiple times in the visible output.
+#[tokio::test]
+async fn grpc_resize_shrink_grow_shows_pgup_pgdn_scroll_exactly_once() -> anyhow::Result<()> {
+    let (_handle, port, shutdown) =
+        spawn_presenter_with_terminal_service(Some("Build auth".to_string()));
+
+    let mut client = connect_terminal_grpc(port).await?;
+
+    let (input_tx, input_rx) = tokio::sync::mpsc::channel(64);
+    let input_stream = tokio_stream::wrappers::ReceiverStream::new(input_rx);
+
+    let mut stream = client
+        .stream_terminal_io(tonic::Request::new(input_stream))
+        .await?
+        .into_inner();
+
+    input_tx
+        .send(TerminalInput {
+            data: encode_resize(80, 24),
+        })
+        .await?;
+
+    let mut all_output = drain_output(&mut stream, Duration::from_millis(500), "init").await?;
+
+    input_tx
+        .send(TerminalInput {
+            data: encode_resize(80, 14),
+        })
+        .await?;
+    let shrink_output = drain_output(&mut stream, Duration::from_millis(500), "shrink").await?;
+    all_output.extend_from_slice(&shrink_output);
+
+    input_tx
+        .send(TerminalInput {
+            data: encode_resize(80, 24),
+        })
+        .await?;
+    let grow_output = drain_output(&mut stream, Duration::from_millis(500), "grow").await?;
+    all_output.extend_from_slice(&grow_output);
+
+    shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+    drop(input_tx);
+
+    let mut parser = Parser::new(24, 80, 0);
+    parser.process(&all_output);
+    let visible = parser.screen().contents();
+    let count = visible.matches("PgUp/PgDn scroll").count();
+    assert_eq!(
+        count, 1,
+        "PgUp/PgDn scroll should appear exactly once in final visible screen after shrink and grow by 10 rows; got {} occurrences. Screen:\n{}",
+        count,
+        visible
     );
 
     Ok(())
