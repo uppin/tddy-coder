@@ -2,9 +2,16 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-19 — Configurable Log Routing via YAML Config
+
+- **Log config section**: YAML `log:` section with named loggers (output target + format) and policies that reference loggers by name. Selectors: target (exact/glob), module_path, heuristic. First-match-wins ordering.
+- **CLI**: `--log-level <level>` overrides default policy level. Removed `--debug`, `--debug-output`, `--webrtc-debug-output`.
+- **Log rotation**: On startup, existing log files renamed with timestamp suffix; rotated files beyond `max_rotated` pruned.
+- **Packages**: tddy-core (log_backend.rs), tddy-coder (config.rs, run.rs).
+
 ## 2026-03-18 — Debug, Demo Worktree, Workflow Logging
 
-- **WebRTC debug output**: `--webrtc-debug-output <path>` routes libwebrtc logs (connection.cc, etc.) to a separate file instead of the main debug output.
+- **WebRTC debug output** (superseded by log config): Previously `--webrtc-debug-output <path>` routed libwebrtc logs to a separate file; now use `log:` section with `selector: { target: "libwebrtc" }`.
 - **Demo worktree skip**: When backend is stub (tddy-demo), acceptance-tests uses output_dir directly; no git fetch or worktree creation.
 - **Workflow failure logging**: Workflow failures logged at error level for visibility in debug output.
 - **VirtualTui debug logs**: Input, keys, mouse, resize, render, frame sent at debug level for remote TUI troubleshooting.

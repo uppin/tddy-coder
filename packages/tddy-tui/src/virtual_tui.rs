@@ -100,7 +100,10 @@ pub fn run_virtual_tui(
                 b.clone()
             };
             if current_frame != *prev_frame {
-                log::debug!("VirtualTui: frame changed {} bytes -> client", current_frame.len());
+                log::debug!(
+                    "VirtualTui: frame changed {} bytes -> client",
+                    current_frame.len()
+                );
                 // When prev_frame is empty (initial render or post-resize), prepend clear
                 // so the remote vt100 parser starts with a clean slate. Otherwise shrink→grow
                 // leaves old content visible and the final screen shows duplicated status bars.
@@ -200,11 +203,7 @@ pub fn run_virtual_tui(
                             }
                         }
                         while let Some((key, consumed)) = parse_key_from_buf(&mut input_buf) {
-                            log::debug!(
-                                "VirtualTui: key {:?} mode={:?}",
-                                key.code,
-                                state.mode
-                            );
+                            log::debug!("VirtualTui: key {:?} mode={:?}", key.code, state.mode);
                             let inbox_len = state.inbox.len();
                             let view_consumed = view.view_state_mut().handle_key_view_local(
                                 key,

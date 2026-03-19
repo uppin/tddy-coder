@@ -11,7 +11,10 @@ use tddy_e2e::rpc_frontend::{encode_resize, event_to_bytes};
 fn encode_resize_produces_correct_osc_sequence() {
     let bytes = encode_resize(120, 30);
     let expected = b"\x1b]resize;120;30\x07";
-    assert_eq!(bytes, expected, "encode_resize must produce OSC resize sequence");
+    assert_eq!(
+        bytes, expected,
+        "encode_resize must produce OSC resize sequence"
+    );
 }
 
 #[test]

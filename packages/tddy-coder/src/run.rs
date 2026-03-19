@@ -77,26 +77,24 @@ pub fn run_main(mut args: Args) {
         std::process::exit(1);
     }
 
-    tddy_core::init_tddy_logger(
-        args.debug,
-        args.debug_output.as_deref(),
-        args.webrtc_debug_output.as_deref(),
-    );
-    if args.debug_output.is_none() {
-        if let Some(session_dir) = session_dir_path(&args) {
-            let logs = session_dir.join("logs");
-            let _ = std::fs::create_dir_all(&logs);
+    let log_config = effective_log_config(&args);
+    let has_file_output = tddy_core::config_has_file_output(&log_config);
+    tddy_core::init_tddy_logger(log_config);
+    if let Some(session_dir) = session_dir_path(&args) {
+        let logs = session_dir.join("logs");
+        let _ = std::fs::create_dir_all(&logs);
+        if !has_file_output {
             tddy_core::redirect_debug_output(&logs.join("debug.log"));
-            log::set_max_level(log::LevelFilter::Debug);
-            // Daemon runs headless (stdin/stdout/stderr = null). Redirect stderr to a real file
-            // so crossterm/terminal APIs that may probe stderr work correctly (e.g. VirtualTui).
-            #[cfg(unix)]
-            if args.daemon {
-                if let Ok(file) = std::fs::File::create(logs.join("daemon_stderr.log")) {
-                    let fd = file.into_raw_fd();
-                    let _ = unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
-                    let _ = unsafe { libc::close(fd) };
-                }
+        }
+        log::set_max_level(log::LevelFilter::Debug);
+        // Daemon runs headless (stdin/stdout/stderr = null). Redirect stderr to a real file
+        // so crossterm/terminal APIs that may probe stderr work correctly (e.g. VirtualTui).
+        #[cfg(unix)]
+        if args.daemon {
+            if let Ok(file) = std::fs::File::create(logs.join("daemon_stderr.log")) {
+                let fd = file.into_raw_fd();
+                let _ = unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
+                let _ = unsafe { libc::close(fd) };
             }
         }
     }
@@ -161,10 +159,10 @@ pub struct Args {
     pub conversation_output: Option<PathBuf>,
     pub model: Option<String>,
     pub allowed_tools: Option<Vec<String>>,
-    pub debug: bool,
-    pub debug_output: Option<PathBuf>,
-    /// When set, WebRTC/libwebrtc debug logs (connection.cc, etc.) go to this file instead of debug_output.
-    pub webrtc_debug_output: Option<PathBuf>,
+    /// Log config from YAML. When None, default_log_config is used.
+    pub log: Option<tddy_core::LogConfig>,
+    /// CLI override for default log level (e.g. --log-level debug).
+    pub log_level: Option<log::LevelFilter>,
     pub agent: String,
     pub prompt: Option<String>,
     /// When Some(port), gRPC server runs alongside TUI on the given port.
@@ -238,17 +236,9 @@ pub struct CoderArgs {
     #[arg(long, value_delimiter = ',')]
     pub allowed_tools: Option<Vec<String>>,
 
-    /// Enable debug logging (stderr in plain mode, TUI debug area in TUI mode)
-    #[arg(long)]
-    pub debug: bool,
-
-    /// Enable debug logging and redirect to file (avoids stderr/TUI corruption)
-    #[arg(long)]
-    pub debug_output: Option<PathBuf>,
-
-    /// Redirect WebRTC/libwebrtc debug logs to a separate file (e.g. connection.cc, peer_connection.cc)
-    #[arg(long)]
-    pub webrtc_debug_output: Option<PathBuf>,
+    /// Override default log level (e.g. debug, trace)
+    #[arg(long, value_name = "LEVEL", value_parser = ["off", "error", "warn", "info", "debug", "trace"])]
+    pub log_level: Option<String>,
 
     /// Agent backend: claude, cursor, or stub (stub for tests/demo, no tddy-tools needed)
     #[arg(long, default_value = "claude", value_parser = ["claude", "cursor", "stub"])]
@@ -364,17 +354,9 @@ pub struct DemoArgs {
     #[arg(long, value_delimiter = ',')]
     pub allowed_tools: Option<Vec<String>>,
 
-    /// Enable debug logging (stderr in plain mode, TUI debug area in TUI mode)
-    #[arg(long)]
-    pub debug: bool,
-
-    /// Enable debug logging and redirect to file (avoids stderr/TUI corruption)
-    #[arg(long)]
-    pub debug_output: Option<PathBuf>,
-
-    /// Redirect WebRTC/libwebrtc debug logs to a separate file (e.g. connection.cc, peer_connection.cc)
-    #[arg(long)]
-    pub webrtc_debug_output: Option<PathBuf>,
+    /// Override default log level (e.g. debug, trace)
+    #[arg(long, value_name = "LEVEL", value_parser = ["off", "error", "warn", "info", "debug", "trace"])]
+    pub log_level: Option<String>,
 
     /// Agent backend: stub only (default: stub)
     #[arg(long, default_value = "stub", value_parser = ["stub"])]
@@ -461,6 +443,43 @@ pub struct DemoArgs {
     pub mouse: bool,
 }
 
+fn is_debug_mode(args: &Args) -> bool {
+    if let Some(level) = args.log_level {
+        return level >= log::LevelFilter::Debug;
+    }
+    args.log
+        .as_ref()
+        .is_some_and(|c| c.default.level >= log::LevelFilter::Debug)
+}
+
+fn effective_log_config(args: &Args) -> tddy_core::LogConfig {
+    let level_override = args.log_level;
+    let mut config = args
+        .log
+        .clone()
+        .unwrap_or_else(|| tddy_core::default_log_config(level_override, None));
+    if let Some(level) = level_override {
+        config.default.level = level;
+    }
+    config
+}
+
+fn parse_log_level(s: Option<&str>) -> Option<log::LevelFilter> {
+    s.and_then(|s| {
+        s.parse::<log::LevelFilter>()
+            .ok()
+            .or_else(|| match s.to_lowercase().as_str() {
+                "off" => Some(log::LevelFilter::Off),
+                "error" => Some(log::LevelFilter::Error),
+                "warn" => Some(log::LevelFilter::Warn),
+                "info" => Some(log::LevelFilter::Info),
+                "debug" => Some(log::LevelFilter::Debug),
+                "trace" => Some(log::LevelFilter::Trace),
+                _ => None,
+            })
+    })
+}
+
 impl From<CoderArgs> for Args {
     fn from(a: CoderArgs) -> Args {
         Args {
@@ -469,9 +488,8 @@ impl From<CoderArgs> for Args {
             conversation_output: a.conversation_output,
             model: a.model,
             allowed_tools: a.allowed_tools,
-            debug: a.debug,
-            debug_output: a.debug_output,
-            webrtc_debug_output: a.webrtc_debug_output,
+            log: None,
+            log_level: parse_log_level(a.log_level.as_deref()),
             agent: a.agent,
             prompt: a.prompt,
             grpc: a.grpc,
@@ -506,9 +524,8 @@ impl From<DemoArgs> for Args {
             conversation_output: a.conversation_output,
             model: a.model,
             allowed_tools: a.allowed_tools,
-            debug: a.debug,
-            debug_output: a.debug_output,
-            webrtc_debug_output: a.webrtc_debug_output,
+            log: None,
+            log_level: parse_log_level(a.log_level.as_deref()),
             agent: a.agent,
             prompt: a.prompt,
             grpc: a.grpc,
@@ -799,11 +816,7 @@ fn on_progress(_event: &ProgressEvent) {
 /// Run as headless gRPC daemon. Serves GetSession and ListSessions; blocks until shutdown.
 /// When LiveKit args are present, also joins the room as a participant serving RPC over the data channel.
 fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
-    tddy_core::init_tddy_logger(
-        args.debug,
-        args.debug_output.as_deref(),
-        args.webrtc_debug_output.as_deref(),
-    );
+    tddy_core::init_tddy_logger(effective_log_config(args));
 
     let sessions_base = tddy_core::output::sessions_base_path()
         .map_err(|e| anyhow::anyhow!("{}", e))?
@@ -1087,11 +1100,7 @@ fn create_backend(
 /// Resolve conversation_output and debug_output defaults to plan_dir/logs/ when not set.
 /// Returns the resolved conversation output path for use in context.
 fn resolve_log_defaults(args: &Args, plan_dir: &Path) -> Option<PathBuf> {
-    tddy_core::resolve_log_defaults(
-        args.conversation_output.clone(),
-        args.debug_output.as_ref(),
-        plan_dir,
-    )
+    tddy_core::resolve_log_defaults(args.conversation_output.clone(), None::<&Path>, plan_dir)
 }
 
 /// Build context_values for a goal from args and plan_dir.
@@ -1120,7 +1129,7 @@ fn build_goal_context(
         "allowed_tools".to_string(),
         serde_json::to_value(args.allowed_tools.clone()).unwrap(),
     );
-    ctx.insert("debug".to_string(), serde_json::json!(args.debug));
+    ctx.insert("debug".to_string(), serde_json::json!(is_debug_mode(args)));
     if let Some(p) = plan_dir {
         ctx.insert("plan_dir".to_string(), serde_json::to_value(p).unwrap());
         // Repo root is stored in changeset.repo_path (set when plan started). Use it for worktree creation.
@@ -1629,8 +1638,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         args.plan_dir.clone(),
         initial_prompt,
         args.conversation_output.clone(),
-        args.debug_output.clone(),
-        args.debug,
+        None,
+        is_debug_mode(args),
         args.session_id.clone(),
         socket_path,
         tool_call_rx,
@@ -1664,7 +1673,13 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         }
     });
 
-    tddy_tui::run_event_loop(conn, shutdown.as_ref(), None, args.debug, args.mouse)?;
+    tddy_tui::run_event_loop(
+        conn,
+        shutdown.as_ref(),
+        None,
+        is_debug_mode(args),
+        args.mouse,
+    )?;
 
     presenter_handle.join().expect("presenter thread panicked");
 

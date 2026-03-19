@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-core.
 
+- **2026-03-19** [Feature] Configurable Log Routing via YAML Config — LogConfig with named loggers (output target + format) and policies that reference loggers by name. Selectors: target (exact/glob), module_path, heuristic. TddyLogger routes records to first-matching policy. Log rotation on startup (timestamp rename, max_rotated retention). init_tddy_logger(config: LogConfig). (tddy-core)
 - **2026-03-18** [Feature] Debug, Demo Worktree, Workflow Logging — init_tddy_logger(debug, debug_output_path, webrtc_debug_output_path). WebRTC detection via `.cc:` or `.cpp:`; libwebrtc logs route to separate file when set. ensure_worktree_for_acceptance_tests skips worktree when backend_name == "stub" (demo); uses output_dir directly. log::error! on worktree creation failure (repo_root, plan_dir). Workflow failure log::info! → log::error! for debug visibility. (tddy-core)
 - **2026-03-14** [Feature] Per-Connection Virtual TUI — ViewConnection, connect_view(), NoopView. Presenter decoupled from single view; views subscribe via connect_view for state snapshot + event_rx + intent_tx. (tddy-core)
 - **2026-03-14** [Bug Fix] Clarification Prompt Preference — BackendInvokeTask prefers `prompt` over `feature_input` when both exist. Fixes clarification loop: before_* hooks (e.g. before_acceptance_tests) set prompt with follow-up when resuming from clarification; prompt was previously ignored in favor of feature_input. (tddy-core)

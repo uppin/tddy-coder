@@ -28,7 +28,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 8. Planning output always goes to `$HOME/.tddy/sessions/{uuid}/` (stable session directory)
 9. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
 10. Accepts `--conversation-output <path>` to log the entire agent conversation in raw bytes to a file (Updated: 2026-03-07)
-11. Accepts `--debug` to print CLI command and cwd before running (for debugging empty output)
+11. Accepts `--log-level <level>` to override default log level (e.g. `--log-level debug`)
 12. Accepts `--agent <name>` to select backend: `claude` (default) or `cursor`
 13. Reads the feature description from stdin (supports piped input and interactive prompt), or from `--prompt <text>` when provided
 14. **TUI mode**: When both stdin and stderr are TTY, runs full TUI (activity log, inbox when Running, status bar, prompt bar). Agent output is always visible. During Running mode, users can queue prompts in the inbox; queued items are displayed, navigable (Up/Down), editable (E), and deletable (D); on workflow completion with non-empty inbox the first item is auto-dequeued and sent; when inbox is empty, mode transitions to FeatureInput so the user can start a new workflow without restarting. Piped/non-TTY uses plain linear output.

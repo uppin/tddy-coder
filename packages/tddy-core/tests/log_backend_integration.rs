@@ -61,7 +61,7 @@ fn redirect_debug_output_writes_to_file() {
     std::fs::create_dir_all(&tmp).unwrap();
 
     let log_file = tmp.join("debug.log");
-    tddy_core::init_tddy_logger(true, None, None);
+    tddy_core::init_tddy_logger_legacy(true, None, None);
     redirect_debug_output(&log_file);
 
     log::debug!("test redirect message");

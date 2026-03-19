@@ -65,6 +65,12 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 - **plan_allowlist / acceptance_tests_allowlist / red_allowlist / green_allowlist / demo_allowlist / evaluate_allowlist / validate_subagents_allowlist / refactor_allowlist / update_docs_allowlist**: Goal-specific tool allowlists passed as `--allowedTools`. All goals include `Bash(tddy-tools *)` for agent tool calls. Plan: Read, Glob, Grep, SemanticSearch, AskUserQuestion, ExitPlanMode. Acceptance-tests, Red, Green, Demo: Read, Write, Edit, Glob, Grep, Bash(cargo *, tddy-tools *), SemanticSearch. Evaluate: Read, Glob, Grep, SemanticSearch, Bash(git diff/log/find/cargo build/check *, tddy-tools *). Validate (subagents): Agent, Read, Write, Edit, Glob, Grep, SemanticSearch, Bash(git diff/cargo build/check/test *, tddy-tools *). Refactor: Read, Write, Edit, Glob, Grep, SemanticSearch, Bash(cargo *, tddy-tools *). UpdateDocs: Read, Write, Edit, Glob, Grep, SemanticSearch, Bash(cargo *, tddy-tools *).
 
+### Log (`log_backend.rs`)
+
+- **LogConfig**: YAML `log:` section. **Loggers** define output targets (stderr, stdout, file, buffer, mute) and optional format. **Policies** reference loggers by name and map selectors (target, module_path, heuristic) to level filters. First-match-wins ordering.
+- **TddyLogger**: Implements `log::Log`. Routes records to the logger chosen by the first matching policy. Format templating: `{timestamp}`, `{level}`, `{target}`, `{module}`, `{message}`.
+- **Log rotation**: On startup, existing file outputs are renamed to `{stem}.{ISO-8601}.{ext}`; rotated files beyond `max_rotated` are pruned. `TDDY_QUIET` switches default output to buffer for TUI display.
+
 ### Workflow (`workflow/`)
 
 - **Graph-flow modules**: `Task` trait (async run), `NextAction`, `TaskResult`, `Context` (typed k/v store), `Graph`/`GraphBuilder`, `Session`/`SessionStorage`, `FlowRunner`, `WorkflowEngine`. `build_tdd_workflow_graph(backend)` builds plan→acceptance-tests→red→green→end. `PlanTask` invokes backend, parses response, writes PRD.md and TODO.md. `BackendInvokeTask` for acceptance-tests, red, green. `FlowRunner` loads session, executes one step, saves session. After `after_task`, FlowRunner calls `RunnerHooks::elicitation_after_task`; if `Some(event)`, returns `ExecutionStatus::ElicitationNeeded` to caller instead of advancing. `WorkflowEngine` returns to caller on `ElicitationNeeded` (no auto-continue).

@@ -26,8 +26,10 @@ pub use changeset::{
 };
 pub use error::{BackendError, ParseError, WorkflowError};
 pub use log_backend::{
-    get_buffered_logs, init_tddy_logger, redirect_debug_output, resolve_log_defaults,
-    take_buffered_logs,
+    config_has_file_output, default_log_config, find_matching_policy, get_buffered_logs,
+    init_tddy_logger, init_tddy_logger_legacy, matches_selector, redirect_debug_output,
+    resolve_log_defaults, resolve_logger, take_buffered_logs, DefaultLogPolicy, LogConfig,
+    LogOutput, LogPolicy, LogRotation, LogSelector, LoggerDefinition, MatchedPolicy,
 };
 pub use output::{
     parse_acceptance_tests_response, parse_demo_response, parse_evaluate_response,

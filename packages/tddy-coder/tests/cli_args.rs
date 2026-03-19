@@ -307,14 +307,30 @@ fn cli_accepts_refactor_goal() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// --debug-output creates file and redirects debug logs to it (no stderr corruption).
+/// Log config with file output redirects logs to file (no stderr corruption).
 #[test]
 #[cfg(unix)]
-fn debug_output_redirects_logs_to_file() {
-    let tmp = std::env::temp_dir().join("tddy-debug-output-test");
+fn log_config_file_output_redirects_logs() {
+    let tmp = std::env::temp_dir().join("tddy-log-config-file-test");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
     let debug_file = tmp.join("debug.log");
+
+    let config_yaml = format!(
+        r#"
+log:
+  loggers:
+    default:
+      output: {{ file: "{}" }}
+      format: "{{timestamp}} [{{level}}] [{{target}}] {{message}}"
+  default:
+    level: debug
+    logger: default
+"#,
+        debug_file.display()
+    );
+    let config_path = tmp.join("config.yaml");
+    std::fs::write(&config_path, config_yaml).expect("write config");
 
     let script = r#"#!/bin/sh
 printf '%s\n' '{"type":"system","session_id":"t1"}'
@@ -340,23 +356,23 @@ exit 0
     );
     cmd.env("PATH", path);
     cmd.args([
+        "-c",
+        config_path.to_str().unwrap(),
         "--goal",
         "plan",
         "--prompt",
         "test feature",
-        "--debug-output",
-        debug_file.to_str().unwrap(),
         "--agent",
         "cursor",
     ]);
 
     let _output = cmd.output().expect("run tddy-coder");
 
-    assert!(debug_file.exists(), "debug output file should be created");
-    let content = std::fs::read_to_string(&debug_file).expect("read debug file");
+    assert!(debug_file.exists(), "log output file should be created");
+    let content = std::fs::read_to_string(&debug_file).expect("read log file");
     assert!(
         content.contains("[DEBUG]"),
-        "debug output file should contain debug-level log entries, got: {}",
+        "log file should contain debug-level log entries, got: {}",
         content
     );
 

@@ -7,6 +7,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 use crate::Args;
+use tddy_core::LogConfig;
 
 /// Top-level config file structure.
 #[derive(Debug, Default, Deserialize)]
@@ -23,9 +24,7 @@ pub struct Config {
     #[serde(default)]
     pub allowed_tools: Option<Vec<String>>,
     #[serde(default)]
-    pub debug: Option<bool>,
-    #[serde(default)]
-    pub debug_output: Option<PathBuf>,
+    pub log: Option<LogConfig>,
     #[serde(default)]
     pub agent: Option<String>,
     #[serde(default)]
@@ -122,11 +121,8 @@ pub fn merge_config_into_args(args: &mut Args, config: Config) {
     if args.allowed_tools.is_none() {
         args.allowed_tools = config.allowed_tools;
     }
-    if !args.debug {
-        args.debug = config.debug.unwrap_or(false);
-    }
-    if args.debug_output.is_none() {
-        args.debug_output = config.debug_output;
+    if args.log.is_none() {
+        args.log = config.log;
     }
     if args.agent == "claude" {
         // "claude" is the default — only override if config specifies something
@@ -218,7 +214,6 @@ mod tests {
 agent: stub
 daemon: true
 model: sonnet
-debug: true
 
 livekit:
   url: ws://127.0.0.1:7880
@@ -241,7 +236,6 @@ github:
         assert_eq!(config.agent.as_deref(), Some("stub"));
         assert_eq!(config.daemon, Some(true));
         assert_eq!(config.model.as_deref(), Some("sonnet"));
-        assert!(config.debug.unwrap());
 
         let lk = config.livekit.as_ref().unwrap();
         assert_eq!(lk.url.as_deref(), Some("ws://127.0.0.1:7880"));
@@ -279,6 +273,40 @@ github:
     }
 
     #[test]
+    fn parse_log_config() {
+        let yaml = r#"
+log:
+  loggers:
+    default:
+      output: stderr
+      format: "{timestamp} [{level}] [{target}] {message}"
+    webrtc_file:
+      output: { file: "logs/webrtc.log" }
+  default:
+    level: debug
+    logger: default
+  policies:
+    - selector: { target: "libwebrtc" }
+      level: debug
+      logger: webrtc_file
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let log = config.log.as_ref().unwrap();
+        assert_eq!(log.default.logger, "default");
+        assert_eq!(log.default.level, log::LevelFilter::Debug);
+        assert!(matches!(
+            log.loggers.get("default").unwrap().output,
+            tddy_core::LogOutput::Stderr
+        ));
+        assert!(matches!(
+            log.loggers.get("webrtc_file").unwrap().output,
+            tddy_core::LogOutput::File(_)
+        ));
+        assert_eq!(log.policies.len(), 1);
+        assert_eq!(log.policies[0].logger.as_deref(), Some("webrtc_file"));
+    }
+
+    #[test]
     fn unknown_field_is_rejected() {
         let yaml = "bogus_field: true\n";
         let result: Result<Config, _> = serde_yaml::from_str(yaml);
@@ -294,9 +322,8 @@ github:
             conversation_output: None,
             model: Some("opus".to_string()),
             allowed_tools: None,
-            debug: false,
-            debug_output: None,
-            webrtc_debug_output: None,
+            log: None,
+            log_level: None,
             agent: "claude".to_string(),
             prompt: None,
             grpc: None,

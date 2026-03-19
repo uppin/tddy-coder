@@ -2,7 +2,6 @@
 
 use clap::Parser;
 use tddy_coder::{load_config, merge_config_into_args, run_main, Args, CoderArgs};
-use tddy_core::init_tddy_logger;
 
 fn main() {
     let coder_args = CoderArgs::parse();
@@ -19,10 +18,5 @@ fn main() {
         }
     }
 
-    init_tddy_logger(
-        args.debug,
-        args.debug_output.as_deref(),
-        args.webrtc_debug_output.as_deref(),
-    );
     run_main(args);
 }

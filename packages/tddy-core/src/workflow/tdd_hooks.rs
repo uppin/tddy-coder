@@ -116,16 +116,16 @@ fn ensure_worktree_for_acceptance_tests(
         .get_sync("output_dir")
         .ok_or("output_dir required for worktree creation")?;
 
-    let backend_name = context.get_sync::<String>("backend_name").unwrap_or_default();
+    let backend_name = context
+        .get_sync::<String>("backend_name")
+        .unwrap_or_default();
     if backend_name == "stub" {
         log::debug!(
             "[tddy-core] acceptance-tests: stub backend, using output_dir as worktree (no git fetch)"
         );
         context.set_sync("worktree_dir", output_dir.clone());
         if let Some(tx) = event_tx {
-            let _ = tx.send(WorkflowEvent::WorktreeSwitched {
-                path: output_dir,
-            });
+            let _ = tx.send(WorkflowEvent::WorktreeSwitched { path: output_dir });
         }
         return Ok(());
     }

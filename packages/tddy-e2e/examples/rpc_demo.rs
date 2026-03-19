@@ -23,8 +23,8 @@ use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 
 use tddy_core::backend::{AnyBackend, SharedBackend, StubBackend};
-use tddy_e2e::rpc_frontend::{encode_resize, event_to_bytes};
 use tddy_core::Presenter;
+use tddy_e2e::rpc_frontend::{encode_resize, event_to_bytes};
 #[cfg(feature = "livekit")]
 use tddy_service::TerminalServiceVirtualTui;
 use tddy_service::{start_virtual_tui_session, VirtualTuiSession};
