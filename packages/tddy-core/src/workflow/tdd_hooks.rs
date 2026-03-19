@@ -98,6 +98,7 @@ fn before_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error +
 
 /// Ensure worktree exists before acceptance-tests. Creates from origin/master if needed.
 /// Sets worktree_dir in context; sends WorktreeSwitched when event_tx is set.
+/// Skips worktree creation for stub backend (demo): uses output_dir directly.
 fn ensure_worktree_for_acceptance_tests(
     plan_dir: &Path,
     context: &Context,
@@ -114,16 +115,42 @@ fn ensure_worktree_for_acceptance_tests(
     let output_dir: PathBuf = context
         .get_sync("output_dir")
         .ok_or("output_dir required for worktree creation")?;
-    let repo_root = find_git_root(&output_dir);
-    let worktree_path = setup_worktree_for_session(&repo_root, plan_dir)
-        .map_err(|e| format!("worktree creation failed: {}", e))?;
-    context.set_sync("worktree_dir", worktree_path.clone());
-    if let Some(tx) = event_tx {
-        let _ = tx.send(WorkflowEvent::WorktreeSwitched {
-            path: worktree_path,
-        });
+
+    let backend_name = context.get_sync::<String>("backend_name").unwrap_or_default();
+    if backend_name == "stub" {
+        log::debug!(
+            "[tddy-core] acceptance-tests: stub backend, using output_dir as worktree (no git fetch)"
+        );
+        context.set_sync("worktree_dir", output_dir.clone());
+        if let Some(tx) = event_tx {
+            let _ = tx.send(WorkflowEvent::WorktreeSwitched {
+                path: output_dir,
+            });
+        }
+        return Ok(());
     }
-    Ok(())
+
+    let repo_root = find_git_root(&output_dir);
+    match setup_worktree_for_session(&repo_root, plan_dir) {
+        Ok(worktree_path) => {
+            context.set_sync("worktree_dir", worktree_path.clone());
+            if let Some(tx) = event_tx {
+                let _ = tx.send(WorkflowEvent::WorktreeSwitched {
+                    path: worktree_path,
+                });
+            }
+            Ok(())
+        }
+        Err(e) => {
+            log::error!(
+                "[tddy-core] worktree creation failed: repo_root={:?}, plan_dir={:?}, error={}",
+                repo_root,
+                plan_dir,
+                e
+            );
+            Err(format!("worktree creation failed: {}", e).into())
+        }
+    }
 }
 
 fn before_acceptance_tests(

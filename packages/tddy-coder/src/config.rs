@@ -296,6 +296,7 @@ github:
             allowed_tools: None,
             debug: false,
             debug_output: None,
+            webrtc_debug_output: None,
             agent: "claude".to_string(),
             prompt: None,
             grpc: None,

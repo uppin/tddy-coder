@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-03-18** [Feature] WebRTC Debug Output, web-dev Args — Args.webrtc_debug_output, --webrtc-debug-output to CoderArgs and DemoArgs. init_tddy_logger call sites updated (main, run_main, run_daemon). web-dev script passes CLI args to daemon. (tddy-coder)
 - **2026-03-17** [Feature] Terminal UX Fullscreen Touch — --mouse CLI flag in CoderArgs, threaded to event_loop and TerminalServiceVirtualTui. (tddy-coder)
 - **2026-03-14** [Bug Fix] Worktree Path on Resume — Removed `output_dir` overwrite from `run_plan_resume`, `run_plan_to_complete`, `run_plan_refinement` extra() callbacks. When plan_dir is under `~/.tddy/sessions/`, `plan_dir.parent()` is not the repo root; worktree creation would fail. `build_goal_context` already sets `output_dir` from `changeset.repo_path` when plan_dir is set. (tddy-coder)
 - **2026-03-14** [Feature] ConnectRPC Transport — Mount ConnectRPC router at `/rpc` on web-port. tddy-connectrpc crate serves tddy-rpc services over Connect protocol. (tddy-coder)

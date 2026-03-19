@@ -679,7 +679,7 @@ impl Presenter {
                     } else {
                         match result {
                             Err(ref msg) => {
-                                log::info!("WorkflowComplete Err → ErrorRecovery: {}", msg);
+                                log::error!("Workflow failed: {}", msg);
                                 self.log_activity(
                                     format!("Workflow failed: {}", msg),
                                     ActivityKind::Info,
