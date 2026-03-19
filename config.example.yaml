@@ -5,8 +5,25 @@
 # agent: claude          # claude, cursor, or stub
 # model: sonnet          # Model name for Claude Code CLI
 # daemon: true           # Run as headless daemon (no TUI)
-# debug: false
 # goal: plan             # plan, acceptance-tests, red, green, demo, etc.
+#
+# log:                   # Optional. When omitted, default: info to stderr, target in format.
+#   loggers:
+#     default:
+#       output: stderr
+#       format: "{timestamp} [{level}] [{target}] {message}"
+#     webrtc_file:
+#       output: { file: "logs/webrtc.log" }
+#       format: "{timestamp} [{level}] [{target}] {message}"
+#   default:
+#     level: info
+#     logger: default
+#   rotation:
+#     max_rotated: 5     # keep at most 5 previous log files per output (0 = disable)
+#   policies:
+#     - selector: { target: "libwebrtc" }
+#       level: debug
+#       logger: webrtc_file
 # plan_dir: ./plans/my-feature
 # prompt: "my feature description"
 

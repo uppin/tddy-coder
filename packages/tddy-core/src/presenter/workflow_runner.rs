@@ -813,7 +813,7 @@ mod tests {
 
         let session_id = "test-debug-log-session";
 
-        crate::init_tddy_logger(false, None, None);
+        crate::init_tddy_logger_legacy(false, None, None);
 
         run_workflow(
             SharedBackend::from_arc(backend),

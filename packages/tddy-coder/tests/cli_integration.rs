@@ -120,7 +120,7 @@ fn cli_plain_mode_plan_approval_approve_proceeds() {
 }
 
 /// Each goal should log the agent and model it is using before execution.
-/// Uses --debug-output to collect log entries from the log system.
+/// Uses log config with file output to collect log entries.
 #[test]
 #[cfg(unix)]
 fn cli_displays_agent_and_model_before_goal_execution() {
@@ -129,16 +129,31 @@ fn cli_displays_agent_and_model_before_goal_execution() {
     let _ = std::fs::create_dir_all(&tmp);
 
     let log_file = tmp.join("debug.log");
+    let config_yaml = format!(
+        r#"log:
+  loggers:
+    default:
+      output: {{ file: "{}" }}
+      format: "{{timestamp}} [{{level}}] [{{target}}] {{message}}"
+  default:
+    level: debug
+    logger: default
+"#,
+        log_file.display()
+    );
+    let config_path = tmp.join("config.yaml");
+    std::fs::write(&config_path, config_yaml).expect("write config");
+
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
+            "-c",
+            config_path.to_str().unwrap(),
             "--agent",
             "stub",
             "--goal",
             "plan",
-            "--debug-output",
-            log_file.to_str().unwrap(),
             "--prompt",
             "SKIP_QUESTIONS Build feature X",
         ])
@@ -167,7 +182,7 @@ fn cli_displays_agent_and_model_before_goal_execution() {
 }
 
 /// Each state transition should be logged.
-/// Uses --debug-output to collect log entries from the log system.
+/// Uses log config with file output to collect log entries.
 #[test]
 #[cfg(unix)]
 fn cli_displays_state_transitions() {
@@ -176,16 +191,31 @@ fn cli_displays_state_transitions() {
     let _ = std::fs::create_dir_all(&tmp);
 
     let log_file = tmp.join("debug.log");
+    let config_yaml = format!(
+        r#"log:
+  loggers:
+    default:
+      output: {{ file: "{}" }}
+      format: "{{timestamp}} [{{level}}] [{{target}}] {{message}}"
+  default:
+    level: debug
+    logger: default
+"#,
+        log_file.display()
+    );
+    let config_path = tmp.join("config.yaml");
+    std::fs::write(&config_path, config_yaml).expect("write config");
+
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
         .args([
+            "-c",
+            config_path.to_str().unwrap(),
             "--agent",
             "stub",
             "--goal",
             "plan",
-            "--debug-output",
-            log_file.to_str().unwrap(),
             "--prompt",
             "SKIP_QUESTIONS Build feature X",
         ])

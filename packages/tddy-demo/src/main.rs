@@ -10,7 +10,7 @@ use std::path::Path;
 
 use clap::Parser;
 use tddy_coder::{load_config, merge_config_into_args, run_main, Args, DemoArgs};
-use tddy_core::{init_tddy_logger, remove_worktree, worktree_dir};
+use tddy_core::{remove_worktree, worktree_dir};
 
 /// Clean up stale worktrees in `.worktrees/` that were left by previous demo runs.
 /// Only removes worktrees whose directory still exists on disk.
@@ -68,12 +68,6 @@ fn main() {
             }
         }
     }
-
-    init_tddy_logger(
-        args.debug,
-        args.debug_output.as_deref(),
-        args.webrtc_debug_output.as_deref(),
-    );
 
     // Demo-specific: clean up stale worktrees before starting
     let repo_root = std::env::current_dir().unwrap_or_default();
