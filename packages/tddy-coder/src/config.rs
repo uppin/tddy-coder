@@ -328,6 +328,7 @@ log:
             prompt: None,
             grpc: None,
             session_id: None,
+            resume_from: None,
             daemon: false,
             livekit_url: None,
             livekit_token: None,

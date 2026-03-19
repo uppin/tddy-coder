@@ -65,6 +65,27 @@ impl Status {
             message: msg.into(),
         }
     }
+
+    pub fn unauthenticated(msg: impl Into<String>) -> Self {
+        Self {
+            code: Code::Unauthenticated,
+            message: msg.into(),
+        }
+    }
+
+    pub fn permission_denied(msg: impl Into<String>) -> Self {
+        Self {
+            code: Code::PermissionDenied,
+            message: msg.into(),
+        }
+    }
+
+    pub fn failed_precondition(msg: impl Into<String>) -> Self {
+        Self {
+            code: Code::FailedPrecondition,
+            message: msg.into(),
+        }
+    }
 }
 
 impl fmt::Display for Status {

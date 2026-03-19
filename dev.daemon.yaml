@@ -1,0 +1,28 @@
+# Dev config for tddy-daemon. Used when TDDY_USE_DAEMON=1.
+# Maps stub user "testuser" to current OS user for local dev.
+
+listen:
+  web_port: 8899
+  web_host: 127.0.0.1
+
+web_bundle_path: packages/tddy-web/dist
+
+livekit:
+  url: ws://127.0.0.1:7880
+  api_key: devkey
+  api_secret: secret
+  public_url: ws://127.0.0.1:7880
+
+github:
+  stub: true
+  stub_codes: "test-code:testuser"
+
+users:
+  - github_user: "testuser"
+    os_user: "CURRENT_USER"  # Replaced by web-dev with $USER
+
+allowed_tools:
+  - path: "target/debug/tddy-demo"
+    label: "tddy-demo (debug)"
+  - path: "target/release/tddy-demo"
+    label: "tddy-demo (release)"
