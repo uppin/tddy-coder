@@ -1,6 +1,9 @@
 {
   "private": true,
   "workspaces": ["packages/tddy-web", "packages/tddy-livekit-web", "packages/tddy-rust-typescript-tests"],
+  "devDependencies": {
+    "@zed-industries/claude-agent-acp": "0.22.2"
+  },
   "scripts": {
     "build": "bun run --filter tddy-web build",
     "storybook": "bun run --filter tddy-web storybook",

@@ -16,7 +16,8 @@ use tddy_core::{
     get_session_for_tag, next_goal_for_state, parse_acceptance_tests_response,
     parse_evaluate_response, parse_green_response, parse_red_response, parse_refactor_response,
     parse_update_docs_response, parse_validate_subagents_response, read_changeset, AnyBackend,
-    ClaudeCodeBackend, CursorBackend, ProgressEvent, SharedBackend, StubBackend, WorkflowEngine,
+    ClaudeAcpBackend, ClaudeCodeBackend, CursorBackend, ProgressEvent, SharedBackend, StubBackend,
+    WorkflowEngine,
 };
 
 use crate::plain;
@@ -42,7 +43,7 @@ impl tddy_service::TokenProvider for LiveKitTokenProvider {
 /// Verify tddy-tools binary is available. Required for claude/cursor agents.
 /// Skips when agent is stub (uses InMemoryToolExecutor).
 fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
-    if agent == "stub" {
+    if agent == "stub" || agent == "claude-acp" {
         return Ok(());
     }
     // Check 1: Same directory as current executable
@@ -240,8 +241,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "LEVEL", value_parser = ["off", "error", "warn", "info", "debug", "trace"])]
     pub log_level: Option<String>,
 
-    /// Agent backend: claude, cursor, or stub (stub for tests/demo, no tddy-tools needed)
-    #[arg(long, default_value = "claude", value_parser = ["claude", "cursor", "stub"])]
+    /// Agent backend: claude, claude-acp, cursor, or stub (stub for tests/demo, no tddy-tools needed)
+    #[arg(long, default_value = "claude", value_parser = ["claude", "claude-acp", "cursor", "stub"])]
     pub agent: String,
 
     /// Feature description (alternative to stdin). When set, skips interactive/piped input.
@@ -1091,6 +1092,7 @@ fn create_backend(
     log::debug!("[tddy-coder] using agent: {}", agent);
     let backend: AnyBackend = match agent {
         "cursor" => AnyBackend::Cursor(CursorBackend::new().with_progress(on_progress)),
+        "claude-acp" => AnyBackend::ClaudeAcp(ClaudeAcpBackend::new()),
         "stub" => AnyBackend::Stub(StubBackend::new()),
         _ => AnyBackend::Claude(ClaudeCodeBackend::new().with_progress(on_progress)),
     };

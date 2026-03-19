@@ -14,10 +14,10 @@ pub mod worktree;
 
 pub use backend::{
     build_claude_args, clear_child_pid, get_child_pid, kill_child_process, set_child_pid,
-    AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeCodeBackend, ClaudeInvokeConfig,
-    CodingBackend, CursorBackend, Goal, InMemoryToolExecutor, InvokeRequest, InvokeResponse,
-    MockBackend, PermissionMode, ProcessToolExecutor, QuestionOption, SessionMode, SharedBackend,
-    StubBackend, ToolExecutor,
+    AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend, ClaudeCodeBackend,
+    ClaudeInvokeConfig, CodingBackend, CursorBackend, Goal, InMemoryToolExecutor, InvokeRequest,
+    InvokeResponse, MockBackend, PermissionMode, ProcessToolExecutor, QuestionOption, SessionMode,
+    SharedBackend, StubBackend, ToolExecutor,
 };
 pub use changeset::{
     append_session_and_update_state, get_session_for_tag, next_goal_for_state, read_changeset,
