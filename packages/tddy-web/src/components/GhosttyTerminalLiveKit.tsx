@@ -64,6 +64,8 @@ export interface GhosttyTerminalLiveKitProps {
   autoFocus?: boolean;
   /** When true, prevent terminal from receiving focus on pointer/touch (e.g. mobile when keyboard closed). */
   preventFocusOnTap?: boolean;
+  /** When true, show mobile keyboard overlay (tap-to-type input). Must stay true while keyboard is open so input stays mounted. */
+  showMobileKeyboard?: boolean;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -79,6 +81,7 @@ export function GhosttyTerminalLiveKit({
   onRegisterFocus,
   autoFocus = true,
   preventFocusOnTap = false,
+  showMobileKeyboard = false,
 }: GhosttyTerminalLiveKitProps) {
   const log = debugLogging
     ? (...args: unknown[]) => console.log("[GhosttyLiveKit]", ...args)
@@ -319,6 +322,72 @@ export function GhosttyTerminalLiveKit({
     }
   }, [onRegisterFocus]);
 
+  const mobileKeyboardOverlayStyle: React.CSSProperties = {
+    position: "absolute",
+    bottom: 16,
+    left: "50%",
+    transform: "translateX(-50%)",
+    padding: "10px 20px",
+    fontSize: 14,
+    cursor: "pointer",
+    backgroundColor: "rgba(0,0,0,0.7)",
+    color: "#fff",
+    border: "1px solid #555",
+    borderRadius: 8,
+    zIndex: 10,
+  };
+
+  const pushInput = (data: string | Uint8Array) => {
+    const encoded =
+      typeof data === "string" ? new TextEncoder().encode(data) : data;
+    inputQueueRef.current.push(encoded);
+  };
+
+  const handleMobileKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const key = e.key;
+    if (key === "Enter") {
+      e.preventDefault();
+      pushInput(new Uint8Array([0x0d]));
+      return;
+    }
+    if (key === "Backspace") {
+      e.preventDefault();
+      pushInput(new Uint8Array([0x7f]));
+      return;
+    }
+    if (key === "Tab") {
+      e.preventDefault();
+      pushInput(new Uint8Array([0x09]));
+      return;
+    }
+    if (key === "Escape") {
+      e.preventDefault();
+      pushInput(new Uint8Array([0x1b]));
+      return;
+    }
+    if (key.startsWith("Arrow")) {
+      e.preventDefault();
+      const seq =
+        key === "ArrowUp"
+          ? "\x1b[A"
+          : key === "ArrowDown"
+            ? "\x1b[B"
+            : key === "ArrowRight"
+              ? "\x1b[C"
+              : key === "ArrowLeft"
+                ? "\x1b[D"
+                : null;
+      if (seq) pushInput(seq);
+    }
+  };
+
+  const handleMobileInput = (e: React.FormEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const data = (e.nativeEvent as InputEvent).data;
+    if (data) pushInput(data);
+    input.value = "";
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div data-testid="livekit-status">{status}</div>
@@ -369,6 +438,35 @@ export function GhosttyTerminalLiveKit({
       </div>
       {firstOutputReceived && (
         <div data-testid="first-output-received" style={{ display: "none" }} aria-hidden />
+      )}
+      {showMobileKeyboard && (
+        <label
+          data-testid="mobile-keyboard-button"
+          style={mobileKeyboardOverlayStyle}
+        >
+          <input
+            type="text"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            aria-label="Open keyboard for terminal input"
+            style={{
+              position: "absolute",
+              inset: 0,
+              opacity: 0,
+              width: "100%",
+              height: "100%",
+              margin: 0,
+              padding: 0,
+              border: "none",
+              fontSize: 1,
+            }}
+            onKeyDown={handleMobileKeyDown}
+            onInput={handleMobileInput}
+          />
+          Keyboard
+        </label>
       )}
       {showBufferTextForTest && (
         <>

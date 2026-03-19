@@ -19,6 +19,10 @@ fn main() {
         }
     }
 
-    init_tddy_logger(args.debug, args.debug_output.as_deref());
+    init_tddy_logger(
+        args.debug,
+        args.debug_output.as_deref(),
+        args.webrtc_debug_output.as_deref(),
+    );
     run_main(args);
 }

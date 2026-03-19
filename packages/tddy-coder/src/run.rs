@@ -77,7 +77,11 @@ pub fn run_main(mut args: Args) {
         std::process::exit(1);
     }
 
-    tddy_core::init_tddy_logger(args.debug, args.debug_output.as_deref());
+    tddy_core::init_tddy_logger(
+        args.debug,
+        args.debug_output.as_deref(),
+        args.webrtc_debug_output.as_deref(),
+    );
     if args.debug_output.is_none() {
         if let Some(session_dir) = session_dir_path(&args) {
             let logs = session_dir.join("logs");
@@ -159,6 +163,8 @@ pub struct Args {
     pub allowed_tools: Option<Vec<String>>,
     pub debug: bool,
     pub debug_output: Option<PathBuf>,
+    /// When set, WebRTC/libwebrtc debug logs (connection.cc, etc.) go to this file instead of debug_output.
+    pub webrtc_debug_output: Option<PathBuf>,
     pub agent: String,
     pub prompt: Option<String>,
     /// When Some(port), gRPC server runs alongside TUI on the given port.
@@ -239,6 +245,10 @@ pub struct CoderArgs {
     /// Enable debug logging and redirect to file (avoids stderr/TUI corruption)
     #[arg(long)]
     pub debug_output: Option<PathBuf>,
+
+    /// Redirect WebRTC/libwebrtc debug logs to a separate file (e.g. connection.cc, peer_connection.cc)
+    #[arg(long)]
+    pub webrtc_debug_output: Option<PathBuf>,
 
     /// Agent backend: claude, cursor, or stub (stub for tests/demo, no tddy-tools needed)
     #[arg(long, default_value = "claude", value_parser = ["claude", "cursor", "stub"])]
@@ -362,6 +372,10 @@ pub struct DemoArgs {
     #[arg(long)]
     pub debug_output: Option<PathBuf>,
 
+    /// Redirect WebRTC/libwebrtc debug logs to a separate file (e.g. connection.cc, peer_connection.cc)
+    #[arg(long)]
+    pub webrtc_debug_output: Option<PathBuf>,
+
     /// Agent backend: stub only (default: stub)
     #[arg(long, default_value = "stub", value_parser = ["stub"])]
     pub agent: String,
@@ -457,6 +471,7 @@ impl From<CoderArgs> for Args {
             allowed_tools: a.allowed_tools,
             debug: a.debug,
             debug_output: a.debug_output,
+            webrtc_debug_output: a.webrtc_debug_output,
             agent: a.agent,
             prompt: a.prompt,
             grpc: a.grpc,
@@ -493,6 +508,7 @@ impl From<DemoArgs> for Args {
             allowed_tools: a.allowed_tools,
             debug: a.debug,
             debug_output: a.debug_output,
+            webrtc_debug_output: a.webrtc_debug_output,
             agent: a.agent,
             prompt: a.prompt,
             grpc: a.grpc,
@@ -783,7 +799,11 @@ fn on_progress(_event: &ProgressEvent) {
 /// Run as headless gRPC daemon. Serves GetSession and ListSessions; blocks until shutdown.
 /// When LiveKit args are present, also joins the room as a participant serving RPC over the data channel.
 fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
-    tddy_core::init_tddy_logger(args.debug, args.debug_output.as_deref());
+    tddy_core::init_tddy_logger(
+        args.debug,
+        args.debug_output.as_deref(),
+        args.webrtc_debug_output.as_deref(),
+    );
 
     let sessions_base = tddy_core::output::sessions_base_path()
         .map_err(|e| anyhow::anyhow!("{}", e))?

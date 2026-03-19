@@ -108,21 +108,6 @@ const overlayButtonStyle = {
 const disconnectButtonStyle = { ...overlayButtonStyle, right: 8 } as const;
 const ctrlCButtonStyle = { ...overlayButtonStyle, right: 72 } as const;
 
-const mobileKeyboardButtonStyle = {
-  position: "absolute" as const,
-  bottom: 16,
-  left: "50%",
-  transform: "translateX(-50%)",
-  padding: "10px 20px",
-  fontSize: 14,
-  cursor: "pointer",
-  backgroundColor: "rgba(0,0,0,0.7)",
-  color: "#fff",
-  border: "1px solid #555",
-  borderRadius: 8,
-  zIndex: 10,
-} as const;
-
 function ConnectedTerminal({
   url,
   identity,
@@ -141,7 +126,6 @@ function ConnectedTerminal({
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
   const sendCtrlCRef = useRef<(() => void) | null>(null);
-  const focusTerminalRef = useRef<(() => void) | null>(null);
   const { height: viewportHeight, isKeyboardOpen } = useVisualViewport();
   const isMobile =
     typeof window !== "undefined" &&
@@ -238,22 +222,11 @@ function ConnectedTerminal({
         debugLogging={debugLogging ?? false}
         autoFocus={!isMobile}
         preventFocusOnTap={isMobile && !isKeyboardOpen}
+        showMobileKeyboard={isMobile}
         onRegisterSendCtrlC={(send) => {
           sendCtrlCRef.current = send;
         }}
-        onRegisterFocus={(focus) => {
-          focusTerminalRef.current = focus;
-        }}
       />
-      {isMobile && !isKeyboardOpen && (
-        <button
-          data-testid="mobile-keyboard-button"
-          onClick={() => focusTerminalRef.current?.()}
-          style={mobileKeyboardButtonStyle}
-        >
-          Keyboard
-        </button>
-      )}
     </div>
   );
 }

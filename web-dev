@@ -81,41 +81,33 @@ DAEMON_PORT=$(grep -A5 '^web:' "$CONFIG" 2>/dev/null | grep 'port:' | head -1 | 
 DAEMON_PORT="${DAEMON_PORT:-8899}"
 
 echo "=== Starting tddy-coder daemon on :${DAEMON_PORT} (config: ${CONFIG}) ==="
-exec nix develop --profile ./.nix-profile --impure -c bash -c '
-  set -e
-  binary="$1"; shift
-  vite_port="$1"; shift
-  daemon_port="$1"; shift
-  web_host="$1"; shift
 
-  # Start daemon in background
-  "$binary" "$@" &
-  daemon_pid=$!
+# Start daemon via ./dev so CLI args are passed correctly to the tddy binary
+./dev "$binary" "${daemon_args[@]}" &
+daemon_pid=$!
 
-  # Wait for daemon to be ready
-  for i in $(seq 1 30); do
-    if curl -s -o /dev/null "http://127.0.0.1:${daemon_port}/"; then
-      break
-    fi
-    sleep 0.5
-  done
+# Wait for daemon to be ready
+for i in $(seq 1 30); do
+  if curl -s -o /dev/null "http://127.0.0.1:${DAEMON_PORT}/"; then
+    break
+  fi
+  sleep 0.5
+done
 
-  echo ""
-  echo "=== Starting Vite dev server on ${web_host}:${vite_port} ==="
-  echo "=== Open http://${web_host}:${vite_port} ==="
-  echo ""
+echo ""
+echo "=== Starting Vite dev server on ${WEB_HOST}:${VITE_PORT} ==="
+echo "=== Open http://${WEB_HOST}:${VITE_PORT} ==="
+echo ""
 
-  # Start Vite dev server with DAEMON_PORT for proxy config
-  cd packages/tddy-web
-  DAEMON_PORT="$daemon_port" npx vite --port "$vite_port" --host "$web_host" &
-  vite_pid=$!
+# Start Vite dev server with DAEMON_PORT for proxy config (run via ./dev for nix env)
+./dev bash -c "cd packages/tddy-web && DAEMON_PORT='$DAEMON_PORT' npx vite --port '$VITE_PORT' --host '$WEB_HOST'" &
+vite_pid=$!
 
-  # Wait for either to exit
-  wait_exit() {
-    wait -n "$daemon_pid" "$vite_pid" 2>/dev/null || true
-    kill "$daemon_pid" "$vite_pid" 2>/dev/null || true
-    wait 2>/dev/null
-  }
-  trap wait_exit INT TERM
-  wait_exit
-' -- "$binary" "$VITE_PORT" "$DAEMON_PORT" "$WEB_HOST" "${daemon_args[@]}"
+# Wait for either to exit
+wait_exit() {
+  wait -n "$daemon_pid" "$vite_pid" 2>/dev/null || true
+  kill "$daemon_pid" "$vite_pid" 2>/dev/null || true
+  wait 2>/dev/null
+}
+trap wait_exit INT TERM
+wait_exit

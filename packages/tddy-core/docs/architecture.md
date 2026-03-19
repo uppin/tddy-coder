@@ -28,7 +28,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **setup_worktree_for_session**: Fetches `origin/master`, creates a git worktree from that ref, updates changeset with `worktree`, `branch`, `repo_path`. Used by TUI and daemon after plan approval.
 - **fetch_origin_master**: Runs `git fetch origin master`; failure is a hard error (no fallback).
 - **create_worktree**: Creates worktree with optional `start_point` (e.g. `origin/master`). Worktrees live in `.worktrees/` relative to repo root.
-- **ensure_worktree_for_acceptance_tests**: Uses `output_dir` from context (must be main repo root). Calls `find_git_root(&output_dir)` to locate `.git`; fallback to `output_dir.parent()`. After creation, `cs.repo_path` is overwritten with worktree path; later goals use `worktree_dir`.
+- **ensure_worktree_for_acceptance_tests**: Uses `output_dir` from context (must be main repo root). When `backend_name == "stub"` (demo), skips worktree creation and uses `output_dir` directly. Otherwise calls `find_git_root(&output_dir)` to locate `.git`; fallback to `output_dir.parent()`. After creation, `cs.repo_path` is overwritten with worktree path; later goals use `worktree_dir`.
 
 **Repo root resolution** (where `output_dir`/`repo_path` comes from):
 

@@ -237,4 +237,50 @@ describe("App", () => {
       ).to.be.false;
     });
   });
+
+  it("mobile keyboard overlay accepts input when tapped (tap-to-type flow)", () => {
+    cy.viewport(375, 667);
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAuthAsAuthenticated();
+
+    const mockToken = "mock-jwt-from-rpc";
+    const mockTtl = 600;
+    const generateBody = mockTokenResponse(mockToken, mockTtl);
+    const refreshBody = mockRefreshResponse(mockToken, mockTtl);
+    cy.intercept("POST", "**/rpc/token.TokenService/GenerateToken", (req) => {
+      req.reply({
+        statusCode: 200,
+        headers: { "Content-Type": "application/proto" },
+        body: toArrayBuffer(generateBody),
+      });
+    }).as("generateToken");
+    cy.intercept("POST", "**/rpc/token.TokenService/RefreshToken", (req) => {
+      req.reply({
+        statusCode: 200,
+        headers: { "Content-Type": "application/proto" },
+        body: toArrayBuffer(refreshBody),
+      });
+    }).as("refreshToken");
+
+    cy.mount(<App />);
+    cy.wait("@getAuthStatus");
+    cy.get("#livekit-url", { timeout: 5000 }).type("ws://localhost:7880");
+    cy.get("[data-testid='livekit-identity']").type("client");
+    cy.get("#livekit-room").clear().type("terminal-e2e");
+    cy.get("button[type='submit']").click();
+
+    cy.wait("@generateToken");
+    cy.get("[data-testid='connected-terminal-container']", { timeout: 5000 }).should("exist");
+    cy.get("[data-testid='mobile-keyboard-button']", { timeout: 5000 }).should("exist");
+
+    cy.get("[data-testid='mobile-keyboard-button']").within(() => {
+      cy.get("input").focus();
+    });
+    cy.get("[data-testid='mobile-keyboard-button']").within(() => {
+      cy.get("input").type("x");
+    });
+    cy.get("[data-testid='mobile-keyboard-button']").within(() => {
+      cy.get("input").should("have.value", "");
+    });
+  });
 });

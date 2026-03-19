@@ -1,5 +1,28 @@
-import React from "react";
-import { GhosttyTerminal } from "../../src/components/GhosttyTerminal";
+import React, { useRef } from "react";
+import {
+  GhosttyTerminal,
+  type GhosttyTerminalHandle,
+} from "../../src/components/GhosttyTerminal";
+
+function MobileKeyboardWrapper({
+  onData,
+}: {
+  onData: (data: string) => void;
+}) {
+  const ref = useRef<GhosttyTerminalHandle>(null);
+  return (
+    <>
+      <GhosttyTerminal ref={ref} onData={onData} preventFocusOnTap />
+      <button
+        data-testid="keyboard-btn"
+        type="button"
+        onClick={() => ref.current?.focus()}
+      >
+        Keyboard
+      </button>
+    </>
+  );
+}
 
 describe("GhosttyTerminal", () => {
   it("renders ANSI content passed via initialContent prop", () => {
@@ -179,6 +202,16 @@ describe("GhosttyTerminal", () => {
       ).to.be.false;
     });
   });
+
+  it("receives keyboard input after focus() when preventFocusOnTap (mobile keyboard flow)", () => {
+    const onData = cy.stub().as("onData");
+    cy.mount(<MobileKeyboardWrapper onData={onData} />);
+    cy.get("[data-testid='ghostty-terminal']", { timeout: 10000 }).should("exist");
+    cy.get("[data-testid='keyboard-btn']").click();
+    cy.get("[data-testid='ghostty-terminal']").type("x");
+    cy.get("@onData").should("have.been.calledWith", "x");
+  });
+
 
   it("forwards SGR mouse sequence via onData when mouse tracking enabled and user clicks", () => {
     const onData = cy.stub().as("onData");

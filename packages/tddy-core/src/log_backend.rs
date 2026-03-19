@@ -16,6 +16,15 @@ static LOG_BUFFER: once_cell::sync::Lazy<Mutex<Vec<String>>> =
 static DEBUG_OUTPUT_FILE: once_cell::sync::Lazy<Mutex<Option<std::fs::File>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(None));
 
+static WEBRTC_DEBUG_OUTPUT_FILE: once_cell::sync::Lazy<Mutex<Option<std::fs::File>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(None));
+
+/// True if the log message looks like libwebrtc output (e.g. "(connection.cc:985):").
+fn is_webrtc_log(args: &std::fmt::Arguments) -> bool {
+    let s = format!("{}", args);
+    s.contains(".cc:") || s.contains(".cpp:")
+}
+
 /// Logger that buffers when TDDY_QUIET is set, writes to file when debug_output_path set,
 /// otherwise writes to stderr.
 pub struct TddyLogger;
@@ -33,6 +42,18 @@ impl Log for TddyLogger {
         }
         let ts = chrono::Local::now().format("%H:%M:%S%.3f");
         let line = format!("{} [{}] {}\n", ts, record.level(), record.args());
+        let is_webrtc = is_webrtc_log(record.args());
+
+        if is_webrtc {
+            if let Ok(mut guard) = WEBRTC_DEBUG_OUTPUT_FILE.lock() {
+                if let Some(ref mut f) = *guard {
+                    let _ = f.write_all(line.as_bytes());
+                    let _ = f.flush();
+                    return;
+                }
+            }
+        }
+
         if let Ok(mut guard) = DEBUG_OUTPUT_FILE.lock() {
             if let Some(ref mut f) = *guard {
                 let _ = f.write_all(line.as_bytes());
@@ -109,7 +130,12 @@ pub fn redirect_debug_output(path: &Path) {
 /// Initialize the tddy logger. Call once at startup.
 /// When `debug` is true (--debug flag), uses Debug level. Otherwise respects RUST_LOG or defaults to Info.
 /// When `debug_output_path` is Some, enables Debug level and redirects logs to that file.
-pub fn init_tddy_logger(debug: bool, debug_output_path: Option<&Path>) {
+/// When `webrtc_debug_output_path` is Some, libwebrtc logs (connection.cc, etc.) go to that file instead.
+pub fn init_tddy_logger(
+    debug: bool,
+    debug_output_path: Option<&Path>,
+    webrtc_debug_output_path: Option<&Path>,
+) {
     if let Some(path) = debug_output_path {
         match OpenOptions::new().create(true).append(true).open(path) {
             Ok(f) => {
@@ -125,7 +151,22 @@ pub fn init_tddy_logger(debug: bool, debug_output_path: Option<&Path>) {
             }
         }
     }
-    let level = if debug || debug_output_path.is_some() {
+    if let Some(path) = webrtc_debug_output_path {
+        match OpenOptions::new().create(true).append(true).open(path) {
+            Ok(f) => {
+                if let Ok(mut guard) = WEBRTC_DEBUG_OUTPUT_FILE.lock() {
+                    *guard = Some(f);
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "[tddy-core] warning: could not open webrtc debug output file {:?}: {}",
+                    path, e
+                );
+            }
+        }
+    }
+    let level = if debug || debug_output_path.is_some() || webrtc_debug_output_path.is_some() {
         log::LevelFilter::Debug
     } else if std::env::var("TDDY_QUIET").is_ok() {
         // TUI mode: enable Debug from the start so early messages are buffered.

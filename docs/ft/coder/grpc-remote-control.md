@@ -84,6 +84,8 @@ The `--daemon` flag starts a headless gRPC server (no TUI) suitable for systemd 
 
 **StreamTerminalIO** (daemon with LiveKit or gRPC): Per-connection virtual TUI. Each RPC connection gets its own headless ratatui instance (`VirtualTui`) via `ViewConnection`. Presenter exposes `connect_view()` → state snapshot + event_rx + intent_tx. Client keyboard input is parsed by the virtual TUI into `UserIntent`s. When the client disconnects, the virtual TUI is stopped. `TerminalServiceImplPerConnection` and `TddyRemoteService::with_view_connection_factory` create one VirtualTui per `StreamTerminalIO` call. Daemon with LiveKit exposes TerminalService (per-connection VirtualTui) instead of EchoService.
 
+**Terminal resize**: Local event loop handles `Event::Resize` with `terminal.clear()` for a clean redraw. Virtual TUI accepts `\x1b]resize;cols;rows\x07`; after `terminal.resize()` it calls `terminal.clear()` and resets the frame buffer so the next render sends a full frame to the client. Scroll offsets are clamped after resize.
+
 ### 7. Codegen tooling
 
 - Use **Buf** for proto management and code generation (prost plugin)
