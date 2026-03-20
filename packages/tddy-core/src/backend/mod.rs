@@ -1,11 +1,13 @@
 //! Coding backend abstraction for LLM-based coders.
 
+mod acp;
 mod claude;
 mod cursor;
 mod mock;
 mod stub;
 mod tool_executor;
 
+pub use acp::ClaudeAcpBackend;
 pub use claude::{build_claude_args, ClaudeCodeBackend, ClaudeInvokeConfig, PermissionMode};
 pub use cursor::CursorBackend;
 pub use mock::MockBackend;
@@ -17,6 +19,7 @@ pub use tool_executor::{InMemoryToolExecutor, ProcessToolExecutor, ToolExecutor}
 #[derive(Debug)]
 pub enum AnyBackend {
     Claude(ClaudeCodeBackend),
+    ClaudeAcp(ClaudeAcpBackend),
     Cursor(CursorBackend),
     Stub(StubBackend),
 }
@@ -69,6 +72,7 @@ impl CodingBackend for AnyBackend {
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         match self {
             AnyBackend::Claude(b) => b.invoke(request).await,
+            AnyBackend::ClaudeAcp(b) => b.invoke(request).await,
             AnyBackend::Cursor(b) => b.invoke(request).await,
             AnyBackend::Stub(b) => b.invoke(request).await,
         }
@@ -77,6 +81,7 @@ impl CodingBackend for AnyBackend {
     fn name(&self) -> &str {
         match self {
             AnyBackend::Claude(b) => b.name(),
+            AnyBackend::ClaudeAcp(b) => b.name(),
             AnyBackend::Cursor(b) => b.name(),
             AnyBackend::Stub(b) => b.name(),
         }
@@ -85,6 +90,7 @@ impl CodingBackend for AnyBackend {
     fn submit_channel(&self) -> Option<&crate::toolcall::SubmitResultChannel> {
         match self {
             AnyBackend::Claude(b) => b.submit_channel(),
+            AnyBackend::ClaudeAcp(b) => b.submit_channel(),
             AnyBackend::Cursor(b) => b.submit_channel(),
             AnyBackend::Stub(b) => b.submit_channel(),
         }

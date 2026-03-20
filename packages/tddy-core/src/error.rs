@@ -4,7 +4,7 @@ use crate::backend::ClarificationQuestion;
 use thiserror::Error;
 
 /// Errors from coding backends (Claude Code CLI, etc.).
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum BackendError {
     #[error("backend invocation failed: {0}")]
     InvocationFailed(String),
