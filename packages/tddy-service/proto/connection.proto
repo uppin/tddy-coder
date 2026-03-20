@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package connection;
+
+service ConnectionService {
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  rpc ConnectSession(ConnectSessionRequest) returns (ConnectSessionResponse);
+  rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
+}
+
+message ListToolsRequest {}
+message ListToolsResponse {
+  repeated ToolInfo tools = 1;
+}
+message ToolInfo {
+  string path = 1;
+  string label = 2;
+}
+
+message ListSessionsRequest {
+  string session_token = 1;
+}
+message ListSessionsResponse {
+  repeated SessionEntry sessions = 1;
+}
+message SessionEntry {
+  string session_id = 1;
+  string created_at = 2;
+  string status = 3;
+  string repo_path = 4;
+  uint32 pid = 5;
+  bool is_active = 6;
+}
+
+message StartSessionRequest {
+  string session_token = 1;
+  string tool_path = 2;
+  string repo_path = 3;
+}
+message StartSessionResponse {
+  string session_id = 1;
+  string livekit_room = 2;
+  string livekit_url = 3;
+}
+
+message ConnectSessionRequest {
+  string session_token = 1;
+  string session_id = 2;
+}
+message ConnectSessionResponse {
+  string livekit_room = 1;
+  string livekit_url = 2;
+}
+
+message ResumeSessionRequest {
+  string session_token = 1;
+  string session_id = 2;
+}
+message ResumeSessionResponse {
+  string session_id = 1;
+  string livekit_room = 2;
+  string livekit_url = 3;
+}

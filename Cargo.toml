@@ -15,4 +15,5 @@ members = [
     "packages/tddy-livekit-testkit",
     "packages/tddy-connectrpc",
     "packages/tddy-github",
+    "packages/tddy-daemon",
 ]

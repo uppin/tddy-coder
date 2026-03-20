@@ -5596,6 +5596,7 @@ dependencies = [
  "assert_cmd",
  "async-trait",
  "axum 0.8.8",
+ "chrono",
  "clap",
  "crossterm",
  "ctor",
@@ -5662,6 +5663,33 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "uuid",
+]
+
+[[package]]
+name = "tddy-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum 0.8.8",
+ "clap",
+ "libc",
+ "log",
+ "reqwest 0.12.28",
+ "scopeguard",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tddy-coder",
+ "tddy-connectrpc",
+ "tddy-core",
+ "tddy-github",
+ "tddy-livekit",
+ "tddy-rpc",
+ "tddy-service",
+ "tempfile",
+ "tokio",
  "uuid",
 ]
 

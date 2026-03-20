@@ -7,6 +7,7 @@ pub mod log_backend;
 pub mod output;
 pub mod permission;
 pub mod presenter;
+pub mod session_metadata;
 pub mod stream;
 pub mod toolcall;
 pub mod workflow;
@@ -51,6 +52,9 @@ pub use presenter::{
     ActivityEntry, ActivityKind, AppMode, ExitAction, Presenter, PresenterEvent, PresenterHandle,
     PresenterState, PresenterView, UserIntent, ViewConnection, WorkflowCompletePayload,
     WorkflowEvent,
+};
+pub use session_metadata::{
+    read_session_metadata, write_session_metadata, SessionMetadata, SESSION_METADATA_FILENAME,
 };
 pub use stream::ProgressEvent;
 pub use workflow::{

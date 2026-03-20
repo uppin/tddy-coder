@@ -70,7 +70,9 @@ fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
 /// Shared main entry: panic hook, Ctrl+C handler, run_with_args, exit logic.
 /// Use from both tddy-coder and tddy-demo binaries.
 pub fn run_main(mut args: Args) {
-    args.session_id = Some(uuid::Uuid::now_v7().to_string());
+    if args.session_id.is_none() {
+        args.session_id = Some(uuid::Uuid::now_v7().to_string());
+    }
 
     // Validate args before any stderr redirect (daemon redirects stderr to a file).
     if let Err(e) = validate_web_args(&args).and_then(|_| validate_livekit_args(&args)) {
@@ -170,6 +172,8 @@ pub struct Args {
     pub grpc: Option<u16>,
     /// Session ID set at program start; used for exit output when no plan_dir.
     pub session_id: Option<String>,
+    /// Resume from existing session (session ID). Sets plan_dir to session dir.
+    pub resume_from: Option<String>,
     /// When true, run as headless gRPC daemon (no TUI).
     pub daemon: bool,
     /// LiveKit server WebSocket URL (e.g. ws://localhost:7880)
@@ -324,6 +328,14 @@ pub struct CoderArgs {
     /// Enable mouse/touch mode in the TUI
     #[arg(long)]
     pub mouse: bool,
+
+    /// Resume from an existing session (session ID). Used when spawned by tddy-daemon.
+    #[arg(long, value_name = "SESSION_ID")]
+    pub resume_from: Option<String>,
+
+    /// Session ID for new daemon sessions. Used when spawned by tddy-daemon.
+    #[arg(long, value_name = "SESSION_ID")]
+    pub session_id: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -442,6 +454,14 @@ pub struct DemoArgs {
     /// Enable mouse/touch mode in the TUI
     #[arg(long)]
     pub mouse: bool,
+
+    /// Resume from an existing session (session ID). Used when spawned by tddy-daemon.
+    #[arg(long, value_name = "SESSION_ID")]
+    pub resume_from: Option<String>,
+
+    /// Session ID for new daemon sessions. Used when spawned by tddy-daemon.
+    #[arg(long, value_name = "SESSION_ID")]
+    pub session_id: Option<String>,
 }
 
 fn is_debug_mode(args: &Args) -> bool {
@@ -494,7 +514,8 @@ impl From<CoderArgs> for Args {
             agent: a.agent,
             prompt: a.prompt,
             grpc: a.grpc,
-            session_id: None,
+            session_id: a.session_id,
+            resume_from: a.resume_from,
             daemon: a.daemon,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
@@ -530,7 +551,8 @@ impl From<DemoArgs> for Args {
             agent: a.agent,
             prompt: a.prompt,
             grpc: a.grpc,
-            session_id: None,
+            session_id: a.session_id,
+            resume_from: a.resume_from,
             daemon: a.daemon,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
@@ -662,6 +684,7 @@ fn build_client_config(args: &Args) -> crate::web_server::ClientConfig {
             .clone()
             .or_else(|| args.livekit_url.clone()),
         livekit_room: args.livekit_room.clone(),
+        daemon_mode: None,
     }
 }
 
@@ -842,13 +865,42 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 Presenter::new(&args.agent, args.model.as_deref().unwrap_or("opus"))
                     .with_broadcast(event_tx)
                     .with_intent_sender(intent_tx);
-            let output_dir = sessions_base.join("tddy-daemon-session");
+            let output_dir = args
+                .resume_from
+                .as_deref()
+                .or(args.session_id.as_deref())
+                .map(|id| sessions_base.join(id))
+                .unwrap_or_else(|| sessions_base.join("tddy-daemon-session"));
             let _ = std::fs::create_dir_all(&output_dir);
+            let now = chrono::Utc::now().to_rfc3339();
+            let session_id = args
+                .resume_from
+                .as_deref()
+                .or(args.session_id.as_deref())
+                .unwrap_or("tddy-daemon-session");
+            let session_metadata = tddy_core::SessionMetadata {
+                session_id: session_id.to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+                status: "active".to_string(),
+                repo_path: std::env::current_dir()
+                    .ok()
+                    .map(|p| p.display().to_string()),
+                pid: Some(std::process::id()),
+                tool: Some("tddy-coder".to_string()),
+                livekit_room: args.livekit_room.clone(),
+            };
+            let _ = tddy_core::write_session_metadata(&output_dir, &session_metadata);
+            let (plan_dir, initial_prompt) = if args.resume_from.is_some() {
+                (Some(output_dir.clone()), None)
+            } else {
+                (None, Some("feature".to_string()))
+            };
             presenter.start_workflow(
                 backend,
                 output_dir,
-                None,
-                Some("feature".to_string()),
+                plan_dir,
+                initial_prompt,
                 None,
                 None,
                 false,
