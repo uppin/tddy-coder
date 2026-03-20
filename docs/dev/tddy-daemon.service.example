@@ -1,0 +1,22 @@
+# Example systemd unit for tddy-daemon (multi-user daemon).
+# Runs as root for fork+setuid. Copy to /etc/systemd/system/tddy-daemon.service and adjust.
+#
+# Install: sudo cp tddy-daemon.service.example /etc/systemd/system/tddy-daemon.service
+# Enable:  sudo systemctl enable tddy-daemon
+# Start:   sudo systemctl start tddy-daemon
+
+[Unit]
+Description=tddy-daemon multi-user daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/path/to/tddy-daemon -c /etc/tddy/daemon.yaml
+Restart=on-failure
+RestartSec=5
+
+# Must run as root for fork+setuid to spawn processes as target OS users
+# User=root
+
+[Install]
+WantedBy=multi-user.target

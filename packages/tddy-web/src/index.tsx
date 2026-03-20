@@ -41,6 +41,7 @@ import { useVisualViewport } from "./hooks/useVisualViewport";
 import { GitHubLoginButton } from "./components/GitHubLoginButton";
 import { AuthCallback } from "./components/AuthCallback";
 import { UserAvatar } from "./components/UserAvatar";
+import { ConnectionScreen } from "./components/ConnectionScreen";
 
 function getParamsFromUrl(): { url: string; identity: string; roomName: string; debugLogging: boolean } {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
@@ -354,10 +355,29 @@ function ConnectionForm() {
 
 export function App() {
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
+  const [daemonMode, setDaemonMode] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch("/api/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((config: { daemon_mode?: boolean } | null) => {
+        setDaemonMode(config?.daemon_mode ?? false);
+      })
+      .catch(() => setDaemonMode(false));
+  }, []);
+
+  const MainScreen =
+    daemonMode === true ? ConnectionScreen : ConnectionForm;
 
   return (
     <>
-      {path === "/auth/callback" ? <AuthCallback /> : <ConnectionForm />}
+      {path === "/auth/callback" ? (
+        <AuthCallback />
+      ) : daemonMode === null ? (
+        <div style={{ padding: 24 }}>Loading…</div>
+      ) : (
+        <MainScreen />
+      )}
       <HmrOverlay />
     </>
   );

@@ -15,6 +15,9 @@ pub struct ClientConfig {
     pub livekit_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub livekit_room: Option<String>,
+    /// When true, server is tddy-daemon; show ConnectionScreen instead of ConnectionForm.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daemon_mode: Option<bool>,
 }
 
 /// Serve static files from `bundle_path` on the given `host` and `port`.

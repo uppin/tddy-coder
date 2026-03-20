@@ -37,6 +37,31 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
             sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+
+    /// Create with a shared session store. Use when ConnectionService needs to resolve session tokens.
+    pub fn new_with_sessions(
+        provider: P,
+        sessions: Arc<Mutex<HashMap<String, GitHubUser>>>,
+    ) -> Self {
+        Self {
+            provider: Arc::new(provider),
+            sessions,
+        }
+    }
+
+    /// Get the GitHub user login for a session token. Used by ConnectionService for user mapping.
+    pub fn get_user_login(&self, session_token: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .unwrap()
+            .get(session_token)
+            .map(|u| u.login.clone())
+    }
+
+    /// Get a shared reference to the sessions store for use by ConnectionService.
+    pub fn sessions(&self) -> Arc<Mutex<HashMap<String, GitHubUser>>> {
+        Arc::clone(&self.sessions)
+    }
 }
 
 #[async_trait]

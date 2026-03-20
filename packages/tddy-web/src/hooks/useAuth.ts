@@ -23,6 +23,8 @@ export interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
+  /** Session token for RPC calls (when authenticated). */
+  sessionToken: string | null;
 }
 
 export function useAuth() {
@@ -32,6 +34,7 @@ export function useAuth() {
     isAuthenticated: false,
     isLoading: true,
     error: null,
+    sessionToken: null,
   });
 
   // On mount: check stored session
@@ -50,15 +53,16 @@ export function useAuth() {
             isAuthenticated: true,
             isLoading: false,
             error: null,
+            sessionToken: token,
           });
         } else {
           localStorage.removeItem(SESSION_TOKEN_KEY);
-          setState({ user: null, isAuthenticated: false, isLoading: false, error: null });
+          setState({ user: null, isAuthenticated: false, isLoading: false, error: null, sessionToken: null });
         }
       })
       .catch(() => {
         localStorage.removeItem(SESSION_TOKEN_KEY);
-        setState({ user: null, isAuthenticated: false, isLoading: false, error: null });
+        setState({ user: null, isAuthenticated: false, isLoading: false, error: null, sessionToken: null });
       });
   }, [client]);
 
@@ -91,6 +95,7 @@ export function useAuth() {
           isAuthenticated: true,
           isLoading: false,
           error: null,
+          sessionToken: res.sessionToken,
         });
       } catch (e) {
         setState({
@@ -98,6 +103,7 @@ export function useAuth() {
           isAuthenticated: false,
           isLoading: false,
           error: e instanceof Error ? e.message : "Code exchange failed",
+          sessionToken: null,
         });
       }
     },
@@ -114,7 +120,7 @@ export function useAuth() {
       }
     }
     localStorage.removeItem(SESSION_TOKEN_KEY);
-    setState({ user: null, isAuthenticated: false, isLoading: false, error: null });
+    setState({ user: null, isAuthenticated: false, isLoading: false, error: null, sessionToken: null });
   }, [client]);
 
   return { ...state, login, handleCallback, logout };
