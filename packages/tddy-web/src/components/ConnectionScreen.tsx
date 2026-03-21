@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
   ConnectionService,
+  Signal,
   type ProjectEntry,
   type SessionEntry,
   type ToolInfo,
@@ -145,6 +146,87 @@ function ProjectSessionOptions({
 
 function sessionsForProject(sessions: SessionEntry[], projectId: string): SessionEntry[] {
   return sessions.filter((s) => s.projectId === projectId);
+}
+
+function SignalDropdown({
+  sessionId,
+  onSignal,
+}: {
+  sessionId: string;
+  onSignal: (sessionId: string, signal: Signal) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const handleClick = (signal: Signal) => {
+    setOpen(false);
+    onSignal(sessionId, signal);
+  };
+
+  return (
+    <div ref={ref} style={{ display: "inline-block", position: "relative", marginLeft: 4 }}>
+      <button
+        type="button"
+        data-testid={`signal-dropdown-${sessionId}`}
+        onClick={() => setOpen((o) => !o)}
+        style={{ padding: "4px 8px" }}
+      >
+        Signal ▾
+      </button>
+      {open && (
+        <div
+          data-testid={`signal-menu-${sessionId}`}
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            background: "#fff",
+            border: "1px solid #ccc",
+            borderRadius: 4,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+            zIndex: 10,
+            minWidth: 180,
+          }}
+        >
+          <button
+            type="button"
+            data-testid={`signal-sigint-${sessionId}`}
+            onClick={() => handleClick(Signal.SIGINT)}
+            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", background: "none", cursor: "pointer" }}
+          >
+            Interrupt (SIGINT)
+          </button>
+          <button
+            type="button"
+            data-testid={`signal-sigterm-${sessionId}`}
+            onClick={() => handleClick(Signal.SIGTERM)}
+            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", background: "none", cursor: "pointer" }}
+          >
+            Terminate (SIGTERM)
+          </button>
+          <button
+            type="button"
+            data-testid={`signal-sigkill-${sessionId}`}
+            onClick={() => handleClick(Signal.SIGKILL)}
+            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", background: "none", cursor: "pointer" }}
+          >
+            Kill (SIGKILL)
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ConnectedTerminal({
@@ -424,6 +506,16 @@ export function ConnectionScreen() {
     }
   };
 
+  const handleSignalSession = async (sessionId: string, signal: Signal) => {
+    if (!sessionToken) return;
+    setError(null);
+    try {
+      await client.signalSession({ sessionToken, sessionId, signal });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to send signal");
+    }
+  };
+
   if (connected) {
     return (
       <ConnectedTerminal
@@ -588,14 +680,20 @@ export function ConnectionScreen() {
                       <td style={{ padding: 8 }}>{s.pid}</td>
                       <td style={{ padding: 8 }}>
                         {s.isActive ? (
-                          <button
-                            type="button"
-                            data-testid={`connect-${s.sessionId}`}
-                            onClick={() => handleConnectSession(s.sessionId)}
-                            style={{ marginRight: 4, padding: "4px 8px" }}
-                          >
-                            Connect
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              data-testid={`connect-${s.sessionId}`}
+                              onClick={() => handleConnectSession(s.sessionId)}
+                              style={{ marginRight: 4, padding: "4px 8px" }}
+                            >
+                              Connect
+                            </button>
+                            <SignalDropdown
+                              sessionId={s.sessionId}
+                              onSignal={handleSignalSession}
+                            />
+                          </>
                         ) : (
                           <button
                             type="button"
@@ -654,14 +752,20 @@ export function ConnectionScreen() {
                   <td style={{ padding: 8 }}>{s.pid}</td>
                   <td style={{ padding: 8 }}>
                     {s.isActive ? (
-                      <button
-                        type="button"
-                        data-testid={`connect-${s.sessionId}`}
-                        onClick={() => handleConnectSession(s.sessionId)}
-                        style={{ marginRight: 4, padding: "4px 8px" }}
-                      >
-                        Connect
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          data-testid={`connect-${s.sessionId}`}
+                          onClick={() => handleConnectSession(s.sessionId)}
+                          style={{ marginRight: 4, padding: "4px 8px" }}
+                        >
+                          Connect
+                        </button>
+                        <SignalDropdown
+                          sessionId={s.sessionId}
+                          onSignal={handleSignalSession}
+                        />
+                      </>
                     ) : (
                       <button
                         type="button"
