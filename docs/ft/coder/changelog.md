@@ -2,6 +2,11 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-21 — Daemon session: `--project-id`
+
+- **CLI**: `--project-id` on `tddy-coder` / `tddy-demo` when spawned by the daemon; persisted in `SessionMetadata` (`.session.yaml`).
+- **Integration**: See [daemon project concept](../daemon/project-concept.md).
+
 ## 2026-03-19 — ACP Backend Implementation
 
 - **ClaudeAcpBackend**: New `CodingBackend` that speaks ACP (Agent Client Protocol) to `@zed-industries/claude-agent-acp` subprocess via agent-client-protocol Rust SDK. Dedicated thread with LocalSet for !Send SDK. Session mapping (Fresh/Resume), progress events (TaskProgress, ToolUse, TaskStarted).

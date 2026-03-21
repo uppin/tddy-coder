@@ -5,6 +5,8 @@ package connection;
 service ConnectionService {
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
   rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
   rpc ConnectSession(ConnectSessionRequest) returns (ConnectSessionResponse);
   rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
@@ -32,12 +34,36 @@ message SessionEntry {
   string repo_path = 4;
   uint32 pid = 5;
   bool is_active = 6;
+  string project_id = 7;
+}
+
+message ProjectEntry {
+  string project_id = 1;
+  string name = 2;
+  string git_url = 3;
+  string main_repo_path = 4;
+}
+
+message ListProjectsRequest {
+  string session_token = 1;
+}
+message ListProjectsResponse {
+  repeated ProjectEntry projects = 1;
+}
+
+message CreateProjectRequest {
+  string session_token = 1;
+  string name = 2;
+  string git_url = 3;
+}
+message CreateProjectResponse {
+  ProjectEntry project = 1;
 }
 
 message StartSessionRequest {
   string session_token = 1;
   string tool_path = 2;
-  string repo_path = 3;
+  string project_id = 3;
 }
 message StartSessionResponse {
   string session_id = 1;

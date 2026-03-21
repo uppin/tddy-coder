@@ -58,6 +58,7 @@ fn acceptance_session_reader_lists_sessions_from_dir() {
     std::fs::create_dir_all(&session_dir).unwrap();
     let metadata = r#"
 session_id: "session-123"
+project_id: "proj-1"
 created_at: "2026-03-19T10:00:00Z"
 updated_at: "2026-03-19T10:30:00Z"
 status: "active"
@@ -75,6 +76,40 @@ livekit_room: "daemon-session-123"
     );
     assert_eq!(sessions[0].session_id, "session-123");
     assert_eq!(sessions[0].repo_path, "/home/dev1/projects/myapp");
+    assert_eq!(sessions[0].project_id, "proj-1");
+}
+
+/// Acceptance: project_storage round-trips projects.yaml.
+#[test]
+fn acceptance_project_storage_roundtrip() {
+    let temp = tempfile::tempdir().unwrap();
+    let projects_dir = temp.path().join("projects");
+    let p = tddy_daemon::project_storage::ProjectData {
+        project_id: "uuid-1".to_string(),
+        name: "my-app".to_string(),
+        git_url: "https://github.com/org/repo.git".to_string(),
+        main_repo_path: "/home/u/repos/my-app".to_string(),
+    };
+    tddy_daemon::project_storage::add_project(&projects_dir, p.clone()).unwrap();
+    let list = tddy_daemon::project_storage::read_projects(&projects_dir).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0], p);
+}
+
+/// Acceptance: Daemon config parses repos_base_path.
+#[test]
+fn acceptance_config_loads_repos_base_path() {
+    let yaml = r#"
+repos_base_path: "repos"
+users:
+  - github_user: "a"
+    os_user: "b"
+"#;
+    let path = std::env::temp_dir().join("tddy-daemon-acceptance-repos.yaml");
+    std::fs::write(&path, yaml).unwrap();
+    let config = DaemonConfig::load(&path).expect("config should load");
+    assert_eq!(config.repos_base_path.as_deref(), Some("repos"));
+    assert_eq!(config.repos_base_path_or_default(), "repos");
 }
 
 /// Smoke: tddy-daemon starts and serves /api/config with daemon_mode: true.

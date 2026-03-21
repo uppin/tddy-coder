@@ -210,6 +210,8 @@ pub struct Args {
     pub github_stub_codes: Option<String>,
     /// Enable mouse/touch mode in the TUI
     pub mouse: bool,
+    /// Project ID for daemon sessions (set by tddy-daemon when spawning).
+    pub project_id: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -336,6 +338,10 @@ pub struct CoderArgs {
     /// Session ID for new daemon sessions. Used when spawned by tddy-daemon.
     #[arg(long, value_name = "SESSION_ID")]
     pub session_id: Option<String>,
+
+    /// Project ID for daemon sessions. Used when spawned by tddy-daemon.
+    #[arg(long, value_name = "PROJECT_ID")]
+    pub project_id: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -462,6 +468,10 @@ pub struct DemoArgs {
     /// Session ID for new daemon sessions. Used when spawned by tddy-daemon.
     #[arg(long, value_name = "SESSION_ID")]
     pub session_id: Option<String>,
+
+    /// Project ID for daemon sessions. Used when spawned by tddy-daemon.
+    #[arg(long, value_name = "PROJECT_ID")]
+    pub project_id: Option<String>,
 }
 
 fn is_debug_mode(args: &Args) -> bool {
@@ -534,6 +544,7 @@ impl From<CoderArgs> for Args {
             github_stub: a.github_stub,
             github_stub_codes: a.github_stub_codes,
             mouse: a.mouse,
+            project_id: a.project_id,
         }
     }
 }
@@ -571,6 +582,7 @@ impl From<DemoArgs> for Args {
             github_stub: a.github_stub,
             github_stub_codes: a.github_stub_codes,
             mouse: a.mouse,
+            project_id: a.project_id,
         }
     }
 }
@@ -880,6 +892,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 .unwrap_or("tddy-daemon-session");
             let session_metadata = tddy_core::SessionMetadata {
                 session_id: session_id.to_string(),
+                project_id: args.project_id.clone().unwrap_or_default(),
                 created_at: now.clone(),
                 updated_at: now,
                 status: "active".to_string(),

@@ -78,6 +78,8 @@ The `--daemon` flag starts a headless gRPC server (no TUI) suitable for systemd 
 
 **Configuration**: Sessions base is `~/.tddy/sessions`. Port defaults to 50051 (`--grpc`). Graceful shutdown on SIGTERM. Optional `--web-port` and `--web-bundle-path` serve tddy-web static assets over HTTP alongside gRPC. When using LiveKit, `--livekit-api-key` and `--livekit-api-secret` (or env vars) generate tokens locally and auto-refresh by reconnecting before expiry; `--livekit-token` is an alternative for pre-generated tokens.
 
+**Session metadata (daemon spawn)**: When spawned by `tddy-daemon`, `tddy-coder` writes `.session.yaml` with `project_id` (and accepts `--project-id`). Worktrees under the repo still follow `tddy-core` worktree flow from the **main repo** path; see [daemon project concept](../../daemon/project-concept.md).
+
 ### 6. Terminal streaming (TUI mode and daemon)
 
 **StreamTerminal** (TUI mode with `--grpc`): Server-streaming RPC delivers raw ANSI bytes from ratatui/crossterm. Multiple clients share one broadcast; slow clients may miss frames.

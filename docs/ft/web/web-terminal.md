@@ -44,6 +44,17 @@ On touch-capable devices or narrow viewports (width &lt; 768px):
 - **Touch forwarding**: Tap-to-click works for TUI menus and interactive elements. Capture-phase touch handlers send SGR mouse sequences before focus prevention, so interactive TUIs (vim, htop) receive correct mouse events.
 - **Build ID**: A build timestamp is shown in the top-left when connected for cache verification on mobile.
 
+## Daemon mode: Connection screen (project-centric)
+
+When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated users see **ConnectionScreen** (not the manual LiveKit URL form):
+
+- **Tool** dropdown from daemon `allowed_tools`.
+- **Create project** (collapsible): name + git URL → `CreateProject` (clone or adopt existing path under `~/repos/` by default).
+- **Projects** as collapsible sections (`<details>`): each shows name, git URL, `main_repo_path`, **Start New Session** (`StartSession` with `project_id`), and a table of sessions for that `project_id`.
+- Sessions whose `project_id` is not in the listed projects appear under **Other sessions**.
+
+See [daemon project concept](../daemon/project-concept.md).
+
 ## Future Scope
 
 - Multi-session support

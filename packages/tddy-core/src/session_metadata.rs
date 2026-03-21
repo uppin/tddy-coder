@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct SessionMetadata {
     pub session_id: String,
+    pub project_id: String,
     pub created_at: String,
     pub updated_at: String,
     pub status: String,

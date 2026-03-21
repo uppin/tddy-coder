@@ -23,6 +23,9 @@ pub struct DaemonConfig {
     pub users: Vec<UserMapping>,
     #[serde(default)]
     pub allowed_tools: Vec<AllowedTool>,
+    /// Relative to each OS user's home directory (e.g. `repos` → `~/repos/`).
+    #[serde(default)]
+    pub repos_base_path: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize)]
@@ -78,6 +81,11 @@ pub struct AllowedTool {
 }
 
 impl DaemonConfig {
+    /// Default subdirectory under home for cloned project repos when `repos_base_path` is unset.
+    pub fn repos_base_path_or_default(&self) -> &str {
+        self.repos_base_path.as_deref().unwrap_or("repos")
+    }
+
     /// Load config from a YAML file.
     pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
         let contents = std::fs::read_to_string(path)

@@ -2,6 +2,11 @@
 
 Release note history for the Web product area.
 
+## 2026-03-21 — Connection screen: projects and sessions
+
+- **ConnectionScreen**: Lists projects (`ListProjects`), inline create project (`CreateProject`), accordion sections per project with sessions filtered by `projectId`, **Start New Session** per project (`StartSession` with `project_id`). Orphan sessions section when `project_id` is unknown to the list.
+- **Removed**: Manual repository path field; work is always scoped to a project.
+
 ## 2026-03-18 — Terminal Mobile UX: Keyboard, Resize, Touch, Build ID
 
 - **Keyboard-aware resize**: useVisualViewport hook tracks `visualViewport.height`; terminal container resizes when virtual keyboard opens or closes.
