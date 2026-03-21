@@ -30,7 +30,18 @@ users:
   - github_user: "testuser"
     os_user: "CURRENT_USER"  # Replaced by web-dev with $USER
 
+# When true (default), pass --mouse to spawned tddy-* (browser / touch terminals).
+spawn_mouse: true
+
 allowed_tools:
+  - path: "target/debug/tddy-coder"
+    label: "tddy-coder (debug)"
+  - path: "target/release/tddy-coder"
+    label: "tddy-coder (release)"
+  - path: "target/debug/tddy-tools"
+    label: "tddy-tools (debug)"
+  - path: "target/release/tddy-tools"
+    label: "tddy-tools (release)"
   - path: "target/debug/tddy-demo"
     label: "tddy-demo (debug)"
   - path: "target/release/tddy-demo"

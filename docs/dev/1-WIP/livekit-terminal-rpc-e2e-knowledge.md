@@ -191,3 +191,17 @@ gRPC uses a single VirtualTui (one stream of input) so output is not interleaved
 - `packages/tddy-web/src/components/GhosttyTerminal.tsx` — `getBufferText()`
 - `packages/tddy-tui/src/virtual_tui.rs` — `run_virtual_tui`, key parsing
 - `packages/tddy-core/src/backend/stub.rs` — StubBackend clarification questions
+
+## PR wrap validation (2026-03-21)
+
+| Check | Result |
+|-------|--------|
+| `cargo fmt` | PASS (workspace formatted) |
+| `cargo clippy -- -D warnings` | PASS |
+| `./test` | PASS (all crates; 0 failed) |
+| Validate changes (manual) | PASS — aligns with web terminal + VirtualTui Ctrl+C + coder-disconnect UX |
+| Validate tests (manual) | PASS — `ghostty-terminal.cy.ts` e2e for coder exit requires `LIVEKIT_TESTKIT_WS_URL` + Storybook serve |
+| Validate prod-ready (manual) | PASS — no `NODE_ENV === test` in changed web paths; LiveKit handlers use real events |
+| Clean code | B — acceptable for merge; optional follow-up: extract banner copy to constant |
+
+**Ready for review:** toolchain green; commit excludes untracked debug logs (`web-debug.txt`, `webrtc-debug.txt`) unless intentionally included.

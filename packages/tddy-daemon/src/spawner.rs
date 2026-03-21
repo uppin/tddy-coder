@@ -68,6 +68,15 @@ fn create_child_log_config_and_stderr(
     Ok((config_path, stderr_file))
 }
 
+/// Optional flags for [`spawn_as_user`] (session identity, agent, mouse).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SpawnOptions<'a> {
+    pub resume_session_id: Option<&'a str>,
+    pub project_id: Option<&'a str>,
+    pub agent: Option<&'a str>,
+    pub mouse: bool,
+}
+
 /// Result of spawning a session.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SpawnResult {
@@ -172,8 +181,7 @@ pub fn spawn_as_user(
     tool_path: &str,
     repo_path: &Path,
     livekit: &LiveKitCreds,
-    resume_session_id: Option<&str>,
-    project_id: Option<&str>,
+    opts: SpawnOptions<'_>,
 ) -> anyhow::Result<SpawnResult> {
     use std::os::unix::process::CommandExt;
 
@@ -201,7 +209,8 @@ pub fn spawn_as_user(
         anyhow::bail!("user '{}' has no home directory", os_user);
     }
 
-    let session_id = resume_session_id
+    let session_id = opts
+        .resume_session_id
         .map(String::from)
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     let livekit_room = format!("daemon-{}", session_id);
@@ -232,16 +241,27 @@ pub fn spawn_as_user(
         .arg("--livekit-identity")
         .arg(&identity);
 
-    if let Some(resume_id) = resume_session_id {
+    if let Some(resume_id) = opts.resume_session_id {
         cmd.arg("--resume-from").arg(resume_id);
     } else {
         cmd.arg("--session-id").arg(&session_id);
     }
 
-    if let Some(pid) = project_id {
+    if let Some(pid) = opts.project_id {
         if !pid.is_empty() {
             cmd.arg("--project-id").arg(pid);
         }
+    }
+
+    if let Some(a) = opts.agent {
+        let a = a.trim();
+        if !a.is_empty() {
+            cmd.arg("--agent").arg(a);
+        }
+    }
+
+    if opts.mouse {
+        cmd.arg("--mouse");
     }
 
     cmd.arg("--config").arg(&config_path);
@@ -323,8 +343,7 @@ pub fn spawn_as_user(
     _tool_path: &str,
     _repo_path: &Path,
     _livekit: &LiveKitCreds,
-    _resume_session_id: Option<&str>,
-    _project_id: Option<&str>,
+    _opts: SpawnOptions<'_>,
 ) -> anyhow::Result<SpawnResult> {
     anyhow::bail!("spawn_as_user is only supported on Unix")
 }

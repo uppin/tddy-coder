@@ -3,7 +3,7 @@
 //! The Presenter owns application state; the View owns this view-local state
 //! (editing buffers, cursor positions, scroll offset).
 
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use tddy_core::AppMode;
 use tddy_core::ClarificationQuestion;
 
@@ -107,8 +107,10 @@ impl ViewState {
                 self.feature_input.clear();
                 self.feature_cursor = 0;
             }
-            AppMode::Select { .. } => {
-                self.select_selected = 0;
+            AppMode::Select {
+                initial_selected, ..
+            } => {
+                self.select_selected = *initial_selected;
                 self.select_other_text.clear();
                 self.select_typing_other = false;
             }
@@ -269,7 +271,11 @@ impl ViewState {
 
     fn handle_feature_input_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char(c) if !c.is_control() => {
+            // Ctrl+letter must not be inserted as text (e.g. Ctrl+C = Quit). Real TUI skips
+            // handle_key_view_local for Ctrl+C; VirtualTui relies on this guard + key_map.
+            KeyCode::Char(c)
+                if !c.is_control() && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
                 self.feature_input.insert(self.feature_cursor, c);
                 self.feature_cursor += c.len_utf8();
                 true
@@ -304,7 +310,9 @@ impl ViewState {
     fn handle_running_key_view_local(&mut self, key: KeyEvent, inbox_len: usize) -> bool {
         match self.inbox_focus {
             InboxFocus::None => match key.code {
-                KeyCode::Char(c) if !c.is_control() => {
+                KeyCode::Char(c)
+                    if !c.is_control() && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
                     self.running_input.insert(self.running_cursor, c);
                     self.running_cursor += c.len_utf8();
                     true
@@ -367,7 +375,9 @@ impl ViewState {
                 _ => false,
             },
             InboxFocus::Editing => match key.code {
-                KeyCode::Char(c) if !c.is_control() => {
+                KeyCode::Char(c)
+                    if !c.is_control() && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
                     self.inbox_edit_buffer.push(c);
                     true
                 }
@@ -431,13 +441,16 @@ impl ViewState {
                     true
                 }
             }
-            KeyCode::Char(c) if self.select_typing_other => {
+            KeyCode::Char(c)
+                if self.select_typing_other && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
                 self.select_other_text.push(c);
                 true
             }
             KeyCode::Char(c)
                 if question.allow_other
                     && !c.is_control()
+                    && !key.modifiers.contains(KeyModifiers::CONTROL)
                     && self.select_selected == other_idx
                     && !self.select_typing_other =>
             {
@@ -522,13 +535,17 @@ impl ViewState {
                 self.multiselect_typing_other = true;
                 true
             }
-            KeyCode::Char(c) if self.multiselect_typing_other => {
+            KeyCode::Char(c)
+                if self.multiselect_typing_other
+                    && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
                 self.multiselect_other_text.push(c);
                 true
             }
             KeyCode::Char(c)
                 if question.allow_other
                     && !c.is_control()
+                    && !key.modifiers.contains(KeyModifiers::CONTROL)
                     && self.multiselect_cursor == other_idx
                     && !self.multiselect_typing_other =>
             {
@@ -555,7 +572,9 @@ impl ViewState {
 
     fn handle_text_input_key_view_local(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char(c) if !c.is_control() => {
+            KeyCode::Char(c)
+                if !c.is_control() && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
                 self.text_input.insert(self.text_input_cursor, c);
                 self.text_input_cursor += c.len_utf8();
                 true
@@ -591,9 +610,25 @@ impl ViewState {
 
 #[cfg(test)]
 mod tests {
-    use crossterm::event::KeyModifiers;
+    use crossterm::event::{KeyEventKind, KeyModifiers};
 
     use super::*;
+
+    #[test]
+    fn feature_input_ctrl_c_not_inserted_as_text() {
+        let mut vs = ViewState::new();
+        vs.on_mode_changed(&AppMode::FeatureInput);
+        let ctrl_c = KeyEvent::new_with_kind(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+            KeyEventKind::Press,
+        );
+        assert!(
+            !vs.handle_key_view_local(ctrl_c, &AppMode::FeatureInput, 0),
+            "Ctrl+C must not be consumed as text; key_map handles Quit"
+        );
+        assert!(vs.feature_input.is_empty());
+    }
 
     #[test]
     fn view_state_default() {

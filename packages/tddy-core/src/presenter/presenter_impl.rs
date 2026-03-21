@@ -24,6 +24,23 @@ enum PendingToolCallResponse {
 const QUEUED_INSTRUCTION_PREFIX: &str =
     "[QUEUED] The following prompt was queued while you were busy. Please address it:\n\n";
 
+/// Creates the coding backend after the user picks an agent (tddy-coder); returns `Err` for e.g. missing tddy-tools.
+pub type DeferredBackendFactory = Box<dyn FnOnce(&str) -> Result<SharedBackend, String> + Send>;
+
+/// Parameters for the first [`Presenter::start_workflow`] after interactive backend selection (CLI).
+#[derive(Debug)]
+pub struct PendingWorkflowStart {
+    pub output_dir: PathBuf,
+    pub plan_dir: Option<PathBuf>,
+    pub initial_prompt: Option<String>,
+    pub conversation_output_path: Option<PathBuf>,
+    pub debug_output_path: Option<PathBuf>,
+    pub debug: bool,
+    pub session_id: Option<String>,
+    pub socket_path: Option<PathBuf>,
+    pub tool_call_rx: Option<mpsc::Receiver<ToolCallRequest>>,
+}
+
 /// Presenter: owns state, receives UserIntents, orchestrates workflow thread.
 /// Views observe state via connect_view() → ViewConnection (broadcast events).
 pub struct Presenter {
@@ -56,6 +73,13 @@ pub struct Presenter {
     workflow_socket_path: Option<PathBuf>,
     /// Pre-set worktree dir to skip git fetch/worktree creation in hooks.
     workflow_worktree_dir: Option<PathBuf>,
+    /// When true, the next `AnswerSelect` resolves interactive backend choice (session start).
+    backend_selection_pending: bool,
+    /// When set with [`Self::configure_deferred_workflow_start`], backend selection creates the backend and starts the workflow.
+    deferred_backend_factory: Option<DeferredBackendFactory>,
+    pending_workflow_start: Option<PendingWorkflowStart>,
+    /// When set, overrides per-backend default model after selection (CLI `--model`).
+    deferred_cli_model: Option<String>,
 }
 
 impl Presenter {
@@ -95,6 +119,10 @@ impl Presenter {
             pending_tool_call_response: None,
             workflow_socket_path: None,
             workflow_worktree_dir: None,
+            backend_selection_pending: false,
+            deferred_backend_factory: None,
+            pending_workflow_start: None,
+            deferred_cli_model: None,
         }
     }
 
@@ -132,6 +160,43 @@ impl Presenter {
         if let Some(ref tx) = self.broadcast_tx {
             let _ = tx.send(event);
         }
+    }
+
+    /// Show interactive backend selection (synthetic single-select question).
+    pub fn show_backend_selection(
+        &mut self,
+        question: ClarificationQuestion,
+        initial_selected: usize,
+    ) {
+        self.backend_selection_pending = true;
+        self.pending_questions = vec![question.clone()];
+        self.current_question_index = 0;
+        self.collected_answers.clear();
+        self.state.mode = AppMode::Select {
+            question,
+            question_index: 0,
+            total_questions: 1,
+            initial_selected,
+        };
+        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+    }
+
+    /// Configure backend creation + first workflow start after interactive backend selection (tddy-coder TUI).
+    pub fn configure_deferred_workflow_start(
+        &mut self,
+        factory: DeferredBackendFactory,
+        pending: PendingWorkflowStart,
+        cli_model_override: Option<String>,
+    ) {
+        self.deferred_backend_factory = Some(factory);
+        self.pending_workflow_start = Some(pending);
+        self.deferred_cli_model = cli_model_override;
+    }
+
+    /// True while waiting for user to pick a coding backend at session start.
+    #[must_use]
+    pub fn is_backend_selection_pending(&self) -> bool {
+        self.backend_selection_pending
     }
 
     /// Handle a user intent. Updates state and may send answers to workflow.
@@ -194,6 +259,58 @@ impl Presenter {
                 }
             }
             UserIntent::AnswerSelect(idx) => {
+                if self.backend_selection_pending {
+                    if let Some(q) = self.pending_questions.first() {
+                        if idx < q.options.len() {
+                            let label = q.options[idx].label.clone();
+                            let (agent, model) = crate::backend::backend_from_label(&label);
+                            self.state.agent = agent.to_string();
+                            self.state.model = model.to_string();
+                            if let Some(ref m) = self.deferred_cli_model {
+                                self.state.model = m.clone();
+                            }
+                            self.backend_selection_pending = false;
+                            self.pending_questions.clear();
+                            self.current_question_index = 0;
+                            self.collected_answers.clear();
+                            self.state.mode = AppMode::FeatureInput;
+                            self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                            self.broadcast(PresenterEvent::BackendSelected {
+                                agent: agent.to_string(),
+                                model: self.state.model.clone(),
+                            });
+                            if let Some(factory) = self.deferred_backend_factory.take() {
+                                match factory(agent) {
+                                    Ok(backend) => {
+                                        if let Some(pending) = self.pending_workflow_start.take() {
+                                            self.deferred_cli_model = None;
+                                            self.start_workflow(
+                                                backend,
+                                                pending.output_dir,
+                                                pending.plan_dir,
+                                                pending.initial_prompt,
+                                                pending.conversation_output_path,
+                                                pending.debug_output_path,
+                                                pending.debug,
+                                                pending.session_id,
+                                                pending.socket_path,
+                                                pending.tool_call_rx,
+                                            );
+                                        }
+                                    }
+                                    Err(msg) => {
+                                        self.state.mode =
+                                            AppMode::ErrorRecovery { error_message: msg };
+                                        self.broadcast(PresenterEvent::ModeChanged(
+                                            self.state.mode.clone(),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
                 if let Some(q) = self.pending_questions.get(self.current_question_index) {
                     if idx < q.options.len() {
                         let answer = q.options[idx].label.clone();
@@ -408,6 +525,7 @@ impl Presenter {
                     question: q,
                     question_index: self.current_question_index,
                     total_questions: total,
+                    initial_selected: 0,
                 };
             }
             self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
@@ -801,6 +919,7 @@ impl Presenter {
         let (event_tx, event_rx) = mpsc::channel();
         let (answer_tx, answer_rx) = mpsc::channel();
 
+        let model_for_workflow = self.state.model.clone();
         let handle = thread::spawn(move || {
             workflow_runner::run_workflow(
                 backend,
@@ -809,7 +928,7 @@ impl Presenter {
                 output_dir,
                 plan_dir,
                 session_id,
-                None,
+                Some(model_for_workflow),
                 initial_prompt,
                 conversation_output_path,
                 debug_output_path,
@@ -1001,5 +1120,36 @@ mod tests {
             "Expected GoalStarted event, got {:?}",
             ev
         );
+    }
+
+    #[test]
+    fn show_backend_selection_transitions_to_select_mode() {
+        let mut p = make_presenter();
+        let q = crate::backend::backend_selection_question();
+        p.show_backend_selection(q, 0);
+        assert!(matches!(p.state().mode, AppMode::Select { .. }));
+        assert!(p.is_backend_selection_pending());
+    }
+
+    #[test]
+    fn backend_selection_answer_transitions_to_feature_input() {
+        let mut p = make_presenter();
+        let q = crate::backend::backend_selection_question();
+        p.show_backend_selection(q, 0);
+        p.handle_intent(UserIntent::AnswerSelect(2));
+        assert!(matches!(p.state().mode, AppMode::FeatureInput));
+        assert!(!p.is_backend_selection_pending());
+        assert_eq!(p.state().agent, "cursor");
+        assert_eq!(p.state().model, "composer-2");
+    }
+
+    #[test]
+    fn backend_selection_answer_claude_acp() {
+        let mut p = make_presenter();
+        let q = crate::backend::backend_selection_question();
+        p.show_backend_selection(q, 0);
+        p.handle_intent(UserIntent::AnswerSelect(1));
+        assert_eq!(p.state().agent, "claude-acp");
+        assert_eq!(p.state().model, "opus");
     }
 }

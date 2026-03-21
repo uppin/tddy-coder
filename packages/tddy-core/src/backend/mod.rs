@@ -362,6 +362,69 @@ pub struct QuestionOption {
     pub description: String,
 }
 
+/// Build a clarification question for interactive coding backend selection at session start.
+#[must_use]
+pub fn backend_selection_question() -> ClarificationQuestion {
+    ClarificationQuestion {
+        header: "Backend".to_string(),
+        question: "Select the coding backend".to_string(),
+        options: vec![
+            QuestionOption {
+                label: "Claude".to_string(),
+                description: "Claude Code CLI (default model: opus)".to_string(),
+            },
+            QuestionOption {
+                label: "Claude ACP".to_string(),
+                description: "Claude Agent Control Protocol (default model: opus)".to_string(),
+            },
+            QuestionOption {
+                label: "Cursor".to_string(),
+                description: "Cursor agent CLI (default model: composer-2)".to_string(),
+            },
+            QuestionOption {
+                label: "Stub".to_string(),
+                description: "Test backend with simulated responses".to_string(),
+            },
+        ],
+        multi_select: false,
+        allow_other: false,
+    }
+}
+
+/// Map a display label from [`backend_selection_question`] to `(agent_name, default_model)`.
+#[must_use]
+pub fn backend_from_label(label: &str) -> (&'static str, &'static str) {
+    match label {
+        "Claude" => ("claude", "opus"),
+        "Claude ACP" => ("claude-acp", "opus"),
+        "Cursor" => ("cursor", "composer-2"),
+        "Stub" => ("stub", "stub"),
+        _ => ("claude", "opus"),
+    }
+}
+
+/// Default model name for a given agent identifier (e.g. `claude`, `cursor`).
+#[must_use]
+pub fn default_model_for_agent(agent: &str) -> &'static str {
+    match agent {
+        "cursor" => "composer-2",
+        "stub" => "stub",
+        _ => "opus",
+    }
+}
+
+/// Index into [`backend_selection_question`] options for a given agent name.
+#[must_use]
+pub fn preselected_index_for_agent(agent: &str) -> usize {
+    match agent {
+        "claude" => 0,
+        "claude-acp" => 1,
+        "cursor" => 2,
+        "stub" => 3,
+        _ => 0,
+    }
+}
+
 /// Response from the coding backend.
 #[derive(Debug, Clone)]
 pub struct InvokeResponse {
@@ -442,5 +505,64 @@ mod tests {
         // Reap the child so it doesn't remain a zombie, then verify it was killed.
         let status = child.wait().expect("failed to wait on child");
         assert!(!status.success());
+    }
+
+    #[test]
+    fn backend_selection_question_returns_four_options() {
+        let q = backend_selection_question();
+        assert_eq!(q.options.len(), 4);
+        assert!(!q.multi_select);
+        assert!(!q.allow_other);
+    }
+
+    #[test]
+    fn backend_selection_question_labels() {
+        let q = backend_selection_question();
+        let labels: Vec<&str> = q.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, vec!["Claude", "Claude ACP", "Cursor", "Stub"]);
+    }
+
+    #[test]
+    fn backend_from_label_claude() {
+        assert_eq!(backend_from_label("Claude"), ("claude", "opus"));
+    }
+
+    #[test]
+    fn backend_from_label_cursor() {
+        assert_eq!(backend_from_label("Cursor"), ("cursor", "composer-2"));
+    }
+
+    #[test]
+    fn backend_from_label_claude_acp() {
+        assert_eq!(backend_from_label("Claude ACP"), ("claude-acp", "opus"));
+    }
+
+    #[test]
+    fn backend_from_label_stub() {
+        assert_eq!(backend_from_label("Stub"), ("stub", "stub"));
+    }
+
+    #[test]
+    fn backend_from_label_unknown_defaults_to_claude() {
+        assert_eq!(backend_from_label("Unknown"), ("claude", "opus"));
+    }
+
+    #[test]
+    fn default_model_for_agent_cursor() {
+        assert_eq!(default_model_for_agent("cursor"), "composer-2");
+    }
+
+    #[test]
+    fn default_model_for_agent_claude() {
+        assert_eq!(default_model_for_agent("claude"), "opus");
+    }
+
+    #[test]
+    fn preselected_index_for_agent_returns_correct_index() {
+        assert_eq!(preselected_index_for_agent("claude"), 0);
+        assert_eq!(preselected_index_for_agent("claude-acp"), 1);
+        assert_eq!(preselected_index_for_agent("cursor"), 2);
+        assert_eq!(preselected_index_for_agent("stub"), 3);
+        assert_eq!(preselected_index_for_agent("unknown"), 0);
     }
 }

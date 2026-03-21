@@ -86,4 +86,37 @@ describe("Ghostty Terminal E2E", () => {
       }
     );
   });
+
+  /**
+   * When the coder / daemon process exits, the LiveKit server participant leaves the room.
+   * The terminal must stop accepting input and show a clear indication (same UX expectation
+   * as losing the backend session).
+   */
+  it("disables terminal and shows coder-unavailable when server participant leaves", () => {
+    const storyUrl = `/iframe.html?id=components-ghosttyterminal--live-kit-connected&url=${encodeURIComponent(serverUrl)}&token=${encodeURIComponent(clientToken)}&roomName=${encodeURIComponent(roomName)}`;
+    cy.visit(storyUrl);
+
+    cy.get("[data-testid='livekit-status']", { timeout: 10000 })
+      .should("exist")
+      .and("have.text", "connected");
+
+    cy.get("[data-testid='ghostty-terminal']", { timeout: 5000 }).should("exist");
+
+    cy.task("stopTerminalServer");
+
+    cy.get("[data-testid='terminal-coder-unavailable']", { timeout: 20000 })
+      .should("be.visible")
+      .and(($el) => {
+        expect($el.text().trim().length).to.be.greaterThan(
+          0,
+          "banner should explain that the session ended"
+        );
+      });
+
+    cy.get("[data-testid='ghostty-terminal']").should(
+      "have.attr",
+      "data-session-active",
+      "false"
+    );
+  });
 });

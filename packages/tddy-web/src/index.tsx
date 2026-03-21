@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
@@ -93,22 +93,6 @@ function createTokenClient() {
   return createClient(TokenService, transport);
 }
 
-const overlayButtonStyle = {
-  position: "absolute" as const,
-  top: 8,
-  padding: "4px 12px",
-  fontSize: 12,
-  cursor: "pointer",
-  backgroundColor: "rgba(0,0,0,0.6)",
-  color: "#ccc",
-  border: "1px solid #555",
-  borderRadius: 4,
-  zIndex: 10,
-} as const;
-
-const disconnectButtonStyle = { ...overlayButtonStyle, right: 8 } as const;
-const ctrlCButtonStyle = { ...overlayButtonStyle, right: 72 } as const;
-
 function ConnectedTerminal({
   url,
   identity,
@@ -126,7 +110,6 @@ function ConnectedTerminal({
   const [initialToken, setInitialToken] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const sendCtrlCRef = useRef<(() => void) | null>(null);
   const { height: viewportHeight, isKeyboardOpen } = useVisualViewport();
   const isMobile =
     typeof window !== "undefined" &&
@@ -186,33 +169,6 @@ function ConnectedTerminal({
         flexDirection: "column",
       }}
     >
-      <button
-        data-testid="ctrl-c-button"
-        onClick={() => sendCtrlCRef.current?.()}
-        style={ctrlCButtonStyle}
-      >
-        Ctrl+C
-      </button>
-      <button
-        data-testid="disconnect-button"
-        onClick={onDisconnect}
-        style={disconnectButtonStyle}
-      >
-        Disconnect
-      </button>
-      <span
-        data-testid="build-id"
-        style={{
-          ...overlayButtonStyle,
-          left: 8,
-          right: "auto",
-          fontSize: 10,
-          color: "#888",
-          cursor: "default",
-        }}
-      >
-        {BUILD_ID}
-      </span>
       <GhosttyTerminalLiveKit
         url={url}
         token={initialToken}
@@ -224,9 +180,7 @@ function ConnectedTerminal({
         autoFocus={!isMobile}
         preventFocusOnTap={isMobile && !isKeyboardOpen}
         showMobileKeyboard={isMobile}
-        onRegisterSendCtrlC={(send) => {
-          sendCtrlCRef.current = send;
-        }}
+        connectionOverlay={{ onDisconnect, buildId: BUILD_ID }}
       />
     </div>
   );

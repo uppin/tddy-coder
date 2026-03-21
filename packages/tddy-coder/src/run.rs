@@ -13,11 +13,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
-    get_session_for_tag, next_goal_for_state, parse_acceptance_tests_response,
-    parse_evaluate_response, parse_green_response, parse_red_response, parse_refactor_response,
-    parse_update_docs_response, parse_validate_subagents_response, read_changeset, AnyBackend,
-    ClaudeAcpBackend, ClaudeCodeBackend, CursorBackend, ProgressEvent, SharedBackend, StubBackend,
-    WorkflowEngine,
+    backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
+    next_goal_for_state, parse_acceptance_tests_response, parse_evaluate_response,
+    parse_green_response, parse_red_response, parse_refactor_response, parse_update_docs_response,
+    parse_validate_subagents_response, preselected_index_for_agent, read_changeset, AnyBackend,
+    ClaudeAcpBackend, ClaudeCodeBackend, CodingBackend, CursorBackend, PendingWorkflowStart,
+    ProgressEvent, SharedBackend, StubBackend, WorkflowEngine,
 };
 
 use crate::plain;
@@ -65,6 +66,27 @@ fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
              Or ensure it's on PATH."
         ),
     }
+}
+
+/// Plain stdin menu when `--agent` was omitted (single-goal mode).
+fn resolve_agent_for_single_goal_plain(_args: &Args) -> anyhow::Result<String> {
+    let q = backend_selection_question();
+    let label = plain::read_backend_selection_plain(&q)?;
+    let (agent, _) = backend_from_label(&label);
+    verify_tddy_tools_available(agent)?;
+    Ok(agent.to_string())
+}
+
+/// Plain stdin menu when `--agent` was omitted (full workflow, no TUI).
+fn resolve_agent_for_full_workflow_plain(args: &Args) -> anyhow::Result<String> {
+    if let Some(ref a) = args.agent {
+        return Ok(a.clone());
+    }
+    let q = backend_selection_question();
+    let label = plain::read_backend_selection_plain(&q)?;
+    let (agent, _) = backend_from_label(&label);
+    verify_tddy_tools_available(agent)?;
+    Ok(agent.to_string())
 }
 
 /// Shared main entry: panic hook, Ctrl+C handler, run_with_args, exit logic.
@@ -166,7 +188,8 @@ pub struct Args {
     pub log: Option<tddy_core::LogConfig>,
     /// CLI override for default log level (e.g. --log-level debug).
     pub log_level: Option<log::LevelFilter>,
-    pub agent: String,
+    /// When `None`, the user did not pass `--agent` (interactive backend selection).
+    pub agent: Option<String>,
     pub prompt: Option<String>,
     /// When Some(port), gRPC server runs alongside TUI on the given port.
     pub grpc: Option<u16>,
@@ -247,9 +270,9 @@ pub struct CoderArgs {
     #[arg(long, value_name = "LEVEL", value_parser = ["off", "error", "warn", "info", "debug", "trace"])]
     pub log_level: Option<String>,
 
-    /// Agent backend: claude, claude-acp, cursor, or stub (stub for tests/demo, no tddy-tools needed)
-    #[arg(long, default_value = "claude", value_parser = ["claude", "claude-acp", "cursor", "stub"])]
-    pub agent: String,
+    /// Agent backend: claude, claude-acp, cursor, or stub. Omit to choose interactively at startup.
+    #[arg(long, value_parser = ["claude", "claude-acp", "cursor", "stub"])]
+    pub agent: Option<String>,
 
     /// Feature description (alternative to stdin). When set, skips interactive/piped input.
     #[arg(long)]
@@ -377,9 +400,9 @@ pub struct DemoArgs {
     #[arg(long, value_name = "LEVEL", value_parser = ["off", "error", "warn", "info", "debug", "trace"])]
     pub log_level: Option<String>,
 
-    /// Agent backend: stub only (default: stub)
-    #[arg(long, default_value = "stub", value_parser = ["stub"])]
-    pub agent: String,
+    /// Agent backend: stub only. Omit defaults to stub (no interactive menu in tddy-demo).
+    #[arg(long, value_parser = ["stub"])]
+    pub agent: Option<String>,
 
     /// Feature description (alternative to stdin). When set, skips interactive/piped input.
     #[arg(long)]
@@ -559,7 +582,7 @@ impl From<DemoArgs> for Args {
             allowed_tools: a.allowed_tools,
             log: None,
             log_level: parse_log_level(a.log_level.as_deref()),
-            agent: a.agent,
+            agent: a.agent.or(Some("stub".to_string())),
             prompt: a.prompt,
             grpc: a.grpc,
             session_id: a.session_id,
@@ -704,7 +727,9 @@ fn build_client_config(args: &Args) -> crate::web_server::ClientConfig {
 pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     validate_web_args(args)?;
     validate_livekit_args(args)?;
-    verify_tddy_tools_available(&args.agent)?;
+    if let Some(ref a) = args.agent {
+        verify_tddy_tools_available(a)?;
+    }
     if args.daemon {
         return run_daemon(args, shutdown);
     }
@@ -716,14 +741,19 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         return run_full_workflow_plain(args, shutdown);
     }
 
+    let resolved_agent = match &args.agent {
+        Some(a) => a.clone(),
+        None => resolve_agent_for_single_goal_plain(args)?,
+    };
+
     log::debug!(
         "[tddy-coder] goal: {}, agent: {}, model: {}",
         args.goal.as_deref().unwrap_or("(none)"),
-        args.agent,
+        resolved_agent,
         args.model.as_deref().unwrap_or("(default)")
     );
 
-    let backend = create_backend(&args.agent, None, None);
+    let backend = create_backend(&resolved_agent, None, None);
 
     if args.goal.as_deref() == Some("acceptance-tests") {
         let plan_dir = args
@@ -731,7 +761,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for acceptance-tests goal"))?;
         let conv = resolve_log_defaults(args, plan_dir);
-        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, &resolved_agent, |_| {});
         return run_goal_plain(args, backend, "acceptance-tests", ctx, true, &shutdown);
     }
 
@@ -741,7 +771,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for green goal"))?;
         let conv = resolve_log_defaults(args, plan_dir);
-        let ctx = build_goal_context(args, Some(plan_dir), &conv, |c| {
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, &resolved_agent, |c| {
             c.insert("run_demo".to_string(), serde_json::json!(false));
         });
         return run_goal_plain(args, backend, "green", ctx, true, &shutdown);
@@ -753,7 +783,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for evaluate"))?;
         let conv = resolve_log_defaults(args, plan_dir);
-        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, &resolved_agent, |_| {});
         return run_goal_plain(args, backend, "evaluate", ctx, true, &shutdown);
     }
 
@@ -763,7 +793,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for demo goal"))?;
         let conv = resolve_log_defaults(args, plan_dir);
-        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, &resolved_agent, |_| {});
         return run_goal_plain(args, backend, "demo", ctx, true, &shutdown);
     }
 
@@ -773,7 +803,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for red goal"))?;
         let conv = resolve_log_defaults(args, plan_dir);
-        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, &resolved_agent, |_| {});
         return run_goal_plain(args, backend, "red", ctx, true, &shutdown);
     }
 
@@ -783,7 +813,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for validate goal"))?;
         let conv = resolve_log_defaults(args, plan_dir);
-        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, &resolved_agent, |_| {});
         return run_goal_plain(args, backend, "validate", ctx, true, &shutdown);
     }
 
@@ -793,7 +823,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for refactor goal"))?;
         let conv = resolve_log_defaults(args, plan_dir);
-        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, &resolved_agent, |_| {});
         return run_goal_plain(args, backend, "refactor", ctx, true, &shutdown);
     }
 
@@ -803,7 +833,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--plan-dir is required for update-docs goal"))?;
         let conv = resolve_log_defaults(args, plan_dir);
-        let ctx = build_goal_context(args, Some(plan_dir), &conv, |_| {});
+        let ctx = build_goal_context(args, Some(plan_dir), &conv, &resolved_agent, |_| {});
         return run_goal_plain(args, backend, "update-docs", ctx, true, &shutdown);
     }
 
@@ -831,7 +861,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         std::env::current_dir().context("current dir for agent working_dir")?;
 
     let conv = resolve_log_defaults(args, &plan_dir);
-    let ctx = build_goal_context(args, None, &conv, |c| {
+    let ctx = build_goal_context(args, None, &conv, &resolved_agent, |c| {
         c.insert("feature_input".to_string(), serde_json::json!(input));
         c.insert(
             "output_dir".to_string(),
@@ -860,7 +890,11 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     std::fs::create_dir_all(&sessions_base).context("create sessions base dir")?;
 
     let port = args.grpc.unwrap_or(50051);
-    let backend = create_backend(&args.agent, None, None);
+    let agent_str = args.agent.as_deref().unwrap_or("claude");
+    if args.agent.is_none() {
+        verify_tddy_tools_available(agent_str)?;
+    }
+    let backend = create_backend(agent_str, None, None);
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
     let livekit_enabled = args.livekit_url.is_some()
@@ -873,10 +907,14 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         if livekit_enabled {
             let (event_tx, _) = tokio::sync::broadcast::channel(256);
             let (intent_tx, intent_rx) = std::sync::mpsc::channel();
-            let mut presenter =
-                Presenter::new(&args.agent, args.model.as_deref().unwrap_or("opus"))
-                    .with_broadcast(event_tx)
-                    .with_intent_sender(intent_tx);
+            let mut presenter = Presenter::new(
+                agent_str,
+                args.model
+                    .as_deref()
+                    .unwrap_or_else(|| default_model_for_agent(agent_str)),
+            )
+            .with_broadcast(event_tx)
+            .with_intent_sender(intent_tx);
             let output_dir = args
                 .resume_from
                 .as_deref()
@@ -904,10 +942,14 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 livekit_room: args.livekit_room.clone(),
             };
             let _ = tddy_core::write_session_metadata(&output_dir, &session_metadata);
+            // New daemon sessions must not use a placeholder prompt: stdin is /dev/null from the
+            // parent spawner, so the workflow must block on `answer_rx` until the user submits
+            // feature text via Virtual TUI / LiveKit (SubmitFeatureInput). A placeholder skips
+            // that and jumps straight into plan / first clarification.
             let (plan_dir, initial_prompt) = if args.resume_from.is_some() {
                 (Some(output_dir.clone()), None)
             } else {
-                (None, Some("feature".to_string()))
+                (None, None)
             };
             presenter.start_workflow(
                 backend,
@@ -1175,13 +1217,18 @@ fn build_goal_context(
     args: &Args,
     plan_dir: Option<&PathBuf>,
     conversation_output: &Option<PathBuf>,
+    resolved_agent_for_model: &str,
     extra: impl FnOnce(&mut std::collections::HashMap<String, serde_json::Value>),
 ) -> std::collections::HashMap<String, serde_json::Value> {
     let inherit_stdin = io::stdin().is_terminal();
     let mut ctx = std::collections::HashMap::new();
+    let model_val = args
+        .model
+        .clone()
+        .unwrap_or_else(|| default_model_for_agent(resolved_agent_for_model).to_string());
     ctx.insert(
         "model".to_string(),
-        serde_json::to_value(args.model.clone()).unwrap(),
+        serde_json::to_value(model_val).unwrap(),
     );
     ctx.insert("agent_output".to_string(), serde_json::json!(true));
     ctx.insert(
@@ -1500,14 +1547,73 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         Ok((path, rx)) => (Some(path), Some(rx)),
         Err(_) => (None, None),
     };
-    let backend = create_backend(&args.agent, socket_path.as_deref(), None);
 
     let (event_tx, _) = tokio::sync::broadcast::channel(256);
     let (intent_tx, intent_rx) = std::sync::mpsc::channel();
-    let presenter = Presenter::new(&args.agent, args.model.as_deref().unwrap_or("opus"))
-        .with_broadcast(event_tx.clone())
-        .with_intent_sender(intent_tx.clone());
+    let presenter = match args.agent.as_deref() {
+        Some(a) => {
+            let m = args
+                .model
+                .as_deref()
+                .unwrap_or_else(|| default_model_for_agent(a));
+            Presenter::new(a, m)
+        }
+        None => {
+            let m = args
+                .model
+                .as_deref()
+                .unwrap_or_else(|| default_model_for_agent("claude"));
+            Presenter::new("claude", m)
+        }
+    }
+    .with_broadcast(event_tx.clone())
+    .with_intent_sender(intent_tx.clone());
     let presenter = Arc::new(Mutex::new(presenter));
+
+    if args.agent.is_none() {
+        let q = backend_selection_question();
+        let idx = preselected_index_for_agent("claude");
+        let socket_path_for_factory = socket_path.clone();
+        let mut p = presenter.lock().unwrap();
+        p.configure_deferred_workflow_start(
+            Box::new(move |agent: &str| {
+                verify_tddy_tools_available(agent).map_err(|e| e.to_string())?;
+                Ok(create_backend(
+                    agent,
+                    socket_path_for_factory.as_deref(),
+                    None,
+                ))
+            }),
+            PendingWorkflowStart {
+                output_dir: PathBuf::from("."),
+                plan_dir: args.plan_dir.clone(),
+                initial_prompt: args.prompt.clone(),
+                conversation_output_path: args.conversation_output.clone(),
+                debug_output_path: None,
+                debug: is_debug_mode(args),
+                session_id: args.session_id.clone(),
+                socket_path,
+                tool_call_rx,
+            },
+            args.model.clone(),
+        );
+        p.show_backend_selection(q, idx);
+    } else {
+        let agent = args.agent.as_deref().unwrap();
+        let backend = create_backend(agent, socket_path.as_deref(), None);
+        presenter.lock().unwrap().start_workflow(
+            backend,
+            PathBuf::from("."),
+            args.plan_dir.clone(),
+            args.prompt.clone(),
+            args.conversation_output.clone(),
+            None,
+            is_debug_mode(args),
+            args.session_id.clone(),
+            socket_path,
+            tool_call_rx,
+        );
+    }
 
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
@@ -1698,20 +1804,6 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         });
     }
 
-    let initial_prompt = args.prompt.clone();
-    presenter.lock().unwrap().start_workflow(
-        backend,
-        PathBuf::from("."),
-        args.plan_dir.clone(),
-        initial_prompt,
-        args.conversation_output.clone(),
-        None,
-        is_debug_mode(args),
-        args.session_id.clone(),
-        socket_path,
-        tool_call_rx,
-    );
-
     let conn = presenter
         .lock()
         .unwrap()
@@ -1797,12 +1889,13 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
 }
 
 fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
-    let backend = create_backend(&args.agent, None, None);
+    let agent_str = resolve_agent_for_full_workflow_plain(args)?;
+    let backend = create_backend(&agent_str, None, None);
 
     let mut plan_dir = if let Some(ref p) = args.plan_dir {
         p.clone()
     } else {
-        run_plan_to_get_dir(args, backend.clone(), &shutdown)?
+        run_plan_to_get_dir(args, backend.clone(), &agent_str, &shutdown)?
     };
 
     // When resuming with --plan-dir: if state is Init and plan is incomplete, run plan to complete it.
@@ -1819,7 +1912,14 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
             .trim()
             .to_string();
         if !input.is_empty() {
-            plan_dir = run_plan_to_complete(args, backend.clone(), &input, &plan_dir, &shutdown)?;
+            plan_dir = run_plan_to_complete(
+                args,
+                backend.clone(),
+                &input,
+                &plan_dir,
+                &agent_str,
+                &shutdown,
+            )?;
         }
     }
 
@@ -1848,7 +1948,7 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
     let conv = resolve_log_defaults(args, &plan_dir);
     // output_dir comes from build_goal_context (repo_path in changeset); do not overwrite with plan_dir.parent()
     // — plan_dir under ~/.tddy/sessions/ would make parent wrong for worktree creation.
-    let context_values = build_goal_context(args, Some(&plan_dir), &conv, |c| {
+    let context_values = build_goal_context(args, Some(&plan_dir), &conv, &agent_str, |c| {
         c.insert(
             "feature_input".to_string(),
             serde_json::json!(feature_input),
@@ -1960,6 +2060,7 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
 fn run_plan_to_get_dir(
     args: &Args,
     backend: SharedBackend,
+    resolved_agent_for_model: &str,
     shutdown: &AtomicBool,
 ) -> anyhow::Result<PathBuf> {
     let input = read_feature_input(args).context("read feature description")?;
@@ -1984,7 +2085,7 @@ fn run_plan_to_get_dir(
     let _ = tddy_core::changeset::write_changeset(&plan_dir, &init_cs);
 
     let conv = resolve_log_defaults(args, &plan_dir);
-    let ctx = build_goal_context(args, None, &conv, |c| {
+    let ctx = build_goal_context(args, None, &conv, resolved_agent_for_model, |c| {
         c.insert("feature_input".to_string(), serde_json::json!(input));
         c.insert(
             "output_dir".to_string(),
@@ -2004,11 +2105,12 @@ fn run_plan_to_complete(
     backend: SharedBackend,
     input: &str,
     plan_dir: &PathBuf,
+    resolved_agent_for_model: &str,
     shutdown: &AtomicBool,
 ) -> anyhow::Result<PathBuf> {
     // output_dir from build_goal_context (repo_path in changeset); plan_dir.parent() wrong when under ~/.tddy/sessions/
     let conv = resolve_log_defaults(args, plan_dir);
-    let ctx = build_goal_context(args, Some(plan_dir), &conv, |c| {
+    let ctx = build_goal_context(args, Some(plan_dir), &conv, resolved_agent_for_model, |c| {
         c.insert("feature_input".to_string(), serde_json::json!(input));
     });
     run_goal_plain(args, backend, "plan", ctx, false, shutdown)?;
@@ -2037,16 +2139,17 @@ fn run_plan_refinement(
     let refine_engine = WorkflowEngine::new(backend.clone(), refine_storage, Some(refine_hooks));
     let plan_dir_buf = plan_dir.to_path_buf();
     let conv = resolve_log_defaults(args, &plan_dir_buf);
-    let mut refine_ctx = build_goal_context(args, Some(&plan_dir_buf), &conv, |c| {
-        c.insert(
-            "feature_input".to_string(),
-            serde_json::json!(feature_input),
-        );
-        c.insert(
-            "refinement_feedback".to_string(),
-            serde_json::json!(feedback),
-        );
-    });
+    let mut refine_ctx =
+        build_goal_context(args, Some(&plan_dir_buf), &conv, backend.name(), |c| {
+            c.insert(
+                "feature_input".to_string(),
+                serde_json::json!(feature_input),
+            );
+            c.insert(
+                "refinement_feedback".to_string(),
+                serde_json::json!(feedback),
+            );
+        });
     if let Some(sid) = session_id_for_refine {
         refine_ctx.insert("session_id".to_string(), serde_json::json!(sid));
     }

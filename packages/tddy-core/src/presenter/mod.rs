@@ -13,6 +13,6 @@ pub use events::WorkflowEvent;
 
 pub use intent::UserIntent;
 pub use presenter_events::{PresenterEvent, PresenterHandle, ViewConnection};
-pub use presenter_impl::Presenter;
+pub use presenter_impl::{PendingWorkflowStart, Presenter};
 pub use state::{ActivityEntry, ActivityKind, AppMode, ExitAction, PresenterState};
 pub use view::PresenterView;

@@ -22,6 +22,7 @@ use tddy_core::{
 };
 
 use crate::capturing_writer::CapturingWriter;
+use crate::ctrl_interrupt::{ctrl_c_interrupt_session, key_is_ctrl_c_press};
 use crate::key_map::key_event_to_intent;
 use crate::mouse_map::{handle_mouse_event, LayoutAreas};
 use crate::render::draw;
@@ -204,6 +205,12 @@ pub fn run_virtual_tui(
                         }
                         while let Some((key, consumed)) = parse_key_from_buf(&mut input_buf) {
                             log::debug!("VirtualTui: key {:?} mode={:?}", key.code, state.mode);
+                            if key_is_ctrl_c_press(&key) {
+                                ctrl_c_interrupt_session(shutdown.as_ref());
+                                input_buf.drain(..consumed);
+                                updated = true;
+                                continue;
+                            }
                             let inbox_len = state.inbox.len();
                             let view_consumed = view.view_state_mut().handle_key_view_local(
                                 key,
@@ -322,6 +329,7 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
             state.should_quit = true;
         }
         PresenterEvent::IntentReceived(_) => {}
+        PresenterEvent::BackendSelected { .. } => {}
     }
 }
 

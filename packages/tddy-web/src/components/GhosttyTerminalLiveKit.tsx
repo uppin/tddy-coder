@@ -9,6 +9,21 @@ import {
 import { create } from "@bufbuild/protobuf";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 
+/** Overlay buttons for live sessions: must sit above the canvas (z-index, DOM order) and enqueue bytes via the same path as Ghostty `onData`. */
+const CONNECTION_OVERLAY_BTN: React.CSSProperties = {
+  position: "absolute",
+  top: 8,
+  padding: "4px 12px",
+  fontSize: 12,
+  cursor: "pointer",
+  backgroundColor: "rgba(0,0,0,0.6)",
+  color: "#ccc",
+  border: "1px solid #555",
+  borderRadius: 4,
+  zIndex: 100,
+  pointerEvents: "auto",
+};
+
 /** Human-readable description of a terminal input byte sequence. */
 function describeKey(bytes: Uint8Array): string {
   if (bytes.length === 1) {
@@ -54,10 +69,13 @@ export interface GhosttyTerminalLiveKitProps {
   debugMode?: boolean;
   /** When true, log data flows and lifecycle events to console for debugging. */
   debugLogging?: boolean;
-  /** Called with a function to send Ctrl+C (\x03) to the terminal. Used by overlay button. */
-  onRegisterSendCtrlC?: (send: () => void) => void;
   /** Called with a function to focus the terminal. Used by mobile keyboard button. */
   onRegisterFocus?: (focus: () => void) => void;
+  /** When set, show Disconnect + Ctrl+C above the terminal; they enqueue bytes on the same RPC path as keyboard input. */
+  connectionOverlay?: {
+    onDisconnect: () => void;
+    buildId?: string;
+  };
   /** When false, do not auto-focus terminal on ready (e.g. for mobile to avoid opening keyboard). Default true. */
   autoFocus?: boolean;
   /** When true, prevent terminal from receiving focus on pointer/touch (e.g. mobile when keyboard closed). */
@@ -77,12 +95,12 @@ export function GhosttyTerminalLiveKit({
   showBufferTextForTest = false,
   debugMode = false,
   debugLogging = false,
-  onRegisterSendCtrlC,
   onRegisterFocus,
   autoFocus = true,
   preventFocusOnTap = false,
   showMobileKeyboard = false,
   serverIdentity = "server",
+  connectionOverlay,
 }: GhosttyTerminalLiveKitProps) {
   const log = debugLogging
     ? (...args: unknown[]) => console.log("[GhosttyLiveKit]", ...args)
@@ -104,6 +122,8 @@ export function GhosttyTerminalLiveKit({
   const [rpcReceivedSample, setRpcReceivedSample] = useState("");
   const [firstOutputReceived, setFirstOutputReceived] = useState(false);
   const [highlightedLine, setHighlightedLine] = useState("");
+  const [coderSessionActive, setCoderSessionActive] = useState(true);
+  const coderAvailableRef = useRef(true);
 
   useEffect(() => {
     let room: Room | null = null;
@@ -112,6 +132,9 @@ export function GhosttyTerminalLiveKit({
 
     const run = async () => {
       try {
+        coderAvailableRef.current = true;
+        setCoderSessionActive(true);
+
         let initialToken: string;
         let ttlSecondsForRefresh: bigint | null = null;
         if (token && getToken && ttlSecondsProp !== undefined) {
@@ -171,9 +194,13 @@ export function GhosttyTerminalLiveKit({
         room.on(RoomEvent.ParticipantConnected, (participant) =>
           console.log("[LiveKit] ParticipantConnected", participant.identity)
         );
-        room.on(RoomEvent.ParticipantDisconnected, (participant) =>
-          console.log("[LiveKit] ParticipantDisconnected", participant.identity)
-        );
+        room.on(RoomEvent.ParticipantDisconnected, (participant) => {
+          console.log("[LiveKit] ParticipantDisconnected", participant.identity);
+          if (participant.identity !== serverIdentity) return;
+          if (cancelled) return;
+          coderAvailableRef.current = false;
+          setCoderSessionActive(false);
+        });
 
         log("lifecycle: connecting to room");
         await room.connect(url, initialToken);
@@ -259,9 +286,11 @@ export function GhosttyTerminalLiveKit({
                 const ready = termReadyRef.current;
                 const hasTerm = !!termRef.current;
                 log("dataflow: RPC output chunk #", count, "bytes:", output.data.length, "termReady:", ready, "hasTerm:", hasTerm, "preview:", JSON.stringify(preview));
-                if (ready && termRef.current) {
+                if (coderAvailableRef.current && ready && termRef.current) {
                   log("dataflow: writing to term");
                   termRef.current.write(output.data);
+                } else if (!coderAvailableRef.current) {
+                  log("dataflow: skip write (coder session inactive)");
                 } else {
                   log("dataflow: buffering (outputBuffer length:", outputBufferRef.current.length + 1, ")");
                   outputBufferRef.current.push(output.data);
@@ -314,14 +343,6 @@ export function GhosttyTerminalLiveKit({
   }, [url, token, getToken, ttlSecondsProp, roomName, serverIdentity, showBufferTextForTest, debugMode, debugLogging]);
 
   useEffect(() => {
-    if (onRegisterSendCtrlC) {
-      onRegisterSendCtrlC(() => {
-        inputQueueRef.current.push(new Uint8Array([0x03]));
-      });
-    }
-  }, [onRegisterSendCtrlC]);
-
-  useEffect(() => {
     if (onRegisterFocus) {
       onRegisterFocus(() => {
         termRef.current?.focus();
@@ -344,13 +365,31 @@ export function GhosttyTerminalLiveKit({
     zIndex: 10,
   };
 
+  /** Single path to the LiveKit input stream (same queue as Ghostty `onData`). Always logs `[terminal→server]` like keyboard. */
+  const enqueueTerminalInput = (encoded: Uint8Array) => {
+    if (!coderAvailableRef.current) return;
+    inputQueueRef.current.push(encoded);
+    const keyName = describeKey(encoded);
+    console.log("[terminal→server]", keyName, `(${encoded.length} bytes)`, Array.from(encoded));
+  };
+
   const pushInput = (data: string | Uint8Array) => {
     const encoded =
       typeof data === "string" ? new TextEncoder().encode(data) : data;
-    inputQueueRef.current.push(encoded);
+    enqueueTerminalInput(encoded);
   };
 
   const handleMobileKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Ctrl+letter must send control bytes (e.g. Ctrl+C → 0x03). Otherwise `onInput` only sees "c"
+    // (0x63) — the same bug as VirtualTui view_state swallowing Ctrl as text.
+    if (e.ctrlKey && e.key.length === 1) {
+      const lower = e.key.toLowerCase();
+      if (lower >= "a" && lower <= "z") {
+        e.preventDefault();
+        pushInput(new Uint8Array([lower.charCodeAt(0) - 96]));
+        return;
+      }
+    }
     const key = e.key;
     if (key === "Enter") {
       e.preventDefault();
@@ -401,7 +440,29 @@ export function GhosttyTerminalLiveKit({
       {status === "error" && (
         <div data-testid="livekit-error">{errorMsg}</div>
       )}
-      <div style={{ flex: 1, minHeight: 0 }}>
+      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+        {!coderSessionActive && (
+          <div
+            data-testid="terminal-coder-unavailable"
+            role="status"
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 50,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+              backgroundColor: "rgba(0,0,0,0.55)",
+              color: "#e0e0e0",
+              fontSize: 14,
+              textAlign: "center",
+              pointerEvents: "auto",
+            }}
+          >
+            Session ended — the coder disconnected. Reconnect from the session list to continue.
+          </div>
+        )}
         {debugMode ? (
           <div data-testid="rpc-debug-panel">
             <div data-testid="rpc-received-count">{rpcReceivedCount}</div>
@@ -412,6 +473,7 @@ export function GhosttyTerminalLiveKit({
         ) : (
           <GhosttyTerminal
             ref={termRef}
+            sessionActive={coderSessionActive}
             debugLogging={debugLogging}
             preventFocusOnTap={preventFocusOnTap}
             onReady={() => {
@@ -432,15 +494,55 @@ export function GhosttyTerminalLiveKit({
             }}
             onResize={(size) => {
               const seq = `\x1b]resize;${size.cols};${size.rows}\x07`;
-              inputQueueRef.current.push(new TextEncoder().encode(seq));
+              enqueueTerminalInput(new TextEncoder().encode(seq));
             }}
             onData={(data) => {
-              const encoded = new TextEncoder().encode(data);
-              inputQueueRef.current.push(encoded);
-              const keyName = describeKey(encoded);
-              console.log("[terminal→server]", keyName, `(${encoded.length} bytes)`, Array.from(encoded));
+              enqueueTerminalInput(new TextEncoder().encode(data));
             }}
           />
+        )}
+        {connectionOverlay && (
+          <>
+            <button
+              type="button"
+              data-testid="ctrl-c-button"
+              style={{ ...CONNECTION_OVERLAY_BTN, right: 72 }}
+              onClick={(ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                enqueueTerminalInput(new Uint8Array([0x03]));
+              }}
+            >
+              Ctrl+C
+            </button>
+            <button
+              type="button"
+              data-testid="disconnect-button"
+              style={{ ...CONNECTION_OVERLAY_BTN, right: 8 }}
+              onClick={(ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                connectionOverlay.onDisconnect();
+              }}
+            >
+              Disconnect
+            </button>
+            {connectionOverlay.buildId !== undefined && (
+              <span
+                data-testid="build-id"
+                style={{
+                  ...CONNECTION_OVERLAY_BTN,
+                  left: 8,
+                  right: "auto",
+                  fontSize: 10,
+                  color: "#888",
+                  cursor: "default",
+                }}
+              >
+                {connectionOverlay.buildId}
+              </span>
+            )}
+          </>
         )}
       </div>
       {firstOutputReceived && (

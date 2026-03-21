@@ -124,10 +124,9 @@ pub fn merge_config_into_args(args: &mut Args, config: Config) {
     if args.log.is_none() {
         args.log = config.log;
     }
-    if args.agent == "claude" {
-        // "claude" is the default — only override if config specifies something
+    if args.agent.is_none() {
         if let Some(agent) = config.agent {
-            args.agent = agent;
+            args.agent = Some(agent);
         }
     }
     if args.prompt.is_none() {
@@ -324,7 +323,7 @@ log:
             allowed_tools: None,
             log: None,
             log_level: None,
-            agent: "claude".to_string(),
+            agent: Some("claude".to_string()),
             prompt: None,
             grpc: None,
             session_id: None,

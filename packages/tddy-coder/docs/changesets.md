@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-03-21** [Feature] Interactive backend selection — `Args.agent` / `CoderArgs.agent` as `Option<String>`; `effective_agent()`; TUI/plain paths show backend selection when omitted; `verify_tddy_tools_available` after resolved agent; config merge when `args.agent.is_none()`; `plain.rs` menu helpers. (tddy-coder)
 - **2026-03-19** [Feature] tddy-daemon Session Writing and Resume — run_daemon writes .session.yaml on startup; updates session metadata. --resume-from and --session-id CLI args. When resume_from set, loads session from ~/.tddy/sessions/<id>/, sets plan_dir. When session_id set (daemon spawn), uses that for output_dir. Preserves daemon-provided session_id in run_main. ClientConfig gains daemon_mode for web app. (tddy-coder)
 - **2026-03-19** [Feature] Configurable Log Routing via YAML Config — Removed `--debug`, `--debug-output`, `--webrtc-debug-output`. Added `log: Option<LogConfig>` to Config, `--log-level` CLI override. init_tddy_logger receives LogConfig. config.example.yaml documents log section. (tddy-coder)
 - **2026-03-18** [Feature] WebRTC Debug Output, web-dev Args — Args.webrtc_debug_output, --webrtc-debug-output to CoderArgs and DemoArgs. init_tddy_logger call sites updated (main, run_main, run_daemon). web-dev script passes CLI args to daemon. (tddy-coder)

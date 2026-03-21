@@ -2,7 +2,7 @@
 
 **Type**: Technical Product (Developer Tool)
 **Status**: Active
-**Updated**: 2026-03-10
+**Updated**: 2026-03-21
 
 ## Summary
 
@@ -31,6 +31,15 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 | **gRPC** | `--grpc` exposes bidirectional streaming for programmatic control (E2E tests, automation); `StreamTerminal` streams raw TUI bytes for remote viewing |
 | **LiveKit** | `--livekit-url`, `--livekit-room`, `--livekit-identity` with either `--livekit-token` or `--livekit-api-key`/`--livekit-api-secret`. Key/secret generate tokens locally and auto-refresh before expiry. |
 | **Web Bundle** | `--web-port` and `--web-bundle-path` serve pre-built tddy-web static assets over HTTP (TUI and daemon modes) |
+| **Backend selection** | With `--agent` omitted, users pick the coding backend (Claude, Claude ACP, Cursor, Stub) via TUI `AppMode::Select` or a plain numbered menu. With `--agent` set, selection is skipped. Per-backend default models apply; `--model` overrides. Cursor receives `--model` on `cursor agent` when configured. |
+
+## Backend selection at session start
+
+- **CLI**: `--agent` is optional. Omitted → interactive choice before FeatureInput; set → that backend is used without a selection step.
+- **TUI**: Synthetic clarification `Select` over backend options; `AppMode::Select` includes `initial_selected` for highlight consistency.
+- **Plain**: Numbered menu on stderr; stdin line picks the backend when `--agent` is omitted.
+- **Daemon / web**: `StartSession` includes `agent`; the daemon passes `--agent` into the spawned `tddy-coder`. The web Connection Screen offers backend per **new session** only (`StartSessionRequest.agent`). The choice is **per session**, not stored on the project record.
+- **Models**: Defaults per backend (e.g. Cursor `composer-2`); global `--model` overrides when provided.
 
 ## Feature Documents
 
