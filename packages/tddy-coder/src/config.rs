@@ -347,6 +347,7 @@ log:
             github_stub: false,
             github_stub_codes: None,
             mouse: false,
+            project_id: None,
         };
         merge_config_into_args(&mut args, config);
         // CLI set model=opus, config has model=sonnet → opus wins

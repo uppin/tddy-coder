@@ -78,6 +78,93 @@ pub struct SpawnResult {
     pub pid: u32,
 }
 
+/// Clone a git repository as the given OS user. If `destination` already exists, skips clone.
+#[cfg(unix)]
+pub fn clone_as_user(os_user: &str, git_url: &str, destination: &Path) -> anyhow::Result<()> {
+    use std::os::unix::process::CommandExt;
+
+    let dest_str = destination
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("destination path is not valid UTF-8"))?;
+
+    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
+    let mut buf = vec![0u8; 16384];
+    let mut result = std::ptr::null_mut();
+    let ret = unsafe {
+        libc::getpwnam_r(
+            std::ffi::CString::new(os_user)
+                .map_err(|e| anyhow::anyhow!("invalid username: {}", e))?
+                .as_ptr(),
+            passwd.as_mut_ptr(),
+            buf.as_mut_ptr() as *mut libc::c_char,
+            buf.len(),
+            &mut result,
+        )
+    };
+    if ret != 0 || result.is_null() {
+        anyhow::bail!("user '{}' not found", os_user);
+    }
+    let passwd = unsafe { &*result };
+    let uid = passwd.pw_uid;
+    let gid = passwd.pw_gid;
+    if passwd.pw_dir.is_null() {
+        anyhow::bail!("user '{}' has no home directory", os_user);
+    }
+
+    let home_dir = unsafe { std::ffi::CStr::from_ptr(passwd.pw_dir) }
+        .to_string_lossy()
+        .into_owned();
+
+    let same_user = uid == unsafe { libc::getuid() } && gid == unsafe { libc::getgid() };
+
+    // Run as target user: skip clone if destination exists; else `git clone`.
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c")
+        .arg(r#"if test -e "$1"; then exit 0; fi; exec git clone "$2" "$1""#)
+        .arg("sh")
+        .arg(dest_str)
+        .arg(git_url)
+        .env("HOME", &home_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    if !same_user {
+        let home_dir_pre = home_dir.clone();
+        unsafe {
+            cmd.pre_exec(move || {
+                std::env::set_var("HOME", &home_dir_pre);
+                if libc::setgid(gid) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::initgroups(std::ptr::null(), gid) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::setuid(uid) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| anyhow::anyhow!("git clone: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git clone failed: {}", stderr.trim());
+    }
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn clone_as_user(_os_user: &str, _git_url: &str, _destination: &Path) -> anyhow::Result<()> {
+    anyhow::bail!("clone_as_user is only supported on Unix")
+}
+
 /// Spawn a tddy-* process as the given OS user.
 #[cfg(unix)]
 pub fn spawn_as_user(
@@ -86,6 +173,7 @@ pub fn spawn_as_user(
     repo_path: &Path,
     livekit: &LiveKitCreds,
     resume_session_id: Option<&str>,
+    project_id: Option<&str>,
 ) -> anyhow::Result<SpawnResult> {
     use std::os::unix::process::CommandExt;
 
@@ -148,6 +236,12 @@ pub fn spawn_as_user(
         cmd.arg("--resume-from").arg(resume_id);
     } else {
         cmd.arg("--session-id").arg(&session_id);
+    }
+
+    if let Some(pid) = project_id {
+        if !pid.is_empty() {
+            cmd.arg("--project-id").arg(pid);
+        }
     }
 
     cmd.arg("--config").arg(&config_path);
@@ -230,6 +324,7 @@ pub fn spawn_as_user(
     _repo_path: &Path,
     _livekit: &LiveKitCreds,
     _resume_session_id: Option<&str>,
+    _project_id: Option<&str>,
 ) -> anyhow::Result<SpawnResult> {
     anyhow::bail!("spawn_as_user is only supported on Unix")
 }

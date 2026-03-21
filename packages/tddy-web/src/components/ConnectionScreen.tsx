@@ -3,8 +3,9 @@ import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
   ConnectionService,
-  type ToolInfo,
+  type ProjectEntry,
   type SessionEntry,
+  type ToolInfo,
 } from "../gen/connection_pb";
 import { GhosttyTerminalLiveKit } from "./GhosttyTerminalLiveKit";
 import { useAuth } from "../hooks/useAuth";
@@ -70,6 +71,10 @@ function createTokenClient() {
 function truncateId(id: string, maxLen = 12): string {
   if (id.length <= maxLen) return id;
   return `${id.slice(0, 6)}…${id.slice(-4)}`;
+}
+
+function sessionsForProject(sessions: SessionEntry[], projectId: string): SessionEntry[] {
+  return sessions.filter((s) => s.projectId === projectId);
 }
 
 function ConnectedTerminal({
@@ -202,8 +207,12 @@ export function ConnectionScreen() {
   const { user, isAuthenticated, login, logout, sessionToken } = useAuth();
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
+  const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [selectedTool, setSelectedTool] = useState<string>("");
-  const [repoPath, setRepoPath] = useState("");
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectGitUrl, setNewProjectGitUrl] = useState("");
+  const [newProjectUserRelativePath, setNewProjectUserRelativePath] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState<{
@@ -237,19 +246,29 @@ export function ConnectionScreen() {
         .then((res) => setSessions(res.sessions))
         .catch(() => setSessions([]));
     };
+    const loadProjects = () => {
+      client
+        .listProjects({ sessionToken })
+        .then((res) => setProjects(res.projects))
+        .catch(() => setProjects([]));
+    };
     loadSessions();
-    const interval = setInterval(loadSessions, 5000);
+    loadProjects();
+    const interval = setInterval(() => {
+      loadSessions();
+      loadProjects();
+    }, 5000);
     return () => clearInterval(interval);
   }, [client, sessionToken, isAuthenticated]);
 
-  const handleStartSession = async () => {
-    if (!sessionToken || !selectedTool || !repoPath.trim()) return;
+  const handleStartSession = async (projectId: string) => {
+    if (!sessionToken || !selectedTool || !projectId.trim()) return;
     setError(null);
     try {
       const res = await client.startSession({
         sessionToken,
         toolPath: selectedTool,
-        repoPath: repoPath.trim(),
+        projectId: projectId.trim(),
       });
       setConnected({
         livekitUrl: res.livekitUrl,
@@ -260,6 +279,27 @@ export function ConnectionScreen() {
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start session");
+    }
+  };
+
+  const handleCreateProject = async () => {
+    if (!sessionToken || !newProjectName.trim() || !newProjectGitUrl.trim()) return;
+    setError(null);
+    try {
+      await client.createProject({
+        sessionToken,
+        name: newProjectName.trim(),
+        gitUrl: newProjectGitUrl.trim(),
+        userRelativePath: newProjectUserRelativePath.trim(),
+      });
+      const res = await client.listProjects({ sessionToken });
+      setProjects(res.projects);
+      setNewProjectName("");
+      setNewProjectGitUrl("");
+      setNewProjectUserRelativePath("");
+      setCreateProjectOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create project");
     }
   };
 
@@ -296,6 +336,15 @@ export function ConnectionScreen() {
       setError(e instanceof Error ? e.message : "Failed to resume session");
     }
   };
+
+  const knownProjectIds = useMemo(
+    () => new Set(projects.map((p) => p.projectId)),
+    [projects]
+  );
+  const orphanSessions = useMemo(
+    () => sessions.filter((s) => !knownProjectIds.has(s.projectId)),
+    [sessions, knownProjectIds]
+  );
 
   if (connected) {
     return (
@@ -345,18 +394,74 @@ export function ConnectionScreen() {
         ))}
       </select>
 
-      <label style={labelStyle} htmlFor="repo-path">
-        Repository path
-      </label>
-      <input
-        id="repo-path"
-        data-testid="repo-path"
-        type="text"
-        placeholder="/home/user/project"
-        value={repoPath}
-        onChange={(e) => setRepoPath(e.target.value)}
-        style={inputStyle}
-      />
+      <div style={{ marginTop: 16, marginBottom: 8 }}>
+        <button
+          type="button"
+          data-testid="toggle-create-project"
+          onClick={() => setCreateProjectOpen((o) => !o)}
+          style={{ padding: "6px 12px", fontSize: 14 }}
+        >
+          {createProjectOpen ? "Hide" : "Create project"}
+        </button>
+      </div>
+
+      {createProjectOpen && (
+        <div
+          data-testid="create-project-form"
+          style={{
+            border: "1px solid #ccc",
+            borderRadius: 4,
+            padding: 12,
+            marginBottom: 16,
+          }}
+        >
+          <label style={labelStyle} htmlFor="new-project-name">
+            Project name
+          </label>
+          <input
+            id="new-project-name"
+            data-testid="new-project-name"
+            type="text"
+            placeholder="my-app"
+            value={newProjectName}
+            onChange={(e) => setNewProjectName(e.target.value)}
+            style={inputStyle}
+          />
+          <label style={labelStyle} htmlFor="new-project-git-url">
+            Git URL
+          </label>
+          <input
+            id="new-project-git-url"
+            data-testid="new-project-git-url"
+            type="text"
+            placeholder="https://github.com/org/repo.git"
+            value={newProjectGitUrl}
+            onChange={(e) => setNewProjectGitUrl(e.target.value)}
+            style={inputStyle}
+          />
+          <label style={labelStyle} htmlFor="new-project-user-relative-path">
+            Path under home (optional)
+          </label>
+          <input
+            id="new-project-user-relative-path"
+            data-testid="new-project-user-relative-path"
+            type="text"
+            placeholder="e.g. Code/my-app or ~/Code/my-app — leave empty for default clone path"
+            value={newProjectUserRelativePath}
+            onChange={(e) => setNewProjectUserRelativePath(e.target.value)}
+            style={inputStyle}
+          />
+          <button
+            type="button"
+            data-testid="create-project-submit"
+            onClick={handleCreateProject}
+            disabled={!newProjectName.trim() || !newProjectGitUrl.trim()}
+            style={{ padding: "8px 16px" }}
+          >
+            Create
+          </button>
+        </div>
+      )}
 
       <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
         <input
@@ -367,70 +472,138 @@ export function ConnectionScreen() {
         Debug logging
       </label>
 
-      <button
-        type="button"
-        data-testid="start-session"
-        onClick={handleStartSession}
-        disabled={loading || !selectedTool || !repoPath.trim()}
-        style={{ marginTop: 12, marginRight: 8, padding: "8px 16px" }}
-      >
-        Start New
-      </button>
-
       {error && (
         <div data-testid="connection-error" style={{ color: "#c00", marginTop: 12 }}>
           {error}
         </div>
       )}
 
-      <h3 style={{ marginTop: 24, fontSize: 16 }}>Existing sessions</h3>
-      {sessions.length === 0 ? (
-        <p style={{ fontSize: 14, color: "#666" }}>No sessions found.</p>
+      <h3 style={{ marginTop: 24, fontSize: 16 }}>Projects</h3>
+      {projects.length === 0 ? (
+        <p style={{ fontSize: 14, color: "#666" }}>No projects yet. Create one above.</p>
       ) : (
-        <table style={tableStyle} data-testid="sessions-table">
-          <thead>
-            <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>
-              <th style={{ padding: 8 }}>ID</th>
-              <th style={{ padding: 8 }}>Date</th>
-              <th style={{ padding: 8 }}>Status</th>
-              <th style={{ padding: 8 }}>Repo</th>
-              <th style={{ padding: 8 }}>PID</th>
-              <th style={{ padding: 8 }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sessions.map((s) => (
-              <tr key={s.sessionId} style={{ borderBottom: "1px solid #eee" }}>
-                <td style={{ padding: 8 }}>{truncateId(s.sessionId)}</td>
-                <td style={{ padding: 8 }}>{s.createdAt}</td>
-                <td style={{ padding: 8 }}>{s.status}</td>
-                <td style={{ padding: 8 }}>{s.repoPath}</td>
-                <td style={{ padding: 8 }}>{s.pid}</td>
-                <td style={{ padding: 8 }}>
-                  {s.isActive ? (
-                    <button
-                      type="button"
-                      data-testid={`connect-${s.sessionId}`}
-                      onClick={() => handleConnectSession(s.sessionId)}
-                      style={{ marginRight: 4, padding: "4px 8px" }}
-                    >
-                      Connect
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      data-testid={`resume-${s.sessionId}`}
-                      onClick={() => handleResumeSession(s.sessionId)}
-                      style={{ padding: "4px 8px" }}
-                    >
-                      Resume
-                    </button>
-                  )}
-                </td>
+        projects.map((p) => (
+          <details
+            key={p.projectId}
+            data-testid={`project-accordion-${p.projectId}`}
+            style={{ marginBottom: 12, border: "1px solid #ddd", borderRadius: 4, padding: 8 }}
+            open
+          >
+            <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+              {p.name}{" "}
+              <span style={{ fontWeight: 400, fontSize: 12, color: "#666" }}> {p.gitUrl}</span>
+            </summary>
+            <p style={{ fontSize: 12, color: "#555", marginTop: 8 }}>{p.mainRepoPath}</p>
+            <button
+              type="button"
+              data-testid={`start-session-${p.projectId}`}
+              onClick={() => handleStartSession(p.projectId)}
+              disabled={loading || !selectedTool}
+              style={{ marginTop: 8, marginBottom: 8, padding: "8px 16px" }}
+            >
+              Start New Session
+            </button>
+            {sessionsForProject(sessions, p.projectId).length === 0 ? (
+              <p style={{ fontSize: 14, color: "#666" }}>No sessions for this project.</p>
+            ) : (
+              <table style={tableStyle} data-testid={`sessions-table-${p.projectId}`}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>
+                    <th style={{ padding: 8 }}>ID</th>
+                    <th style={{ padding: 8 }}>Date</th>
+                    <th style={{ padding: 8 }}>Status</th>
+                    <th style={{ padding: 8 }}>Repo</th>
+                    <th style={{ padding: 8 }}>PID</th>
+                    <th style={{ padding: 8 }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessionsForProject(sessions, p.projectId).map((s) => (
+                    <tr key={s.sessionId} style={{ borderBottom: "1px solid #eee" }}>
+                      <td style={{ padding: 8 }}>{truncateId(s.sessionId)}</td>
+                      <td style={{ padding: 8 }}>{s.createdAt}</td>
+                      <td style={{ padding: 8 }}>{s.status}</td>
+                      <td style={{ padding: 8 }}>{s.repoPath}</td>
+                      <td style={{ padding: 8 }}>{s.pid}</td>
+                      <td style={{ padding: 8 }}>
+                        {s.isActive ? (
+                          <button
+                            type="button"
+                            data-testid={`connect-${s.sessionId}`}
+                            onClick={() => handleConnectSession(s.sessionId)}
+                            style={{ marginRight: 4, padding: "4px 8px" }}
+                          >
+                            Connect
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            data-testid={`resume-${s.sessionId}`}
+                            onClick={() => handleResumeSession(s.sessionId)}
+                            style={{ padding: "4px 8px" }}
+                          >
+                            Resume
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </details>
+        ))
+      )}
+
+      {orphanSessions.length > 0 && (
+        <>
+          <h3 style={{ marginTop: 24, fontSize: 16 }}>Other sessions</h3>
+          <p style={{ fontSize: 13, color: "#666" }}>Sessions not associated with a listed project.</p>
+          <table style={tableStyle} data-testid="sessions-table-orphan">
+            <thead>
+              <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>
+                <th style={{ padding: 8 }}>ID</th>
+                <th style={{ padding: 8 }}>Date</th>
+                <th style={{ padding: 8 }}>Status</th>
+                <th style={{ padding: 8 }}>Repo</th>
+                <th style={{ padding: 8 }}>PID</th>
+                <th style={{ padding: 8 }}>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {orphanSessions.map((s) => (
+                <tr key={s.sessionId} style={{ borderBottom: "1px solid #eee" }}>
+                  <td style={{ padding: 8 }}>{truncateId(s.sessionId)}</td>
+                  <td style={{ padding: 8 }}>{s.createdAt}</td>
+                  <td style={{ padding: 8 }}>{s.status}</td>
+                  <td style={{ padding: 8 }}>{s.repoPath}</td>
+                  <td style={{ padding: 8 }}>{s.pid}</td>
+                  <td style={{ padding: 8 }}>
+                    {s.isActive ? (
+                      <button
+                        type="button"
+                        data-testid={`connect-${s.sessionId}`}
+                        onClick={() => handleConnectSession(s.sessionId)}
+                        style={{ marginRight: 4, padding: "4px 8px" }}
+                      >
+                        Connect
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        data-testid={`resume-${s.sessionId}`}
+                        onClick={() => handleResumeSession(s.sessionId)}
+                        style={{ padding: "4px 8px" }}
+                      >
+                        Resume
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
       )}
     </div>
   );

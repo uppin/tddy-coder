@@ -23,13 +23,36 @@ pub struct SpawnRequest {
     pub livekit_api_key: String,
     pub livekit_api_secret: String,
     pub resume_session_id: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
 }
 
-/// Response from spawn worker.
+/// Request to clone a git repository as an OS user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloneRequest {
+    pub os_user: String,
+    pub git_url: String,
+    pub destination: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "op", content = "payload")]
+pub enum WorkerRequest {
+    #[serde(rename = "spawn")]
+    Spawn(SpawnRequest),
+    #[serde(rename = "clone")]
+    Clone(CloneRequest),
+}
+
 #[derive(Debug, Serialize, Deserialize)]
-pub enum SpawnResponse {
-    Ok(SpawnResult),
-    Err(String),
+#[serde(tag = "op")]
+pub enum WorkerResponse {
+    #[serde(rename = "spawn_ok")]
+    SpawnOk { result: SpawnResult },
+    #[serde(rename = "clone_ok")]
+    CloneOk,
+    #[serde(rename = "error")]
+    Error { message: String },
 }
 
 /// Client for sending spawn requests to the worker. Used by the async daemon.
@@ -39,27 +62,40 @@ pub struct SpawnClient {
 }
 
 impl SpawnClient {
-    pub fn spawn(&self, req: SpawnRequest) -> anyhow::Result<SpawnResult> {
-        let session_id = req.resume_session_id.as_deref().unwrap_or("new");
-        log::debug!("SpawnClient: sending request session_id={}", session_id);
+    fn send_and_recv(&self, req: WorkerRequest) -> anyhow::Result<WorkerResponse> {
+        let label = match &req {
+            WorkerRequest::Spawn(s) => s.resume_session_id.as_deref().unwrap_or("new"),
+            WorkerRequest::Clone(c) => c.destination.as_str(),
+        };
+        log::debug!("SpawnClient: sending request label={}", label);
         let request_json = serde_json::to_string(&req)?;
         let mut tx = self.request_tx.lock().unwrap();
         writeln!(tx, "{}", request_json)?;
         tx.flush()?;
         drop(tx);
 
-        log::debug!(
-            "SpawnClient: waiting for response session_id={}",
-            session_id
-        );
+        log::debug!("SpawnClient: waiting for response label={}", label);
         let mut rx = self.response_rx.lock().unwrap();
         let mut line = String::new();
         rx.read_line(&mut line)?;
-        log::debug!("SpawnClient: got response session_id={}", session_id);
-        let response: SpawnResponse = serde_json::from_str(line.trim())?;
-        match response {
-            SpawnResponse::Ok(r) => Ok(r),
-            SpawnResponse::Err(e) => Err(anyhow::anyhow!("{}", e)),
+        log::debug!("SpawnClient: got response label={}", label);
+        let response: WorkerResponse = serde_json::from_str(line.trim())?;
+        Ok(response)
+    }
+
+    pub fn spawn(&self, req: SpawnRequest) -> anyhow::Result<SpawnResult> {
+        match self.send_and_recv(WorkerRequest::Spawn(req))? {
+            WorkerResponse::SpawnOk { result } => Ok(result),
+            WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
+            WorkerResponse::CloneOk => Err(anyhow::anyhow!("unexpected clone_ok for spawn")),
+        }
+    }
+
+    pub fn clone_repo(&self, req: CloneRequest) -> anyhow::Result<()> {
+        match self.send_and_recv(WorkerRequest::Clone(req))? {
+            WorkerResponse::CloneOk => Ok(()),
+            WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
+            WorkerResponse::SpawnOk { .. } => Err(anyhow::anyhow!("unexpected spawn_ok for clone")),
         }
     }
 }
@@ -139,44 +175,65 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
             Err(_) => break,
         };
         log::info!("spawn_worker: received request ({} bytes)", line.len());
-        let req: SpawnRequest = match serde_json::from_str(&line) {
+
+        let req: WorkerRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
                 let _ = writeln!(
                     response_writer,
                     "{}",
-                    serde_json::to_string(&SpawnResponse::Err(e.to_string())).unwrap()
+                    serde_json::to_string(&WorkerResponse::Error {
+                        message: e.to_string()
+                    })
+                    .unwrap()
                 );
                 let _ = response_writer.flush();
                 continue;
             }
         };
 
-        let livekit = LiveKitCreds {
-            url: req.livekit_url.clone(),
-            api_key: req.livekit_api_key.clone(),
-            api_secret: req.livekit_api_secret.clone(),
+        let response = match req {
+            WorkerRequest::Spawn(req) => {
+                let livekit = LiveKitCreds {
+                    url: req.livekit_url.clone(),
+                    api_key: req.livekit_api_key.clone(),
+                    api_secret: req.livekit_api_secret.clone(),
+                };
+                log::info!(
+                    "spawn_worker: calling spawn_as_user session_id={}",
+                    req.resume_session_id.as_deref().unwrap_or("new")
+                );
+                let result = spawner::spawn_as_user(
+                    &req.os_user,
+                    &req.tool_path,
+                    Path::new(&req.repo_path),
+                    &livekit,
+                    req.resume_session_id.as_deref(),
+                    req.project_id.as_deref(),
+                );
+                log::info!(
+                    "spawn_worker: spawn_as_user returned session_id={}",
+                    req.resume_session_id.as_deref().unwrap_or("new")
+                );
+                match result {
+                    Ok(r) => WorkerResponse::SpawnOk { result: r },
+                    Err(e) => WorkerResponse::Error {
+                        message: e.to_string(),
+                    },
+                }
+            }
+            WorkerRequest::Clone(req) => {
+                let dest = Path::new(&req.destination);
+                let result = spawner::clone_as_user(&req.os_user, &req.git_url, dest);
+                match result {
+                    Ok(()) => WorkerResponse::CloneOk,
+                    Err(e) => WorkerResponse::Error {
+                        message: e.to_string(),
+                    },
+                }
+            }
         };
-        log::info!(
-            "spawn_worker: calling spawn_as_user session_id={}",
-            req.resume_session_id.as_deref().unwrap_or("new")
-        );
-        let result = spawner::spawn_as_user(
-            &req.os_user,
-            &req.tool_path,
-            Path::new(&req.repo_path),
-            &livekit,
-            req.resume_session_id.as_deref(),
-        );
-        log::info!(
-            "spawn_worker: spawn_as_user returned session_id={}",
-            req.resume_session_id.as_deref().unwrap_or("new")
-        );
 
-        let response = match result {
-            Ok(r) => SpawnResponse::Ok(r),
-            Err(e) => SpawnResponse::Err(e.to_string()),
-        };
         let response_json = serde_json::to_string(&response).unwrap();
         let _ = writeln!(response_writer, "{}", response_json);
         let _ = response_writer.flush();
@@ -190,6 +247,7 @@ pub fn build_spawn_request(
     repo_path: &Path,
     livekit: &LiveKitCreds,
     resume_session_id: Option<&str>,
+    project_id: Option<&str>,
 ) -> SpawnRequest {
     SpawnRequest {
         os_user: os_user.to_string(),
@@ -199,5 +257,6 @@ pub fn build_spawn_request(
         livekit_api_key: livekit.api_key.clone(),
         livekit_api_secret: livekit.api_secret.clone(),
         resume_session_id: resume_session_id.map(String::from),
+        project_id: project_id.map(String::from),
     }
 }

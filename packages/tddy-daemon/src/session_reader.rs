@@ -11,6 +11,7 @@ pub struct SessionEntry {
     pub created_at: String,
     pub status: String,
     pub repo_path: String,
+    pub project_id: String,
     pub pid: Option<u32>,
     pub is_active: bool,
 }
@@ -59,6 +60,7 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             created_at: metadata.created_at,
             status: metadata.status,
             repo_path: metadata.repo_path.unwrap_or_default(),
+            project_id: metadata.project_id,
             pid: metadata.pid,
             is_active,
         });

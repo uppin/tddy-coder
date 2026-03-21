@@ -7,15 +7,21 @@ use tddy_core::read_session_metadata;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::connection::{
     ConnectSessionRequest, ConnectSessionResponse, ConnectionService as ConnectionServiceTrait,
+    CreateProjectRequest, CreateProjectResponse, ListProjectsRequest, ListProjectsResponse,
     ListSessionsRequest, ListSessionsResponse, ListToolsRequest, ListToolsResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SessionEntry as ProtoSessionEntry,
-    StartSessionRequest, StartSessionResponse, ToolInfo,
+    ProjectEntry as ProtoProjectEntry, ResumeSessionRequest, ResumeSessionResponse,
+    SessionEntry as ProtoSessionEntry, StartSessionRequest, StartSessionResponse, ToolInfo,
 };
+use uuid::Uuid;
 
 use crate::config::DaemonConfig;
+use crate::project_storage::{self, ProjectData};
 use crate::session_reader;
 use crate::spawn_worker;
 use crate::spawner;
+use crate::user_sessions_path::{
+    project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
+};
 
 /// Resolves session token to GitHub user login.
 pub type SessionUserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -90,9 +96,122 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 repo_path: s.repo_path,
                 pid: s.pid.unwrap_or(0),
                 is_active: s.is_active,
+                project_id: s.project_id,
             })
             .collect();
         Ok(Response::new(ListSessionsResponse { sessions: entries }))
+    }
+
+    async fn list_projects(
+        &self,
+        request: Request<ListProjectsRequest>,
+    ) -> Result<Response<ListProjectsResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let projects_dir = projects_path_for_user(os_user)
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        let projects = project_storage::read_projects(&projects_dir)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let entries: Vec<ProtoProjectEntry> = projects
+            .into_iter()
+            .map(|p| ProtoProjectEntry {
+                project_id: p.project_id,
+                name: p.name,
+                git_url: p.git_url,
+                main_repo_path: p.main_repo_path,
+            })
+            .collect();
+        Ok(Response::new(ListProjectsResponse { projects: entries }))
+    }
+
+    async fn create_project(
+        &self,
+        request: Request<CreateProjectRequest>,
+    ) -> Result<Response<CreateProjectResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let name = req.name.trim();
+        if name.is_empty() {
+            return Err(Status::invalid_argument("project name is required"));
+        }
+        if name.contains('/') || name.contains("..") {
+            return Err(Status::invalid_argument("invalid project name"));
+        }
+        let git_url = req.git_url.trim();
+        if git_url.is_empty() {
+            return Err(Status::invalid_argument("git_url is required"));
+        }
+
+        let projects_dir = projects_path_for_user(os_user)
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+
+        let user_rel = req.user_relative_path.trim();
+        let destination = if !user_rel.is_empty() {
+            project_path_under_home_from_user_relative(os_user, user_rel)
+                .map_err(Status::invalid_argument)?
+        } else {
+            let base = repos_base_for_user(os_user, self.config.repos_base_path_or_default())
+                .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
+            base.join(name)
+        };
+        let spawn_client = self.spawn_client.clone();
+        let os_user_owned = os_user.to_string();
+        let git_url_owned = git_url.to_string();
+        let dest_path = destination.clone();
+
+        tokio::task::spawn_blocking(move || {
+            if let Some(ref client) = spawn_client {
+                client.clone_repo(spawn_worker::CloneRequest {
+                    os_user: os_user_owned,
+                    git_url: git_url_owned,
+                    destination: dest_path.display().to_string(),
+                })
+            } else {
+                spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
+            }
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(|e| {
+            log::error!("clone project failed: {}", e);
+            Status::internal(e.to_string())
+        })?;
+
+        let main_repo_path = destination
+            .canonicalize()
+            .unwrap_or(destination)
+            .display()
+            .to_string();
+
+        let project = ProjectData {
+            project_id: Uuid::new_v4().to_string(),
+            name: name.to_string(),
+            git_url: git_url.to_string(),
+            main_repo_path,
+        };
+        let entry = ProtoProjectEntry {
+            project_id: project.project_id.clone(),
+            name: project.name.clone(),
+            git_url: project.git_url.clone(),
+            main_repo_path: project.main_repo_path.clone(),
+        };
+        project_storage::add_project(&projects_dir, project)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(CreateProjectResponse {
+            project: Some(entry),
+        }))
     }
 
     async fn start_session(
@@ -108,28 +227,45 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
         let livekit = spawner::livekit_creds_from_config(&self.config)
             .ok_or_else(|| Status::failed_precondition("LiveKit not configured"))?;
-        let repo_path = Path::new(&req.repo_path);
-        if !repo_path.exists() {
-            return Err(Status::invalid_argument("repo path does not exist"));
+
+        let project_id_req = req.project_id.trim();
+        if project_id_req.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
         }
+
+        let projects_dir = projects_path_for_user(os_user)
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        let project = project_storage::find_project(&projects_dir, project_id_req)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let repo_path = Path::new(&project.main_repo_path);
+        if !repo_path.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
         log::debug!("StartSession: entering spawn_blocking session_id=new");
         let spawn_client = self.spawn_client.clone();
         let os_user = os_user.to_string();
         let tool_path = req.tool_path.clone();
         let repo_path = repo_path.to_path_buf();
         let livekit = livekit.clone();
+        let pid_for_spawn = project.project_id.clone();
         let result = tokio::task::spawn_blocking(move || {
             log::debug!(
                 "StartSession: spawn_blocking running, using_spawn_worker={}",
                 spawn_client.is_some()
             );
+            let pid = Some(pid_for_spawn.as_str());
             if let Some(ref client) = spawn_client {
                 let spawn_req = spawn_worker::build_spawn_request(
-                    &os_user, &tool_path, &repo_path, &livekit, None,
+                    &os_user, &tool_path, &repo_path, &livekit, None, pid,
                 );
                 client.spawn(spawn_req)
             } else {
-                spawner::spawn_as_user(&os_user, &tool_path, &repo_path, &livekit, None)
+                spawner::spawn_as_user(&os_user, &tool_path, &repo_path, &livekit, None, pid)
             }
         })
         .await
@@ -217,7 +353,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let os_user = os_user.to_string();
         let session_id = req.session_id.clone();
         let livekit = livekit.clone();
+        let project_id_resume = metadata.project_id.clone();
         let result = tokio::task::spawn_blocking(move || {
+            let pid = if project_id_resume.is_empty() {
+                None
+            } else {
+                Some(project_id_resume.as_str())
+            };
             if let Some(ref client) = spawn_client {
                 let spawn_req = spawn_worker::build_spawn_request(
                     &os_user,
@@ -225,6 +367,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &repo_path,
                     &livekit,
                     Some(&session_id),
+                    pid,
                 );
                 client.spawn(spawn_req)
             } else {
@@ -234,6 +377,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &repo_path,
                     &livekit,
                     Some(&session_id),
+                    pid,
                 )
             }
         })
