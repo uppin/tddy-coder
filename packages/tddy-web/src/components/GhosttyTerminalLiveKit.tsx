@@ -9,8 +9,6 @@ import {
 import { create } from "@bufbuild/protobuf";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 
-const SERVER_IDENTITY = "server";
-
 /** Human-readable description of a terminal input byte sequence. */
 function describeKey(bytes: Uint8Array): string {
   if (bytes.length === 1) {
@@ -66,6 +64,8 @@ export interface GhosttyTerminalLiveKitProps {
   preventFocusOnTap?: boolean;
   /** When true, show mobile keyboard overlay (tap-to-type input). Must stay true while keyboard is open so input stays mounted. */
   showMobileKeyboard?: boolean;
+  /** LiveKit identity of the server participant to target for RPC. Required when connecting to daemon sessions. */
+  serverIdentity?: string;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -82,6 +82,7 @@ export function GhosttyTerminalLiveKit({
   autoFocus = true,
   preventFocusOnTap = false,
   showMobileKeyboard = false,
+  serverIdentity = "server",
 }: GhosttyTerminalLiveKitProps) {
   const log = debugLogging
     ? (...args: unknown[]) => console.log("[GhosttyLiveKit]", ...args)
@@ -178,20 +179,26 @@ export function GhosttyTerminalLiveKit({
         await room.connect(url, initialToken);
         log("lifecycle: room connected");
 
+        const participantIdentities = () =>
+          Array.from(room!.remoteParticipants.values()).map((p) => p.identity);
         const hasServer = () =>
           Array.from(room!.remoteParticipants.values()).some(
-            (p) => p.identity === SERVER_IDENTITY
+            (p) => p.identity === serverIdentity
           );
 
-        await new Promise<void>((resolve, reject) => {
+        console.log(
+          "[LiveKit] Waiting for server participant",
+          { lookingFor: serverIdentity, currentParticipants: participantIdentities() }
+        );
+
+        await new Promise<void>((resolve) => {
           if (hasServer()) return resolve();
-          const t = setTimeout(
-            () => reject(new Error("Server participant not found")),
-            10000
-          );
-          const handler = () => {
+          const handler = (participant: { identity: string }) => {
+            console.log("[LiveKit] ParticipantConnected", participant.identity, {
+              lookingFor: serverIdentity,
+              currentParticipants: participantIdentities(),
+            });
             if (hasServer()) {
-              clearTimeout(t);
               room!.off(RoomEvent.ParticipantConnected, handler);
               resolve();
             }
@@ -202,7 +209,7 @@ export function GhosttyTerminalLiveKit({
 
         const transport = createLiveKitTransport({
           room: room!,
-          targetIdentity: SERVER_IDENTITY,
+          targetIdentity: serverIdentity,
           debug: debugMode || debugLogging,
         });
         log("lifecycle: transport created");
@@ -304,7 +311,7 @@ export function GhosttyTerminalLiveKit({
       if (bufferInterval) clearInterval(bufferInterval);
       if (room) room.disconnect();
     };
-  }, [url, token, getToken, ttlSecondsProp, roomName, showBufferTextForTest, debugMode, debugLogging]);
+  }, [url, token, getToken, ttlSecondsProp, roomName, serverIdentity, showBufferTextForTest, debugMode, debugLogging]);
 
   useEffect(() => {
     if (onRegisterSendCtrlC) {

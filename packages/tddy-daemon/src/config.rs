@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use tddy_core::LogConfig;
+
 #[derive(Debug, Default, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DaemonConfig {
@@ -16,7 +18,7 @@ pub struct DaemonConfig {
     #[serde(default)]
     pub auth_storage: Option<PathBuf>,
     #[serde(default)]
-    pub log_dir: Option<PathBuf>,
+    pub log: Option<LogConfig>,
     #[serde(default)]
     pub users: Vec<UserMapping>,
     #[serde(default)]

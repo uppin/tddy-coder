@@ -12,6 +12,11 @@
 #   WEB_HOST        — Host to bind Vite (default: 127.0.0.1)
 #   VITE_PORT       — Port for Vite dev server (default: 5173)
 #   TDDY_USE_DAEMON — If set, use tddy-daemon instead of tddy-demo
+#   DAEMON_CONFIG — Config for tddy-daemon (default: dev.daemon.yaml when TDDY_USE_DAEMON=1)
+#   LIVEKIT_PUBLIC_URL — Override LiveKit URL (tddy-daemon and tddy-demo); e.g. ws://192.168.1.10:7880
+#   LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET — LiveKit overrides (tddy-daemon)
+#   WEB_HOST, WEB_PUBLIC_URL — Bind host and public URL for auth callback (tddy-daemon)
+#   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_REDIRECT_URI — GitHub OAuth (tddy-daemon)
 #
 # Press Ctrl+C to stop both servers.
 set -euo pipefail
@@ -35,7 +40,12 @@ fi
 WEB_HOST="${WEB_HOST:-127.0.0.1}"
 VITE_PORT="${VITE_PORT:-5173}"
 USE_DAEMON="${TDDY_USE_DAEMON:-0}"
-CONFIG="${CONFIG:-dev.config.yaml}"
+if [ "$USE_DAEMON" = "1" ]; then
+  # tddy-daemon requires dev.daemon.yaml format; ignore CONFIG from .env
+  CONFIG="${DAEMON_CONFIG:-dev.daemon.yaml}"
+else
+  CONFIG="${CONFIG:-dev.config.yaml}"
+fi
 
 # Find binary: tddy-daemon when TDDY_USE_DAEMON=1, else tddy-demo
 find_binary() {
@@ -60,14 +70,12 @@ binary=$(find_binary)
 
 daemon_args=()
 if [ "$USE_DAEMON" = "1" ]; then
-  DAEMON_CONFIG="${CONFIG:-dev.daemon.yaml}"
-  if [ -f "$DAEMON_CONFIG" ]; then
+  if [ -f "$CONFIG" ]; then
     # Replace CURRENT_USER with $USER in a temp copy (daemon config uses os_user)
     TMP_CONFIG=$(mktemp)
-    sed "s/CURRENT_USER/${USER}/g" "$DAEMON_CONFIG" > "$TMP_CONFIG"
+    sed "s/CURRENT_USER/${USER}/g" "$CONFIG" > "$TMP_CONFIG"
     trap "rm -f $TMP_CONFIG" EXIT
     daemon_args+=("-c" "$TMP_CONFIG")
-    CONFIG="$DAEMON_CONFIG"
   else
     echo "tddy-daemon requires -c CONFIG. dev.daemon.yaml not found." >&2
     exit 1
@@ -110,32 +118,73 @@ else
   echo "=== Starting tddy-coder daemon on :${DAEMON_PORT} (config: ${CONFIG}) ==="
 fi
 
-# Start daemon via ./dev so CLI args are passed correctly to the tddy binary
+# Clean up stale processes from previous runs
+fuser -k -9 -s "${DAEMON_PORT}/tcp" "${VITE_PORT}/tcp" 2>/dev/null || true
+sleep 2
+
+# Start daemon via ./dev (nix may take 5–10s to load the binary) so CLI args are passed correctly to the tddy binary
 ./dev "$binary" "${daemon_args[@]}" &
 daemon_pid=$!
 
-# Wait for daemon to be ready
-for i in $(seq 1 30); do
-  if curl -s -o /dev/null "http://127.0.0.1:${DAEMON_PORT}/"; then
-    break
+# Wait for daemon to be ready (HTTP 200, verified twice to avoid race)
+# nix + daemon can take 10–15s on first run; allow 90s
+daemon_ready=false
+for i in $(seq 1 180); do
+  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${DAEMON_PORT}/" 2>/dev/null || echo "000")
+  if [ "$code" = "200" ]; then
+    sleep 1
+    code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${DAEMON_PORT}/" 2>/dev/null || echo "000")
+    if [ "$code" = "200" ]; then
+      daemon_ready=true
+      break
+    fi
   fi
   sleep 0.5
 done
+if [ "$daemon_ready" != "true" ]; then
+  echo "Error: daemon did not respond with HTTP 200 on port ${DAEMON_PORT} within 90s." >&2
+  echo "Check tmp/logs/daemon for errors. Port may be in use: fuser ${DAEMON_PORT}/tcp" >&2
+  kill -9 -"$daemon_pid" 2>/dev/null || true
+  exit 1
+fi
 
 echo ""
 echo "=== Starting Vite dev server on ${WEB_HOST}:${VITE_PORT} ==="
-echo "=== Open http://${WEB_HOST}:${VITE_PORT} ==="
+if [ -n "${WEB_PUBLIC_URL:-}" ]; then
+  # Extract host from WEB_PUBLIC_URL (e.g. http://192.168.1.10:8899 -> 192.168.1.10)
+  PUBLIC_HOST=$(echo "$WEB_PUBLIC_URL" | sed -n 's|.*://\([^:/]*\).*|\1|p')
+  if [ -n "$PUBLIC_HOST" ]; then
+    echo "=== Open http://${PUBLIC_HOST}:${VITE_PORT} (app) or http://${PUBLIC_HOST}:${DAEMON_PORT} (backend) ==="
+  else
+    echo "=== Open http://${WEB_HOST}:${VITE_PORT} ==="
+  fi
+else
+  echo "=== Open http://${WEB_HOST}:${VITE_PORT} ==="
+fi
 echo ""
 
 # Start Vite dev server with DAEMON_PORT for proxy config (run via ./dev for nix env)
 ./dev bash -c "cd packages/tddy-web && DAEMON_PORT='$DAEMON_PORT' npx vite --port '$VITE_PORT' --host '$WEB_HOST'" &
 vite_pid=$!
 
-# Wait for either to exit
-wait_exit() {
-  wait -n "$daemon_pid" "$vite_pid" 2>/dev/null || true
-  kill "$daemon_pid" "$vite_pid" 2>/dev/null || true
-  wait 2>/dev/null
+# Cleanup and exit. Kill by port (most reliable) since process groups may not
+# include all descendants (nix → daemon → spawn_worker).
+cleanup() {
+  kill -TERM -"$daemon_pid" -"$vite_pid" 2>/dev/null || true
+  sleep 2
+  kill -KILL -"$daemon_pid" -"$vite_pid" 2>/dev/null || true
+  sleep 1
+  fuser -k -9 -s "${DAEMON_PORT:-8899}/tcp" "${VITE_PORT:-5173}/tcp" 2>/dev/null || true
+  exit 0
 }
-trap wait_exit INT TERM
-wait_exit
+trap cleanup INT TERM
+
+# Wait for either process to exit
+wait -n "$daemon_pid" "$vite_pid" 2>/dev/null || true
+if ! kill -0 "$daemon_pid" 2>/dev/null; then
+  echo "Daemon exited unexpectedly — stopping" >&2
+fi
+if ! kill -0 "$vite_pid" 2>/dev/null; then
+  echo "Vite exited unexpectedly — stopping" >&2
+fi
+cleanup
