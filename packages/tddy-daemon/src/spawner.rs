@@ -19,6 +19,10 @@ pub struct LiveKitCreds {
 
 /// Create child log config and stderr file. Returns (config_path, stderr_file).
 /// Child needs a real stderr so crossterm/terminal APIs work; Stdio::null() can cause SIGSEGV.
+///
+/// Appends to `tmp/logs/coder` (same path as `dev.config.yaml`’s default file logger) so
+/// backend invoke lines (e.g. Cursor CLI) appear alongside `tddy_coder::run` startup logs.
+/// `rotation.max_rotated: 0` avoids renaming the shared file on each session start.
 fn create_child_log_config_and_stderr(
     repo_path: &Path,
     session_id: &str,
@@ -32,7 +36,14 @@ fn create_child_log_config_and_stderr(
         )
     })?;
 
-    let log_file = child_logs_dir.join(session_id);
+    let log_file = repo_path.join("tmp").join("logs").join("coder");
+    if let Some(parent) = log_file.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| anyhow::anyhow!("failed to create log dir {}: {}", parent.display(), e))?;
+    }
+    // Absolute path avoids duplicate FILE_OUTPUTS keys and matches the repo the child uses as cwd.
+    let log_file_abs = log_file.canonicalize().unwrap_or_else(|_| log_file.clone());
+
     let config_path = child_logs_dir.join(format!("{}.yaml", session_id));
 
     let yaml = format!(
@@ -44,8 +55,10 @@ fn create_child_log_config_and_stderr(
   default:
     level: debug
     logger: default
+  rotation:
+    max_rotated: 0
 "#,
-        log_file.display()
+        log_file_abs.display()
     );
 
     std::fs::write(&config_path, yaml).map_err(|e| {

@@ -150,51 +150,55 @@ async fn full_workflow_with_clarification_completes() {
 /// and demo (Create & run). StubBackend plan includes demo_plan, so demo step runs.
 #[tokio::test]
 async fn full_workflow_asserts_each_state_transition() {
-    /// With demo: 18 transitions. Without demo: 16. Plan approval adds (Planned→Planning→Planned).
+    /// `TddWorkflowHooks::before_task` persists the transitional state in `changeset.yaml` before
+    /// emitting `WorkflowEvent::StateChange`, so the UI often sees identity transitions
+    /// (`Planning→Planning`, `AcceptanceTesting→AcceptanceTesting`, …). PlanReview resync still sends
+    /// `Planning→Planned`. With demo: 22 transitions; without demo: 20 (no demo clarification answer
+    /// in this test → `run_demo` stays false).
     const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
         ("Init", "Planning"),
         ("Planning", "Planned"),
-        ("Planning", "Planned"), // resync on PlanReview
-        ("Planned", "Planning"),
         ("Planning", "Planned"),
-        ("Planning", "Planned"), // resync on PlanReview
-        ("Planned", "AcceptanceTesting"),
+        ("Planning", "Planning"),
+        ("Planning", "Planned"),
+        ("Planning", "Planned"),
+        ("AcceptanceTesting", "AcceptanceTesting"),
         ("AcceptanceTesting", "AcceptanceTestsReady"),
-        ("AcceptanceTestsReady", "RedTesting"),
+        ("RedTesting", "RedTesting"),
         ("RedTesting", "RedTestsReady"),
-        ("RedTestsReady", "GreenImplementing"),
+        ("GreenImplementing", "GreenImplementing"),
         ("GreenImplementing", "GreenComplete"),
-        ("GreenComplete", "DemoRunning"),
+        ("DemoRunning", "DemoRunning"),
         ("DemoRunning", "DemoComplete"),
-        ("DemoComplete", "Evaluating"),
+        ("Evaluating", "Evaluating"),
         ("Evaluating", "Evaluated"),
-        ("Evaluated", "Validating"),
+        ("Validating", "Validating"),
         ("Validating", "ValidateComplete"),
-        ("ValidateComplete", "Refactoring"),
+        ("Refactoring", "Refactoring"),
         ("Refactoring", "RefactorComplete"),
-        ("RefactorComplete", "UpdatingDocs"),
+        ("UpdatingDocs", "UpdatingDocs"),
         ("UpdatingDocs", "DocsUpdated"),
     ];
     const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
         ("Init", "Planning"),
         ("Planning", "Planned"),
-        ("Planning", "Planned"), // resync on PlanReview
-        ("Planned", "Planning"),
         ("Planning", "Planned"),
-        ("Planning", "Planned"), // resync on PlanReview
-        ("Planned", "AcceptanceTesting"),
+        ("Planning", "Planning"),
+        ("Planning", "Planned"),
+        ("Planning", "Planned"),
+        ("AcceptanceTesting", "AcceptanceTesting"),
         ("AcceptanceTesting", "AcceptanceTestsReady"),
-        ("AcceptanceTestsReady", "RedTesting"),
+        ("RedTesting", "RedTesting"),
         ("RedTesting", "RedTestsReady"),
-        ("RedTestsReady", "GreenImplementing"),
+        ("GreenImplementing", "GreenImplementing"),
         ("GreenImplementing", "GreenComplete"),
-        ("GreenComplete", "Evaluating"),
+        ("Evaluating", "Evaluating"),
         ("Evaluating", "Evaluated"),
-        ("Evaluated", "Validating"),
+        ("Validating", "Validating"),
         ("Validating", "ValidateComplete"),
-        ("ValidateComplete", "Refactoring"),
+        ("Refactoring", "Refactoring"),
         ("Refactoring", "RefactorComplete"),
-        ("RefactorComplete", "UpdatingDocs"),
+        ("UpdatingDocs", "UpdatingDocs"),
         ("UpdatingDocs", "DocsUpdated"),
     ];
 

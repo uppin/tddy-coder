@@ -187,7 +187,7 @@ fn click_dynamic_area(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::{layout_chunks_with_inbox, question_height};
+    use crate::layout::{layout_chunks_with_inbox, prompt_height, question_height};
     use crossterm::event::MouseButton;
     use ratatui::layout::Rect;
 
@@ -214,6 +214,32 @@ mod tests {
         let dynamic_h = question_height(&mode);
         let debug_h = 0u16;
         let prompt_h = 1u16;
+        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+            layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
+        LayoutAreas {
+            activity_log,
+            dynamic_area,
+            status_bar,
+            prompt_bar,
+        }
+    }
+
+    /// Same layout as `draw()` for ErrorRecovery on 80x24 (prompt height matches `render::draw`).
+    fn areas_from_real_layout_80x24_error_recovery() -> LayoutAreas {
+        let area = Rect::new(0, 0, 80, 24);
+        let mode = AppMode::ErrorRecovery {
+            error_message: "e".to_string(),
+        };
+        let is_running = false;
+        let inbox_h = crate::layout::inbox_height(0, is_running);
+        let question_h = question_height(&mode);
+        let dynamic_h = question_h.max(inbox_h);
+        let debug_h = 0u16;
+        let prompt_text = "Up/Down navigate  Enter select";
+        let text_len = prompt_text.chars().count().min(u16::MAX as usize) as u16;
+        let area_width = area.width;
+        let max_height = (area.height / 3).max(1);
+        let prompt_h = prompt_height(text_len, area_width, max_height);
         let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
             layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
         LayoutAreas {
@@ -356,5 +382,37 @@ mod tests {
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
         assert_eq!(vs.plan_review_selected, 0);
         assert!(matches!(intent, Some(UserIntent::ViewPlan)));
+    }
+
+    /// `event_loop` applies `normalize_mouse_coords_for_local` before `handle_mouse_event`.
+    /// Same pattern as PlanReview: some terminals report the click row one less than the cell row;
+    /// raw `dynamic_area.y + 2` becomes `y + 3` after normalize, which is the Continue line.
+    #[test]
+    fn click_error_recovery_continue_with_agent_after_normalize_matches_event_loop() {
+        let areas = areas_from_real_layout_80x24_error_recovery();
+        let continue_row_raw = areas.dynamic_area.y + 2;
+        let mut vs = ViewState::new();
+        let mode = AppMode::ErrorRecovery {
+            error_message: "backend timeout".to_string(),
+        };
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: continue_row_raw,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(
+            normalize_mouse_coords_for_local(ev),
+            &mode,
+            &mut vs,
+            &areas,
+            0,
+        );
+        assert!(
+            matches!(intent, Some(UserIntent::ContinueWithAgent)),
+            "click Continue row after normalize must produce ContinueWithAgent; got {:?} (selection={})",
+            intent,
+            vs.error_recovery_selected
+        );
     }
 }

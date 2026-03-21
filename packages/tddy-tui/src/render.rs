@@ -239,7 +239,11 @@ fn render_question(
                 } else {
                     "  "
                 };
-                let text = format!("{}{} -- {}", prefix, opt.label, opt.description);
+                let text = if opt.description.is_empty() {
+                    format!("{}{}", prefix, opt.label)
+                } else {
+                    format!("{}{} -- {}", prefix, opt.label, opt.description)
+                };
                 let style = if view_state.select_selected == i {
                     Style::default().add_modifier(Modifier::REVERSED)
                 } else {
@@ -295,10 +299,14 @@ fn render_question(
                 } else {
                     "  "
                 };
-                let text = format!(
-                    "{}{} {} -- {}",
-                    prefix, checkbox, opt.label, opt.description
-                );
+                let text = if opt.description.is_empty() {
+                    format!("{}{} {}", prefix, checkbox, opt.label)
+                } else {
+                    format!(
+                        "{}{} {} -- {}",
+                        prefix, checkbox, opt.label, opt.description
+                    )
+                };
                 let style = if view_state.multiselect_cursor == i {
                     Style::default().add_modifier(Modifier::REVERSED)
                 } else {

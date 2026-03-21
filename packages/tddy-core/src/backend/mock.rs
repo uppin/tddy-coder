@@ -8,6 +8,7 @@ use crate::error::BackendError;
 use crate::stream::ProgressEvent;
 use crate::toolcall::SubmitResultChannel;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 
 /// Mock backend that returns pre-configured responses for testing.
@@ -16,6 +17,9 @@ pub struct MockBackend {
     responses: RwLock<VecDeque<Result<InvokeResponse, BackendError>>>,
     invocations: RwLock<Vec<InvokeRequest>>,
     submit_channel: SubmitResultChannel,
+    /// When set, the next successful invoke skips storing output in `submit_channel`, simulating
+    /// an agent exit where `tddy-tools submit` never relayed (e.g. validation failed before socket).
+    suppress_next_submit_store: AtomicBool,
 }
 
 impl Default for MockBackend {
@@ -31,6 +35,7 @@ impl MockBackend {
             responses: RwLock::new(VecDeque::new()),
             invocations: RwLock::new(Vec::new()),
             submit_channel: SubmitResultChannel::new(),
+            suppress_next_submit_store: AtomicBool::new(false),
         }
     }
 
@@ -49,6 +54,14 @@ impl MockBackend {
             raw_stream: None,
             stderr: None,
         }));
+    }
+
+    /// Like [`push_ok`](Self::push_ok), but the next `invoke` does not record output as a submit
+    /// result (no `tddy-tools submit` delivery).
+    pub fn push_ok_without_submit(&self, output: impl Into<String>) {
+        self.suppress_next_submit_store
+            .store(true, Ordering::SeqCst);
+        self.push_ok(output);
     }
 
     /// Push an error response.
@@ -123,7 +136,10 @@ impl CodingBackend for MockBackend {
 
         // Only store submit when the agent produced final output (no pending questions).
         // When returning questions, the agent has not called tddy-tools submit yet.
-        if response.questions.is_empty() {
+        let suppress_submit = self
+            .suppress_next_submit_store
+            .swap(false, Ordering::SeqCst);
+        if response.questions.is_empty() && !suppress_submit {
             self.submit_channel
                 .store(request.goal.submit_key(), &response.output);
         }

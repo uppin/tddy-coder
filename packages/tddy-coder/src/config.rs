@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 use crate::Args;
 use tddy_core::LogConfig;
 
+/// File name for persisted CLI options inside a session directory (`sessions/<id>/`).
+pub const SESSION_CODER_CONFIG_FILE: &str = "coder-config.yaml";
+
 /// Top-level config file structure.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,6 +30,9 @@ pub struct Config {
     pub log: Option<LogConfig>,
     #[serde(default)]
     pub agent: Option<String>,
+    /// Path to the Cursor `agent` CLI (overrides `TDDY_CURSOR_AGENT` and default `agent` on `PATH`).
+    #[serde(default)]
+    pub cursor_agent_path: Option<PathBuf>,
     #[serde(default)]
     pub prompt: Option<String>,
     #[serde(default)]
@@ -128,6 +134,9 @@ pub fn merge_config_into_args(args: &mut Args, config: Config) {
         if let Some(agent) = config.agent {
             args.agent = Some(agent);
         }
+    }
+    if args.cursor_agent_path.is_none() {
+        args.cursor_agent_path = config.cursor_agent_path;
     }
     if args.prompt.is_none() {
         args.prompt = config.prompt;
@@ -347,6 +356,7 @@ log:
             github_stub_codes: None,
             mouse: false,
             project_id: None,
+            cursor_agent_path: None,
         };
         merge_config_into_args(&mut args, config);
         // CLI set model=opus, config has model=sonnet → opus wins

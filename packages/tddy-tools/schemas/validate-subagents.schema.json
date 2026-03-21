@@ -10,6 +10,7 @@
     "tests_report_written": { "type": "boolean" },
     "prod_ready_report_written": { "type": "boolean" },
     "clean_code_report_written": { "type": "boolean" },
-    "refactoring_plan_written": { "type": "boolean" }
+    "refactoring_plan_written": { "type": "boolean" },
+    "refactoring_plan": { "type": "string", "description": "Markdown for refactoring-plan.md" }
   }
 }

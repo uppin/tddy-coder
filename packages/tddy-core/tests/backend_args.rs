@@ -393,6 +393,135 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n\n## TODO\n\n
     );
 }
 
+/// Green (and other non-plan workflow goals) must register MCP permission relay even when no
+/// toolcall socket is configured, so tool approvals use the same path as Plan — not Claude Code
+/// UI-only prompts that break headless runs.
+#[test]
+fn invoke_green_goal_without_socket_includes_permission_prompt_and_mcp_config() {
+    let tmp = std::env::temp_dir().join("tddy-backend-permission-green-test");
+    let _ = std::fs::create_dir_all(&tmp);
+    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
+    let args_file = tmp_abs.join("captured_args.txt");
+
+    let script = format!(
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "{}"
+printf '%s\n' '{{"type":"result","result":"ok","session_id":"test-session"}}'
+"##,
+        args_file.display()
+    );
+    let script_path = tmp.join("claude");
+    fs::write(&script_path, script).expect("write script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms).unwrap();
+    }
+
+    let backend = ClaudeCodeBackend::with_path(script_path.into());
+    let req = InvokeRequest {
+        prompt: "User prompt".to_string(),
+        system_prompt: Some("System instructions".to_string()),
+        system_prompt_path: None,
+        goal: Goal::Green,
+        model: None,
+        session: None,
+        working_dir: None,
+        debug: false,
+        agent_output: false,
+        agent_output_sink: None,
+        progress_sink: None,
+        conversation_output_path: None,
+        inherit_stdin: false,
+        extra_allowed_tools: None,
+        socket_path: None,
+        plan_dir: None,
+    };
+
+    let _ = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req))
+        .expect("invoke should succeed");
+
+    let captured = fs::read_to_string(&args_file).expect("read captured args");
+    assert!(
+        captured.contains("--permission-prompt-tool"),
+        "green goal must include --permission-prompt-tool so permissions can be resolved like plan, got: {}",
+        captured
+    );
+    assert!(
+        captured.contains("--mcp-config"),
+        "green goal must include --mcp-config, got: {}",
+        captured
+    );
+}
+
+/// AcceptanceTests (and other workflow goals) with `socket_path` must register MCP permission
+/// relay so Bash/tool approvals reach the Virtual TUI instead of Claude Code UI-only prompts.
+#[test]
+fn invoke_acceptance_tests_with_socket_includes_permission_prompt_and_mcp_config() {
+    let tmp = std::env::temp_dir().join("tddy-backend-permission-accept-test");
+    let _ = std::fs::create_dir_all(&tmp);
+    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
+    let args_file = tmp_abs.join("captured_args.txt");
+
+    let script = format!(
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "{}"
+printf '%s\n' '{{"type":"result","result":"ok","session_id":"test-session"}}'
+"##,
+        args_file.display()
+    );
+    let script_path = tmp.join("claude");
+    fs::write(&script_path, script).expect("write script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms).unwrap();
+    }
+
+    let backend = ClaudeCodeBackend::with_path(script_path.into());
+    let req = InvokeRequest {
+        prompt: "User prompt".to_string(),
+        system_prompt: Some("System instructions".to_string()),
+        system_prompt_path: None,
+        goal: Goal::AcceptanceTests,
+        model: None,
+        session: None,
+        working_dir: None,
+        debug: false,
+        agent_output: false,
+        agent_output_sink: None,
+        progress_sink: None,
+        conversation_output_path: None,
+        inherit_stdin: false,
+        extra_allowed_tools: None,
+        socket_path: Some(tmp_abs.join("toolcall.sock")),
+        plan_dir: None,
+    };
+
+    let _ = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req))
+        .expect("invoke should succeed");
+
+    let captured = fs::read_to_string(&args_file).expect("read captured args");
+    assert!(
+        captured.contains("--permission-prompt-tool"),
+        "acceptance-tests with TDDY_SOCKET must include --permission-prompt-tool for headless approval, got: {}",
+        captured
+    );
+    assert!(
+        captured.contains("--mcp-config"),
+        "acceptance-tests with socket must include --mcp-config, got: {}",
+        captured
+    );
+}
+
 /// Invoke uses --append-system-prompt-file (not inline) when system prompt is present,
 /// to avoid argument length limits and shell parsing issues.
 #[test]

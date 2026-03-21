@@ -1,6 +1,6 @@
 # PRD: TokenService — LiveKit Token Generation via RPC
 
-**Status:** WIP
+**Status:** ✅ Complete (documentation wrapped)
 **Date:** 2026-03-14
 
 ## Summary
@@ -43,7 +43,7 @@ The daemon (tddy-coder) will register `TokenServiceServer` on both transports wh
 ## Affected Features
 
 - [PRD-2026-03-11-livekit-participant.md](PRD-2026-03-11-livekit-participant.md) — Adds a new service to the LiveKit participant's RPC bridge
-- [grpc-remote-control.md](../grpc-remote-control.md) — Adds a new gRPC service to the daemon
+- [grpc-remote-control.md](../../grpc-remote-control.md) — Adds a new gRPC service to the daemon
 
 ## Technical Constraints
 
@@ -61,3 +61,9 @@ The daemon (tddy-coder) will register `TokenServiceServer` on both transports wh
 5. `cargo test -p tddy-service` passes — DONE
 
 Note: gRPC exposure deferred; TokenService is exposed over LiveKit RPC when the daemon uses API key/secret.
+
+---
+
+## Documentation wrap
+
+Merged into [gRPC remote control](../../grpc-remote-control.md) (transport stack) and [Coder changelog](../../changelog.md) on 2026-03-21. This file is archived under `1-WIP/archived/`.

@@ -294,7 +294,7 @@ pub struct InvokeRequest {
     pub goal: Goal,
     /// Optional model name (e.g. "sonnet") passed to the agent.
     pub model: Option<String>,
-    /// Session mode: fresh (--session-id) or resume (--resume).
+    /// Session mode: Claude uses `--session-id` / `--resume`; Cursor uses only `--resume` (fresh chats omit session flags).
     pub session: Option<SessionMode>,
     /// Working directory for the subprocess (default: inherit from parent).
     pub working_dir: Option<PathBuf>,
@@ -359,6 +359,8 @@ pub struct ClarificationQuestion {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuestionOption {
     pub label: String,
+    /// Secondary line in the TUI; omit in JSON when unused (`tddy-tools ask`).
+    #[serde(default)]
     pub description: String,
 }
 

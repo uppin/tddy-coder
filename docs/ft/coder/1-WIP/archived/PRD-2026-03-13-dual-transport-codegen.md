@@ -1,6 +1,6 @@
 # PRD: Dual-Transport Service Codegen (`tddy-codegen`)
 
-**Status:** WIP
+**Status:** ✅ Complete (documentation wrapped)
 **Date:** 2026-03-13
 
 ## Summary
@@ -45,3 +45,9 @@ let participant = LiveKitParticipant::connect(url, token, server, opts).await?;
 5. `TerminalServiceImpl` (in `tddy-service`) has zero hand-written `RpcService` routing boilerplate
 6. All existing integration tests pass (wired via `tddy-service` as dev-dependency)
 7. `cargo test -p tddy-livekit -p tddy-service -p tddy-codegen -p tddy-rpc` all pass
+
+---
+
+## Documentation wrap
+
+Merged into [gRPC remote control](../../grpc-remote-control.md) (transport stack) and [Coder changelog](../../changelog.md) on 2026-03-21. This file is archived under `1-WIP/archived/`.

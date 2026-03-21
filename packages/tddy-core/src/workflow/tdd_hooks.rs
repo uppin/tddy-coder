@@ -24,7 +24,7 @@ use crate::workflow::graph::ElicitationEvent;
 use crate::workflow::hooks::RunnerHooks;
 use crate::workflow::task::TaskResult;
 use crate::workflow::{
-    acceptance_tests, evaluate, green, prepend_context_header, red, refactor, update_docs,
+    acceptance_tests, demo, evaluate, green, prepend_context_header, red, refactor, update_docs,
     validate_subagents,
 };
 use crate::{setup_worktree_for_session, workflow::find_git_root};
@@ -55,6 +55,30 @@ impl Default for TddWorkflowHooks {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Active agent CLI thread id from `changeset.yaml`: `state.session_id`, else tagged `impl`
+/// session, else `.impl-session` (same rules as `before_green`).
+fn resolve_agent_session_id(plan_dir: &Path) -> Result<String, Box<dyn Error + Send + Sync>> {
+    let changeset =
+        read_changeset(plan_dir).map_err(|e| -> Box<dyn Error + Send + Sync> { Box::new(e) })?;
+    changeset
+        .state
+        .session_id
+        .clone()
+        .or_else(|| get_session_for_tag(&changeset, "impl"))
+        .or_else(|| {
+            std::fs::read_to_string(plan_dir.join(".impl-session"))
+                .ok()
+                .map(|s| s.trim().to_string())
+        })
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| -> Box<dyn Error + Send + Sync> {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "agent session id missing: need changeset.state.session_id, impl session, or .impl-session",
+            ))
+        })
 }
 
 fn before_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -92,7 +116,9 @@ fn before_plan(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error +
         };
         let _ = write_changeset(&dir, &init_cs);
     }
-    read_changeset(&dir).map_err(|e| e.to_string())?;
+    let mut cs = read_changeset(&dir).map_err(|e| e.to_string())?;
+    update_state(&mut cs, "Planning");
+    let _ = write_changeset(&dir, &cs);
     Ok(())
 }
 
@@ -182,6 +208,10 @@ fn before_acceptance_tests(
     context.set_sync("is_resume", false);
     context.set_sync("plan_dir", plan_dir.to_path_buf());
     context.set_sync("model", model);
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "AcceptanceTesting");
+        let _ = write_changeset(plan_dir, &cs);
+    }
     Ok(())
 }
 
@@ -212,6 +242,10 @@ fn before_red(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + 
     let session_id = uuid::Uuid::new_v4().to_string();
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", false);
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "RedTesting");
+        let _ = write_changeset(plan_dir, &cs);
+    }
     Ok(())
 }
 
@@ -221,23 +255,12 @@ fn before_green(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error 
     let prd = std::fs::read_to_string(plan_dir.join("PRD.md")).ok();
     let at = std::fs::read_to_string(plan_dir.join("acceptance-tests.md")).ok();
     let changeset = read_changeset(plan_dir).ok();
-    let session_id = changeset
-        .as_ref()
-        .and_then(|cs| cs.state.session_id.clone())
-        .or_else(|| {
-            changeset
-                .as_ref()
-                .and_then(|cs| get_session_for_tag(cs, "impl"))
-        })
-        .or_else(|| {
-            std::fs::read_to_string(plan_dir.join(".impl-session"))
-                .ok()
-                .map(|s| s.trim().to_string())
-        })
-        .filter(|s| !s.is_empty())
-        .ok_or(
-            "green requires changeset with state.session_id, impl session, or .impl-session file",
-        )?;
+    let session_id = resolve_agent_session_id(plan_dir).map_err(|e| {
+        format!(
+            "green requires changeset with state.session_id, impl session, or .impl-session file: {}",
+            e
+        )
+    })?;
     let model = resolve_model(
         changeset.as_ref(),
         "green",
@@ -255,6 +278,10 @@ fn before_green(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error 
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", true);
     context.set_sync("model", model);
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "GreenImplementing");
+        let _ = write_changeset(plan_dir, &cs);
+    }
     Ok(())
 }
 
@@ -265,18 +292,35 @@ fn before_demo(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error +
         "Execute the demo described in demo-plan.md:\n\n{}",
         demo_plan
     );
+    let session_id = resolve_agent_session_id(plan_dir)?;
     context.set_sync("prompt", prompt);
+    context.set_sync("system_prompt", demo::system_prompt());
     context.set_sync("plan_dir", plan_dir.to_path_buf());
+    context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", true);
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "DemoRunning");
+        let _ = write_changeset(plan_dir, &cs);
+    }
     Ok(())
 }
 
 fn before_evaluate(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
     let prd = std::fs::read_to_string(plan_dir.join("PRD.md")).ok();
-    let changeset = std::fs::read_to_string(plan_dir.join("changeset.yaml")).ok();
-    let prompt = evaluate::build_prompt(prd.as_deref(), changeset.as_deref());
+    let changeset_raw = std::fs::read_to_string(plan_dir.join("changeset.yaml")).ok();
+    let prompt = evaluate::build_prompt(prd.as_deref(), changeset_raw.as_deref());
+    let session_id = resolve_agent_session_id(plan_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", evaluate::system_prompt());
     context.set_sync("plan_dir", plan_dir.to_path_buf());
+    context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", true);
+    // Persist transitional state so resume (`next_goal_for_state` / run_workflow) does not keep
+    // e.g. GreenComplete → next "demo" while the evaluate goal is actually running.
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "Evaluating");
+        let _ = write_changeset(plan_dir, &cs);
+    }
     Ok(())
 }
 
@@ -284,9 +328,16 @@ fn before_validate(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Err
     let eval_report = std::fs::read_to_string(plan_dir.join("evaluation-report.md"))
         .map_err(|e| format!("read evaluation-report.md: {}", e))?;
     let prompt = validate_subagents::build_prompt(&eval_report);
+    let session_id = resolve_agent_session_id(plan_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", validate_subagents::system_prompt());
     context.set_sync("plan_dir", plan_dir.to_path_buf());
+    context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", true);
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "Validating");
+        let _ = write_changeset(plan_dir, &cs);
+    }
     Ok(())
 }
 
@@ -294,9 +345,16 @@ fn before_refactor(plan_dir: &Path, context: &Context) -> Result<(), Box<dyn Err
     let refactor_plan = std::fs::read_to_string(plan_dir.join("refactoring-plan.md"))
         .map_err(|e| format!("read refactoring-plan.md: {}", e))?;
     let prompt = refactor::build_prompt(&refactor_plan);
+    let session_id = resolve_agent_session_id(plan_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", refactor::system_prompt());
     context.set_sync("plan_dir", plan_dir.to_path_buf());
+    context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", true);
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "Refactoring");
+        let _ = write_changeset(plan_dir, &cs);
+    }
     Ok(())
 }
 
@@ -335,6 +393,13 @@ fn before_update_docs(
     }
     context.set_sync("system_prompt", system_prompt);
     context.set_sync("plan_dir", plan_dir.to_path_buf());
+    let session_id = resolve_agent_session_id(plan_dir)?;
+    context.set_sync("session_id", session_id);
+    context.set_sync("is_resume", true);
+    if let Ok(mut cs) = read_changeset(plan_dir) {
+        update_state(&mut cs, "UpdatingDocs");
+        let _ = write_changeset(plan_dir, &cs);
+    }
     Ok(())
 }
 
@@ -468,14 +533,18 @@ fn after_evaluate(plan_dir: &Path, output: &str) -> Result<(), Box<dyn Error + S
 
 fn after_validate(plan_dir: &Path, output: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let parsed = parse_validate_subagents_response(output).map_err(WorkflowError::ParseError)?;
-    if parsed.refactoring_plan_written {
-        let refactoring_plan_path = plan_dir.join("refactoring-plan.md");
-        if !refactoring_plan_path.exists() {
-            let _ = std::fs::write(
-                &refactoring_plan_path,
-                "# Refactoring Plan\n## Tasks\n1. No-op refactoring task\n",
-            );
-        }
+    let refactoring_plan_path = plan_dir.join("refactoring-plan.md");
+    if let Some(plan_md) = parsed.refactoring_plan {
+        std::fs::write(&refactoring_plan_path, plan_md).map_err(
+            |e| -> Box<dyn Error + Send + Sync> {
+                format!("write refactoring-plan.md: {}", e).into()
+            },
+        )?;
+    } else if parsed.refactoring_plan_written && !refactoring_plan_path.exists() {
+        let _ = std::fs::write(
+            &refactoring_plan_path,
+            "# Refactoring Plan\n## Tasks\n1. No-op refactoring task\n",
+        );
     }
     if let Ok(mut cs) = read_changeset(plan_dir) {
         update_state(&mut cs, "ValidateComplete");

@@ -3,6 +3,7 @@
 mod acceptance_tests;
 mod agent_output;
 pub mod context;
+mod demo;
 pub mod engine;
 mod evaluate;
 pub mod graph;

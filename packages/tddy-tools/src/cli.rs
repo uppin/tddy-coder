@@ -82,6 +82,7 @@ pub struct AskQuestionItem {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct QuestionOption {
     pub label: String,
+    #[serde(default)]
     pub description: String,
 }
 

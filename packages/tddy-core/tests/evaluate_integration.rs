@@ -14,6 +14,9 @@ mod common;
 
 use std::sync::Arc;
 use tddy_core::changeset::read_changeset;
+use tddy_core::next_goal_for_state;
+use tddy_core::workflow::context::Context;
+use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{evaluate_allowlist, Goal, MockBackend, SharedBackend, WorkflowEngine};
 
@@ -115,6 +118,7 @@ async fn evaluate_workflow_writes_evaluation_report_to_plan_dir() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    write_changeset_with_state(&plan_dir, "GreenComplete", "sess-eval-writes");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(EVALUATE_OUTPUT);
@@ -194,6 +198,7 @@ async fn evaluate_workflow_includes_changed_files_in_report() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    write_changeset_with_state(&plan_dir, "GreenComplete", "sess-eval-changed-files");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(EVALUATE_OUTPUT);
@@ -236,6 +241,7 @@ async fn evaluate_workflow_includes_affected_tests_in_report() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    write_changeset_with_state(&plan_dir, "GreenComplete", "sess-eval-affected-tests");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(EVALUATE_OUTPUT);
@@ -280,6 +286,7 @@ async fn evaluate_workflow_includes_validity_assessment() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    write_changeset_with_state(&plan_dir, "GreenComplete", "sess-eval-validity");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(EVALUATE_OUTPUT);
@@ -397,6 +404,49 @@ fn evaluate_allowlist_contains_required_tools() {
     );
 }
 
+/// When the agent finishes without a delivered `tddy-tools submit` (e.g. repeated validation
+/// failure before relay), the workflow fails with an explicit error instead of hanging.
+#[tokio::test]
+async fn evaluate_workflow_fails_when_agent_finished_without_submit() {
+    let working_dir = std::env::temp_dir().join("tddy-evaluate-no-submit");
+    let plan_dir = std::env::temp_dir().join("tddy-evaluate-no-submit-plan");
+    let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&working_dir).expect("create working dir");
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    write_changeset_with_state(&plan_dir, "GreenComplete", "sess-eval-no-submit");
+
+    let backend = Arc::new(MockBackend::new());
+    backend.push_ok_without_submit("Agent finished; submit never relayed.");
+
+    let storage_dir = std::env::temp_dir().join("tddy-evaluate-no-submit-engine");
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_evaluate(plan_dir.clone(), Some(working_dir.clone()));
+    let result = run_goal_until_done(&engine, "evaluate", ctx).await;
+
+    assert!(
+        result.is_err(),
+        "evaluate should fail when no submit was delivered, got: {:?}",
+        result
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("without calling tddy-tools submit")
+            || err_msg.contains("evaluate-changes"),
+        "expected missing-submit workflow error, got: {}",
+        err_msg
+    );
+
+    let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
 /// evaluate() returns ParseError when backend returns a response with no structured-response block.
 #[tokio::test]
 async fn evaluate_workflow_returns_parse_error_on_malformed_response() {
@@ -436,5 +486,43 @@ async fn evaluate_workflow_returns_parse_error_on_malformed_response() {
     );
 
     let _ = std::fs::remove_dir_all(&working_dir);
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// When the workflow enters the evaluate goal, `changeset.yaml` must record the real phase
+/// (`Evaluating`), not the previous completed state (`GreenComplete`). Otherwise resume logic
+/// (`next_goal_for_state` in `run_workflow`) maps `GreenComplete` → `demo` and the session
+/// continues at the wrong goal instead of evaluate.
+#[tokio::test]
+async fn entering_evaluate_persists_evaluating_in_changeset_for_resume() {
+    let plan_dir = std::env::temp_dir().join(format!(
+        "tddy-evaluate-persist-state-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    write_changeset_with_state(&plan_dir, "GreenComplete", "sess-resume-eval");
+    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Summary\nTest.").expect("write PRD");
+
+    let hooks = TddWorkflowHooks::new();
+    let ctx = Context::new();
+    ctx.set_sync("plan_dir", plan_dir.clone());
+    ctx.set_sync("backend_name", "claude".to_string());
+
+    hooks
+        .before_task("evaluate", &ctx)
+        .expect("before_task evaluate");
+
+    let cs = read_changeset(&plan_dir).expect("read changeset");
+    assert_eq!(
+        cs.state.current, "Evaluating",
+        "changeset must move to Evaluating when the evaluate goal starts so resume does not treat the workflow as still at GreenComplete (which maps to demo, not evaluate)"
+    );
+    assert_eq!(
+        next_goal_for_state(&cs.state.current),
+        Some("evaluate"),
+        "resume start_goal must be evaluate while evaluation is in progress"
+    );
+
     let _ = std::fs::remove_dir_all(&plan_dir);
 }

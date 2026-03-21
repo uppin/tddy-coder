@@ -41,6 +41,7 @@ fn presenter_event_to_test_event(ev: PresenterEvent) -> Option<TestEvent> {
         PresenterEvent::InboxChanged(inbox) => Some(TestEvent::InboxChanged(inbox)),
         PresenterEvent::IntentReceived(_) => None,
         PresenterEvent::BackendSelected { .. } => None,
+        PresenterEvent::ShouldQuit => None,
     }
 }
 

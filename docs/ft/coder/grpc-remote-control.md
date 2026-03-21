@@ -1,10 +1,10 @@
 # gRPC Remote Control
 
-**Status:** WIP
+**Status:** Stable
 
 ## Summary
 
-Add a `--grpc` flag to `tddy-coder` and `tddy-demo` that starts a gRPC server alongside the TUI. The gRPC server exposes a bidirectional streaming RPC that connects to the same Presenter instance as the TUI, enabling programmatic remote control of the application — sending `UserIntent`s and receiving `PresenterView` events — analogous to Selenium/Playwright for browser automation.
+`tddy-coder` and `tddy-demo` support a `--grpc` flag that starts a gRPC server alongside the TUI. The gRPC server exposes a bidirectional streaming RPC that connects to the same Presenter instance as the TUI, enabling programmatic remote control of the application — sending `UserIntent`s and receiving `PresenterView` events — analogous to Selenium/Playwright for browser automation.
 
 ## Background
 
@@ -16,16 +16,28 @@ The TUI is the only way to interact with the running application. There is no pr
 
 The Presenter follows MVP architecture: it accepts abstract `UserIntent`s (not raw key events) and fires `PresenterView` callbacks. This abstraction boundary is the natural point to attach a remote control interface.
 
+## Transport stack (reference)
+
+Remote control and terminal streaming use these workspace crates:
+
+- **`tddy-rpc`**: Transport-agnostic RPC types, streaming, `RpcService` trait, optional tonic adapters.
+- **`tddy-codegen`**: Generates service traits and server glue from protos.
+- **`tddy-service`**: Service implementations (`TddyRemoteService`, `DaemonService`, `TerminalService`, token and auth handlers). Tonic-generated code lives here; protos under `packages/tddy-service/proto/`.
+- **`tddy-livekit`**: LiveKit participant adapter: maps `RpcRequest` ↔ `RpcMessage` over data channels; depends on `tddy-rpc` for the envelope protocol.
+- **`tddy-connectrpc`**: Connect-RPC HTTP handlers for browser clients (e.g. `TokenService`, `AuthService`) where applicable.
+
+Application code wires `tddy-service` + `tddy-livekit` (and Connect-RPC) at runtime.
+
 ## Requirements
 
-### 1. New package: `tddy-grpc`
+### 1. Service layer: `tddy-service`
 
-A workspace member that defines:
+The workspace member that defines:
 
-- Proto service definition (`.proto` file) with a single bidirectional streaming RPC
+- Proto service definitions (`.proto` files) including bidirectional streaming `TddyRemote`
 - Tonic-generated server and client code
-- `GrpcService` implementation that bridges gRPC streams to the Presenter's event bus
-- Accepts a Presenter event bus handle in its constructor (not the Presenter itself)
+- `TddyRemoteService` / `DaemonService` implementations that bridge gRPC streams to the Presenter's event bus
+- Accepts a Presenter event bus handle in constructors (not the Presenter itself)
 
 ### 2. Proto service definition
 
@@ -90,9 +102,9 @@ The `--daemon` flag starts a headless gRPC server (no TUI) suitable for systemd 
 
 ### 7. Codegen tooling
 
-- Use **Buf** for proto management and code generation (prost plugin)
+- Use **Buf** for proto management and code generation (prost plugin) where configured
 - Add `buf` to the Nix flake devShell
-- Proto files live in `packages/tddy-grpc/proto/`
+- Proto files live in `packages/tddy-service/proto/` (and LiveKit envelope protos under `packages/tddy-livekit/proto/` as needed)
 
 ## Success Criteria
 
@@ -100,8 +112,8 @@ The `--daemon` flag starts a headless gRPC server (no TUI) suitable for systemd 
 2. A gRPC client can connect and send a `SubmitFeatureInput` intent
 3. The gRPC client receives `PresenterView` events (mode changes, activity log entries, etc.) as the workflow progresses. When a workflow completes with an empty inbox, clients receive `ModeChanged(FeatureInput)` and can immediately send a new `SubmitFeatureInput` to start another workflow
 4. The TUI and gRPC client see the same state — sending an intent from either side updates both
-5. Tests in `tddy-grpc` verify bidirectional event flow using an in-process gRPC client connected to a test Presenter instance
-6. `cargo test -p tddy-grpc` passes with all acceptance tests
+5. Integration tests in `tddy-service` and end-to-end tests in `tddy-e2e` verify bidirectional event flow against a running gRPC server and presenter
+6. `cargo test -p tddy-service` and `cargo test -p tddy-e2e` cover the remote-control surface
 
 ### E2E Testing
 

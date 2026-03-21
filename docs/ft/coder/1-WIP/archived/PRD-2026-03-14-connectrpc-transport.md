@@ -1,8 +1,8 @@
 # PRD: ConnectRPC Transport for tddy-rpc Services
 
 **Date**: 2026-03-14
-**Status**: WIP
-**Affected features**: [grpc-remote-control](../grpc-remote-control.md)
+**Status**: ✅ Complete (documentation wrapped)
+**Affected features**: [grpc-remote-control](../../grpc-remote-control.md)
 
 ## Summary
 
@@ -69,3 +69,9 @@ An axum-based HTTP handler that implements the Connect protocol:
 5. Error responses follow Connect protocol format
 6. Logging provides clear visibility into request/response lifecycle
 7. ConnectRPC router mounts cleanly alongside static file serving on web-port
+
+---
+
+## Documentation wrap
+
+Merged into [gRPC remote control](../../grpc-remote-control.md) (transport stack) and [Coder changelog](../../changelog.md) on 2026-03-21. This file is archived under `1-WIP/archived/`.

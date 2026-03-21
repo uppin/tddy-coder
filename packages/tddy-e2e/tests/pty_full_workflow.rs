@@ -16,52 +16,52 @@ use tddy_service::gen::{
     client_message, AnswerSelect, ApprovePlan, ClientMessage, SubmitFeatureInput,
 };
 
-/// With demo: 22 transitions. Without demo: 20. Plan approval adds (Planned→Planning→Planned).
-/// PlanReview resync adds duplicate (Planning→Planned) after each plan review.
+/// See `grpc_full_workflow.rs`: transitional state is persisted before `StateChange`, so identity
+/// transitions appear; PlanReview resync still sends `Planning→Planned`. With demo: 22; without: 20.
 const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
     ("Init", "Planning"),
     ("Planning", "Planned"),
-    ("Planning", "Planned"), // resync on PlanReview
-    ("Planned", "Planning"),
     ("Planning", "Planned"),
-    ("Planning", "Planned"), // resync on PlanReview
-    ("Planned", "AcceptanceTesting"),
+    ("Planning", "Planning"),
+    ("Planning", "Planned"),
+    ("Planning", "Planned"),
+    ("AcceptanceTesting", "AcceptanceTesting"),
     ("AcceptanceTesting", "AcceptanceTestsReady"),
-    ("AcceptanceTestsReady", "RedTesting"),
+    ("RedTesting", "RedTesting"),
     ("RedTesting", "RedTestsReady"),
-    ("RedTestsReady", "GreenImplementing"),
+    ("GreenImplementing", "GreenImplementing"),
     ("GreenImplementing", "GreenComplete"),
-    ("GreenComplete", "DemoRunning"),
+    ("DemoRunning", "DemoRunning"),
     ("DemoRunning", "DemoComplete"),
-    ("DemoComplete", "Evaluating"),
+    ("Evaluating", "Evaluating"),
     ("Evaluating", "Evaluated"),
-    ("Evaluated", "Validating"),
+    ("Validating", "Validating"),
     ("Validating", "ValidateComplete"),
-    ("ValidateComplete", "Refactoring"),
+    ("Refactoring", "Refactoring"),
     ("Refactoring", "RefactorComplete"),
-    ("RefactorComplete", "UpdatingDocs"),
+    ("UpdatingDocs", "UpdatingDocs"),
     ("UpdatingDocs", "DocsUpdated"),
 ];
 const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
     ("Init", "Planning"),
     ("Planning", "Planned"),
-    ("Planning", "Planned"), // resync on PlanReview
-    ("Planned", "Planning"),
     ("Planning", "Planned"),
-    ("Planning", "Planned"), // resync on PlanReview
-    ("Planned", "AcceptanceTesting"),
+    ("Planning", "Planning"),
+    ("Planning", "Planned"),
+    ("Planning", "Planned"),
+    ("AcceptanceTesting", "AcceptanceTesting"),
     ("AcceptanceTesting", "AcceptanceTestsReady"),
-    ("AcceptanceTestsReady", "RedTesting"),
+    ("RedTesting", "RedTesting"),
     ("RedTesting", "RedTestsReady"),
-    ("RedTestsReady", "GreenImplementing"),
+    ("GreenImplementing", "GreenImplementing"),
     ("GreenImplementing", "GreenComplete"),
-    ("GreenComplete", "Evaluating"),
+    ("Evaluating", "Evaluating"),
     ("Evaluating", "Evaluated"),
-    ("Evaluated", "Validating"),
+    ("Validating", "Validating"),
     ("Validating", "ValidateComplete"),
-    ("ValidateComplete", "Refactoring"),
+    ("Refactoring", "Refactoring"),
     ("Refactoring", "RefactorComplete"),
-    ("RefactorComplete", "UpdatingDocs"),
+    ("UpdatingDocs", "UpdatingDocs"),
     ("UpdatingDocs", "DocsUpdated"),
 ];
 

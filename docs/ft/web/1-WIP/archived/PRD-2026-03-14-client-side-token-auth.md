@@ -1,5 +1,7 @@
 # PRD: Server-Side LiveKit Token Authentication via Connect-RPC
 
+**Status:** ✅ Complete (documentation wrapped)
+
 ## Summary
 
 Replace the pre-generated JWT token input in tddy-web with server-side token generation via Connect-RPC. The user provides Identity and Room name; the tddy-coder server (with API key/secret) generates tokens on demand. Add periodic token refresh to maintain long-running sessions.
@@ -10,7 +12,7 @@ Previously, tddy-web required users to manually generate a LiveKit JWT token usi
 
 ## Affected Features
 
-- [web-terminal.md](../web-terminal.md) — Connection flow, authentication UX
+- [web-terminal.md](../../web-terminal.md) — Connection flow, authentication UX
 
 ## Proposed Changes
 
@@ -44,3 +46,9 @@ Previously, tddy-web required users to manually generate a LiveKit JWT token usi
 5. Token refresh does not interrupt the active terminal session
 6. Existing Cypress e2e tests continue to pass (pre-generated tokens via Storybook URL params)
 7. When tddy-coder runs with `--livekit-token` only (no key/secret), TokenService is not available; user must provide token manually
+
+---
+
+## Documentation wrap
+
+Merged into [web-terminal.md](../../web-terminal.md) and [Web changelog](../../changelog.md) on 2026-03-21. This file is archived under `1-WIP/archived/`.

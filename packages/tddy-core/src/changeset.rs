@@ -30,6 +30,7 @@ pub struct ClarificationQuestionForQa {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuestionOptionForQa {
     pub label: String,
+    #[serde(default)]
     pub description: String,
 }
 
@@ -229,18 +230,28 @@ pub fn resolve_model(
 }
 
 /// Map changeset state to the next goal to execute in the full workflow.
-/// Returns `None` when workflow is complete (GreenComplete) or failed.
+/// Returns `None` when workflow is complete (`DocsUpdated`) or failed.
+/// Transitional states (e.g. `Evaluating`) map to the goal currently in progress for resume.
 pub fn next_goal_for_state(state: &str) -> Option<&'static str> {
     match state {
         "Init" => Some("plan"),
+        "Planning" => Some("plan"),
         "Planned" => Some("acceptance-tests"),
+        "AcceptanceTesting" => Some("acceptance-tests"),
         "AcceptanceTestsReady" => Some("red"),
+        "RedTesting" => Some("red"),
         "RedTestsReady" => Some("green"),
+        "GreenImplementing" => Some("green"),
         "GreenComplete" => Some("demo"),
+        "DemoRunning" => Some("demo"),
         "DemoComplete" => Some("evaluate"),
+        "Evaluating" => Some("evaluate"),
         "Evaluated" => Some("validate"),
+        "Validating" => Some("validate"),
         "ValidateComplete" | "ValidateRefactorComplete" => Some("refactor"),
+        "Refactoring" => Some("refactor"),
         "RefactorComplete" => Some("update-docs"),
+        "UpdatingDocs" => Some("update-docs"),
         "DocsUpdated" => None,
         "Failed" => None,
         _ => Some("plan"),
@@ -254,6 +265,16 @@ pub fn get_session_for_tag(changeset: &Changeset, tag: &str) -> Option<String> {
         .iter()
         .rfind(|s| s.tag == tag)
         .map(|s| s.id.clone())
+}
+
+/// Backend `agent` from the latest session with `tag == "plan"`, else the last session entry.
+pub fn resolve_agent_from_changeset(changeset: &Changeset) -> Option<String> {
+    changeset
+        .sessions
+        .iter()
+        .rfind(|s| s.tag == "plan")
+        .map(|s| s.agent.clone())
+        .or_else(|| changeset.sessions.last().map(|s| s.agent.clone()))
 }
 
 /// Update workflow state only (no new session).
@@ -322,4 +343,38 @@ pub fn append_session_and_update_state(
     });
     changeset.state.current = new_state.to_string();
     changeset.state.updated_at = now;
+}
+
+#[cfg(test)]
+mod resolve_agent_tests {
+    use super::*;
+
+    #[test]
+    fn resolve_agent_prefers_plan_tag_session() {
+        let mut cs = Changeset::default();
+        append_session_and_update_state(&mut cs, "a".into(), "plan", "Planned", "cursor", None);
+        append_session_and_update_state(
+            &mut cs,
+            "b".into(),
+            "acceptance-tests",
+            "AcceptanceTestsReady",
+            "claude",
+            None,
+        );
+        assert_eq!(resolve_agent_from_changeset(&cs).as_deref(), Some("cursor"));
+    }
+
+    #[test]
+    fn resolve_agent_falls_back_to_last_session() {
+        let mut cs = Changeset::default();
+        append_session_and_update_state(
+            &mut cs,
+            "x".into(),
+            "acceptance-tests",
+            "AcceptanceTestsReady",
+            "stub",
+            None,
+        );
+        assert_eq!(resolve_agent_from_changeset(&cs).as_deref(), Some("stub"));
+    }
 }

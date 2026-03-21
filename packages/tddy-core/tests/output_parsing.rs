@@ -200,6 +200,23 @@ fn parse_evaluate_response_extracts_evaluate_json() {
     assert_eq!(out.risk_level, "low");
 }
 
+/// Partial `changeset_sync` (status only) matches what the evaluate step needs for reporting;
+/// unused numeric fields should default so agents are not forced to invent counts.
+#[test]
+fn parse_evaluate_response_accepts_changeset_sync_with_only_status() {
+    let input =
+        r#"{"goal":"evaluate-changes","summary":"Done.","changeset_sync":{"status":"skipped"}}"#;
+    let out = parse_evaluate_response(input)
+        .expect("parse_evaluate_response should accept partial changeset_sync");
+    let sync = out
+        .changeset_sync
+        .as_ref()
+        .expect("changeset_sync should be present");
+    assert_eq!(sync.status, "skipped");
+    assert_eq!(sync.items_updated, 0);
+    assert_eq!(sync.items_added, 0);
+}
+
 /// parse_evaluate_response() returns ParseError::Malformed when the goal field is not "evaluate-changes".
 #[test]
 fn parse_evaluate_response_fails_on_wrong_goal_field() {
