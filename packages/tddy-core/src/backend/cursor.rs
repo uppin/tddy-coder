@@ -1,6 +1,7 @@
 //! Cursor agent CLI backend implementation.
 //!
-//! Spawns `cursor agent` with stream-json output format.
+//! Invokes the `agent` executable on `PATH` with stream-json output format (`--output-format stream-json`, etc.).
+//! Some environments also expose the same flow as `cursor agent`; this backend targets the `agent` binary name.
 //! Based on Baker CLI's executeWithCursor.
 
 use super::{Goal, InvokeRequest, InvokeResponse};
@@ -52,10 +53,13 @@ impl Default for CursorBackend {
 }
 
 impl CursorBackend {
-    /// Create a new backend using the default `cursor` binary from PATH.
+    /// Default executable name on `PATH` for [`CursorBackend::new`] (also used in logs / `BinaryNotFound`).
+    pub const DEFAULT_CLI_BINARY: &'static str = "agent";
+
+    /// Create a new backend using the default `agent` binary from PATH.
     pub fn new() -> Self {
         Self {
-            binary_path: PathBuf::from("cursor"),
+            binary_path: PathBuf::from(Self::DEFAULT_CLI_BINARY),
             progress_callback: None,
         }
     }
@@ -96,15 +100,14 @@ impl super::CodingBackend for CursorBackend {
 
 /// Builds argv for `cursor agent` (excluding the binary path). Used by [`CursorBackend::invoke_sync`] and tests.
 pub(crate) fn build_cursor_cli_args(request: &InvokeRequest, prompt: &str) -> Vec<String> {
-    let mut args = vec!["agent".to_string()];
+    let mut args = Vec::new();
     if request.goal == Goal::Plan {
         args.push("--plan".to_string());
     }
     if let Some(ref session) = request.session {
         match session {
-            super::SessionMode::Fresh(id) => {
-                args.push("--session-id".to_string());
-                args.push(id.clone());
+            super::SessionMode::Fresh(_) => {
+                // Cursor `agent` does not document `--session-id`; new chats omit session flags.
             }
             super::SessionMode::Resume(id) => {
                 args.push("--resume".to_string());
@@ -128,26 +131,6 @@ pub(crate) fn build_cursor_cli_args(request: &InvokeRequest, prompt: &str) -> Ve
 
 impl CursorBackend {
     fn invoke_sync(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
-        // validate spawns subagents via the Agent tool which Cursor does not support.
-        // Reject early before any spawn attempt so tests can distinguish this from BinaryNotFound.
-        if request.goal == Goal::Validate {
-            log::debug!(
-                "[tddy-coder] CursorBackend: rejecting Goal::Validate — not supported on Cursor"
-            );
-            return Err(BackendError::InvocationFailed(
-                "validate is not supported on the Cursor backend".to_string(),
-            ));
-        }
-
-        if request.goal == Goal::Refactor {
-            log::debug!(
-                "[tddy-coder] CursorBackend: rejecting Goal::Refactor — not supported on Cursor"
-            );
-            return Err(BackendError::InvocationFailed(
-                "refactor is not supported on the Cursor backend".to_string(),
-            ));
-        }
-
         // Cursor CLI has no --system-prompt; prepend system content to user prompt.
         let system_content: Option<String> = if let Some(ref path) = request.system_prompt_path {
             Some(std::fs::read_to_string(path).map_err(|e| {
@@ -187,7 +170,7 @@ impl CursorBackend {
                     .unwrap_or_else(|_| "(unknown)".into())
             });
         let cmd_str = super::format_command_for_log(&self.binary_path, &args, 200);
-        log::debug!("[tddy-coder] Cursor backend command: {}", cmd_str);
+        log::info!("[tddy-coder] Cursor backend command: {}", cmd_str);
         log::debug!(
             "[tddy-coder] Cursor backend spawning: {} (resolved: {})",
             self.binary_path.display(),
@@ -382,13 +365,25 @@ impl CursorBackend {
         );
 
         if exit_code != 0 {
+            log::warn!(
+                "[tddy-coder] Cursor backend command failed (exit {}): {}",
+                exit_code,
+                cmd_str
+            );
+            if !stderr_buf.trim().is_empty() {
+                log::warn!("[tddy-coder] Cursor backend stderr: {}", stderr_buf.trim());
+            }
             let msg = if stderr_buf.trim().is_empty() {
-                format!("Cursor agent exited with code {}", exit_code)
+                format!(
+                    "Cursor agent exited with code {} (no stderr from CLI). Invoked: {}",
+                    exit_code, cmd_str
+                )
             } else {
                 format!(
-                    "Cursor agent exited with code {}: {}",
+                    "Cursor agent exited with code {}: {}\nInvoked: {}",
                     exit_code,
-                    stderr_buf.trim()
+                    stderr_buf.trim(),
+                    cmd_str
                 )
             };
             return Err(BackendError::InvocationFailed(msg));
@@ -431,6 +426,7 @@ impl CursorBackend {
 #[cfg(test)]
 mod tests {
     use super::build_cursor_cli_args;
+    use super::CursorBackend;
     use crate::backend::{Goal, InvokeRequest, SessionMode};
 
     fn minimal_request(goal: Goal, model: Option<&str>, prompt: &str) -> InvokeRequest {
@@ -477,11 +473,30 @@ mod tests {
     }
 
     #[test]
-    fn build_args_session_fresh() {
+    fn build_args_session_fresh_omits_session_flags() {
         let mut request = minimal_request(Goal::Red, None, "x");
         request.session = Some(SessionMode::Fresh("sid-1".to_string()));
         let args = build_cursor_cli_args(&request, "p");
-        assert!(args.iter().any(|a| a == "--session-id"));
-        assert!(args.contains(&"sid-1".to_string()));
+        assert!(!args.iter().any(|a| a == "--session-id"));
+        assert!(!args.iter().any(|a| a == "--resume"));
+    }
+
+    #[test]
+    fn build_args_session_resume_includes_resume() {
+        let mut request = minimal_request(Goal::Red, None, "x");
+        request.session = Some(SessionMode::Resume("resume-id".to_string()));
+        let args = build_cursor_cli_args(&request, "p");
+        assert!(args.iter().any(|a| a == "--resume"));
+        assert!(args.contains(&"resume-id".to_string()));
+    }
+
+    #[test]
+    fn default_cursor_cli_binary_on_path_is_agent() {
+        let backend = CursorBackend::new();
+        assert_eq!(
+            backend.binary_path,
+            std::path::PathBuf::from("agent"),
+            "invokes the Cursor CLI as `agent` on PATH; BinaryNotFound must report agent, not cursor"
+        );
     }
 }

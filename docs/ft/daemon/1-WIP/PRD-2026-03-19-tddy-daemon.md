@@ -1,6 +1,6 @@
 # PRD: tddy-daemon — Multi-User Daemon Binary
 
-**Status:** WIP
+**Status:** 🚧 In progress — Phase 1 shipped; extended success criteria below remain the product target
 **Created:** 2026-03-19
 
 ## Summary
@@ -8,6 +8,14 @@
 Extract a new `tddy-daemon` binary from the existing `tddy-coder --daemon` mode. The daemon is a root-level system process (systemd-managed) that orchestrates multi-user access to tddy-* tools. It handles GitHub authentication, maps GitHub users to OS users, spawns tddy-* processes as the target OS user (fork + setuid/setgid), and manages session discovery. Each spawned process joins its own LiveKit room with daemon-provided credentials.
 
 `tddy-coder --daemon` is retained as-is for single-user dev/personal use.
+
+## Implementation status (2026-03-21)
+
+**Delivered in tree:** `packages/tddy-daemon` binary; HTTP static bundle; GitHub OAuth via Connect-RPC (`AuthService`); user mapping and `allowed_tools`; Unix spawn with `pre_exec` + `setuid`/`setgid` when spawning as a different OS user (`spawner.rs`); LiveKit credentials passed to spawned `tddy-coder --daemon`; session metadata including `--project-id` / `.session.yaml`; project-centric connection UX in tddy-web (projects, sessions, `StartSession` with `project_id`) — see [daemon project concept](../project-concept.md) and [Web changelog](../../web/changelog.md).
+
+**Superseded UX:** The connection screen no longer uses a single global “repository path” field; work is scoped per project as documented in [web-terminal.md](../../web/web-terminal.md).
+
+**Still open vs this PRD:** Validate each numbered success criterion against production behavior (especially resume, session table columns, and central auth storage guarantees). Update this document when the checklist is fully satisfied.
 
 ## Background
 

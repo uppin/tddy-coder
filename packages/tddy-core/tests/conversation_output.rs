@@ -103,7 +103,7 @@ printf '%s\n' '{{"type":"result","result":"done","session_id":"t1"}}'
 exit 0
 "##
     );
-    let script_path = tmp.join("cursor");
+    let script_path = tmp.join("agent");
     fs::write(&script_path, script).expect("write script");
     {
         use std::os::unix::fs::PermissionsExt;

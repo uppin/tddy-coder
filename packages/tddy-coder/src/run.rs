@@ -68,6 +68,17 @@ fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
     }
 }
 
+fn assign_default_session_id(args: &mut Args) {
+    if args.session_id.is_some() {
+        return;
+    }
+    if let Some(ref sid) = args.resume_from {
+        args.session_id = Some(sid.clone());
+        return;
+    }
+    args.session_id = Some(uuid::Uuid::now_v7().to_string());
+}
+
 /// Plain stdin menu when `--agent` was omitted (single-goal mode).
 fn resolve_agent_for_single_goal_plain(_args: &Args) -> anyhow::Result<String> {
     let q = backend_selection_question();
@@ -92,8 +103,21 @@ fn resolve_agent_for_full_workflow_plain(args: &Args) -> anyhow::Result<String> 
 /// Shared main entry: panic hook, Ctrl+C handler, run_with_args, exit logic.
 /// Use from both tddy-coder and tddy-demo binaries.
 pub fn run_main(mut args: Args) {
-    if args.session_id.is_none() {
-        args.session_id = Some(uuid::Uuid::now_v7().to_string());
+    assign_default_session_id(&mut args);
+
+    if let Err(e) = merge_session_coder_config_for_resume(&mut args) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
+    if let Err(e) = apply_plan_dir_from_session_if_needed(&mut args) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
+    if let Err(e) = apply_agent_from_changeset_if_needed(&mut args) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
     }
 
     // Validate args before any stderr redirect (daemon redirects stderr to a file).
@@ -235,6 +259,9 @@ pub struct Args {
     pub mouse: bool,
     /// Project ID for daemon sessions (set by tddy-daemon when spawning).
     pub project_id: Option<String>,
+
+    /// Path to the Cursor `agent` CLI. When set, overrides `TDDY_CURSOR_AGENT` and the default `agent` on `PATH`.
+    pub cursor_agent_path: Option<PathBuf>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -365,6 +392,10 @@ pub struct CoderArgs {
     /// Project ID for daemon sessions. Used when spawned by tddy-daemon.
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
+
+    /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
+    #[arg(long, value_name = "PATH")]
+    pub cursor_agent_path: Option<PathBuf>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -568,6 +599,7 @@ impl From<CoderArgs> for Args {
             github_stub_codes: a.github_stub_codes,
             mouse: a.mouse,
             project_id: a.project_id,
+            cursor_agent_path: a.cursor_agent_path,
         }
     }
 }
@@ -606,6 +638,7 @@ impl From<DemoArgs> for Args {
             github_stub_codes: a.github_stub_codes,
             mouse: a.mouse,
             project_id: a.project_id,
+            cursor_agent_path: None,
         }
     }
 }
@@ -753,7 +786,12 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         args.model.as_deref().unwrap_or("(default)")
     );
 
-    let backend = create_backend(&resolved_agent, None, None);
+    let backend = create_backend(
+        &resolved_agent,
+        args.cursor_agent_path.as_deref(),
+        None,
+        None,
+    );
 
     if args.goal.as_deref() == Some("acceptance-tests") {
         let plan_dir = args
@@ -882,7 +920,9 @@ fn on_progress(_event: &ProgressEvent) {
 /// Run as headless gRPC daemon. Serves GetSession and ListSessions; blocks until shutdown.
 /// When LiveKit args are present, also joins the room as a participant serving RPC over the data channel.
 fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
-    tddy_core::init_tddy_logger(effective_log_config(args));
+    // Logger is already initialized in `run_main` with `effective_log_config(args)`.
+    // Do not call `init_tddy_logger` again: `log::set_logger` only succeeds once; a second
+    // init would skip `set_max_level` and can leave FILE_OUTPUTS / routing inconsistent.
 
     let sessions_base = tddy_core::output::sessions_base_path()
         .map_err(|e| anyhow::anyhow!("{}", e))?
@@ -894,7 +934,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     if args.agent.is_none() {
         verify_tddy_tools_available(agent_str)?;
     }
-    let backend = create_backend(agent_str, None, None);
+    let backend = create_backend(agent_str, args.cursor_agent_path.as_deref(), None, None);
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
     let livekit_enabled = args.livekit_url.is_some()
@@ -922,6 +962,16 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 .map(|id| sessions_base.join(id))
                 .unwrap_or_else(|| sessions_base.join("tddy-daemon-session"));
             let _ = std::fs::create_dir_all(&output_dir);
+            let logs = output_dir.join("logs");
+            let _ = std::fs::create_dir_all(&logs);
+            tddy_core::toolcall::set_toolcall_log_dir(&logs);
+
+            let (toolcall_socket_path, tool_call_rx) =
+                match tddy_core::toolcall::start_toolcall_listener() {
+                    Ok((path, rx)) => (Some(path), Some(rx)),
+                    Err(_) => (None, None),
+                };
+
             let now = chrono::Utc::now().to_rfc3339();
             let session_id = args
                 .resume_from
@@ -960,8 +1010,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 None,
                 false,
                 None,
-                None,
-                None,
+                toolcall_socket_path,
+                tool_call_rx,
             );
             let presenter = Arc::new(Mutex::new(presenter));
             let presenter_for_factory = presenter.clone();
@@ -985,6 +1035,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         }
                     }
                     if let Ok(mut p) = presenter_for_thread.lock() {
+                        p.poll_tool_calls();
                         p.poll_workflow();
                     }
                     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -1187,18 +1238,91 @@ fn session_dir_path(args: &Args) -> Option<PathBuf> {
     Some(base.join(tddy_core::output::SESSIONS_SUBDIR).join(sid))
 }
 
+/// When [`Args::resume_from`] is set and `plan_dir` is unset, sets `plan_dir` to the session directory (`session_dir_path`).
+fn apply_plan_dir_from_session_if_needed(args: &mut Args) -> anyhow::Result<()> {
+    if args.plan_dir.is_some() {
+        return Ok(());
+    }
+    if args.resume_from.is_none() {
+        return Ok(());
+    }
+    if let Some(dir) = session_dir_path(args) {
+        args.plan_dir = Some(dir);
+    }
+    Ok(())
+}
+
+/// Merges [`crate::config::SESSION_CODER_CONFIG_FILE`] from the session directory when
+/// [`Args::resume_from`] is set. Uses the same YAML schema and merge rules as `-c` / [`crate::config::merge_config_into_args`].
+pub fn merge_session_coder_config_for_resume(args: &mut Args) -> anyhow::Result<()> {
+    let Some(ref sid) = args.resume_from else {
+        return Ok(());
+    };
+    let base = tddy_core::output::sessions_base_path().map_err(|e| anyhow::anyhow!("{}", e))?;
+    let dir = base.join(tddy_core::output::SESSIONS_SUBDIR).join(sid);
+    merge_session_coder_config_from_dir(args, &dir)
+}
+
+fn merge_session_coder_config_from_dir(
+    args: &mut Args,
+    session_plan_dir: &Path,
+) -> anyhow::Result<()> {
+    let path = session_plan_dir.join(crate::config::SESSION_CODER_CONFIG_FILE);
+    if !path.is_file() {
+        return Ok(());
+    }
+    let config = crate::config::load_config(&path)?;
+    crate::config::merge_config_into_args(args, config);
+    Ok(())
+}
+
+/// When `plan_dir` has `changeset.yaml` with session entries, sets `agent` from
+/// [`tddy_core::resolve_agent_from_changeset`] if the CLI left the default `claude`.
+fn apply_agent_from_changeset_if_needed(args: &mut Args) -> anyhow::Result<()> {
+    if args.agent.as_deref().is_some_and(|a| a != "claude") {
+        return Ok(());
+    }
+    let Some(ref plan_dir) = args.plan_dir else {
+        return Ok(());
+    };
+    let cs = match tddy_core::read_changeset(plan_dir) {
+        Ok(cs) => cs,
+        Err(_) => return Ok(()),
+    };
+    if let Some(agent) = tddy_core::resolve_agent_from_changeset(&cs) {
+        args.agent = Some(agent);
+    }
+    Ok(())
+}
+
+/// Resolve Cursor `agent` executable: `--cursor-agent-path` / config, then `TDDY_CURSOR_AGENT`, then `agent` on `PATH`.
+fn resolve_cursor_agent_binary(cursor_agent_path: Option<&Path>) -> PathBuf {
+    cursor_agent_path
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("TDDY_CURSOR_AGENT").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from(CursorBackend::DEFAULT_CLI_BINARY))
+}
+
 /// Create backend once at startup (plain mode, no progress events).
 /// StubBackend always uses InMemoryToolExecutor (no tddy-tools): stub simulates the agent,
 /// so it stores results directly. ProcessToolExecutor is for real agents (Claude/Cursor)
 /// that run tddy-tools submit.
 fn create_backend(
     agent: &str,
+    cursor_agent_path: Option<&Path>,
     _socket_path: Option<&Path>,
     _working_dir: Option<&Path>,
 ) -> SharedBackend {
-    log::debug!("[tddy-coder] using agent: {}", agent);
+    log::info!("[tddy-coder] using agent: {}", agent);
     let backend: AnyBackend = match agent {
-        "cursor" => AnyBackend::Cursor(CursorBackend::new().with_progress(on_progress)),
+        "cursor" => {
+            let path = resolve_cursor_agent_binary(cursor_agent_path);
+            log::info!(
+                "[tddy-coder] Cursor backend: CLI binary `{}` (full argv logged when a goal invokes the backend)",
+                path.display()
+            );
+            AnyBackend::Cursor(CursorBackend::with_path(path).with_progress(on_progress))
+        }
         "claude-acp" => AnyBackend::ClaudeAcp(ClaudeAcpBackend::new()),
         "stub" => AnyBackend::Stub(StubBackend::new()),
         _ => AnyBackend::Claude(ClaudeCodeBackend::new().with_progress(on_progress)),
@@ -1547,7 +1671,6 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         Ok((path, rx)) => (Some(path), Some(rx)),
         Err(_) => (None, None),
     };
-
     let (event_tx, _) = tokio::sync::broadcast::channel(256);
     let (intent_tx, intent_rx) = std::sync::mpsc::channel();
     let presenter = match args.agent.as_deref() {
@@ -1574,12 +1697,14 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         let q = backend_selection_question();
         let idx = preselected_index_for_agent("claude");
         let socket_path_for_factory = socket_path.clone();
+        let cursor_path_for_factory = args.cursor_agent_path.clone();
         let mut p = presenter.lock().unwrap();
         p.configure_deferred_workflow_start(
             Box::new(move |agent: &str| {
                 verify_tddy_tools_available(agent).map_err(|e| e.to_string())?;
                 Ok(create_backend(
                     agent,
+                    cursor_path_for_factory.as_deref(),
                     socket_path_for_factory.as_deref(),
                     None,
                 ))
@@ -1600,7 +1725,12 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         p.show_backend_selection(q, idx);
     } else {
         let agent = args.agent.as_deref().unwrap();
-        let backend = create_backend(agent, socket_path.as_deref(), None);
+        let backend = create_backend(
+            agent,
+            args.cursor_agent_path.as_deref(),
+            socket_path.as_deref(),
+            None,
+        );
         presenter.lock().unwrap().start_workflow(
             backend,
             PathBuf::from("."),
@@ -1890,7 +2020,12 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
 
 fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     let agent_str = resolve_agent_for_full_workflow_plain(args)?;
-    let backend = create_backend(&agent_str, None, None);
+    let backend = create_backend(
+        &agent_str,
+        args.cursor_agent_path.as_deref(),
+        None,
+        None,
+    );
 
     let mut plan_dir = if let Some(ref p) = args.plan_dir {
         p.clone()
@@ -2195,4 +2330,258 @@ fn read_feature_input(args: &Args) -> anyhow::Result<String> {
     let mut buf = String::new();
     io::stdin().lock().read_to_string(&mut buf)?;
     Ok(buf)
+}
+
+#[cfg(test)]
+mod resume_session_config_tests {
+    use super::merge_session_coder_config_for_resume;
+    use super::Args;
+    use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn resume_from_merges_coder_config_from_session_dir() {
+        let tmp =
+            std::env::temp_dir().join(format!("tddy-resume-config-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create temp sessions base");
+        std::env::set_var(tddy_core::output::TDDY_SESSIONS_DIR_ENV, &tmp);
+
+        let sid = "019d105b-ac0f-78d3-9a89-409731145a36";
+        let session_dir = tmp.join("sessions").join(sid);
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        std::fs::write(
+            session_dir.join(crate::config::SESSION_CODER_CONFIG_FILE),
+            "agent: cursor\ncursor_agent_path: /persisted/cursor-agent\n",
+        )
+        .expect("write coder-config.yaml");
+
+        let mut args = Args {
+            goal: None,
+            plan_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: None,
+            prompt: None,
+            grpc: None,
+            session_id: None,
+            resume_from: Some(sid.to_string()),
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+        };
+
+        merge_session_coder_config_for_resume(&mut args).expect("merge");
+
+        assert_eq!(args.agent.as_deref(), Some("cursor"));
+        assert_eq!(
+            args.cursor_agent_path.as_ref().map(|p| p.as_path()),
+            Some(std::path::Path::new("/persisted/cursor-agent"))
+        );
+
+        std::env::remove_var(tddy_core::output::TDDY_SESSIONS_DIR_ENV);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod resume_session_identity_tests {
+    use super::assign_default_session_id;
+    use super::Args;
+
+    #[test]
+    fn resume_from_sets_session_id_when_session_id_absent() {
+        let sid = "019d105b-ac0f-78d3-9a89-409731145a36";
+        let mut args = Args {
+            goal: None,
+            plan_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: Some("claude".to_string()),
+            prompt: None,
+            grpc: None,
+            session_id: None,
+            resume_from: Some(sid.to_string()),
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+        };
+
+        assign_default_session_id(&mut args);
+
+        assert_eq!(args.session_id.as_deref(), Some(sid));
+    }
+}
+
+#[cfg(test)]
+mod plan_dir_from_session_tests {
+    use super::apply_plan_dir_from_session_if_needed;
+    use super::Args;
+    use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn plan_dir_derived_from_session_id_when_unset() {
+        let tmp =
+            std::env::temp_dir().join(format!("tddy-plan-dir-session-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("create temp sessions base");
+        std::env::set_var(tddy_core::output::TDDY_SESSIONS_DIR_ENV, &tmp);
+
+        let sid = "019d105b-ac0f-78d3-9a89-409731145a36";
+        let expected = tmp.join("sessions").join(sid);
+
+        let mut args = Args {
+            goal: None,
+            plan_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: Some("claude".to_string()),
+            prompt: None,
+            grpc: None,
+            session_id: Some(sid.to_string()),
+            resume_from: Some(sid.to_string()),
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+        };
+
+        apply_plan_dir_from_session_if_needed(&mut args).expect("apply");
+
+        assert_eq!(args.plan_dir, Some(expected));
+
+        std::env::remove_var(tddy_core::output::TDDY_SESSIONS_DIR_ENV);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod changeset_agent_resume_tests {
+    use super::apply_agent_from_changeset_if_needed;
+    use super::Args;
+    use serial_test::serial;
+    use tddy_core::changeset::{append_session_and_update_state, write_changeset, Changeset};
+
+    /// Backend `agent` should follow the plan session recorded in `changeset.yaml` on resume.
+    #[test]
+    #[serial]
+    fn resume_applies_agent_from_changeset_plan_session() {
+        let plan_dir =
+            std::env::temp_dir().join(format!("tddy-changeset-agent-tests-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&plan_dir);
+        std::fs::create_dir_all(&plan_dir).expect("plan dir");
+
+        let mut cs = Changeset::default();
+        append_session_and_update_state(
+            &mut cs,
+            "plan-sess".into(),
+            "plan",
+            "Planned",
+            "cursor",
+            None,
+        );
+        write_changeset(&plan_dir, &cs).expect("write changeset");
+
+        let sid = "019d105b-ac0f-78d3-9a89-409731145a36";
+        let mut args = Args {
+            goal: None,
+            plan_dir: Some(plan_dir.clone()),
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: Some("claude".to_string()),
+            prompt: None,
+            grpc: None,
+            session_id: Some(sid.to_string()),
+            resume_from: Some(sid.to_string()),
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+        };
+
+        apply_agent_from_changeset_if_needed(&mut args).expect("apply");
+
+        assert_eq!(args.agent.as_deref(), Some("cursor"));
+
+        let _ = std::fs::remove_dir_all(&plan_dir);
+    }
 }

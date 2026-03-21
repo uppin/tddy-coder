@@ -79,3 +79,15 @@ fn parse_validate_subagents_response_with_refactoring_plan() {
     assert!(output.prod_ready_report_written);
     assert!(output.clean_code_report_written);
 }
+
+/// parse_validate_subagents_response extracts optional refactoring_plan markdown.
+#[test]
+fn parse_validate_subagents_response_extracts_refactoring_plan_field() {
+    use tddy_core::parse_validate_subagents_response;
+
+    // r##"..."## so the JSON value `"# Plan..."` does not terminate the raw string at `"#`.
+    let input = r##"{"goal":"validate","summary":"Done.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true,"refactoring_plan":"# Plan\n\nBody\n"}"##;
+
+    let output = parse_validate_subagents_response(input).expect("parse");
+    assert_eq!(output.refactoring_plan.as_deref(), Some("# Plan\n\nBody\n"));
+}

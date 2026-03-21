@@ -333,16 +333,15 @@ impl ClaudeCodeBackend {
 
         let mut config = goal_to_claude_config(&request);
 
-        // Plan goal: create MCP config so Claude Code routes permission requests to tddy-tools.
-        let _mcp_cleanup: Option<CleanupGuard> = if request.goal == Goal::Plan {
-            if let Some(mcp_path) = create_mcp_config_temp_file() {
-                config.permission_prompt_tool =
-                    Some("mcp__tddy-tools__approval_prompt".to_string());
-                config.mcp_config_path = Some(mcp_path.clone());
-                Some(CleanupGuard(mcp_path))
-            } else {
-                None
-            }
+        // MCP + permission-prompt-tool for every goal: tool approvals must route through
+        // tddy-tools (same as Plan) whether or not `TDDY_SOCKET` is set — without MCP, non-plan
+        // goals fall back to Claude Code UI-only prompts and break headless workflows.
+        let _mcp_cleanup: Option<CleanupGuard> = if let Some(mcp_path) =
+            create_mcp_config_temp_file()
+        {
+            config.permission_prompt_tool = Some("mcp__tddy-tools__approval_prompt".to_string());
+            config.mcp_config_path = Some(mcp_path.clone());
+            Some(CleanupGuard(mcp_path))
         } else {
             None
         };

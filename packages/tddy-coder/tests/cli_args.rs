@@ -337,7 +337,7 @@ printf '%s\n' '{"type":"system","session_id":"t1"}'
 printf '%s\n' '{"type":"result","result":"","session_id":"t1"}'
 exit 0
 "#;
-    let script_path = tmp.join("cursor");
+    let script_path = tmp.join("agent");
     std::fs::write(&script_path, script).expect("write script");
     {
         use std::os::unix::fs::PermissionsExt;

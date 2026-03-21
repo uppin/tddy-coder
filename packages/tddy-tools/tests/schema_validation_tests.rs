@@ -151,6 +151,33 @@ fn invalid_evaluate_missing_goal_fails() {
     assert!(!err.is_empty());
 }
 
+/// Evaluate output should not require changeset sync counters when the workflow only needs a
+/// successful submit and report generation; those fields are not used for state transitions.
+#[test]
+fn evaluate_schema_accepts_partial_changeset_sync_status_only() {
+    let json =
+        r#"{"goal":"evaluate-changes","summary":"Done.","changeset_sync":{"status":"skipped"}}"#;
+    assert!(
+        validate_output("evaluate-changes", json).is_ok(),
+        "evaluate-changes schema should accept changeset_sync with only status; workflow does not require items_updated/items_added for hooks"
+    );
+}
+
+#[test]
+fn invalid_evaluate_build_results_use_name_instead_of_package_fails() {
+    let json = r#"{"goal":"evaluate-changes","summary":"x","risk_level":"low","build_results":[{"name":"tddy-core","status":"pass"}],"issues":[],"changed_files":[],"affected_tests":[],"validity_assessment":"x"}"#;
+    let err = validate_output("evaluate-changes", json).unwrap_err();
+    assert!(!err.is_empty());
+    assert!(
+        err.iter().any(|e| {
+            e.instance_path.contains("build_results")
+                && (e.message.contains("package") || e.schema_path.contains("package"))
+        }),
+        "errors should reference required package on build_results items: {:?}",
+        err
+    );
+}
+
 #[test]
 fn invalid_acceptance_tests_missing_summary_fails() {
     let json = include_str!("fixtures/invalid/acceptance-tests-empty-summary.json");

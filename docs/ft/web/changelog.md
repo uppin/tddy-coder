@@ -31,6 +31,10 @@ Release note history for the Web product area.
 
 - **ConnectionScreen**: Backend select (Claude, Claude ACP, Cursor, Stub); value sent as `agent` on `StartSession`. **Per session:** choice applies only to that spawn, not stored on the project.
 
+## 2026-03-21 — Feature docs: token auth PRD wrapped
+
+- **Consolidated** [PRD: Server-side token auth via Connect-RPC](1-WIP/archived/PRD-2026-03-14-client-side-token-auth.md) into [web-terminal.md](web-terminal.md) and this changelog. Source PRD moved to `docs/ft/web/1-WIP/archived/`.
+
 ## 2026-03-21 — Connection screen: projects and sessions
 
 - **ConnectionScreen**: Lists projects (`ListProjects`), inline create project (`CreateProject` with optional path-under-home), accordion sections per project with sessions filtered by `projectId`, **Start New Session** per project (`StartSession` with `project_id`). Orphan sessions section when `project_id` is unknown to the list.

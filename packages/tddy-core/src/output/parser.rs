@@ -702,7 +702,9 @@ struct EvaluateIssueDe {
 #[derive(serde::Deserialize)]
 struct EvaluateChangesetSyncDe {
     status: String,
+    #[serde(default)]
     items_updated: u32,
+    #[serde(default)]
     items_added: u32,
 }
 
@@ -996,6 +998,8 @@ pub struct ValidateSubagentsOutput {
     pub prod_ready_report_written: bool,
     pub clean_code_report_written: bool,
     pub refactoring_plan_written: bool,
+    /// Markdown body for `refactoring-plan.md` when included in `tddy-tools submit` JSON.
+    pub refactoring_plan: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1010,6 +1014,8 @@ struct StructuredValidateRefactor {
     clean_code_report_written: Option<bool>,
     #[serde(default)]
     refactoring_plan_written: Option<bool>,
+    #[serde(default)]
+    refactoring_plan: Option<String>,
 }
 
 /// Parse LLM validate (subagent) response. JSON must come from tddy-tools submit.
@@ -1041,6 +1047,7 @@ pub fn parse_validate_subagents_response(s: &str) -> Result<ValidateSubagentsOut
         prod_ready_report_written: parsed.prod_ready_report_written.unwrap_or(false),
         clean_code_report_written: parsed.clean_code_report_written.unwrap_or(false),
         refactoring_plan_written: parsed.refactoring_plan_written.unwrap_or(false),
+        refactoring_plan: parsed.refactoring_plan.filter(|s| !s.trim().is_empty()),
     })
 }
 

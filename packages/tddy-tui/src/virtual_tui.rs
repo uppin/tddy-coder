@@ -15,6 +15,7 @@ use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Rect;
 use ratatui::Terminal;
 use ratatui::{TerminalOptions, Viewport};
+use tokio::sync::broadcast::error::TryRecvError;
 use tokio::sync::mpsc;
 
 use tddy_core::{
@@ -160,12 +161,9 @@ pub fn run_virtual_tui(
         while !shutdown.load(Ordering::Relaxed) {
             let mut updated = false;
 
-            while let Ok(ev) = event_rx.try_recv() {
-                log::debug!(
-                    "VirtualTui: PresenterEvent {:?}",
-                    std::mem::discriminant(&ev)
-                );
-                apply_event(&mut state, &mut view, ev);
+            let had_events = drain_presenter_broadcast(&mut event_rx, &mut state, &mut view);
+            if had_events {
+                log::debug!("VirtualTui: drained PresenterEvents from broadcast");
                 updated = true;
             }
 
@@ -284,6 +282,36 @@ fn apply_resize<B: Backend>(
     prev_frame.clear();
 }
 
+/// Drain all pending [`PresenterEvent`]s from a broadcast subscription.
+///
+/// [`broadcast::Receiver::try_recv`] may return [`TryRecvError::Lagged`] without yielding a
+/// value; the cursor then points at the oldest retained message, which the next `try_recv`
+/// returns. A plain `while let Ok(ev) = try_recv()` stops on `Lagged` and defers processing
+/// until a later poll. This loop retries on `Lagged` (same idea as tokio's `Receiver` drop
+/// implementation) without spinning on empty.
+pub(crate) fn drain_presenter_broadcast(
+    event_rx: &mut tokio::sync::broadcast::Receiver<PresenterEvent>,
+    state: &mut PresenterState,
+    view: &mut TuiView,
+) -> bool {
+    let mut any = false;
+    loop {
+        match event_rx.try_recv() {
+            Ok(ev) => {
+                log::debug!(
+                    "VirtualTui: PresenterEvent {:?}",
+                    std::mem::discriminant(&ev)
+                );
+                apply_event(state, view, ev);
+                any = true;
+            }
+            Err(TryRecvError::Lagged(_)) => continue,
+            Err(TryRecvError::Empty) | Err(TryRecvError::Closed) => break,
+        }
+    }
+    any
+}
+
 pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: PresenterEvent) {
     use std::time::Instant;
 
@@ -330,6 +358,9 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
         }
         PresenterEvent::IntentReceived(_) => {}
         PresenterEvent::BackendSelected { .. } => {}
+        PresenterEvent::ShouldQuit => {
+            state.should_quit = true;
+        }
     }
 }
 
@@ -712,5 +743,50 @@ mod tests {
 
         let (key, _) = parse_key_from_buf(&mut buf).unwrap();
         assert_eq!(key.code, KeyCode::Char('a'));
+    }
+
+    /// Capacity 2 + three sends without reading forces `TryRecvError::Lagged` on the first
+    /// `try_recv`; the drain loop must retry so `IntentReceived(Quit)` still applies.
+    #[test]
+    fn drain_broadcast_retries_after_lagged_so_quit_applies() {
+        use std::time::Instant;
+
+        use tddy_core::presenter::{ActivityEntry, ActivityKind};
+        use tddy_core::UserIntent;
+
+        let (tx, mut rx) = tokio::sync::broadcast::channel(2);
+        let entry = |text: &str| {
+            PresenterEvent::ActivityLogged(ActivityEntry {
+                text: text.to_string(),
+                kind: ActivityKind::Info,
+            })
+        };
+        tx.send(entry("a")).unwrap();
+        tx.send(entry("b")).unwrap();
+        tx.send(PresenterEvent::IntentReceived(UserIntent::Quit))
+            .unwrap();
+
+        let mut state = PresenterState {
+            agent: String::new(),
+            model: String::new(),
+            mode: AppMode::FeatureInput,
+            current_goal: None,
+            current_state: None,
+            goal_start_time: Instant::now(),
+            activity_log: Vec::new(),
+            inbox: Vec::new(),
+            should_quit: false,
+            exit_action: None,
+        };
+        let mut view = TuiView::new();
+
+        assert!(
+            drain_presenter_broadcast(&mut rx, &mut state, &mut view),
+            "expected at least one event after lag"
+        );
+        assert!(
+            state.should_quit,
+            "Quit must apply in the same drain after Lagged"
+        );
     }
 }

@@ -19,7 +19,7 @@ use crate::key_map::key_event_to_intent;
 use crate::raw::{disable_raw_mode, enable_raw_mode_keep_sig};
 use crate::render::draw;
 use crate::tui_view::TuiView;
-use crate::virtual_tui::apply_event;
+use crate::virtual_tui::drain_presenter_broadcast;
 use crate::ByteCallback;
 
 /// Run the TUI event loop with a ViewConnection.
@@ -67,10 +67,8 @@ pub fn run_event_loop(
             break;
         }
 
-        // Apply any pending events from broadcast
-        while let Ok(ev) = event_rx.try_recv() {
-            apply_event(&mut state, &mut view, ev);
-        }
+        // Apply any pending events from broadcast (handle Lagged per tokio semantics).
+        let _ = drain_presenter_broadcast(&mut event_rx, &mut state, &mut view);
 
         let mut layout_areas = crate::mouse_map::LayoutAreas {
             activity_log: ratatui::layout::Rect::default(),

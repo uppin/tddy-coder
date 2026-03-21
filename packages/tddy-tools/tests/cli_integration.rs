@@ -125,6 +125,17 @@ fn ask_valid_questions_returns_success_when_no_socket() {
 }
 
 #[test]
+fn ask_accepts_options_without_description() {
+    let questions = r#"{"questions":[{"header":"Scope","question":"Pick one","options":[{"label":"Only label"}],"multiSelect":false}]}"#;
+
+    let mut cmd = tddy_tools_bin();
+    cmd.args(["ask", "--data", questions]);
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("\"status\":\"ok\""));
+}
+
+#[test]
 fn ask_malformed_input_returns_error() {
     let mut cmd = tddy_tools_bin();
     cmd.args(["ask", "--data", "not json"]);

@@ -1,6 +1,6 @@
 //! Acceptance tests for CursorBackend.
 //!
-//! Verifies that CursorBackend spawns `cursor agent` with correct flags,
+//! Verifies that CursorBackend spawns the `agent` CLI with correct flags,
 //! parses Cursor's stream-json output, and captures thread_id for --resume.
 //! Migrated from Workflow to WorkflowEngine where applicable.
 
@@ -14,7 +14,7 @@ use tddy_core::{CodingBackend, CursorBackend, Goal, InvokeRequest, SharedBackend
 
 use common::{ctx_plan, plan_dir_for_input};
 
-/// CursorBackend spawns cursor agent with -p, --output-format stream-json, --force, --trust.
+/// CursorBackend spawns agent with -p, --output-format stream-json, --force, --trust.
 #[test]
 fn cursor_backend_spawns_cursor_agent_with_correct_flags() {
     let tmp = std::env::temp_dir().join("tddy-cursor-backend-test");
@@ -32,7 +32,7 @@ exit 0
 "##,
         args_file.display()
     );
-    let script_path = tmp.join("cursor");
+    let script_path = tmp.join("agent");
     fs::write(&script_path, script).expect("write script");
     #[cfg(unix)]
     {
@@ -71,9 +71,10 @@ exit 0
     assert_eq!(result.session_id.as_deref(), Some("cursor-thread-abc"));
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
-    assert!(
-        captured.contains("agent"),
-        "should have 'agent' subcommand, got: {}",
+    assert_eq!(
+        captured.lines().next(),
+        Some("--plan"),
+        "Plan goal should pass --plan as first arg, got: {}",
         captured
     );
     assert!(
@@ -124,7 +125,7 @@ exit 0
 "##,
         args_file.display()
     );
-    let script_path = tmp.join("cursor");
+    let script_path = tmp.join("agent");
     fs::write(&script_path, script).expect("write script");
     #[cfg(unix)]
     {
@@ -168,6 +169,197 @@ exit 0
     }
 }
 
+/// Validate uses the same `agent` CLI path as other non-plan goals (parity with Claude).
+#[test]
+fn cursor_backend_invokes_validate_goal_like_other_non_plan_goals() {
+    let tmp = std::env::temp_dir().join("tddy-cursor-validate-invoke-test");
+    let _ = std::fs::create_dir_all(&tmp);
+    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
+    let args_file = tmp_abs.join("captured_args.txt");
+
+    let script = format!(
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "{}"
+printf '%s\n' '{{"type":"result","result":"validate-ok","session_id":"val-sid"}}'
+exit 0
+"##,
+        args_file.display()
+    );
+    let script_path = tmp.join("agent");
+    fs::write(&script_path, script).expect("write script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms).unwrap();
+    }
+
+    let backend = CursorBackend::with_path(script_path.into());
+    let req = InvokeRequest {
+        prompt: "run validate subagents".to_string(),
+        system_prompt: None,
+        system_prompt_path: None,
+        goal: Goal::Validate,
+        model: None,
+        session: None,
+        working_dir: None,
+        debug: false,
+        agent_output: false,
+        agent_output_sink: None,
+        progress_sink: None,
+        conversation_output_path: None,
+        inherit_stdin: false,
+        extra_allowed_tools: None,
+        socket_path: None,
+        plan_dir: None,
+    };
+
+    let result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req))
+        .expect("invoke Goal::Validate must succeed like other goals");
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.output, "validate-ok");
+    assert_eq!(result.session_id.as_deref(), Some("val-sid"));
+
+    let captured = fs::read_to_string(&args_file).expect("read captured args");
+    assert!(
+        !captured.contains("--plan"),
+        "validate must not use --plan, got: {}",
+        captured
+    );
+}
+
+/// Refactor uses the same `agent` CLI path as other non-plan goals (parity with Claude).
+#[test]
+fn cursor_backend_invokes_refactor_goal_like_other_non_plan_goals() {
+    let tmp = std::env::temp_dir().join("tddy-cursor-refactor-invoke-test");
+    let _ = std::fs::create_dir_all(&tmp);
+    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
+    let args_file = tmp_abs.join("captured_args.txt");
+
+    let script = format!(
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "{}"
+printf '%s\n' '{{"type":"result","result":"refactor-ok","session_id":"ref-sid"}}'
+exit 0
+"##,
+        args_file.display()
+    );
+    let script_path = tmp.join("agent");
+    fs::write(&script_path, script).expect("write script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms).unwrap();
+    }
+
+    let backend = CursorBackend::with_path(script_path.into());
+    let req = InvokeRequest {
+        prompt: "apply refactoring plan".to_string(),
+        system_prompt: None,
+        system_prompt_path: None,
+        goal: Goal::Refactor,
+        model: None,
+        session: None,
+        working_dir: None,
+        debug: false,
+        agent_output: false,
+        agent_output_sink: None,
+        progress_sink: None,
+        conversation_output_path: None,
+        inherit_stdin: false,
+        extra_allowed_tools: None,
+        socket_path: None,
+        plan_dir: None,
+    };
+
+    let result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req))
+        .expect("invoke Goal::Refactor must succeed like other non-plan goals");
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(result.output, "refactor-ok");
+    assert_eq!(result.session_id.as_deref(), Some("ref-sid"));
+
+    let captured = fs::read_to_string(&args_file).expect("read captured args");
+    assert!(
+        !captured.contains("--plan"),
+        "refactor must not use --plan, got: {}",
+        captured
+    );
+}
+
+/// Cursor `agent` does not accept `--session-id` for new chats; Fresh must not pass it.
+#[test]
+fn cursor_backend_omits_session_id_on_fresh_session() {
+    let tmp = std::env::temp_dir().join("tddy-cursor-fresh-no-sid-test");
+    let _ = std::fs::create_dir_all(&tmp);
+    let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
+    let args_file = tmp_abs.join("captured_args.txt");
+
+    let script = format!(
+        r##"#!/bin/sh
+printf '%s\n' "$@" > "{}"
+printf '%s\n' '{{"type":"result","result":"ok","session_id":"from-stream"}}'
+exit 0
+"##,
+        args_file.display()
+    );
+    let script_path = tmp.join("agent");
+    fs::write(&script_path, script).expect("write script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms).unwrap();
+    }
+
+    let backend = CursorBackend::with_path(script_path.into());
+    let req = InvokeRequest {
+        prompt: "first turn".to_string(),
+        system_prompt: None,
+        system_prompt_path: None,
+        goal: Goal::Plan,
+        model: None,
+        session: Some(tddy_core::SessionMode::Fresh(
+            "7a552e2e-1d03-4f9b-82fa-f0c45b343ae1".to_string(),
+        )),
+        working_dir: None,
+        debug: false,
+        agent_output: false,
+        agent_output_sink: None,
+        progress_sink: None,
+        conversation_output_path: None,
+        inherit_stdin: false,
+        extra_allowed_tools: None,
+        socket_path: None,
+        plan_dir: None,
+    };
+
+    let result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(backend.invoke(req))
+        .expect("invoke should succeed");
+    assert_eq!(result.session_id.as_deref(), Some("from-stream"));
+
+    let captured = fs::read_to_string(&args_file).expect("read captured args");
+    assert!(
+        !captured.contains("--session-id"),
+        "Cursor CLI has no --session-id; must not pass it on Fresh, got: {}",
+        captured
+    );
+    assert!(
+        !captured.contains("--resume"),
+        "Fresh session must not use --resume, got: {}",
+        captured
+    );
+}
+
 /// CursorBackend adds --resume when session is SessionMode::Resume.
 #[test]
 fn cursor_backend_adds_resume_flag_on_followup() {
@@ -184,7 +376,7 @@ exit 0
 "##,
         args_file.display()
     );
-    let script_path = tmp.join("cursor");
+    let script_path = tmp.join("agent");
     fs::write(&script_path, script).expect("write script");
     #[cfg(unix)]
     {
@@ -272,7 +464,7 @@ exit 0
 "##,
         args_file.display()
     );
-    let script_path = tmp.join("cursor");
+    let script_path = tmp.join("agent");
     fs::write(&script_path, script).expect("write script");
     use std::os::unix::fs::PermissionsExt;
     let mut perms = fs::metadata(&script_path).unwrap().permissions();
@@ -337,7 +529,7 @@ exit 0
 "##,
         args_file.display()
     );
-    let script_path = tmp.join("cursor");
+    let script_path = tmp.join("agent");
     fs::write(&script_path, script).expect("write script");
     use std::os::unix::fs::PermissionsExt;
     let mut perms = fs::metadata(&script_path).unwrap().permissions();
@@ -402,7 +594,7 @@ exit 0
 "##,
         args_file.display()
     );
-    let script_path = tmp.join("cursor");
+    let script_path = tmp.join("agent");
     fs::write(&script_path, script).expect("write script");
     use std::os::unix::fs::PermissionsExt;
     let mut perms = fs::metadata(&script_path).unwrap().permissions();
@@ -477,7 +669,7 @@ exit 0
 "#,
         stream_path.display()
     );
-    let script_path = tmp.join("cursor");
+    let script_path = tmp.join("agent");
     fs::write(&script_path, script).expect("write script");
     {
         use std::os::unix::fs::PermissionsExt;

@@ -29,6 +29,7 @@ async fn refactor_invokes_backend_with_refactor_goal() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_refactoring_plan(&plan_dir);
+    write_changeset_with_state(&plan_dir, "ValidateComplete", "sess-refactor-goal");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(REFACTOR_OUTPUT);
@@ -133,6 +134,7 @@ async fn refactor_parses_structured_response() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_refactoring_plan(&plan_dir);
+    write_changeset_with_state(&plan_dir, "ValidateComplete", "sess-refactor-parse");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(REFACTOR_OUTPUT);
@@ -163,9 +165,11 @@ async fn refactor_parses_structured_response() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// CursorBackend must reject Goal::Refactor with an "unsupported" error.
+/// CursorBackend must not return the legacy "refactor is not supported on the Cursor backend"
+/// error; Refactor uses the same invocation path as other goals (Claude parity). A missing
+/// binary yields `BinaryNotFound` after attempting spawn, not a pre-spawn rejection.
 #[tokio::test]
-async fn refactor_rejects_cursor_backend() {
+async fn refactor_cursor_backend_does_not_reject_goal_before_spawn() {
     let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/cursor"));
     let req = InvokeRequest {
         prompt: "refactor".to_string(),
@@ -189,28 +193,12 @@ async fn refactor_rejects_cursor_backend() {
     let result = backend.invoke(req).await;
 
     assert!(
-        result.is_err(),
-        "CursorBackend must return an error for Goal::Refactor"
+        !matches!(
+            &result,
+            Err(BackendError::InvocationFailed(ref m))
+                if m == "refactor is not supported on the Cursor backend"
+        ),
+        "Refactor on Cursor must be implemented like Claude; got {:?}",
+        result
     );
-    match result {
-        Err(BackendError::InvocationFailed(ref msg)) => {
-            let msg_lower = msg.to_lowercase();
-            assert!(
-                msg_lower.contains("not supported")
-                    || msg_lower.contains("cursor")
-                    || msg_lower.contains("refactor"),
-                "error message should indicate unsupported, got: {}",
-                msg
-            );
-        }
-        Err(BackendError::BinaryNotFound(_)) => {
-            panic!(
-                "CursorBackend must reject Goal::Refactor BEFORE spawning. \
-                 Got BinaryNotFound — early rejection not implemented."
-            );
-        }
-        #[allow(unreachable_patterns)]
-        Err(e) => panic!("Expected InvocationFailed, got: {:?}", e),
-        Ok(_) => panic!("Expected error, not Ok"),
-    }
 }

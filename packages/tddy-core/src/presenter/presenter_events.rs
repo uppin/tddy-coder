@@ -29,6 +29,9 @@ pub enum PresenterEvent {
         agent: String,
         model: String,
     },
+    /// Presenter requested the view loop to exit (e.g. successful Continue with agent).
+    /// Distinct from [`IntentReceived`](PresenterEvent::IntentReceived): sent after session resolution.
+    ShouldQuit,
 }
 
 /// Handle passed to gRPC service: broadcast sender for events, mpsc sender for intents.

@@ -137,6 +137,15 @@ pub fn event_to_server_message(event: PresenterEvent) -> ServerMessage {
             }
         }
         PresenterEvent::BackendSelected { .. } => ServerMessage { event: None },
+        PresenterEvent::ShouldQuit => {
+            if let Some(msg) = intent_to_client_message(&UserIntent::Quit) {
+                ServerMessage {
+                    event: Some(Event::IntentReceived(IntentReceived { intent: Some(msg) })),
+                }
+            } else {
+                ServerMessage { event: None }
+            }
+        }
     }
 }
 

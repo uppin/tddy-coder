@@ -273,6 +273,7 @@ pub fn write_changeset_for_plan_session(plan_dir: &std::path::Path, session_id: 
 }
 
 /// Write a minimal changeset.yaml with custom state.
+/// Sets `state.session_id` to `session_id` (persisted agent thread id for resume).
 /// Includes branch_suggestion and worktree_suggestion for worktree creation.
 pub fn write_changeset_with_state(plan_dir: &std::path::Path, state: &str, session_id: &str) {
     let mut cs = Changeset::default();
@@ -287,6 +288,7 @@ pub fn write_changeset_with_state(plan_dir: &std::path::Path, state: &str, sessi
     cs.state.current = state.to_string();
     cs.state.updated_at = "2026-03-07T10:00:00Z".to_string();
     cs.state.history = vec![];
+    cs.state.session_id = Some(session_id.to_string());
     cs.branch_suggestion = Some("feature/test".to_string());
     cs.worktree_suggestion = Some("feature-test".to_string());
     write_changeset(plan_dir, &cs).expect("write changeset");

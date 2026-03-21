@@ -4,6 +4,10 @@
 
 - **ConnectionService**: `StartSessionRequest` includes optional `agent`; forwarded to spawned `tddy-coder` as `--agent` when non-empty (skips interactive backend menu in the child).
 
+## 2026-03-21 — PRD: implementation status
+
+- **[PRD: tddy-daemon](1-WIP/PRD-2026-03-19-tddy-daemon.md)** updated with **Implementation status (2026-03-21)**: Phase 1 (binary, OAuth, spawn, project-centric web UX) documented; full success-criteria checklist remains open for validation.
+
 ## 2026-03-21 — Project concept
 
 - **Projects**: Named `git_url` + `main_repo_path` per user; `~/.tddy/projects/projects.yaml`.

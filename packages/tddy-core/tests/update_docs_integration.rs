@@ -32,6 +32,7 @@ async fn update_docs_invokes_backend_with_update_docs_goal() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_minimal_artifacts(&plan_dir);
+    write_changeset_with_state(&plan_dir, "RefactorComplete", "sess-update-docs-goal");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(UPDATE_DOCS_OUTPUT);
@@ -107,6 +108,7 @@ async fn update_docs_parses_structured_response() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_minimal_artifacts(&plan_dir);
+    write_changeset_with_state(&plan_dir, "RefactorComplete", "sess-update-docs-parse");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(UPDATE_DOCS_OUTPUT);
@@ -138,10 +140,10 @@ async fn update_docs_parses_structured_response() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// CursorBackend must accept Goal::UpdateDocs (unlike Validate/Refactor).
+/// CursorBackend must accept Goal::UpdateDocs (same `agent` invocation path as other goals).
 #[tokio::test]
 async fn cursor_backend_accepts_update_docs() {
-    let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/cursor"));
+    let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/agent"));
     let req = InvokeRequest {
         prompt: "update-docs".to_string(),
         system_prompt: None,
@@ -164,7 +166,7 @@ async fn cursor_backend_accepts_update_docs() {
     let result = backend.invoke(req).await;
 
     // CursorBackend does NOT reject UpdateDocs. It may return BinaryNotFound
-    // (cursor not installed) or InvocationFailed for other reasons, but must
+    // (agent CLI not installed) or InvocationFailed for other reasons, but must
     // NOT return InvocationFailed("update-docs is not supported").
     if let Err(tddy_core::BackendError::InvocationFailed(ref msg)) = result {
         assert!(

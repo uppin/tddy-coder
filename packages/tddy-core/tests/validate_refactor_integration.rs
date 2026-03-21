@@ -5,8 +5,8 @@
 //! - `workflow.validate()` -> run_goal_until_done with ctx_validate
 //! - `validate_subagents_allowlist()`
 //!
-//! CursorBackend must reject Goal::Validate immediately with an "unsupported" error,
-//! before attempting to spawn the cursor process.
+//! CursorBackend must invoke Goal::Validate using the same `agent` path as other goals
+//! (parity with Claude), not reject it before spawn.
 //!
 //! Migrated from Workflow to WorkflowEngine.
 
@@ -24,6 +24,7 @@ use common::{
     ctx_validate, run_goal_until_done, write_changeset_with_state,
     write_evaluation_report_to_plan_dir,
 };
+use serde_json::json;
 use tddy_core::workflow::graph::ExecutionStatus;
 
 /// Minimal validate (subagent) output as JSON (tddy-tools submit format).
@@ -42,6 +43,7 @@ async fn validate_invokes_backend_with_validate_goal() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_evaluation_report_to_plan_dir(&plan_dir);
+    write_changeset_with_state(&plan_dir, "Evaluated", "sess-vr-goal");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
@@ -106,10 +108,11 @@ async fn validate_requires_plan_dir_with_evaluation_report() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
-/// CursorBackend must reject Goal::Validate with an "unsupported" error
-/// before spawning the cursor process.
+/// CursorBackend must not return the legacy "validate is not supported on the Cursor backend"
+/// error; Validate uses the same invocation path as other goals (Claude parity). A missing
+/// binary yields `BinaryNotFound` after attempting spawn, not a pre-spawn rejection.
 #[tokio::test]
-async fn validate_rejects_cursor_backend() {
+async fn validate_cursor_backend_does_not_reject_goal_before_spawn() {
     let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/cursor"));
     let req = InvokeRequest {
         prompt: "validate refactor".to_string(),
@@ -133,36 +136,14 @@ async fn validate_rejects_cursor_backend() {
     let result = backend.invoke(req).await;
 
     assert!(
-        result.is_err(),
-        "CursorBackend must return an error for Goal::Validate"
+        !matches!(
+            &result,
+            Err(BackendError::InvocationFailed(ref m))
+                if m == "validate is not supported on the Cursor backend"
+        ),
+        "Validate on Cursor must be implemented like Claude; got {:?}",
+        result
     );
-
-    match result {
-        Err(BackendError::InvocationFailed(ref msg)) => {
-            let msg_lower = msg.to_lowercase();
-            assert!(
-                msg_lower.contains("not supported")
-                    || msg_lower.contains("cursor")
-                    || msg_lower.contains("validate"),
-                "error message should indicate the feature is unsupported on Cursor, got: {}",
-                msg
-            );
-        }
-        Err(BackendError::BinaryNotFound(_)) => {
-            panic!(
-                "CursorBackend must reject Goal::Validate BEFORE spawning the cursor process. \
-                 Got BinaryNotFound, which means the early rejection is not implemented."
-            );
-        }
-        #[allow(unreachable_patterns)]
-        Err(e) => {
-            panic!(
-                "Expected InvocationFailed with unsupported message, got different error: {:?}",
-                e
-            );
-        }
-        Ok(_) => panic!("Expected error, CursorBackend must not accept Goal::Validate"),
-    }
 }
 
 /// validate() transitions workflow to ValidateComplete state on success.
@@ -211,6 +192,7 @@ async fn validate_parses_structured_response() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_evaluation_report_to_plan_dir(&plan_dir);
+    write_changeset_with_state(&plan_dir, "Evaluated", "sess-vr-parse");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(VALIDATE_REFACTOR_OUTPUT);
@@ -299,6 +281,7 @@ async fn validate_response_has_validate_goal() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_evaluation_report_to_plan_dir(&plan_dir);
+    write_changeset_with_state(&plan_dir, "Evaluated", "sess-vr-renamed-goal");
 
     let validate_output_with_plan = r#"{"goal":"validate","summary":"All 3 subagents completed. Reports and refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
 
@@ -345,6 +328,7 @@ async fn validate_produces_refactoring_plan() {
     let _ = std::fs::remove_dir_all(&plan_dir);
     std::fs::create_dir_all(&plan_dir).expect("create plan dir");
     write_evaluation_report_to_plan_dir(&plan_dir);
+    write_changeset_with_state(&plan_dir, "Evaluated", "sess-vr-refactoring-plan");
 
     let validate_output = r#"{"goal":"validate","summary":"All 3 subagents completed. Refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
 
@@ -379,6 +363,70 @@ async fn validate_produces_refactoring_plan() {
     assert!(
         output.refactoring_plan_written,
         "structured response must include refactoring_plan_written: true"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
+/// After validate, `refactoring-plan.md` must contain the markdown from the `tddy-tools submit`
+/// JSON (`refactoring_plan` field), not a generic placeholder, so the refactor step can read the
+/// real plan.
+#[tokio::test]
+async fn validate_submit_refactoring_plan_field_written_to_refactoring_plan_md() {
+    let plan_dir = std::env::temp_dir().join(format!(
+        "tddy-vr-submit-refactor-plan-md-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    write_evaluation_report_to_plan_dir(&plan_dir);
+    write_changeset_with_state(&plan_dir, "Evaluated", "sess-vr-submit-plan-md");
+
+    const REFACTORING_PLAN_MARKDOWN: &str =
+        "# Refactoring Plan\n\n## Tasks\n\n1. Remove `eprintln!` markers from production code.\n";
+
+    let validate_json = json!({
+        "goal": "validate",
+        "summary": "Validation complete.",
+        "tests_report_written": true,
+        "prod_ready_report_written": true,
+        "clean_code_report_written": true,
+        "refactoring_plan_written": true,
+        "refactoring_plan": REFACTORING_PLAN_MARKDOWN,
+    })
+    .to_string();
+
+    let backend = Arc::new(MockBackend::new());
+    backend.push_ok(&validate_json);
+
+    let storage_dir = std::env::temp_dir().join(format!(
+        "tddy-vr-submit-plan-md-engine-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_validate(plan_dir.clone());
+    let result = engine.run_goal("validate", ctx).await.unwrap();
+    assert!(
+        matches!(result.status, ExecutionStatus::Paused { .. }),
+        "validate: {:?}",
+        result.status
+    );
+
+    let path = plan_dir.join("refactoring-plan.md");
+    assert!(
+        path.exists(),
+        "refactoring-plan.md must exist after validate when submit claims the plan was written"
+    );
+    let on_disk = std::fs::read_to_string(&path).expect("read refactoring-plan.md");
+    assert_eq!(
+        on_disk, REFACTORING_PLAN_MARKDOWN,
+        "refactoring-plan.md must match the markdown from the validate tddy-tools submit JSON (refactoring_plan field)"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);

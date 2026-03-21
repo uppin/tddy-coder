@@ -1,6 +1,6 @@
 # PRD: LiveKit Room Participant for tddy-coder Daemon
 
-**Status:** WIP
+**Status:** ✅ Complete (documentation wrapped)
 **Date:** 2026-03-11
 
 ## Summary
@@ -76,7 +76,7 @@ When these flags are provided, the daemon:
 
 ## Affected Features
 
-- [grpc-remote-control.md](../grpc-remote-control.md) — Daemon startup flow changes (additional LiveKit connection alongside gRPC server)
+- [grpc-remote-control.md](../../grpc-remote-control.md) — Daemon startup flow changes (additional LiveKit connection alongside gRPC server)
 
 ## Technical Constraints
 
@@ -104,3 +104,9 @@ When these flags are provided, the daemon:
 4. Integration tests using testcontainers spin up a real LiveKit server, connect two participants, and verify end-to-end RPC calls
 5. The custom `ServiceGenerator` produces correct service traits and handlers from `.proto` definitions
 6. `cargo test -p tddy-livekit` and `cargo test -p tddy-livekit-testkit` pass
+
+---
+
+## Documentation wrap
+
+Merged into [gRPC remote control](../../grpc-remote-control.md) (transport stack) and [Coder changelog](../../changelog.md) on 2026-03-21. This file is archived under `1-WIP/archived/`.

@@ -7,8 +7,10 @@
 mod common;
 
 use std::sync::Arc;
-use tddy_core::changeset::read_changeset;
+use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
+use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::ExecutionStatus;
+use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
 use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
@@ -261,6 +263,41 @@ async fn evaluate_accepts_demo_complete_state() {
     let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
+/// `before_task("demo")` must set `system_prompt` with the `tddy-tools submit --goal demo`
+/// contract so agents finish the goal (evaluate/validate set system_prompt the same way).
+#[tokio::test]
+async fn before_demo_hook_sets_system_prompt_with_submit_contract() {
+    let plan_dir = std::env::temp_dir().join(format!("tddy-demo-hook-sys-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    std::fs::write(plan_dir.join("demo-plan.md"), "# Demo\nsteps").expect("write demo-plan.md");
+
+    let mut cs = Changeset::default();
+    cs.state.session_id = Some("hook-test-agent-session".to_string());
+    write_changeset(&plan_dir, &cs).expect("write changeset for resolve_agent_session_id");
+
+    let hooks = TddWorkflowHooks::new();
+    let ctx = Context::new();
+    ctx.set_sync("plan_dir", plan_dir.clone());
+
+    hooks.before_task("demo", &ctx).expect("before_task demo");
+
+    let sys: Option<String> = ctx.get_sync("system_prompt");
+    let prompt = sys
+        .expect("demo goal must set system_prompt on context (mirrors evaluate/validate/refactor)");
+    assert!(
+        prompt.contains("tddy-tools submit") && prompt.contains("--goal demo"),
+        "system_prompt must include tddy-tools submit --goal demo, got {:?}",
+        prompt.chars().take(200).collect::<String>()
+    );
+    assert!(
+        prompt.contains("tddy-tools get-schema demo") || prompt.contains("get-schema demo"),
+        "system_prompt must reference get-schema for demo goal"
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
+}
+
 /// Demo backend invocation should use Goal::Demo.
 #[tokio::test]
 async fn demo_backend_invocation_uses_goal_demo() {
@@ -288,6 +325,68 @@ async fn demo_backend_invocation_uses_goal_demo() {
     );
 
     let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
+}
+
+/// After `--resume-from`, `before_demo` loads the agent thread id from `changeset.yaml`
+/// (`state.session_id`) so the backend uses `SessionMode::Resume` with that id, not the
+/// workflow engine storage id.
+#[tokio::test]
+async fn demo_after_cli_resume_passes_persisted_session_for_agent_resume() {
+    let plan_dir =
+        std::env::temp_dir().join(format!("tddy-resume-demo-cli-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&plan_dir);
+    std::fs::create_dir_all(&plan_dir).expect("mkdir");
+    std::fs::write(
+        plan_dir.join("demo-plan.md"),
+        "# Demo\n## Steps\n- Run\n## Verification\nOK",
+    )
+    .expect("demo-plan");
+
+    let mut cs = Changeset::default();
+    cs.state.current = "GreenComplete".to_string();
+    cs.state.session_id = Some("persisted-agent-thread-for-resume".to_string());
+    write_changeset(&plan_dir, &cs).expect("write changeset");
+
+    let backend = Arc::new(MockBackend::new());
+    backend.push_ok(DEMO_OUTPUT);
+    let storage_dir =
+        std::env::temp_dir().join(format!("tddy-resume-demo-engine-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        SharedBackend::from_arc(backend.clone()),
+        storage_dir,
+        Some(Arc::new(TddWorkflowHooks::new())),
+    );
+
+    let ctx = ctx_demo(plan_dir.clone());
+    let result = engine.run_goal("demo", ctx).await.expect("demo run");
+    assert!(
+        matches!(result.status, ExecutionStatus::Paused { .. }),
+        "expected Paused after demo, got {:?}",
+        result.status
+    );
+
+    let inv = backend.invocations();
+    let demo_req = inv
+        .iter()
+        .find(|r| r.goal == tddy_core::Goal::Demo)
+        .expect("demo invoke");
+
+    assert_eq!(
+        demo_req.session.as_ref().map(|s| s.session_id()),
+        Some("persisted-agent-thread-for-resume"),
+        "InvokeRequest.session must carry changeset state.session_id"
+    );
+    assert!(
+        demo_req
+            .session
+            .as_ref()
+            .is_some_and(|s| s.is_resume()),
+        "InvokeRequest.session must be Resume so the agent CLI continues the prior thread; got {:?}",
+        demo_req.session
+    );
+
+    let _ = std::fs::remove_dir_all(&plan_dir);
 }
 
 /// Changeset should include "demo" in default_models for model resolution.

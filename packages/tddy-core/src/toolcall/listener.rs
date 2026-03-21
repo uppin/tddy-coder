@@ -7,8 +7,14 @@ use std::io::Write as IoWrite;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::Mutex;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
+use tokio::time::timeout;
+
+/// Max time to wait for the presenter to answer a **submit** relay before returning an error to
+/// `tddy-tools`. Ask/approve may block until the user responds.
+const PRESENTER_SUBMIT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(1);
 
 static TOOLCALL_LOG_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -108,7 +114,11 @@ async fn handle_connection(
     let request: serde_json::Value =
         serde_json::from_str(line).map_err(|e| format!("invalid JSON: {}", e))?;
 
-    let req_type = request.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    let req_type = request
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     let (tool_request, response_rx) = if req_type == "submit" {
         let wire: SubmitRequestWire = serde_json::from_value(request)
@@ -172,11 +182,26 @@ async fn handle_connection(
     tx.send(tool_request).map_err(|_| "channel closed")?;
     toolcall_log("[wait] waiting for presenter response...");
 
-    let response = response_rx
-        .await
-        .unwrap_or_else(|_| ToolCallResponse::Error {
-            message: "response channel dropped".to_string(),
-        });
+    let response = if req_type == "submit" {
+        match timeout(PRESENTER_SUBMIT_RESPONSE_TIMEOUT, response_rx).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(_)) => ToolCallResponse::Error {
+                message: "response channel dropped".to_string(),
+            },
+            Err(_elapsed) => {
+                toolcall_log("[error] presenter did not respond to submit relay in time");
+                ToolCallResponse::Error {
+                    message: "presenter did not respond to submit relay in time — ensure the UI loop calls poll_tool_calls() so tddy-tools submit can complete".to_string(),
+                }
+            }
+        }
+    } else {
+        response_rx
+            .await
+            .unwrap_or_else(|_| ToolCallResponse::Error {
+                message: "response channel dropped".to_string(),
+            })
+    };
 
     let response_line = response.to_json_line();
     toolcall_log(&format!("[send] {}", response_line));

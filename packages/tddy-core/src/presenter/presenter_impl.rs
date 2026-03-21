@@ -49,6 +49,10 @@ pub struct Presenter {
     answer_tx: Option<mpsc::Sender<String>>,
     workflow_backend: Option<SharedBackend>,
     workflow_output_dir: Option<PathBuf>,
+    /// Directory containing `changeset.yaml` for the active workflow (session / plan dir).
+    /// When set, used for `read_changeset` in Continue with agent / resume; `workflow_output_dir`
+    /// alone may be `.` while the changeset lives under this path.
+    workflow_plan_dir: Option<PathBuf>,
     workflow_conversation_output: Option<PathBuf>,
     workflow_debug_output: Option<PathBuf>,
     workflow_debug: bool,
@@ -103,6 +107,7 @@ impl Presenter {
             answer_tx: None,
             workflow_backend: None,
             workflow_output_dir: None,
+            workflow_plan_dir: None,
             workflow_conversation_output: None,
             workflow_debug_output: None,
             workflow_debug: false,
@@ -405,15 +410,54 @@ impl Presenter {
                 self.state.should_quit = true;
             }
             UserIntent::ContinueWithAgent => {
-                let session_id = if let Some(output_dir) = self.workflow_output_dir.as_ref() {
-                    match crate::changeset::read_changeset(output_dir) {
-                        Ok(cs) => cs.state.session_id.clone(),
+                let session_id = if let Some(cs_dir) = self.changeset_read_dir() {
+                    log::info!(
+                        "ContinueWithAgent: read_changeset from {} (workflow_plan_dir={:?}, workflow_output_dir={:?})",
+                        cs_dir.display(),
+                        self.workflow_plan_dir.as_ref().map(|p| p.display().to_string()),
+                        self.workflow_output_dir.as_ref().map(|p| p.display().to_string()),
+                    );
+                    match crate::changeset::read_changeset(cs_dir) {
+                        Ok(cs) => {
+                            // Prefer persisted active session; else same lookup as ResumeFromError
+                            // (Cursor often stores thread id on tagged sessions only).
+                            cs.state
+                                .session_id
+                                .clone()
+                                .or_else(|| {
+                                    self.state.current_goal.as_deref().and_then(|goal| {
+                                        let sid = crate::changeset::get_session_for_tag(&cs, goal);
+                                        log::info!(
+                                            "ContinueWithAgent: session from tag {:?} → {:?}",
+                                            goal,
+                                            sid
+                                        );
+                                        sid
+                                    })
+                                })
+                                .or_else(|| {
+                                    cs.sessions.last().map(|s| {
+                                        log::info!(
+                                        "ContinueWithAgent: fallback to last session entry id={}",
+                                        s.id
+                                    );
+                                        s.id.clone()
+                                    })
+                                })
+                        }
                         Err(e) => {
-                            log::warn!("ContinueWithAgent: could not read changeset: {}", e);
+                            log::warn!(
+                                "ContinueWithAgent: could not read changeset at {}: {}",
+                                cs_dir.display(),
+                                e
+                            );
                             None
                         }
                     }
                 } else {
+                    log::warn!(
+                        "ContinueWithAgent: no workflow_plan_dir or workflow_output_dir set"
+                    );
                     None
                 };
                 if let Some(sid) = session_id {
@@ -422,6 +466,11 @@ impl Presenter {
                             session_id: sid,
                         });
                     self.state.should_quit = true;
+                    self.broadcast(PresenterEvent::ShouldQuit);
+                } else {
+                    log::warn!(
+                        "ContinueWithAgent: no session id resolved; not setting exit_action or ShouldQuit"
+                    );
                 }
             }
             UserIntent::ResumeFromError => {
@@ -429,23 +478,37 @@ impl Presenter {
                     "ResumeFromError: looking up last session for goal {:?}",
                     self.state.current_goal
                 );
-                let session_id = if let (Some(output_dir), Some(goal)) = (
-                    self.workflow_output_dir.as_ref(),
+                let session_id = if let (Some(cs_dir), Some(goal)) = (
+                    self.changeset_read_dir(),
                     self.state.current_goal.as_deref(),
                 ) {
-                    match crate::changeset::read_changeset(output_dir) {
+                    log::info!(
+                        "ResumeFromError: read_changeset from {} for tag {}",
+                        cs_dir.display(),
+                        goal
+                    );
+                    match crate::changeset::read_changeset(cs_dir) {
                         Ok(cs) => {
                             let sid = crate::changeset::get_session_for_tag(&cs, goal);
                             log::info!("ResumeFromError: session_id={:?} for tag={}", sid, goal);
                             sid
                         }
                         Err(e) => {
-                            log::warn!("ResumeFromError: could not read changeset: {}", e);
+                            log::warn!(
+                                "ResumeFromError: could not read changeset at {}: {}",
+                                cs_dir.display(),
+                                e
+                            );
                             None
                         }
                     }
                 } else {
-                    log::warn!("ResumeFromError: no output_dir or goal available, spawning fresh");
+                    log::warn!(
+                        "ResumeFromError: no changeset dir or goal (plan_dir={:?}, output_dir={:?}, goal={:?}), spawning fresh",
+                        self.workflow_plan_dir,
+                        self.workflow_output_dir,
+                        self.state.current_goal
+                    );
                     None
                 };
                 self.state.mode = AppMode::Running;
@@ -872,6 +935,7 @@ impl Presenter {
     ) {
         self.workflow_backend = Some(backend.clone());
         self.workflow_output_dir = Some(output_dir.clone());
+        self.workflow_plan_dir = plan_dir.clone();
         self.workflow_conversation_output = conversation_output_path.clone();
         self.workflow_debug_output = debug_output_path.clone();
         self.workflow_debug = debug;
@@ -956,6 +1020,13 @@ impl Presenter {
         self.workflow_event_rx = Some(event_rx);
         self.answer_tx = Some(answer_tx);
         self.workflow_handle = Some(handle);
+    }
+
+    /// Prefer session/plan dir for `changeset.yaml`; fall back to `workflow_output_dir`.
+    fn changeset_read_dir(&self) -> Option<&PathBuf> {
+        self.workflow_plan_dir
+            .as_ref()
+            .or(self.workflow_output_dir.as_ref())
     }
 
     /// Reference to current state.
@@ -1094,6 +1165,153 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    /// Cursor stores the agent thread id on the session list (tagged `evaluate`, `green`, etc.);
+    /// `state.session_id` may be unset. Continue with agent must still resolve a session id
+    /// (same idea as `ResumeFromError` via `get_session_for_tag`), otherwise the user stays in
+    /// error recovery and no `claude --resume` runs.
+    ///
+    /// Reproduces: session `019d105b-ac0f-78d3-9a89-409731145a36` visible in logs but Continue
+    /// with agent appeared to do nothing.
+    ///
+    /// Note: choosing **Resume** restarts the workflow from `next_goal_for_state`; if the next
+    /// step is `validate` and the backend is Cursor, invocation fails with
+    /// `validate is not supported on the Cursor backend` — that is a different path from
+    /// Continue with agent (exec resume).
+    #[test]
+    fn continue_with_agent_resolves_tagged_session_when_state_session_id_missing() {
+        let mut p = make_presenter();
+
+        let tmp = std::env::temp_dir().join("tddy-test-continue-agent-tag-fallback");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let cursor_thread = "019d105b-ac0f-78d3-9a89-409731145a36";
+        let mut cs = crate::changeset::Changeset::default();
+        cs.state.session_id = None;
+        cs.sessions.push(crate::changeset::SessionEntry {
+            id: cursor_thread.to_string(),
+            agent: "cursor".to_string(),
+            tag: "evaluate".to_string(),
+            created_at: "2026-03-21T12:00:00Z".to_string(),
+            system_prompt_file: None,
+        });
+        crate::changeset::write_changeset(&tmp, &cs).unwrap();
+
+        p.workflow_output_dir = Some(tmp.clone());
+        p.state.current_goal = Some("evaluate".to_string());
+        p.state.mode = AppMode::ErrorRecovery {
+            error_message: "validate is not supported on the Cursor backend".to_string(),
+        };
+
+        p.handle_intent(UserIntent::ContinueWithAgent);
+
+        assert!(
+            p.state().should_quit,
+            "ContinueWithAgent should quit to exec claude --resume when a tagged session exists"
+        );
+        assert!(
+            matches!(
+                p.state().exit_action,
+                Some(crate::presenter::state::ExitAction::ContinueWithAgent { ref session_id })
+                if session_id == cursor_thread
+            ),
+            "exit_action should use session id from get_session_for_tag(evaluate), got {:?}",
+            p.state().exit_action
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// When the failing goal has no matching tagged session (e.g. validate failed before a
+    /// validate session was recorded), `ContinueWithAgent` must still resolve an agent session
+    /// from the changeset so Enter does not appear to do nothing.
+    #[test]
+    fn continue_with_agent_resolves_session_when_current_goal_tag_has_no_entry() {
+        let mut p = make_presenter();
+
+        let tmp = std::env::temp_dir().join("tddy-test-continue-agent-wrong-tag");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let sid = "session-from-prior-step";
+        let mut cs = crate::changeset::Changeset::default();
+        cs.state.session_id = None;
+        cs.sessions.push(crate::changeset::SessionEntry {
+            id: sid.to_string(),
+            agent: "cursor".to_string(),
+            tag: "evaluate".to_string(),
+            created_at: "2026-03-21T12:00:00Z".to_string(),
+            system_prompt_file: None,
+        });
+        crate::changeset::write_changeset(&tmp, &cs).unwrap();
+
+        p.workflow_output_dir = Some(tmp.clone());
+        p.state.current_goal = Some("validate".to_string());
+        p.state.mode = AppMode::ErrorRecovery {
+            error_message: "validate is not supported on the Cursor backend".to_string(),
+        };
+
+        p.handle_intent(UserIntent::ContinueWithAgent);
+
+        assert!(
+            p.state().should_quit,
+            "ContinueWithAgent must quit with a resume session when any session exists in changeset"
+        );
+        assert!(
+            matches!(
+                p.state().exit_action,
+                Some(crate::presenter::state::ExitAction::ContinueWithAgent { ref session_id })
+                if session_id == sid
+            ),
+            "expected resume id from an existing session entry when goal tag misses, got {:?}",
+            p.state().exit_action
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// `start_workflow` passes `output_dir` as `.` while `plan_dir` points at the session folder
+    /// (`~/.tddy/sessions/...`). Continue with agent must read `changeset.yaml` from `plan_dir`.
+    #[test]
+    fn continue_with_agent_reads_changeset_from_workflow_plan_dir() {
+        let mut p = make_presenter();
+
+        let tmp_plan = std::env::temp_dir().join("tddy-test-continue-plan-dir");
+        let tmp_wrong = std::env::temp_dir().join("tddy-test-continue-wrong-dir");
+        let _ = std::fs::remove_dir_all(&tmp_plan);
+        let _ = std::fs::remove_dir_all(&tmp_wrong);
+        std::fs::create_dir_all(&tmp_plan).unwrap();
+        std::fs::create_dir_all(&tmp_wrong).unwrap();
+
+        let resume_id = "resume-from-plan-dir";
+        let mut cs = crate::changeset::Changeset::default();
+        cs.state.session_id = Some(resume_id.to_string());
+        crate::changeset::write_changeset(&tmp_plan, &cs).unwrap();
+
+        p.workflow_output_dir = Some(tmp_wrong.clone());
+        p.workflow_plan_dir = Some(tmp_plan.clone());
+        p.state.mode = AppMode::ErrorRecovery {
+            error_message: "read refactoring-plan.md: No such file or directory (os error 2)"
+                .to_string(),
+        };
+
+        p.handle_intent(UserIntent::ContinueWithAgent);
+
+        assert!(p.state().should_quit);
+        assert!(
+            matches!(
+                p.state().exit_action,
+                Some(crate::presenter::state::ExitAction::ContinueWithAgent { ref session_id })
+                if session_id == resume_id
+            ),
+            "expected session id from changeset at workflow_plan_dir, got {:?}",
+            p.state().exit_action
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp_plan);
+        let _ = std::fs::remove_dir_all(&tmp_wrong);
+    }
+
     #[test]
     fn connect_view_returns_none_without_broadcast() {
         let p = make_presenter();
@@ -1166,5 +1384,32 @@ mod tests {
         p.handle_intent(UserIntent::AnswerSelect(1));
         assert_eq!(p.state().agent, "claude-acp");
         assert_eq!(p.state().model, "opus");
+    }
+
+    #[test]
+    fn quit_broadcasts_intent_received_for_tui_should_quit_sync() {
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        let (intent_tx, _) = mpsc::channel();
+        let mut p = make_presenter()
+            .with_broadcast(event_tx.clone())
+            .with_intent_sender(intent_tx);
+        let mut conn = p.connect_view().expect("connect_view should return Some");
+        p.state.mode = AppMode::ErrorRecovery {
+            error_message: "workflow failed".to_string(),
+        };
+        p.handle_intent(UserIntent::Quit);
+        assert!(
+            p.state().should_quit,
+            "presenter must set should_quit on Quit"
+        );
+        let ev = conn
+            .event_rx
+            .try_recv()
+            .expect("subscriber must receive IntentReceived(Quit) for apply_event");
+        assert!(
+            matches!(ev, PresenterEvent::IntentReceived(UserIntent::Quit)),
+            "TUI apply_event relies on this event to set local should_quit, got {:?}",
+            ev
+        );
     }
 }

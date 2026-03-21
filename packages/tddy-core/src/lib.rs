@@ -23,8 +23,9 @@ pub use backend::{
 };
 pub use changeset::{
     append_session_and_update_state, get_session_for_tag, next_goal_for_state, read_changeset,
-    resolve_model, update_state, write_changeset, Changeset, ChangesetState, ClarificationQa,
-    ClarificationQuestionForQa, DiscoveryData, QuestionOptionForQa, SessionEntry, StateTransition,
+    resolve_agent_from_changeset, resolve_model, update_state, write_changeset, Changeset,
+    ChangesetState, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
+    QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use error::{BackendError, ParseError, WorkflowError};
 pub use log_backend::{
