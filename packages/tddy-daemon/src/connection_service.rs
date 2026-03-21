@@ -19,7 +19,9 @@ use crate::project_storage::{self, ProjectData};
 use crate::session_reader;
 use crate::spawn_worker;
 use crate::spawner;
-use crate::user_sessions_path::{projects_path_for_user, repos_base_for_user};
+use crate::user_sessions_path::{
+    project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
+};
 
 /// Resolves session token to GitHub user login.
 pub type SessionUserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -153,10 +155,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         let projects_dir = projects_path_for_user(os_user)
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        let base = repos_base_for_user(os_user, self.config.repos_base_path_or_default())
-            .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
 
-        let destination = base.join(name);
+        let user_rel = req.user_relative_path.trim();
+        let destination = if !user_rel.is_empty() {
+            project_path_under_home_from_user_relative(os_user, user_rel)
+                .map_err(Status::invalid_argument)?
+        } else {
+            let base = repos_base_for_user(os_user, self.config.repos_base_path_or_default())
+                .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
+            base.join(name)
+        };
         let spawn_client = self.spawn_client.clone();
         let os_user_owned = os_user.to_string();
         let git_url_owned = git_url.to_string();

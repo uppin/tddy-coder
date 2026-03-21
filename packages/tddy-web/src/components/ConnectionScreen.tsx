@@ -212,6 +212,7 @@ export function ConnectionScreen() {
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectGitUrl, setNewProjectGitUrl] = useState("");
+  const [newProjectUserRelativePath, setNewProjectUserRelativePath] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState<{
@@ -289,11 +290,13 @@ export function ConnectionScreen() {
         sessionToken,
         name: newProjectName.trim(),
         gitUrl: newProjectGitUrl.trim(),
+        userRelativePath: newProjectUserRelativePath.trim(),
       });
       const res = await client.listProjects({ sessionToken });
       setProjects(res.projects);
       setNewProjectName("");
       setNewProjectGitUrl("");
+      setNewProjectUserRelativePath("");
       setCreateProjectOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create project");
@@ -434,6 +437,18 @@ export function ConnectionScreen() {
             placeholder="https://github.com/org/repo.git"
             value={newProjectGitUrl}
             onChange={(e) => setNewProjectGitUrl(e.target.value)}
+            style={inputStyle}
+          />
+          <label style={labelStyle} htmlFor="new-project-user-relative-path">
+            Path under home (optional)
+          </label>
+          <input
+            id="new-project-user-relative-path"
+            data-testid="new-project-user-relative-path"
+            type="text"
+            placeholder="e.g. Code/my-app or ~/Code/my-app — leave empty for default clone path"
+            value={newProjectUserRelativePath}
+            onChange={(e) => setNewProjectUserRelativePath(e.target.value)}
             style={inputStyle}
           />
           <button

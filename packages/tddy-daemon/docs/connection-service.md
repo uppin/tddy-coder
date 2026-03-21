@@ -19,7 +19,8 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 |---------|------|
 | Sessions | `~/.tddy/sessions/<session_id>/` |
 | Projects file | `~/.tddy/projects/projects.yaml` |
-| Clone base | `~/{repos_base_path}/` from config (default `repos`) |
+| Clone default | `~/{repos_base_path}/{name}/` where `repos_base_path` comes from config (default `repos`) |
+| `CreateProject.user_relative_path` | Optional: clone/adopt at `~/<path>` instead (e.g. `Code/foo` or `~/Code/foo`); must stay under home |
 
 ## Spawn worker
 

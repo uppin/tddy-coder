@@ -19,7 +19,8 @@ A **Project** is a named configuration linking a **git URL** to a **main reposit
 ## Storage
 
 - **Projects registry:** `~/.tddy/projects/projects.yaml` (list of projects).
-- **Clone location:** `{home}/{repos_base_path}/{name}/` where `repos_base_path` comes from daemon config (default: `repos`).
+- **Clone location (default):** `{home}/{repos_base_path}/{name}/` where `repos_base_path` comes from daemon config (default: `repos`).
+- **Optional override:** `CreateProject` may set **`user_relative_path`** (POSIX path relative to the user’s home, e.g. `Code/my-app` or `~/Code/my-app`). When set, the clone destination is that path instead of `{repos_base}/{name}/`.
 
 ## Daemon configuration
 
@@ -30,7 +31,7 @@ repos_base_path: "repos"
 
 ## Create project behavior
 
-1. Resolve destination: `{repos_base}/{name}/`.
+1. Resolve destination: `{repos_base}/{name}/`, **unless** `user_relative_path` is non-empty — then `{home}/{user_relative_path}` (normalized; `..` and absolute paths are rejected).
 2. **If that path already exists** (checked as the target OS user): **no clone** — the existing directory is registered as `main_repo_path`.
 3. Otherwise: run `git clone` as the target OS user, then register the project.
 

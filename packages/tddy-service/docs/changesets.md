@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-service.
 
+- **2026-03-21** [Feature] CreateProject optional path — `CreateProjectRequest.user_relative_path`: clone/adopt destination under the OS user’s home when set; default behavior unchanged when empty. (tddy-service)
 - **2026-03-19** [Feature] ConnectionService Proto — connection.proto: ConnectionService with ListTools, ListSessions, StartSession, ConnectSession, ResumeSession. ToolInfo, SessionEntry, StartSessionResponse, ConnectSessionResponse, ResumeSessionResponse. ConnectionServiceServer export. (tddy-service)
 - **2026-03-14** [Feature] Per-Connection Virtual TUI — TerminalServiceImplPerConnection, DaemonService/TddyRemoteService with_view_connection_factory. stream_terminal_io creates VirtualTui per connection. (tddy-service)
 - **2026-03-17** [Feature] Terminal UX Fullscreen Touch — Thread mouse flag to TerminalServiceVirtualTui and run_virtual_tui. (tddy-service)

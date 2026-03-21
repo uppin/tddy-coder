@@ -49,7 +49,7 @@ On touch-capable devices or narrow viewports (width &lt; 768px):
 When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated users see **ConnectionScreen** (not the manual LiveKit URL form):
 
 - **Tool** dropdown from daemon `allowed_tools`.
-- **Create project** (collapsible): name + git URL → `CreateProject` (clone or adopt existing path under `~/repos/` by default).
+- **Create project** (collapsible): name + git URL → `CreateProject` (clone or adopt existing path under `~/repos/<name>/` by default). Optional **path under home** overrides the clone destination (e.g. `Code/my-app`).
 - **Projects** as collapsible sections (`<details>`): each shows name, git URL, `main_repo_path`, **Start New Session** (`StartSession` with `project_id`), and a table of sessions for that `project_id`.
 - Sessions whose `project_id` is not in the listed projects appear under **Other sessions**.
 
