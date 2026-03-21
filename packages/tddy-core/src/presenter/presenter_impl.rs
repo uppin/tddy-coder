@@ -199,6 +199,69 @@ impl Presenter {
         self.backend_selection_pending
     }
 
+    fn broadcast_error_recovery(&mut self, error_message: String) {
+        self.state.mode = AppMode::ErrorRecovery { error_message };
+        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+    }
+
+    fn start_workflow_from_pending_if_any(&mut self, backend: SharedBackend) {
+        let Some(pending) = self.pending_workflow_start.take() else {
+            return;
+        };
+        self.deferred_cli_model = None;
+        self.start_workflow(
+            backend,
+            pending.output_dir,
+            pending.plan_dir,
+            pending.initial_prompt,
+            pending.conversation_output_path,
+            pending.debug_output_path,
+            pending.debug,
+            pending.session_id,
+            pending.socket_path,
+            pending.tool_call_rx,
+        );
+    }
+
+    fn apply_deferred_backend_factory(&mut self, factory: DeferredBackendFactory, agent_str: &str) {
+        match factory(agent_str) {
+            Ok(backend) => self.start_workflow_from_pending_if_any(backend),
+            Err(msg) => self.broadcast_error_recovery(msg),
+        }
+    }
+
+    /// Resolves interactive backend selection (`show_backend_selection`). No-op if the index is invalid.
+    fn handle_backend_selection_answer(&mut self, idx: usize) {
+        let Some(q) = self.pending_questions.first() else {
+            return;
+        };
+        if idx >= q.options.len() {
+            return;
+        }
+        let label = q.options[idx].label.clone();
+        let (agent, model) = crate::backend::backend_from_label(&label);
+        let agent_str = agent.to_string();
+        self.state.agent = agent_str.clone();
+        self.state.model = model.to_string();
+        if let Some(ref m) = self.deferred_cli_model {
+            self.state.model = m.clone();
+        }
+        self.backend_selection_pending = false;
+        self.pending_questions.clear();
+        self.current_question_index = 0;
+        self.collected_answers.clear();
+        self.state.mode = AppMode::FeatureInput;
+        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+        self.broadcast(PresenterEvent::BackendSelected {
+            agent: agent_str.clone(),
+            model: self.state.model.clone(),
+        });
+        let Some(factory) = self.deferred_backend_factory.take() else {
+            return;
+        };
+        self.apply_deferred_backend_factory(factory, agent_str.as_str());
+    }
+
     /// Handle a user intent. Updates state and may send answers to workflow.
     pub fn handle_intent(&mut self, intent: UserIntent) {
         self.broadcast(PresenterEvent::IntentReceived(intent.clone()));
@@ -260,55 +323,7 @@ impl Presenter {
             }
             UserIntent::AnswerSelect(idx) => {
                 if self.backend_selection_pending {
-                    if let Some(q) = self.pending_questions.first() {
-                        if idx < q.options.len() {
-                            let label = q.options[idx].label.clone();
-                            let (agent, model) = crate::backend::backend_from_label(&label);
-                            self.state.agent = agent.to_string();
-                            self.state.model = model.to_string();
-                            if let Some(ref m) = self.deferred_cli_model {
-                                self.state.model = m.clone();
-                            }
-                            self.backend_selection_pending = false;
-                            self.pending_questions.clear();
-                            self.current_question_index = 0;
-                            self.collected_answers.clear();
-                            self.state.mode = AppMode::FeatureInput;
-                            self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
-                            self.broadcast(PresenterEvent::BackendSelected {
-                                agent: agent.to_string(),
-                                model: self.state.model.clone(),
-                            });
-                            if let Some(factory) = self.deferred_backend_factory.take() {
-                                match factory(agent) {
-                                    Ok(backend) => {
-                                        if let Some(pending) = self.pending_workflow_start.take() {
-                                            self.deferred_cli_model = None;
-                                            self.start_workflow(
-                                                backend,
-                                                pending.output_dir,
-                                                pending.plan_dir,
-                                                pending.initial_prompt,
-                                                pending.conversation_output_path,
-                                                pending.debug_output_path,
-                                                pending.debug,
-                                                pending.session_id,
-                                                pending.socket_path,
-                                                pending.tool_call_rx,
-                                            );
-                                        }
-                                    }
-                                    Err(msg) => {
-                                        self.state.mode =
-                                            AppMode::ErrorRecovery { error_message: msg };
-                                        self.broadcast(PresenterEvent::ModeChanged(
-                                            self.state.mode.clone(),
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    self.handle_backend_selection_answer(idx);
                     return;
                 }
                 if let Some(q) = self.pending_questions.get(self.current_question_index) {

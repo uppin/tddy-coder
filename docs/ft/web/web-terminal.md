@@ -55,6 +55,10 @@ When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated us
 
 See [daemon project concept](../daemon/project-concept.md).
 
+## See also (development)
+
+- [LiveKit and gRPC terminal RPC E2E](../../dev/guides/livekit-terminal-rpc-e2e.md) — `tddy-e2e` tests, VirtualTui vs LiveKit bidi behavior, assertion patterns.
+
 ## Future Scope
 
 - Multi-session support
