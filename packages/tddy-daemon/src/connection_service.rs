@@ -10,7 +10,8 @@ use tddy_service::proto::connection::{
     CreateProjectRequest, CreateProjectResponse, ListProjectsRequest, ListProjectsResponse,
     ListSessionsRequest, ListSessionsResponse, ListToolsRequest, ListToolsResponse,
     ProjectEntry as ProtoProjectEntry, ResumeSessionRequest, ResumeSessionResponse,
-    SessionEntry as ProtoSessionEntry, StartSessionRequest, StartSessionResponse, ToolInfo,
+    SessionEntry as ProtoSessionEntry, Signal, SignalSessionRequest, SignalSessionResponse,
+    StartSessionRequest, StartSessionResponse, ToolInfo,
 };
 use uuid::Uuid;
 
@@ -432,5 +433,213 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             livekit_url: result.livekit_url,
             livekit_server_identity: result.livekit_server_identity,
         }))
+    }
+
+    async fn signal_session(
+        &self,
+        request: Request<SignalSessionRequest>,
+    ) -> Result<Response<SignalSessionResponse>, Status> {
+        log::debug!(
+            "{}",
+            r#"{"tddy":{"marker_id":"M001","scope":"connection_service::signal_session","data":{}}}"#
+        );
+
+        let req = request.into_inner();
+        log::debug!(
+            "SignalSession: session_id={}, signal={}",
+            req.session_id,
+            req.signal
+        );
+
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let sessions_base = (self.sessions_base_for_user)(os_user)
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+
+        let session_dir = sessions_base.join(&req.session_id);
+        let metadata = read_session_metadata(&session_dir)
+            .map_err(|_| Status::not_found("session not found"))?;
+
+        let pid = metadata
+            .pid
+            .ok_or_else(|| Status::failed_precondition("session has no PID"))?;
+
+        log::debug!(
+            "SignalSession: resolved pid={} for session={}",
+            pid,
+            req.session_id
+        );
+
+        #[cfg(unix)]
+        {
+            let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
+            if !alive {
+                log::debug!("SignalSession: pid={} is not alive", pid);
+                return Err(Status::failed_precondition("process is not alive"));
+            }
+
+            let os_signal = match Signal::try_from(req.signal) {
+                Ok(Signal::Sigint) => libc::SIGINT,
+                Ok(Signal::Sigterm) => libc::SIGTERM,
+                Ok(Signal::Sigkill) => libc::SIGKILL,
+                Err(_) => return Err(Status::invalid_argument("invalid signal value")),
+            };
+
+            log::info!(
+                "SignalSession: sending signal {} to pid={} session={}",
+                os_signal,
+                pid,
+                req.session_id
+            );
+
+            let ret = unsafe { libc::kill(pid as i32, os_signal) };
+            if ret != 0 {
+                let err = std::io::Error::last_os_error();
+                log::error!(
+                    "SignalSession: kill({}, {}) failed: {}",
+                    pid,
+                    os_signal,
+                    err
+                );
+                return Err(Status::internal(format!("failed to send signal: {}", err)));
+            }
+
+            Ok(Response::new(SignalSessionResponse {
+                ok: true,
+                message: format!("signal {} sent to pid {}", os_signal, pid),
+            }))
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = pid;
+            Err(Status::unimplemented(
+                "signal delivery is only supported on Unix",
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod signal_session_unit_tests {
+    use super::*;
+    use tddy_core::SessionMetadata;
+
+    fn make_unit_config() -> crate::config::DaemonConfig {
+        let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        crate::config::DaemonConfig::load(&path).unwrap()
+    }
+
+    fn make_unit_service(sessions_base: std::path::PathBuf) -> ConnectionServiceImpl {
+        let config = make_unit_config();
+        let base = sessions_base.clone();
+        let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
+        let user_resolver: SessionUserResolver = Arc::new(|token| {
+            if token == "valid" {
+                Some("u".to_string())
+            } else {
+                None
+            }
+        });
+        ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None)
+    }
+
+    fn write_unit_session(session_dir: &std::path::Path, pid: u32) {
+        let session_id = session_dir
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let metadata = SessionMetadata {
+            session_id,
+            project_id: "proj-unit".to_string(),
+            created_at: "2026-03-21T00:00:00Z".to_string(),
+            updated_at: "2026-03-21T00:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: Some("/tmp".to_string()),
+            pid: Some(pid),
+            tool: None,
+            livekit_room: None,
+        };
+        tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
+    }
+
+    /// Unit: signal_session rejects an invalid (empty) session token.
+    #[tokio::test]
+    async fn signal_session_unit_rejects_invalid_token() {
+        eprintln!(
+            "{}",
+            r#"{"tddy":{"marker_id":"M002","scope":"unit::signal_session_unit_rejects_invalid_token","data":{}}}"#
+        );
+        let temp = tempfile::tempdir().unwrap();
+        let service = make_unit_service(temp.path().join("sessions"));
+        let request = Request::new(SignalSessionRequest {
+            session_token: "bad-token".to_string(),
+            session_id: "any".to_string(),
+            signal: Signal::Sigint as i32,
+        });
+        let result = service.signal_session(request).await;
+        assert!(result.is_err(), "invalid token should return error");
+        assert_eq!(result.unwrap_err().code, tddy_rpc::Code::Unauthenticated);
+    }
+
+    /// Unit: signal_session returns not-found for a session that has no yaml file.
+    #[tokio::test]
+    async fn signal_session_unit_returns_error_for_missing_session() {
+        eprintln!(
+            "{}",
+            r#"{"tddy":{"marker_id":"M003","scope":"unit::signal_session_unit_returns_error_for_missing_session","data":{}}}"#
+        );
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("sessions")).unwrap();
+        let service = make_unit_service(temp.path().join("sessions"));
+        let request = Request::new(SignalSessionRequest {
+            session_token: "valid".to_string(),
+            session_id: "no-such-session".to_string(),
+            signal: Signal::Sigterm as i32,
+        });
+        let result = service.signal_session(request).await;
+        assert!(result.is_err(), "missing session should return error");
+        assert_eq!(result.unwrap_err().code, tddy_rpc::Code::NotFound);
+    }
+
+    /// Unit: signal_session with SIGKILL sends correct signal to a live process.
+    #[tokio::test]
+    async fn signal_session_unit_sigkill_reaches_live_process() {
+        eprintln!(
+            "{}",
+            r#"{"tddy":{"marker_id":"M004","scope":"unit::signal_session_unit_sigkill_reaches_live_process","data":{}}}"#
+        );
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().join("sessions");
+        let session_dir = sessions_base.join("sigkill-session");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        write_unit_session(&session_dir, pid);
+
+        let service = make_unit_service(sessions_base);
+        let request = Request::new(SignalSessionRequest {
+            session_token: "valid".to_string(),
+            session_id: "sigkill-session".to_string(),
+            signal: Signal::Sigkill as i32,
+        });
+        let response = service.signal_session(request).await.unwrap();
+        assert!(response.into_inner().ok);
+
+        let status = child.wait().unwrap();
+        assert!(!status.success(), "process should have been killed");
     }
 }

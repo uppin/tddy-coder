@@ -10,6 +10,7 @@ service ConnectionService {
   rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
   rpc ConnectSession(ConnectSessionRequest) returns (ConnectSessionResponse);
   rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
+  rpc SignalSession(SignalSessionRequest) returns (SignalSessionResponse);
 }
 
 message ListToolsRequest {}
@@ -97,4 +98,21 @@ message ResumeSessionResponse {
   string livekit_room = 2;
   string livekit_url = 3;
   string livekit_server_identity = 4;
+}
+
+enum Signal {
+  SIGNAL_SIGINT = 0;
+  SIGNAL_SIGTERM = 1;
+  SIGNAL_SIGKILL = 2;
+}
+
+message SignalSessionRequest {
+  string session_token = 1;
+  string session_id = 2;
+  int32 signal = 3;
+}
+
+message SignalSessionResponse {
+  bool ok = 1;
+  string message = 2;
 }
