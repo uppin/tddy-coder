@@ -14,6 +14,7 @@ use tddy_service::proto::connection::{
 
 use crate::config::DaemonConfig;
 use crate::session_reader;
+use crate::spawn_worker;
 use crate::spawner;
 
 /// Resolves session token to GitHub user login.
@@ -27,6 +28,7 @@ pub struct ConnectionServiceImpl {
     config: DaemonConfig,
     sessions_base_for_user: SessionsBaseResolver,
     user_resolver: SessionUserResolver,
+    spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
 }
 
 impl ConnectionServiceImpl {
@@ -34,11 +36,14 @@ impl ConnectionServiceImpl {
         config: DaemonConfig,
         sessions_base_for_user: SessionsBaseResolver,
         user_resolver: SessionUserResolver,
+        spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
     ) -> Self {
+        let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
         Self {
             config,
             sessions_base_for_user,
             user_resolver,
+            spawn_client,
         }
     }
 }
@@ -107,12 +112,41 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         if !repo_path.exists() {
             return Err(Status::invalid_argument("repo path does not exist"));
         }
-        let result = spawner::spawn_as_user(os_user, &req.tool_path, repo_path, &livekit, None)
-            .map_err(|e| Status::internal(e.to_string()))?;
+        log::debug!("StartSession: entering spawn_blocking session_id=new");
+        let spawn_client = self.spawn_client.clone();
+        let os_user = os_user.to_string();
+        let tool_path = req.tool_path.clone();
+        let repo_path = repo_path.to_path_buf();
+        let livekit = livekit.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            log::debug!(
+                "StartSession: spawn_blocking running, using_spawn_worker={}",
+                spawn_client.is_some()
+            );
+            if let Some(ref client) = spawn_client {
+                let spawn_req = spawn_worker::build_spawn_request(
+                    &os_user, &tool_path, &repo_path, &livekit, None,
+                );
+                client.spawn(spawn_req)
+            } else {
+                spawner::spawn_as_user(&os_user, &tool_path, &repo_path, &livekit, None)
+            }
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(|e| {
+            log::error!("spawn failed: {}", e);
+            Status::internal(e.to_string())
+        })?;
+        log::debug!(
+            "StartSession: spawn_blocking returned, session_id={}",
+            result.session_id
+        );
         Ok(Response::new(StartSessionResponse {
             session_id: result.session_id,
             livekit_room: result.livekit_room,
             livekit_url: result.livekit_url,
+            livekit_server_identity: result.livekit_server_identity,
         }))
     }
 
@@ -142,9 +176,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let livekit_room = metadata
             .livekit_room
             .ok_or_else(|| Status::failed_precondition("session has no LiveKit room"))?;
+        let livekit_server_identity = format!("daemon-{}", req.session_id);
         Ok(Response::new(ConnectSessionResponse {
             livekit_room,
             livekit_url,
+            livekit_server_identity,
         }))
     }
 
@@ -174,21 +210,44 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         } else {
             session_dir.clone()
         };
-        let tool_path = metadata.tool.as_deref().unwrap_or("tddy-coder");
+        let tool_path = metadata.tool.as_deref().unwrap_or("tddy-coder").to_string();
         let livekit = spawner::livekit_creds_from_config(&self.config)
             .ok_or_else(|| Status::failed_precondition("LiveKit not configured"))?;
-        let result = spawner::spawn_as_user(
-            os_user,
-            tool_path,
-            &repo_path,
-            &livekit,
-            Some(&req.session_id),
-        )
-        .map_err(|e| Status::internal(e.to_string()))?;
+        let spawn_client = self.spawn_client.clone();
+        let os_user = os_user.to_string();
+        let session_id = req.session_id.clone();
+        let livekit = livekit.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            if let Some(ref client) = spawn_client {
+                let spawn_req = spawn_worker::build_spawn_request(
+                    &os_user,
+                    &tool_path,
+                    &repo_path,
+                    &livekit,
+                    Some(&session_id),
+                );
+                client.spawn(spawn_req)
+            } else {
+                spawner::spawn_as_user(
+                    &os_user,
+                    &tool_path,
+                    &repo_path,
+                    &livekit,
+                    Some(&session_id),
+                )
+            }
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(|e| {
+            log::error!("spawn (resume) failed: {}", e);
+            Status::internal(e.to_string())
+        })?;
         Ok(Response::new(ResumeSessionResponse {
             session_id: result.session_id,
             livekit_room: result.livekit_room,
             livekit_url: result.livekit_url,
+            livekit_server_identity: result.livekit_server_identity,
         }))
     }
 }

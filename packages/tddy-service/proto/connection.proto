@@ -43,6 +43,7 @@ message StartSessionResponse {
   string session_id = 1;
   string livekit_room = 2;
   string livekit_url = 3;
+  string livekit_server_identity = 4;
 }
 
 message ConnectSessionRequest {
@@ -52,6 +53,7 @@ message ConnectSessionRequest {
 message ConnectSessionResponse {
   string livekit_room = 1;
   string livekit_url = 2;
+  string livekit_server_identity = 3;
 }
 
 message ResumeSessionRequest {
@@ -62,4 +64,5 @@ message ResumeSessionResponse {
   string session_id = 1;
   string livekit_room = 2;
   string livekit_url = 3;
+  string livekit_server_identity = 4;
 }

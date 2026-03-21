@@ -8,6 +8,59 @@ use std::sync::Arc;
 
 use clap::Parser;
 
+/// Apply environment variable overrides to config (e.g. from .env loaded by web-dev).
+fn apply_env_overrides(config: &mut tddy_daemon::config::DaemonConfig) {
+    if let Some(v) = env_var("LIVEKIT_PUBLIC_URL") {
+        if let Some(ref mut lk) = config.livekit {
+            lk.public_url = Some(v.clone());
+            lk.url = Some(v);
+        }
+    }
+    if let Some(v) = env_var("LIVEKIT_URL") {
+        if let Some(ref mut lk) = config.livekit {
+            lk.url = Some(v);
+        }
+    }
+    if let Some(v) = env_var("LIVEKIT_API_KEY") {
+        if let Some(ref mut lk) = config.livekit {
+            lk.api_key = Some(v);
+        }
+    }
+    if let Some(v) = env_var("LIVEKIT_API_SECRET") {
+        if let Some(ref mut lk) = config.livekit {
+            lk.api_secret = Some(v);
+        }
+    }
+    if let Some(v) = env_var("WEB_HOST") {
+        config.listen.web_host = Some(v);
+    }
+    if let Some(v) = env_var("WEB_PUBLIC_URL") {
+        let base = v.trim_end_matches('/');
+        if let Some(ref mut g) = config.github {
+            g.redirect_uri = Some(format!("{}/auth/callback", base));
+        }
+    }
+    if let Some(v) = env_var("GITHUB_CLIENT_ID") {
+        if let Some(ref mut g) = config.github {
+            g.client_id = Some(v);
+        }
+    }
+    if let Some(v) = env_var("GITHUB_CLIENT_SECRET") {
+        if let Some(ref mut g) = config.github {
+            g.client_secret = Some(v);
+        }
+    }
+    if let Some(v) = env_var("GITHUB_REDIRECT_URI") {
+        if let Some(ref mut g) = config.github {
+            g.redirect_uri = Some(v);
+        }
+    }
+}
+
+fn env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|s| !s.is_empty())
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "tddy-daemon")]
 #[command(about = "Multi-user daemon for tddy-* tools")]
@@ -17,22 +70,41 @@ struct Args {
     config: Option<PathBuf>,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    // Ignore SIGPIPE — writing to spawn worker pipe after it dies would otherwise crash the daemon
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+
     let args = Args::parse();
     let config_path = args
         .config
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("--config is required"))?;
 
-    let config = tddy_daemon::config::DaemonConfig::load(config_path)?;
+    let mut config = tddy_daemon::config::DaemonConfig::load(config_path)?;
+
+    let log_config = config
+        .log
+        .clone()
+        .unwrap_or_else(|| tddy_core::default_log_config(None, None));
+    tddy_core::init_tddy_logger(log_config);
+
     log::info!("tddy-daemon loaded config from {}", config_path.display());
+
+    // Fork spawn worker before tokio — fork() from multi-threaded process can deadlock.
+    let spawn_client = tddy_daemon::spawn_worker::fork_spawn_worker()?;
+
+    // Apply env overrides (e.g. from .env loaded by web-dev)
+    apply_env_overrides(&mut config);
 
     let port = config
         .listen
         .web_port
         .ok_or_else(|| anyhow::anyhow!("config.listen.web_port is required"))?;
     let host = config.listen.web_host.as_deref().unwrap_or("0.0.0.0");
+    log::info!("tddy-daemon listening on {}:{}", host, port);
     let bundle_path = config
         .web_bundle_path
         .clone()
@@ -72,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
             config.clone(),
             Arc::new(tddy_daemon::user_sessions_path::sessions_base_for_user),
             user_resolver,
+            spawn_client,
         );
         let connection_server = tddy_service::ConnectionServiceServer::new(connection_impl);
         rpc_entries.push(tddy_rpc::ServiceEntry {
@@ -80,5 +153,14 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    tddy_daemon::server::run_server(host, port, bundle_path, rpc_entries, livekit_url).await
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(tddy_daemon::server::run_server(
+        host,
+        port,
+        bundle_path,
+        rpc_entries,
+        livekit_url,
+    ))
 }

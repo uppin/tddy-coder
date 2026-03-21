@@ -532,6 +532,9 @@ pub fn init_tddy_logger(config: LogConfig) {
 
     let file_paths: Vec<PathBuf> = collect_file_outputs(&config);
     for path in &file_paths {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         match OpenOptions::new().create(true).append(true).open(path) {
             Ok(f) => {
                 if let Ok(mut guard) = FILE_OUTPUTS.lock() {

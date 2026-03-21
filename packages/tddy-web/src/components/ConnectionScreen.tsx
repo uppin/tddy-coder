@@ -76,12 +76,14 @@ function ConnectedTerminal({
   livekitUrl,
   roomName,
   identity,
+  serverIdentity,
   debugLogging,
   onDisconnect,
 }: {
   livekitUrl: string;
   roomName: string;
   identity: string;
+  serverIdentity: string;
   debugLogging?: boolean;
   onDisconnect: () => void;
 }) {
@@ -182,6 +184,7 @@ function ConnectedTerminal({
         getToken={getToken}
         ttlSeconds={ttlSeconds}
         roomName={roomName}
+        serverIdentity={serverIdentity}
         debugMode={false}
         debugLogging={debugLogging ?? false}
         autoFocus={!isMobile}
@@ -207,6 +210,7 @@ export function ConnectionScreen() {
     livekitUrl: string;
     roomName: string;
     identity: string;
+    serverIdentity: string;
     debugLogging: boolean;
   } | null>(null);
   const [debugLogging, setDebugLogging] = useState(false);
@@ -251,6 +255,7 @@ export function ConnectionScreen() {
         livekitUrl: res.livekitUrl,
         roomName: res.livekitRoom,
         identity: `browser-${res.sessionId}-${Date.now()}`,
+        serverIdentity: res.livekitServerIdentity,
         debugLogging,
       });
     } catch (e) {
@@ -267,6 +272,7 @@ export function ConnectionScreen() {
         livekitUrl: res.livekitUrl,
         roomName: res.livekitRoom,
         identity: `browser-${sessionId}-${Date.now()}`,
+        serverIdentity: res.livekitServerIdentity,
         debugLogging,
       });
     } catch (e) {
@@ -283,6 +289,7 @@ export function ConnectionScreen() {
         livekitUrl: res.livekitUrl,
         roomName: res.livekitRoom,
         identity: `browser-${res.sessionId}-${Date.now()}`,
+        serverIdentity: res.livekitServerIdentity,
         debugLogging,
       });
     } catch (e) {
@@ -296,6 +303,7 @@ export function ConnectionScreen() {
         livekitUrl={connected.livekitUrl}
         roomName={connected.roomName}
         identity={connected.identity}
+        serverIdentity={connected.serverIdentity}
         debugLogging={connected.debugLogging}
         onDisconnect={() => setConnected(null)}
       />
