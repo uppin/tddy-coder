@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
@@ -39,19 +39,6 @@ const tableStyle = {
   marginBottom: 12,
 };
 
-const overlayButtonStyle = {
-  position: "absolute" as const,
-  top: 8,
-  padding: "4px 12px",
-  fontSize: 12,
-  cursor: "pointer",
-  backgroundColor: "rgba(0,0,0,0.6)",
-  color: "#ccc",
-  border: "1px solid #555",
-  borderRadius: 4,
-  zIndex: 10,
-} as const;
-
 function createConnectionClient() {
   const transport = createConnectTransport({
     baseUrl: typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
@@ -71,6 +58,89 @@ function createTokenClient() {
 function truncateId(id: string, maxLen = 12): string {
   if (id.length <= maxLen) return id;
   return `${id.slice(0, 6)}…${id.slice(-4)}`;
+}
+
+type ProjectSessionForm = {
+  toolPath: string;
+  agent: string;
+  debugLogging: boolean;
+};
+
+function defaultProjectSessionForm(tools: ToolInfo[]): ProjectSessionForm {
+  return {
+    toolPath: tools[0]?.path ?? "",
+    agent: "claude",
+    debugLogging: false,
+  };
+}
+
+/** Tool, backend, and browser-terminal debug for one project—per session / connection, not stored on the project. */
+function ProjectSessionOptions({
+  projectId,
+  tools,
+  form,
+  onChange,
+}: {
+  projectId: string;
+  tools: ToolInfo[];
+  form: ProjectSessionForm;
+  onChange: (patch: Partial<ProjectSessionForm>) => void;
+}) {
+  const toolId = `tool-select-${projectId}`;
+  const backendId = `backend-select-${projectId}`;
+  const debugId = `debug-logging-${projectId}`;
+  return (
+    <>
+      <p style={{ fontSize: 12, color: "#666", marginTop: 8, marginBottom: 8 }}>
+        Tool, backend, and debug apply only to <strong>Start New Session</strong> and to{" "}
+        <strong>Connect / Resume</strong> in this project—not saved on the project.
+      </p>
+      <label style={labelStyle} htmlFor={toolId}>
+        Tool (this session)
+      </label>
+      <select
+        id={toolId}
+        data-testid={toolId}
+        value={form.toolPath}
+        onChange={(e) => onChange({ toolPath: e.target.value })}
+        style={{ ...inputStyle, marginBottom: 12 }}
+      >
+        {tools.map((t) => (
+          <option key={t.path} value={t.path}>
+            {t.label || t.path}
+          </option>
+        ))}
+      </select>
+      <label style={labelStyle} htmlFor={backendId}>
+        Backend (this session)
+      </label>
+      <select
+        id={backendId}
+        data-testid={backendId}
+        value={form.agent}
+        onChange={(e) => onChange({ agent: e.target.value })}
+        style={{ ...inputStyle, marginBottom: 12 }}
+      >
+        <option value="claude">Claude (opus)</option>
+        <option value="claude-acp">Claude ACP (opus)</option>
+        <option value="cursor">Cursor (composer-2)</option>
+        <option value="stub">Stub</option>
+      </select>
+      <label
+        style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}
+        htmlFor={debugId}
+      >
+        <input
+          id={debugId}
+          data-testid={debugId}
+          type="checkbox"
+          checked={form.debugLogging}
+          onChange={(e) => onChange({ debugLogging: e.target.checked })}
+        />
+        Debug logging (browser terminal, this connection)
+      </label>
+    </>
+  );
 }
 
 function sessionsForProject(sessions: SessionEntry[], projectId: string): SessionEntry[] {
@@ -96,7 +166,6 @@ function ConnectedTerminal({
   const [initialToken, setInitialToken] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const sendCtrlCRef = useRef<(() => void) | null>(null);
   const { height: viewportHeight, isKeyboardOpen } = useVisualViewport();
   const isMobile =
     typeof window !== "undefined" &&
@@ -156,33 +225,6 @@ function ConnectedTerminal({
         flexDirection: "column",
       }}
     >
-      <button
-        data-testid="ctrl-c-button"
-        onClick={() => sendCtrlCRef.current?.()}
-        style={{ ...overlayButtonStyle, right: 72 }}
-      >
-        Ctrl+C
-      </button>
-      <button
-        data-testid="disconnect-button"
-        onClick={onDisconnect}
-        style={{ ...overlayButtonStyle, right: 8 }}
-      >
-        Disconnect
-      </button>
-      <span
-        data-testid="build-id"
-        style={{
-          ...overlayButtonStyle,
-          left: 8,
-          right: "auto",
-          fontSize: 10,
-          color: "#888",
-          cursor: "default",
-        }}
-      >
-        {BUILD_ID}
-      </span>
       <GhosttyTerminalLiveKit
         url={livekitUrl}
         token={initialToken}
@@ -195,9 +237,7 @@ function ConnectedTerminal({
         autoFocus={!isMobile}
         preventFocusOnTap={isMobile && !isKeyboardOpen}
         showMobileKeyboard={isMobile}
-        onRegisterSendCtrlC={(send) => {
-          sendCtrlCRef.current = send;
-        }}
+        connectionOverlay={{ onDisconnect, buildId: BUILD_ID }}
       />
     </div>
   );
@@ -208,7 +248,8 @@ export function ConnectionScreen() {
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
-  const [selectedTool, setSelectedTool] = useState<string>("");
+  const [projectForms, setProjectForms] = useState<Record<string, ProjectSessionForm>>({});
+  const [orphanSessionDebug, setOrphanSessionDebug] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectGitUrl, setNewProjectGitUrl] = useState("");
@@ -222,8 +263,6 @@ export function ConnectionScreen() {
     serverIdentity: string;
     debugLogging: boolean;
   } | null>(null);
-  const [debugLogging, setDebugLogging] = useState(false);
-
   const client = useMemo(() => createConnectionClient(), []);
 
   useEffect(() => {
@@ -235,7 +274,6 @@ export function ConnectionScreen() {
       .listTools({})
       .then((res) => {
         setTools(res.tools);
-        setSelectedTool(res.tools[0]?.path ?? "");
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to list tools"))
       .finally(() => setLoading(false));
@@ -261,21 +299,70 @@ export function ConnectionScreen() {
     return () => clearInterval(interval);
   }, [client, sessionToken, isAuthenticated]);
 
+  useEffect(() => {
+    setProjectForms((prev) => {
+      const next = { ...prev };
+      const def = defaultProjectSessionForm(tools);
+      for (const p of projects) {
+        const existing = next[p.projectId];
+        if (!existing) {
+          next[p.projectId] = { ...def };
+        } else {
+          const toolStillValid = tools.some((t) => t.path === existing.toolPath);
+          if (!toolStillValid && tools[0]) {
+            next[p.projectId] = { ...existing, toolPath: tools[0].path };
+          }
+        }
+      }
+      return next;
+    });
+  }, [projects, tools]);
+
+  const updateProjectForm = (projectId: string, patch: Partial<ProjectSessionForm>) => {
+    setProjectForms((prev) => ({
+      ...prev,
+      [projectId]: {
+        ...(prev[projectId] ?? defaultProjectSessionForm(tools)),
+        ...patch,
+      },
+    }));
+  };
+
+  const knownProjectIds = useMemo(
+    () => new Set(projects.map((p) => p.projectId)),
+    [projects]
+  );
+  const orphanSessions = useMemo(
+    () => sessions.filter((s) => !knownProjectIds.has(s.projectId)),
+    [sessions, knownProjectIds]
+  );
+
+  const debugForSessionId = (sessionId: string): boolean => {
+    const sess = sessions.find((s) => s.sessionId === sessionId);
+    if (!sess) return false;
+    if (knownProjectIds.has(sess.projectId)) {
+      return projectForms[sess.projectId]?.debugLogging ?? false;
+    }
+    return orphanSessionDebug;
+  };
+
   const handleStartSession = async (projectId: string) => {
-    if (!sessionToken || !selectedTool || !projectId.trim()) return;
+    const form = projectForms[projectId] ?? defaultProjectSessionForm(tools);
+    if (!sessionToken || !form.toolPath || !projectId.trim()) return;
     setError(null);
     try {
       const res = await client.startSession({
         sessionToken,
-        toolPath: selectedTool,
+        toolPath: form.toolPath,
         projectId: projectId.trim(),
+        agent: form.agent,
       });
       setConnected({
         livekitUrl: res.livekitUrl,
         roomName: res.livekitRoom,
         identity: `browser-${res.sessionId}-${Date.now()}`,
         serverIdentity: res.livekitServerIdentity,
-        debugLogging,
+        debugLogging: form.debugLogging,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start session");
@@ -313,7 +400,7 @@ export function ConnectionScreen() {
         roomName: res.livekitRoom,
         identity: `browser-${sessionId}-${Date.now()}`,
         serverIdentity: res.livekitServerIdentity,
-        debugLogging,
+        debugLogging: debugForSessionId(sessionId),
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect to session");
@@ -330,21 +417,12 @@ export function ConnectionScreen() {
         roomName: res.livekitRoom,
         identity: `browser-${res.sessionId}-${Date.now()}`,
         serverIdentity: res.livekitServerIdentity,
-        debugLogging,
+        debugLogging: debugForSessionId(sessionId),
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to resume session");
     }
   };
-
-  const knownProjectIds = useMemo(
-    () => new Set(projects.map((p) => p.projectId)),
-    [projects]
-  );
-  const orphanSessions = useMemo(
-    () => sessions.filter((s) => !knownProjectIds.has(s.projectId)),
-    [sessions, knownProjectIds]
-  );
 
   if (connected) {
     return (
@@ -376,23 +454,6 @@ export function ConnectionScreen() {
       <h1>tddy-web</h1>
       {user && <UserAvatar user={user} onLogout={logout} />}
       <h2 style={{ marginTop: 24, fontSize: 18 }}>Start or connect to a session</h2>
-
-      <label style={labelStyle} htmlFor="tool-select">
-        Tool
-      </label>
-      <select
-        id="tool-select"
-        data-testid="tool-select"
-        value={selectedTool}
-        onChange={(e) => setSelectedTool(e.target.value)}
-        style={{ ...inputStyle, marginBottom: 12 }}
-      >
-        {tools.map((t) => (
-          <option key={t.path} value={t.path}>
-            {t.label || t.path}
-          </option>
-        ))}
-      </select>
 
       <div style={{ marginTop: 16, marginBottom: 8 }}>
         <button
@@ -463,15 +524,6 @@ export function ConnectionScreen() {
         </div>
       )}
 
-      <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-        <input
-          type="checkbox"
-          checked={debugLogging}
-          onChange={(e) => setDebugLogging(e.target.checked)}
-        />
-        Debug logging
-      </label>
-
       {error && (
         <div data-testid="connection-error" style={{ color: "#c00", marginTop: 12 }}>
           {error}
@@ -494,11 +546,20 @@ export function ConnectionScreen() {
               <span style={{ fontWeight: 400, fontSize: 12, color: "#666" }}> {p.gitUrl}</span>
             </summary>
             <p style={{ fontSize: 12, color: "#555", marginTop: 8 }}>{p.mainRepoPath}</p>
+            <ProjectSessionOptions
+              projectId={p.projectId}
+              tools={tools}
+              form={projectForms[p.projectId] ?? defaultProjectSessionForm(tools)}
+              onChange={(patch) => updateProjectForm(p.projectId, patch)}
+            />
             <button
               type="button"
               data-testid={`start-session-${p.projectId}`}
               onClick={() => handleStartSession(p.projectId)}
-              disabled={loading || !selectedTool}
+              disabled={
+                loading ||
+                !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools)).toolPath
+              }
               style={{ marginTop: 8, marginBottom: 8, padding: "8px 16px" }}
             >
               Start New Session
@@ -559,6 +620,19 @@ export function ConnectionScreen() {
         <>
           <h3 style={{ marginTop: 24, fontSize: 16 }}>Other sessions</h3>
           <p style={{ fontSize: 13, color: "#666" }}>Sessions not associated with a listed project.</p>
+          <label
+            style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}
+            htmlFor="orphan-session-debug"
+          >
+            <input
+              id="orphan-session-debug"
+              data-testid="orphan-session-debug"
+              type="checkbox"
+              checked={orphanSessionDebug}
+              onChange={(e) => setOrphanSessionDebug(e.target.checked)}
+            />
+            Debug logging (browser terminal, Connect / Resume below)
+          </label>
           <table style={tableStyle} data-testid="sessions-table-orphan">
             <thead>
               <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>

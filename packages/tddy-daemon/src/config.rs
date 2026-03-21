@@ -4,7 +4,11 @@ use std::path::PathBuf;
 
 use tddy_core::LogConfig;
 
-#[derive(Debug, Default, Clone, serde::Deserialize)]
+fn default_spawn_mouse() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DaemonConfig {
     #[serde(default)]
@@ -26,6 +30,26 @@ pub struct DaemonConfig {
     /// Relative to each OS user's home directory (e.g. `repos` → `~/repos/`).
     #[serde(default)]
     pub repos_base_path: Option<String>,
+    /// When true (default), spawned `tddy-*` processes receive `--mouse` (browser / touch terminals).
+    #[serde(default = "default_spawn_mouse")]
+    pub spawn_mouse: bool,
+}
+
+impl Default for DaemonConfig {
+    fn default() -> Self {
+        Self {
+            listen: ListenConfig::default(),
+            web_bundle_path: None,
+            livekit: None,
+            github: None,
+            auth_storage: None,
+            log: None,
+            users: Vec::new(),
+            allowed_tools: Vec::new(),
+            repos_base_path: None,
+            spawn_mouse: true,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize)]

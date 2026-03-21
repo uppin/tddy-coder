@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-tui.
 
+- **2026-03-21** [Feature] Backend Select `initial_selected`; Ctrl+C parity — `view_state` / `render` / `layout` / `key_map` / `mouse_map` handle `Select` with `initial_selected`. `ctrl_interrupt` module: `key_is_ctrl_c_press`, `ctrl_c_interrupt_session` shared by `event_loop` and `virtual_tui` (RPC ETX 0x03 kills tracked child like local TUI). Integration test `virtual_tui_ctrl_c_kills_child` (unix). (tddy-tui)
 - **2026-03-18** [Feature] VirtualTui Debug Logs — log::trace! → log::debug! for input bytes, keys, mouse, resize, PresenterEvent, render reason, frame sent, disconnect. updated = true when intent sent. Visible with --debug for remote TUI troubleshooting. (tddy-tui)
 - **2026-03-18** [Bug Fix] Terminal Resize Support — Event::Resize handling in event_loop with terminal.clear(); apply_resize in virtual_tui (resize, clear, prev_frame.clear). Unit tests: apply_resize_clears_prev_frame, resize_and_clear_then_draw_produces_correct_frame_area. (tddy-tui)
 - **2026-03-17** [Feature] Terminal UX Fullscreen Touch — Mouse capture, mouse_map hit-testing, SGR mouse parsing, resize sequence parsing, dynamic viewport. EnableMouseCapture in event_loop and virtual_tui. (tddy-tui)

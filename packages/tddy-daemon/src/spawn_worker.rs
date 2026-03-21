@@ -11,7 +11,11 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::spawner::{self, LiveKitCreds, SpawnResult};
+use crate::spawner::{self, LiveKitCreds, SpawnOptions, SpawnResult};
+
+fn default_spawn_mouse() -> bool {
+    true
+}
 
 /// Request to spawn a session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +29,12 @@ pub struct SpawnRequest {
     pub resume_session_id: Option<String>,
     #[serde(default)]
     pub project_id: Option<String>,
+    /// Passed to spawned tddy-coder as --agent when non-empty.
+    #[serde(default)]
+    pub agent: Option<String>,
+    /// Passed as `--mouse` when true (default). Omit in JSON for legacy clients.
+    #[serde(default = "default_spawn_mouse")]
+    pub mouse: bool,
 }
 
 /// Request to clone a git repository as an OS user.
@@ -208,8 +218,12 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                     &req.tool_path,
                     Path::new(&req.repo_path),
                     &livekit,
-                    req.resume_session_id.as_deref(),
-                    req.project_id.as_deref(),
+                    SpawnOptions {
+                        resume_session_id: req.resume_session_id.as_deref(),
+                        project_id: req.project_id.as_deref(),
+                        agent: req.agent.as_deref(),
+                        mouse: req.mouse,
+                    },
                 );
                 log::info!(
                     "spawn_worker: spawn_as_user returned session_id={}",
@@ -246,8 +260,7 @@ pub fn build_spawn_request(
     tool_path: &str,
     repo_path: &Path,
     livekit: &LiveKitCreds,
-    resume_session_id: Option<&str>,
-    project_id: Option<&str>,
+    opts: SpawnOptions<'_>,
 ) -> SpawnRequest {
     SpawnRequest {
         os_user: os_user.to_string(),
@@ -256,7 +269,9 @@ pub fn build_spawn_request(
         livekit_url: livekit.url.clone(),
         livekit_api_key: livekit.api_key.clone(),
         livekit_api_secret: livekit.api_secret.clone(),
-        resume_session_id: resume_session_id.map(String::from),
-        project_id: project_id.map(String::from),
+        resume_session_id: opts.resume_session_id.map(String::from),
+        project_id: opts.project_id.map(String::from),
+        agent: opts.agent.map(String::from),
+        mouse: opts.mouse,
     }
 }

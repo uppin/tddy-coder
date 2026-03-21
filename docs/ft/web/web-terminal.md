@@ -48,12 +48,16 @@ On touch-capable devices or narrow viewports (width &lt; 768px):
 
 When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated users see **ConnectionScreen** (not the manual LiveKit URL form):
 
-- **Tool** dropdown from daemon `allowed_tools`.
 - **Create project** (collapsible): name + git URL → `CreateProject` (clone or adopt existing path under `~/repos/<name>/` by default). Optional **path under home** overrides the clone destination (e.g. `Code/my-app`).
-- **Projects** as collapsible sections (`<details>`): each shows name, git URL, `main_repo_path`, **Start New Session** (`StartSession` with `project_id`), and a table of sessions for that `project_id`.
+- **Projects** as collapsible sections (`<details>`): each shows name, git URL, `main_repo_path`, then **Tool** (from daemon `allowed_tools`), **Backend** (`agent` on `StartSession`), and **Debug logging** (browser terminal only)—all **per session**, not stored on the project—then **Start New Session** (`StartSession` with `project_id`), and a table of sessions for that `project_id`. Connect/Resume in that section uses that project’s debug setting.
+- **Other sessions**: Connect/Resume uses a separate **debug** checkbox for that list (sessions not tied to a listed project).
 - Sessions whose `project_id` is not in the listed projects appear under **Other sessions**.
 
 See [daemon project concept](../daemon/project-concept.md).
+
+## See also (development)
+
+- [LiveKit and gRPC terminal RPC E2E](../../dev/guides/livekit-terminal-rpc-e2e.md) — `tddy-e2e` tests, VirtualTui vs LiveKit bidi behavior, assertion patterns.
 
 ## Future Scope
 

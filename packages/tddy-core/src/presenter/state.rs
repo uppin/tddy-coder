@@ -44,6 +44,8 @@ pub enum AppMode {
         question: ClarificationQuestion,
         question_index: usize,
         total_questions: usize,
+        /// Initial highlighted option index (0-based).
+        initial_selected: usize,
     },
     /// Presenting a multi-select clarification question.
     MultiSelect {
@@ -147,5 +149,29 @@ mod tests {
         };
         assert_eq!(entry.text, "Tool: Read");
         assert_eq!(entry.kind, ActivityKind::ToolUse);
+    }
+
+    #[test]
+    fn app_mode_select_has_initial_selected() {
+        let mode = AppMode::Select {
+            question: ClarificationQuestion {
+                header: "test".to_string(),
+                question: "pick one".to_string(),
+                options: vec![],
+                multi_select: false,
+                allow_other: false,
+            },
+            question_index: 0,
+            total_questions: 1,
+            initial_selected: 2,
+        };
+        if let AppMode::Select {
+            initial_selected, ..
+        } = mode
+        {
+            assert_eq!(initial_selected, 2);
+        } else {
+            panic!("expected Select");
+        }
     }
 }

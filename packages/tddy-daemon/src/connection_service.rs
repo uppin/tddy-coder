@@ -18,7 +18,7 @@ use crate::config::DaemonConfig;
 use crate::project_storage::{self, ProjectData};
 use crate::session_reader;
 use crate::spawn_worker;
-use crate::spawner;
+use crate::spawner::{self, SpawnOptions};
 use crate::user_sessions_path::{
     project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
 };
@@ -248,24 +248,54 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         log::debug!("StartSession: entering spawn_blocking session_id=new");
         let spawn_client = self.spawn_client.clone();
+        let spawn_mouse = self.config.spawn_mouse;
         let os_user = os_user.to_string();
         let tool_path = req.tool_path.clone();
         let repo_path = repo_path.to_path_buf();
         let livekit = livekit.clone();
         let pid_for_spawn = project.project_id.clone();
+        let agent_for_spawn: Option<String> = {
+            let t = req.agent.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
         let result = tokio::task::spawn_blocking(move || {
             log::debug!(
                 "StartSession: spawn_blocking running, using_spawn_worker={}",
                 spawn_client.is_some()
             );
             let pid = Some(pid_for_spawn.as_str());
+            let agent = agent_for_spawn.as_deref();
             if let Some(ref client) = spawn_client {
                 let spawn_req = spawn_worker::build_spawn_request(
-                    &os_user, &tool_path, &repo_path, &livekit, None, pid,
+                    &os_user,
+                    &tool_path,
+                    &repo_path,
+                    &livekit,
+                    SpawnOptions {
+                        resume_session_id: None,
+                        project_id: pid,
+                        agent,
+                        mouse: spawn_mouse,
+                    },
                 );
                 client.spawn(spawn_req)
             } else {
-                spawner::spawn_as_user(&os_user, &tool_path, &repo_path, &livekit, None, pid)
+                spawner::spawn_as_user(
+                    &os_user,
+                    &tool_path,
+                    &repo_path,
+                    &livekit,
+                    SpawnOptions {
+                        resume_session_id: None,
+                        project_id: pid,
+                        agent,
+                        mouse: spawn_mouse,
+                    },
+                )
             }
         })
         .await
@@ -350,6 +380,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let livekit = spawner::livekit_creds_from_config(&self.config)
             .ok_or_else(|| Status::failed_precondition("LiveKit not configured"))?;
         let spawn_client = self.spawn_client.clone();
+        let spawn_mouse = self.config.spawn_mouse;
         let os_user = os_user.to_string();
         let session_id = req.session_id.clone();
         let livekit = livekit.clone();
@@ -366,8 +397,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &tool_path,
                     &repo_path,
                     &livekit,
-                    Some(&session_id),
-                    pid,
+                    SpawnOptions {
+                        resume_session_id: Some(session_id.as_str()),
+                        project_id: pid,
+                        agent: None,
+                        mouse: spawn_mouse,
+                    },
                 );
                 client.spawn(spawn_req)
             } else {
@@ -376,8 +411,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &tool_path,
                     &repo_path,
                     &livekit,
-                    Some(&session_id),
-                    pid,
+                    SpawnOptions {
+                        resume_session_id: Some(session_id.as_str()),
+                        project_id: pid,
+                        agent: None,
+                        mouse: spawn_mouse,
+                    },
                 )
             }
         })

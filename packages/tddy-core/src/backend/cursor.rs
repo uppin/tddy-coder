@@ -94,6 +94,38 @@ impl super::CodingBackend for CursorBackend {
     }
 }
 
+/// Builds argv for `cursor agent` (excluding the binary path). Used by [`CursorBackend::invoke_sync`] and tests.
+pub(crate) fn build_cursor_cli_args(request: &InvokeRequest, prompt: &str) -> Vec<String> {
+    let mut args = vec!["agent".to_string()];
+    if request.goal == Goal::Plan {
+        args.push("--plan".to_string());
+    }
+    if let Some(ref session) = request.session {
+        match session {
+            super::SessionMode::Fresh(id) => {
+                args.push("--session-id".to_string());
+                args.push(id.clone());
+            }
+            super::SessionMode::Resume(id) => {
+                args.push("--resume".to_string());
+                args.push(id.clone());
+            }
+        }
+    }
+    args.push("-p".to_string());
+    args.push(prompt.to_string());
+    if let Some(ref m) = request.model {
+        args.push("--model".to_string());
+        args.push(m.clone());
+    }
+    args.push("--output-format".to_string());
+    args.push("stream-json".to_string());
+    args.push("--stream-partial-output".to_string());
+    args.push("--force".to_string());
+    args.push("--trust".to_string());
+    args
+}
+
 impl CursorBackend {
     fn invoke_sync(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         // validate spawns subagents via the Agent tool which Cursor does not support.
@@ -134,29 +166,7 @@ impl CursorBackend {
             None => request.prompt.clone(),
         };
 
-        let mut args = vec!["agent".to_string()];
-        if request.goal == Goal::Plan {
-            args.push("--plan".to_string());
-        }
-        if let Some(ref session) = request.session {
-            match session {
-                super::SessionMode::Fresh(id) => {
-                    args.push("--session-id".to_string());
-                    args.push(id.clone());
-                }
-                super::SessionMode::Resume(id) => {
-                    args.push("--resume".to_string());
-                    args.push(id.clone());
-                }
-            }
-        }
-        args.push("-p".to_string());
-        args.push(prompt);
-        args.push("--output-format".to_string());
-        args.push("stream-json".to_string());
-        args.push("--stream-partial-output".to_string());
-        args.push("--force".to_string());
-        args.push("--trust".to_string());
+        let args = build_cursor_cli_args(&request, &prompt);
 
         let mut cmd = Command::new(&self.binary_path);
         if let Some(ref wd) = request.working_dir {
@@ -415,5 +425,63 @@ impl CursorBackend {
             raw_stream,
             stderr,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_cursor_cli_args;
+    use crate::backend::{Goal, InvokeRequest, SessionMode};
+
+    fn minimal_request(goal: Goal, model: Option<&str>, prompt: &str) -> InvokeRequest {
+        InvokeRequest {
+            prompt: prompt.to_string(),
+            system_prompt: None,
+            system_prompt_path: None,
+            goal,
+            model: model.map(std::string::ToString::to_string),
+            session: None,
+            working_dir: None,
+            debug: false,
+            agent_output: false,
+            agent_output_sink: None,
+            progress_sink: None,
+            conversation_output_path: None,
+            inherit_stdin: false,
+            extra_allowed_tools: None,
+            socket_path: None,
+            plan_dir: None,
+        }
+    }
+
+    #[test]
+    fn build_args_includes_model_when_set() {
+        let request = minimal_request(Goal::Plan, Some("composer-2"), "test");
+        let args = build_cursor_cli_args(&request, "test prompt");
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"composer-2".to_string()));
+    }
+
+    #[test]
+    fn build_args_omits_model_when_none() {
+        let request = minimal_request(Goal::Plan, None, "test");
+        let args = build_cursor_cli_args(&request, "test prompt");
+        assert!(!args.contains(&"--model".to_string()));
+    }
+
+    #[test]
+    fn build_args_plan_includes_plan_flag() {
+        let request = minimal_request(Goal::Plan, None, "x");
+        let args = build_cursor_cli_args(&request, "p");
+        assert!(args.contains(&"--plan".to_string()));
+    }
+
+    #[test]
+    fn build_args_session_fresh() {
+        let mut request = minimal_request(Goal::Red, None, "x");
+        request.session = Some(SessionMode::Fresh("sid-1".to_string()));
+        let args = build_cursor_cli_args(&request, "p");
+        assert!(args.iter().any(|a| a == "--session-id"));
+        assert!(args.contains(&"sid-1".to_string()));
     }
 }

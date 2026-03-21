@@ -136,6 +136,7 @@ pub fn event_to_server_message(event: PresenterEvent) -> ServerMessage {
                 ServerMessage { event: None }
             }
         }
+        PresenterEvent::BackendSelected { .. } => ServerMessage { event: None },
     }
 }
 
@@ -147,10 +148,12 @@ fn app_mode_to_proto(mode: &AppMode) -> AppModeProto {
             question,
             question_index,
             total_questions,
+            initial_selected,
         } => app_mode_proto::Variant::Select(AppModeSelect {
             question: Some(clarification_to_proto(question)),
             question_index: *question_index as u32,
             total_questions: *total_questions as u32,
+            initial_selected: *initial_selected as u32,
         }),
         AppMode::MultiSelect {
             question,

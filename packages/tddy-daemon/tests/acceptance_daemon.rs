@@ -32,6 +32,25 @@ allowed_tools:
     assert_eq!(config.users[0].os_user, "dev1");
     assert_eq!(config.allowed_tools.len(), 2);
     assert_eq!(config.allowed_tools[0].path, "target/debug/tddy-coder");
+    assert!(
+        config.spawn_mouse,
+        "spawn_mouse defaults to true when omitted"
+    );
+}
+
+/// Acceptance: spawn_mouse can be disabled in YAML.
+#[test]
+fn acceptance_config_spawn_mouse_false() {
+    let yaml = r#"
+users:
+  - github_user: "a"
+    os_user: "b"
+spawn_mouse: false
+"#;
+    let path = std::env::temp_dir().join("tddy-daemon-acceptance-mouse.yaml");
+    std::fs::write(&path, yaml).unwrap();
+    let config = DaemonConfig::load(&path).expect("config should load");
+    assert!(!config.spawn_mouse);
 }
 
 /// Acceptance: GitHub user maps to OS user; unmapped returns None.

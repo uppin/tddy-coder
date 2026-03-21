@@ -251,3 +251,7 @@ cargo test -- --ignored
 # Full validation
 cargo test && cargo test -- --ignored
 ```
+
+## LiveKit and gRPC terminal RPC E2E
+
+End-to-end tests for `StreamTerminalIO`, `VirtualTui`, and Ghostty live in `packages/tddy-e2e`. For protocol behavior, assertion strategies, flaky-test notes, and source references, see [livekit-terminal-rpc-e2e.md](./livekit-terminal-rpc-e2e.md).

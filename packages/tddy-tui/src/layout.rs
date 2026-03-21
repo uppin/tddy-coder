@@ -120,6 +120,7 @@ mod tests {
             question: q,
             question_index: 0,
             total_questions: 1,
+            initial_selected: 0,
         };
         assert_eq!(question_height(&mode), 5); // 2 (header+question) + 2 options + 1 Other
     }

@@ -14,11 +14,12 @@ pub mod workflow;
 pub mod worktree;
 
 pub use backend::{
-    build_claude_args, clear_child_pid, get_child_pid, kill_child_process, set_child_pid,
-    AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend, ClaudeCodeBackend,
-    ClaudeInvokeConfig, CodingBackend, CursorBackend, Goal, InMemoryToolExecutor, InvokeRequest,
-    InvokeResponse, MockBackend, PermissionMode, ProcessToolExecutor, QuestionOption, SessionMode,
-    SharedBackend, StubBackend, ToolExecutor,
+    backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,
+    default_model_for_agent, get_child_pid, kill_child_process, preselected_index_for_agent,
+    set_child_pid, AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend,
+    ClaudeCodeBackend, ClaudeInvokeConfig, CodingBackend, CursorBackend, Goal,
+    InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionMode,
+    ProcessToolExecutor, QuestionOption, SessionMode, SharedBackend, StubBackend, ToolExecutor,
 };
 pub use changeset::{
     append_session_and_update_state, get_session_for_tag, next_goal_for_state, read_changeset,
@@ -49,9 +50,9 @@ pub use permission::{
     validate_subagents_allowlist,
 };
 pub use presenter::{
-    ActivityEntry, ActivityKind, AppMode, ExitAction, Presenter, PresenterEvent, PresenterHandle,
-    PresenterState, PresenterView, UserIntent, ViewConnection, WorkflowCompletePayload,
-    WorkflowEvent,
+    ActivityEntry, ActivityKind, AppMode, ExitAction, PendingWorkflowStart, Presenter,
+    PresenterEvent, PresenterHandle, PresenterState, PresenterView, UserIntent, ViewConnection,
+    WorkflowCompletePayload, WorkflowEvent,
 };
 pub use session_metadata::{
     read_session_metadata, write_session_metadata, SessionMetadata, SESSION_METADATA_FILENAME,

@@ -4,6 +4,7 @@
 //! View-local state: scroll, text buffers, selection cursor.
 
 pub mod capturing_writer;
+pub mod ctrl_interrupt;
 pub mod event_loop;
 pub mod key_map;
 pub mod layout;

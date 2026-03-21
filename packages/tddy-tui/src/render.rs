@@ -220,6 +220,7 @@ fn render_question(
             question,
             question_index,
             total_questions: _,
+            initial_selected: _,
         } => {
             let header = format!(
                 "[{}] {}: {}",

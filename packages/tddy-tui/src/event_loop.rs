@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crossterm::cursor::Show;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event};
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
@@ -14,6 +14,7 @@ use ratatui::Terminal;
 use tddy_core::ViewConnection;
 
 use crate::capturing_writer::CapturingWriter;
+use crate::ctrl_interrupt::{ctrl_c_interrupt_session, key_is_ctrl_c_press};
 use crate::key_map::key_event_to_intent;
 use crate::raw::{disable_raw_mode, enable_raw_mode_keep_sig};
 use crate::render::draw;
@@ -95,14 +96,8 @@ pub fn run_event_loop(
         if event::poll(Duration::from_millis(50)).unwrap_or(false) {
             match event::read() {
                 Ok(Event::Key(key)) => {
-                    if key.kind == KeyEventKind::Press
-                        && key.code == KeyCode::Char('c')
-                        && key
-                            .modifiers
-                            .contains(crossterm::event::KeyModifiers::CONTROL)
-                    {
-                        shutdown.store(true, Ordering::Relaxed);
-                        tddy_core::kill_child_process();
+                    if key_is_ctrl_c_press(&key) {
+                        ctrl_c_interrupt_session(shutdown);
                         continue;
                     }
 

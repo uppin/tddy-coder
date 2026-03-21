@@ -16,11 +16,19 @@ pub enum PresenterEvent {
     ModeChanged(AppMode),
     ActivityLogged(ActivityEntry),
     GoalStarted(String),
-    StateChanged { from: String, to: String },
+    StateChanged {
+        from: String,
+        to: String,
+    },
     WorkflowComplete(Result<crate::presenter::WorkflowCompletePayload, String>),
     AgentOutput(String),
     InboxChanged(Vec<String>),
     IntentReceived(UserIntent),
+    /// User confirmed coding backend at session start (before workflow runs).
+    BackendSelected {
+        agent: String,
+        model: String,
+    },
 }
 
 /// Handle passed to gRPC service: broadcast sender for events, mpsc sender for intents.

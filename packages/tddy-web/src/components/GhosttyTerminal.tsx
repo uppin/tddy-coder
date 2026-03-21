@@ -28,6 +28,8 @@ export interface GhosttyTerminalProps {
   debugLogging?: boolean;
   /** When true, prevent terminal from receiving focus on pointer/touch events (e.g. mobile when keyboard closed). */
   preventFocusOnTap?: boolean;
+  /** When false, the backend session is gone — disable interaction and expose data-session-active for accessibility/tests. */
+  sessionActive?: boolean;
 }
 
 export interface BufferLineInfo {
@@ -62,6 +64,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       onReady,
       debugLogging = false,
       preventFocusOnTap = false,
+      sessionActive = true,
     },
     ref
   ) {
@@ -156,6 +159,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         termRef.current.write(initialContent);
       }
     }, [initialContent, ready]);
+
+    useEffect(() => {
+      if (!ready || !termRef.current?.textarea) return;
+      const ta = termRef.current.textarea;
+      if (sessionActive) {
+        ta.removeAttribute("aria-disabled");
+      } else {
+        ta.setAttribute("aria-disabled", "true");
+        ta.blur();
+      }
+    }, [sessionActive, ready]);
 
     // Mouse/touch forwarding when hasMouseTracking (SGR sequences via onData)
     useEffect(() => {
@@ -360,11 +374,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     return (
       <div
         data-testid="ghostty-terminal"
+        data-session-active={sessionActive ? "true" : "false"}
+        aria-disabled={sessionActive ? undefined : true}
         ref={containerRef}
         style={{
           width: "100%",
           height: "100%",
           minHeight: 200,
+          ...(sessionActive
+            ? {}
+            : { opacity: 0.55, pointerEvents: "none" as const }),
         }}
       />
     );

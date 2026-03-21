@@ -65,8 +65,11 @@ message CreateProjectResponse {
 
 message StartSessionRequest {
   string session_token = 1;
+  // Path to the binary to spawn for this session only (from daemon allowlist). Not stored on the project.
   string tool_path = 2;
   string project_id = 3;
+  // Per new session: passed to spawned tddy-coder as --agent (skips interactive backend menu). Not stored on the project.
+  string agent = 4;
 }
 message StartSessionResponse {
   string session_id = 1;
