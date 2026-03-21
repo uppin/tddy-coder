@@ -439,11 +439,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         &self,
         request: Request<SignalSessionRequest>,
     ) -> Result<Response<SignalSessionResponse>, Status> {
-        log::debug!(
-            "{}",
-            r#"{"tddy":{"marker_id":"M001","scope":"connection_service::signal_session","data":{}}}"#
-        );
-
         let req = request.into_inner();
         log::debug!(
             "SignalSession: session_id={}, signal={}",
@@ -575,10 +570,6 @@ mod signal_session_unit_tests {
     /// Unit: signal_session rejects an invalid (empty) session token.
     #[tokio::test]
     async fn signal_session_unit_rejects_invalid_token() {
-        eprintln!(
-            "{}",
-            r#"{"tddy":{"marker_id":"M002","scope":"unit::signal_session_unit_rejects_invalid_token","data":{}}}"#
-        );
         let temp = tempfile::tempdir().unwrap();
         let service = make_unit_service(temp.path().join("sessions"));
         let request = Request::new(SignalSessionRequest {
@@ -594,10 +585,6 @@ mod signal_session_unit_tests {
     /// Unit: signal_session returns not-found for a session that has no yaml file.
     #[tokio::test]
     async fn signal_session_unit_returns_error_for_missing_session() {
-        eprintln!(
-            "{}",
-            r#"{"tddy":{"marker_id":"M003","scope":"unit::signal_session_unit_returns_error_for_missing_session","data":{}}}"#
-        );
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("sessions")).unwrap();
         let service = make_unit_service(temp.path().join("sessions"));
@@ -614,10 +601,6 @@ mod signal_session_unit_tests {
     /// Unit: signal_session with SIGKILL sends correct signal to a live process.
     #[tokio::test]
     async fn signal_session_unit_sigkill_reaches_live_process() {
-        eprintln!(
-            "{}",
-            r#"{"tddy":{"marker_id":"M004","scope":"unit::signal_session_unit_sigkill_reaches_live_process","data":{}}}"#
-        );
         let mut child = std::process::Command::new("sleep")
             .arg("60")
             .spawn()
