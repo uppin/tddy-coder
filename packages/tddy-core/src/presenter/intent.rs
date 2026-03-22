@@ -15,6 +15,8 @@ pub enum UserIntent {
     DismissViewer,
     /// User selected option at index (Select mode).
     AnswerSelect(usize),
+    /// View-local highlight moved (arrow keys / mouse) before submit — syncs presenter snapshot for reconnect.
+    SelectHighlightChanged(usize),
     /// User typed custom answer for "Other" (Select mode).
     AnswerOther(String),
     /// User submitted multi-select answer: checked indices + optional other text.

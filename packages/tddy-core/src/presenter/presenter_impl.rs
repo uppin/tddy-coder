@@ -267,8 +267,47 @@ impl Presenter {
         self.apply_deferred_backend_factory(factory, agent_str.as_str());
     }
 
+    fn select_highlight_matches(&self, idx: usize) -> bool {
+        matches!(
+            &self.state.mode,
+            AppMode::Select {
+                initial_selected,
+                ..
+            } if *initial_selected == idx
+        )
+    }
+
+    /// Sync presenter Select highlight (for reconnect snapshots). No-op if not in Select mode.
+    fn sync_select_highlight(&mut self, idx: usize) {
+        let (question, question_index, total_questions) = match &self.state.mode {
+            AppMode::Select {
+                question,
+                question_index,
+                total_questions,
+                ..
+            } => (question.clone(), *question_index, *total_questions),
+            _ => return,
+        };
+        let max = question.options.len() + if question.allow_other { 1 } else { 0 };
+        if max == 0 || idx >= max {
+            return;
+        }
+        self.state.mode = AppMode::Select {
+            question,
+            question_index,
+            total_questions,
+            initial_selected: idx,
+        };
+        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+    }
+
     /// Handle a user intent. Updates state and may send answers to workflow.
     pub fn handle_intent(&mut self, intent: UserIntent) {
+        if let UserIntent::SelectHighlightChanged(idx) = &intent {
+            if self.select_highlight_matches(*idx) {
+                return;
+            }
+        }
         self.broadcast(PresenterEvent::IntentReceived(intent.clone()));
         match intent {
             UserIntent::SubmitFeatureInput(text) => {
@@ -405,6 +444,9 @@ impl Presenter {
             }
             UserIntent::Scroll(_) => {
                 // View-local; no-op in Presenter
+            }
+            UserIntent::SelectHighlightChanged(idx) => {
+                self.sync_select_highlight(idx);
             }
             UserIntent::Quit => {
                 self.state.should_quit = true;

@@ -54,7 +54,12 @@ impl TddyRemote for TddyRemoteService {
                             break;
                         }
                     }
-                    Err(broadcast::error::RecvError::Lagged(_n)) => {}
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        log::warn!(
+                            "TddyRemote gRPC stream: broadcast receiver lagged; skipped {} presenter event(s)",
+                            skipped
+                        );
+                    }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }

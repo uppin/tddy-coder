@@ -2,6 +2,8 @@
 
 Wrapped changeset history for tddy-e2e.
 
+- **2026-03-22** [Feature] Web-dev script contract — `web_dev_contract` module (`verify_*`, substring detectors) and `tests/web_dev_script.rs` for `bash -n` and daemon-only content checks; granular tests delegate to `verify_*`. (tddy-e2e)
+- **2026-03-22** [Fix] gRPC terminal reconnect — `UserIntent::SelectHighlightChanged` syncs Select highlight to presenter for `connect_view` snapshots; `grpc_reconnect_second_stream_receives_full_tui_render` re-enabled. (tddy-core, tddy-tui, tddy-service, tddy-e2e)
 - **2026-03-21** [Docs] LiveKit / gRPC terminal RPC E2E knowledge consolidated into [livekit-terminal-rpc-e2e.md](../../../docs/dev/guides/livekit-terminal-rpc-e2e.md); removed WIP `docs/dev/1-WIP/livekit-terminal-rpc-e2e-knowledge.md`. (tddy-e2e)
 - **2026-03-14** [Feature] Per-Connection Virtual TUI — spawn_presenter_with_view_connection_factory (LiveKit), spawn_presenter_with_terminal_service (gRPC). virtual_tui_sessions.rs: two_grpc_clients_get_independent_terminal_streams. terminal_service_livekit.rs: two_livekit_clients_get_independent_terminal_streams. (tddy-e2e)
 - **2026-03-14** [Feature] E2E Git Repo Setup — temp_dir_with_git_repo helper creates temp dir with git init, commit, origin/master. spawn_presenter_with_grpc, spawn_presenter_with_grpc_and_tui, spawn_presenter_with_livekit_and_tui use it. Fixes clarification_flow_submit_answer_select_workflow_completes (worktree creation requires git repo). (tddy-e2e)

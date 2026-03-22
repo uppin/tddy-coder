@@ -68,6 +68,8 @@ pub struct ViewState {
     pub error_recovery_selected: usize,
     /// Frame counter for the spinner animation.
     pub spinner_tick: usize,
+    /// Last Select question identity — used to avoid clearing Other-typing state on highlight-only ModeChanged.
+    last_select_identity: Option<(String, String)>,
 }
 
 /// Byte index of the start of the character immediately before `idx`.
@@ -102,17 +104,27 @@ impl ViewState {
 
     /// Reset view state when entering a new mode. Call from TuiView when mode changes.
     pub fn on_mode_changed(&mut self, mode: &AppMode) {
+        if !matches!(mode, AppMode::Select { .. }) {
+            self.last_select_identity = None;
+        }
         match mode {
             AppMode::FeatureInput => {
                 self.feature_input.clear();
                 self.feature_cursor = 0;
             }
             AppMode::Select {
-                initial_selected, ..
+                question,
+                initial_selected,
+                ..
             } => {
+                let id = (question.header.clone(), question.question.clone());
+                let same_question = self.last_select_identity.as_ref() == Some(&id);
+                if !same_question {
+                    self.select_other_text.clear();
+                    self.select_typing_other = false;
+                }
+                self.last_select_identity = Some(id);
                 self.select_selected = *initial_selected;
-                self.select_other_text.clear();
-                self.select_typing_other = false;
             }
             AppMode::MultiSelect { question, .. } => {
                 let len = question.options.len() + if question.allow_other { 1 } else { 0 };

@@ -255,6 +255,7 @@ fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
         UserIntent::ResumeFromError => return None,
         // skeleton: ContinueWithAgent has no proto message yet
         UserIntent::ContinueWithAgent => return None,
+        UserIntent::SelectHighlightChanged(_) => return None,
     };
     Some(ClientMessage {
         intent: Some(intent),

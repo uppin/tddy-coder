@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
-# Start tddy-coder/tddy-daemon (RPC backend) + Vite dev server (HMR frontend).
+# Start tddy-daemon (RPC backend) + Vite dev server (HMR frontend).
 #
 # Vite proxies /rpc → daemon. Edit React code and see changes instantly.
 #
-# Usage: ./web-dev                        # uses dev.config.yaml (tddy-demo)
-#        TDDY_USE_DAEMON=1 ./web-dev      # uses tddy-daemon with dev.daemon.yaml
-#        ./web-dev -c my-config.yaml      # custom config
-#        ./web-dev --github-stub          # extra CLI overrides
+# Usage: ./web-dev                        # tddy-daemon with dev.daemon.yaml (see DAEMON_CONFIG)
+#        ./web-dev -c my-config.yaml     # extra CLI for tddy-daemon (pass-through)
+#        ./web-dev --github-stub         # e.g. extra CLI overrides
 #
 # Environment variables:
 #   WEB_HOST        — Host to bind Vite (default: 127.0.0.1)
 #   VITE_PORT       — Port for Vite dev server (default: 5173)
-#   TDDY_USE_DAEMON — If set, use tddy-daemon instead of tddy-demo
-#   DAEMON_CONFIG — Config for tddy-daemon (default: dev.daemon.yaml when TDDY_USE_DAEMON=1)
-#   LIVEKIT_PUBLIC_URL — Override LiveKit URL (tddy-daemon and tddy-demo); e.g. ws://192.168.1.10:7880
+#   DAEMON_CONFIG   — YAML for tddy-daemon (default: dev.daemon.yaml at repo root).
+#                     CONFIG from .env is not used for the daemon backend; use DAEMON_CONFIG.
+#   LIVEKIT_PUBLIC_URL — Override LiveKit URL (tddy-daemon); e.g. ws://192.168.1.10:7880
 #   LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET — LiveKit overrides (tddy-daemon)
-#   WEB_HOST, WEB_PUBLIC_URL — Bind host and public URL for auth callback (tddy-daemon)
+#   WEB_PUBLIC_URL — Public URL for auth callback (tddy-daemon)
 #   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_REDIRECT_URI — GitHub OAuth (tddy-daemon)
 #
 # Press Ctrl+C to stop both servers.
@@ -39,86 +38,48 @@ fi
 
 WEB_HOST="${WEB_HOST:-127.0.0.1}"
 VITE_PORT="${VITE_PORT:-5173}"
-USE_DAEMON="${TDDY_USE_DAEMON:-0}"
-if [ "$USE_DAEMON" = "1" ]; then
-  # tddy-daemon requires dev.daemon.yaml format; ignore CONFIG from .env
-  CONFIG="${DAEMON_CONFIG:-dev.daemon.yaml}"
-else
-  CONFIG="${CONFIG:-dev.config.yaml}"
-fi
+# Daemon YAML path for this script (not the generic CONFIG env var from .env).
+# DAEMON_CONFIG overrides; default is dev.daemon.yaml at repo root.
+CONFIG="${DAEMON_CONFIG:-dev.daemon.yaml}"
 
-# Find binary: tddy-daemon when TDDY_USE_DAEMON=1, else tddy-demo
 find_binary() {
-  if [ "$USE_DAEMON" = "1" ]; then
-    local debug="target/debug/tddy-daemon"
-    local release="target/release/tddy-daemon"
-    if [ -f "$debug" ]; then echo "$debug"; return; fi
-    if [ -f "$release" ]; then echo "$release"; return; fi
-    echo "tddy-daemon binary not found. Run: cargo build -p tddy-daemon" >&2
-    exit 1
-  else
-    local debug="target/debug/tddy-demo"
-    local release="target/release/tddy-demo"
-    if [ -f "$debug" ]; then echo "$debug"; return; fi
-    if [ -f "$release" ]; then echo "$release"; return; fi
-    echo "tddy-demo binary not found. Run: cargo build -p tddy-demo" >&2
-    exit 1
-  fi
+  local debug="target/debug/tddy-daemon"
+  local release="target/release/tddy-daemon"
+  if [ -f "$debug" ]; then echo "$debug"; return; fi
+  if [ -f "$release" ]; then echo "$release"; return; fi
+  echo "tddy-daemon binary not found. Run: cargo build -p tddy-daemon" >&2
+  exit 1
 }
 
 binary=$(find_binary)
 
 daemon_args=()
-if [ "$USE_DAEMON" = "1" ]; then
-  if [ -f "$CONFIG" ]; then
-    # Replace CURRENT_USER with $USER in a temp copy (daemon config uses os_user)
-    TMP_CONFIG=$(mktemp)
-    sed "s/CURRENT_USER/${USER}/g" "$CONFIG" > "$TMP_CONFIG"
-    trap "rm -f $TMP_CONFIG" EXIT
-    daemon_args+=("-c" "$TMP_CONFIG")
-  else
-    echo "tddy-daemon requires -c CONFIG. dev.daemon.yaml not found." >&2
-    exit 1
-  fi
+if [ -f "$CONFIG" ]; then
+  # Replace CURRENT_USER with $USER in a temp copy (daemon config uses os_user).
+  # Use | as delimiter so slashes in paths inside YAML are not conflated with sed's replacement.
+  TMP_CONFIG=$(mktemp)
+  sed "s|CURRENT_USER|${USER}|g" "$CONFIG" > "$TMP_CONFIG"
+  trap 'rm -f "$TMP_CONFIG"' EXIT
+  daemon_args+=("-c" "$TMP_CONFIG")
 else
-  has_config=false
-  for arg in "$@"; do
-    if [ "$arg" = "-c" ] || [ "$arg" = "--config" ]; then
-      has_config=true
-      break
-    fi
-  done
-  if [ "$has_config" = false ] && [ -f "$CONFIG" ]; then
-    daemon_args+=("-c" "$CONFIG")
-  fi
+  echo "tddy-daemon requires -c CONFIG. ${CONFIG} not found." >&2
+  exit 1
 fi
 
-# Pass through all user args (may include -c, --github-stub, etc.)
+# Pass through all user args (may include -c, --github-stub, etc.). If the user also passes -c,
+# the daemon may receive two -c flags; effective config is daemon-defined. DAEMON_PORT below still
+# comes from the CONFIG path selected above (not from a second -c on the CLI).
 daemon_args+=("$@")
 
-if [ "$USE_DAEMON" != "1" ]; then
-  # tddy-demo/tddy-coder: WEB_HOST and URL overrides
-  daemon_args+=("--web-host" "$WEB_HOST")
-  if [ -n "${WEB_PUBLIC_URL:-}" ]; then
-    daemon_args+=("--web-public-url" "$WEB_PUBLIC_URL")
-  fi
-  if [ -n "${LIVEKIT_PUBLIC_URL:-}" ]; then
-    daemon_args+=("--livekit-public-url" "$LIVEKIT_PUBLIC_URL")
-  fi
-fi
-
-# Read daemon port from config for the Vite proxy.
+# Read daemon port from config for the Vite proxy (same file as CONFIG / DAEMON_CONFIG).
 # Supports web.port (tddy-coder) and listen.web_port (tddy-daemon)
 DAEMON_PORT=$(grep -E 'port:\s*[0-9]+' "$CONFIG" 2>/dev/null | head -1 | awk '{print $2}')
 DAEMON_PORT="${DAEMON_PORT:-8899}"
 
-if [ "$USE_DAEMON" = "1" ]; then
-  echo "=== Starting tddy-daemon on :${DAEMON_PORT} (config: ${CONFIG}) ==="
-else
-  echo "=== Starting tddy-coder daemon on :${DAEMON_PORT} (config: ${CONFIG}) ==="
-fi
+echo "=== Starting tddy-daemon on :${DAEMON_PORT} (config: ${CONFIG}) ==="
 
-# Clean up stale processes from previous runs
+# Clean up stale processes from previous runs. SIGKILLs listeners on these ports; on a shared
+# machine, ensure ports are free or avoid conflicts before running ./web-dev.
 fuser -k -9 -s "${DAEMON_PORT}/tcp" "${VITE_PORT}/tcp" 2>/dev/null || true
 sleep 2
 
