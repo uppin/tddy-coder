@@ -85,11 +85,22 @@ impl TerminalService for TerminalServiceVirtualTui {
         tokio::spawn(async move {
             log::trace!("[BIDI_TRACE] terminal_service: input-forwarding task started");
             let mut input_count: u64 = 0;
+            let mut cumulative_forwarded_bytes: u64 = 0;
             futures_util::pin_mut!(client_stream);
             while let Some(item) = futures_util::stream::StreamExt::next(&mut client_stream).await {
                 input_count += 1;
                 match item {
                     Ok(req) if !req.data.is_empty() => {
+                        let chunk_len = req.data.len() as u64;
+                        cumulative_forwarded_bytes += chunk_len;
+                        if input_count <= 5 || input_count.is_multiple_of(500) || chunk_len != 1 {
+                            log::debug!(
+                                "[BIDI_TRACE] terminal_service: forward msg#{} chunk_len={} cumulative_forwarded_bytes={}",
+                                input_count,
+                                chunk_len,
+                                cumulative_forwarded_bytes
+                            );
+                        }
                         if let Err(e) = input_tx.send(req.data).await {
                             log::error!(
                                 "[BIDI_TRACE] terminal_service: input_tx.send FAILED #{}: {}",
@@ -108,9 +119,10 @@ impl TerminalService for TerminalServiceVirtualTui {
                     _ => {}
                 }
             }
-            log::trace!(
-                "[BIDI_TRACE] terminal_service: input stream ended after {} inputs",
-                input_count
+            log::debug!(
+                "[BIDI_TRACE] terminal_service: input stream ended after {} msgs cumulative_forwarded_bytes={}",
+                input_count,
+                cumulative_forwarded_bytes
             );
             shutdown.store(true, Ordering::Relaxed);
         });
@@ -151,20 +163,35 @@ impl crate::tonic_terminal::terminal_service_server::TerminalService for Termina
         tokio::spawn(async move {
             log::trace!("tonic terminal_service: input-forwarding task started");
             let mut input_count: u64 = 0;
+            let mut cumulative_forwarded_bytes: u64 = 0;
             while let Ok(Some(msg)) = client_stream.message().await {
                 input_count += 1;
                 if !msg.data.is_empty() {
+                    let chunk_len = msg.data.len() as u64;
+                    cumulative_forwarded_bytes += chunk_len;
                     log::trace!(
                         "tonic: forwarding input #{} ({} bytes)",
                         input_count,
-                        msg.data.len()
+                        chunk_len
                     );
+                    if input_count <= 5 || input_count.is_multiple_of(500) || chunk_len != 1 {
+                        log::debug!(
+                            "tonic VirtualTui input: msg#{} chunk_len={} cumulative_forwarded_bytes={}",
+                            input_count,
+                            chunk_len,
+                            cumulative_forwarded_bytes
+                        );
+                    }
                     if let Err(e) = input_tx.send(msg.data).await {
                         log::error!("tonic: input_tx.send FAILED #{}: {}", input_count, e);
                     }
                 }
             }
-            log::trace!("tonic: input stream ended after {} inputs", input_count);
+            log::debug!(
+                "tonic VirtualTui input stream ended: total_msgs={} cumulative_forwarded_bytes={}",
+                input_count,
+                cumulative_forwarded_bytes
+            );
             shutdown.store(true, Ordering::Relaxed);
         });
 

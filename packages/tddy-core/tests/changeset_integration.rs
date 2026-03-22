@@ -372,7 +372,10 @@ fn red_goal_verifies_marker_collection() {
 
     let out =
         parse_red_response(RED_JSON_WITH_LOGGING_MARKERS).expect("parse red output with markers");
-    assert!(out.skeletons.len() >= 1, "red output should have skeletons");
+    assert!(
+        !out.skeletons.is_empty(),
+        "red output should have skeletons"
+    );
 }
 
 /// System prompt is written to plan directory; session object (not global artifacts) references it.

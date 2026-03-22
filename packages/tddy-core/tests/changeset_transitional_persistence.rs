@@ -9,7 +9,9 @@ mod common;
 
 use std::path::Path;
 
-use tddy_core::changeset::{read_changeset, write_changeset, Changeset, SessionEntry};
+use tddy_core::changeset::{
+    read_changeset, write_changeset, Changeset, ChangesetState, SessionEntry,
+};
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
@@ -32,29 +34,34 @@ fn write_plan_dir_green_ready(plan_dir: &Path) {
         "# Progress\n## Tests\n- t1 done\n",
     )
     .expect("progress.md");
-    let mut cs = Changeset::default();
-    cs.name = Some("feature".to_string());
-    cs.sessions = vec![
-        SessionEntry {
-            id: "plan-s".to_string(),
-            agent: "claude".to_string(),
-            tag: "plan".to_string(),
-            created_at: "2026-03-07T10:00:00Z".to_string(),
-            system_prompt_file: None,
+    let cs = Changeset {
+        name: Some("feature".to_string()),
+        sessions: vec![
+            SessionEntry {
+                id: "plan-s".to_string(),
+                agent: "claude".to_string(),
+                tag: "plan".to_string(),
+                created_at: "2026-03-07T10:00:00Z".to_string(),
+                system_prompt_file: None,
+            },
+            SessionEntry {
+                id: "impl-s".to_string(),
+                agent: "claude".to_string(),
+                tag: "impl".to_string(),
+                created_at: "2026-03-07T10:00:00Z".to_string(),
+                system_prompt_file: None,
+            },
+        ],
+        state: ChangesetState {
+            current: "RedTestsReady".to_string(),
+            session_id: Some("impl-s".to_string()),
+            updated_at: "2026-03-07T10:00:00Z".to_string(),
+            ..Changeset::default().state
         },
-        SessionEntry {
-            id: "impl-s".to_string(),
-            agent: "claude".to_string(),
-            tag: "impl".to_string(),
-            created_at: "2026-03-07T10:00:00Z".to_string(),
-            system_prompt_file: None,
-        },
-    ];
-    cs.state.current = "RedTestsReady".to_string();
-    cs.state.session_id = Some("impl-s".to_string());
-    cs.state.updated_at = "2026-03-07T10:00:00Z".to_string();
-    cs.branch_suggestion = Some("feature/test".to_string());
-    cs.worktree_suggestion = Some("feature-test".to_string());
+        branch_suggestion: Some("feature/test".to_string()),
+        worktree_suggestion: Some("feature-test".to_string()),
+        ..Changeset::default()
+    };
     write_changeset(plan_dir, &cs).expect("write changeset");
 }
 

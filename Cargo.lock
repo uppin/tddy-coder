@@ -5701,7 +5701,6 @@ dependencies = [
  "crossterm",
  "ctrlc",
  "tddy-coder",
- "tddy-core",
 ]
 
 [[package]]
@@ -5832,6 +5831,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "tddy-core",
  "tempfile",
  "tokio",
 ]

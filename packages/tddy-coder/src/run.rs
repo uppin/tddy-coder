@@ -2390,7 +2390,7 @@ mod resume_session_config_tests {
 
         assert_eq!(args.agent.as_deref(), Some("cursor"));
         assert_eq!(
-            args.cursor_agent_path.as_ref().map(|p| p.as_path()),
+            args.cursor_agent_path.as_deref(),
             Some(std::path::Path::new("/persisted/cursor-agent"))
         );
 

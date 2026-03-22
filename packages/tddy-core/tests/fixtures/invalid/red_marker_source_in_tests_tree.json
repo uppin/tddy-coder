@@ -1,0 +1,23 @@
+{
+  "goal": "red",
+  "summary": "Incorrectly placed marker in integration test file.",
+  "tests": [
+    {
+      "name": "it_fails",
+      "file": "packages/demo/tests/it.rs",
+      "line": 5,
+      "status": "failing"
+    }
+  ],
+  "skeletons": [],
+  "markers": [
+    {
+      "marker_id": "M_BAD",
+      "test_name": "it_fails",
+      "scope": "it::main",
+      "source_file": "packages/demo/tests/it.rs",
+      "data": {}
+    }
+  ],
+  "marker_results": []
+}

@@ -355,7 +355,7 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n\n## TODO\n\n
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = ClaudeCodeBackend::with_path(script_path.into());
+    let backend = ClaudeCodeBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "User prompt".to_string(),
         system_prompt: Some("System instructions".to_string()),
@@ -420,7 +420,7 @@ printf '%s\n' '{{"type":"result","result":"ok","session_id":"test-session"}}'
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = ClaudeCodeBackend::with_path(script_path.into());
+    let backend = ClaudeCodeBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "User prompt".to_string(),
         system_prompt: Some("System instructions".to_string()),
@@ -484,7 +484,7 @@ printf '%s\n' '{{"type":"result","result":"ok","session_id":"test-session"}}'
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = ClaudeCodeBackend::with_path(script_path.into());
+    let backend = ClaudeCodeBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "User prompt".to_string(),
         system_prompt: Some("System instructions".to_string()),
@@ -548,7 +548,7 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n\n## TODO\n\n
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = ClaudeCodeBackend::with_path(script_path.into());
+    let backend = ClaudeCodeBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "User prompt".to_string(),
         system_prompt: Some("System instructions".to_string()),

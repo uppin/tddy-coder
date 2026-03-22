@@ -3,8 +3,12 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 
+/// Subprocess must not inherit `TDDY_SOCKET` from the parent (e.g. a running tddy-coder session),
+/// or submit/ask would relay to the live relay instead of the no-socket success path.
 fn tddy_tools_bin() -> Command {
-    cargo_bin_cmd!("tddy-tools")
+    let mut cmd = cargo_bin_cmd!("tddy-tools");
+    cmd.env_remove("TDDY_SOCKET");
+    cmd
 }
 
 #[test]
@@ -160,4 +164,49 @@ fn mcp_mode_does_not_require_subcommand() {
         "MCP mode should exit (0=ok, 1=connection closed); got {:?}",
         code
     );
+}
+
+/// Relay `ToolCallResponse::Error` uses `message`, not `errors`. tddy-tools must surface it
+/// (matches `packages/tddy-core/src/toolcall/mod.rs` serialization).
+#[cfg(unix)]
+#[test]
+fn submit_relay_error_with_message_surfaces_detail() {
+    use std::io::{BufRead, Write};
+    use std::os::unix::net::UnixListener;
+    use std::thread;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sock_path = dir.path().join("relay.sock");
+    let _ = std::fs::remove_file(&sock_path);
+    let listener = UnixListener::bind(&sock_path).expect("bind");
+
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut line = String::new();
+        std::io::BufReader::new(&mut stream)
+            .read_line(&mut line)
+            .expect("read request");
+        let resp = r#"{"status":"error","message":"presenter did not respond to submit relay in time — poll_tool_calls"}"#;
+        writeln!(stream, "{}", resp).expect("write response");
+        stream.flush().ok();
+    });
+
+    let valid_json =
+        r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X","todo":"- [ ] Task 1"}"##;
+
+    let mut cmd = tddy_tools_bin();
+    cmd.env("TDDY_SOCKET", &sock_path);
+    cmd.args(["submit", "--goal", "plan", "--data", valid_json]);
+
+    let assertion = cmd.assert().code(1);
+    let stdout = String::from_utf8_lossy(&assertion.get_output().stdout);
+    assert!(
+        !stdout.contains("\"relay failed\""),
+        "expected relay detail to replace generic relay failure; stdout={stdout}"
+    );
+    assertion
+        .stdout(predicates::str::contains("presenter did not respond"))
+        .stdout(predicates::str::contains("poll_tool_calls"));
+
+    handle.join().expect("server thread");
 }

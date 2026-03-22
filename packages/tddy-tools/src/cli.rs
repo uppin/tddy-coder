@@ -60,6 +60,9 @@ pub struct SubmitResponse {
     pub status: String,
     pub goal: Option<String>,
     pub errors: Option<Vec<String>>,
+    /// Transport / relay failures from tddy-coder (`ToolCallResponse::Error`).
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 /// Wire format for ask request (matches ClarificationQuestion).
@@ -223,6 +226,8 @@ fn relay_submit(socket_path: &std::path::Path, goal: &str, data: &serde_json::Va
         output_success(response.goal.as_deref().unwrap_or(goal));
     } else if let Some(ref errs) = response.errors {
         output_validation_error(errs);
+    } else if let Some(ref msg) = response.message {
+        output_error(msg, 1);
     } else {
         output_error("relay failed", 1);
     }

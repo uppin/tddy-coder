@@ -5,6 +5,7 @@
 //! Processes client input bytes into UserIntents.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -158,7 +159,11 @@ pub fn run_virtual_tui(
         let render_interval = Duration::from_millis(200);
         let mut last_render = std::time::Instant::now();
 
-        while !shutdown.load(Ordering::Relaxed) {
+        let mut recv_chunk_count: u64 = 0;
+        let mut total_input_bytes: u64 = 0;
+        let mut total_keys_parsed: u64 = 0;
+
+        loop {
             let mut updated = false;
 
             let had_events = drain_presenter_broadcast(&mut event_rx, &mut state, &mut view);
@@ -170,66 +175,30 @@ pub fn run_virtual_tui(
             loop {
                 match input_rx.try_recv() {
                     Ok(bytes) if !bytes.is_empty() => {
-                        log::debug!(
-                            "VirtualTui: input {} bytes, buf_len={}",
-                            bytes.len(),
-                            input_buf.len() + bytes.len()
+                        process_virtual_tui_input_chunk(
+                            &bytes,
+                            &mut updated,
+                            &mut recv_chunk_count,
+                            &mut total_input_bytes,
+                            &mut total_keys_parsed,
+                            &mut input_buf,
+                            &mut terminal,
+                            &mut prev_frame,
+                            mouse,
+                            &state,
+                            &mut view,
+                            &layout_areas,
+                            &intent_tx,
+                            &shutdown,
                         );
-                        input_buf.extend_from_slice(&bytes);
-                        while let Some((cols, rows, consumed)) = parse_resize_from_buf(&input_buf) {
-                            log::debug!("VirtualTui: resize {}x{}", cols, rows);
-                            apply_resize(&mut terminal, &mut prev_frame, cols, rows);
-                            input_buf.drain(..consumed);
-                            updated = true;
-                        }
-                        if mouse {
-                            while let Some((mouse_ev, consumed)) = parse_mouse_from_buf(&input_buf)
-                            {
-                                log::debug!("VirtualTui: mouse {:?}", mouse_ev.kind);
-                                let normalized =
-                                    crate::mouse_map::normalize_mouse_coords_for_local(mouse_ev);
-                                if let Some(intent) = handle_mouse_event(
-                                    normalized,
-                                    &state.mode,
-                                    view.view_state_mut(),
-                                    &layout_areas,
-                                    state.inbox.len(),
-                                ) {
-                                    let _ = intent_tx.send(intent);
-                                }
-                                input_buf.drain(..consumed);
-                                updated = true;
-                            }
-                        }
-                        while let Some((key, consumed)) = parse_key_from_buf(&mut input_buf) {
-                            log::debug!("VirtualTui: key {:?} mode={:?}", key.code, state.mode);
-                            if key_is_ctrl_c_press(&key) {
-                                ctrl_c_interrupt_session(shutdown.as_ref());
-                                input_buf.drain(..consumed);
-                                updated = true;
-                                continue;
-                            }
-                            let inbox_len = state.inbox.len();
-                            let view_consumed = view.view_state_mut().handle_key_view_local(
-                                key,
-                                &state.mode,
-                                inbox_len,
-                            );
-                            if view_consumed {
-                                log::debug!("VirtualTui: key {:?} consumed by view", key.code);
-                                updated = true;
-                            } else if let Some(intent) =
-                                key_event_to_intent(key, &state.mode, view.view_state())
-                            {
-                                log::debug!("VirtualTui: intent {:?} -> presenter", intent);
-                                let _ = intent_tx.send(intent);
-                                updated = true;
-                            }
-                            input_buf.drain(..consumed);
-                        }
                     }
                     Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                        log::debug!("VirtualTui: input_rx disconnected");
+                        log::debug!(
+                            "VirtualTui: input_rx disconnected recv_chunks={} total_input_bytes={} total_keys_parsed={}",
+                            recv_chunk_count,
+                            total_input_bytes,
+                            total_keys_parsed
+                        );
                         break;
                     }
                     _ => break,
@@ -260,9 +229,157 @@ pub fn run_virtual_tui(
             }
 
             thread::sleep(Duration::from_millis(10));
+
+            if shutdown.load(Ordering::Relaxed) {
+                let mut straggler_updated = false;
+                loop {
+                    match input_rx.try_recv() {
+                        Ok(bytes) if !bytes.is_empty() => {
+                            process_virtual_tui_input_chunk(
+                                &bytes,
+                                &mut straggler_updated,
+                                &mut recv_chunk_count,
+                                &mut total_input_bytes,
+                                &mut total_keys_parsed,
+                                &mut input_buf,
+                                &mut terminal,
+                                &mut prev_frame,
+                                mouse,
+                                &state,
+                                &mut view,
+                                &layout_areas,
+                                &intent_tx,
+                                &shutdown,
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
+                    }
+                }
+                if straggler_updated {
+                    log::debug!("VirtualTui: render (stragglers after shutdown)");
+                    render_and_send(
+                        &mut terminal,
+                        &state,
+                        &mut view,
+                        &frame_buf,
+                        &mut prev_frame,
+                        &output_tx,
+                        &mut layout_areas,
+                    );
+                }
+                log::debug!(
+                    "VirtualTui: shutdown set after drain/render; exiting recv_chunks={} total_input_bytes={} total_keys_parsed={}",
+                    recv_chunk_count,
+                    total_input_bytes,
+                    total_keys_parsed
+                );
+                break;
+            }
         }
         log::debug!("VirtualTui: main loop exited");
     });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_virtual_tui_input_chunk(
+    bytes: &[u8],
+    updated: &mut bool,
+    recv_chunk_count: &mut u64,
+    total_input_bytes: &mut u64,
+    total_keys_parsed: &mut u64,
+    input_buf: &mut Vec<u8>,
+    terminal: &mut Terminal<CrosstermBackend<CapturingWriter>>,
+    prev_frame: &mut Vec<u8>,
+    mouse: bool,
+    state: &PresenterState,
+    view: &mut TuiView,
+    layout_areas: &LayoutAreas,
+    intent_tx: &std_mpsc::Sender<UserIntent>,
+    shutdown: &Arc<AtomicBool>,
+) {
+    *recv_chunk_count += 1;
+    let chunk_len = bytes.len() as u64;
+    *total_input_bytes += chunk_len;
+    if *recv_chunk_count <= 5 || (*recv_chunk_count).is_multiple_of(500) || chunk_len != 1 {
+        log::debug!(
+            "VirtualTui: recv chunk#{} len={} total_input_bytes={} buf_after_extend_will_be={}",
+            *recv_chunk_count,
+            chunk_len,
+            *total_input_bytes,
+            input_buf.len() + bytes.len()
+        );
+    }
+    input_buf.extend_from_slice(bytes);
+    while let Some((cols, rows, consumed)) = parse_resize_from_buf(input_buf) {
+        log::debug!("VirtualTui: resize {}x{}", cols, rows);
+        apply_resize(terminal, prev_frame, cols, rows);
+        input_buf.drain(..consumed);
+        *updated = true;
+    }
+    if mouse {
+        while let Some((mouse_ev, consumed)) = parse_mouse_from_buf(input_buf) {
+            log::debug!("VirtualTui: mouse {:?}", mouse_ev.kind);
+            let normalized = crate::mouse_map::normalize_mouse_coords_for_local(mouse_ev);
+            if let Some(intent) = handle_mouse_event(
+                normalized,
+                &state.mode,
+                view.view_state_mut(),
+                layout_areas,
+                state.inbox.len(),
+            ) {
+                let _ = intent_tx.send(intent);
+            }
+            input_buf.drain(..consumed);
+            *updated = true;
+        }
+    }
+    while let Some((key, consumed)) = parse_key_from_buf(input_buf) {
+        *total_keys_parsed += 1;
+        log::trace!(
+            "VirtualTui: key {:?} mode={:?} total_keys_parsed={}",
+            key.code,
+            state.mode,
+            *total_keys_parsed
+        );
+        if key_is_ctrl_c_press(&key) {
+            ctrl_c_interrupt_session(shutdown.as_ref());
+            input_buf.drain(..consumed);
+            *updated = true;
+            continue;
+        }
+        let inbox_len = state.inbox.len();
+        let view_consumed =
+            view.view_state_mut()
+                .handle_key_view_local(key, &state.mode, inbox_len);
+        if view_consumed {
+            log::trace!("VirtualTui: key {:?} consumed by view", key.code);
+            if matches!(state.mode, AppMode::FeatureInput) {
+                let flen = view.view_state().feature_input.len();
+                if flen.is_multiple_of(250) || flen <= 8 {
+                    log::debug!(
+                        "VirtualTui: FeatureInput progress feature_input_len={} total_input_bytes={} total_keys_parsed={}",
+                        flen,
+                        *total_input_bytes,
+                        *total_keys_parsed
+                    );
+                }
+            }
+            *updated = true;
+        } else if let Some(intent) = key_event_to_intent(key, &state.mode, view.view_state()) {
+            log::debug!("VirtualTui: intent {:?} -> presenter", intent);
+            let _ = intent_tx.send(intent);
+            *updated = true;
+        }
+        input_buf.drain(..consumed);
+    }
+    if !input_buf.is_empty() {
+        log::debug!(
+            "VirtualTui: after key parse, input_buf still has {} bytes (partial escape/utf8?)",
+            input_buf.len()
+        );
+    }
 }
 
 /// Apply resize: resize terminal, clear buffers, reset prev_frame.

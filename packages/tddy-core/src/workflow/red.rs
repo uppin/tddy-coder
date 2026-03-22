@@ -24,7 +24,9 @@ The summary must describe what skeletons and tests were created and confirm all 
 
 **test_command**: Derive from the project (Cargo.toml → cargo test, package.json → npm test, pytest.ini → pytest, etc.).
 **prerequisite_actions**: Suggest the cheapest approach. If the test command already compiles/builds (e.g. cargo test compiles first), use "None". Only suggest explicit build steps when needed (e.g. "npm install" before "npm test").
-**run_single_or_selected_tests**: How to run a single test or filter by name/pattern (e.g. `cargo test <name>`, `pytest -k <pattern>`, `npm test -- --testNamePattern=<pattern>`)."#
+**run_single_or_selected_tests**: How to run a single test or filter by name/pattern (e.g. `cargo test <name>`, `pytest -k <pattern>`, `npm test -- --testNamePattern=<pattern>`).
+
+**Production-only logging markers**: Logging markers MUST NOT appear in test code (unit tests, integration tests under `tests/`, `#[cfg(test)]` modules, or language-specific test file conventions). Place markers only at entry points in **production** source or skeleton code that new tests exercise; never in test-only files."#
         .to_string()
 }
 
@@ -46,7 +48,9 @@ pub fn build_followup_prompt(
 
 {answers}
 
-Now create skeleton code and failing tests based on this PRD and acceptance tests:
+Now create skeleton code and failing tests based on this PRD and acceptance tests.
+
+**Production-only logging markers**: Logging markers MUST NOT appear in test code. Place markers only at **production** skeleton entry points.
 
 ## PRD
 
@@ -84,6 +88,18 @@ mod tests {
         assert!(
             prompt.contains("tddy-tools submit") && prompt.contains("--goal red"),
             "system prompt must instruct agent to use tddy-tools submit --goal red"
+        );
+    }
+
+    /// Red system prompt must forbid placing logging markers in test code (acceptance / PRD).
+    #[test]
+    fn system_prompt_forbids_markers_in_test_code() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("MUST NOT")
+                && prompt.contains("test code")
+                && prompt.contains("production"),
+            "system prompt must forbid markers in test code and tie markers to production skeleton entry points"
         );
     }
 }
