@@ -9,6 +9,17 @@ use tokio::sync::broadcast;
 use crate::presenter::intent::UserIntent;
 use crate::presenter::state::{ActivityEntry, AppMode, PresenterState};
 
+/// Structured session status for remote UIs (mirrors TUI status bar content).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRuntimeSnapshot {
+    pub status_line: String,
+    pub goal: String,
+    pub workflow_state: String,
+    pub elapsed_ms: u64,
+    pub agent: String,
+    pub model: String,
+}
+
 /// Events the Presenter broadcasts to subscribers (e.g. gRPC clients).
 /// Mirrors PresenterView callbacks for remote observation.
 #[derive(Debug, Clone)]
@@ -32,6 +43,8 @@ pub enum PresenterEvent {
     /// Presenter requested the view loop to exit (e.g. successful Continue with agent).
     /// Distinct from [`IntentReceived`](PresenterEvent::IntentReceived): sent after session resolution.
     ShouldQuit,
+    /// Full status line + structured fields for web terminal / LiveKit `TddyRemote` stream.
+    SessionRuntimeStatus(SessionRuntimeSnapshot),
 }
 
 /// Handle passed to gRPC service: broadcast sender for events, mpsc sender for intents.

@@ -358,6 +358,9 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
         }
         PresenterEvent::IntentReceived(_) => {}
         PresenterEvent::BackendSelected { .. } => {}
+        PresenterEvent::SessionRuntimeStatus(_) => {
+            // Remote-only snapshot; local TUI renders status from state + periodic redraw.
+        }
         PresenterEvent::ShouldQuit => {
             state.should_quit = true;
         }

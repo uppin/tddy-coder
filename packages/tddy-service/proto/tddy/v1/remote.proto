@@ -103,7 +103,18 @@ message ServerMessage {
     SessionCreated session_created = 9;
     WorktreeElicitation worktree_elicitation = 10;
     SessionStatusChanged session_status_changed = 11;
+    SessionRuntimeStatus session_runtime_status = 12;
   }
+}
+
+// Full session status for remote UIs (web terminal parity with local TUI status bar).
+message SessionRuntimeStatus {
+  string status_line = 1;
+  string goal = 2;
+  string workflow_state = 3;
+  int64 elapsed_ms = 4;
+  string agent = 5;
+  string model = 6;
 }
 
 message SessionCreated {

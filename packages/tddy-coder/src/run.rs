@@ -2020,12 +2020,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
 
 fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     let agent_str = resolve_agent_for_full_workflow_plain(args)?;
-    let backend = create_backend(
-        &agent_str,
-        args.cursor_agent_path.as_deref(),
-        None,
-        None,
-    );
+    let backend = create_backend(&agent_str, args.cursor_agent_path.as_deref(), None, None);
 
     let mut plan_dir = if let Some(ref p) = args.plan_dir {
         p.clone()
