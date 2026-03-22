@@ -121,3 +121,39 @@ export const LiveKitEcho: StoryObj<typeof GhosttyTerminalLiveKit> = {
     roomName: { control: false },
   },
 };
+
+/**
+ * Same LiveKit + echo_terminal path as LiveKitEcho, with a fixed viewport so Ghostty FitAddon
+ * sizes the terminal predictably, and hidden `terminal-buffer-text` for E2E assertions (matches
+ * Rust `grpc_terminal_rpc` large segmented echo scenario: line-based echo after Enter).
+ */
+export const LiveKitEchoLargeSegmented: StoryObj<typeof GhosttyTerminalLiveKit> = {
+  render: (args: Parameters<typeof LiveKitConnectedStory>[0]) => (
+    <div
+      style={{
+        width: 1280,
+        height: 720,
+        minWidth: 1280,
+        minHeight: 720,
+        boxSizing: "border-box",
+      }}
+    >
+      <LiveKitConnectedStory
+        {...args}
+        showBufferTextForTest
+        debugMode={false}
+        debugLogging={args.debugLogging}
+      />
+    </div>
+  ),
+  args: {
+    url: "",
+    token: "",
+    roomName: "terminal-e2e",
+  },
+  argTypes: {
+    url: { control: false },
+    token: { control: false },
+    roomName: { control: false },
+  },
+};

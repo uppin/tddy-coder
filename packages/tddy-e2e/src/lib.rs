@@ -23,6 +23,9 @@ use crate::test_util::temp_dir_with_git_repo;
 pub mod rpc_frontend;
 pub mod test_util;
 
+/// `connect_view` callback used by VirtualTui and terminal services.
+pub type ViewConnectionFactory = Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>;
+
 /// Spawn a Presenter with StubBackend and gRPC server. Returns (join_handle, port, shutdown_flag).
 /// The presenter waits for initial feature input (pass None for initial_prompt).
 pub fn spawn_presenter_with_grpc(
@@ -301,15 +304,32 @@ pub fn spawn_presenter_with_view_connection_factory(
     (presenter_handle, factory, shutdown)
 }
 
-/// Spawn Presenter with per-connection VirtualTui (stream_terminal_io creates a VirtualTui per client).
-/// Serves both TddyRemoteServer and tonic TerminalServiceServer on the same gRPC port.
-/// Returns (presenter_handle, port, shutdown).
-pub fn spawn_presenter_with_terminal_service(
+/// Stub Presenter workflow with a `connect_view` factory. No gRPC server.
+/// Use with [`tddy_service::start_virtual_tui_session`] for in-process VirtualTui tests
+/// that bypass tonic RPC.
+pub fn spawn_presenter_with_view_factory(
     initial_prompt: Option<String>,
-) -> (thread::JoinHandle<()>, u16, Arc<AtomicBool>) {
+) -> (
+    thread::JoinHandle<()>,
+    ViewConnectionFactory,
+    Arc<AtomicBool>,
+) {
+    let (presenter_handle, factory, shutdown, _remote) =
+        spawn_presenter_stub_workflow(initial_prompt);
+    (presenter_handle, factory, shutdown)
+}
+
+fn spawn_presenter_stub_workflow(
+    initial_prompt: Option<String>,
+) -> (
+    thread::JoinHandle<()>,
+    ViewConnectionFactory,
+    Arc<AtomicBool>,
+    PresenterHandle,
+) {
     let (event_tx, _) = broadcast::channel(256);
     let (intent_tx, intent_rx) = mpsc::channel();
-    let handle = PresenterHandle {
+    let remote = PresenterHandle {
         event_tx: event_tx.clone(),
         intent_tx: intent_tx.clone(),
     };
@@ -336,13 +356,12 @@ pub fn spawn_presenter_with_terminal_service(
 
     let presenter = Arc::new(Mutex::new(presenter));
     let presenter_for_factory = presenter.clone();
-    let factory: Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync> =
-        Arc::new(move || {
-            presenter_for_factory
-                .lock()
-                .ok()
-                .and_then(|p| p.connect_view())
-        });
+    let factory: ViewConnectionFactory = Arc::new(move || {
+        presenter_for_factory
+            .lock()
+            .ok()
+            .and_then(|p| p.connect_view())
+    });
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = shutdown.clone();
@@ -364,6 +383,18 @@ pub fn spawn_presenter_with_terminal_service(
             thread::sleep(Duration::from_millis(10));
         }
     });
+
+    (presenter_handle, factory, shutdown, remote)
+}
+
+/// Spawn Presenter with per-connection VirtualTui (stream_terminal_io creates a VirtualTui per client).
+/// Serves both TddyRemoteServer and tonic TerminalServiceServer on the same gRPC port.
+/// Returns (presenter_handle, port, shutdown).
+pub fn spawn_presenter_with_terminal_service(
+    initial_prompt: Option<String>,
+) -> (thread::JoinHandle<()>, u16, Arc<AtomicBool>) {
+    let (presenter_handle, factory, shutdown, handle) =
+        spawn_presenter_stub_workflow(initial_prompt);
 
     let terminal_svc = tddy_service::TerminalServiceVirtualTui::new(factory, false);
     let addr: std::net::SocketAddr = "[::1]:0".parse().unwrap();

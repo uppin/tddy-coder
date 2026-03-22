@@ -68,7 +68,7 @@ impl FlowRunner {
             Err(e) => {
                 crate::workflow::agent_output::clear_sinks();
                 if let Some(ref hooks) = self.hooks {
-                    hooks.on_error(&session.current_task_id, e.as_ref());
+                    hooks.on_error(&session.current_task_id, &ctx, e.as_ref());
                 }
                 return Err(e);
             }
