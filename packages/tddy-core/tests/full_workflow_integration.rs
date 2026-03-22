@@ -485,7 +485,7 @@ async fn plain_full_workflow_uses_single_workflow_instance() {
 
 // ── Phase 5: Full workflow chains all 8 steps ───────────────────────────────
 
-const VALIDATE_SUBAGENTS_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 subagents completed. Reports and refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
+const VALIDATE_SUBAGENTS_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 subagents completed. Reports and refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true,"refactoring_plan":"\n# Refactoring Plan\n\n## Tasks\n\n- None required.\n"}"#;
 
 const REFACTOR_OUTPUT_COMPLETE: &str = r#"{"goal":"refactor","summary":"Completed 5 refactoring tasks. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
 

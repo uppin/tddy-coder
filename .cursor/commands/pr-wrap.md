@@ -1,177 +1,158 @@
 ---
-description: Comprehensive PR preparation workflow using subagents
+description: Comprehensive PR preparation workflow using validation commands and targeted refactors
 ---
-## PR Wrap - Prepare Changes for Pull Request
 
-This command orchestrates comprehensive PR preparation by invoking specialized subagents for each step.
+## PR Wrap — Prepare Changes for Pull Request
 
-**Goal**: Ensure code is clean, maintainable, tested, and production ready.
+Orchestrate validation steps, address findings, run the real toolchain, then wrap docs when appropriate.
+
+**Goal**: Code is reviewed for risk, tests meet standards, tooling is green, and documentation matches project rules.
 
 ## Prerequisites
 
-- Current changes committed (use `--no-verify` since we fix linting at the end)
-- Changeset document in context (if applicable): `docs/dev/1-WIP/YYYY-MM-DD-*.md`
-- PRD document in context (if applicable): `docs/ft/*/1-WIP/PRD-YYYY-MM-DD-*.md`
+- Changes ready for review (committed or clearly staged). Prefer **committing only after** fmt/clippy/tests pass (step 6), not the reverse.
+- **Never use `git commit --no-verify`** — it is forbidden in this repo ([AGENTS.md](../../AGENTS.md)). Fix hooks or run validations before committing.
+- Optional context: changeset `docs/dev/1-WIP/YYYY-MM-DD-*.md`, feature PRD `docs/ft/*/1-WIP/PRD-*.md` (see [changeset-doc.mdc](../rules/changeset-doc.mdc)).
 
-## Workflow Steps
+## Workflow (order matters)
 
-Execute these steps in order, using the specified subagent for each:
+### 1. Validate changes → fix
 
-### 1. Validate Changes → Refactor
+**Cursor command**: `/validate-changes`
 
-**Run Command**: `/validate-changes`
-- Analyze code changes for risks
-- Update changeset "Validation Results" section
+- Assess risks and unsafe patterns; update changeset **Validation Results** per that command’s template.
 
-**Invoke Subagent**: `refactor`
-- Fix issues found in validation
+**Then**: Implement fixes here (same session) or use the **Task** subagent `refactor` with a narrow prompt (files, findings, acceptance criteria).
 
-### 2. Validate Tests → Refactor
+### 2. Validate tests → fix
 
-**Run Command**: `/validate-tests`
-- Check test quality and anti-patterns
-- Update changeset "Validation Results" section
+**Cursor command**: `/validate-tests`
 
-**Invoke Subagent**: `refactor`
-- Fix test issues found
+- Check test quality vs [docs/dev/guides/testing.md](../../docs/dev/guides/testing.md); update **Validation Results**.
 
-### 3. Production Readiness → Refactor
+**Then**: Same as step 1 — fix production/tests or delegate to Task `refactor`.
 
-**Run Command**: `/validate-prod-ready`
-- Check for mock code, TODOs, unused code
-- Update changeset "Validation Results" section
+### 3. Production readiness → fix
 
-**Invoke Subagent**: `refactor`
-- Fix production readiness issues
+**Cursor command**: `/validate-prod-ready`
 
-### 4. Code Quality → Refactor
+- Blockers, TODOs, mocks, etc.; update **Validation Results**.
 
-**Run Command**: `/analyze-clean-code`
-- Analyze code quality metrics
-- Update changeset "Validation Results" section
+**Then**: Fix or Task `refactor`.
 
-**Invoke Subagent**: `refactor`
-- Apply clean code improvements
+### 4. Clean code → fix
 
-### 5. Final Validation
+**Cursor command**: `/analyze-clean-code`
 
-**Run Command**: `/validate-changes`
-- Re-validate after all refactoring
-- Ensure no new issues introduced
+- Quality notes; update **Validation Results**.
 
-### 6. Linting & Type Checking
+**Then**: Fix or Task `refactor`.
 
-Run directly (no subagent needed):
+### 5. Final validation
+
+**Cursor command**: `/validate-changes` again
+
+- Confirm refactors did not introduce new issues.
+
+### 6. Lint and test (mandatory)
+
+Run from repo root inside the nix toolchain (**`./dev`**):
+
 ```bash
-cargo fmt
-cargo clippy
-cargo test
+./dev cargo fmt --all
+./dev cargo clippy -- -D warnings
+./test
 ```
 
-### 7. Update & Wrap Documentation
+- Use **`./verify`** instead of `./test` when terminal capture is unreliable; read **`.verify-result.txt`** for evidence ([AGENTS.md](../../AGENTS.md)).
+- **`./test`** / **`./verify`** build **`tddy-acp-stub`** so `tddy-core` ACP integration tests can run.
 
-**Run Command**: `/wrap-context-docs`
-- Update changeset progress
-- Wrap documentation if all complete
+**If `packages/tddy-web` (or Bun workspace) changed**, also:
 
-### 8. Display Summary
-
-Present comprehensive summary with recommendations.
-
-## Subagent Invocation Pattern
-
-For each step, explicitly delegate to the subagent:
-
-```
-Use the `/validate-changes` command to analyze the current changes.
-[Wait for completion]
-
-Use the refactor subagent to fix the issues found.
-[Wait for completion]
-
-Use the `/validate-tests` command to check test quality.
-[Wait for completion]
-...
+```bash
+./dev bun install
+./dev bun run build --filter tddy-web
+./dev bash -lc 'cd packages/tddy-web && bun test'
+./dev bun run cypress:component --filter tddy-web
 ```
 
-## Available Subagents
+(Adjust scope: e.g. one spec file instead of full Cypress when iterating.)
 
-| Subagent | Purpose |
-|----------|---------|
-| `/validate-changes` | Analyze code change risks |
-| `/validate-tests` | Check test quality |
-| `/validate-prod-ready` | Production readiness check |
-| `/analyze-clean-code` | Code quality metrics |
-| `refactor` (subagent) | Fix identified issues |
-| `/wrap-context-docs` | Update/wrap documentation |
+### 7. Wrap documentation (when criteria met)
 
-## Tracking Progress
+**Cursor command**: `/wrap-context-docs`
 
-Create TODO list and mark each step complete:
+- Only when the changeset and validations satisfy [wrap-context-docs.md](./wrap-context-docs.md) and [changeset-doc.mdc](../rules/changeset-doc.mdc). Do not wrap incomplete work.
+
+### 8. Summary
+
+Report what ran, what failed/fixed, and whether the branch is ready for PR.
+
+## Commands vs Task subagent
+
+| Kind | Name | Role |
+|------|------|------|
+| Cursor command | `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`, `/wrap-context-docs` | Guided review; update changeset sections |
+| Task subagent | `refactor` | Optional parallel implementation pass for mechanical refactors |
+| Cursor command | `/pr` | Open/create PR after readiness |
+
+Slash entries are **not** a separate runtime named “validate-changes”; they are repo instructions for the agent.
+
+## Invocation pattern
+
+For each validation step:
+
+1. Run the **Cursor command** (read `.cursor/commands/<name>.md` for full rules).
+2. Apply fixes or spawn **Task** `refactor` with a concrete checklist.
+3. Re-run the same command until the changeset reflects **pass** or documented exceptions.
+
+## Tracking progress
 
 ```
-[ ] 1. /validate-changes → refactor
-[ ] 2. /validate-tests → refactor
-[ ] 3. /validate-prod-ready → refactor
-[ ] 4. /analyze-clean-code → refactor
-[ ] 5. Final validation
-[ ] 6. Linting & type checking
-[ ] 7. Documentation update/wrap
+[ ] 1. /validate-changes → fixes
+[ ] 2. /validate-tests → fixes
+[ ] 3. /validate-prod-ready → fixes
+[ ] 4. /analyze-clean-code → fixes
+[ ] 5. /validate-changes (final)
+[ ] 6. fmt, clippy, ./test (and web if touched)
+[ ] 7. /wrap-context-docs (if ready)
 [ ] 8. Summary
 ```
 
-## Output Format
+## Output format (for the user)
 
 ```markdown
-## 🎯 PR Preparation Complete
+## PR preparation summary
 
-### Subagents Invoked
-| Step | Subagent | Status |
-|------|----------|--------|
-| 1 | /validate-changes | ✅ |
-| 1 | refactor | ✅ |
-| 2 | /validate-tests | ✅ |
-| 2 | refactor | ✅ |
-| 3 | /validate-prod-ready | ✅ |
-| 3 | refactor | ✅ |
-| 4 | /analyze-clean-code | ✅ |
-| 4 | refactor | ✅ |
-| 5 | /validate-changes | ✅ |
-| 7 | /wrap-context-docs | ✅ |
+### Validations
+| Step | Command | Result |
+|------|---------|--------|
+| 1 | /validate-changes | pass / notes |
+| 2 | /validate-tests | pass / notes |
+| 3 | /validate-prod-ready | pass / notes |
+| 4 | /analyze-clean-code | pass / notes |
+| 5 | /validate-changes (final) | pass / notes |
 
-### Summary
-- **Code Quality**: X/10 ⭐
-- **Tests**: All passing ✅
-- **Production Ready**: ✅ Yes
-- **Documentation**: ✅ Wrapped
+### Toolchain
+- cargo fmt: pass / fail
+- cargo clippy -D warnings: pass / fail
+- ./test (or ./verify): pass / fail
+- tddy-web (if applicable): build / bun test / cypress: pass / skip
 
-### 🎯 Recommendation
+### Documentation
+- /wrap-context-docs: run / skipped (reason)
 
-[If fit to ship:]
-✅ **Code is ready for PR!**
-Next step: Use `/pr` command to create pull request
-
-[If needs refinement:]
-⚠️ **Refinements needed:**
-1. [Issue 1]
-2. [Issue 2]
+### Recommendation
+- Ready for `/pr` OR list blockers and next actions.
 ```
 
-## Best Practices
+## Best practices
 
-✅ **Do:**
-- Follow all steps in order
-- Wait for each subagent to complete before proceeding
-- Track progress with TODOs
-- Provide changeset/PRD context to subagents
+**Do**: Run steps in order; update the changeset as each command specifies; use `./dev` for Rust/Bun; read `.verify-result.txt` when using `./verify`.
 
-❌ **Don't:**
-- Don't skip validation steps
-- Don't wrap incomplete changesets
-- Don't proceed with failing tests
-- Don't ignore subagent recommendations
+**Don’t**: Skip step 6; wrap incomplete changesets; merge with failing tests; use `--no-verify`.
 
 ## Related
 
-**Related**: Subagent `refactor`, Commands `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`, `/wrap-context-docs`
-**Commands**: `/pr` (next step), `/update-context-docs`
+- [validate-changes.md](./validate-changes.md), [validate-tests.md](./validate-tests.md), [validate-prod-ready.md](./validate-prod-ready.md), [analyze-clean-code.md](./analyze-clean-code.md), [wrap-context-docs.md](./wrap-context-docs.md), [pr.md](./pr.md)
+- [AGENTS.md](../../AGENTS.md), [docs/dev/guides/testing.md](../../docs/dev/guides/testing.md)

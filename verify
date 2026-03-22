@@ -6,4 +6,6 @@
 set -e
 cd "$(dirname "$0")"
 export TDDY_SESSIONS_DIR="${TMPDIR:-/tmp}/tddy-test-sessions"
+# tddy-core integration tests (acp_backend_acceptance) spawn target/debug/tddy-acp-stub
+cargo build -p tddy-acp-stub
 cargo test -- --test-threads=1 2>&1 | tee .verify-result.txt

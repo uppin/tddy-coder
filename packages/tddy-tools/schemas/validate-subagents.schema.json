@@ -3,7 +3,7 @@
   "$id": "urn:tddy:goal/validate-subagents",
   "title": "ValidateSubagentsOutput",
   "type": "object",
-  "required": ["goal"],
+  "required": ["goal", "refactoring_plan"],
   "properties": {
     "goal": { "const": "validate" },
     "summary": { "type": "string" },
@@ -11,6 +11,10 @@
     "prod_ready_report_written": { "type": "boolean" },
     "clean_code_report_written": { "type": "boolean" },
     "refactoring_plan_written": { "type": "boolean" },
-    "refactoring_plan": { "type": "string", "description": "Markdown for refactoring-plan.md" }
+    "refactoring_plan": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Markdown body for refactoring-plan.md (required). Use a no-op heading if no tasks."
+    }
   }
 }

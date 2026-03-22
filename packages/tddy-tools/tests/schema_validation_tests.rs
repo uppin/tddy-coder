@@ -192,6 +192,31 @@ fn invalid_validate_subagents_wrong_goal_fails() {
     assert!(!err.is_empty());
 }
 
+#[test]
+fn invalid_validate_subagents_missing_refactoring_plan_fails() {
+    let json = include_str!("fixtures/invalid/validate-subagents-missing-refactoring-plan.json");
+    let err = validate_output("validate", json).unwrap_err();
+    assert!(!err.is_empty());
+    assert!(
+        err.iter().any(|e| {
+            e.instance_path.contains("refactoring_plan") || e.message.contains("refactoring_plan")
+        }),
+        "errors should mention refactoring_plan: {:?}",
+        err
+    );
+}
+
+/// `validate-subagents.schema.json` must stay identical between tddy-core and tddy-tools.
+#[test]
+fn validate_subagents_schema_parity_core_and_tools() {
+    const CORE: &str = include_str!("../../tddy-core/schemas/validate-subagents.schema.json");
+    const TOOLS: &str = include_str!("../schemas/validate-subagents.schema.json");
+    assert_eq!(
+        CORE, TOOLS,
+        "packages/tddy-core/schemas/validate-subagents.schema.json must match packages/tddy-tools/schemas/validate-subagents.schema.json"
+    );
+}
+
 /// `red.schema.json` must stay identical between tddy-core and tddy-tools, and document
 /// `source_file` on markers for placement validation (PRD acceptance).
 #[test]

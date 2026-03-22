@@ -8,6 +8,8 @@ import {
 } from "tddy-livekit-web";
 import { create } from "@bufbuild/protobuf";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
+import { GhosttyCliArrowPad } from "./GhosttyCliArrowPad";
+import { bytesForArrowDirection } from "./ghosttyCliArrowCsi";
 
 /** Overlay buttons for live sessions: must sit above the canvas (z-index, DOM order) and enqueue bytes via the same path as Ghostty `onData`. */
 const CONNECTION_OVERLAY_BTN: React.CSSProperties = {
@@ -123,6 +125,7 @@ export function GhosttyTerminalLiveKit({
   const [firstOutputReceived, setFirstOutputReceived] = useState(false);
   const [highlightedLine, setHighlightedLine] = useState("");
   const [coderSessionActive, setCoderSessionActive] = useState(true);
+  const [cliModeEnabled, setCliModeEnabled] = useState(false);
   const coderAvailableRef = useRef(true);
 
   useEffect(() => {
@@ -413,17 +416,30 @@ export function GhosttyTerminalLiveKit({
     }
     if (key.startsWith("Arrow")) {
       e.preventDefault();
-      const seq =
+      const dir =
         key === "ArrowUp"
-          ? "\x1b[A"
+          ? "up"
           : key === "ArrowDown"
-            ? "\x1b[B"
+            ? "down"
             : key === "ArrowRight"
-              ? "\x1b[C"
+              ? "right"
               : key === "ArrowLeft"
-                ? "\x1b[D"
+                ? "left"
                 : null;
-      if (seq) pushInput(seq);
+      if (dir) {
+        const encoded = bytesForArrowDirection(dir);
+        log("input: mobile keyboard arrow", { key, bytes: Array.from(encoded) });
+        if (debugLogging) {
+          console.debug("[GhosttyTerminalLiveKit] mobile Arrow key → CSI", {
+            key,
+            dir,
+          });
+          console.info("[GhosttyTerminalLiveKit] mobile arrow bytes", {
+            byteLength: encoded.length,
+          });
+        }
+        pushInput(encoded);
+      }
     }
   };
 
@@ -544,6 +560,52 @@ export function GhosttyTerminalLiveKit({
             )}
           </>
         )}
+        {/* CLI mode: toggle bottom-left; arrow pad bottom-right. With showMobileKeyboard, the centered Keyboard label stays visible; pad stays below connection overlays (top-right). */}
+        <button
+          type="button"
+          data-testid="ghostty-cli-mode-toggle"
+          aria-label="Toggle CLI mode with on-screen arrow keys"
+          style={{
+            position: "absolute",
+            bottom: 16,
+            left: 16,
+            padding: "8px 14px",
+            minHeight: 44,
+            minWidth: 44,
+            fontSize: 12,
+            cursor: "pointer",
+            backgroundColor: "rgba(0,0,0,0.6)",
+            color: "#ccc",
+            border: "1px solid #555",
+            borderRadius: 4,
+            zIndex: 101,
+            pointerEvents: "auto",
+          }}
+          onClick={(ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            setCliModeEnabled((v) => {
+              const next = !v;
+              log("cli: toggle", { cliModeEnabled: next });
+              if (debugLogging) {
+                console.debug("[GhosttyTerminalLiveKit] CLI mode toggle", {
+                  enabled: next,
+                });
+                console.info("[GhosttyTerminalLiveKit] CLI mode", {
+                  enabled: next,
+                });
+              }
+              return next;
+            });
+          }}
+        >
+          CLI
+        </button>
+        <GhosttyCliArrowPad
+          visible={cliModeEnabled}
+          onEnqueue={enqueueTerminalInput}
+          debugLogging={debugLogging}
+        />
       </div>
       {firstOutputReceived && (
         <div data-testid="first-output-received" style={{ display: "none" }} aria-hidden />
