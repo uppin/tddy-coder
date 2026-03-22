@@ -31,3 +31,5 @@ assert_cmd = "2"
 predicates = "3"
 serial_test = "3"
 tempfile = "3"
+# Relay integration: `start_toolcall_listener` + CLI subprocess (`submit_relay_no_poll`).
+tddy-core = { path = "../tddy-core" }

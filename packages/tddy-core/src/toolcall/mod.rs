@@ -1,7 +1,10 @@
 //! IPC for tddy-tools relay: Unix socket listener, request/response types.
 //!
 //! tddy-tools connects to the socket, sends JSON line requests, receives JSON line responses.
-//! The listener forwards requests to the presenter via mpsc; responses are sent via oneshot.
+//! **`submit`** is acknowledged on the wire immediately after persisting the payload; the listener
+//! then `try_send`s [`ToolCallRequest::SubmitActivity`] for the activity log only. **`ask`** and
+//! **`approve`** block until the presenter responds via oneshot channels (requires
+//! [`crate::presenter::Presenter::poll_tool_calls`]).
 
 mod listener;
 
@@ -105,10 +108,13 @@ use tokio::sync::oneshot;
 /// Request from tddy-tools (internal, with response channel).
 #[derive(Debug)]
 pub enum ToolCallRequest {
-    Submit {
+    /// Presenter should log activity for a submit that was already acknowledged on the wire.
+    /// The relay stores results and sends `SubmitOk` to `tddy-tools` immediately so the client
+    /// never depends on the presenter loop being scheduled (avoids timeouts when `poll_workflow`
+    /// holds the presenter lock for a long time).
+    SubmitActivity {
         goal: String,
         data: serde_json::Value,
-        response_tx: oneshot::Sender<ToolCallResponse>,
     },
     Ask {
         questions: Vec<ClarificationQuestion>,

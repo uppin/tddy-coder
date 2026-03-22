@@ -1,9 +1,9 @@
 //! Regression: headless `tddy-coder --daemon` must poll the tddy-tools Unix relay like the TUI.
 //!
-//! When the presenter loop only calls `poll_workflow()` and never `poll_tool_calls()`,
-//! [`ToolCallRequest::Submit`](tddy_core::toolcall::ToolCallRequest) from the relay is never
-//! answered, so `tddy-tools submit` blocks on the socket
-//! (`listener.rs` logs `[wait] waiting for presenter response...` with no matching `[send]`).
+//! Submit is acknowledged on the wire immediately; the presenter still receives
+//! [`ToolCallRequest::SubmitActivity`](tddy_core::toolcall::ToolCallRequest) for activity log
+//! lines. If `poll_tool_calls()` is never called, those log lines are skipped but submit does not
+//! block. This test keeps the daemon loop calling `poll_tool_calls()` alongside `poll_workflow()`.
 
 fn run_daemon_source() -> &'static str {
     let src = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/run.rs"));
@@ -23,7 +23,6 @@ fn run_daemon_presenter_loop_polls_tool_calls() {
     assert!(
         body.contains("p.poll_tool_calls()"),
         "run_daemon's presenter thread must call Presenter::poll_tool_calls() the same way as \
-         run_full_workflow_tui. Otherwise the tddy-tools relay never completes Submit and the \
-         agent hangs after calling tddy-tools submit (e.g. acceptance-tests)."
+         run_full_workflow_tui so SubmitActivity notifications are processed for the activity log."
     );
 }
