@@ -192,6 +192,22 @@ fn invalid_validate_subagents_wrong_goal_fails() {
     assert!(!err.is_empty());
 }
 
+/// `red.schema.json` must stay identical between tddy-core and tddy-tools, and document
+/// `source_file` on markers for placement validation (PRD acceptance).
+#[test]
+fn red_schema_parity_core_and_tools() {
+    const CORE: &str = include_str!("../../tddy-core/schemas/red.schema.json");
+    const TOOLS: &str = include_str!("../schemas/red.schema.json");
+    assert_eq!(
+        CORE, TOOLS,
+        "packages/tddy-core/schemas/red.schema.json must match packages/tddy-tools/schemas/red.schema.json"
+    );
+    assert!(
+        CORE.contains("\"source_file\""),
+        "red.schema.json markers items must include source_file for production-only validation"
+    );
+}
+
 #[test]
 fn format_validation_errors_produces_readable_output() {
     let errors = vec![

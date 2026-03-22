@@ -97,8 +97,9 @@ fn virtual_tui_rpc_ctrl_c_byte_kills_tracked_child_like_local_tui() {
 
     if !exited {
         let _ = child.kill();
-        let _ = child.wait();
     }
+    // Always reap the handle (after `try_wait` => Some, `wait` may return an error; ignore).
+    let _ = child.wait();
 
     assert!(
         exited,

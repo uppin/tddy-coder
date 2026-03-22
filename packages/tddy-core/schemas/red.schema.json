@@ -27,6 +27,7 @@
           "marker_id": { "type": "string" },
           "test_name": { "type": "string" },
           "scope": { "type": "string" },
+          "source_file": { "type": "string" },
           "data": {}
         }
       }

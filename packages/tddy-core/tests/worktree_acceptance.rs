@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
+use tddy_core::changeset::{read_changeset, write_changeset, Changeset, ChangesetState};
 use tddy_core::workflow::{build_context_header, prepend_context_header};
 use tddy_core::{create_worktree, setup_worktree_for_session};
 
@@ -74,17 +74,17 @@ fn test_setup_worktree_for_session_creates_from_origin_master_and_updates_change
 
     let plan_dir = base.join("plan");
     fs::create_dir_all(&plan_dir).unwrap();
-    let mut cs = Changeset {
+    let cs = Changeset {
         name: Some("Auth Feature".to_string()),
         initial_prompt: Some("add auth".to_string()),
-        ..Default::default()
+        state: ChangesetState {
+            current: "Planned".to_string(),
+            ..Changeset::default().state
+        },
+        branch_suggestion: Some("feature/auth".to_string()),
+        worktree_suggestion: Some("feature-auth".to_string()),
+        ..Changeset::default()
     };
-    cs.state.current = "Planned".to_string();
-    cs.branch_suggestion = Some("feature/auth".to_string());
-    cs.worktree_suggestion = Some("feature-auth".to_string());
-    cs.branch = None;
-    cs.worktree = None;
-    cs.repo_path = None;
     write_changeset(&plan_dir, &cs).unwrap();
 
     // PRD from plan output

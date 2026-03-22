@@ -4,6 +4,7 @@
 
 # Agent verification output (when terminal capture is broken)
 .verify-result.txt
+.red-markers-test-output.txt
 
 # Build artifacts
 target/

@@ -18,6 +18,9 @@ use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, Signal, SignalSessionRequest,
 };
 
+type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
 fn test_config() -> DaemonConfig {
     let yaml = r#"
 users:
@@ -32,9 +35,9 @@ users:
 #[allow(clippy::type_complexity)]
 fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
     let config = test_config();
-    let sessions_base_resolver: Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync> =
+    let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
-    let user_resolver: Arc<dyn Fn(&str) -> Option<String> + Send + Sync> = Arc::new(|token| {
+    let user_resolver: UserResolver = Arc::new(|token| {
         if token == "valid-token" {
             Some("testuser".to_string())
         } else {

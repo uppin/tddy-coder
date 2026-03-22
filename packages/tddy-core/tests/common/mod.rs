@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tddy_core::changeset::{write_changeset, Changeset};
+use tddy_core::changeset::{write_changeset, Changeset, ChangesetState};
 use tddy_core::output::slugify_directory_name;
 use tddy_core::workflow::graph::{ExecutionResult, ExecutionStatus};
 use tddy_core::WorkflowEngine;
@@ -255,22 +255,25 @@ pub async fn run_plan_with_conversation_output(
 /// Write a minimal changeset.yaml with Planned state for a plan session.
 /// Includes branch_suggestion and worktree_suggestion for worktree creation.
 pub fn write_changeset_for_plan_session(plan_dir: &std::path::Path, session_id: &str) {
-    let mut cs = Changeset {
+    let cs = Changeset {
         name: Some("feature".to_string()),
-        ..Default::default()
+        sessions: vec![tddy_core::changeset::SessionEntry {
+            id: session_id.to_string(),
+            agent: "claude".to_string(),
+            tag: "plan".to_string(),
+            created_at: "2026-03-07T10:00:00Z".to_string(),
+            system_prompt_file: None,
+        }],
+        state: ChangesetState {
+            current: "Planned".to_string(),
+            updated_at: "2026-03-07T10:00:00Z".to_string(),
+            history: vec![],
+            ..Changeset::default().state
+        },
+        branch_suggestion: Some("feature/test".to_string()),
+        worktree_suggestion: Some("feature-test".to_string()),
+        ..Changeset::default()
     };
-    cs.sessions = vec![tddy_core::changeset::SessionEntry {
-        id: session_id.to_string(),
-        agent: "claude".to_string(),
-        tag: "plan".to_string(),
-        created_at: "2026-03-07T10:00:00Z".to_string(),
-        system_prompt_file: None,
-    }];
-    cs.state.current = "Planned".to_string();
-    cs.state.updated_at = "2026-03-07T10:00:00Z".to_string();
-    cs.state.history = vec![];
-    cs.branch_suggestion = Some("feature/test".to_string());
-    cs.worktree_suggestion = Some("feature-test".to_string());
     write_changeset(plan_dir, &cs).expect("write changeset");
 }
 
@@ -278,23 +281,25 @@ pub fn write_changeset_for_plan_session(plan_dir: &std::path::Path, session_id: 
 /// Sets `state.session_id` to `session_id` (persisted agent thread id for resume).
 /// Includes branch_suggestion and worktree_suggestion for worktree creation.
 pub fn write_changeset_with_state(plan_dir: &std::path::Path, state: &str, session_id: &str) {
-    let mut cs = Changeset {
+    let cs = Changeset {
         name: Some("feature".to_string()),
-        ..Default::default()
+        sessions: vec![tddy_core::changeset::SessionEntry {
+            id: session_id.to_string(),
+            agent: "claude".to_string(),
+            tag: "plan".to_string(),
+            created_at: "2026-03-07T10:00:00Z".to_string(),
+            system_prompt_file: None,
+        }],
+        state: ChangesetState {
+            current: state.to_string(),
+            updated_at: "2026-03-07T10:00:00Z".to_string(),
+            history: vec![],
+            session_id: Some(session_id.to_string()),
+        },
+        branch_suggestion: Some("feature/test".to_string()),
+        worktree_suggestion: Some("feature-test".to_string()),
+        ..Changeset::default()
     };
-    cs.sessions = vec![tddy_core::changeset::SessionEntry {
-        id: session_id.to_string(),
-        agent: "claude".to_string(),
-        tag: "plan".to_string(),
-        created_at: "2026-03-07T10:00:00Z".to_string(),
-        system_prompt_file: None,
-    }];
-    cs.state.current = state.to_string();
-    cs.state.updated_at = "2026-03-07T10:00:00Z".to_string();
-    cs.state.history = vec![];
-    cs.state.session_id = Some(session_id.to_string());
-    cs.branch_suggestion = Some("feature/test".to_string());
-    cs.worktree_suggestion = Some("feature-test".to_string());
     write_changeset(plan_dir, &cs).expect("write changeset");
 }
 

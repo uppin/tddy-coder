@@ -5,6 +5,7 @@
 //! Questions are extracted from AskUserQuestion tool events in the NDJSON stream, not from text.
 
 use crate::error::ParseError;
+use crate::source_path::{classify_rust_source_path, RustSourcePathKind};
 
 /// Parsed planning output. PRD must include a `## TODO` section (implementation milestones).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -475,6 +476,9 @@ pub struct MarkerInfo {
     pub test_name: String,
     pub scope: String,
     pub data: serde_json::Value,
+    /// File where the marker was placed (production skeleton entry point), when provided.
+    #[serde(default)]
+    pub source_file: Option<String>,
 }
 
 /// Result of marker collection verification.
@@ -537,6 +541,8 @@ struct MarkerInfoDe {
     scope: String,
     #[serde(default)]
     data: serde_json::Value,
+    #[serde(default)]
+    source_file: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -566,6 +572,7 @@ struct SkeletonInfoDe {
 
 /// Parse LLM red goal response. JSON must come from tddy-tools submit.
 pub fn parse_red_response(s: &str) -> Result<RedOutput, ParseError> {
+    log::info!(target: "tddy_core::output::parser", "parse_red_response: parsing red goal JSON");
     let s = s.trim();
     let parsed: StructuredRed = serde_json::from_str(s)
         .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
@@ -607,6 +614,7 @@ pub fn parse_red_response(s: &str) -> Result<RedOutput, ParseError> {
             test_name: m.test_name,
             scope: m.scope,
             data: m.data,
+            source_file: m.source_file.filter(|s| !s.is_empty()),
         })
         .collect();
     let marker_results = parsed
@@ -621,7 +629,7 @@ pub fn parse_red_response(s: &str) -> Result<RedOutput, ParseError> {
             investigation: m.investigation,
         })
         .collect();
-    Ok(RedOutput {
+    let output = RedOutput {
         summary,
         tests,
         skeletons,
@@ -637,7 +645,54 @@ pub fn parse_red_response(s: &str) -> Result<RedOutput, ParseError> {
         logging_command: parsed.logging_command.filter(|x| !x.is_empty()),
         metric_hooks: parsed.metric_hooks.filter(|x| !x.is_empty()),
         feedback_options: parsed.feedback_options.filter(|x| !x.is_empty()),
-    })
+    };
+    log::debug!(
+        target: "tddy_core::output::parser",
+        "parse_red_response: deserialized ({} markers); validating marker source_file paths",
+        output.markers.len()
+    );
+    validate_red_marker_source_paths(&output)?;
+    log::debug!(
+        target: "tddy_core::output::parser",
+        "parse_red_response: marker placement validation ok"
+    );
+    Ok(output)
+}
+
+/// Validate that red output markers with `source_file` are only associated with production paths.
+///
+/// Callers invoke this after [`parse_red_response`] when enforcing production-only marker placement.
+/// [`parse_red_response`] already runs this check; calling again is idempotent.
+pub fn validate_red_marker_source_paths(output: &RedOutput) -> Result<(), ParseError> {
+    log::debug!(
+        target: "tddy_core::output::parser",
+        "validate_red_marker_source_paths: checking {} markers for source_file paths",
+        output.markers.len()
+    );
+    for m in &output.markers {
+        let Some(ref path) = m.source_file else {
+            log::debug!(
+                target: "tddy_core::output::parser",
+                "validate_red_marker_source_paths: marker {} has no source_file; skipping placement check",
+                m.marker_id
+            );
+            continue;
+        };
+        if classify_rust_source_path(path) == RustSourcePathKind::Test {
+            let msg = format!(
+                "red marker {}: source_file {:?} is test-only; logging markers MUST NOT appear in test code — place markers only on production/skeleton entry points",
+                m.marker_id, path
+            );
+            log::debug!(
+                target: "tddy_core::output::parser",
+                "validate_red_marker_source_paths: rejected marker_id={} test-only source_file={:?}",
+                m.marker_id,
+                path
+            );
+            return Err(ParseError::Malformed(msg));
+        }
+    }
+    Ok(())
 }
 
 /// Build result entry from evaluate-changes output.
@@ -1155,6 +1210,32 @@ mod tests {
             out.run_single_or_selected_tests.as_deref(),
             Some("cargo test <name>")
         );
+    }
+
+    #[test]
+    fn validate_red_marker_source_paths_accepts_production_only_markers() {
+        let out = RedOutput {
+            summary: "s".into(),
+            tests: vec![],
+            skeletons: vec![],
+            test_command: None,
+            prerequisite_actions: None,
+            run_single_or_selected_tests: None,
+            markers: vec![MarkerInfo {
+                marker_id: "M001".into(),
+                test_name: "t".into(),
+                scope: "scope".into(),
+                data: serde_json::json!({}),
+                source_file: Some("packages/demo/src/widget.rs".into()),
+            }],
+            marker_results: vec![],
+            test_output_file: None,
+            sequential_command: None,
+            logging_command: None,
+            metric_hooks: None,
+            feedback_options: None,
+        };
+        validate_red_marker_source_paths(&out).expect("production-only markers should validate");
     }
 
     #[test]
