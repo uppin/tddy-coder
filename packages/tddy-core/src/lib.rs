@@ -53,8 +53,8 @@ pub use permission::{
 };
 pub use presenter::{
     ActivityEntry, ActivityKind, AppMode, ExitAction, PendingWorkflowStart, Presenter,
-    PresenterEvent, PresenterHandle, PresenterState, PresenterView, UserIntent, ViewConnection,
-    WorkflowCompletePayload, WorkflowEvent,
+    PresenterEvent, PresenterHandle, PresenterState, PresenterView, SessionRuntimeSnapshot,
+    UserIntent, ViewConnection, WorkflowCompletePayload, WorkflowEvent,
 };
 pub use session_metadata::{
     read_session_metadata, write_session_metadata, SessionMetadata, SESSION_METADATA_FILENAME,

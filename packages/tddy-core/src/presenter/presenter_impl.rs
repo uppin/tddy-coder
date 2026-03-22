@@ -10,6 +10,7 @@ use crate::{ClarificationQuestion, SharedBackend};
 
 use crate::presenter::intent::UserIntent;
 use crate::presenter::presenter_events::{PresenterEvent, ViewConnection};
+use crate::presenter::session_runtime::session_runtime_snapshot_from_state;
 use crate::presenter::state::{ActivityEntry, ActivityKind, AppMode, PresenterState};
 use crate::presenter::workflow_runner;
 use crate::presenter::{WorkflowCompletePayload, WorkflowEvent};
@@ -163,7 +164,11 @@ impl Presenter {
 
     fn broadcast(&self, event: PresenterEvent) {
         if let Some(ref tx) = self.broadcast_tx {
-            let _ = tx.send(event);
+            let _ = tx.send(event.clone());
+            if !matches!(&event, PresenterEvent::SessionRuntimeStatus(_)) {
+                let snap = session_runtime_snapshot_from_state(&self.state);
+                let _ = tx.send(PresenterEvent::SessionRuntimeStatus(snap));
+            }
         }
     }
 

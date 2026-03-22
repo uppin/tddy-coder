@@ -2,6 +2,12 @@
 
 Release note history for the Web product area.
 
+## 2026-03-22 — Session runtime status (full stack)
+
+- **Proto / gRPC / LiveKit**: `ServerMessage` adds **`session_runtime_status`** (`SessionRuntimeStatus`: `status_line`, goal, workflow state, elapsed ms, agent, model). The presenter emits a snapshot after each broadcastable `PresenterEvent` so the web terminal matches the TUI status bar.
+- **tddy-web**: `GhosttyTerminalLiveKit` subscribes to `TddyRemote.Stream` and updates **`SessionRuntimeStatusBar`** from **`sessionRuntimeStatus`** events (prefers `status_line`, else structured fields). Regenerate TS: `cd packages/tddy-web && bunx buf generate ../tddy-service/proto`.
+- **Contract tests**: `packages/tddy-rust-typescript-tests/tests/remote-session-runtime-contract.test.ts` asserts protobuf round-trip for `SessionRuntimeStatus`.
+
 ## 2026-03-21 — Terminal: coder left the room
 
 - **GhosttyTerminalLiveKit**: When the LiveKit **server/coder** participant disconnects (`ParticipantDisconnected` for `serverIdentity`), input to the RPC stream stops, the terminal is dimmed and non-interactive (`data-session-active="false"` on `GhosttyTerminal`), and a full-area banner **`terminal-coder-unavailable`** explains that the session ended.

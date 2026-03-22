@@ -7,7 +7,14 @@ import {
   TerminalInputSchema,
 } from "tddy-livekit-web";
 import { create } from "@bufbuild/protobuf";
+import {
+  ClientMessageSchema,
+  ScrollSchema,
+  TddyRemote,
+  type SessionRuntimeStatus,
+} from "../gen/tddy/v1/remote_pb";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
+import { SessionRuntimeStatusBar } from "./SessionRuntimeStatusBar";
 
 /** Overlay buttons for live sessions: must sit above the canvas (z-index, DOM order) and enqueue bytes via the same path as Ghostty `onData`. */
 const CONNECTION_OVERLAY_BTN: React.CSSProperties = {
@@ -48,6 +55,23 @@ function describeKey(bytes: Uint8Array): string {
     if (bytes[2] === 0x36) return "PageDown";
   }
   return `raw(${bytes.length})`;
+}
+
+function formatElapsedMs(ms: bigint): string {
+  const sec = Math.floor(Number(ms) / 1000);
+  const m = Math.floor(sec / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) return `${h}h${m % 60}m`;
+  if (m > 0) return `${m}m${sec % 60}s`;
+  return `${sec}s`;
+}
+
+/** Prefer `status_line` from server (TUI parity); else join structured fields. */
+function formatSessionRuntimeLine(s: SessionRuntimeStatus): string {
+  if (s.statusLine.trim().length > 0) return s.statusLine;
+  return [s.goal, s.workflowState, formatElapsedMs(s.elapsedMs), s.agent, s.model]
+    .filter((x) => x.length > 0)
+    .join(" | ");
 }
 
 export interface TokenResult {
@@ -124,6 +148,7 @@ export function GhosttyTerminalLiveKit({
   const [highlightedLine, setHighlightedLine] = useState("");
   const [coderSessionActive, setCoderSessionActive] = useState(true);
   const coderAvailableRef = useRef(true);
+  const [sessionRuntimeStatusLine, setSessionRuntimeStatusLine] = useState("");
 
   useEffect(() => {
     let room: Room | null = null;
@@ -134,6 +159,7 @@ export function GhosttyTerminalLiveKit({
       try {
         coderAvailableRef.current = true;
         setCoderSessionActive(true);
+        setSessionRuntimeStatusLine("");
 
         let initialToken: string;
         let ttlSecondsForRefresh: bigint | null = null;
@@ -242,6 +268,45 @@ export function GhosttyTerminalLiveKit({
         log("lifecycle: transport created");
 
         const client = createClient(TerminalService, transport);
+        const remoteClient = createClient(TddyRemote, transport);
+
+        async function* remoteClientInput() {
+          yield create(ClientMessageSchema, {
+            intent: {
+              case: "scroll",
+              value: create(ScrollSchema, { delta: 0 }),
+            },
+          });
+          for (;;) {
+            await new Promise((r) => setTimeout(r, 60_000));
+            if (cancelled) return;
+            yield create(ClientMessageSchema, {
+              intent: {
+                case: "scroll",
+                value: create(ScrollSchema, { delta: 0 }),
+              },
+            });
+          }
+        }
+
+        (async () => {
+          try {
+            const remoteStream = remoteClient.stream(remoteClientInput());
+            for await (const msg of remoteStream) {
+              if (cancelled) break;
+              const ev = msg.event;
+              if (!ev || ev.case === undefined) continue;
+              if (ev.case === "sessionRuntimeStatus") {
+                const line = formatSessionRuntimeLine(ev.value);
+                if (line.length > 0) {
+                  setSessionRuntimeStatusLine(line);
+                }
+              }
+            }
+          } catch (e) {
+            console.warn("[GhosttyTerminalLiveKit] TddyRemote stream ended:", e);
+          }
+        })();
 
         const queue = inputQueueRef.current;
         async function* inputGen() {
@@ -437,6 +502,9 @@ export function GhosttyTerminalLiveKit({
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div data-testid="livekit-status">{status}</div>
+      {status === "connected" && (
+        <SessionRuntimeStatusBar statusLine={sessionRuntimeStatusLine} />
+      )}
       {status === "error" && (
         <div data-testid="livekit-error">{errorMsg}</div>
       )}

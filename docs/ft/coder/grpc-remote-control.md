@@ -48,7 +48,7 @@ service TddyRemote {
 ```
 
 - **ClientMessage**: Carries `UserIntent` variants (SubmitFeatureInput, AnswerSelect, QueuePrompt, Quit, etc.)
-- **ServerMessage**: Carries `PresenterView` callback events (mode_changed, activity_logged, goal_started, state_changed, workflow_complete, agent_output, inbox_changed)
+- **ServerMessage**: Carries `PresenterView` callback events (mode_changed, activity_logged, goal_started, state_changed, workflow_complete, agent_output, inbox_changed) plus **`session_runtime_status`** ([`SessionRuntimeStatus`](../../../packages/tddy-service/proto/tddy/v1/remote.proto)) — full TUI-equivalent status line and structured fields for web / LiveKit clients
 
 Both directions carry the full set of events for bidirectional mirroring.
 

@@ -519,7 +519,7 @@ mod tests {
                 Ok(Ok(Some(msg))) => {
                     if let Some(event) = msg.event {
                         events.push(event);
-                        if events.len() >= 3 {
+                        if events.len() >= 10 {
                             break;
                         }
                     }
@@ -547,6 +547,14 @@ mod tests {
         assert!(
             has_mode_changed,
             "Expected ModeChanged event, got: {:?}",
+            events
+        );
+        let has_session_runtime = events
+            .iter()
+            .any(|e| matches!(e, server_message::Event::SessionRuntimeStatus(_)));
+        assert!(
+            has_session_runtime,
+            "Expected SessionRuntimeStatus event, got: {:?}",
             events
         );
     }
