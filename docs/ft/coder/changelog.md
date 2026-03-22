@@ -2,6 +2,12 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-22 — Red phase: production-only logging markers
+
+- **Structured output**: Red JSON may include `source_file` per logging marker (where the marker was placed). `tddy-tools submit` validates against the updated `red` schema.
+- **Enforcement**: `tddy-core` rejects red output when `source_file` points at test-only paths (Rust integration-test trees and `*_test.rs` file names). Agents must place markers on production skeleton entry points, not in test-only files.
+- **Packages**: tddy-core (`source_path`, parser validation, red workflow prompt), tddy-tools (embedded schema).
+
 ## 2026-03-21 — Interactive backend selection
 
 - **CLI**: `--agent` is optional. When omitted, choose backend via TUI dropdown or plain stdin menu before the workflow; when set, behavior matches the previous default path.
