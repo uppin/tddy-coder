@@ -422,7 +422,13 @@ pub(crate) fn drain_presenter_broadcast(
                 apply_event(state, view, ev);
                 any = true;
             }
-            Err(TryRecvError::Lagged(_)) => continue,
+            Err(TryRecvError::Lagged(skipped)) => {
+                log::warn!(
+                    "VirtualTui: broadcast receiver lagged; skipped {} presenter event(s)",
+                    skipped
+                );
+                continue;
+            }
             Err(TryRecvError::Empty) | Err(TryRecvError::Closed) => break,
         }
     }
