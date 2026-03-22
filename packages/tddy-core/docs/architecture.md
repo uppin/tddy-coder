@@ -12,7 +12,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **UserIntent**: SubmitFeatureInput, AnswerSelect, AnswerMultiSelect, AnswerText, QueuePrompt, etc.
 - **PresenterState**: agent, model, mode (AppMode), activity_log, inbox, should_quit.
 - **PresenterView**: Trait with callbacks: on_mode_changed, on_activity_logged, on_goal_started, on_state_changed, on_workflow_complete, on_agent_output, on_inbox_changed.
-- **workflow_runner**: Runs full TDD workflow in background thread; sends events via mpsc; receives answers for clarification. After plan approval, creates worktree via `setup_worktree_for_session` (when start_goal is acceptance-tests and no worktree exists), sends `WorkflowEvent::WorktreeSwitched`, sets `worktree_dir` in context. Polls `tool_call_rx` for tddy-tools relay requests (Submit, Ask). Writes refactoring-plan.md when StubBackend (validate does not write files).
+- **workflow_runner**: Runs full TDD workflow in background thread; sends events via mpsc; receives answers for clarification. After plan approval, creates worktree via `setup_worktree_for_session` (when start_goal is acceptance-tests and no worktree exists), sends `WorkflowEvent::WorktreeSwitched`, sets `worktree_dir` in context. Polls `tool_call_rx` for tddy-tools relay requests (`SubmitActivity`, Ask, Approve). Writes refactoring-plan.md when StubBackend (validate does not write files).
 
 ### Backend (`backend/`)
 
@@ -50,8 +50,8 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 ### Toolcall (`toolcall/`)
 
 - **store_submit_result / take_submit_result_for_goal**: Shared storage for submit results. Presenter writes via tool executor; workflow reads. Key: goal name; Value: JSON string.
-- **ToolCallRequest / ToolCallResponse**: IPC types. Submit (goal, data, response_tx), Ask (questions, response_tx). Response: SubmitOk, SubmitError, AskAnswer, Error.
-- **start_toolcall_listener**: Unix domain socket listener. Accepts connections, reads JSON line, deserializes to wire format, forwards to presenter via mpsc with oneshot response channel.
+- **ToolCallRequest / ToolCallResponse**: IPC types. **SubmitActivity** (goal, data) notifies the presenter for activity-log lines only—the relay has already acknowledged `submit` on the wire. **Ask** (questions, response_tx) and **Approve** (tool_name, input, response_tx) block until `Presenter::poll_tool_calls` completes the oneshot. Responses: SubmitOk, SubmitError, AskAnswer, ApproveResult, Error.
+- **start_toolcall_listener**: Unix domain socket listener. Accepts connections, reads one JSON line per connection. For **`type: submit`**: persists via `store_submit_result`, sends **`SubmitOk` on the socket immediately**, then `try_send`s `SubmitActivity` to the presenter queue (full queue or disconnect skips activity notification but does not affect the client). For **`ask`** / **`approve`**: forwards to the presenter with a oneshot and waits for the response before writing the wire reply.
 - **TDDY_SOCKET**: Env var set by tddy-coder when spawning agent; tddy-tools connects to this path.
 
 ### Stream (`stream/`)
