@@ -249,12 +249,23 @@ export function GhosttyTerminalLiveKit({
           yield create(TerminalInputSchema, { data: new Uint8Array(0) });
           while (true) {
             if (queue.length > 0) {
-              const data = queue.shift()!;
+              // Drain all available items into one message to avoid flooding the LiveKit data
+              // channel with hundreds of tiny packets (e.g. rapid typing or paste). The WebRTC
+              // data channel send buffer overflows when >~300 small messages are queued at once,
+              // causing silent drops. Batching reduces 1000 single-byte sends to a few large ones.
+              const chunks = queue.splice(0);
+              const totalLen = chunks.reduce((sum, c) => sum + c.length, 0);
+              const data = new Uint8Array(totalLen);
+              let offset = 0;
+              for (const chunk of chunks) {
+                data.set(chunk, offset);
+                offset += chunk.length;
+              }
               const preview = new TextDecoder().decode(data.slice(0, 40));
-              log("dataflow: inputGen yielding", data.length, "bytes", JSON.stringify(preview));
+              log("dataflow: inputGen yielding", data.length, "bytes (batched from", chunks.length, "items)", JSON.stringify(preview));
               yield create(TerminalInputSchema, { data });
             } else {
-              await new Promise((r) => setTimeout(r, 100));
+              await new Promise((r) => setTimeout(r, 20));
             }
           }
         }

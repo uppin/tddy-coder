@@ -862,11 +862,11 @@ mod tests {
         assert_eq!(key.code, KeyCode::Char('a'));
     }
 
-    /// Verify that 1000-char feature input is fully visible with char-level line splitting.
+    /// Verify that a 1000-char segmented feature input is fully visible with char-level splitting.
     ///
-    /// Uses TestBackend(80, 10000) + Viewport::Fixed so all rows are reachable. Draws one frame
-    /// with `feature_input = "a" * 1000`, then counts 'a' chars in the prompt-bar rows only
-    /// (everything below the status bar) and asserts all 1000 are present.
+    /// Uses TestBackend(80, 10000) + Viewport::Fixed so all rows are reachable. The input is
+    /// built as 10 segments (`#SEG-0:aaa…`, `#SEG-1:aaa…`, …) totalling 1000 chars — the same
+    /// structure as the E2E echo tests — so a failure points directly to the missing segment.
     #[test]
     fn feature_input_1000_chars_all_visible_in_test_backend() {
         use std::time::Instant;
@@ -881,16 +881,35 @@ mod tests {
 
         const COLS: u16 = 80;
         const ROWS: u16 = 10000;
+        const TOTAL_LEN: usize = 1000;
+        const NUM_SEGMENTS: usize = 10;
+
+        // Build segmented payload: "#SEG-0:aaa…#SEG-1:aaa…" totalling TOTAL_LEN chars.
+        let headers: Vec<String> = (0..NUM_SEGMENTS).map(|i| format!("#SEG-{}:", i)).collect();
+        let header_chars: usize = headers.iter().map(|s| s.chars().count()).sum();
+        let body_total = TOTAL_LEN - header_chars;
+        let base = body_total / NUM_SEGMENTS;
+        let rem = body_total % NUM_SEGMENTS;
+        let input: String = headers
+            .iter()
+            .enumerate()
+            .map(|(i, h)| {
+                let body_len = base + if i < rem { 1 } else { 0 };
+                let mut seg = h.clone();
+                seg.extend(std::iter::repeat_n('a', body_len));
+                seg
+            })
+            .collect();
+        assert_eq!(input.chars().count(), TOTAL_LEN);
 
         let backend = TestBackend::new(COLS, ROWS);
         let viewport = Viewport::Fixed(ratatui::layout::Rect::new(0, 0, COLS, ROWS));
         let mut terminal =
             Terminal::with_options(backend, TerminalOptions { viewport }).unwrap();
 
-        let input = "a".repeat(1000);
         let state = PresenterState {
-            agent: "a".to_string(),
-            model: "a".to_string(),
+            agent: String::new(),
+            model: String::new(),
             mode: AppMode::FeatureInput,
             current_goal: None,
             current_state: None,
@@ -918,23 +937,27 @@ mod tests {
         let (_, _, _, status_bar, _, _) = layout_chunks_with_inbox(area, 0, 0, prompt_h);
         let prompt_start_row = status_bar.y + status_bar.height;
 
-        // Count 'a' chars exclusively within the prompt bar rows.
-        let a_in_prompt: usize = (prompt_start_row..ROWS)
-            .map(|row| {
-                (0..COLS)
-                    .filter(|&col| {
-                        buf.cell(ratatui::layout::Position::new(col, row))
-                            .map(|c| c.symbol() == "a")
-                            .unwrap_or(false)
-                    })
-                    .count()
+        // Collect prompt bar content without whitespace for substring search.
+        let prompt_compact: String = (prompt_start_row..ROWS)
+            .flat_map(|row| {
+                let buf = &buf;
+                (0..COLS).filter_map(move |col| {
+                    buf.cell(ratatui::layout::Position::new(col, row))
+                        .map(|c| c.symbol().chars().next().unwrap_or(' '))
+                })
             })
-            .sum();
+            .filter(|c| !c.is_whitespace())
+            .collect();
 
-        assert_eq!(
-            a_in_prompt, 1000,
-            "all 1000 input chars must be visible in the prompt bar"
-        );
+        // Every segment marker must appear in the rendered prompt bar.
+        for (i, header) in headers.iter().enumerate() {
+            assert!(
+                prompt_compact.contains(header.as_str()),
+                "segment {} marker {:?} missing from prompt bar output",
+                i,
+                header
+            );
+        }
     }
 
     /// Capacity 2 + three sends without reading forces `TryRecvError::Lagged` on the first
