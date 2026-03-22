@@ -113,10 +113,15 @@ pub fn run_event_loop(
                     {
                         vs.inbox_edit_buffer = edit_item.unwrap_or_default();
                     }
-                    if !consumed {
-                        if let Some(intent) = key_event_to_intent(key, &mode, view.view_state()) {
-                            let _ = intent_tx.send(intent);
+                    if consumed {
+                        if matches!(mode, tddy_core::AppMode::Select { .. }) {
+                            let idx = view.view_state().select_selected;
+                            let _ =
+                                intent_tx.send(tddy_core::UserIntent::SelectHighlightChanged(idx));
                         }
+                    } else if let Some(intent) = key_event_to_intent(key, &mode, view.view_state())
+                    {
+                        let _ = intent_tx.send(intent);
                     }
                 }
                 Ok(Event::Mouse(mouse_ev)) if mouse => {
@@ -129,6 +134,10 @@ pub fn run_event_loop(
                         state.inbox.len(),
                     ) {
                         let _ = intent_tx.send(intent);
+                    }
+                    if matches!(state.mode, tddy_core::AppMode::Select { .. }) {
+                        let idx = view.view_state().select_selected;
+                        let _ = intent_tx.send(tddy_core::UserIntent::SelectHighlightChanged(idx));
                     }
                 }
                 Ok(Event::Resize(_, _)) => {
