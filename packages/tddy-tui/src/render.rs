@@ -1,6 +1,6 @@
 //! Frame rendering: draw activity log, status bar, prompt bar.
 
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use tddy_core::{ActivityEntry, AppMode, PresenterState};
@@ -186,7 +186,22 @@ pub fn draw(
     }
 
     if prompt_bar.height > 0 {
-        let widget = Paragraph::new(prompt_text_str.as_str()).wrap(Wrap { trim: false });
+        // Split by characters (not words) so the height matches prompt_height's div_ceil
+        // calculation. Word-wrapping puts a short prefix like "> " alone on its own line when
+        // followed by a long single-word payload, causing the last partial row to overflow the
+        // allocated height and be clipped.
+        let w = prompt_bar.width as usize;
+        let lines: Vec<ratatui::text::Line> = if w == 0 {
+            vec![ratatui::text::Line::raw(prompt_text_str.as_str())]
+        } else {
+            prompt_text_str
+                .chars()
+                .collect::<Vec<_>>()
+                .chunks(w)
+                .map(|chunk| ratatui::text::Line::raw(chunk.iter().collect::<String>()))
+                .collect()
+        };
+        let widget = Paragraph::new(lines);
         frame.render_widget(widget, prompt_bar);
     }
 

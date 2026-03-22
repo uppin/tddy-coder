@@ -862,6 +862,81 @@ mod tests {
         assert_eq!(key.code, KeyCode::Char('a'));
     }
 
+    /// Verify that 1000-char feature input is fully visible with char-level line splitting.
+    ///
+    /// Uses TestBackend(80, 10000) + Viewport::Fixed so all rows are reachable. Draws one frame
+    /// with `feature_input = "a" * 1000`, then counts 'a' chars in the prompt-bar rows only
+    /// (everything below the status bar) and asserts all 1000 are present.
+    #[test]
+    fn feature_input_1000_chars_all_visible_in_test_backend() {
+        use std::time::Instant;
+
+        use ratatui::backend::TestBackend;
+        use ratatui::{TerminalOptions, Viewport};
+        use tddy_core::{AppMode, PresenterState};
+
+        use crate::layout::{layout_chunks_with_inbox, prompt_height};
+        use crate::render::draw;
+        use crate::view_state::ViewState;
+
+        const COLS: u16 = 80;
+        const ROWS: u16 = 10000;
+
+        let backend = TestBackend::new(COLS, ROWS);
+        let viewport = Viewport::Fixed(ratatui::layout::Rect::new(0, 0, COLS, ROWS));
+        let mut terminal =
+            Terminal::with_options(backend, TerminalOptions { viewport }).unwrap();
+
+        let input = "a".repeat(1000);
+        let state = PresenterState {
+            agent: "a".to_string(),
+            model: "a".to_string(),
+            mode: AppMode::FeatureInput,
+            current_goal: None,
+            current_state: None,
+            goal_start_time: Instant::now(),
+            activity_log: Vec::new(),
+            inbox: Vec::new(),
+            should_quit: false,
+            exit_action: None,
+        };
+        let mut vs = ViewState::new();
+        vs.feature_input = input.clone();
+
+        terminal
+            .draw(|frame| draw(frame, &state, &mut vs, false, None))
+            .unwrap();
+
+        let buf = terminal.backend().buffer().clone();
+
+        // Determine prompt bar start row from layout (mirrors draw()'s own calculation).
+        let area = ratatui::layout::Rect::new(0, 0, COLS, ROWS);
+        let prompt_text = format!("> {}", input);
+        let text_len = prompt_text.chars().count().min(u16::MAX as usize) as u16;
+        let max_height = (ROWS / 3).max(1);
+        let prompt_h = prompt_height(text_len, COLS, max_height);
+        let (_, _, _, status_bar, _, _) = layout_chunks_with_inbox(area, 0, 0, prompt_h);
+        let prompt_start_row = status_bar.y + status_bar.height;
+
+        // Count 'a' chars exclusively within the prompt bar rows.
+        let a_in_prompt: usize = (prompt_start_row..ROWS)
+            .map(|row| {
+                (0..COLS)
+                    .filter(|&col| {
+                        buf.cell(ratatui::layout::Position::new(col, row))
+                            .map(|c| c.symbol() == "a")
+                            .unwrap_or(false)
+                    })
+                    .count()
+            })
+            .sum();
+
+        assert_eq!(
+            a_in_prompt, 1000,
+            "all 1000 input chars must be visible in the prompt bar"
+        );
+    }
+
     /// Capacity 2 + three sends without reading forces `TryRecvError::Lagged` on the first
     /// `try_recv`; the drain loop must retry so `IntentReceived(Quit)` still applies.
     #[test]
