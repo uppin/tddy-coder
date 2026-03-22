@@ -7,7 +7,9 @@
 pub mod convert;
 pub mod daemon_service;
 pub mod echo_service;
+pub mod runtime_status;
 pub mod service;
+pub mod tddy_remote_rpc;
 pub mod terminal_service;
 pub mod token_service;
 
@@ -19,7 +21,12 @@ pub use proto::connection::ConnectionServiceServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
+pub use runtime_status::{
+    build_session_runtime_status_proto, maybe_emit_session_runtime_status,
+    session_runtime_status_status_line,
+};
 pub use service::TddyRemoteService;
+pub use tddy_remote_rpc::TddyRemoteRpcServer;
 pub use tddy_rpc::Status;
 pub use terminal_service::{
     start_virtual_tui_session, TerminalServiceVirtualTui, VirtualTuiSession,

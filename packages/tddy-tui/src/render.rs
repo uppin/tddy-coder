@@ -499,6 +499,7 @@ mod tests {
         PresenterState {
             agent: "test-agent".to_string(),
             model: "test-model".to_string(),
+            session_id: String::new(),
             mode,
             current_goal: None,
             current_state: None,

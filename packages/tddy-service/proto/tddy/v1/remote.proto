@@ -103,7 +103,21 @@ message ServerMessage {
     SessionCreated session_created = 9;
     WorktreeElicitation worktree_elicitation = 10;
     SessionStatusChanged session_status_changed = 11;
+    // TUI-equivalent runtime status for remote viewers (goal, state, elapsed, agent, model).
+    SessionRuntimeStatus session_runtime_status = 12;
   }
+}
+
+// Per-session runtime snapshot aligned with the local TUI status bar (see format_status_bar).
+message SessionRuntimeStatus {
+  string session_id = 1;
+  string goal = 2;
+  string workflow_state = 3;
+  uint64 elapsed_ms = 4;
+  string agent = 5;
+  string model = 6;
+  // Optional verbatim line for byte-for-byte parity with format_status_bar.
+  string status_line = 7;
 }
 
 message SessionCreated {

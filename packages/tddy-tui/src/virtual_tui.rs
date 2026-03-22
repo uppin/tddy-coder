@@ -358,6 +358,7 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
         }
         PresenterEvent::IntentReceived(_) => {}
         PresenterEvent::BackendSelected { .. } => {}
+        PresenterEvent::SessionRuntimeStatus(_) => {}
         PresenterEvent::ShouldQuit => {
             state.should_quit = true;
         }
@@ -769,6 +770,7 @@ mod tests {
         let mut state = PresenterState {
             agent: String::new(),
             model: String::new(),
+            session_id: String::new(),
             mode: AppMode::FeatureInput,
             current_goal: None,
             current_state: None,

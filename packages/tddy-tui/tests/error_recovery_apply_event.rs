@@ -10,6 +10,7 @@ fn sample_state() -> PresenterState {
     PresenterState {
         agent: "cursor".to_string(),
         model: "opus".to_string(),
+        session_id: String::new(),
         mode: AppMode::Running,
         current_goal: Some("refactor".to_string()),
         current_state: Some("Refactoring".to_string()),

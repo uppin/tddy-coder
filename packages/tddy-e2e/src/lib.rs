@@ -236,18 +236,24 @@ pub fn spawn_presenter_with_grpc_and_tui(
     (presenter_handle, port, shutdown, screen_buffer)
 }
 
-/// Spawn Presenter with view connection factory. Returns (presenter_handle, factory, shutdown).
+/// Spawn Presenter with view connection factory. Returns (presenter_handle, factory, shutdown, presenter_handle_for_rpc).
 /// Use the factory to create TerminalServiceVirtualTui for LiveKit or tonic terminal server for gRPC.
 #[cfg(feature = "livekit")]
+#[allow(clippy::type_complexity)]
 pub fn spawn_presenter_with_view_connection_factory(
     initial_prompt: Option<String>,
 ) -> (
     thread::JoinHandle<()>,
     Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>,
     Arc<AtomicBool>,
+    PresenterHandle,
 ) {
     let (event_tx, _) = broadcast::channel(256);
     let (intent_tx, intent_rx) = mpsc::channel();
+    let remote_handle = PresenterHandle {
+        event_tx: event_tx.clone(),
+        intent_tx: intent_tx.clone(),
+    };
     let output_dir =
         std::env::temp_dir().join(format!("tddy-e2e-livekit-tui-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&output_dir).unwrap();
@@ -281,7 +287,7 @@ pub fn spawn_presenter_with_view_connection_factory(
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = shutdown.clone();
     let presenter_for_thread = presenter.clone();
-    let presenter_handle = thread::spawn(move || {
+    let presenter_thread = thread::spawn(move || {
         for _ in 0..1000 {
             if shutdown_clone.load(Ordering::Relaxed) {
                 break;
@@ -298,7 +304,7 @@ pub fn spawn_presenter_with_view_connection_factory(
         }
     });
 
-    (presenter_handle, factory, shutdown)
+    (presenter_thread, factory, shutdown, remote_handle)
 }
 
 /// Spawn Presenter with per-connection VirtualTui (stream_terminal_io creates a VirtualTui per client).

@@ -66,6 +66,8 @@ pub enum AppMode {
 pub struct PresenterState {
     pub agent: String,
     pub model: String,
+    /// Stable id for this workflow session (remote observation, multi-session isolation).
+    pub session_id: String,
     pub mode: AppMode,
     pub current_goal: Option<String>,
     pub current_state: Option<String>,
@@ -116,6 +118,7 @@ mod tests {
         let state = PresenterState {
             agent: "test".to_string(),
             model: "test".to_string(),
+            session_id: String::new(),
             mode: AppMode::FeatureInput,
             current_goal: None,
             current_state: None,

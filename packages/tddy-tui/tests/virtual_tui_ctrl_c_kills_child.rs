@@ -27,6 +27,7 @@ fn running_presenter_state() -> PresenterState {
     PresenterState {
         agent: "test".to_string(),
         model: "test".to_string(),
+        session_id: String::new(),
         mode: AppMode::Running,
         current_goal: Some("test-goal".to_string()),
         current_state: None,
@@ -42,6 +43,8 @@ fn running_presenter_state() -> PresenterState {
 }
 
 #[test]
+// `try_wait()` reaps the child when it returns `Some`; clippy cannot see that.
+#[allow(clippy::zombie_processes)]
 fn virtual_tui_rpc_ctrl_c_byte_kills_tracked_child_like_local_tui() {
     clear_child_pid();
 
