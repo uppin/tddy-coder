@@ -28,7 +28,7 @@ use serde_json::json;
 use tddy_core::workflow::graph::ExecutionStatus;
 
 /// Minimal validate (subagent) output as JSON (tddy-tools submit format).
-const VALIDATE_REFACTOR_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 subagents completed. Reports written to plan-dir. Tests: 2 issues found. Production readiness: 1 blocker. Clean code score: 7/10.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
+const VALIDATE_REFACTOR_OUTPUT: &str = r#"{"goal":"validate","summary":"All 3 subagents completed. Reports written to plan-dir. Tests: 2 issues found. Production readiness: 1 blocker. Clean code score: 7/10.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true,"refactoring_plan":"\n# Refactoring Plan\n\n## Tasks\n\n- None required.\n"}"#;
 
 /// For run_goal_until_done(validate): validate -> refactor -> update-docs chain.
 const REFACTOR_OUTPUT: &str = r#"{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
@@ -283,7 +283,7 @@ async fn validate_response_has_validate_goal() {
     write_evaluation_report_to_plan_dir(&plan_dir);
     write_changeset_with_state(&plan_dir, "Evaluated", "sess-vr-renamed-goal");
 
-    let validate_output_with_plan = r#"{"goal":"validate","summary":"All 3 subagents completed. Reports and refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
+    let validate_output_with_plan = r#"{"goal":"validate","summary":"All 3 subagents completed. Reports and refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true,"refactoring_plan":"\n# Refactoring Plan\n\n## Tasks\n\n- None required.\n"}"#;
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(validate_output_with_plan);
@@ -330,7 +330,7 @@ async fn validate_produces_refactoring_plan() {
     write_evaluation_report_to_plan_dir(&plan_dir);
     write_changeset_with_state(&plan_dir, "Evaluated", "sess-vr-refactoring-plan");
 
-    let validate_output = r#"{"goal":"validate","summary":"All 3 subagents completed. Refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
+    let validate_output = r#"{"goal":"validate","summary":"All 3 subagents completed. Refactoring plan written.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true,"refactoring_plan":"\n# Refactoring Plan\n\n## Tasks\n\n- None required.\n"}"#;
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(validate_output);
@@ -363,6 +363,10 @@ async fn validate_produces_refactoring_plan() {
     assert!(
         output.refactoring_plan_written,
         "structured response must include refactoring_plan_written: true"
+    );
+    assert!(
+        output.refactoring_plan.is_some(),
+        "structured response must include refactoring_plan markdown"
     );
 
     let _ = std::fs::remove_dir_all(&plan_dir);

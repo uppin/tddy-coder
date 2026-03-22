@@ -35,11 +35,11 @@ pub const GREEN_JSON_SOME_FAIL: &str = r#"{"goal":"green","summary":"Implemented
 
 pub const EVALUATE_JSON: &str = r#"{"goal":"evaluate-changes","summary":"Evaluated. All criteria met.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"synced","items_updated":0,"items_added":0},"files_analyzed":[],"test_impact":{"tests_affected":0,"new_tests_needed":0},"changed_files":[],"affected_tests":[],"validity_assessment":"OK"}"#;
 
-pub const VALIDATE_JSON: &str = r#"{"goal":"validate","summary":"All 3 subagents completed.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
+pub const VALIDATE_JSON: &str = r#"{"goal":"validate","summary":"All 3 subagents completed.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true,"refactoring_plan":"\n# Refactoring Plan\n\n## Tasks\n\n- None required.\n"}"#;
 
 pub const REFACTOR_JSON: &str = r#"{"goal":"refactor","summary":"Completed. All tests passing.","tasks_completed":5,"tests_passing":true}"#;
 
 pub const UPDATE_DOCS_JSON: &str =
     r#"{"goal":"update-docs","summary":"Updated 2 docs.","docs_updated":2}"#;
 
-pub const VALIDATE_REFACTOR_JSON: &str = r#"{"goal":"validate","summary":"All 3 subagents completed.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
+pub const VALIDATE_REFACTOR_JSON: &str = r#"{"goal":"validate","summary":"All 3 subagents completed.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true,"refactoring_plan":"\n# Refactoring Plan\n\n## Tasks\n\n- None required.\n"}"#;

@@ -1,42 +1,13 @@
-# Create Pull Request
+# Create pull request
 
-Create a PR from the current branch's changes.
+Full workflow (branch rules, artifacts to exclude, `./dev`, `gh pr`): **`.cursor/commands/pr.md`**.
 
-## Process
+## Short process
 
-### 1. Branch Check
-
-- If on `main` or `master`, ask the user for a branch name and create it before proceeding.
-- If already on a feature branch, continue.
-
-### 2. Analyze Changes
-
-- Run `git status` and `git diff` to understand what has changed.
-- Run `git log main..HEAD` (or `master..HEAD`) to see all commits on this branch.
-- Identify which files are relevant to the feature and which are unrelated.
-
-### 3. Compose Commit (if needed)
-
-- If there are uncommitted changes, stage only the files relevant to the feature.
-- Do NOT include unrelated files, generated artifacts, or temporary files.
-- Write a clear commit message summarizing the changes.
-
-### 4. Verify Before Push
-
-- Run `cargo test` to make sure tests pass.
-- Run `cargo clippy -- -D warnings` to check for lint issues.
-- If tests fail, stop and inform the user. Do not push broken code.
-
-### 5. Push and Create PR
-
-- Push the branch to the remote: `git push -u origin <branch-name>`.
-- Create the PR using `gh pr create` with:
-  - A concise title (under 70 characters)
-  - A body with a summary of changes and test plan
-- Present the PR URL to the user.
-
-## Output
-
-- PR URL
-- Summary of what was included
-- Any files that were intentionally excluded and why
+1. **Branch**: On `master`/`main`, create `git checkout -b <name>` from updated `origin/master`; never push `master` to a random remote branch name.
+2. **Review**: `git status`, `git diff`; exclude agent scratch files (`.tddy-*-submit.json`, etc.) unless the user wants them.
+3. **Ask** if unrelated changes are mixed.
+4. **Verify**: `./dev cargo fmt --all`, `./dev cargo clippy -- -D warnings`, `./test` (see [AGENTS.md](../../AGENTS.md)). Fix failures; **never** `--no-verify`.
+5. **Commit** with Markdown body; **stage only PR-relevant files**.
+6. **Push**: `git push -u origin <branch>`.
+7. **PR**: `gh pr create` or use the compare URL Git prints; optional `xdg-open` / `open` for browser.

@@ -3,5 +3,6 @@
   "summary": "Completed validation and refactoring.",
   "tests_report_written": true,
   "prod_ready_report_written": true,
-  "clean_code_report_written": true
+  "clean_code_report_written": true,
+  "refactoring_plan": "\n# Refactoring Plan\n\n## Tasks\n\n- None required.\n"
 }

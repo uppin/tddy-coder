@@ -175,7 +175,7 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
     }
 
     fn validate_response(&self) -> InvokeResponse {
-        let json = r#"{"goal":"validate","summary":"Validation complete.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
+        let json = r#"{"goal":"validate","summary":"Validation complete.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true,"refactoring_plan":"\n# Refactoring Plan\n\n## Tasks\n\n- None required.\n"}"#;
         self.submit_and_respond("validate", json, None)
     }
 

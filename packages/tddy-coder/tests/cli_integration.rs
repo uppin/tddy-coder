@@ -650,7 +650,7 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
     const GREEN: &str = r#"{"goal":"green","summary":"All tests passing.","tests":[{"name":"t1","file":"test.rs","line":1,"status":"passing"}]}"#;
     const EVALUATE: &str =
         r#"{"goal":"evaluate-changes","summary":"Changes look good.","risk_level":"low"}"#;
-    const VALIDATE: &str = r#"{"goal":"validate","summary":"All subagents done.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
+    const VALIDATE: &str = r#"{"goal":"validate","summary":"All subagents done.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true,"refactoring_plan":"\n# Refactoring Plan\n\n## Tasks\n\n- None required.\n"}"#;
     const REFACTOR: &str = r#"{"goal":"refactor","summary":"Refactoring complete.","tasks_completed":3,"tests_passing":true}"#;
     const UPDATE_DOCS: &str =
         r#"{"goal":"update-docs","summary":"Documentation updated.","docs_updated":2}"#;

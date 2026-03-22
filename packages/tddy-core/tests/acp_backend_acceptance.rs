@@ -1,8 +1,13 @@
 //! Acceptance tests for ClaudeAcpBackend.
 //!
 //! These tests verify the ACP backend behavior using tddy-acp-stub as the agent.
-//! Run with: cargo test -p tddy-core acp_ --no-fail-fast -- --test-threads=1
-//! (sequential execution avoids TDDY_ACP_SCENARIO env var interference)
+//! The stub binary must exist at `target/debug/tddy-acp-stub` (or `.exe` on Windows).
+//! **`./verify` and `./test` build it automatically** (`cargo build -p tddy-acp-stub`).
+//! If you run `cargo test -p tddy-core` alone and see "tddy-acp-stub not built", run:
+//! `cargo build -p tddy-acp-stub` once, then re-run tests.
+//!
+//! Run with: `cargo test -p tddy-core acp_ --no-fail-fast -- --test-threads=1`
+//! (sequential execution avoids `TDDY_ACP_SCENARIO` env var interference)
 
 use std::path::PathBuf;
 

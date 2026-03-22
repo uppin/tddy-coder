@@ -1053,7 +1053,7 @@ pub struct ValidateSubagentsOutput {
     pub prod_ready_report_written: bool,
     pub clean_code_report_written: bool,
     pub refactoring_plan_written: bool,
-    /// Markdown body for `refactoring-plan.md` when included in `tddy-tools submit` JSON.
+    /// Markdown body for `refactoring-plan.md` from `tddy-tools submit` JSON (required by schema; empty omitted).
     pub refactoring_plan: Option<String>,
 }
 

@@ -1,68 +1,58 @@
 # Systematic Test Fixing
 
-Identify and fix failing tests methodically, one at a time.
+Identify and fix failing tests methodically, **one at a time**, with logging. Authoritative Cursor command (toolchain, Cypress, `./verify`): **`.cursor/commands/fix-tests.md`**.
 
 ## Process
 
 ### 1. Discover Failures
 
-- Run `cargo test` to get the full picture of failing tests.
-- If the output is too large, use `./verify` and read `.verify-result.txt`.
-- List all failing tests with their package and module.
+**Rust** (repo root):
+
+```bash
+./test
+```
+
+If output is hard to capture: `./verify` then read `.verify-result.txt` (see AGENTS.md).
+
+**Web (`packages/tddy-web`)**:
+
+```bash
+./dev bash -lc 'cd packages/tddy-web && bun test'
+./dev bun run cypress:component --filter tddy-web
+```
+
+List failing **package**, **file**, and **test name**.
 
 ### 2. Prioritize
 
-Order failing tests by dependency -- fix foundational/unit tests before integration tests that depend on them.
+Fix foundational unit tests before integration tests that depend on them.
 
 ### 3. Fix Each Test
 
-For each failing test, in order:
+For each failure, in order:
 
-**a. Isolate**: Run the single test with `cargo test -p <package> -- <test_name>` to get detailed output.
+**a. Isolate** — Run a **single** test or spec with verbose logging:
 
-**b. Diagnose root cause**: Determine if the failure is:
-- **Production code issue** -- the code has a bug and the test is correct.
-- **Test issue** -- the test has incorrect expectations, outdated assertions, or broken setup.
-- **Infrastructure issue** -- missing test fixtures, environment problems, etc.
+- Rust: `cargo test -p <package> <name> -- --exact --nocapture` with `RUST_LOG=debug` as needed.
+- Bun: `bun test path/to/file.test.ts`
+- Cypress: `bunx cypress run --component --spec cypress/component/Foo.cy.tsx` with `DEBUG=cypress:*` when needed.
 
-**c. Fix**:
-- For production code issues: use the Agent tool to delegate the fix, providing the failing test and root cause analysis.
-- For test issues: update the test to match current correct behavior. Never weaken assertions just to make tests pass -- if the expected behavior has genuinely changed, update the test; if not, fix the production code.
-- For infrastructure issues: fix the test setup/fixtures.
+**b. Diagnose** — Production bug vs incorrect/stale test vs infrastructure (fixtures, env, missing binary).
 
-**d. Validate alignment**: Ensure the fix follows testing practices (see CLAUDE.md):
-- No conditional logic in tests (no `if/else`, no match arms that skip assertions)
-- No try/catch workarounds
-- No test-specific branches in production code (`cfg!(test)`)
-- Tests are linear: setup, act, assert
+**c. Fix** — Correct production code or update the test to match **real** required behavior. Never weaken assertions just to pass.
 
-**e. Verify**: Run `cargo test -p <package> -- <test_name>` to confirm the fix.
+**d. Standards** — [docs/dev/guides/testing.md](../../docs/dev/guides/testing.md): no conditional skips, no try/catch “pass anyway”, no test-only production behavior branches.
+
+**e. Verify** — Re-run the same focused command, then widen.
 
 ### 4. Full Suite Verification
 
-After fixing all individual tests:
-- Run `cargo test` for the full suite.
-- Run `cargo clippy -- -D warnings`.
-
-## Output Format
-
-### Test-by-Test Diagnostics
-
-| # | Test | Package | Root Cause | Fix Applied | Status |
-|---|------|---------|------------|-------------|--------|
-| 1 | `test_name` | `tddy-core` | Brief cause | Brief fix | PASS/FAIL |
-
-### Final Results
-
-```
-<full cargo test output>
+```bash
+./test
 ```
 
-- Total: X tests
-- Passing: X
-- Still failing: X (with explanation for each)
+Web changes: full `bun test` and relevant Cypress run. Then `cargo clippy -- -D warnings` for Rust.
 
-### Notes
+## Output
 
-- Any tests that could not be fixed and need user input
-- Any production code changes that were made (for user review)
+Summarize each failure, root cause, fix, and final suite result. See `.cursor/commands/fix-tests.md` for a full report template.

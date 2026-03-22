@@ -1,36 +1,70 @@
 ---
-description:
-globs:
-alwaysApply: false
+description: Open a pull request from the current work—review diffs, commit only PR-relevant files, push branch, create PR link
 ---
-Users wants to open a PR from the changes in the current focus.
 
-You should:
-1. Analyze the current changes and compose the commit.
-2. Commit should only include relevant work. If there are some irrelevant functionalty changes, you should ask the user if the changes should be included to the commit.
-3. Add relevant files that are not added to git yet.
-4. Make a commit with summary of the changes. Markdown format should be used.
-5. Push the changes to a newly created remote branch.
-6. **CRITICAL** only include files that are relevant to the PR.
+## PR — Open a pull request from current focus
 
-## Working branch selection
+Prepare a clean commit (or commits), push to `origin`, and give the user a URL to open the PR. **Include only files that belong in the PR.**
 
-1. **If the user is in main/master branch**:
-   - **CRITICAL**: Create a new local branch from master first
-   - Switch to the new branch: `git checkout -b feature-branch-name`
-   - Commit changes to this new branch
-   - Push to remote with tracking: `git push -u origin feature-branch-name`
-   - **Why**: Never push master to a differently-named remote branch - it's error-prone and confusing
+## Before you change git state
 
-2. **If the user is in a different branch**, however not related to the current change:
-   - Ask the user if to use this branch or create a new one
+1. **`git status`** and **`git diff`** — understand every modified and untracked path.
+2. **Split by relevance** — production code, tests, lockfiles, and intentional doc/command updates belong together; **agent scratch artifacts** (e.g. `.tddy-*-submit.json`, `.tddy-red-phase-output.txt`, local `plan/` drafts) usually **must not** be committed unless the user explicitly wants them. **Never** commit secrets, tokens, or `.env`.
+3. If unrelated edits are mixed in the working tree, **ask the user** which paths to include before staging.
+4. **Do not use `git commit --no-verify`** — forbidden in this repo ([AGENTS.md](../../AGENTS.md)). If hooks fail, fix fmt/clippy/tests or the hook itself.
 
-3. **If the user has manually created the relevant branch**:
-   - Just use this branch as-is
+## Branch selection
 
-## Creation of the PR
+1. **On `main` or `master`** (this repo tracks **`master`** upstream):
+   - **Create a new branch** before committing: `git fetch origin` then `git checkout -b <meaningful-branch-name>` from the latest `origin/master` (or merge/rebase first if required).
+   - Do **not** push local `master` to a differently named remote branch as a substitute for branching.
 
-1. Always check git status if everything is added to commit as expected.
-2. Do not skip linting errors that are preventing commit. Fix them.
-3. After the changes are pushed to remote branch, the git command returns an URL to finish the PR creation.
-4. Open the user's browser window with the retrieved URL. In some systems `open <URL>` command is used.
+2. **Already on a feature branch** that matches the work:
+   - Use it as-is (prefer **rebase/merge** from `origin/master` if the branch is behind and the user wants it current).
+
+3. **On a branch unrelated to this change**:
+   - Ask whether to use it, create a new branch from `origin/master`, or move changes with `git stash` / cherry-pick.
+
+## Staging and commit
+
+1. **`git add`** only agreed paths — use `git add -p` when helpful for partial hunks.
+2. **Message**: use **Markdown** in the body (bullets, subsections). Subject line: imperative, ~72 chars. Describe *what* and *why*.
+3. Run checks before or after staging as appropriate:
+   - Rust: `./dev cargo fmt --all`, `./dev cargo clippy -- -D warnings`, `./test` (or `./verify` and read `.verify-result.txt`).
+   - Web (`packages/tddy-web`): `./dev bun run build --filter tddy-web`, `bun test`, Cypress if the change touches UI/tests.
+4. Resolve **lint errors** that block commit; do not “skip” with `--no-verify`.
+
+## Push
+
+```bash
+git push -u origin <branch-name>
+```
+
+If the branch is new on the remote, upstream `-u` avoids ambiguity.
+
+## PR creation URL
+
+After push, Git often prints a **compare URL** (`https://github.com/org/repo/compare/...`). If not:
+
+- **GitHub CLI** (if installed and authenticated): `gh pr create --fill` or `gh pr create --title "..." --body "..."`.
+- Otherwise give the user: `https://github.com/<org>/<repo>/compare/master...<branch>` (adjust default branch if not `master`).
+
+**Browser** (optional, ask in sandboxed environments):
+
+- macOS: `open <url>`
+- Linux: `xdg-open <url>` (or `gio open`)
+- Do not assume a display is available in CI/agent-only environments.
+
+## Checklist
+
+- [ ] Only PR-relevant paths staged; user consulted if mixed.
+- [ ] No secrets; no accidental agent-only artifacts.
+- [ ] Branch strategy matches rules above.
+- [ ] fmt / clippy / tests green (and web checks if applicable).
+- [ ] Commit message is clear Markdown.
+- [ ] Pushed with tracking; user has compare or `gh pr` URL.
+
+## Related
+
+- [pr-wrap.md](./pr-wrap.md) — validation workflow before merge
+- [AGENTS.md](../../AGENTS.md) — `./test`, `./verify`, Judgment Boundaries

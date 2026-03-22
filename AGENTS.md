@@ -33,9 +33,9 @@ With **direnv**: `direnv allow` once; the shell loads automatically when you `cd
 |--------|---------|
 | `./dev` | Enter nix dev shell with profile (persists across `nix gc`). With args: run command inside shell, e.g. `./dev cargo test` or `./dev echo "Hello"`. |
 | `./release` | Build optimized production binaries (tddy-coder, tddy-tools). Output: `target/release/tddy-coder`, `target/release/tddy-tools`. |
-| `./test` | Build tddy-coder + tddy-tools, run all tests. Writes output to `.verify-result.txt` (agent workaround for Cursor terminal capture). Usage: `./test` — all tests; `./test -p tddy-core` — one package; `./test -- test_name` — specific test. |
+| `./test` | Build tddy-coder + tddy-tools + **tddy-acp-stub** (needed by `tddy-core` ACP tests), run all tests. Writes output to `.verify-result.txt` (agent workaround for Cursor terminal capture). Usage: `./test` — all tests; `./test -p tddy-core` — one package; `./test -- test_name` — specific test. |
 | `./clean` | Remove stale Cargo build fingerprints, deps, incremental. Keeps newest per crate in `target/debug` and `target/release`. Frees disk space without full `cargo clean`. |
-| `./verify` | Run `cargo test` and write output to `.verify-result.txt`. Use when agent terminal capture fails; read that file for verification evidence. |
+| `./verify` | Run `cargo build -p tddy-acp-stub` then full `cargo test`; writes output to `.verify-result.txt`. Use when agent terminal capture fails; read that file for verification evidence. |
 
 ### Commands
 
@@ -46,7 +46,7 @@ All `./` scripts use nix dev shell via `--profile ./.nix-profile` for a consiste
 | Dev shell | `./dev` — enter nix dev shell with a GC-rooted profile. With args, runs the command inside the shell (e.g. `./dev cargo clippy`) |
 | Build | `cargo build` or `cargo build -p tddy-core` / `-p tddy-coder` |
 | Release | `./release` — optimized production build (output: `target/release/tddy-coder`, `target/release/tddy-tools`) |
-| Test | `./test` — builds tddy-coder + tddy-tools, then runs all tests (output also written to `.verify-result.txt`). Supports args: `./test -p tddy-core` or `./test -- test_name` |
+| Test | `./test` — builds tddy-coder + tddy-tools + tddy-acp-stub, then runs all tests (output also written to `.verify-result.txt`). Supports args: `./test -p tddy-core` or `./test -- test_name`. Plain `cargo test -p tddy-core` alone may require `cargo build -p tddy-acp-stub` first for ACP integration tests. |
 | Clean | `./clean` — removes stale Cargo build fingerprints from `target/debug/build` and `target/release/build`, keeping only the newest per crate |
 | Lint | `cargo clippy -- -D warnings` |
 | Format | `cargo fmt` |

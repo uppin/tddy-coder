@@ -25,6 +25,8 @@ You MUST:
 5. When done, submit your output by calling:
   tddy-tools submit --goal validate --data '<your JSON output>'
 
+The submit JSON **must** include a non-empty `refactoring_plan` string (Markdown). That body is written to `refactoring-plan.md` for the next refactor goal. If no refactors are needed, use a short no-op plan (for example a single task like "None — validation reports only").
+
 If you need to ask the user clarification questions, call:
   tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
 The call will block until the user answers. The response contains the user's answers.
@@ -71,6 +73,10 @@ mod tests {
         assert!(
             prompt.contains("tddy-tools submit") && prompt.contains("--goal validate"),
             "system prompt must instruct agent to use tddy-tools submit --goal validate"
+        );
+        assert!(
+            prompt.contains("refactoring_plan") && prompt.contains("refactoring-plan.md"),
+            "system prompt must require refactoring_plan markdown for refactoring-plan.md"
         );
     }
 }
