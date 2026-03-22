@@ -230,7 +230,7 @@ export default defineConfig({
           return null;
         },
 
-        async startEchoTerminal() {
+        async startEchoTerminal(options?: { roomName?: string } | null) {
           const wsUrl = process.env.LIVEKIT_TESTKIT_WS_URL;
           if (!wsUrl || wsUrl.trim() === "") {
             throw new Error(
@@ -238,12 +238,14 @@ export default defineConfig({
             );
           }
 
+          const room = options?.roomName ?? ROOM_NAME;
+
           const serverToken = new AccessToken(DEV_API_KEY, DEV_API_SECRET, {
             identity: SERVER_IDENTITY,
           });
           serverToken.addGrant({
             roomJoin: true,
-            room: ROOM_NAME,
+            room,
             canPublish: true,
             canSubscribe: true,
           });
@@ -274,7 +276,7 @@ export default defineConfig({
             const repoRoot = path.resolve(__dirname, "../..");
             echoTerminalProcess = spawn(
               binaryPath,
-              ["--url", wsUrl, "--token", token, "--room", ROOM_NAME],
+              ["--url", wsUrl, "--token", token, "--room", room],
               {
                 stdio: ["ignore", "pipe", "pipe"],
                 cwd: repoRoot,
@@ -305,7 +307,7 @@ export default defineConfig({
                 });
                 clientToken.addGrant({
                   roomJoin: true,
-                  room: ROOM_NAME,
+                  room,
                   canPublish: true,
                   canSubscribe: true,
                 });
@@ -313,7 +315,7 @@ export default defineConfig({
                   resolve({
                     url: wsUrl,
                     clientToken: clientJwt,
-                    roomName: ROOM_NAME,
+                    roomName: room,
                     echoTerminalLogPath: echoLogPath,
                   });
                 });

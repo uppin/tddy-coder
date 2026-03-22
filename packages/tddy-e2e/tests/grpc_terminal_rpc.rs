@@ -5,17 +5,212 @@
 //!
 //! Assertions are 1:1 with livekit_terminal_rpc tests — same phases, same strictness.
 
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use std::sync::atomic::Ordering;
 use strip_ansi_escapes::strip;
+
 use tddy_e2e::rpc_frontend::encode_resize;
-use tddy_e2e::{connect_terminal_grpc, spawn_presenter_with_terminal_service};
+use tddy_e2e::{
+    connect_terminal_grpc, spawn_presenter_with_terminal_service, spawn_presenter_with_view_factory,
+};
 use tddy_service::proto::terminal::TerminalInput;
+use tddy_service::{start_virtual_tui_session, VirtualTuiSession};
 use vt100::Parser;
 
 mod keys {
     pub const ENTER: &[u8] = b"\r";
     pub const DOWN: &[u8] = b"\x1b[B";
+}
+
+static LARGE_ECHO_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+const LARGE_ECHO_CHAR_CAP: usize = 1_000;
+const LARGE_ECHO_SEGMENTS: usize = 10;
+
+/// Wait for VirtualTui / RPC to catch up: input can be queued ahead of rendered output.
+const LARGE_ECHO_VT100_SYNC_TIMEOUT: Duration = Duration::from_secs(120);
+/// Full VT100 parse + binary search each iteration is expensive; throttle checks.
+const LARGE_ECHO_VT100_SYNC_MIN_INTERVAL: Duration = Duration::from_millis(400);
+const LARGE_ECHO_VT100_SYNC_MIN_NEW_BYTES: usize = 4096;
+const LARGE_ECHO_VT100_SYNC_LOOP_SLEEP: Duration = Duration::from_millis(50);
+
+/// Builds a single feature string of exactly `total_len` Unicode scalars. Each segment starts
+/// with `#SEG-<i>:` followed by `a` padding so the total length matches.
+fn build_large_echo_segmented_payload(
+    total_len: usize,
+    num_segments: usize,
+) -> (String, Vec<String>) {
+    assert!(num_segments > 0);
+    let headers: Vec<String> = (0..num_segments).map(|i| format!("#SEG-{}:", i)).collect();
+    let header_chars: usize = headers.iter().map(|s| s.chars().count()).sum();
+    assert!(
+        header_chars <= total_len,
+        "segment headers exceed total_len={} (headers use {} chars, {} segments)",
+        total_len,
+        header_chars,
+        num_segments
+    );
+    let body_total = total_len - header_chars;
+    let base = body_total / num_segments;
+    let rem = body_total % num_segments;
+    let mut segments: Vec<String> = Vec::with_capacity(num_segments);
+    for (i, header) in headers.iter().enumerate() {
+        let body_len = base + if i < rem { 1 } else { 0 };
+        let mut seg = header.clone();
+        seg.extend(std::iter::repeat_n('a', body_len));
+        segments.push(seg);
+    }
+    let full: String = segments.iter().cloned().collect();
+    assert_eq!(full.chars().count(), total_len);
+    (full, segments)
+}
+
+fn vt100_compact_screen(all_output: &[u8], rows: u16, cols: u16) -> String {
+    let mut parser = Parser::new(rows, cols, 0);
+    parser.process(all_output);
+    let screen = parser.screen().contents();
+    screen.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+fn longest_echo_prefix_len_in_compact(compact: &str, expected_no_ws: &str) -> usize {
+    let mut lo = 0usize;
+    let mut hi = expected_no_ws.len();
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if compact.contains(&expected_no_ws[..mid]) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
+fn segmented_echo_complete_in_vt100(
+    all_output: &[u8],
+    expected_full: &str,
+    rows: u16,
+    cols: u16,
+) -> bool {
+    let compact = vt100_compact_screen(all_output, rows, cols);
+    let expected_no_ws: String = expected_full
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    longest_echo_prefix_len_in_compact(&compact, &expected_no_ws) == expected_no_ws.len()
+}
+
+/// Eventually wait until the full expected echo appears in the VT100 parse, or timeout.
+/// Throttles expensive `segmented_echo_complete_in_vt100` calls (interval and/or byte growth).
+async fn eventually_segmented_echo_in_vt100_buffer(
+    buf: &Arc<Mutex<Vec<u8>>>,
+    expected_full: &str,
+    rows: u16,
+    cols: u16,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + LARGE_ECHO_VT100_SYNC_TIMEOUT;
+    let mut last_check_at = tokio::time::Instant::now() - LARGE_ECHO_VT100_SYNC_MIN_INTERVAL;
+    let mut last_check_len = 0usize;
+
+    while tokio::time::Instant::now() < deadline {
+        let ok = {
+            let g = buf.lock().expect("echo sync buffer");
+            let len = g.len();
+            let due = last_check_at.elapsed() >= LARGE_ECHO_VT100_SYNC_MIN_INTERVAL
+                || len.saturating_sub(last_check_len) >= LARGE_ECHO_VT100_SYNC_MIN_NEW_BYTES;
+            if due {
+                last_check_at = tokio::time::Instant::now();
+                last_check_len = len;
+                segmented_echo_complete_in_vt100(&g, expected_full, rows, cols)
+            } else {
+                false
+            }
+        };
+        if ok {
+            return true;
+        }
+        tokio::time::sleep(LARGE_ECHO_VT100_SYNC_LOOP_SLEEP).await;
+    }
+
+    let g = buf.lock().expect("echo sync buffer");
+    segmented_echo_complete_in_vt100(&g, expected_full, rows, cols)
+}
+
+fn assert_segmented_echo_in_vt100(
+    all_output: &[u8],
+    expected_full: &str,
+    segments: &[String],
+    rows: u16,
+    cols: u16,
+) {
+    let compact = vt100_compact_screen(all_output, rows, cols);
+    let expected_no_ws: String = expected_full
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    let mut seg_full_in_compact: Vec<bool> = Vec::with_capacity(segments.len());
+    let mut seg_marker_in_compact: Vec<bool> = Vec::with_capacity(segments.len());
+    for (i, seg) in segments.iter().enumerate() {
+        let seg_no_ws: String = seg.chars().filter(|c| !c.is_whitespace()).collect();
+        seg_full_in_compact.push(compact.contains(&seg_no_ws));
+        let marker = format!("#SEG-{}:", i);
+        seg_marker_in_compact.push(compact.contains(marker.as_str()));
+    }
+
+    let lo = longest_echo_prefix_len_in_compact(&compact, &expected_no_ws);
+
+    let missing_full: Vec<usize> = seg_full_in_compact
+        .iter()
+        .enumerate()
+        .filter(|(_, ok)| !**ok)
+        .map(|(i, _)| i)
+        .collect();
+    let missing_markers: Vec<usize> = seg_marker_in_compact
+        .iter()
+        .enumerate()
+        .filter(|(_, ok)| !**ok)
+        .map(|(i, _)| i)
+        .collect();
+
+    let last_idx = segments.len().saturating_sub(1);
+    let region_hint = if missing_full.is_empty() {
+        "all segment bodies visible as substrings"
+    } else if missing_full.contains(&0) {
+        "leading: segment 0 missing (start of echoed input not present as substring)"
+    } else if missing_full.len() == 1 && missing_full[0] == last_idx {
+        if seg_marker_in_compact[last_idx] && !seg_full_in_compact[last_idx] {
+            "trailing: last #SEG marker is present but the tail of that segment (after the marker) is not present as one contiguous substring"
+        } else {
+            "trailing: only the last segment missing (marker and body)"
+        }
+    } else if missing_full.iter().all(|&i| i > 0) && missing_full.iter().any(|&i| i < last_idx) {
+        "middle: some interior segment(s) missing (first missing index > 0)"
+    } else {
+        "mixed: see missing_full indices vs segment count"
+    };
+
+    assert_eq!(
+        lo,
+        expected_no_ws.len(),
+        "vt100 contiguous echo check failed.\n\
+         longest prefix (no ws) found: {} of {}\n\
+         per-segment full body in compact: {:?} (indices 0..{})\n\
+         per-segment #SEG-n: marker in compact: {:?}\n\
+         segments missing as full substring: {:?}\n\
+         markers missing: {:?}\n\
+         region hint: {}\n",
+        lo,
+        expected_no_ws.len(),
+        seg_full_in_compact,
+        segments.len(),
+        seg_marker_in_compact,
+        missing_full,
+        missing_markers,
+        region_hint
+    );
 }
 
 fn ansi_to_text(bytes: &[u8]) -> String {
@@ -613,6 +808,151 @@ async fn grpc_resize_shrink_grow_shows_pgup_pgdn_scroll_exactly_once() -> anyhow
         count,
         visible
     );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[allow(clippy::await_holding_lock)]
+async fn grpc_virtual_tui_rpc_large_echo_char_by_char() -> anyhow::Result<()> {
+    let _ = env_logger::builder().is_test(true).try_init();
+
+    const COLS: u16 = 80;
+    const ROWS: u16 = 10000;
+    let max_height = (ROWS as usize / 3).max(1);
+    let max_feature_len = max_height.saturating_mul(COLS as usize).saturating_sub(2);
+    let feature_len = max_feature_len.min(LARGE_ECHO_CHAR_CAP);
+    let (expected, segments) = build_large_echo_segmented_payload(feature_len, LARGE_ECHO_SEGMENTS);
+
+    let all_output = {
+        let _lock = LARGE_ECHO_TEST_LOCK
+            .lock()
+            .expect("large echo test serialization");
+
+        let (_handle, port, shutdown) = spawn_presenter_with_terminal_service(None);
+
+        let mut client = connect_terminal_grpc(port).await?;
+
+        let (input_tx, input_rx) = tokio::sync::mpsc::channel::<TerminalInput>(1024);
+        let input_stream = tokio_stream::wrappers::ReceiverStream::new(input_rx);
+
+        let mut stream = client
+            .stream_terminal_io(tonic::Request::new(input_stream))
+            .await?
+            .into_inner();
+
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let buf_for_reader = Arc::clone(&buf);
+        let reader = tokio::spawn(async move {
+            loop {
+                match stream.message().await {
+                    Ok(Some(o)) => buf_for_reader
+                        .lock()
+                        .expect("terminal output buffer")
+                        .extend_from_slice(&o.data),
+                    Ok(None) => break,
+                    Err(e) => return Err(anyhow::anyhow!("terminal stream: {}", e)),
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        });
+
+        input_tx
+            .send(TerminalInput {
+                data: encode_resize(COLS, ROWS),
+            })
+            .await?;
+        input_tx.send(TerminalInput { data: vec![] }).await?;
+        for byte in expected.as_bytes() {
+            input_tx.send(TerminalInput { data: vec![*byte] }).await?;
+        }
+
+        eventually_segmented_echo_in_vt100_buffer(&buf, expected.as_str(), ROWS, COLS).await;
+
+        drop(input_tx);
+        shutdown.store(true, Ordering::Relaxed);
+
+        reader.await??;
+
+        let all_output = buf.lock().expect("terminal output buffer").clone();
+        all_output
+    };
+
+    assert_segmented_echo_in_vt100(&all_output, &expected, &segments, ROWS, COLS);
+
+    Ok(())
+}
+
+/// Same long echo and vt100 contiguous-prefix check as
+/// [`grpc_virtual_tui_rpc_large_echo_char_by_char`], but drives
+/// [`tddy_service::start_virtual_tui_session`] input/output channels directly (no tonic RPC).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[allow(clippy::await_holding_lock)]
+async fn virtual_tui_large_echo_char_by_char_direct_vt100() -> anyhow::Result<()> {
+    const COLS: u16 = 80;
+    const ROWS: u16 = 10000;
+    let max_height = (ROWS as usize / 3).max(1);
+    let max_feature_len = max_height.saturating_mul(COLS as usize).saturating_sub(2);
+    let feature_len = max_feature_len.min(LARGE_ECHO_CHAR_CAP);
+    let (expected, segments) = build_large_echo_segmented_payload(feature_len, LARGE_ECHO_SEGMENTS);
+
+    let all_output = {
+        let _lock = LARGE_ECHO_TEST_LOCK
+            .lock()
+            .expect("large echo test serialization");
+
+        let (_presenter_handle, factory, presenter_shutdown) =
+            spawn_presenter_with_view_factory(None);
+
+        let Some(session) = start_virtual_tui_session(&*factory, false) else {
+            anyhow::bail!("connect_view / start_virtual_tui_session");
+        };
+        let VirtualTuiSession {
+            input_tx,
+            output_rx,
+            shutdown: vt_shutdown,
+        } = session;
+
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let buf_for_reader = Arc::clone(&buf);
+        let reader = tokio::spawn(async move {
+            let mut rx = output_rx;
+            while let Some(chunk) = rx.recv().await {
+                buf_for_reader
+                    .lock()
+                    .expect("virtual tui output buffer")
+                    .extend_from_slice(&chunk);
+            }
+        });
+
+        input_tx
+            .send(encode_resize(COLS, ROWS))
+            .await
+            .map_err(|e| anyhow::anyhow!("input_tx resize: {}", e))?;
+        input_tx
+            .send(vec![])
+            .await
+            .map_err(|e| anyhow::anyhow!("input_tx empty: {}", e))?;
+        for byte in expected.as_bytes() {
+            input_tx
+                .send(vec![*byte])
+                .await
+                .map_err(|e| anyhow::anyhow!("input_tx byte: {}", e))?;
+        }
+
+        eventually_segmented_echo_in_vt100_buffer(&buf, expected.as_str(), ROWS, COLS).await;
+
+        drop(input_tx);
+        vt_shutdown.store(true, Ordering::Relaxed);
+        presenter_shutdown.store(true, Ordering::Relaxed);
+
+        reader.await?;
+
+        let all_output = buf.lock().expect("virtual tui output buffer").clone();
+        all_output
+    };
+
+    assert_segmented_echo_in_vt100(&all_output, &expected, &segments, ROWS, COLS);
 
     Ok(())
 }

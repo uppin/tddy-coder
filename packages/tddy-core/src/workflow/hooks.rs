@@ -49,6 +49,7 @@ pub trait RunnerHooks: Send + Sync {
         None
     }
 
-    /// Called when a task fails. Use for logging or error reporting.
-    fn on_error(&self, task_id: &str, error: &(dyn Error + Send + Sync));
+    /// Called when a task fails. Use for logging, error reporting, or persisting terminal state
+    /// (e.g. `Failed` in `changeset.yaml`).
+    fn on_error(&self, task_id: &str, context: &Context, error: &(dyn Error + Send + Sync));
 }

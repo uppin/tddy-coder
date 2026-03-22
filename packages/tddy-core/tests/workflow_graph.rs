@@ -649,7 +649,12 @@ impl RunnerHooks for RecordHooks {
         Ok(())
     }
 
-    fn on_error(&self, task_id: &str, _error: &(dyn std::error::Error + Send + Sync)) {
+    fn on_error(
+        &self,
+        task_id: &str,
+        _context: &tddy_core::workflow::context::Context,
+        _error: &(dyn std::error::Error + Send + Sync),
+    ) {
         self.calls
             .lock()
             .unwrap()
@@ -717,7 +722,12 @@ impl RunnerHooks for ElicitationHooks {
         }
     }
 
-    fn on_error(&self, task_id: &str, _error: &(dyn std::error::Error + Send + Sync)) {
+    fn on_error(
+        &self,
+        task_id: &str,
+        _context: &tddy_core::workflow::context::Context,
+        _error: &(dyn std::error::Error + Send + Sync),
+    ) {
         self.calls
             .lock()
             .unwrap()
@@ -746,7 +756,13 @@ impl RunnerHooks for FailBeforeHooks {
         Ok(())
     }
 
-    fn on_error(&self, _task_id: &str, _error: &(dyn std::error::Error + Send + Sync)) {}
+    fn on_error(
+        &self,
+        _task_id: &str,
+        _context: &tddy_core::workflow::context::Context,
+        _error: &(dyn std::error::Error + Send + Sync),
+    ) {
+    }
 }
 
 /// FlowRunner with hooks: before_task and after_task called in correct order.

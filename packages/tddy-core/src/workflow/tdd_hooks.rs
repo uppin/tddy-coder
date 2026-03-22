@@ -796,7 +796,27 @@ impl RunnerHooks for TddWorkflowHooks {
         Some(ElicitationEvent::PlanApproval { prd_content })
     }
 
-    fn on_error(&self, _task_id: &str, _error: &(dyn Error + Send + Sync)) {
-        // Logging can be added when integrating with TUI
+    fn on_error(&self, _task_id: &str, context: &Context, error: &(dyn Error + Send + Sync)) {
+        log::error!("[tddy-core] workflow task failed: {}", error);
+        let plan_dir: Option<PathBuf> = context
+            .get_sync("plan_dir")
+            .or_else(|| context.get_sync("output_dir"));
+        let Some(ref dir) = plan_dir else {
+            return;
+        };
+        let Ok(mut cs) = read_changeset(dir) else {
+            return;
+        };
+        let from = cs.state.current.clone();
+        update_state(&mut cs, "Failed");
+        if write_changeset(dir, &cs).is_err() {
+            return;
+        }
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.send(WorkflowEvent::StateChange {
+                from,
+                to: "Failed".to_string(),
+            });
+        }
     }
 }

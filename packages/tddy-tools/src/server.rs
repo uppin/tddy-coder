@@ -9,6 +9,24 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::path::PathBuf;
 
+/// Unix socket for relaying approval prompts to the tddy-coder TUI. In `cfg(test)` builds this is
+/// disabled unless `TDDY_TOOLS_TEST_ALLOW_SOCKET=1`, so unit tests never hit a live session when
+/// the parent shell leaked `TDDY_SOCKET`.
+fn permission_relay_socket_path() -> Option<PathBuf> {
+    #[cfg(test)]
+    {
+        if std::env::var_os("TDDY_TOOLS_TEST_ALLOW_SOCKET").is_some() {
+            std::env::var_os("TDDY_SOCKET").map(PathBuf::from)
+        } else {
+            None
+        }
+    }
+    #[cfg(not(test))]
+    {
+        std::env::var_os("TDDY_SOCKET").map(PathBuf::from)
+    }
+}
+
 /// Parameters for the approval_prompt tool (Claude Code permission-prompt-tool format).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ApprovalPromptInput {
@@ -28,7 +46,7 @@ pub struct PermissionServer {
 
 impl PermissionServer {
     pub fn new() -> Self {
-        let socket_path = std::env::var_os("TDDY_SOCKET").map(PathBuf::from);
+        let socket_path = permission_relay_socket_path();
         Self {
             tool_router: Self::tool_router(),
             socket_path,
