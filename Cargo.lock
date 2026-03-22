@@ -5615,6 +5615,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-tui",
+ "tddy-workflow-recipes",
  "tokio",
  "tokio-stream",
  "tonic 0.12.3",
@@ -5726,6 +5727,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-tui",
+ "tddy-workflow-recipes",
  "termwright",
  "tokio",
  "tokio-stream",
@@ -5748,6 +5750,23 @@ dependencies = [
  "tddy-service",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "tddy-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "async-trait",
+ "chrono",
+ "log",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
+ "tddy-core",
+ "tddy-workflow-recipes",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -5809,6 +5828,7 @@ dependencies = [
  "tddy-core",
  "tddy-rpc",
  "tddy-tui",
+ "tddy-workflow-recipes",
  "tokio",
  "tokio-stream",
  "tonic 0.12.3",
@@ -5848,6 +5868,21 @@ dependencies = [
  "tddy-core",
  "tokio",
  "tui-markdown",
+]
+
+[[package]]
+name = "tddy-workflow-recipes"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tddy-core",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

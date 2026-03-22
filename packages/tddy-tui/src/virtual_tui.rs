@@ -42,6 +42,7 @@ pub fn run_virtual_tui(
     thread::spawn(move || {
         let mut state = conn.state_snapshot;
         let mut view = TuiView::new();
+        view.on_mode_changed(&state.mode);
         let mut input_buf: Vec<u8> = Vec::new();
 
         // Collect each draw()'s raw ANSI output into a buffer so we can diff
@@ -365,6 +366,12 @@ fn process_virtual_tui_input_chunk(
                         *total_keys_parsed
                     );
                 }
+            }
+            if matches!(state.mode, AppMode::Select { .. })
+                && matches!(key.code, KeyCode::Up | KeyCode::Down)
+            {
+                let idx = view.view_state().select_selected;
+                let _ = intent_tx.send(UserIntent::SelectHighlightChanged(idx));
             }
             *updated = true;
         } else if let Some(intent) = key_event_to_intent(key, &state.mode, view.view_state()) {
@@ -904,8 +911,7 @@ mod tests {
 
         let backend = TestBackend::new(COLS, ROWS);
         let viewport = Viewport::Fixed(ratatui::layout::Rect::new(0, 0, COLS, ROWS));
-        let mut terminal =
-            Terminal::with_options(backend, TerminalOptions { viewport }).unwrap();
+        let mut terminal = Terminal::with_options(backend, TerminalOptions { viewport }).unwrap();
 
         let state = PresenterState {
             agent: String::new(),

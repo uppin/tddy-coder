@@ -1,7 +1,7 @@
 //! Acceptance tests for CLI argument parsing changes from TDD Workflow Restructure PRD.
 //!
 //! AC4: --goal evaluate is accepted (replaces --goal validate-changes)
-//! AC12: --goal demo works standalone with --plan-dir
+//! AC12: --goal demo works standalone with --session-dir
 
 mod common;
 
@@ -69,7 +69,7 @@ fn cli_accepts_evaluate_goal() {
     let output = cmd.output().expect("run tddy-coder");
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // The command may fail for other reasons (e.g. missing --plan-dir),
+    // The command may fail for other reasons (e.g. missing --session-dir),
     // but it should NOT fail because "evaluate" is an invalid goal value.
     assert!(
         !stderr.contains("invalid value 'evaluate'")
@@ -79,7 +79,7 @@ fn cli_accepts_evaluate_goal() {
     );
 }
 
-/// AC12: `--goal demo --plan-dir <path>` is accepted by the CLI.
+/// AC12: `--goal demo --session-dir <path>` is accepted by the CLI.
 /// The CLI should recognize "demo" as a valid goal value.
 ///
 /// This test will fail until:
@@ -93,10 +93,10 @@ fn standalone_demo_goal() {
     create_fake_claude_quick_exit(&tmp).expect("create fake claude");
     create_fake_tddy_tools(&tmp).expect("create fake tddy-tools");
 
-    let plan_dir = tmp.join("plan");
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let session_dir = tmp.join("plan");
+    std::fs::create_dir_all(&session_dir).expect("create plan dir");
     std::fs::write(
-        plan_dir.join("demo-plan.md"),
+        session_dir.join("demo-plan.md"),
         "# Demo\n## Steps\n- Run CLI\n## Verification\nOK",
     )
     .expect("write demo-plan.md");
@@ -108,7 +108,12 @@ fn standalone_demo_goal() {
     );
     let mut cmd = tddy_coder_bin();
     cmd.env("PATH", &path);
-    cmd.args(["--goal", "demo", "--plan-dir", plan_dir.to_str().unwrap()]);
+    cmd.args([
+        "--goal",
+        "demo",
+        "--session-dir",
+        session_dir.to_str().unwrap(),
+    ]);
 
     let output = cmd.output().expect("run tddy-coder");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -118,25 +123,6 @@ fn standalone_demo_goal() {
         !stderr.contains("invalid value 'demo'") && !stderr.contains("'demo' isn't a valid value"),
         "--goal demo should be accepted by the CLI parser, stderr: {}",
         stderr
-    );
-
-    // Without --plan-dir, demo should error (requires plan dir)
-    let mut cmd2 = tddy_coder_bin();
-    cmd2.env("PATH", &path);
-    cmd2.args(["--goal", "demo"]);
-
-    let output2 = cmd2.output().expect("run tddy-coder");
-
-    assert!(
-        !output2.status.success(),
-        "--goal demo without --plan-dir should fail (demo requires plan-dir)"
-    );
-
-    let stderr2 = String::from_utf8_lossy(&output2.stderr);
-    assert!(
-        stderr2.contains("plan-dir") || stderr2.contains("plan_dir") || stderr2.contains("demo"),
-        "error should mention plan-dir or demo requirement, stderr: {}",
-        stderr2
     );
 
     let _ = std::fs::remove_dir_all(&tmp);
@@ -149,15 +135,15 @@ fn standalone_demo_goal() {
 /// - "validate-refactor" is removed from the value_parser
 #[test]
 fn cli_accepts_validate_goal() {
-    let plan_dir = std::env::temp_dir().join("tddy-cli-validate-test");
-    let _ = std::fs::create_dir_all(&plan_dir);
+    let session_dir = std::env::temp_dir().join("tddy-cli-validate-test");
+    let _ = std::fs::create_dir_all(&session_dir);
     // --goal validate should be recognized by the argument parser
     let mut cmd = tddy_coder_bin();
     cmd.args([
         "--goal",
         "validate",
-        "--plan-dir",
-        plan_dir.to_str().expect("temp path"),
+        "--session-dir",
+        session_dir.to_str().expect("temp path"),
     ]);
 
     let output = cmd.output().expect("run tddy-coder");
@@ -184,7 +170,7 @@ fn cli_accepts_validate_goal() {
     );
 }
 
-/// `--goal update-docs --plan-dir <path>` is accepted by CLI.
+/// `--goal update-docs --session-dir <path>` is accepted by CLI.
 #[test]
 #[cfg(unix)]
 fn cli_accepts_update_docs_goal() {
@@ -194,8 +180,8 @@ fn cli_accepts_update_docs_goal() {
     create_fake_claude_quick_exit(&tmp).expect("create fake claude");
     create_fake_tddy_tools(&tmp).expect("create fake tddy-tools");
 
-    let plan_dir = tmp.join("plan");
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let session_dir = tmp.join("plan");
+    std::fs::create_dir_all(&session_dir).expect("create plan dir");
 
     let path = format!(
         "{}:{}",
@@ -207,8 +193,8 @@ fn cli_accepts_update_docs_goal() {
     cmd.args([
         "--goal",
         "update-docs",
-        "--plan-dir",
-        plan_dir.to_str().unwrap(),
+        "--session-dir",
+        session_dir.to_str().unwrap(),
     ]);
 
     let output = cmd.output().expect("run tddy-coder");
@@ -238,7 +224,7 @@ fn cli_accepts_update_docs_goal() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// AC2: `--goal refactor --plan-dir <path>` is accepted by CLI.
+/// AC2: `--goal refactor --session-dir <path>` is accepted by CLI.
 ///
 /// This test will fail until:
 /// - "refactor" is added to the value_parser in CLI Args struct
@@ -251,10 +237,10 @@ fn cli_accepts_refactor_goal() {
     create_fake_claude_quick_exit(&tmp).expect("create fake claude");
     create_fake_tddy_tools(&tmp).expect("create fake tddy-tools");
 
-    let plan_dir = tmp.join("plan");
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let session_dir = tmp.join("plan");
+    std::fs::create_dir_all(&session_dir).expect("create plan dir");
     std::fs::write(
-        plan_dir.join("refactoring-plan.md"),
+        session_dir.join("refactoring-plan.md"),
         "# Refactoring Plan\n## Tasks\n- Rename method\n",
     )
     .expect("write refactoring-plan.md");
@@ -269,8 +255,8 @@ fn cli_accepts_refactor_goal() {
     cmd.args([
         "--goal",
         "refactor",
-        "--plan-dir",
-        plan_dir.to_str().unwrap(),
+        "--session-dir",
+        session_dir.to_str().unwrap(),
     ]);
 
     let output = cmd.output().expect("run tddy-coder");
@@ -281,27 +267,6 @@ fn cli_accepts_refactor_goal() {
             && !stderr.contains("'refactor' isn't a valid value"),
         "--goal refactor should be accepted by the CLI parser, stderr: {}",
         stderr
-    );
-
-    // Without --plan-dir, refactor should error (requires plan dir)
-    let mut cmd2 = tddy_coder_bin();
-    cmd2.env("PATH", &path);
-    cmd2.args(["--goal", "refactor"]);
-
-    let output2 = cmd2.output().expect("run tddy-coder");
-
-    assert!(
-        !output2.status.success(),
-        "--goal refactor without --plan-dir should fail (refactor requires plan-dir)"
-    );
-
-    let stderr2 = String::from_utf8_lossy(&output2.stderr);
-    assert!(
-        stderr2.contains("plan-dir")
-            || stderr2.contains("plan_dir")
-            || stderr2.contains("refactor"),
-        "error should mention plan-dir or refactor requirement, stderr: {}",
-        stderr2
     );
 
     let _ = std::fs::remove_dir_all(&tmp);

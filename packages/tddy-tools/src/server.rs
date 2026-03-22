@@ -53,11 +53,11 @@ impl PermissionServer {
         }
     }
 
-    /// Allowed dirs from TDDY_PLAN_DIR and TDDY_REPO_DIR (canonicalized).
+    /// Allowed dirs from TDDY_SESSION_DIR and TDDY_REPO_DIR (canonicalized).
     fn allowed_dirs() -> Vec<PathBuf> {
-        let plan_dir = std::env::var_os("TDDY_PLAN_DIR").map(PathBuf::from);
+        let session_dir = std::env::var_os("TDDY_SESSION_DIR").map(PathBuf::from);
         let repo_dir = std::env::var_os("TDDY_REPO_DIR").map(PathBuf::from);
-        [plan_dir, repo_dir]
+        [session_dir, repo_dir]
             .into_iter()
             .flatten()
             .filter_map(|p| std::fs::canonicalize(&p).ok())
@@ -95,7 +95,7 @@ impl PermissionServer {
             .unwrap_or(false)
     }
 
-    /// True if all absolute paths in the command are under TDDY_PLAN_DIR or TDDY_REPO_DIR.
+    /// True if all absolute paths in the command are under TDDY_SESSION_DIR or TDDY_REPO_DIR.
     fn paths_in_command_all_allowed(command: &str) -> bool {
         let allowed = Self::allowed_dirs();
         if allowed.is_empty() {
@@ -147,7 +147,7 @@ impl PermissionServer {
     }
 
     /// Decide allow/deny. Bash(tddy-tools *) and mcp__tddy-tools__* are always allowed.
-    /// Bash commands that only reference paths under TDDY_PLAN_DIR or TDDY_REPO_DIR are pre-allowed.
+    /// Bash commands that only reference paths under TDDY_SESSION_DIR or TDDY_REPO_DIR are pre-allowed.
     /// For other tools: route through TDDY_SOCKET to TUI if available, else deny.
     ///
     /// Claude Code permission-prompt-tool expects allow responses to include `updatedInput` (the

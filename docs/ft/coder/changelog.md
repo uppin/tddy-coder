@@ -161,7 +161,7 @@ Release note history for the Coder product area.
 - **New goal**: `update-docs` runs after refactor as the final workflow step. Reads planning artifacts (PRD.md, progress.md, changeset.yaml, acceptance-tests.md, evaluation-report.md, refactoring-plan.md) and updates target repo documentation per repo guidelines.
 - **Workflow**: Full chain is plan → acceptance-tests → red → green → [demo] → evaluate → validate → refactor → update-docs → end.
 - **State machine**: `RefactorComplete` → `UpdatingDocs` → `DocsUpdated` (terminal).
-- **CLI**: `--goal update-docs --plan-dir <path>` accepted by tddy-coder and tddy-demo.
+- **CLI**: `--goal update-docs --session-dir <path>` accepted by tddy-coder and tddy-demo.
 - **CursorBackend**: Supports UpdateDocs (unlike Validate/Refactor which require Agent tool).
 - **Schema**: `update-docs.schema.json` with goal, summary, docs_updated.
 - **Packages**: tddy-core (workflow/update_docs.rs, parse_update_docs_response, TddWorkflowHooks, tdd_graph), tddy-coder (run.rs value_parser).
@@ -235,7 +235,7 @@ Release note history for the Coder product area.
 
 - **TUI scroll**: PageUp/PageDown for activity log; no mouse capture so terminal text selection works.
 - **Ctrl+C**: Raw mode with ISIG preserved; ctrlc handler restores LeaveAlternateScreen, cursor Show, disable_raw_mode.
-- **Plan resume**: When `--plan-dir` has Init state and no PRD.md, runs plan() to complete the plan.
+- **Plan resume**: When `--session-dir` has Init state and no PRD.md, runs plan() to complete the plan.
 - **Debug area**: `--debug` enables TUI debug area and TDDY_QUIET bypass for debug output.
 
 ## 2026-03-08 — Agent Inbox
@@ -259,15 +259,15 @@ Release note history for the Coder product area.
 
 ## 2026-03-08 — Context Header for Agent Prompts
 
-- **Context reminder**: Plan, acceptance-tests, and red prompts are prepended with a `<context-reminder>` block listing absolute paths to existing .md artifacts (PRD.md, TODO.md, acceptance-tests.md, etc.) when the plan directory contains them.
+- **Context reminder**: Plan, acceptance-tests, and red prompts are prepended with a `<context-reminder>` block listing absolute paths to existing .md artifacts (PRD.md, TODO.md, acceptance-tests.md, etc.) when the session directory contains them.
 - **Format**: Header starts with `**CRITICAL FOR CONTEXT AND SUMMARY**`; each line is `{filename}: {absolute_path}`. Omitted when plan dir is empty or no .md files exist.
 - **Agent awareness**: Agents receive immediate visibility of available plan context files without discovering them.
 
 ## 2026-03-08 — Plan Directory Relocation (plan_dir_suggestion)
 
-- **Agent-decided location**: When the plan agent returns `plan_dir_suggestion` in discovery, the workflow relocates the plan directory from staging (output_dir) to the suggested path relative to the git root (e.g. `docs/dev/1-WIP/2026-03-08-feature/`).
-- **Exit output**: On successful exit, tddy-coder prints the plan directory path (plan, acceptance-tests, red, green goals and full workflow).
-- **Resume**: Full workflow resume requires `--plan-dir`; automatic discovery removed.
+- **Agent-decided location**: When the plan agent returns `plan_dir_suggestion` in discovery, the workflow relocates the session directory from staging (output_dir) to the suggested path relative to the git root (e.g. `docs/dev/1-WIP/2026-03-08-feature/`).
+- **Exit output**: On successful exit, tddy-coder prints the session directory path (plan, acceptance-tests, red, green goals and full workflow).
+- **Resume**: Full workflow resume requires `--session-dir`; automatic discovery removed.
 - **Validation**: Invalid suggestions (absolute paths, `..`, empty) fall back to staging location. Cross-device moves use copy-then-delete when rename fails.
 
 ## 2026-03-08 — JSON Schema Structured Output Validation
@@ -282,7 +282,7 @@ Release note history for the Coder product area.
 ## 2026-03-07 — Validate-Changes Goal (removed 2026-03-08, superseded by evaluate)
 
 - **New goal**: `--goal validate-changes` analyzed current git changes for risks (build validity, test infrastructure, production code quality, security). Produced validation-report.md in working directory.
-- **Standalone**: Callable from Init without prior plan/red/green. Optional `--plan-dir` for changeset/PRD context. Used a fresh session (not resumed).
+- **Standalone**: Callable from Init without prior plan/red/green. Optional `--session-dir` for changeset/PRD context. Used a fresh session (not resumed).
 - **Permission**: validate_allowlist permitted Read, Glob, Grep, SemanticSearch, git diff/log, find, cargo build/check.
 - **State**: Init → Validating → Validated. Not in next_goal_for_state auto-sequence.
 - **CLI**: `--conversation-output <path>` writes raw agent bytes in real time (each line appended as received).
@@ -301,7 +301,7 @@ Release note history for the Coder product area.
 ## 2026-03-07 — Full Workflow When --goal Omitted
 
 - **Full workflow**: When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → green in a single invocation
-- **Resume**: Auto-detects completed state from `changeset.yaml`; re-running skips completed steps (via `--plan-dir`)
+- **Resume**: Auto-detects completed state from `changeset.yaml`; re-running skips completed steps (via `--session-dir`)
 - **CLI**: `--goal` is now optional; individual goals (`plan`, `acceptance-tests`, `red`, `green`) unchanged
 - **Output**: Full workflow prints green step output on success; when `GreenComplete`, re-running exits with summary
 
@@ -310,24 +310,24 @@ Release note history for the Coder product area.
 - **changeset.yaml**: Replaces `.session` and `.impl-session` as the unified manifest. Contains name (PRD name from plan agent), initial_prompt, clarification_qa, sessions (with system_prompt_file per session), state, models, discovery, artifacts.
 - **Plan goal**: Project discovery (toolchain, scripts, doc locations, relevant code). Demo planning (demo-plan.md). Agent decides PRD name. Stores initial_prompt and clarification_qa in changeset.yaml.
 - **Observability**: Each goal displays agent and model before execution. State transitions displayed.
-- **System prompts**: Stored in plan directory (e.g. system-prompt-plan.md); referenced per-session via system_prompt_file in changeset.yaml.
+- **System prompts**: Stored in session directory (e.g. system-prompt-plan.md); referenced per-session via system_prompt_file in changeset.yaml.
 - **Green goal**: Executes demo plan when demo-plan.md exists; writes demo-results.md.
 - **Model resolution**: Goals use model from changeset.yaml when --model not specified; CLI --model overrides.
 
 ## 2026-03-07 — Green Goal & Implementation Step
 
-- **Green goal**: `--goal green --plan-dir <path>` resumes red session via `.impl-session`, implements production code to make failing tests pass, updates progress.md and acceptance-tests.md
+- **Green goal**: `--goal green --session-dir <path>` resumes red session via `.impl-session`, implements production code to make failing tests pass, updates progress.md and acceptance-tests.md
 - **Red goal**: Now persists session ID to `.impl-session` for green to resume
 - **State machine**: New states GreenImplementing, GreenComplete
 - **Documentation**: Red and green moved to `implementation-step.md`; `planning-step.md` covers only plan and acceptance-tests
-- **CLI**: `--goal green` requires `--plan-dir`
+- **CLI**: `--goal green` requires `--session-dir`
 
 ## 2026-03-07 — Red Goal & Acceptance-Tests.md
 
-- **Red goal**: `--goal red --plan-dir <path>` reads PRD.md and acceptance-tests.md, creates skeleton production code and failing lower-level tests via Claude
-- **acceptance-tests.md**: acceptance-tests goal now writes acceptance-tests.md (structured list + rich descriptions) to the plan directory
+- **Red goal**: `--goal red --session-dir <path>` reads PRD.md and acceptance-tests.md, creates skeleton production code and failing lower-level tests via Claude
+- **acceptance-tests.md**: acceptance-tests goal now writes acceptance-tests.md (structured list + rich descriptions) to the session directory
 - **State machine**: New states RedTesting, RedTestsReady
-- **CLI**: `--goal red` requires `--plan-dir`
+- **CLI**: `--goal red` requires `--session-dir`
 
 ## 2026-03-07 — Permission Handling in Claude Code Print Mode
 
@@ -338,11 +338,11 @@ Release note history for the Coder product area.
 
 ## 2026-03-07 — Acceptance Tests Goal
 
-- **New goal**: `--goal acceptance-tests --plan-dir <path>` reads a completed plan, resumes the Claude session, creates failing acceptance tests, and verifies they fail
+- **New goal**: `--goal acceptance-tests --session-dir <path>` reads a completed plan, resumes the Claude session, creates failing acceptance tests, and verifies they fail
 - **Session persistence**: Plan goal now writes `.session` file for session resumption
 - **Testing Plan in PRD**: Plan system prompt requires a Testing Plan section (test level, acceptance tests list, target files, assertions)
 - **State machine**: New states `AcceptanceTesting` and `AcceptanceTestsReady`
-- **CLI**: `--plan-dir` flag required for acceptance-tests goal
+- **CLI**: `--session-dir` flag required for acceptance-tests goal
 
 ## 2026-03-07 — Claude Stream-JSON Backend
 

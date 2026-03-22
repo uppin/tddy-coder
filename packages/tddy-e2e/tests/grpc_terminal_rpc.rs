@@ -428,7 +428,7 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
         &text[..text.len().min(300)]
     );
 
-    let progressed = text.contains("Plan dir:")
+    let progressed = text.contains("Session dir:")
         || text.contains("AcceptanceTesting")
         || text.contains("GreenComplete")
         || text.contains("Workflow complete")
@@ -530,7 +530,7 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
     shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
 
     let visible = ansi_to_text(&all_raw);
-    let progressed = visible.contains("Plan dir:")
+    let progressed = visible.contains("Session dir:")
         || visible.contains("AcceptanceTesting")
         || visible.contains("GreenComplete")
         || visible.contains("Workflow complete")

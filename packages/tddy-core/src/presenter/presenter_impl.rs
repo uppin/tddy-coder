@@ -2,11 +2,12 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
 
 use crate::backend::QuestionOption;
 use crate::toolcall::{ToolCallRequest, ToolCallResponse};
-use crate::{ClarificationQuestion, SharedBackend};
+use crate::{ClarificationQuestion, SharedBackend, WorkflowRecipe};
 
 use crate::presenter::intent::UserIntent;
 use crate::presenter::presenter_events::{PresenterEvent, ViewConnection};
@@ -31,7 +32,7 @@ pub type DeferredBackendFactory = Box<dyn FnOnce(&str) -> Result<SharedBackend, 
 #[derive(Debug)]
 pub struct PendingWorkflowStart {
     pub output_dir: PathBuf,
-    pub plan_dir: Option<PathBuf>,
+    pub session_dir: Option<PathBuf>,
     pub initial_prompt: Option<String>,
     pub conversation_output_path: Option<PathBuf>,
     pub debug_output_path: Option<PathBuf>,
@@ -52,7 +53,7 @@ pub struct Presenter {
     /// Directory containing `changeset.yaml` for the active workflow (session / plan dir).
     /// When set, used for `read_changeset` in Continue with agent / resume; `workflow_output_dir`
     /// alone may be `.` while the changeset lives under this path.
-    workflow_plan_dir: Option<PathBuf>,
+    workflow_session_dir: Option<PathBuf>,
     workflow_conversation_output: Option<PathBuf>,
     workflow_debug_output: Option<PathBuf>,
     workflow_debug: bool,
@@ -84,11 +85,17 @@ pub struct Presenter {
     pending_workflow_start: Option<PendingWorkflowStart>,
     /// When set, overrides per-backend default model after selection (CLI `--model`).
     deferred_cli_model: Option<String>,
+    /// Active workflow definition (TDD, bug-fix, …).
+    workflow_recipe: Arc<dyn WorkflowRecipe>,
 }
 
 impl Presenter {
     /// Create a new Presenter in FeatureInput mode.
-    pub fn new(agent: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(
+        agent: impl Into<String>,
+        model: impl Into<String>,
+        workflow_recipe: Arc<dyn WorkflowRecipe>,
+    ) -> Self {
         let state = PresenterState {
             agent: agent.into(),
             model: model.into(),
@@ -107,7 +114,7 @@ impl Presenter {
             answer_tx: None,
             workflow_backend: None,
             workflow_output_dir: None,
-            workflow_plan_dir: None,
+            workflow_session_dir: None,
             workflow_conversation_output: None,
             workflow_debug_output: None,
             workflow_debug: false,
@@ -128,6 +135,7 @@ impl Presenter {
             deferred_backend_factory: None,
             pending_workflow_start: None,
             deferred_cli_model: None,
+            workflow_recipe,
         }
     }
 
@@ -217,7 +225,7 @@ impl Presenter {
         self.start_workflow(
             backend,
             pending.output_dir,
-            pending.plan_dir,
+            pending.session_dir,
             pending.initial_prompt,
             pending.conversation_output_path,
             pending.debug_output_path,
@@ -326,6 +334,22 @@ impl Presenter {
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
             }
+            UserIntent::SelectHighlightChanged(idx) => {
+                if let AppMode::Select {
+                    question,
+                    question_index,
+                    total_questions,
+                    ..
+                } = &self.state.mode
+                {
+                    self.state.mode = AppMode::Select {
+                        question: question.clone(),
+                        question_index: *question_index,
+                        total_questions: *total_questions,
+                        initial_selected: idx,
+                    };
+                }
+            }
             UserIntent::AnswerSelect(idx) => {
                 if self.backend_selection_pending {
                     self.handle_backend_selection_answer(idx);
@@ -412,9 +436,9 @@ impl Presenter {
             UserIntent::ContinueWithAgent => {
                 let session_id = if let Some(cs_dir) = self.changeset_read_dir() {
                     log::info!(
-                        "ContinueWithAgent: read_changeset from {} (workflow_plan_dir={:?}, workflow_output_dir={:?})",
+                        "ContinueWithAgent: read_changeset from {} (workflow_session_dir={:?}, workflow_output_dir={:?})",
                         cs_dir.display(),
-                        self.workflow_plan_dir.as_ref().map(|p| p.display().to_string()),
+                        self.workflow_session_dir.as_ref().map(|p| p.display().to_string()),
                         self.workflow_output_dir.as_ref().map(|p| p.display().to_string()),
                     );
                     match crate::changeset::read_changeset(cs_dir) {
@@ -456,7 +480,7 @@ impl Presenter {
                     }
                 } else {
                     log::warn!(
-                        "ContinueWithAgent: no workflow_plan_dir or workflow_output_dir set"
+                        "ContinueWithAgent: no workflow_session_dir or workflow_output_dir set"
                     );
                     None
                 };
@@ -504,8 +528,8 @@ impl Presenter {
                     }
                 } else {
                     log::warn!(
-                        "ResumeFromError: no changeset dir or goal (plan_dir={:?}, output_dir={:?}, goal={:?}), spawning fresh",
-                        self.workflow_plan_dir,
+                        "ResumeFromError: no changeset dir or goal (session_dir={:?}, output_dir={:?}, goal={:?}), spawning fresh",
+                        self.workflow_session_dir,
                         self.workflow_output_dir,
                         self.state.current_goal
                     );
@@ -523,7 +547,7 @@ impl Presenter {
                     self.spawn_workflow(
                         backend,
                         output_dir,
-                        None,
+                        self.workflow_session_dir.clone(),
                         None,
                         self.workflow_conversation_output.clone(),
                         self.workflow_debug_output.clone(),
@@ -808,6 +832,10 @@ impl Presenter {
                     self.collected_answers.clear();
                     self.advance_to_next_question();
                 }
+                WorkflowEvent::AwaitingFeatureInput => {
+                    self.state.mode = AppMode::FeatureInput;
+                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                }
                 WorkflowEvent::PlanApprovalNeeded { prd_content } => {
                     self.flush_agent_output_buffer();
                     self.state.mode = AppMode::PlanReview { prd_content };
@@ -842,8 +870,8 @@ impl Presenter {
                         self.state.mode = AppMode::Running;
                         self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                         // Workflow thread has exited; restart with dequeued prompt.
-                        // Pass plan_dir so we resume in the same session (avoids re-creating worktree).
-                        let plan_dir = result.as_ref().ok().and_then(|p| p.plan_dir.clone());
+                        // Pass session_dir so we resume in the same session (avoids re-creating worktree).
+                        let session_dir = result.as_ref().ok().and_then(|p| p.session_dir.clone());
                         if let (Some(backend), Some(output_dir)) = (
                             self.workflow_backend.clone(),
                             self.workflow_output_dir.clone(),
@@ -855,7 +883,7 @@ impl Presenter {
                             self.spawn_workflow(
                                 backend,
                                 output_dir,
-                                plan_dir,
+                                session_dir,
                                 Some(prefixed),
                                 self.workflow_conversation_output.clone(),
                                 self.workflow_debug_output.clone(),
@@ -917,7 +945,7 @@ impl Presenter {
         &mut self,
         backend: SharedBackend,
         output_dir: PathBuf,
-        plan_dir: Option<PathBuf>,
+        session_dir: Option<PathBuf>,
         initial_prompt: Option<String>,
         conversation_output_path: Option<PathBuf>,
         debug_output_path: Option<PathBuf>,
@@ -928,7 +956,7 @@ impl Presenter {
     ) {
         self.workflow_backend = Some(backend.clone());
         self.workflow_output_dir = Some(output_dir.clone());
-        self.workflow_plan_dir = plan_dir.clone();
+        self.workflow_session_dir = session_dir.clone();
         self.workflow_conversation_output = conversation_output_path.clone();
         self.workflow_debug_output = debug_output_path.clone();
         self.workflow_debug = debug;
@@ -937,7 +965,7 @@ impl Presenter {
         self.spawn_workflow(
             backend,
             output_dir,
-            plan_dir,
+            session_dir,
             initial_prompt,
             conversation_output_path,
             debug_output_path,
@@ -979,7 +1007,7 @@ impl Presenter {
         &mut self,
         backend: SharedBackend,
         output_dir: PathBuf,
-        plan_dir: Option<PathBuf>,
+        session_dir: Option<PathBuf>,
         initial_prompt: Option<String>,
         conversation_output_path: Option<PathBuf>,
         debug_output_path: Option<PathBuf>,
@@ -992,13 +1020,15 @@ impl Presenter {
         let (answer_tx, answer_rx) = mpsc::channel();
 
         let model_for_workflow = self.state.model.clone();
+        let recipe = self.workflow_recipe.clone();
         let handle = thread::spawn(move || {
             workflow_runner::run_workflow(
+                recipe,
                 backend,
                 event_tx,
                 answer_rx,
                 output_dir,
-                plan_dir,
+                session_dir,
                 session_id,
                 Some(model_for_workflow),
                 initial_prompt,
@@ -1017,7 +1047,7 @@ impl Presenter {
 
     /// Prefer session/plan dir for `changeset.yaml`; fall back to `workflow_output_dir`.
     fn changeset_read_dir(&self) -> Option<&PathBuf> {
-        self.workflow_plan_dir
+        self.workflow_session_dir
             .as_ref()
             .or(self.workflow_output_dir.as_ref())
     }
@@ -1044,7 +1074,12 @@ mod tests {
     use crate::presenter::state::AppMode;
 
     fn make_presenter() -> Presenter {
-        Presenter::new("agent", "model")
+        Presenter::new(
+            "agent",
+            "model",
+            std::sync::Arc::new(crate::presenter::presenter_test_recipe::EmptyPresenterTestRecipe)
+                as std::sync::Arc<dyn WorkflowRecipe>,
+        )
     }
 
     fn inject_workflow_event(presenter: &mut Presenter, event: WorkflowEvent) {
@@ -1078,13 +1113,25 @@ mod tests {
             &mut p,
             WorkflowEvent::WorkflowComplete(Ok(WorkflowCompletePayload {
                 summary: "all done".to_string(),
-                plan_dir: None,
+                session_dir: None,
             })),
         );
         p.poll_workflow();
         assert!(
             matches!(p.state().mode, AppMode::FeatureInput),
             "Expected FeatureInput mode (ready for new workflow), got {:?}",
+            p.state().mode
+        );
+    }
+
+    #[test]
+    fn awaiting_feature_input_event_switches_to_feature_input_mode() {
+        let mut p = make_presenter();
+        inject_workflow_event(&mut p, WorkflowEvent::AwaitingFeatureInput);
+        p.poll_workflow();
+        assert!(
+            matches!(p.state().mode, AppMode::FeatureInput),
+            "Expected FeatureInput when plan awaits description, got {:?}",
             p.state().mode
         );
     }
@@ -1263,10 +1310,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    /// `start_workflow` passes `output_dir` as `.` while `plan_dir` points at the session folder
-    /// (`~/.tddy/sessions/...`). Continue with agent must read `changeset.yaml` from `plan_dir`.
+    /// `start_workflow` passes `output_dir` as `.` while `session_dir` points at the session folder
+    /// (`~/.tddy/sessions/...`). Continue with agent must read `changeset.yaml` from `session_dir`.
     #[test]
-    fn continue_with_agent_reads_changeset_from_workflow_plan_dir() {
+    fn continue_with_agent_reads_changeset_from_workflow_session_dir() {
         let mut p = make_presenter();
 
         let tmp_plan = std::env::temp_dir().join("tddy-test-continue-plan-dir");
@@ -1282,7 +1329,7 @@ mod tests {
         crate::changeset::write_changeset(&tmp_plan, &cs).unwrap();
 
         p.workflow_output_dir = Some(tmp_wrong.clone());
-        p.workflow_plan_dir = Some(tmp_plan.clone());
+        p.workflow_session_dir = Some(tmp_plan.clone());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "read refactoring-plan.md: No such file or directory (os error 2)"
                 .to_string(),
@@ -1297,7 +1344,7 @@ mod tests {
                 Some(crate::presenter::state::ExitAction::ContinueWithAgent { ref session_id })
                 if session_id == resume_id
             ),
-            "expected session id from changeset at workflow_plan_dir, got {:?}",
+            "expected session id from changeset at workflow_session_dir, got {:?}",
             p.state().exit_action
         );
 

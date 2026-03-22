@@ -5,7 +5,7 @@
 //! Deterministic outputs for each goal enable workflow tests to assert on exact state transitions.
 
 use super::{
-    ClarificationQuestion, CodingBackend, Goal, InvokeRequest, InvokeResponse, QuestionOption,
+    ClarificationQuestion, CodingBackend, GoalId, InvokeRequest, InvokeResponse, QuestionOption,
     ToolExecutor,
 };
 use crate::error::BackendError;
@@ -17,7 +17,7 @@ fn emit_agent_exited(request: &InvokeRequest, exit_code: i32) {
     if let Some(ref sink) = request.progress_sink {
         sink.emit(&ProgressEvent::AgentExited {
             exit_code,
-            goal: request.goal.submit_key().to_string(),
+            goal: request.submit_key.to_string(),
         });
     }
 }
@@ -114,13 +114,13 @@ Stub-generated PRD for tddy-demo. This demonstrates the TDD workflow.
 
 After planning, run each step (or omit `--goal` to run the full flow interactively):
 
-1. **Acceptance tests**: `tddy-demo --goal acceptance-tests --plan-dir <plan_dir>`
-2. **Red** (failing tests): `tddy-demo --goal red --plan-dir <plan_dir>`
-3. **Green** (implement): `tddy-demo --goal green --plan-dir <plan_dir>`
-4. **Demo** (verify): `tddy-demo --goal demo --plan-dir <plan_dir>`
-5. **Evaluate** (risk analysis): `tddy-demo --goal evaluate --plan-dir <plan_dir>`
-6. **Validate** (tests, prod-ready, clean-code): `tddy-demo --goal validate --plan-dir <plan_dir>`
-7. **Refactor** (apply refactoring plan): `tddy-demo --goal refactor --plan-dir <plan_dir>`
+1. **Acceptance tests**: `tddy-demo --goal acceptance-tests --session-dir <dir>` (optional; default is session storage)
+2. **Red** (failing tests): `tddy-demo --goal red --session-dir <dir>`
+3. **Green** (implement): `tddy-demo --goal green --session-dir <dir>`
+4. **Demo** (verify): `tddy-demo --goal demo --session-dir <dir>`
+5. **Evaluate** (risk analysis): `tddy-demo --goal evaluate --session-dir <dir>`
+6. **Validate** (tests, prod-ready, clean-code): `tddy-demo --goal validate --session-dir <dir>`
+7. **Refactor** (apply refactoring plan): `tddy-demo --goal refactor --session-dir <dir>`
 
 Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
 
@@ -189,17 +189,18 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
         self.submit_and_respond("update-docs", json, None)
     }
 
-    fn response_for_goal(&self, goal: Goal) -> InvokeResponse {
-        match goal {
-            Goal::Plan => self.plan_response(),
-            Goal::AcceptanceTests => self.acceptance_tests_response(),
-            Goal::Red => self.red_response(),
-            Goal::Green => self.green_response(),
-            Goal::Demo => self.demo_response(),
-            Goal::Evaluate => self.evaluate_response(),
-            Goal::Validate => self.validate_response(),
-            Goal::Refactor => self.refactor_response(),
-            Goal::UpdateDocs => self.update_docs_response(),
+    fn response_for_goal(&self, goal_id: &GoalId) -> InvokeResponse {
+        match goal_id.as_str() {
+            "plan" => self.plan_response(),
+            "acceptance-tests" => self.acceptance_tests_response(),
+            "red" => self.red_response(),
+            "green" => self.green_response(),
+            "demo" => self.demo_response(),
+            "evaluate" => self.evaluate_response(),
+            "validate" => self.validate_response(),
+            "refactor" => self.refactor_response(),
+            "update-docs" => self.update_docs_response(),
+            _ => self.plan_response(),
         }
     }
 
@@ -243,7 +244,7 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
         }]
     }
 
-    fn fail_parse_response(&self, _goal: Goal) -> InvokeResponse {
+    fn fail_parse_response(&self, _goal_id: &GoalId) -> InvokeResponse {
         // Malformed: no valid JSON, or wrong structure. No tool call.
         let garbage = "not valid json at all {{{";
         InvokeResponse {
@@ -256,7 +257,7 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
         }
     }
 
-    fn fail_schema_response(&self, _goal: Goal) -> InvokeResponse {
+    fn fail_schema_response(&self, _goal_id: &GoalId) -> InvokeResponse {
         // Valid JSON but wrong goal or missing required fields. No tool call.
         let json = r#"{"goal":"wrong-goal","summary":"oops"}"#;
         InvokeResponse {
@@ -295,7 +296,7 @@ impl CodingBackend for StubBackend {
 
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         let n = self.invocation_count.fetch_add(1, Ordering::SeqCst) + 1;
-        log::debug!("[stub] invoke #{} goal={:?}", n, request.goal);
+        log::debug!("[stub] invoke #{} goal={}", n, request.goal_id);
         let prompt = request.prompt.to_uppercase();
         let has_answers = prompt.contains("HERE ARE THE USER'S ANSWERS");
 
@@ -307,12 +308,12 @@ impl CodingBackend for StubBackend {
 
         if prompt.contains(FAIL_PARSE) {
             emit_agent_exited(&request, 0);
-            return Ok(self.fail_parse_response(request.goal));
+            return Ok(self.fail_parse_response(&request.goal_id));
         }
 
         if prompt.contains(FAIL_SCHEMA) {
             emit_agent_exited(&request, 0);
-            return Ok(self.fail_schema_response(request.goal));
+            return Ok(self.fail_schema_response(&request.goal_id));
         }
 
         // Plan: always clarify; when answered (HERE ARE THE USER'S ANSWERS) or refinement, proceed.
@@ -323,7 +324,7 @@ impl CodingBackend for StubBackend {
         // the plan prematurely. Submit only when we have answers and are returning the final plan.
         let is_refinement =
             prompt.contains("THE USER HAS REVIEWED THE PLAN AND REQUESTED REFINEMENTS");
-        if request.goal == Goal::Plan
+        if request.goal_id.as_str() == "plan"
             && !has_answers
             && !prompt.contains(SKIP_QUESTIONS)
             && !is_refinement
@@ -345,7 +346,9 @@ impl CodingBackend for StubBackend {
 
         // AcceptanceTests: always ask permission (like Claude) before creating files.
         // Same as Plan: do NOT submit when returning questions.
-        if request.goal == Goal::AcceptanceTests && !has_answers && !prompt.contains(SKIP_QUESTIONS)
+        if request.goal_id.as_str() == "acceptance-tests"
+            && !has_answers
+            && !prompt.contains(SKIP_QUESTIONS)
         {
             log::debug!("[stub] acceptance-tests: returning permission questions (no submit)");
             emit_agent_exited(&request, 0);
@@ -364,8 +367,8 @@ impl CodingBackend for StubBackend {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
 
-        log::debug!("[stub] returning response_for_goal {:?}", request.goal);
-        let response = self.response_for_goal(request.goal);
+        log::debug!("[stub] returning response_for_goal {}", request.goal_id);
+        let response = self.response_for_goal(&request.goal_id);
         emit_agent_exited(&request, response.exit_code);
         Ok(response)
     }

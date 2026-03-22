@@ -24,7 +24,7 @@
 #     - selector: { target: "libwebrtc" }
 #       level: debug
 #       logger: webrtc_file
-# plan_dir: ./plans/my-feature
+# session_dir: ./plans/my-feature
 # prompt: "my feature description"
 
 # LiveKit configuration (for terminal streaming)

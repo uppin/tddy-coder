@@ -29,6 +29,7 @@ use tddy_e2e::rpc_frontend::{encode_resize, event_to_bytes};
 use tddy_service::TerminalServiceVirtualTui;
 use tddy_service::{start_virtual_tui_session, VirtualTuiSession};
 use tddy_tui::raw::{disable_raw_mode, enable_raw_mode_keep_sig};
+use tddy_workflow_recipes::TddRecipe;
 
 #[derive(Parser)]
 #[command(name = "rpc-demo", about = "VirtualTui RPC demo")]
@@ -65,7 +66,7 @@ fn start_backend(
     let (event_tx, _) = tokio::sync::broadcast::channel(256);
     let (intent_tx, intent_rx) = std::sync::mpsc::channel();
 
-    let presenter = Presenter::new("stub", "opus")
+    let presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe))
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx);
     let output_dir = std::env::temp_dir().join(format!("tddy-rpc-demo-{}", uuid::Uuid::new_v4()));

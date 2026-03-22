@@ -19,7 +19,7 @@ pub struct Config {
     #[serde(default)]
     pub goal: Option<String>,
     #[serde(default)]
-    pub plan_dir: Option<PathBuf>,
+    pub session_dir: Option<PathBuf>,
     #[serde(default)]
     pub conversation_output: Option<PathBuf>,
     #[serde(default)]
@@ -115,8 +115,8 @@ pub fn merge_config_into_args(args: &mut Args, config: Config) {
     if args.goal.is_none() {
         args.goal = config.goal;
     }
-    if args.plan_dir.is_none() {
-        args.plan_dir = config.plan_dir;
+    if args.session_dir.is_none() {
+        args.session_dir = config.session_dir;
     }
     if args.conversation_output.is_none() {
         args.conversation_output = config.conversation_output;
@@ -326,7 +326,7 @@ log:
         let config: Config = serde_yaml::from_str("model: sonnet\ndaemon: true\n").unwrap();
         let mut args = Args {
             goal: None,
-            plan_dir: None,
+            session_dir: None,
             conversation_output: None,
             model: Some("opus".to_string()),
             allowed_tools: None,

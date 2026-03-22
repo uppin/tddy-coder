@@ -139,7 +139,7 @@ message ListSessionsResponse {
 message SessionInfo {
   string session_id = 1;
   string status = 2;
-  string plan_dir = 3;
+  string session_dir = 3;
   string worktree = 4;
   string branch = 5;
 }

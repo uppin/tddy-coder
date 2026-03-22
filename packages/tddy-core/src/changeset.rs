@@ -4,6 +4,7 @@
 
 use crate::backend::ClarificationQuestion;
 use crate::error::WorkflowError;
+use crate::workflow::ids::WorkflowState;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -89,7 +90,7 @@ pub struct SessionEntry {
 /// Workflow state persisted in changeset.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChangesetState {
-    pub current: String,
+    pub current: WorkflowState,
     /// Currently active agent session ID. Updated when a step starts or when SessionStarted is received.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
@@ -101,7 +102,7 @@ pub struct ChangesetState {
 /// State transition for history.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StateTransition {
-    pub state: String,
+    pub state: WorkflowState,
     pub at: String,
 }
 
@@ -141,18 +142,18 @@ impl Default for Changeset {
             initial_prompt: None,
             clarification_qa: Vec::new(),
             version: 1,
-            models: default_models(),
+            models: BTreeMap::new(),
             sessions: Vec::new(),
             state: ChangesetState {
-                current: "Init".to_string(),
+                current: WorkflowState::new("Init"),
                 session_id: None,
                 updated_at: now.clone(),
                 history: vec![StateTransition {
-                    state: "Init".to_string(),
+                    state: WorkflowState::new("Init"),
                     at: now,
                 }],
             },
-            artifacts: default_artifacts(),
+            artifacts: BTreeMap::new(),
             discovery: None,
             worktree: None,
             branch: None,
@@ -164,42 +165,14 @@ impl Default for Changeset {
     }
 }
 
-fn default_models() -> BTreeMap<String, String> {
-    let mut m = BTreeMap::new();
-    m.insert("plan".to_string(), "opus".to_string());
-    m.insert("acceptance-tests".to_string(), "sonnet".to_string());
-    m.insert("red".to_string(), "sonnet".to_string());
-    m.insert("green".to_string(), "sonnet".to_string());
-    m.insert("demo".to_string(), "sonnet".to_string());
-    m
-}
-
-fn default_artifacts() -> BTreeMap<String, String> {
-    let mut a = BTreeMap::new();
-    a.insert("prd".to_string(), "PRD.md".to_string());
-    a.insert(
-        "acceptance_tests".to_string(),
-        "acceptance-tests.md".to_string(),
-    );
-    a.insert("red_output".to_string(), "red-output.md".to_string());
-    a.insert("progress".to_string(), "progress.md".to_string());
-    a.insert("demo_plan".to_string(), "demo-plan.md".to_string());
-    a.insert("demo_results".to_string(), "demo-results.md".to_string());
-    a.insert(
-        "system_prompt_plan".to_string(),
-        "system-prompt-plan.md".to_string(),
-    );
-    a
-}
-
 /// Read changeset from plan directory.
-pub fn read_changeset(plan_dir: &Path) -> Result<Changeset, WorkflowError> {
-    let path = plan_dir.join("changeset.yaml");
+pub fn read_changeset(session_dir: &Path) -> Result<Changeset, WorkflowError> {
+    let path = session_dir.join("changeset.yaml");
     let content = fs::read_to_string(&path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             WorkflowError::ChangesetMissing(format!(
                 "changeset.yaml not found in {} — run the plan goal first",
-                plan_dir.display()
+                session_dir.display()
             ))
         } else {
             WorkflowError::ChangesetInvalid(e.to_string())
@@ -209,53 +182,30 @@ pub fn read_changeset(plan_dir: &Path) -> Result<Changeset, WorkflowError> {
 }
 
 /// Write changeset to plan directory.
-pub fn write_changeset(plan_dir: &Path, changeset: &Changeset) -> Result<(), WorkflowError> {
-    let path = plan_dir.join("changeset.yaml");
+pub fn write_changeset(session_dir: &Path, changeset: &Changeset) -> Result<(), WorkflowError> {
+    let path = session_dir.join("changeset.yaml");
     let content =
         serde_yaml::to_string(changeset).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     fs::write(&path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     Ok(())
 }
 
-/// Resolve model for a goal: CLI override > changeset > None.
+/// Resolve model for a goal: CLI override > changeset `models` > optional recipe defaults.
 pub fn resolve_model(
     changeset: Option<&Changeset>,
     goal: &str,
     cli_model: Option<&str>,
+    recipe_defaults: Option<&BTreeMap<String, String>>,
 ) -> Option<String> {
     if let Some(m) = cli_model {
         return Some(m.to_string());
     }
-    changeset.and_then(|c| c.models.get(goal)).cloned()
-}
-
-/// Map changeset state to the next goal to execute in the full workflow.
-/// Returns `None` when workflow is complete (`DocsUpdated`) or failed.
-/// Transitional states (e.g. `Evaluating`) map to the goal currently in progress for resume.
-pub fn next_goal_for_state(state: &str) -> Option<&'static str> {
-    match state {
-        "Init" => Some("plan"),
-        "Planning" => Some("plan"),
-        "Planned" => Some("acceptance-tests"),
-        "AcceptanceTesting" => Some("acceptance-tests"),
-        "AcceptanceTestsReady" => Some("red"),
-        "RedTesting" => Some("red"),
-        "RedTestsReady" => Some("green"),
-        "GreenImplementing" => Some("green"),
-        "GreenComplete" => Some("demo"),
-        "DemoRunning" => Some("demo"),
-        "DemoComplete" => Some("evaluate"),
-        "Evaluating" => Some("evaluate"),
-        "Evaluated" => Some("validate"),
-        "Validating" => Some("validate"),
-        "ValidateComplete" | "ValidateRefactorComplete" => Some("refactor"),
-        "Refactoring" => Some("refactor"),
-        "RefactorComplete" => Some("update-docs"),
-        "UpdatingDocs" => Some("update-docs"),
-        "DocsUpdated" => None,
-        "Failed" => None,
-        _ => Some("plan"),
+    if let Some(c) = changeset {
+        if let Some(m) = c.models.get(goal) {
+            return Some(m.clone());
+        }
     }
+    recipe_defaults.and_then(|d| d.get(goal).cloned())
 }
 
 /// Get session ID for a tag (e.g. "plan" or "impl").
@@ -278,13 +228,13 @@ pub fn resolve_agent_from_changeset(changeset: &Changeset) -> Option<String> {
 }
 
 /// Update workflow state only (no new session).
-pub fn update_state(changeset: &mut Changeset, new_state: &str) {
+pub fn update_state(changeset: &mut Changeset, new_state: WorkflowState) {
     let now = chrono::Utc::now().to_rfc3339();
     changeset.state.history.push(StateTransition {
-        state: new_state.to_string(),
+        state: new_state.clone(),
         at: now.clone(),
     });
-    changeset.state.current = new_state.to_string();
+    changeset.state.current = new_state;
     changeset.state.updated_at = now;
 }
 
@@ -324,7 +274,7 @@ pub fn append_session_and_update_state(
     changeset: &mut Changeset,
     session_id: String,
     tag: &str,
-    new_state: &str,
+    new_state: WorkflowState,
     agent: &str,
     system_prompt_file: Option<String>,
 ) {
@@ -338,10 +288,10 @@ pub fn append_session_and_update_state(
     });
     changeset.state.session_id = Some(session_id);
     changeset.state.history.push(StateTransition {
-        state: new_state.to_string(),
+        state: new_state.clone(),
         at: now.clone(),
     });
-    changeset.state.current = new_state.to_string();
+    changeset.state.current = new_state;
     changeset.state.updated_at = now;
 }
 
@@ -352,12 +302,19 @@ mod resolve_agent_tests {
     #[test]
     fn resolve_agent_prefers_plan_tag_session() {
         let mut cs = Changeset::default();
-        append_session_and_update_state(&mut cs, "a".into(), "plan", "Planned", "cursor", None);
+        append_session_and_update_state(
+            &mut cs,
+            "a".into(),
+            "plan",
+            WorkflowState::new("Planned"),
+            "cursor",
+            None,
+        );
         append_session_and_update_state(
             &mut cs,
             "b".into(),
             "acceptance-tests",
-            "AcceptanceTestsReady",
+            WorkflowState::new("AcceptanceTestsReady"),
             "claude",
             None,
         );
@@ -371,7 +328,7 @@ mod resolve_agent_tests {
             &mut cs,
             "x".into(),
             "acceptance-tests",
-            "AcceptanceTestsReady",
+            WorkflowState::new("AcceptanceTestsReady"),
             "stub",
             None,
         );

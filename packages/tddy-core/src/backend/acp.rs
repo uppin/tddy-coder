@@ -3,7 +3,7 @@
 //! Spawns a subprocess (e.g. tddy-acp-stub for tests, or bunx claude-agent-acp for production)
 //! and speaks JSON-RPC 2.0 over stdin/stdout using the agent-client-protocol SDK.
 
-use super::{Goal, InvokeRequest, InvokeResponse, ProgressSink, SessionMode};
+use super::{InvokeRequest, InvokeResponse, ProgressSink, SessionMode};
 use crate::error::BackendError;
 use crate::stream::ProgressEvent;
 use agent_client_protocol::{self as acp, Agent as _, Client};
@@ -157,18 +157,7 @@ fn run_acp_worker(
                     request,
                     response_tx,
                 } => {
-                    let auto_approve = matches!(
-                        request.goal,
-                        Goal::Plan
-                            | Goal::Green
-                            | Goal::AcceptanceTests
-                            | Goal::Red
-                            | Goal::Demo
-                            | Goal::Evaluate
-                            | Goal::Validate
-                            | Goal::Refactor
-                            | Goal::UpdateDocs
-                    );
+                    let auto_approve = true;
                     if let Ok(mut acc) = accumulator.lock() {
                         *acc = AcpAccumulator {
                             output: String::new(),

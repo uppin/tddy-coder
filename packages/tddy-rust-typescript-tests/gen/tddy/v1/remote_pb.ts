@@ -10,71 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file tddy/v1/remote.proto.
  */
 export const file_tddy_v1_remote: GenFile = /*@__PURE__*/
-  fileDesc("ChR0ZGR5L3YxL3JlbW90ZS5wcm90bxIHdGRkeS52MSIzChVTdHJlYW1UZXJtaW5hbFJlcXVlc3QSDAoEY29scxgBIAEoDRIMCgRyb3dzGAIgASgNIh0KDVRlcm1pbmFsSW5wdXQSDAoEZGF0YRgBIAEoDCIeCg5UZXJtaW5hbE91dHB1dBIMCgRkYXRhGAEgASgMIo8GCg1DbGllbnRNZXNzYWdlEjsKFHN1Ym1pdF9mZWF0dXJlX2lucHV0GAEgASgLMhsudGRkeS52MS5TdWJtaXRGZWF0dXJlSW5wdXRIABIuCg1hbnN3ZXJfc2VsZWN0GAIgASgLMhUudGRkeS52MS5BbnN3ZXJTZWxlY3RIABIsCgxhbnN3ZXJfb3RoZXIYAyABKAsyFC50ZGR5LnYxLkFuc3dlck90aGVySAASOQoTYW5zd2VyX211bHRpX3NlbGVjdBgEIAEoCzIaLnRkZHkudjEuQW5zd2VyTXVsdGlTZWxlY3RIABIqCgthbnN3ZXJfdGV4dBgFIAEoCzITLnRkZHkudjEuQW5zd2VyVGV4dEgAEiwKDHF1ZXVlX3Byb21wdBgGIAEoCzIULnRkZHkudjEuUXVldWVQcm9tcHRIABIxCg9lZGl0X2luYm94X2l0ZW0YByABKAsyFi50ZGR5LnYxLkVkaXRJbmJveEl0ZW1IABI1ChFkZWxldGVfaW5ib3hfaXRlbRgIIAEoCzIYLnRkZHkudjEuRGVsZXRlSW5ib3hJdGVtSAASIQoGc2Nyb2xsGAogASgLMg8udGRkeS52MS5TY3JvbGxIABIdCgRxdWl0GAsgASgLMg0udGRkeS52MS5RdWl0SAASLAoMYXBwcm92ZV9wbGFuGAwgASgLMhQudGRkeS52MS5BcHByb3ZlUGxhbkgAEiYKCXZpZXdfcGxhbhgNIAEoCzIRLnRkZHkudjEuVmlld1BsYW5IABIqCgtyZWZpbmVfcGxhbhgOIAEoCzITLnRkZHkudjEuUmVmaW5lUGxhbkgAEjAKDmRpc21pc3Nfdmlld2VyGA8gASgLMhYudGRkeS52MS5EaXNtaXNzVmlld2VySAASLgoNc3RhcnRfc2Vzc2lvbhgQIAEoCzIVLnRkZHkudjEuU3RhcnRTZXNzaW9uSAASNAoQY29uZmlybV93b3JrdHJlZRgRIAEoCzIYLnRkZHkudjEuQ29uZmlybVdvcmt0cmVlSABCCAoGaW50ZW50IjEKDFN0YXJ0U2Vzc2lvbhIOCgZwcm9tcHQYASABKAkSEQoJcmVwb19yb290GAIgASgJIjgKD0NvbmZpcm1Xb3JrdHJlZRIOCgZicmFuY2gYASABKAkSFQoNd29ya3RyZWVfbmFtZRgCIAEoCSINCgtBcHByb3ZlUGxhbiIKCghWaWV3UGxhbiIMCgpSZWZpbmVQbGFuIg8KDURpc21pc3NWaWV3ZXIiIgoSU3VibWl0RmVhdHVyZUlucHV0EgwKBHRleHQYASABKAkiHQoMQW5zd2VyU2VsZWN0Eg0KBWluZGV4GAEgASgNIhsKC0Fuc3dlck90aGVyEgwKBHRleHQYASABKAkiMwoRQW5zd2VyTXVsdGlTZWxlY3QSDwoHaW5kaWNlcxgBIAMoDRINCgVvdGhlchgCIAEoCSIaCgpBbnN3ZXJUZXh0EgwKBHRleHQYASABKAkiGwoLUXVldWVQcm9tcHQSDAoEdGV4dBgBIAEoCSIsCg1FZGl0SW5ib3hJdGVtEg0KBWluZGV4GAEgASgNEgwKBHRleHQYAiABKAkiIAoPRGVsZXRlSW5ib3hJdGVtEg0KBWluZGV4GAEgASgNIhcKBlNjcm9sbBINCgVkZWx0YRgBIAEoBSIGCgRRdWl0ItUECg1TZXJ2ZXJNZXNzYWdlEiwKDG1vZGVfY2hhbmdlZBgBIAEoCzIULnRkZHkudjEuTW9kZUNoYW5nZWRIABIyCg9hY3Rpdml0eV9sb2dnZWQYAiABKAsyFy50ZGR5LnYxLkFjdGl2aXR5TG9nZ2VkSAASLAoMZ29hbF9zdGFydGVkGAMgASgLMhQudGRkeS52MS5Hb2FsU3RhcnRlZEgAEi4KDXN0YXRlX2NoYW5nZWQYBCABKAsyFS50ZGR5LnYxLlN0YXRlQ2hhbmdlZEgAEjYKEXdvcmtmbG93X2NvbXBsZXRlGAUgASgLMhkudGRkeS52MS5Xb3JrZmxvd0NvbXBsZXRlSAASLAoMYWdlbnRfb3V0cHV0GAYgASgLMhQudGRkeS52MS5BZ2VudE91dHB1dEgAEi4KDWluYm94X2NoYW5nZWQYByABKAsyFS50ZGR5LnYxLkluYm94Q2hhbmdlZEgAEjIKD2ludGVudF9yZWNlaXZlZBgIIAEoCzIXLnRkZHkudjEuSW50ZW50UmVjZWl2ZWRIABIyCg9zZXNzaW9uX2NyZWF0ZWQYCSABKAsyFy50ZGR5LnYxLlNlc3Npb25DcmVhdGVkSAASPAoUd29ya3RyZWVfZWxpY2l0YXRpb24YCiABKAsyHC50ZGR5LnYxLldvcmt0cmVlRWxpY2l0YXRpb25IABI/ChZzZXNzaW9uX3N0YXR1c19jaGFuZ2VkGAsgASgLMh0udGRkeS52MS5TZXNzaW9uU3RhdHVzQ2hhbmdlZEgAQgcKBWV2ZW50IiQKDlNlc3Npb25DcmVhdGVkEhIKCnNlc3Npb25faWQYASABKAkiSwoTV29ya3RyZWVFbGljaXRhdGlvbhIYChBzdWdnZXN0ZWRfYnJhbmNoGAEgASgJEhoKEnN1Z2dlc3RlZF93b3JrdHJlZRgCIAEoCSI6ChRTZXNzaW9uU3RhdHVzQ2hhbmdlZBISCgpzZXNzaW9uX2lkGAEgASgJEg4KBnN0YXR1cxgCIAEoCSInChFHZXRTZXNzaW9uUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJIjsKEkdldFNlc3Npb25SZXNwb25zZRIlCgdzZXNzaW9uGAEgASgLMhQudGRkeS52MS5TZXNzaW9uSW5mbyIoChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EhEKCXJlcG9fcm9vdBgBIAEoCSI+ChRMaXN0U2Vzc2lvbnNSZXNwb25zZRImCghzZXNzaW9ucxgBIAMoCzIULnRkZHkudjEuU2Vzc2lvbkluZm8iZQoLU2Vzc2lvbkluZm8SEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZzdGF0dXMYAiABKAkSEAoIcGxhbl9kaXIYAyABKAkSEAoId29ya3RyZWUYBCABKAkSDgoGYnJhbmNoGAUgASgJIjIKC01vZGVDaGFuZ2VkEiMKBG1vZGUYASABKAsyFS50ZGR5LnYxLkFwcE1vZGVQcm90byKgAwoMQXBwTW9kZVByb3RvEjUKDWZlYXR1cmVfaW5wdXQYASABKAsyHC50ZGR5LnYxLkFwcE1vZGVGZWF0dXJlSW5wdXRIABIqCgdydW5uaW5nGAIgASgLMhcudGRkeS52MS5BcHBNb2RlUnVubmluZ0gAEigKBnNlbGVjdBgDIAEoCzIWLnRkZHkudjEuQXBwTW9kZVNlbGVjdEgAEjMKDG11bHRpX3NlbGVjdBgEIAEoCzIbLnRkZHkudjEuQXBwTW9kZU11bHRpU2VsZWN0SAASLwoKdGV4dF9pbnB1dBgFIAEoCzIZLnRkZHkudjEuQXBwTW9kZVRleHRJbnB1dEgAEiQKBGRvbmUYByABKAsyFC50ZGR5LnYxLkFwcE1vZGVEb25lSAASMQoLcGxhbl9yZXZpZXcYCCABKAsyGi50ZGR5LnYxLkFwcE1vZGVQbGFuUmV2aWV3SAASOQoPbWFya2Rvd25fdmlld2VyGAkgASgLMh4udGRkeS52MS5BcHBNb2RlTWFya2Rvd25WaWV3ZXJIAEIJCgd2YXJpYW50IigKEUFwcE1vZGVQbGFuUmV2aWV3EhMKC3ByZF9jb250ZW50GAEgASgJIigKFUFwcE1vZGVNYXJrZG93blZpZXdlchIPCgdjb250ZW50GAEgASgJIhUKE0FwcE1vZGVGZWF0dXJlSW5wdXQiEAoOQXBwTW9kZVJ1bm5pbmcidwoNQXBwTW9kZVNlbGVjdBI1CghxdWVzdGlvbhgBIAEoCzIjLnRkZHkudjEuQ2xhcmlmaWNhdGlvblF1ZXN0aW9uUHJvdG8SFgoOcXVlc3Rpb25faW5kZXgYAiABKA0SFwoPdG90YWxfcXVlc3Rpb25zGAMgASgNInwKEkFwcE1vZGVNdWx0aVNlbGVjdBI1CghxdWVzdGlvbhgBIAEoCzIjLnRkZHkudjEuQ2xhcmlmaWNhdGlvblF1ZXN0aW9uUHJvdG8SFgoOcXVlc3Rpb25faW5kZXgYAiABKA0SFwoPdG90YWxfcXVlc3Rpb25zGAMgASgNIiIKEEFwcE1vZGVUZXh0SW5wdXQSDgoGcHJvbXB0GAEgASgJIg0KC0FwcE1vZGVEb25lIoMBChpDbGFyaWZpY2F0aW9uUXVlc3Rpb25Qcm90bxIOCgZoZWFkZXIYASABKAkSEAoIcXVlc3Rpb24YAiABKAkSLQoHb3B0aW9ucxgDIAMoCzIcLnRkZHkudjEuUXVlc3Rpb25PcHRpb25Qcm90bxIUCgxtdWx0aV9zZWxlY3QYBCABKAgiOQoTUXVlc3Rpb25PcHRpb25Qcm90bxINCgVsYWJlbBgBIAEoCRITCgtkZXNjcmlwdGlvbhgCIAEoCSIsCg5BY3Rpdml0eUxvZ2dlZBIMCgR0ZXh0GAEgASgJEgwKBGtpbmQYAiABKAkiGwoLR29hbFN0YXJ0ZWQSDAoEZ29hbBgBIAEoCSIoCgxTdGF0ZUNoYW5nZWQSDAoEZnJvbRgBIAEoCRIKCgJ0bxgCIAEoCSIvChBXb3JrZmxvd0NvbXBsZXRlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiGwoLQWdlbnRPdXRwdXQSDAoEdGV4dBgBIAEoCSIdCgxJbmJveENoYW5nZWQSDQoFaXRlbXMYASADKAkiOAoOSW50ZW50UmVjZWl2ZWQSJgoGaW50ZW50GAEgASgLMhYudGRkeS52MS5DbGllbnRNZXNzYWdlMvQCCgpUZGR5UmVtb3RlEjwKBlN0cmVhbRIWLnRkZHkudjEuQ2xpZW50TWVzc2FnZRoWLnRkZHkudjEuU2VydmVyTWVzc2FnZSgBMAESSwoOU3RyZWFtVGVybWluYWwSHi50ZGR5LnYxLlN0cmVhbVRlcm1pbmFsUmVxdWVzdBoXLnRkZHkudjEuVGVybWluYWxPdXRwdXQwARJHChBTdHJlYW1UZXJtaW5hbElPEhYudGRkeS52MS5UZXJtaW5hbElucHV0GhcudGRkeS52MS5UZXJtaW5hbE91dHB1dCgBMAESRQoKR2V0U2Vzc2lvbhIaLnRkZHkudjEuR2V0U2Vzc2lvblJlcXVlc3QaGy50ZGR5LnYxLkdldFNlc3Npb25SZXNwb25zZRJLCgxMaXN0U2Vzc2lvbnMSHC50ZGR5LnYxLkxpc3RTZXNzaW9uc1JlcXVlc3QaHS50ZGR5LnYxLkxpc3RTZXNzaW9uc1Jlc3BvbnNlYgZwcm90bzM");
-
-/**
- * @generated from message tddy.v1.StreamTerminalRequest
- */
-export type StreamTerminalRequest = Message<"tddy.v1.StreamTerminalRequest"> & {
-  /**
-   * desired terminal width (0 = use server default)
-   *
-   * @generated from field: uint32 cols = 1;
-   */
-  cols: number;
-
-  /**
-   * desired terminal height (0 = use server default)
-   *
-   * @generated from field: uint32 rows = 2;
-   */
-  rows: number;
-};
-
-/**
- * Describes the message tddy.v1.StreamTerminalRequest.
- * Use `create(StreamTerminalRequestSchema)` to create a new message.
- */
-export const StreamTerminalRequestSchema: GenMessage<StreamTerminalRequest> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 0);
-
-/**
- * @generated from message tddy.v1.TerminalInput
- */
-export type TerminalInput = Message<"tddy.v1.TerminalInput"> & {
-  /**
-   * raw keyboard/mouse bytes (escape sequences)
-   *
-   * @generated from field: bytes data = 1;
-   */
-  data: Uint8Array;
-};
-
-/**
- * Describes the message tddy.v1.TerminalInput.
- * Use `create(TerminalInputSchema)` to create a new message.
- */
-export const TerminalInputSchema: GenMessage<TerminalInput> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 1);
-
-/**
- * @generated from message tddy.v1.TerminalOutput
- */
-export type TerminalOutput = Message<"tddy.v1.TerminalOutput"> & {
-  /**
-   * raw ANSI terminal bytes
-   *
-   * @generated from field: bytes data = 1;
-   */
-  data: Uint8Array;
-};
-
-/**
- * Describes the message tddy.v1.TerminalOutput.
- * Use `create(TerminalOutputSchema)` to create a new message.
- */
-export const TerminalOutputSchema: GenMessage<TerminalOutput> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 2);
+  fileDesc("ChR0ZGR5L3YxL3JlbW90ZS5wcm90bxIHdGRkeS52MSKPBgoNQ2xpZW50TWVzc2FnZRI7ChRzdWJtaXRfZmVhdHVyZV9pbnB1dBgBIAEoCzIbLnRkZHkudjEuU3VibWl0RmVhdHVyZUlucHV0SAASLgoNYW5zd2VyX3NlbGVjdBgCIAEoCzIVLnRkZHkudjEuQW5zd2VyU2VsZWN0SAASLAoMYW5zd2VyX290aGVyGAMgASgLMhQudGRkeS52MS5BbnN3ZXJPdGhlckgAEjkKE2Fuc3dlcl9tdWx0aV9zZWxlY3QYBCABKAsyGi50ZGR5LnYxLkFuc3dlck11bHRpU2VsZWN0SAASKgoLYW5zd2VyX3RleHQYBSABKAsyEy50ZGR5LnYxLkFuc3dlclRleHRIABIsCgxxdWV1ZV9wcm9tcHQYBiABKAsyFC50ZGR5LnYxLlF1ZXVlUHJvbXB0SAASMQoPZWRpdF9pbmJveF9pdGVtGAcgASgLMhYudGRkeS52MS5FZGl0SW5ib3hJdGVtSAASNQoRZGVsZXRlX2luYm94X2l0ZW0YCCABKAsyGC50ZGR5LnYxLkRlbGV0ZUluYm94SXRlbUgAEiEKBnNjcm9sbBgKIAEoCzIPLnRkZHkudjEuU2Nyb2xsSAASHQoEcXVpdBgLIAEoCzINLnRkZHkudjEuUXVpdEgAEiwKDGFwcHJvdmVfcGxhbhgMIAEoCzIULnRkZHkudjEuQXBwcm92ZVBsYW5IABImCgl2aWV3X3BsYW4YDSABKAsyES50ZGR5LnYxLlZpZXdQbGFuSAASKgoLcmVmaW5lX3BsYW4YDiABKAsyEy50ZGR5LnYxLlJlZmluZVBsYW5IABIwCg5kaXNtaXNzX3ZpZXdlchgPIAEoCzIWLnRkZHkudjEuRGlzbWlzc1ZpZXdlckgAEi4KDXN0YXJ0X3Nlc3Npb24YECABKAsyFS50ZGR5LnYxLlN0YXJ0U2Vzc2lvbkgAEjQKEGNvbmZpcm1fd29ya3RyZWUYESABKAsyGC50ZGR5LnYxLkNvbmZpcm1Xb3JrdHJlZUgAQggKBmludGVudCIxCgxTdGFydFNlc3Npb24SDgoGcHJvbXB0GAEgASgJEhEKCXJlcG9fcm9vdBgCIAEoCSI4Cg9Db25maXJtV29ya3RyZWUSDgoGYnJhbmNoGAEgASgJEhUKDXdvcmt0cmVlX25hbWUYAiABKAkiDQoLQXBwcm92ZVBsYW4iCgoIVmlld1BsYW4iDAoKUmVmaW5lUGxhbiIPCg1EaXNtaXNzVmlld2VyIiIKElN1Ym1pdEZlYXR1cmVJbnB1dBIMCgR0ZXh0GAEgASgJIh0KDEFuc3dlclNlbGVjdBINCgVpbmRleBgBIAEoDSIbCgtBbnN3ZXJPdGhlchIMCgR0ZXh0GAEgASgJIjMKEUFuc3dlck11bHRpU2VsZWN0Eg8KB2luZGljZXMYASADKA0SDQoFb3RoZXIYAiABKAkiGgoKQW5zd2VyVGV4dBIMCgR0ZXh0GAEgASgJIhsKC1F1ZXVlUHJvbXB0EgwKBHRleHQYASABKAkiLAoNRWRpdEluYm94SXRlbRINCgVpbmRleBgBIAEoDRIMCgR0ZXh0GAIgASgJIiAKD0RlbGV0ZUluYm94SXRlbRINCgVpbmRleBgBIAEoDSIXCgZTY3JvbGwSDQoFZGVsdGEYASABKAUiBgoEUXVpdCLVBAoNU2VydmVyTWVzc2FnZRIsCgxtb2RlX2NoYW5nZWQYASABKAsyFC50ZGR5LnYxLk1vZGVDaGFuZ2VkSAASMgoPYWN0aXZpdHlfbG9nZ2VkGAIgASgLMhcudGRkeS52MS5BY3Rpdml0eUxvZ2dlZEgAEiwKDGdvYWxfc3RhcnRlZBgDIAEoCzIULnRkZHkudjEuR29hbFN0YXJ0ZWRIABIuCg1zdGF0ZV9jaGFuZ2VkGAQgASgLMhUudGRkeS52MS5TdGF0ZUNoYW5nZWRIABI2ChF3b3JrZmxvd19jb21wbGV0ZRgFIAEoCzIZLnRkZHkudjEuV29ya2Zsb3dDb21wbGV0ZUgAEiwKDGFnZW50X291dHB1dBgGIAEoCzIULnRkZHkudjEuQWdlbnRPdXRwdXRIABIuCg1pbmJveF9jaGFuZ2VkGAcgASgLMhUudGRkeS52MS5JbmJveENoYW5nZWRIABIyCg9pbnRlbnRfcmVjZWl2ZWQYCCABKAsyFy50ZGR5LnYxLkludGVudFJlY2VpdmVkSAASMgoPc2Vzc2lvbl9jcmVhdGVkGAkgASgLMhcudGRkeS52MS5TZXNzaW9uQ3JlYXRlZEgAEjwKFHdvcmt0cmVlX2VsaWNpdGF0aW9uGAogASgLMhwudGRkeS52MS5Xb3JrdHJlZUVsaWNpdGF0aW9uSAASPwoWc2Vzc2lvbl9zdGF0dXNfY2hhbmdlZBgLIAEoCzIdLnRkZHkudjEuU2Vzc2lvblN0YXR1c0NoYW5nZWRIAEIHCgVldmVudCIkCg5TZXNzaW9uQ3JlYXRlZBISCgpzZXNzaW9uX2lkGAEgASgJIksKE1dvcmt0cmVlRWxpY2l0YXRpb24SGAoQc3VnZ2VzdGVkX2JyYW5jaBgBIAEoCRIaChJzdWdnZXN0ZWRfd29ya3RyZWUYAiABKAkiOgoUU2Vzc2lvblN0YXR1c0NoYW5nZWQSEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZzdGF0dXMYAiABKAkiJwoRR2V0U2Vzc2lvblJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCSI7ChJHZXRTZXNzaW9uUmVzcG9uc2USJQoHc2Vzc2lvbhgBIAEoCzIULnRkZHkudjEuU2Vzc2lvbkluZm8iKAoTTGlzdFNlc3Npb25zUmVxdWVzdBIRCglyZXBvX3Jvb3QYASABKAkiPgoUTGlzdFNlc3Npb25zUmVzcG9uc2USJgoIc2Vzc2lvbnMYASADKAsyFC50ZGR5LnYxLlNlc3Npb25JbmZvImgKC1Nlc3Npb25JbmZvEhIKCnNlc3Npb25faWQYASABKAkSDgoGc3RhdHVzGAIgASgJEhMKC3Nlc3Npb25fZGlyGAMgASgJEhAKCHdvcmt0cmVlGAQgASgJEg4KBmJyYW5jaBgFIAEoCSIyCgtNb2RlQ2hhbmdlZBIjCgRtb2RlGAEgASgLMhUudGRkeS52MS5BcHBNb2RlUHJvdG8ioAMKDEFwcE1vZGVQcm90bxI1Cg1mZWF0dXJlX2lucHV0GAEgASgLMhwudGRkeS52MS5BcHBNb2RlRmVhdHVyZUlucHV0SAASKgoHcnVubmluZxgCIAEoCzIXLnRkZHkudjEuQXBwTW9kZVJ1bm5pbmdIABIoCgZzZWxlY3QYAyABKAsyFi50ZGR5LnYxLkFwcE1vZGVTZWxlY3RIABIzCgxtdWx0aV9zZWxlY3QYBCABKAsyGy50ZGR5LnYxLkFwcE1vZGVNdWx0aVNlbGVjdEgAEi8KCnRleHRfaW5wdXQYBSABKAsyGS50ZGR5LnYxLkFwcE1vZGVUZXh0SW5wdXRIABIkCgRkb25lGAcgASgLMhQudGRkeS52MS5BcHBNb2RlRG9uZUgAEjEKC3BsYW5fcmV2aWV3GAggASgLMhoudGRkeS52MS5BcHBNb2RlUGxhblJldmlld0gAEjkKD21hcmtkb3duX3ZpZXdlchgJIAEoCzIeLnRkZHkudjEuQXBwTW9kZU1hcmtkb3duVmlld2VySABCCQoHdmFyaWFudCIoChFBcHBNb2RlUGxhblJldmlldxITCgtwcmRfY29udGVudBgBIAEoCSIoChVBcHBNb2RlTWFya2Rvd25WaWV3ZXISDwoHY29udGVudBgBIAEoCSIVChNBcHBNb2RlRmVhdHVyZUlucHV0IhAKDkFwcE1vZGVSdW5uaW5nIpEBCg1BcHBNb2RlU2VsZWN0EjUKCHF1ZXN0aW9uGAEgASgLMiMudGRkeS52MS5DbGFyaWZpY2F0aW9uUXVlc3Rpb25Qcm90bxIWCg5xdWVzdGlvbl9pbmRleBgCIAEoDRIXCg90b3RhbF9xdWVzdGlvbnMYAyABKA0SGAoQaW5pdGlhbF9zZWxlY3RlZBgEIAEoDSJ8ChJBcHBNb2RlTXVsdGlTZWxlY3QSNQoIcXVlc3Rpb24YASABKAsyIy50ZGR5LnYxLkNsYXJpZmljYXRpb25RdWVzdGlvblByb3RvEhYKDnF1ZXN0aW9uX2luZGV4GAIgASgNEhcKD3RvdGFsX3F1ZXN0aW9ucxgDIAEoDSIiChBBcHBNb2RlVGV4dElucHV0Eg4KBnByb21wdBgBIAEoCSINCgtBcHBNb2RlRG9uZSKDAQoaQ2xhcmlmaWNhdGlvblF1ZXN0aW9uUHJvdG8SDgoGaGVhZGVyGAEgASgJEhAKCHF1ZXN0aW9uGAIgASgJEi0KB29wdGlvbnMYAyADKAsyHC50ZGR5LnYxLlF1ZXN0aW9uT3B0aW9uUHJvdG8SFAoMbXVsdGlfc2VsZWN0GAQgASgIIjkKE1F1ZXN0aW9uT3B0aW9uUHJvdG8SDQoFbGFiZWwYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkiLAoOQWN0aXZpdHlMb2dnZWQSDAoEdGV4dBgBIAEoCRIMCgRraW5kGAIgASgJIhsKC0dvYWxTdGFydGVkEgwKBGdvYWwYASABKAkiKAoMU3RhdGVDaGFuZ2VkEgwKBGZyb20YASABKAkSCgoCdG8YAiABKAkiLwoQV29ya2Zsb3dDb21wbGV0ZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIhsKC0FnZW50T3V0cHV0EgwKBHRleHQYASABKAkiHQoMSW5ib3hDaGFuZ2VkEg0KBWl0ZW1zGAEgAygJIjgKDkludGVudFJlY2VpdmVkEiYKBmludGVudBgBIAEoCzIWLnRkZHkudjEuQ2xpZW50TWVzc2FnZTLeAQoKVGRkeVJlbW90ZRI8CgZTdHJlYW0SFi50ZGR5LnYxLkNsaWVudE1lc3NhZ2UaFi50ZGR5LnYxLlNlcnZlck1lc3NhZ2UoATABEkUKCkdldFNlc3Npb24SGi50ZGR5LnYxLkdldFNlc3Npb25SZXF1ZXN0GhsudGRkeS52MS5HZXRTZXNzaW9uUmVzcG9uc2USSwoMTGlzdFNlc3Npb25zEhwudGRkeS52MS5MaXN0U2Vzc2lvbnNSZXF1ZXN0Gh0udGRkeS52MS5MaXN0U2Vzc2lvbnNSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message tddy.v1.ClientMessage
@@ -187,7 +123,7 @@ export type ClientMessage = Message<"tddy.v1.ClientMessage"> & {
  * Use `create(ClientMessageSchema)` to create a new message.
  */
 export const ClientMessageSchema: GenMessage<ClientMessage> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 3);
+  messageDesc(file_tddy_v1_remote, 0);
 
 /**
  * @generated from message tddy.v1.StartSession
@@ -211,7 +147,7 @@ export type StartSession = Message<"tddy.v1.StartSession"> & {
  * Use `create(StartSessionSchema)` to create a new message.
  */
 export const StartSessionSchema: GenMessage<StartSession> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 4);
+  messageDesc(file_tddy_v1_remote, 1);
 
 /**
  * @generated from message tddy.v1.ConfirmWorktree
@@ -233,7 +169,7 @@ export type ConfirmWorktree = Message<"tddy.v1.ConfirmWorktree"> & {
  * Use `create(ConfirmWorktreeSchema)` to create a new message.
  */
 export const ConfirmWorktreeSchema: GenMessage<ConfirmWorktree> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 5);
+  messageDesc(file_tddy_v1_remote, 2);
 
 /**
  * @generated from message tddy.v1.ApprovePlan
@@ -246,7 +182,7 @@ export type ApprovePlan = Message<"tddy.v1.ApprovePlan"> & {
  * Use `create(ApprovePlanSchema)` to create a new message.
  */
 export const ApprovePlanSchema: GenMessage<ApprovePlan> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 6);
+  messageDesc(file_tddy_v1_remote, 3);
 
 /**
  * @generated from message tddy.v1.ViewPlan
@@ -259,7 +195,7 @@ export type ViewPlan = Message<"tddy.v1.ViewPlan"> & {
  * Use `create(ViewPlanSchema)` to create a new message.
  */
 export const ViewPlanSchema: GenMessage<ViewPlan> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 7);
+  messageDesc(file_tddy_v1_remote, 4);
 
 /**
  * @generated from message tddy.v1.RefinePlan
@@ -272,7 +208,7 @@ export type RefinePlan = Message<"tddy.v1.RefinePlan"> & {
  * Use `create(RefinePlanSchema)` to create a new message.
  */
 export const RefinePlanSchema: GenMessage<RefinePlan> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 8);
+  messageDesc(file_tddy_v1_remote, 5);
 
 /**
  * @generated from message tddy.v1.DismissViewer
@@ -285,7 +221,7 @@ export type DismissViewer = Message<"tddy.v1.DismissViewer"> & {
  * Use `create(DismissViewerSchema)` to create a new message.
  */
 export const DismissViewerSchema: GenMessage<DismissViewer> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 9);
+  messageDesc(file_tddy_v1_remote, 6);
 
 /**
  * @generated from message tddy.v1.SubmitFeatureInput
@@ -302,7 +238,7 @@ export type SubmitFeatureInput = Message<"tddy.v1.SubmitFeatureInput"> & {
  * Use `create(SubmitFeatureInputSchema)` to create a new message.
  */
 export const SubmitFeatureInputSchema: GenMessage<SubmitFeatureInput> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 10);
+  messageDesc(file_tddy_v1_remote, 7);
 
 /**
  * @generated from message tddy.v1.AnswerSelect
@@ -319,7 +255,7 @@ export type AnswerSelect = Message<"tddy.v1.AnswerSelect"> & {
  * Use `create(AnswerSelectSchema)` to create a new message.
  */
 export const AnswerSelectSchema: GenMessage<AnswerSelect> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 11);
+  messageDesc(file_tddy_v1_remote, 8);
 
 /**
  * @generated from message tddy.v1.AnswerOther
@@ -336,7 +272,7 @@ export type AnswerOther = Message<"tddy.v1.AnswerOther"> & {
  * Use `create(AnswerOtherSchema)` to create a new message.
  */
 export const AnswerOtherSchema: GenMessage<AnswerOther> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 12);
+  messageDesc(file_tddy_v1_remote, 9);
 
 /**
  * @generated from message tddy.v1.AnswerMultiSelect
@@ -358,7 +294,7 @@ export type AnswerMultiSelect = Message<"tddy.v1.AnswerMultiSelect"> & {
  * Use `create(AnswerMultiSelectSchema)` to create a new message.
  */
 export const AnswerMultiSelectSchema: GenMessage<AnswerMultiSelect> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 13);
+  messageDesc(file_tddy_v1_remote, 10);
 
 /**
  * @generated from message tddy.v1.AnswerText
@@ -375,7 +311,7 @@ export type AnswerText = Message<"tddy.v1.AnswerText"> & {
  * Use `create(AnswerTextSchema)` to create a new message.
  */
 export const AnswerTextSchema: GenMessage<AnswerText> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 14);
+  messageDesc(file_tddy_v1_remote, 11);
 
 /**
  * @generated from message tddy.v1.QueuePrompt
@@ -392,7 +328,7 @@ export type QueuePrompt = Message<"tddy.v1.QueuePrompt"> & {
  * Use `create(QueuePromptSchema)` to create a new message.
  */
 export const QueuePromptSchema: GenMessage<QueuePrompt> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 15);
+  messageDesc(file_tddy_v1_remote, 12);
 
 /**
  * @generated from message tddy.v1.EditInboxItem
@@ -414,7 +350,7 @@ export type EditInboxItem = Message<"tddy.v1.EditInboxItem"> & {
  * Use `create(EditInboxItemSchema)` to create a new message.
  */
 export const EditInboxItemSchema: GenMessage<EditInboxItem> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 16);
+  messageDesc(file_tddy_v1_remote, 13);
 
 /**
  * @generated from message tddy.v1.DeleteInboxItem
@@ -431,7 +367,7 @@ export type DeleteInboxItem = Message<"tddy.v1.DeleteInboxItem"> & {
  * Use `create(DeleteInboxItemSchema)` to create a new message.
  */
 export const DeleteInboxItemSchema: GenMessage<DeleteInboxItem> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 17);
+  messageDesc(file_tddy_v1_remote, 14);
 
 /**
  * @generated from message tddy.v1.Scroll
@@ -448,7 +384,7 @@ export type Scroll = Message<"tddy.v1.Scroll"> & {
  * Use `create(ScrollSchema)` to create a new message.
  */
 export const ScrollSchema: GenMessage<Scroll> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 18);
+  messageDesc(file_tddy_v1_remote, 15);
 
 /**
  * @generated from message tddy.v1.Quit
@@ -461,7 +397,7 @@ export type Quit = Message<"tddy.v1.Quit"> & {
  * Use `create(QuitSchema)` to create a new message.
  */
 export const QuitSchema: GenMessage<Quit> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 19);
+  messageDesc(file_tddy_v1_remote, 16);
 
 /**
  * @generated from message tddy.v1.ServerMessage
@@ -544,7 +480,7 @@ export type ServerMessage = Message<"tddy.v1.ServerMessage"> & {
  * Use `create(ServerMessageSchema)` to create a new message.
  */
 export const ServerMessageSchema: GenMessage<ServerMessage> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 20);
+  messageDesc(file_tddy_v1_remote, 17);
 
 /**
  * @generated from message tddy.v1.SessionCreated
@@ -561,7 +497,7 @@ export type SessionCreated = Message<"tddy.v1.SessionCreated"> & {
  * Use `create(SessionCreatedSchema)` to create a new message.
  */
 export const SessionCreatedSchema: GenMessage<SessionCreated> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 21);
+  messageDesc(file_tddy_v1_remote, 18);
 
 /**
  * @generated from message tddy.v1.WorktreeElicitation
@@ -583,7 +519,7 @@ export type WorktreeElicitation = Message<"tddy.v1.WorktreeElicitation"> & {
  * Use `create(WorktreeElicitationSchema)` to create a new message.
  */
 export const WorktreeElicitationSchema: GenMessage<WorktreeElicitation> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 22);
+  messageDesc(file_tddy_v1_remote, 19);
 
 /**
  * @generated from message tddy.v1.SessionStatusChanged
@@ -607,7 +543,7 @@ export type SessionStatusChanged = Message<"tddy.v1.SessionStatusChanged"> & {
  * Use `create(SessionStatusChangedSchema)` to create a new message.
  */
 export const SessionStatusChangedSchema: GenMessage<SessionStatusChanged> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 23);
+  messageDesc(file_tddy_v1_remote, 20);
 
 /**
  * @generated from message tddy.v1.GetSessionRequest
@@ -624,7 +560,7 @@ export type GetSessionRequest = Message<"tddy.v1.GetSessionRequest"> & {
  * Use `create(GetSessionRequestSchema)` to create a new message.
  */
 export const GetSessionRequestSchema: GenMessage<GetSessionRequest> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 24);
+  messageDesc(file_tddy_v1_remote, 21);
 
 /**
  * @generated from message tddy.v1.GetSessionResponse
@@ -641,7 +577,7 @@ export type GetSessionResponse = Message<"tddy.v1.GetSessionResponse"> & {
  * Use `create(GetSessionResponseSchema)` to create a new message.
  */
 export const GetSessionResponseSchema: GenMessage<GetSessionResponse> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 25);
+  messageDesc(file_tddy_v1_remote, 22);
 
 /**
  * @generated from message tddy.v1.ListSessionsRequest
@@ -660,7 +596,7 @@ export type ListSessionsRequest = Message<"tddy.v1.ListSessionsRequest"> & {
  * Use `create(ListSessionsRequestSchema)` to create a new message.
  */
 export const ListSessionsRequestSchema: GenMessage<ListSessionsRequest> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 26);
+  messageDesc(file_tddy_v1_remote, 23);
 
 /**
  * @generated from message tddy.v1.ListSessionsResponse
@@ -677,7 +613,7 @@ export type ListSessionsResponse = Message<"tddy.v1.ListSessionsResponse"> & {
  * Use `create(ListSessionsResponseSchema)` to create a new message.
  */
 export const ListSessionsResponseSchema: GenMessage<ListSessionsResponse> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 27);
+  messageDesc(file_tddy_v1_remote, 24);
 
 /**
  * @generated from message tddy.v1.SessionInfo
@@ -694,9 +630,9 @@ export type SessionInfo = Message<"tddy.v1.SessionInfo"> & {
   status: string;
 
   /**
-   * @generated from field: string plan_dir = 3;
+   * @generated from field: string session_dir = 3;
    */
-  planDir: string;
+  sessionDir: string;
 
   /**
    * @generated from field: string worktree = 4;
@@ -714,7 +650,7 @@ export type SessionInfo = Message<"tddy.v1.SessionInfo"> & {
  * Use `create(SessionInfoSchema)` to create a new message.
  */
 export const SessionInfoSchema: GenMessage<SessionInfo> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 28);
+  messageDesc(file_tddy_v1_remote, 25);
 
 /**
  * @generated from message tddy.v1.ModeChanged
@@ -731,7 +667,7 @@ export type ModeChanged = Message<"tddy.v1.ModeChanged"> & {
  * Use `create(ModeChangedSchema)` to create a new message.
  */
 export const ModeChangedSchema: GenMessage<ModeChanged> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 29);
+  messageDesc(file_tddy_v1_remote, 26);
 
 /**
  * @generated from message tddy.v1.AppModeProto
@@ -796,7 +732,7 @@ export type AppModeProto = Message<"tddy.v1.AppModeProto"> & {
  * Use `create(AppModeProtoSchema)` to create a new message.
  */
 export const AppModeProtoSchema: GenMessage<AppModeProto> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 30);
+  messageDesc(file_tddy_v1_remote, 27);
 
 /**
  * @generated from message tddy.v1.AppModePlanReview
@@ -813,7 +749,7 @@ export type AppModePlanReview = Message<"tddy.v1.AppModePlanReview"> & {
  * Use `create(AppModePlanReviewSchema)` to create a new message.
  */
 export const AppModePlanReviewSchema: GenMessage<AppModePlanReview> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 31);
+  messageDesc(file_tddy_v1_remote, 28);
 
 /**
  * @generated from message tddy.v1.AppModeMarkdownViewer
@@ -830,7 +766,7 @@ export type AppModeMarkdownViewer = Message<"tddy.v1.AppModeMarkdownViewer"> & {
  * Use `create(AppModeMarkdownViewerSchema)` to create a new message.
  */
 export const AppModeMarkdownViewerSchema: GenMessage<AppModeMarkdownViewer> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 32);
+  messageDesc(file_tddy_v1_remote, 29);
 
 /**
  * @generated from message tddy.v1.AppModeFeatureInput
@@ -843,7 +779,7 @@ export type AppModeFeatureInput = Message<"tddy.v1.AppModeFeatureInput"> & {
  * Use `create(AppModeFeatureInputSchema)` to create a new message.
  */
 export const AppModeFeatureInputSchema: GenMessage<AppModeFeatureInput> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 33);
+  messageDesc(file_tddy_v1_remote, 30);
 
 /**
  * @generated from message tddy.v1.AppModeRunning
@@ -856,7 +792,7 @@ export type AppModeRunning = Message<"tddy.v1.AppModeRunning"> & {
  * Use `create(AppModeRunningSchema)` to create a new message.
  */
 export const AppModeRunningSchema: GenMessage<AppModeRunning> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 34);
+  messageDesc(file_tddy_v1_remote, 31);
 
 /**
  * @generated from message tddy.v1.AppModeSelect
@@ -876,6 +812,11 @@ export type AppModeSelect = Message<"tddy.v1.AppModeSelect"> & {
    * @generated from field: uint32 total_questions = 3;
    */
   totalQuestions: number;
+
+  /**
+   * @generated from field: uint32 initial_selected = 4;
+   */
+  initialSelected: number;
 };
 
 /**
@@ -883,7 +824,7 @@ export type AppModeSelect = Message<"tddy.v1.AppModeSelect"> & {
  * Use `create(AppModeSelectSchema)` to create a new message.
  */
 export const AppModeSelectSchema: GenMessage<AppModeSelect> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 35);
+  messageDesc(file_tddy_v1_remote, 32);
 
 /**
  * @generated from message tddy.v1.AppModeMultiSelect
@@ -910,7 +851,7 @@ export type AppModeMultiSelect = Message<"tddy.v1.AppModeMultiSelect"> & {
  * Use `create(AppModeMultiSelectSchema)` to create a new message.
  */
 export const AppModeMultiSelectSchema: GenMessage<AppModeMultiSelect> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 36);
+  messageDesc(file_tddy_v1_remote, 33);
 
 /**
  * @generated from message tddy.v1.AppModeTextInput
@@ -927,7 +868,7 @@ export type AppModeTextInput = Message<"tddy.v1.AppModeTextInput"> & {
  * Use `create(AppModeTextInputSchema)` to create a new message.
  */
 export const AppModeTextInputSchema: GenMessage<AppModeTextInput> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 37);
+  messageDesc(file_tddy_v1_remote, 34);
 
 /**
  * @generated from message tddy.v1.AppModeDone
@@ -940,7 +881,7 @@ export type AppModeDone = Message<"tddy.v1.AppModeDone"> & {
  * Use `create(AppModeDoneSchema)` to create a new message.
  */
 export const AppModeDoneSchema: GenMessage<AppModeDone> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 38);
+  messageDesc(file_tddy_v1_remote, 35);
 
 /**
  * @generated from message tddy.v1.ClarificationQuestionProto
@@ -972,7 +913,7 @@ export type ClarificationQuestionProto = Message<"tddy.v1.ClarificationQuestionP
  * Use `create(ClarificationQuestionProtoSchema)` to create a new message.
  */
 export const ClarificationQuestionProtoSchema: GenMessage<ClarificationQuestionProto> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 39);
+  messageDesc(file_tddy_v1_remote, 36);
 
 /**
  * @generated from message tddy.v1.QuestionOptionProto
@@ -994,7 +935,7 @@ export type QuestionOptionProto = Message<"tddy.v1.QuestionOptionProto"> & {
  * Use `create(QuestionOptionProtoSchema)` to create a new message.
  */
 export const QuestionOptionProtoSchema: GenMessage<QuestionOptionProto> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 40);
+  messageDesc(file_tddy_v1_remote, 37);
 
 /**
  * @generated from message tddy.v1.ActivityLogged
@@ -1018,7 +959,7 @@ export type ActivityLogged = Message<"tddy.v1.ActivityLogged"> & {
  * Use `create(ActivityLoggedSchema)` to create a new message.
  */
 export const ActivityLoggedSchema: GenMessage<ActivityLogged> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 41);
+  messageDesc(file_tddy_v1_remote, 38);
 
 /**
  * @generated from message tddy.v1.GoalStarted
@@ -1035,7 +976,7 @@ export type GoalStarted = Message<"tddy.v1.GoalStarted"> & {
  * Use `create(GoalStartedSchema)` to create a new message.
  */
 export const GoalStartedSchema: GenMessage<GoalStarted> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 42);
+  messageDesc(file_tddy_v1_remote, 39);
 
 /**
  * @generated from message tddy.v1.StateChanged
@@ -1057,7 +998,7 @@ export type StateChanged = Message<"tddy.v1.StateChanged"> & {
  * Use `create(StateChangedSchema)` to create a new message.
  */
 export const StateChangedSchema: GenMessage<StateChanged> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 43);
+  messageDesc(file_tddy_v1_remote, 40);
 
 /**
  * @generated from message tddy.v1.WorkflowComplete
@@ -1081,7 +1022,7 @@ export type WorkflowComplete = Message<"tddy.v1.WorkflowComplete"> & {
  * Use `create(WorkflowCompleteSchema)` to create a new message.
  */
 export const WorkflowCompleteSchema: GenMessage<WorkflowComplete> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 44);
+  messageDesc(file_tddy_v1_remote, 41);
 
 /**
  * @generated from message tddy.v1.AgentOutput
@@ -1098,7 +1039,7 @@ export type AgentOutput = Message<"tddy.v1.AgentOutput"> & {
  * Use `create(AgentOutputSchema)` to create a new message.
  */
 export const AgentOutputSchema: GenMessage<AgentOutput> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 45);
+  messageDesc(file_tddy_v1_remote, 42);
 
 /**
  * @generated from message tddy.v1.InboxChanged
@@ -1115,7 +1056,7 @@ export type InboxChanged = Message<"tddy.v1.InboxChanged"> & {
  * Use `create(InboxChangedSchema)` to create a new message.
  */
 export const InboxChangedSchema: GenMessage<InboxChanged> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 46);
+  messageDesc(file_tddy_v1_remote, 43);
 
 /**
  * @generated from message tddy.v1.IntentReceived
@@ -1134,7 +1075,7 @@ export type IntentReceived = Message<"tddy.v1.IntentReceived"> & {
  * Use `create(IntentReceivedSchema)` to create a new message.
  */
 export const IntentReceivedSchema: GenMessage<IntentReceived> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 47);
+  messageDesc(file_tddy_v1_remote, 44);
 
 /**
  * TddyRemote: bidirectional streaming for programmatic control of tddy-coder.
@@ -1150,22 +1091,6 @@ export const TddyRemote: GenService<{
     methodKind: "bidi_streaming";
     input: typeof ClientMessageSchema;
     output: typeof ServerMessageSchema;
-  },
-  /**
-   * @generated from rpc tddy.v1.TddyRemote.StreamTerminal
-   */
-  streamTerminal: {
-    methodKind: "server_streaming";
-    input: typeof StreamTerminalRequestSchema;
-    output: typeof TerminalOutputSchema;
-  },
-  /**
-   * @generated from rpc tddy.v1.TddyRemote.StreamTerminalIO
-   */
-  streamTerminalIO: {
-    methodKind: "bidi_streaming";
-    input: typeof TerminalInputSchema;
-    output: typeof TerminalOutputSchema;
   },
   /**
    * @generated from rpc tddy.v1.TddyRemote.GetSession

@@ -18,8 +18,8 @@ fn set_tddy_sessions_dir_for_tests() {
 }
 
 /// Create a temp directory with a git repo (init, commit, origin/master).
-/// Returns (output_dir, plan_dir) where output_dir = base/repo (repo root) and plan_dir = base/plan.
-/// Plan dir is next to repo, not inside it, so it's clear plan storage is separate from the repo.
+/// Returns (output_dir, session_dir) where output_dir = base/repo (repo root) and session_dir = base/plan.
+/// Session dir is next to repo, not inside it, so session artifacts stay separate from the repo.
 /// Use output_dir for start_workflow when the workflow will run acceptance-tests (worktree creation).
 pub fn temp_dir_with_git_repo(label: &str) -> (PathBuf, PathBuf) {
     let base = std::env::temp_dir().join(format!("tddy-cli-{}-{}", label, std::process::id()));
@@ -44,15 +44,15 @@ pub fn temp_dir_with_git_repo(label: &str) -> (PathBuf, PathBuf) {
     run(&["remote", "add", "origin", output_dir.to_str().unwrap()]);
     run(&["push", "-u", "origin", "master"]);
 
-    let plan_dir = base.join("plan");
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
-    (output_dir, plan_dir)
+    let session_dir = base.join("plan");
+    std::fs::create_dir_all(&session_dir).expect("create plan dir");
+    (output_dir, session_dir)
 }
 
 /// Write a minimal changeset.yaml with Planned state, branch/worktree suggestions, and repo_path.
 /// repo_path is the repo root (required for worktree creation when running acceptance-tests).
-pub fn write_changeset_for_plan_session(
-    plan_dir: &std::path::Path,
+pub fn write_changeset_for_session(
+    session_dir: &std::path::Path,
     session_id: &str,
     repo_path: &std::path::Path,
 ) {
@@ -78,5 +78,5 @@ repo_path: "{}"
         session_id,
         repo_path_str.replace('\\', "\\\\").replace('"', "\\\"")
     );
-    std::fs::write(plan_dir.join("changeset.yaml"), changeset).expect("write changeset");
+    std::fs::write(session_dir.join("changeset.yaml"), changeset).expect("write changeset");
 }

@@ -2,7 +2,9 @@
 //!
 //! Mirrors [graph-flow task.rs](https://github.com/a-agmon/rs-graph-llm/blob/main/graph-flow/src/task.rs).
 
-use crate::backend::{CodingBackend, Goal, InvokeRequest, SessionMode};
+use crate::backend::{
+    CodingBackend, GoalHints, GoalId, InvokeRequest, SessionMode, WorkflowRecipe,
+};
 use crate::toolcall::take_submit_result_for_goal;
 use crate::workflow::context::Context;
 use async_trait::async_trait;
@@ -140,17 +142,45 @@ impl Task for EndTask {
 #[derive(Clone)]
 pub struct BackendInvokeTask {
     id: String,
-    goal: Goal,
+    goal_id: GoalId,
+    submit_key: GoalId,
+    hints: GoalHints,
     backend: Arc<dyn CodingBackend>,
 }
 
 impl BackendInvokeTask {
-    pub fn new(id: impl Into<String>, goal: Goal, backend: Arc<dyn CodingBackend>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        goal_id: GoalId,
+        submit_key: GoalId,
+        hints: GoalHints,
+        backend: Arc<dyn CodingBackend>,
+    ) -> Self {
         Self {
             id: id.into(),
-            goal,
+            goal_id,
+            submit_key,
+            hints,
             backend,
         }
+    }
+
+    /// Resolve hints and submit key from a [`WorkflowRecipe`].
+    pub fn from_recipe(
+        id: impl Into<String>,
+        goal_id: GoalId,
+        recipe: &dyn WorkflowRecipe,
+        backend: Arc<dyn CodingBackend>,
+    ) -> Self {
+        let hints = recipe.goal_hints(&goal_id).unwrap_or_else(|| {
+            panic!(
+                "WorkflowRecipe {}: missing hints for goal {}",
+                recipe.name(),
+                goal_id
+            )
+        });
+        let submit_key = recipe.submit_key(&goal_id);
+        Self::new(id, goal_id, submit_key, hints, backend)
     }
 }
 
@@ -171,11 +201,11 @@ impl Task for BackendInvokeTask {
             .or_else(|| context.get_sync("feature_input"))
             .unwrap_or_else(|| "Add a feature".to_string());
 
-        let plan_dir: Option<PathBuf> = context.get_sync("plan_dir");
+        let session_dir: Option<PathBuf> = context.get_sync("session_dir");
         let working_dir = context
             .get_sync::<PathBuf>("worktree_dir")
             .or_else(|| context.get_sync::<PathBuf>("output_dir"))
-            .or_else(|| plan_dir.clone());
+            .or_else(|| session_dir.clone());
         // Use Resume when is_resume is true, or when session_id exists but is_resume was cleared
         // (e.g. Evaluate after Green — after_task clears is_resume). Use Fresh only when
         // explicitly creating a new session (before_red, before_acceptance_tests set is_resume=false).
@@ -192,7 +222,9 @@ impl Task for BackendInvokeTask {
             prompt: prompt.clone(),
             system_prompt: context.get_sync("system_prompt"),
             system_prompt_path: None,
-            goal: self.goal,
+            goal_id: self.goal_id.clone(),
+            submit_key: self.submit_key.clone(),
+            hints: self.hints.clone(),
             model: context.get_sync("model"),
             session,
             working_dir,
@@ -204,7 +236,7 @@ impl Task for BackendInvokeTask {
             inherit_stdin: context.get_sync::<bool>("inherit_stdin").unwrap_or(false),
             extra_allowed_tools: context.get_sync("allowed_tools"),
             socket_path: context.get_sync("socket_path"),
-            plan_dir: context.get_sync("plan_dir"),
+            session_dir: context.get_sync("session_dir"),
         };
 
         let response = self
@@ -213,7 +245,7 @@ impl Task for BackendInvokeTask {
             .await
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
 
-        let key = self.goal.submit_key();
+        let key = self.submit_key.as_str();
         let submit_output = self
             .backend
             .submit_channel()

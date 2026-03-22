@@ -452,8 +452,11 @@ mod tests {
     use crate::gen::tddy_remote_server::TddyRemoteServer;
     use crate::gen::{client_message, ClientMessage, SubmitFeatureInput};
     use crate::TddyRemoteService;
+    use std::sync::Arc;
+
     use tddy_core::AnyBackend;
     use tddy_core::{Presenter, PresenterHandle, SharedBackend, StubBackend};
+    use tddy_workflow_recipes::TddRecipe;
 
     use crate::test_util::spawn_server_and_connect;
 
@@ -466,7 +469,7 @@ mod tests {
             intent_tx: intent_tx.clone(),
         };
 
-        let mut presenter = Presenter::new("stub", "opus")
+        let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe))
             .with_broadcast(event_tx)
             .with_intent_sender(intent_tx);
         let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
@@ -566,6 +569,7 @@ mod daemon_tests {
     use crate::test_util::spawn_server_and_connect;
     use crate::DaemonService;
     use tddy_core::write_changeset;
+    use tddy_core::WorkflowState;
 
     fn temp_sessions_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -589,7 +593,7 @@ mod daemon_tests {
         let changeset = tddy_core::Changeset {
             initial_prompt: Some("test feature".to_string()),
             state: tddy_core::ChangesetState {
-                current: "Planned".to_string(),
+                current: WorkflowState::new("Planned"),
                 ..tddy_core::Changeset::default().state
             },
             worktree: Some("path/to/worktree".to_string()),
@@ -629,7 +633,7 @@ mod daemon_tests {
             let dir = base.join(name);
             fs::create_dir_all(&dir).unwrap();
             let mut changeset = tddy_core::Changeset::default();
-            changeset.state.current = state.to_string();
+            changeset.state.current = WorkflowState::new(state);
             write_changeset(&dir, &changeset).unwrap();
         }
 
