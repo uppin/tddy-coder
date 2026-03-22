@@ -1,6 +1,8 @@
-//! When the Unix relay accepts a submit but the presenter never calls [`Presenter::poll_tool_calls`],
-//! the listener must still complete the connection with an error response so `tddy-tools submit`
-//! unblocks. Otherwise the agent and relay hang (`[wait] waiting for presenter response...`).
+//! Submit is acknowledged on the wire immediately after storing results; the presenter only
+//! receives an activity-log notification. If the presenter never polls, `tddy-tools` still gets
+//! `{"status":"ok",...}` without waiting on the UI loop.
+//!
+//! End-to-end CLI coverage: `packages/tddy-tools/tests/submit_relay_no_poll.rs` (same invariant).
 
 use serde_json::json;
 use serde_json::Value;
@@ -12,7 +14,7 @@ use tokio::time::timeout;
 
 #[tokio::test]
 #[cfg(unix)]
-async fn relay_responds_with_error_when_presenter_never_polls_submit() {
+async fn relay_accepts_submit_when_presenter_never_polls() {
     let (socket_path, _hold_tool_rx) = start_toolcall_listener().expect("start listener");
 
     let path = socket_path.clone();
@@ -45,12 +47,6 @@ async fn relay_responds_with_error_when_presenter_never_polls_submit() {
     );
     let line = wrapped.unwrap().expect("join client task");
     let v: Value = serde_json::from_str(line.trim()).expect("response is JSON");
-    assert_eq!(v["status"], "error", "expected error status, got: {}", line);
-    let msg = v["message"]
-        .as_str()
-        .expect("error response must include message");
-    assert!(
-        !msg.is_empty(),
-        "error message must be non-empty for stuck presenter case"
-    );
+    assert_eq!(v["status"], "ok", "expected ok status, got: {}", line);
+    assert_eq!(v["goal"], "plan");
 }

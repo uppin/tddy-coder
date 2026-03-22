@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::thread;
 
 use crate::backend::QuestionOption;
-use crate::toolcall::{store_submit_result, ToolCallRequest, ToolCallResponse};
+use crate::toolcall::{ToolCallRequest, ToolCallResponse};
 use crate::{ClarificationQuestion, SharedBackend};
 
 use crate::presenter::intent::UserIntent;
@@ -635,18 +635,11 @@ impl Presenter {
         }
         for req in requests {
             match req {
-                ToolCallRequest::Submit {
-                    goal,
-                    data,
-                    response_tx,
-                } => {
+                ToolCallRequest::SubmitActivity { goal, .. } => {
                     self.log_activity(
                         format!("⚙ tddy-tools submit (goal: {})", goal),
                         ActivityKind::ToolUse,
                     );
-                    let json_str = serde_json::to_string(&data).unwrap_or_default();
-                    store_submit_result(&goal, &json_str);
-                    let _ = response_tx.send(ToolCallResponse::SubmitOk { goal: goal.clone() });
                     self.log_activity(
                         format!("✓ submit accepted (goal: {})", goal),
                         ActivityKind::ToolUse,
