@@ -22,6 +22,7 @@ use crate::test_util::temp_dir_with_git_repo;
 
 pub mod rpc_frontend;
 pub mod test_util;
+pub mod web_dev_contract;
 
 /// `connect_view` callback used by VirtualTui and terminal services.
 pub type ViewConnectionFactory = Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>;

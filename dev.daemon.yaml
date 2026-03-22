@@ -1,4 +1,4 @@
-# Dev config for tddy-daemon. Used when TDDY_USE_DAEMON=1.
+# Dev config for tddy-daemon (default for ./web-dev when DAEMON_CONFIG is unset).
 # Maps stub user "testuser" to current OS user for local dev.
 
 log:

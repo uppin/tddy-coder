@@ -10,6 +10,8 @@ The tddy-coder project is currently a pure Rust workspace. A web frontend is nee
 
 A web terminal feature already exists (see [web-terminal.md](web-terminal.md)) using ghostty-web; `tddy-web` is a separate dashboard application.
 
+For **local daemon + Vite** development (backend RPC and HMR frontend together), see [local-web-dev.md](local-web-dev.md).
+
 ## Requirements
 
 ### Workspace Structure

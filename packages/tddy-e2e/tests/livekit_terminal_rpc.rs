@@ -14,8 +14,8 @@ async fn livekit_terminal_rpc_skipped() {
 
 #[cfg(feature = "livekit")]
 mod livekit_tests {
-    use std::sync::{Arc, Mutex};
     use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use livekit::prelude::*;
@@ -412,7 +412,14 @@ mod livekit_tests {
 
         let seg_full: Vec<bool> = segments
             .iter()
-            .map(|s| compact.contains(s.chars().filter(|c| !c.is_whitespace()).collect::<String>().as_str()))
+            .map(|s| {
+                compact.contains(
+                    s.chars()
+                        .filter(|c| !c.is_whitespace())
+                        .collect::<String>()
+                        .as_str(),
+                )
+            })
             .collect();
         let seg_marker: Vec<bool> = segments
             .iter()
@@ -422,8 +429,18 @@ mod livekit_tests {
 
         let lo = lk_longest_echo_prefix(&compact, &expected_no_ws);
 
-        let missing_full: Vec<usize> = seg_full.iter().enumerate().filter(|(_, ok)| !**ok).map(|(i, _)| i).collect();
-        let missing_markers: Vec<usize> = seg_marker.iter().enumerate().filter(|(_, ok)| !**ok).map(|(i, _)| i).collect();
+        let missing_full: Vec<usize> = seg_full
+            .iter()
+            .enumerate()
+            .filter(|(_, ok)| !**ok)
+            .map(|(i, _)| i)
+            .collect();
+        let missing_markers: Vec<usize> = seg_marker
+            .iter()
+            .enumerate()
+            .filter(|(_, ok)| !**ok)
+            .map(|(i, _)| i)
+            .collect();
 
         assert_eq!(
             lo,
@@ -465,8 +482,7 @@ mod livekit_tests {
         const NUM_SEGMENTS: usize = 10;
 
         // Build segmented payload: "#SEG-0:aaa…#SEG-1:aaa…" totalling TOTAL_LEN chars.
-        let headers: Vec<String> =
-            (0..NUM_SEGMENTS).map(|i| format!("#SEG-{}:", i)).collect();
+        let headers: Vec<String> = (0..NUM_SEGMENTS).map(|i| format!("#SEG-{}:", i)).collect();
         let header_chars: usize = headers.iter().map(|s| s.chars().count()).sum();
         let body_total = TOTAL_LEN - header_chars;
         let base = body_total / NUM_SEGMENTS;
@@ -494,8 +510,7 @@ mod livekit_tests {
         let (_presenter_handle, factory, shutdown) =
             tddy_e2e::spawn_presenter_with_view_connection_factory(None);
 
-        let terminal_service =
-            tddy_service::TerminalServiceVirtualTui::new(factory, false);
+        let terminal_service = tddy_service::TerminalServiceVirtualTui::new(factory, false);
 
         let server = LiveKitParticipant::connect(
             &url,
@@ -514,8 +529,7 @@ mod livekit_tests {
         let rpc_events = client_room.subscribe();
         wait_for_participant(&client_room, &mut client_events, SERVER_IDENTITY).await?;
 
-        let rpc_client =
-            RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
+        let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
 
         let (mut sender, mut rx) = rpc_client
             .start_bidi_stream("terminal.TerminalService", "StreamTerminalIO")
@@ -545,7 +559,10 @@ mod livekit_tests {
         // Resize to COLS×ROWS so the prompt bar can fit the entire payload.
         sender
             .send(
-                TerminalInput { data: encode_resize(COLS, ROWS) }.encode_to_vec(),
+                TerminalInput {
+                    data: encode_resize(COLS, ROWS),
+                }
+                .encode_to_vec(),
                 false,
             )
             .await
@@ -560,10 +577,7 @@ mod livekit_tests {
         // Send expected bytes one by one (char-by-char echo test).
         for byte in expected.as_bytes() {
             sender
-                .send(
-                    TerminalInput { data: vec![*byte] }.encode_to_vec(),
-                    false,
-                )
+                .send(TerminalInput { data: vec![*byte] }.encode_to_vec(), false)
                 .await
                 .map_err(|e| anyhow::anyhow!("send byte: {}", e))?;
         }

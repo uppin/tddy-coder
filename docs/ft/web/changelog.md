@@ -2,6 +2,11 @@
 
 Release note history for the Web product area.
 
+## 2026-03-22 — Local web dev: `./web-dev`
+
+- **Feature doc**: [local-web-dev.md](local-web-dev.md) describes the daemon + Vite flow, **`DAEMON_CONFIG`**, temp YAML, CLI pass-through, **`DAEMON_PORT`** for the proxy, and **`fuser`** port cleanup.
+- **E2E contract tests**: `packages/tddy-e2e` includes static checks for the repo-root **`web-dev`** script (`cargo test -p tddy-e2e web_dev`).
+
 ## 2026-03-21 — Terminal: coder left the room
 
 - **GhosttyTerminalLiveKit**: When the LiveKit **server/coder** participant disconnects (`ParticipantDisconnected` for `serverIdentity`), input to the RPC stream stops, the terminal is dimmed and non-interactive (`data-session-active="false"` on `GhosttyTerminal`), and a full-area banner **`terminal-coder-unavailable`** explains that the session ended.

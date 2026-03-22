@@ -42,6 +42,10 @@ pub fn run_virtual_tui(
     thread::spawn(move || {
         let mut state = conn.state_snapshot;
         let mut view = TuiView::new();
+        // Seed view-local state (e.g. select_selected) from the presenter snapshot. Rendering
+        // uses ViewState for highlights; without this, a new attach would show default selection
+        // even when the snapshot has initial_selected updated (e.g. after SelectHighlightChanged).
+        view.on_mode_changed(&state.mode);
         let mut input_buf: Vec<u8> = Vec::new();
 
         // Collect each draw()'s raw ANSI output into a buffer so we can diff
@@ -175,6 +179,14 @@ pub fn run_virtual_tui(
             loop {
                 match input_rx.try_recv() {
                     Ok(bytes) if !bytes.is_empty() => {
+                        // Mode may change between the top-of-loop drain and this chunk (e.g. Select
+                        // after plan clarification). Drain again so key handling sees current mode.
+                        let had_more =
+                            drain_presenter_broadcast(&mut event_rx, &mut state, &mut view);
+                        if had_more {
+                            updated = true;
+                            log::debug!("VirtualTui: drained PresenterEvents before input chunk");
+                        }
                         process_virtual_tui_input_chunk(
                             &bytes,
                             &mut updated,
@@ -235,6 +247,11 @@ pub fn run_virtual_tui(
                 loop {
                     match input_rx.try_recv() {
                         Ok(bytes) if !bytes.is_empty() => {
+                            let had_more =
+                                drain_presenter_broadcast(&mut event_rx, &mut state, &mut view);
+                            if had_more {
+                                straggler_updated = true;
+                            }
                             process_virtual_tui_input_chunk(
                                 &bytes,
                                 &mut straggler_updated,
@@ -331,6 +348,10 @@ fn process_virtual_tui_input_chunk(
             ) {
                 let _ = intent_tx.send(intent);
             }
+            if matches!(state.mode, AppMode::Select { .. }) {
+                let idx = view.view_state().select_selected;
+                let _ = intent_tx.send(UserIntent::SelectHighlightChanged(idx));
+            }
             input_buf.drain(..consumed);
             *updated = true;
         }
@@ -365,6 +386,10 @@ fn process_virtual_tui_input_chunk(
                         *total_keys_parsed
                     );
                 }
+            }
+            if matches!(state.mode, AppMode::Select { .. }) {
+                let idx = view.view_state().select_selected;
+                let _ = intent_tx.send(UserIntent::SelectHighlightChanged(idx));
             }
             *updated = true;
         } else if let Some(intent) = key_event_to_intent(key, &state.mode, view.view_state()) {
@@ -422,7 +447,13 @@ pub(crate) fn drain_presenter_broadcast(
                 apply_event(state, view, ev);
                 any = true;
             }
-            Err(TryRecvError::Lagged(_)) => continue,
+            Err(TryRecvError::Lagged(skipped)) => {
+                log::warn!(
+                    "VirtualTui: broadcast receiver lagged; skipped {} presenter event(s)",
+                    skipped
+                );
+                continue;
+            }
             Err(TryRecvError::Empty) | Err(TryRecvError::Closed) => break,
         }
     }
@@ -904,8 +935,7 @@ mod tests {
 
         let backend = TestBackend::new(COLS, ROWS);
         let viewport = Viewport::Fixed(ratatui::layout::Rect::new(0, 0, COLS, ROWS));
-        let mut terminal =
-            Terminal::with_options(backend, TerminalOptions { viewport }).unwrap();
+        let mut terminal = Terminal::with_options(backend, TerminalOptions { viewport }).unwrap();
 
         let state = PresenterState {
             agent: String::new(),

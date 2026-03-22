@@ -36,6 +36,7 @@ With **direnv**: `direnv allow` once; the shell loads automatically when you `cd
 | `./test` | Build tddy-coder + tddy-tools, run all tests. Writes output to `.verify-result.txt` (agent workaround for Cursor terminal capture). Usage: `./test` — all tests; `./test -p tddy-core` — one package; `./test -- test_name` — specific test. |
 | `./clean` | Remove stale Cargo build fingerprints, deps, incremental. Keeps newest per crate in `target/debug` and `target/release`. Frees disk space without full `cargo clean`. |
 | `./verify` | Run `cargo test` and write output to `.verify-result.txt`. Use when agent terminal capture fails; read that file for verification evidence. |
+| `./web-dev` | Start **`tddy-daemon`** (see **`DAEMON_CONFIG`** / **`dev.daemon.yaml`**) and the **`tddy-web`** Vite dev server with **`/rpc`** proxy. See [docs/ft/web/local-web-dev.md](docs/ft/web/local-web-dev.md). |
 
 ### Commands
 
