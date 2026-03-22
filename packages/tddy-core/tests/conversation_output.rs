@@ -96,13 +96,12 @@ async fn cursor_backend_writes_raw_stream_to_conversation_output_file() {
     let expected_raw = r#"{"type":"system","thread_id":"t1"}
 {"type":"result","result":"done","session_id":"t1"}"#;
 
-    let script = format!(
-        r##"#!/bin/sh
-printf '%s\n' '{{"type":"system","thread_id":"t1"}}'
-printf '%s\n' '{{"type":"result","result":"done","session_id":"t1"}}'
+    let script = r##"#!/bin/sh
+printf '%s\n' '{"type":"system","thread_id":"t1"}'
+printf '%s\n' '{"type":"result","result":"done","session_id":"t1"}'
 exit 0
 "##
-    );
+    .to_string();
     let script_path = tmp.join("agent");
     fs::write(&script_path, script).expect("write script");
     {
@@ -112,7 +111,7 @@ exit 0
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = CursorBackend::with_path(script_path.into());
+    let backend = CursorBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "test".to_string(),
         system_prompt: None,

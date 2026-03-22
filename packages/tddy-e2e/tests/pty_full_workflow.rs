@@ -156,10 +156,10 @@ async fn pty_full_workflow_asserts_each_state_transition() {
                                 .await
                                 {
                                     Ok(Ok(Some(msg))) => {
-                                        if let Some(event) = msg.event {
-                                            if let server_message::Event::StateChanged(sc) = event {
-                                                state_transitions.push((sc.from, sc.to));
-                                            }
+                                        if let Some(server_message::Event::StateChanged(sc)) =
+                                            msg.event
+                                        {
+                                            state_transitions.push((sc.from, sc.to));
                                         }
                                     }
                                     _ => break,

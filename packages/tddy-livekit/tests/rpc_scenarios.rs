@@ -562,7 +562,7 @@ async fn rpc_scenarios() -> Result<()> {
 
         {
             log::debug!("scenario: client stream concatenates messages");
-            let requests = vec![
+            let requests = [
                 EchoRequest {
                     message: "one".to_string(),
                 },
@@ -595,7 +595,7 @@ async fn rpc_scenarios() -> Result<()> {
 
         {
             log::debug!("scenario: bidi stream echoes each message");
-            let requests = vec![
+            let requests = [
                 EchoRequest {
                     message: "alpha".to_string(),
                 },

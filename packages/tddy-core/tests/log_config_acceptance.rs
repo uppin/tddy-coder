@@ -244,8 +244,8 @@ fn log_rotation_prunes_beyond_max_rotated() {
 #[test]
 #[serial]
 fn default_log_config_matches_current_behavior() {
-    let _ = std::env::remove_var("TDDY_QUIET");
-    let _ = std::env::remove_var("RUST_LOG");
+    std::env::remove_var("TDDY_QUIET");
+    std::env::remove_var("RUST_LOG");
 
     let config = default_log_config(None, None);
     assert_eq!(config.default.level, log::LevelFilter::Info);
@@ -255,7 +255,7 @@ fn default_log_config_matches_current_behavior() {
     assert!(default_logger
         .format
         .as_ref()
-        .map_or(false, |f| f.contains("{target}")));
+        .is_some_and(|f| f.contains("{target}")));
 }
 
 #[test]

@@ -1,6 +1,8 @@
 //! Shared test setup. Ensures TDDY_SESSIONS_DIR is set so tests never write to ~/.tddy.
 //! Include via `mod common;` in each integration test file.
 
+#![allow(dead_code)]
+
 use ctor::ctor;
 use std::path::PathBuf;
 

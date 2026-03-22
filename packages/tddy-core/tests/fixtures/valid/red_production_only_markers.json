@@ -1,0 +1,41 @@
+{
+  "goal": "red",
+  "summary": "Skeletons with logging markers on production entry points only.",
+  "tests": [
+    {
+      "name": "widget_parses_input",
+      "file": "packages/demo/src/widget.rs",
+      "line": 40,
+      "status": "failing"
+    }
+  ],
+  "skeletons": [
+    {
+      "name": "Widget",
+      "file": "packages/demo/src/widget.rs",
+      "line": 10,
+      "kind": "struct"
+    }
+  ],
+  "markers": [
+    {
+      "marker_id": "M001",
+      "test_name": "widget_parses_input",
+      "scope": "widget::new",
+      "source_file": "packages/demo/src/widget.rs",
+      "data": {}
+    }
+  ],
+  "marker_results": [
+    {
+      "marker_id": "M001",
+      "test_name": "widget_parses_input",
+      "scope": "widget::new",
+      "collected": false,
+      "investigation": null
+    }
+  ],
+  "test_command": "cargo test",
+  "prerequisite_actions": "None",
+  "run_single_or_selected_tests": "cargo test widget_parses_input"
+}

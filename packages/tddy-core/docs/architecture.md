@@ -83,7 +83,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **Context header**: `build_context_header` and `prepend_context_header` prepend a `<context-reminder>` block to agent prompts when plan_dir contains `.md` artifacts. Lists absolute paths to PRD.md, TODO.md, acceptance-tests.md, progress.md, etc. When `repo_dir` is provided (worktree or output dir), includes `repo_dir: <absolute path>` so agents know their working directory. Omitted when plan_dir is None and repo_dir is None. Plan, acceptance-tests, and red goals use it.
 - **planning**: System prompt (structured-response format) and user prompt construction. Staging at output_dir/dir_name or `$HOME/.tddy/sessions/{uuid}/` when output_dir omitted. Writes system prompt to plan dir; stores initial_prompt and clarification_qa in changeset. Persists questions when ClarificationNeeded; pairs with answers on follow-up. Discovery uses `name` (human-readable changeset name) in planning prompt.
 - **acceptance_tests**: System prompt for test creation and verification; parses test summary and run instructions; writes acceptance-tests.md; appends session to changeset.
-- **red**: System prompt for skeleton code and failing lower-level tests; parses RedOutput; writes red-output.md and progress.md; appends impl session to changeset.
+- **red**: System prompt for skeleton code and failing lower-level tests; instructs production-only logging markers (not in test-only files). Parses RedOutput; writes red-output.md and progress.md; appends impl session to changeset.
 - **green**: System prompt for implementation; parses GreenOutput; updates progress.md and acceptance-tests.md; writes demo-results.md when demo plan exists.
 - **evaluate**: Analyzes git changes for risks, changed files, affected tests, and validity. Requires plan_dir; writes evaluation-report.md. Reads optional PRD.md and changeset.yaml for context. EvaluateOptions: model, agent_output, conversation_output_path, inherit_stdin, allowed_tools_extras, debug. State: Evaluating → Evaluated. Can start from GreenComplete (when demo skipped) or DemoComplete.
 - **validate** (subagents): Orchestrates validate-tests, validate-prod-ready, and analyze-clean-code subagents via the Agent tool. Requires evaluation-report.md in plan_dir (from prior evaluate run). Claude-only (CursorBackend rejects). ValidateOptions: model, agent_output, conversation_output_path, inherit_stdin, allowed_tools_extras, debug. State: Validating → ValidateComplete.
@@ -92,7 +92,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Schema (tddy-tools)
 
-- **JSON Schema validation**: All schema logic lives in tddy-tools. Schemas are embedded via `include_dir`; no schema files are written to disk. `tddy-tools submit --goal <goal>` validates JSON against the embedded schema before relaying to tddy-coder. `tddy-tools get-schema <goal>` outputs the schema for inspection. On validation failure, tddy-tools returns errors with a tip to run `get-schema`.
+- **JSON Schema validation**: All schema logic lives in tddy-tools. Schemas are embedded via `include_dir`; no schema files are written to disk. `tddy-tools submit --goal <goal>` validates JSON against the embedded schema before relaying to tddy-coder. `tddy-tools get-schema <goal>` outputs the schema for inspection. On validation failure, tddy-tools returns errors with a tip to run `get-schema`. The `red` schema defines an optional `source_file` on each `markers[]` item (file path where the marker was placed); `packages/tddy-core/schemas/red.schema.json` matches the embedded schema for tests and parity checks.
 - **ProcessToolExecutor**: Invokes `tddy-tools submit --goal <goal> --data '<json>'` with TDDY_SOCKET set. tddy-core has no schema module.
 
 ### Output (`output/`)
@@ -100,7 +100,9 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **extract_last_structured_block**: Extracts last `<structured-response>` block and optional `schema="..."` attribute. Used for validation before parsing.
 - **parse_planning_response**: Extracts PRD and TODO from structured-response or delimited text. Tries each structured-response block until one parses (handles system prompt example before model output).
 - **parse_acceptance_tests_response**: Extracts test summary, test_command, prerequisite_actions, run_single_or_selected_tests from acceptance-tests response.
-- **parse_red_response**: Extracts RedOutput (summary, tests, skeletons, markers, marker_results, run instructions) from red goal response. Uses last structured-response block (handles system prompt example before model output).
+- **parse_red_response**: Extracts RedOutput (summary, tests, skeletons, markers, marker_results, run instructions) from red goal response. Uses last structured-response block (handles system prompt example before model output). After deserialize, rejects markers whose optional `source_file` path is classified as test-only (see `source_path`).
+- **validate_red_marker_source_paths**: Ensures every marker with `source_file` points at a production path; returns `ParseError::Malformed` when classification is test-only.
+- **source_path** (`source_path.rs`): `classify_rust_source_path` classifies slash-normalized paths: `tests` as a path segment or `*_test.rs` filename → test-only; otherwise production. Used for red marker placement validation only.
 - **parse_green_response**: Extracts GreenOutput (summary, tests, demo_results) from green goal response.
 - **write_artifacts**: Writes PRD.md, TODO.md, demo-plan.md to the plan directory.
 - **write_acceptance_tests_file / write_red_output_file / write_progress_file / write_demo_results_file**: Artifact writers.

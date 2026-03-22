@@ -171,7 +171,7 @@ async fn green_resumes_from_state_session_id() {
         "green must use state.session_id, not get_session_for_tag(impl)"
     );
     assert!(
-        req.session.as_ref().map_or(false, |s| s.is_resume()),
+        req.session.as_ref().is_some_and(|s| s.is_resume()),
         "green must use SessionMode::Resume when resuming"
     );
 
