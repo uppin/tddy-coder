@@ -137,6 +137,19 @@ pub fn event_to_server_message(event: PresenterEvent) -> ServerMessage {
             }
         }
         PresenterEvent::BackendSelected { .. } => ServerMessage { event: None },
+        PresenterEvent::SessionRuntimeStatus(fields) => {
+            let proto = crate::runtime_status::build_session_runtime_status_proto(
+                &fields.session_id,
+                &fields.goal,
+                &fields.workflow_state,
+                fields.elapsed,
+                &fields.agent,
+                &fields.model,
+            );
+            ServerMessage {
+                event: Some(Event::SessionRuntimeStatus(proto)),
+            }
+        }
         PresenterEvent::ShouldQuit => {
             if let Some(msg) = intent_to_client_message(&UserIntent::Quit) {
                 ServerMessage {

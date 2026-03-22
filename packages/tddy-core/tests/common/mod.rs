@@ -255,8 +255,10 @@ pub async fn run_plan_with_conversation_output(
 /// Write a minimal changeset.yaml with Planned state for a plan session.
 /// Includes branch_suggestion and worktree_suggestion for worktree creation.
 pub fn write_changeset_for_plan_session(plan_dir: &std::path::Path, session_id: &str) {
-    let mut cs = Changeset::default();
-    cs.name = Some("feature".to_string());
+    let mut cs = Changeset {
+        name: Some("feature".to_string()),
+        ..Default::default()
+    };
     cs.sessions = vec![tddy_core::changeset::SessionEntry {
         id: session_id.to_string(),
         agent: "claude".to_string(),
@@ -276,8 +278,10 @@ pub fn write_changeset_for_plan_session(plan_dir: &std::path::Path, session_id: 
 /// Sets `state.session_id` to `session_id` (persisted agent thread id for resume).
 /// Includes branch_suggestion and worktree_suggestion for worktree creation.
 pub fn write_changeset_with_state(plan_dir: &std::path::Path, state: &str, session_id: &str) {
-    let mut cs = Changeset::default();
-    cs.name = Some("feature".to_string());
+    let mut cs = Changeset {
+        name: Some("feature".to_string()),
+        ..Default::default()
+    };
     cs.sessions = vec![tddy_core::changeset::SessionEntry {
         id: session_id.to_string(),
         agent: "claude".to_string(),

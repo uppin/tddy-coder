@@ -42,7 +42,7 @@ exit 0
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = CursorBackend::with_path(script_path.into());
+    let backend = CursorBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "test prompt".to_string(),
         system_prompt: None,
@@ -135,7 +135,7 @@ exit 0
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = CursorBackend::with_path(script_path.into());
+    let backend = CursorBackend::with_path(script_path);
     for goal in [Goal::AcceptanceTests, Goal::Red, Goal::Green] {
         let req = InvokeRequest {
             prompt: "Create tests".to_string(),
@@ -195,7 +195,7 @@ exit 0
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = CursorBackend::with_path(script_path.into());
+    let backend = CursorBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "run validate subagents".to_string(),
         system_prompt: None,
@@ -257,7 +257,7 @@ exit 0
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = CursorBackend::with_path(script_path.into());
+    let backend = CursorBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "apply refactoring plan".to_string(),
         system_prompt: None,
@@ -319,7 +319,7 @@ exit 0
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = CursorBackend::with_path(script_path.into());
+    let backend = CursorBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "first turn".to_string(),
         system_prompt: None,
@@ -386,7 +386,7 @@ exit 0
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = CursorBackend::with_path(script_path.into());
+    let backend = CursorBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "continue".to_string(),
         system_prompt: None,
@@ -471,7 +471,7 @@ exit 0
     perms.set_mode(0o755);
     fs::set_permissions(&script_path, perms).unwrap();
 
-    let backend = CursorBackend::with_path(script_path.into());
+    let backend = CursorBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "Create a PRD for: Add login".to_string(),
         system_prompt: Some("You MUST output a <structured-response> block.".to_string()),
@@ -536,7 +536,7 @@ exit 0
     perms.set_mode(0o755);
     fs::set_permissions(&script_path, perms).unwrap();
 
-    let backend = CursorBackend::with_path(script_path.into());
+    let backend = CursorBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "Plan: Add logout".to_string(),
         system_prompt: None,
@@ -601,7 +601,7 @@ exit 0
     perms.set_mode(0o755);
     fs::set_permissions(&script_path, perms).unwrap();
 
-    let backend = CursorBackend::with_path(script_path.into());
+    let backend = CursorBackend::with_path(script_path);
     let req = InvokeRequest {
         prompt: "Plan feature".to_string(),
         system_prompt: Some("Inline: ignored when path set.".to_string()),
@@ -678,7 +678,7 @@ exit 0
         fs::set_permissions(&script_path, perms).unwrap();
     }
 
-    let backend = Arc::new(CursorBackend::with_path(script_path.into()));
+    let backend = Arc::new(CursorBackend::with_path(script_path));
     let storage_dir = std::env::temp_dir().join("tddy-cursor-clarification-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
     let engine = WorkflowEngine::new(

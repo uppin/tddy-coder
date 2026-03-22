@@ -50,6 +50,11 @@ impl TddyRemote for TddyRemoteService {
                 match event_rx.recv().await {
                     Ok(event) => {
                         let msg = event_to_server_message(event);
+                        if msg.event.is_none() {
+                            log::trace!("TddyRemoteService: skip ServerMessage with empty event");
+                            continue;
+                        }
+                        log::debug!("TddyRemoteService: stream outbound event");
                         if event_tx_clone.send(Ok(msg)).await.is_err() {
                             break;
                         }

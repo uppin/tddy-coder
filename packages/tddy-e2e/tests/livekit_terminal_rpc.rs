@@ -73,7 +73,7 @@ mod livekit_tests {
         let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
         let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
 
-        let (_presenter_handle, factory, _shutdown) =
+        let (_presenter_handle, factory, _shutdown, _) =
             tddy_e2e::spawn_presenter_with_view_connection_factory(Some("Build auth".to_string()));
 
         let terminal_service = TerminalServiceVirtualTui::new(factory, false);
@@ -196,7 +196,7 @@ mod livekit_tests {
         let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
         let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
 
-        let (_presenter_handle, factory, shutdown) =
+        let (_presenter_handle, factory, shutdown, _) =
             tddy_e2e::spawn_presenter_with_view_connection_factory(Some("Build auth".to_string()));
 
         let terminal_service = TerminalServiceVirtualTui::new(factory, false);
@@ -346,7 +346,7 @@ mod livekit_tests {
         let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
         let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
 
-        let (_presenter_handle, factory, shutdown) =
+        let (_presenter_handle, factory, shutdown, _) =
             tddy_e2e::spawn_presenter_with_view_connection_factory(Some("Build auth".to_string()));
 
         let terminal_service = TerminalServiceVirtualTui::new(factory, false);

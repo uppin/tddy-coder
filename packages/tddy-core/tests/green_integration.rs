@@ -435,7 +435,7 @@ async fn green_workflow_resumes_session_from_impl_session_file() {
         "green should resume with session from changeset.yaml"
     );
     assert!(
-        green_req.session.as_ref().map_or(false, |s| s.is_resume()),
+        green_req.session.as_ref().is_some_and(|s| s.is_resume()),
         "green should invoke with SessionMode::Resume"
     );
 

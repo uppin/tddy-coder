@@ -32,8 +32,10 @@ fn write_plan_dir_green_ready(plan_dir: &Path) {
         "# Progress\n## Tests\n- t1 done\n",
     )
     .expect("progress.md");
-    let mut cs = Changeset::default();
-    cs.name = Some("feature".to_string());
+    let mut cs = Changeset {
+        name: Some("feature".to_string()),
+        ..Default::default()
+    };
     cs.sessions = vec![
         SessionEntry {
             id: "plan-s".to_string(),

@@ -9,7 +9,7 @@ use crate::toolcall::{store_submit_result, ToolCallRequest, ToolCallResponse};
 use crate::{ClarificationQuestion, SharedBackend};
 
 use crate::presenter::intent::UserIntent;
-use crate::presenter::presenter_events::{PresenterEvent, ViewConnection};
+use crate::presenter::presenter_events::{PresenterEvent, SessionRuntimeFields, ViewConnection};
 use crate::presenter::state::{ActivityEntry, ActivityKind, AppMode, PresenterState};
 use crate::presenter::workflow_runner;
 use crate::presenter::{WorkflowCompletePayload, WorkflowEvent};
@@ -92,6 +92,7 @@ impl Presenter {
         let state = PresenterState {
             agent: agent.into(),
             model: model.into(),
+            session_id: String::new(),
             mode: AppMode::FeatureInput,
             current_goal: None,
             current_state: None,
@@ -165,6 +166,29 @@ impl Presenter {
         if let Some(ref tx) = self.broadcast_tx {
             let _ = tx.send(event);
         }
+    }
+
+    /// Emit a [`PresenterEvent::SessionRuntimeStatus`] from current state (goal, state label, elapsed, agent, model).
+    fn emit_session_runtime_status(&mut self) {
+        let fields = SessionRuntimeFields {
+            session_id: self.state.session_id.clone(),
+            goal: self.state.current_goal.clone().unwrap_or_default(),
+            workflow_state: self
+                .state
+                .current_state
+                .clone()
+                .unwrap_or_else(|| "—".to_string()),
+            elapsed: self.state.goal_start_time.elapsed(),
+            agent: self.state.agent.clone(),
+            model: self.state.model.clone(),
+        };
+        log::debug!(
+            "Presenter: SessionRuntimeStatus session_id={} goal_len={} workflow_state={}",
+            fields.session_id,
+            fields.goal.len(),
+            fields.workflow_state
+        );
+        self.broadcast(PresenterEvent::SessionRuntimeStatus(fields));
     }
 
     /// Show interactive backend selection (synthetic single-select question).
@@ -261,6 +285,7 @@ impl Presenter {
             agent: agent_str.clone(),
             model: self.state.model.clone(),
         });
+        self.emit_session_runtime_status();
         let Some(factory) = self.deferred_backend_factory.take() else {
             return;
         };
@@ -798,6 +823,7 @@ impl Presenter {
                         from: from.clone(),
                         to: to.clone(),
                     });
+                    self.emit_session_runtime_status();
                 }
                 WorkflowEvent::GoalStarted(goal) => {
                     self.state.current_goal = Some(goal.clone());
@@ -807,6 +833,7 @@ impl Presenter {
                         self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                     }
                     self.broadcast(PresenterEvent::GoalStarted(goal.clone()));
+                    self.emit_session_runtime_status();
                 }
                 WorkflowEvent::ClarificationNeeded { questions } => {
                     self.flush_agent_output_buffer();
@@ -941,6 +968,14 @@ impl Presenter {
         self.workflow_debug = debug;
         self.tool_call_rx = tool_call_rx;
         self.workflow_socket_path = socket_path.clone();
+        self.state.session_id = session_id
+            .clone()
+            .unwrap_or_else(|| output_dir.to_string_lossy().into_owned());
+        log::info!(
+            "Presenter: workflow session_id={} output_dir={}",
+            self.state.session_id,
+            output_dir.display()
+        );
         self.spawn_workflow(
             backend,
             output_dir,

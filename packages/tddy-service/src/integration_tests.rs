@@ -586,8 +586,10 @@ mod daemon_tests {
         let session_dir = base.join("session-1");
         fs::create_dir_all(&session_dir).unwrap();
 
-        let mut changeset = tddy_core::Changeset::default();
-        changeset.initial_prompt = Some("test feature".to_string());
+        let mut changeset = tddy_core::Changeset {
+            initial_prompt: Some("test feature".to_string()),
+            ..Default::default()
+        };
         changeset.state.current = "Planned".to_string();
         changeset.worktree = Some("path/to/worktree".to_string());
         changeset.branch = Some("feature/foo".to_string());

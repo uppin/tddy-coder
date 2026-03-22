@@ -74,9 +74,11 @@ fn test_setup_worktree_for_session_creates_from_origin_master_and_updates_change
 
     let plan_dir = base.join("plan");
     fs::create_dir_all(&plan_dir).unwrap();
-    let mut cs = Changeset::default();
-    cs.name = Some("Auth Feature".to_string());
-    cs.initial_prompt = Some("add auth".to_string());
+    let mut cs = Changeset {
+        name: Some("Auth Feature".to_string()),
+        initial_prompt: Some("add auth".to_string()),
+        ..Default::default()
+    };
     cs.state.current = "Planned".to_string();
     cs.branch_suggestion = Some("feature/auth".to_string());
     cs.worktree_suggestion = Some("feature-auth".to_string());

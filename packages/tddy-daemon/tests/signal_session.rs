@@ -29,6 +29,7 @@ users:
     DaemonConfig::load(&path).unwrap()
 }
 
+#[allow(clippy::type_complexity)]
 fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
     let config = test_config();
     let sessions_base_resolver: Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync> =

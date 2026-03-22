@@ -369,11 +369,7 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
         "expected Q&A prompt in stdout: {}",
         stdout
     );
-    let last_line = stdout
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .last()
-        .unwrap_or("");
+    let last_line = stdout.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("");
     let plan_dir = std::path::Path::new(last_line.trim());
     assert!(
         plan_dir.is_dir() && plan_dir.join("PRD.md").exists(),

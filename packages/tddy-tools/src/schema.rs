@@ -198,7 +198,8 @@ mod tests {
     #[test]
     fn get_schema_returns_content_for_all_goals() {
         for (goal, _) in GOAL_SCHEMA_FILES {
-            let content = get_schema(goal).expect(&format!("schema for {} should exist", goal));
+            let content =
+                get_schema(goal).unwrap_or_else(|| panic!("schema for {} should exist", goal));
             assert!(!content.is_empty());
             assert!(content.contains("$schema"));
         }
