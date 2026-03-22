@@ -14,6 +14,8 @@ async fn livekit_terminal_rpc_skipped() {
 
 #[cfg(feature = "livekit")]
 mod livekit_tests {
+    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
 
     use livekit::prelude::*;
@@ -332,6 +334,255 @@ mod livekit_tests {
         fn visible_content(&self) -> String {
             self.parser.screen().contents()
         }
+    }
+
+    // ── vt100 echo helpers (mirroring grpc_terminal_rpc.rs helpers) ────────────
+
+    fn lk_vt100_compact_screen(all_output: &[u8], rows: u16, cols: u16) -> String {
+        let mut parser = vt100::Parser::new(rows, cols, 0);
+        parser.process(all_output);
+        let screen = parser.screen().contents();
+        screen.chars().filter(|c| !c.is_whitespace()).collect()
+    }
+
+    fn lk_longest_echo_prefix(compact: &str, expected_no_ws: &str) -> usize {
+        let mut lo = 0usize;
+        let mut hi = expected_no_ws.len();
+        while lo < hi {
+            let mid = (lo + hi).div_ceil(2);
+            if compact.contains(&expected_no_ws[..mid]) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        lo
+    }
+
+    async fn lk_eventually_echo_in_vt100(
+        buf: &Arc<Mutex<Vec<u8>>>,
+        expected: &str,
+        rows: u16,
+        cols: u16,
+    ) -> bool {
+        // LiveKit has higher per-chunk latency than gRPC; use a longer timeout.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
+        let min_interval = Duration::from_millis(400);
+        let min_new_bytes = 4096usize;
+        let mut last_check_at = tokio::time::Instant::now() - min_interval;
+        let mut last_check_len = 0usize;
+        let expected_no_ws: String = expected.chars().filter(|c| !c.is_whitespace()).collect();
+
+        while tokio::time::Instant::now() < deadline {
+            let ok = {
+                let g = buf.lock().expect("output buffer");
+                let len = g.len();
+                let due = last_check_at.elapsed() >= min_interval
+                    || len.saturating_sub(last_check_len) >= min_new_bytes;
+                if due {
+                    last_check_at = tokio::time::Instant::now();
+                    last_check_len = len;
+                    let compact = lk_vt100_compact_screen(&g, rows, cols);
+                    lk_longest_echo_prefix(&compact, &expected_no_ws) == expected_no_ws.len()
+                } else {
+                    false
+                }
+            };
+            if ok {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        let g = buf.lock().expect("output buffer");
+        let compact = lk_vt100_compact_screen(&g, rows, cols);
+        let expected_no_ws: String = expected.chars().filter(|c| !c.is_whitespace()).collect();
+        lk_longest_echo_prefix(&compact, &expected_no_ws) == expected_no_ws.len()
+    }
+
+    fn lk_assert_segmented_echo_vt100(
+        all_output: &[u8],
+        expected: &str,
+        segments: &[String],
+        rows: u16,
+        cols: u16,
+    ) {
+        let compact = lk_vt100_compact_screen(all_output, rows, cols);
+        let expected_no_ws: String = expected.chars().filter(|c| !c.is_whitespace()).collect();
+
+        let seg_full: Vec<bool> = segments
+            .iter()
+            .map(|s| compact.contains(s.chars().filter(|c| !c.is_whitespace()).collect::<String>().as_str()))
+            .collect();
+        let seg_marker: Vec<bool> = segments
+            .iter()
+            .enumerate()
+            .map(|(i, _)| compact.contains(format!("#SEG-{}:", i).as_str()))
+            .collect();
+
+        let lo = lk_longest_echo_prefix(&compact, &expected_no_ws);
+
+        let missing_full: Vec<usize> = seg_full.iter().enumerate().filter(|(_, ok)| !**ok).map(|(i, _)| i).collect();
+        let missing_markers: Vec<usize> = seg_marker.iter().enumerate().filter(|(_, ok)| !**ok).map(|(i, _)| i).collect();
+
+        assert_eq!(
+            lo,
+            expected_no_ws.len(),
+            "livekit vt100 echo check failed.\n\
+             longest prefix (no ws) found: {} of {}\n\
+             per-segment full body in compact: {:?} (indices 0..{})\n\
+             per-segment #SEG-n: marker in compact: {:?}\n\
+             segments missing as full substring: {:?}\n\
+             markers missing: {:?}\n",
+            lo,
+            expected_no_ws.len(),
+            seg_full,
+            segments.len(),
+            seg_marker,
+            missing_full,
+            missing_markers,
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Mirror of `grpc_virtual_tui_rpc_large_echo_char_by_char` over LiveKit transport.
+    ///
+    /// Sends 1000 chars as 10 `#SEG-N:` segments byte-by-byte via a LiveKit bidi-stream
+    /// connected to `TerminalServiceVirtualTui`. Waits until the full payload appears in
+    /// the vt100-parsed VirtualTui output, then asserts all segment markers are visible.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial]
+    #[allow(clippy::await_holding_lock)]
+    async fn livekit_virtual_tui_rpc_large_echo_char_by_char() -> anyhow::Result<()> {
+        use tddy_e2e::rpc_frontend::encode_resize;
+
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        const COLS: u16 = 80;
+        const ROWS: u16 = 10000;
+        const TOTAL_LEN: usize = 1000;
+        const NUM_SEGMENTS: usize = 10;
+
+        // Build segmented payload: "#SEG-0:aaa…#SEG-1:aaa…" totalling TOTAL_LEN chars.
+        let headers: Vec<String> =
+            (0..NUM_SEGMENTS).map(|i| format!("#SEG-{}:", i)).collect();
+        let header_chars: usize = headers.iter().map(|s| s.chars().count()).sum();
+        let body_total = TOTAL_LEN - header_chars;
+        let base = body_total / NUM_SEGMENTS;
+        let rem = body_total % NUM_SEGMENTS;
+        let segments: Vec<String> = headers
+            .iter()
+            .enumerate()
+            .map(|(i, h)| {
+                let body_len = base + if i < rem { 1 } else { 0 };
+                let mut seg = h.clone();
+                seg.extend(std::iter::repeat_n('a', body_len));
+                seg
+            })
+            .collect();
+        let expected: String = segments.iter().cloned().collect();
+        assert_eq!(expected.chars().count(), TOTAL_LEN);
+
+        let livekit = LiveKitTestkit::start().await?;
+        let url = livekit.get_ws_url();
+        let room_name = "livekit-large-echo-char-by-char";
+
+        let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
+        let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
+
+        let (_presenter_handle, factory, shutdown) =
+            tddy_e2e::spawn_presenter_with_view_connection_factory(None);
+
+        let terminal_service =
+            tddy_service::TerminalServiceVirtualTui::new(factory, false);
+
+        let server = LiveKitParticipant::connect(
+            &url,
+            &server_token,
+            tddy_service::TerminalServiceServer::new(terminal_service),
+            RoomOptions::default(),
+        )
+        .await?;
+        let server_handle = tokio::spawn(async move { server.run().await });
+
+        let (client_room, mut client_events) =
+            Room::connect(&url, &client_token, RoomOptions::default())
+                .await
+                .map_err(|e| anyhow::anyhow!("client connect: {}", e))?;
+
+        let rpc_events = client_room.subscribe();
+        wait_for_participant(&client_room, &mut client_events, SERVER_IDENTITY).await?;
+
+        let rpc_client =
+            RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
+
+        let (mut sender, mut rx) = rpc_client
+            .start_bidi_stream("terminal.TerminalService", "StreamTerminalIO")
+            .map_err(|e| anyhow::anyhow!("start bidi: {}", e))?;
+
+        // Background task: collect all TerminalOutput bytes into shared buffer.
+        let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let buf_for_reader = Arc::clone(&buf);
+        let reader = tokio::spawn(async move {
+            while let Some(chunk) = rx.recv().await {
+                match chunk {
+                    Ok(bytes) => {
+                        if let Ok(output) =
+                            tddy_service::proto::terminal::TerminalOutput::decode(&bytes[..])
+                        {
+                            buf_for_reader
+                                .lock()
+                                .expect("output buffer")
+                                .extend_from_slice(&output.data);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        // Resize to COLS×ROWS so the prompt bar can fit the entire payload.
+        sender
+            .send(
+                TerminalInput { data: encode_resize(COLS, ROWS) }.encode_to_vec(),
+                false,
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("send resize: {}", e))?;
+
+        // Send empty init to trigger initial TUI render.
+        sender
+            .send(TerminalInput { data: vec![] }.encode_to_vec(), false)
+            .await
+            .map_err(|e| anyhow::anyhow!("send init: {}", e))?;
+
+        // Send expected bytes one by one (char-by-char echo test).
+        for byte in expected.as_bytes() {
+            sender
+                .send(
+                    TerminalInput { data: vec![*byte] }.encode_to_vec(),
+                    false,
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("send byte: {}", e))?;
+        }
+
+        // Wait for the full segmented echo to appear in the vt100-parsed output.
+        lk_eventually_echo_in_vt100(&buf, &expected, ROWS, COLS).await;
+
+        sender
+            .send(TerminalInput { data: vec![] }.encode_to_vec(), true)
+            .await
+            .ok();
+        shutdown.store(true, Ordering::Relaxed);
+        server_handle.abort();
+        reader.abort();
+
+        let all_output = buf.lock().expect("output buffer").clone();
+        lk_assert_segmented_echo_vt100(&all_output, &expected, &segments, ROWS, COLS);
+
+        Ok(())
     }
 
     /// Full e2e: virtual terminal (vt100) as viewer, RPC for I/O sync, virtual keyboard
