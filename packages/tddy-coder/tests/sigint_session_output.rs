@@ -1,7 +1,7 @@
 //! Integration tests: SIGINT handling and session info output.
 //!
 //! Verifies that when tddy-coder (stub backend) receives SIGINT (Ctrl+C), it prints session info
-//! to stderr before exiting (Session: <id> and Plan dir: <path>).
+//! to stderr before exiting (Session: <id> and Session dir: <path>).
 
 mod common;
 
@@ -13,7 +13,7 @@ fn tddy_coder_bin() -> std::path::PathBuf {
     assert_cmd::cargo::cargo_bin("tddy-coder")
 }
 
-/// When tddy-coder receives SIGINT, stderr contains "Session:" (plan dir or fallback).
+/// When tddy-coder receives SIGINT, stderr contains "Session:" (session dir or fallback).
 ///
 /// Without SKIP_QUESTIONS the stub backend returns clarification questions,
 /// causing the process to print "Clarification needed:" to stdout and block

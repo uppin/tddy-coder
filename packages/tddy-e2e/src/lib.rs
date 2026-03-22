@@ -17,6 +17,7 @@ use tddy_core::{AnyBackend, Presenter, PresenterHandle, SharedBackend, StubBacke
 use tddy_service::gen::tddy_remote_server::TddyRemoteServer;
 use tddy_service::TddyRemoteService;
 use tddy_tui::{apply_event, render::draw, TuiView};
+use tddy_workflow_recipes::TddRecipe;
 
 use crate::test_util::temp_dir_with_git_repo;
 
@@ -39,7 +40,7 @@ pub fn spawn_presenter_with_grpc(
         intent_tx: intent_tx.clone(),
     };
 
-    let mut presenter = Presenter::new("stub", "opus")
+    let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe))
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx);
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
@@ -144,7 +145,7 @@ pub fn spawn_presenter_with_grpc_and_tui(
         intent_tx: intent_tx.clone(),
     };
 
-    let mut presenter = Presenter::new("stub", "opus")
+    let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe))
         .with_broadcast(event_tx.clone())
         .with_intent_sender(intent_tx.clone());
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
@@ -255,7 +256,7 @@ pub fn spawn_presenter_with_view_connection_factory(
     let output_dir =
         std::env::temp_dir().join(format!("tddy-e2e-livekit-tui-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&output_dir).unwrap();
-    let mut presenter = Presenter::new("stub", "opus")
+    let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe))
         .with_broadcast(event_tx.clone())
         .with_intent_sender(intent_tx.clone())
         .with_worktree_dir(output_dir.clone());
@@ -335,7 +336,7 @@ fn spawn_presenter_stub_workflow(
         intent_tx: intent_tx.clone(),
     };
 
-    let presenter = Presenter::new("stub", "opus")
+    let presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe))
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx);
     let output_dir = std::env::temp_dir().join(format!("tddy-e2e-vt-{}", uuid::Uuid::new_v4()));

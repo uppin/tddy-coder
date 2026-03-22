@@ -24,7 +24,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 4. Accepts `--goal acceptance-tests` to create failing acceptance tests from a completed plan
 5. Accepts `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, and `--goal update-docs` for the implementation and evaluation phases
 6. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
-7. Accepts `--plan-dir <path>`: path to plan output directory; required when `--goal acceptance-tests`, `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, or `--goal update-docs`; used for resume when running full workflow
+7. Accepts `--session-dir <path>`: path to plan output directory; required when `--goal acceptance-tests`, `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, or `--goal update-docs`; used for resume when running full workflow
 8. Planning output always goes to `$HOME/.tddy/sessions/{uuid}/` (stable session directory)
 9. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
 10. Accepts `--conversation-output <path>` to log the entire agent conversation in raw bytes to a file (Updated: 2026-03-07)
@@ -65,14 +65,14 @@ The approval gate applies to both the initial plan and plan resume/completion sc
 
 ### Acceptance-Tests Workflow
 
-1. Read PRD.md and TODO.md from the plan directory specified by `--plan-dir`
-2. Read the model from `changeset.yaml` in the plan directory
+1. Read PRD.md and TODO.md from the session directory specified by `--session-dir`
+2. Read the model from `changeset.yaml` in the session directory
 3. Create a fresh Claude session (does not resume the plan session)
 4. Use `--permission-mode acceptEdits` (auto-approves file edits for creating tests and running `cargo test`)
 5. **Q&A phase**: When Claude returns clarifying questions (e.g., permission requests), the user provides answers and the workflow continues
 6. System prompt instructs Claude to: read the testing plan from the PRD; create acceptance tests as specified; verify all new tests fail (Red state); remove or adjust any tests that pass
 7. Parser receives JSON from `tddy-tools submit`; deserializes summary of created tests and their status
-8. Write `acceptance-tests.md` to the plan directory (structured list + rich descriptions for downstream goals)
+8. Write `acceptance-tests.md` to the session directory (structured list + rich descriptions for downstream goals)
 9. On successful exit, output a human-readable summary (test count, paths, failing status)
 
 ### LLM Backend Abstraction (Updated: 2026-03-07)
@@ -103,7 +103,7 @@ The approval gate applies to both the initial plan and plan resume/completion sc
 The plan goal performs read-only discovery before producing the PRD:
 - Parse `Cargo.toml`, `package.json`, `Makefile`, `flake.nix`, `.nvmrc`, `.tool-versions`, `.python-version`, `AGENTS.md` for tool/SDK versions and scripts
 - Identify documentation locations (`docs/`, `packages/*/docs/`, README files)
-- Discover the best location for the plan directory based on repo conventions (`plan_dir_suggestion` in discovery)
+- Discover the best location for the session directory based on repo conventions (`plan_dir_suggestion` in discovery)
 - Reveal relevant code areas (modules, traits, key files)
 - Capture test infrastructure (runners, conventions, CI scripts)
 
@@ -111,7 +111,7 @@ Discovery is persisted in `changeset.yaml` for downstream goals.
 
 ### Plan Directory Relocation
 
-When the agent returns `plan_dir_suggestion` in discovery, the workflow relocates the plan directory from its staging location (e.g. `output_dir/2026-03-08-feature/`) to the suggested path relative to the git root (e.g. `git_root/docs/dev/1-WIP/2026-03-08-feature/`). The agent runs in the staging directory first (with schemas available); after artifacts are written, the directory is moved. Invalid suggestions (absolute paths, `..`, empty) fall back to the staging location. Cross-device moves use copy-then-delete when rename fails.
+When the agent returns `plan_dir_suggestion` in discovery, the workflow relocates the session directory from its staging location (e.g. `output_dir/2026-03-08-feature/`) to the suggested path relative to the git root (e.g. `git_root/docs/dev/1-WIP/2026-03-08-feature/`). The agent runs in the staging directory first (with schemas available); after artifacts are written, the directory is moved. Invalid suggestions (absolute paths, `..`, empty) fall back to the staging location. Cross-device moves use copy-then-delete when rename fails.
 
 ### Demo Planning (Plan Goal)
 
@@ -121,7 +121,7 @@ The plan goal produces a demo plan based on project type detection:
 - Libraries: REPL/test-based demonstrations
 - Storybook-enabled projects: storybook component views
 
-Includes setup instructions and verification criteria. Written to `demo-plan.md` in the plan directory.
+Includes setup instructions and verification criteria. Written to `demo-plan.md` in the session directory.
 
 ### Observability
 
@@ -132,7 +132,7 @@ Includes setup instructions and verification criteria. Written to `demo-plan.md`
 
 #### changeset.yaml
 
-Unified manifest in the plan directory:
+Unified manifest in the session directory:
 - `name`: One-liner PRD name (decided by the plan agent)
 - `branch_suggestion`: Git branch name suggested by the plan agent (e.g. "feature/auth"). Used for worktree creation after plan approval.
 - `worktree_suggestion`: Worktree directory name suggested by the plan agent (e.g. "feature-auth"). Used for `git worktree add` after plan approval.
@@ -144,7 +144,7 @@ Unified manifest in the plan directory:
 - `discovery`: Toolchain, scripts, doc locations, relevant code
 - `artifacts`: Paths to PRD.md, TODO.md, acceptance-tests.md, etc.
 
-System prompts are written to the plan directory (e.g. `system-prompt-plan.md`) and referenced per-session via `system_prompt_file`.
+System prompts are written to the session directory (e.g. `system-prompt-plan.md`) and referenced per-session via `system_prompt_file`.
 
 #### PRD.md
 
@@ -162,7 +162,7 @@ System prompts are written to the plan directory (e.g. `system-prompt-plan.md`) 
 
 #### acceptance-tests.md
 
-- Written by the acceptance-tests goal to the plan directory
+- Written by the acceptance-tests goal to the session directory
 - **How to run tests**: Command to run tests, derived from the project (e.g. `cargo test`, `npm test`, `pytest`)
 - **Prerequisite actions**: What to do before running tests; uses the cheapest approach (e.g. "None" when the test command already builds)
 - **How to run a single or selected tests**: Project-specific instructions (e.g. `cargo test <name>`, `pytest -k <pattern>`)
@@ -182,16 +182,16 @@ System prompts are written to the plan directory (e.g. `system-prompt-plan.md`) 
 
 On successful completion, the program prints goal-specific output to stdout:
 
-- **Full workflow** (no `--goal`): Green step output (summary, tests, implementations); prints plan dir path at end
+- **Full workflow** (no `--goal`): Green step output (summary, tests, implementations); prints session dir path at end
 - **plan**: Plan directory path (e.g. `./2026-03-07-feature-slug/` or relocated path)
-- **acceptance-tests**: Summary of created tests and their failing status; prints plan dir path (requires `--plan-dir`)
-- **red**, **green**: Summary of created tests/skeletons or implementations; prints plan dir path
+- **acceptance-tests**: Summary of created tests and their failing status; prints session dir path (requires `--session-dir`)
+- **red**, **green**: Summary of created tests/skeletons or implementations; prints session dir path
 
-This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt` outputs the plan dir path).
+This enables scripting and piping (e.g. `tddy-coder --goal plan < feature.txt` outputs the session dir path).
 
 ### Full Workflow (No --goal)
 
-When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs in sequence. After green completes, the user is prompted "Run demo? [r] Run [s] Skip"; Run executes the demo step, Skip proceeds directly to evaluate. Resume requires `--plan-dir`: if interrupted, re-run with `--plan-dir <path>` to skip completed steps (reads `changeset.yaml.state.current`). Without `--plan-dir`, a new plan is started. When state is `Evaluated`, re-running exits with a summary. `changeset.yaml` is written immediately after the user enters their prompt (before the plan agent runs), so the plan dir is resumable even if planning fails.
+When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs in sequence. After green completes, the user is prompted "Run demo? [r] Run [s] Skip"; Run executes the demo step, Skip proceeds directly to evaluate. Resume requires `--session-dir`: if interrupted, re-run with `--session-dir <path>` to skip completed steps (reads `changeset.yaml.state.current`). Without `--session-dir`, a new plan is started. When state is `Evaluated`, re-running exits with a summary. `changeset.yaml` is written immediately after the user enters their prompt (before the plan agent runs), so the session dir is resumable even if planning fails.
 
 ## Acceptance Criteria
 
@@ -200,7 +200,7 @@ When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → 
 - [x] `tddy-coder` (no `--goal`) reads from stdin and runs plan → acceptance-tests → red → green → demo-prompt → evaluate
 - [x] After green completes, user is prompted to run or skip demo; Skip proceeds to evaluate
 - [x] Full workflow prints evaluate step output on success
-- [x] Full workflow supports resume via `--plan-dir` (required; no auto-detect)
+- [x] Full workflow supports resume via `--session-dir` (required; no auto-detect)
 - [x] When state is Evaluated, re-running exits with summary
 - [x] `changeset.yaml` exists on disk immediately after user enters prompt, before plan agent runs
 
@@ -218,18 +218,18 @@ When `--goal` is omitted, tddy-coder runs plan → acceptance-tests → red → 
 - [ ] Tests use a fake/mock backend to verify the planning workflow end-to-end
 - [ ] Error cases handled: empty input, Claude Code not found, malformed LLM output
 - [ ] State machine enforces valid transitions
-- [ ] On successful plan completion, stdout prints the plan directory path (goal-specific exit output)
+- [ ] On successful plan completion, stdout prints the session directory path (goal-specific exit output)
 
 ### Acceptance-Tests Goal
 
-- [ ] `tddy-coder --goal acceptance-tests --plan-dir <path>` creates failing acceptance tests from a plan
+- [ ] `tddy-coder --goal acceptance-tests --session-dir <path>` creates failing acceptance tests from a plan
 - [ ] Acceptance-tests goal creates a fresh session (does not resume the plan session)
 - [ ] Claude runs tests and verifies all new tests fail (Red state); passing tests are adjusted or removed
 - [ ] Output prints a summary of created tests, their paths, and failing status
 - [ ] State machine transitions: Init/Planned → AcceptanceTesting → AcceptanceTestsReady
-- [ ] Error handling: missing plan-dir, missing PRD.md, missing changeset.yaml, session resume failure
+- [ ] Error handling: missing session-dir, missing PRD.md, missing changeset.yaml, session resume failure
 - [ ] `--model` flag works with the acceptance-tests goal
-- [ ] acceptance-tests goal writes acceptance-tests.md to the plan directory
+- [ ] acceptance-tests goal writes acceptance-tests.md to the session directory
 
 ## Future Considerations (Not In Scope)
 

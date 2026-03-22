@@ -175,41 +175,8 @@ pub fn kill_child_process() -> bool {
     false
 }
 
-/// Workflow goal; backends map this to their own permission/session model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Goal {
-    Plan,
-    AcceptanceTests,
-    Red,
-    Green,
-    /// Standalone demo execution step.
-    Demo,
-    /// Renamed/replacement for Validate: analyze git changes and produce an evaluation report.
-    Evaluate,
-    /// Orchestrate validate-tests, validate-prod-ready, and analyze-clean-code subagents.
-    Validate,
-    /// Execute refactoring plan from refactoring-plan.md.
-    Refactor,
-    /// Update repo documentation from PRD, changeset, progress per repo guidelines.
-    UpdateDocs,
-}
-
-impl Goal {
-    /// Key used for store_submit_result / take_submit_result_for_goal (matches JSON "goal" field).
-    pub fn submit_key(&self) -> &'static str {
-        match self {
-            Goal::Plan => "plan",
-            Goal::AcceptanceTests => "acceptance-tests",
-            Goal::Red => "red",
-            Goal::Green => "green",
-            Goal::Demo => "demo",
-            Goal::Evaluate => "evaluate-changes",
-            Goal::Validate => "validate",
-            Goal::Refactor => "refactor",
-            Goal::UpdateDocs => "update-docs",
-        }
-    }
-}
+pub use crate::workflow::ids::GoalId;
+pub use crate::workflow::recipe::{GoalHints, PermissionHint, WorkflowRecipe};
 
 /// Sink for routing agent output (e.g. to TUI instead of stderr).
 #[derive(Clone)]
@@ -291,7 +258,10 @@ pub struct InvokeRequest {
     pub system_prompt: Option<String>,
     /// When set, backend uses this path instead of system_prompt (avoids temp file).
     pub system_prompt_path: Option<PathBuf>,
-    pub goal: Goal,
+    pub goal_id: GoalId,
+    /// Key for `tddy-tools submit` / progress events (may differ from graph task id, e.g. evaluate vs evaluate-changes).
+    pub submit_key: GoalId,
+    pub hints: GoalHints,
     /// Optional model name (e.g. "sonnet") passed to the agent.
     pub model: Option<String>,
     /// Session mode: Claude uses `--session-id` / `--resume`; Cursor uses only `--resume` (fresh chats omit session flags).
@@ -314,8 +284,8 @@ pub struct InvokeRequest {
     pub extra_allowed_tools: Option<Vec<String>>,
     /// When set, backend sets TDDY_SOCKET env var for tddy-tools relay.
     pub socket_path: Option<PathBuf>,
-    /// When set, backend sets TDDY_PLAN_DIR and TDDY_REPO_DIR for tddy-tools path pre-allow.
-    pub plan_dir: Option<PathBuf>,
+    /// When set, backend sets TDDY_SESSION_DIR and TDDY_REPO_DIR for tddy-tools path pre-allow.
+    pub session_dir: Option<PathBuf>,
 }
 
 fn default_allow_other() -> bool {

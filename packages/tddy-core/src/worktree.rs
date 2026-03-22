@@ -75,8 +75,8 @@ pub fn create_worktree(
 
 /// Create worktree for a session from origin/master. Fetches first, then creates,
 /// updates changeset with worktree, branch, repo_path. Returns the worktree path.
-pub fn setup_worktree_for_session(repo_root: &Path, plan_dir: &Path) -> Result<PathBuf, String> {
-    let mut cs = read_changeset(plan_dir).map_err(|e| e.to_string())?;
+pub fn setup_worktree_for_session(repo_root: &Path, session_dir: &Path) -> Result<PathBuf, String> {
+    let mut cs = read_changeset(session_dir).map_err(|e| e.to_string())?;
 
     let branch = cs
         .branch_suggestion
@@ -101,7 +101,7 @@ pub fn setup_worktree_for_session(repo_root: &Path, plan_dir: &Path) -> Result<P
     cs.worktree = Some(worktree_path.to_string_lossy().to_string());
     cs.branch = Some(branch);
     cs.repo_path = Some(worktree_path.to_string_lossy().to_string());
-    write_changeset(plan_dir, &cs).map_err(|e| e.to_string())?;
+    write_changeset(session_dir, &cs).map_err(|e| e.to_string())?;
 
     Ok(worktree_path)
 }

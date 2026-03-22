@@ -5,7 +5,6 @@ pub mod changeset;
 pub mod error;
 pub mod log_backend;
 pub mod output;
-pub mod permission;
 pub mod presenter;
 pub mod session_metadata;
 pub mod source_path;
@@ -18,12 +17,13 @@ pub use backend::{
     backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,
     default_model_for_agent, get_child_pid, kill_child_process, preselected_index_for_agent,
     set_child_pid, AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend,
-    ClaudeCodeBackend, ClaudeInvokeConfig, CodingBackend, CursorBackend, Goal,
-    InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionMode,
-    ProcessToolExecutor, QuestionOption, SessionMode, SharedBackend, StubBackend, ToolExecutor,
+    ClaudeCodeBackend, ClaudeInvokeConfig, CodingBackend, CursorBackend, GoalHints, GoalId,
+    InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionHint,
+    PermissionMode, ProcessToolExecutor, QuestionOption, SessionMode, SharedBackend, StubBackend,
+    ToolExecutor, WorkflowRecipe,
 };
 pub use changeset::{
-    append_session_and_update_state, get_session_for_tag, next_goal_for_state, read_changeset,
+    append_session_and_update_state, get_session_for_tag, read_changeset,
     resolve_agent_from_changeset, resolve_model, update_state, write_changeset, Changeset,
     ChangesetState, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
     QuestionOptionForQa, SessionEntry, StateTransition,
@@ -34,22 +34,6 @@ pub use log_backend::{
     init_tddy_logger, init_tddy_logger_legacy, matches_selector, redirect_debug_output,
     resolve_log_defaults, resolve_logger, take_buffered_logs, DefaultLogPolicy, LogConfig,
     LogOutput, LogPolicy, LogRotation, LogSelector, LoggerDefinition, MatchedPolicy,
-};
-pub use output::{
-    parse_acceptance_tests_response, parse_demo_response, parse_evaluate_response,
-    parse_green_response, parse_planning_response, parse_red_response, parse_refactor_response,
-    parse_update_docs_response, parse_validate_subagents_response, read_session_file,
-    validate_red_marker_source_paths, write_acceptance_tests_file, write_artifacts,
-    write_evaluation_report, write_session_file, AcceptanceTestInfo, AcceptanceTestsOutput,
-    DemoOutput, EvaluateAffectedTest, EvaluateBuildResult, EvaluateChangedFile,
-    EvaluateChangesetSync, EvaluateFileAnalyzed, EvaluateIssue, EvaluateOutput, EvaluateTestImpact,
-    GreenOutput, GreenTestResult, ImplementationInfo, PlanningOutput, RedOutput, RedTestInfo,
-    RefactorOutput, SkeletonInfo, UpdateDocsOutput, ValidateSubagentsOutput,
-};
-pub use permission::{
-    acceptance_tests_allowlist, demo_allowlist, evaluate_allowlist, green_allowlist,
-    plan_allowlist, red_allowlist, refactor_allowlist, update_docs_allowlist,
-    validate_subagents_allowlist,
 };
 pub use presenter::{
     ActivityEntry, ActivityKind, AppMode, ExitAction, PendingWorkflowStart, Presenter,
@@ -65,8 +49,8 @@ pub use workflow::{
     engine::WorkflowEngine,
     find_git_root,
     graph::{ElicitationEvent, ExecutionResult, ExecutionStatus},
-    AcceptanceTestsOptions, DemoOptions, EvaluateOptions, GreenOptions, PlanOptions, RedOptions,
-    RefactorOptions, UpdateDocsOptions, ValidateOptions,
+    ids::WorkflowState,
+    GoalOptions,
 };
 pub use worktree::{
     create_worktree, fetch_origin_master, list_worktrees, remove_worktree,

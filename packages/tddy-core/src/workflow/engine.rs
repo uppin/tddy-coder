@@ -2,7 +2,7 @@
 //!
 //! Holds graph, runner, storage, backend. Provides run_goal() and run_full_workflow().
 
-use crate::backend::CodingBackend;
+use crate::backend::{CodingBackend, GoalId, WorkflowRecipe};
 use crate::workflow::graph::{ExecutionResult, ExecutionStatus, Graph};
 use crate::workflow::hooks::RunnerHooks;
 use crate::workflow::runner::FlowRunner;
@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 /// Central struct owning create-once infrastructure for workflow execution.
 pub struct WorkflowEngine {
+    pub recipe: Arc<dyn WorkflowRecipe>,
     pub graph: Arc<Graph>,
     pub storage: Arc<dyn SessionStorage>,
     pub runner: FlowRunner,
@@ -21,24 +22,25 @@ pub struct WorkflowEngine {
 }
 
 impl WorkflowEngine {
-    /// Create a WorkflowEngine with the full TDD workflow graph.
+    /// Create a WorkflowEngine for the given recipe (graph + hooks from the recipe).
     ///
-    /// Uses `storage_dir` for session persistence. Hooks handle file I/O and event emission.
+    /// Uses `storage_dir` for session persistence. When `hooks` is `None`, uses `recipe.create_hooks(None)`.
     pub fn new(
+        recipe: Arc<dyn WorkflowRecipe>,
         backend: SharedBackend,
         storage_dir: PathBuf,
         hooks: Option<Arc<dyn RunnerHooks>>,
     ) -> Self {
         let backend_arc = backend.as_arc();
-        let graph = Arc::new(crate::workflow::tdd_graph::build_full_tdd_workflow_graph(
-            backend_arc,
-        ));
+        let graph = Arc::new(recipe.build_graph(backend_arc));
         let storage = Arc::new(crate::workflow::session::FileSessionStorage::new(
             storage_dir,
         ));
-        let runner = FlowRunner::new_with_hooks(graph.clone(), storage.clone(), hooks);
+        let hooks = hooks.unwrap_or_else(|| recipe.create_hooks(None));
+        let runner = FlowRunner::new_with_hooks(graph.clone(), storage.clone(), Some(hooks));
 
         Self {
+            recipe,
             graph: graph.clone(),
             storage,
             runner,
@@ -49,7 +51,7 @@ impl WorkflowEngine {
     /// Run a single goal: create session at target task, populate context, run once.
     pub async fn run_goal(
         &self,
-        goal: &str,
+        goal: &GoalId,
         mut context_values: HashMap<String, serde_json::Value>,
     ) -> Result<ExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
         if !context_values.contains_key("backend_name") {
@@ -98,7 +100,7 @@ impl WorkflowEngine {
         let session = Session {
             id: session_id.clone(),
             graph_id: self.graph.id.clone(),
-            current_task_id: "plan".to_string(),
+            current_task_id: self.recipe.start_goal().to_string(),
             status_message: None,
             context: ctx,
         };
@@ -122,7 +124,7 @@ impl WorkflowEngine {
     /// Use when resuming (e.g. from acceptance-tests after plan is done).
     pub async fn run_workflow_from(
         &self,
-        goal: &str,
+        goal: &GoalId,
         mut context_values: HashMap<String, serde_json::Value>,
     ) -> Result<ExecutionResult, Box<dyn std::error::Error + Send + Sync>> {
         if !context_values.contains_key("backend_name") {
@@ -188,7 +190,7 @@ impl WorkflowEngine {
         Ok(())
     }
 
-    /// Get a session by id. Used to retrieve context (e.g. plan_dir) after a run.
+    /// Get a session by id. Used to retrieve context (e.g. session_dir) after a run.
     pub async fn get_session(
         &self,
         session_id: &str,

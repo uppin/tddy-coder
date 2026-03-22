@@ -141,13 +141,13 @@ impl CodingBackend for MockBackend {
             .swap(false, Ordering::SeqCst);
         if response.questions.is_empty() && !suppress_submit {
             self.submit_channel
-                .store(request.goal.submit_key(), &response.output);
+                .store(request.submit_key.as_str(), &response.output);
         }
 
         if let Some(ref sink) = request.progress_sink {
             sink.emit(&ProgressEvent::AgentExited {
                 exit_code: response.exit_code,
-                goal: request.goal.submit_key().to_string(),
+                goal: request.submit_key.to_string(),
             });
         }
 

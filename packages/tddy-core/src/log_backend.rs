@@ -225,7 +225,7 @@ pub fn find_matching_policy<'a>(
 /// Creates implicit "default" logger in loggers map.
 pub fn default_log_config(
     log_level_override: Option<log::LevelFilter>,
-    _plan_dir: Option<&Path>,
+    _session_dir: Option<&Path>,
 ) -> LogConfig {
     let level = log_level_override.unwrap_or_else(|| {
         std::env::var("RUST_LOG")
@@ -434,15 +434,15 @@ pub fn config_has_file_output(config: &LogConfig) -> bool {
         .any(|def| matches!(def.output, LogOutput::File(_)))
 }
 
-/// Resolve conversation_output and debug_output defaults to plan_dir/logs/ when not set.
-/// Returns the resolved conversation output path. Call when plan_dir becomes known.
+/// Resolve conversation_output and debug_output defaults to session_dir/logs/ when not set.
+/// Returns the resolved conversation output path. Call when session_dir becomes known.
 /// When LogConfig already has file output, skips redirect to avoid overwriting user config.
 pub fn resolve_log_defaults(
     conversation_output_path: Option<std::path::PathBuf>,
     debug_output_path: Option<impl AsRef<Path>>,
-    plan_dir: &Path,
+    session_dir: &Path,
 ) -> Option<std::path::PathBuf> {
-    let logs = plan_dir.join("logs");
+    let logs = session_dir.join("logs");
     if debug_output_path.is_none() && !config_has_file_output_guard() {
         let _ = std::fs::create_dir_all(&logs);
         redirect_debug_output(&logs.join("debug.log"));
@@ -456,7 +456,7 @@ pub fn resolve_log_defaults(
     }
 }
 
-/// Redirect default log output to a file. Use when plan_dir becomes known after init_tddy_logger.
+/// Redirect default log output to a file. Use when session_dir becomes known after init_tddy_logger.
 /// When using LogConfig, updates the default logger's output in config.loggers and opens the file.
 /// Flushes any buffered log lines (from TUI mode) into the file so early messages are preserved.
 pub fn redirect_debug_output(path: &Path) {

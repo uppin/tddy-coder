@@ -6,7 +6,7 @@
 
 ## Summary
 
-The Implementation Step is the TDD Red-Green phase of the tddy-coder workflow. The **red** goal reads PRD.md and acceptance-tests.md from the plan directory, creates skeleton production code and failing lower-level tests, and persists its session to `changeset.yaml`. The **green** goal resumes the red session via `changeset.yaml`, reads progress.md (required) plus PRD.md and acceptance-tests.md (optional for context), implements production-grade code to make all failing tests pass, updates progress.md and acceptance-tests.md with results, and verifies completion by running both unit and acceptance tests. The **demo** goal runs after green (prompted in full workflow); it executes the demo plan from `demo-plan.md` when present. The **evaluate** goal analyzes git changes for risks and produces `evaluation-report.md`.
+The Implementation Step is the TDD Red-Green phase of the tddy-coder workflow. The **red** goal reads PRD.md and acceptance-tests.md from the session directory, creates skeleton production code and failing lower-level tests, and persists its session to `changeset.yaml`. The **green** goal resumes the red session via `changeset.yaml`, reads progress.md (required) plus PRD.md and acceptance-tests.md (optional for context), implements production-grade code to make all failing tests pass, updates progress.md and acceptance-tests.md with results, and verifies completion by running both unit and acceptance tests. The **demo** goal runs after green (prompted in full workflow); it executes the demo plan from `demo-plan.md` when present. The **evaluate** goal analyzes git changes for risks and produces `evaluation-report.md`.
 
 ## Background
 
@@ -21,24 +21,24 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 3. Accepts `--goal demo` to run the demo plan (requires `demo-plan.md` in plan dir)
 4. Accepts `--goal evaluate` to analyze git changes for risks (replaces `--goal validate-changes`)
 5. Accepts `--goal update-docs` to update target repo documentation from planning artifacts
-6. `--plan-dir <path>` is required when `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, or `--goal update-docs`
+6. `--session-dir <path>` is required when `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, or `--goal update-docs`
 7. `--model`, `--agent`, `--conversation-output`, `--allowed-tools`, `--log-level` work with both goals (Updated: 2026-03-19)
 
 ### Red Workflow
 
-1. Read PRD.md and acceptance-tests.md from the plan directory specified by `--plan-dir`
+1. Read PRD.md and acceptance-tests.md from the session directory specified by `--session-dir`
 2. Read `changeset.yaml` for model and state; start a fresh Claude session (does not resume planning session)
 3. Use `--permission-mode acceptEdits` with same allowlist as acceptance-tests
 4. System prompt instructs Claude to: plan implementation structure; create skeleton code that compiles; write failing lower-level tests; run `cargo test` to verify tests fail; emit structured response with tests and skeletons
 5. Parser receives JSON from `tddy-tools submit`; deserializes summary, tests, and skeletons. `tddy-tools submit --goal red` validates against embedded schema before the workflow receives it. Agent runs `tddy-tools get-schema red` to inspect the expected format. (Updated: 2026-03-12)
-6. Write `red-output.md` and `progress.md` to the plan directory
+6. Write `red-output.md` and `progress.md` to the session directory
 7. Update `changeset.yaml` with new session entry for green to resume
 8. On successful exit, output summary, test list, and skeleton list
 
 ### Green Workflow
 
-1. Read `progress.md` from the plan directory specified by `--plan-dir` (required)
-2. Read `PRD.md` and `acceptance-tests.md` from the plan directory if present (optional, for richer LLM context)
+1. Read `progress.md` from the session directory specified by `--session-dir` (required)
+2. Read `PRD.md` and `acceptance-tests.md` from the session directory if present (optional, for richer LLM context)
 3. Read the session ID from `changeset.yaml` state.session_id and model (persisted by the red goal)
 4. Resume the Claude session using `--resume <session-id>` for context continuity with red
 5. Use `--permission-mode acceptEdits` with same allowlist as red
@@ -50,8 +50,8 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
    - Run acceptance tests to verify end-to-end behavior
    - Emit structured response with implementation summary and test results
 7. Parser receives JSON from `tddy-tools submit`; deserializes summary, test results (pass/fail per test), and implementation details. `tddy-tools submit --goal green` validates against embedded schema before the workflow receives it. Agent runs `tddy-tools get-schema green` to inspect the expected format. (Updated: 2026-03-12)
-8. Update `progress.md` in the plan directory: mark passing tests as `[x]`, mark implemented skeletons as `[x]`, mark still-failing tests with `[!]` and reason
-9. Update `acceptance-tests.md` in the plan directory: update test statuses from "failing" to "passing" for tests that now pass
+8. Update `progress.md` in the session directory: mark passing tests as `[x]`, mark implemented skeletons as `[x]`, mark still-failing tests with `[!]` and reason
+9. Update `acceptance-tests.md` in the session directory: update test statuses from "failing" to "passing" for tests that now pass
 10. **Completion determination**:
     - If ALL unit tests AND ALL acceptance tests pass → state transitions to `GreenComplete`
     - If any test fails → state transitions to `Failed` with details of which tests failed
@@ -62,7 +62,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 
 #### red-output.md
 
-- Written by the red goal to the plan directory
+- Written by the red goal to the session directory
 - **How to run tests**: Same as acceptance-tests.md
 - **Prerequisite actions**: Same as acceptance-tests.md
 - **How to run a single or selected tests**: Same as acceptance-tests.md
@@ -76,7 +76,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 
 #### progress.md
 
-- Written by the red goal to the plan directory
+- Written by the red goal to the session directory
 - Unfilled milestones and checkboxes for failed tests and skeletons
 - Green goal updates this document: marks passing tests as `[x]`, implemented skeletons as `[x]`, still-failing tests with `[!]` and reason
 
@@ -90,21 +90,21 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 ### Demo Workflow
 
 1. Runs after green in full workflow (user prompted: Run or Skip)
-2. Standalone `--goal demo --plan-dir <path>` runs demo against existing plan dir
-3. Requires `demo-plan.md` in plan directory
+2. Standalone `--goal demo --session-dir <path>` runs demo against existing plan dir
+3. Requires `demo-plan.md` in session directory
 4. Executes demo steps, writes `demo-results.md`
 5. State transitions: `GreenComplete` → `DemoRunning` → `DemoComplete`
 
 ### Evaluate Workflow
 
-1. `--goal evaluate --plan-dir <path>` analyzes git changes for risks
-2. Produces `evaluation-report.md` in plan directory
+1. `--goal evaluate --session-dir <path>` analyzes git changes for risks
+2. Produces `evaluation-report.md` in session directory
 3. Accepts `GreenComplete` or `DemoComplete` as starting state (when demo skipped, goes directly from GreenComplete)
 4. State transitions: → `Evaluating` → `Evaluated`
 
 ### Update Docs Workflow
 
-1. Runs after refactor in full workflow; `--goal update-docs --plan-dir <path>` runs standalone
+1. Runs after refactor in full workflow; `--goal update-docs --session-dir <path>` runs standalone
 2. Reads planning artifacts (PRD.md, progress.md, changeset.yaml, acceptance-tests.md, evaluation-report.md, refactoring-plan.md)
 3. Updates target repo documentation (feature docs, dev docs, changelogs, READMEs) per repo guidelines
 4. State transitions: `RefactorComplete` → `UpdatingDocs` → `DocsUpdated`
@@ -112,30 +112,30 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 
 ### Exit Output
 
-- **red**: Summary of created skeletons and failing tests (requires `--plan-dir`)
-- **green**: Summary of implementation results — tests passed/failed counts, implementation summary (requires `--plan-dir`)
-- **demo**: Summary and steps completed (requires `--plan-dir`)
-- **evaluate**: Summary, risk level, report path (requires `--plan-dir`)
-- **update-docs**: Summary and count of docs updated (requires `--plan-dir`)
+- **red**: Summary of created skeletons and failing tests (requires `--session-dir`)
+- **green**: Summary of implementation results — tests passed/failed counts, implementation summary (requires `--session-dir`)
+- **demo**: Summary and steps completed (requires `--session-dir`)
+- **evaluate**: Summary, risk level, report path (requires `--session-dir`)
+- **update-docs**: Summary and count of docs updated (requires `--session-dir`)
 
 ## Acceptance Criteria
 
 ### Red Goal
 
-- [x] `tddy-coder --goal red --plan-dir <path>` creates skeleton code and failing lower-level tests
-- [x] Red goal reads PRD.md and acceptance-tests.md from plan directory
+- [x] `tddy-coder --goal red --session-dir <path>` creates skeleton code and failing lower-level tests
+- [x] Red goal reads PRD.md and acceptance-tests.md from session directory
 - [x] Red goal starts fresh session (no resume)
-- [x] Red goal persists session to `changeset.yaml` in the plan directory
+- [x] Red goal persists session to `changeset.yaml` in the session directory
 - [x] Red goal uses AcceptEdits permission mode and correct allowlist
 - [x] Output prints summary, test list, and skeleton list
 - [x] State machine transitions: Init/Planned/AcceptanceTestsReady → RedTesting → RedTestsReady
-- [x] Error handling: missing plan-dir, missing PRD.md, missing acceptance-tests.md
+- [x] Error handling: missing session-dir, missing PRD.md, missing acceptance-tests.md
 - [x] `--model` flag works with the red goal
 
 ### Green Goal
 
-- [x] `tddy-coder --goal green --plan-dir <path>` implements production code to make failing tests pass
-- [x] Green goal reads `progress.md` from plan directory (required); reads `PRD.md` and `acceptance-tests.md` if present (optional context)
+- [x] `tddy-coder --goal green --session-dir <path>` implements production code to make failing tests pass
+- [x] Green goal reads `progress.md` from session directory (required); reads `PRD.md` and `acceptance-tests.md` if present (optional context)
 - [x] Green goal resumes the red session via `changeset.yaml` using `--resume`
 - [x] System prompt instructs Claude to implement production-grade code guided by progress.md
 - [x] System prompt instructs Claude to add detailed logging (feedback channels) that reveals flows and system state
@@ -145,7 +145,7 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 - [x] Green goal updates `progress.md`: marks passing tests `[x]`, implemented skeletons `[x]`, failing tests `[!]` with reason
 - [x] Green goal updates `acceptance-tests.md`: changes test statuses from "failing" to "passing" where applicable
 - [x] State machine transitions: `RedTestsReady` → `GreenImplementing` → `GreenComplete` (or `Failed`)
-- [x] Error handling: missing plan-dir, missing progress.md, missing changeset.yaml
+- [x] Error handling: missing session-dir, missing progress.md, missing changeset.yaml
 - [x] `--model` flag works with the green goal
 - [x] Output prints implementation summary with test pass/fail counts
 - [x] Structured output via `tddy-tools submit` (JSON only, no inline parsing)

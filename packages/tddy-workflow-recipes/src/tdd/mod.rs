@@ -1,0 +1,299 @@
+//! Shipped **TDD product workflow** (PRD/plan approval, red/green, demo branching, docs) — not generic engine glue.
+//! Orchestration lives here; `tddy-core` stays recipe-neutral.
+
+pub mod graph;
+pub mod hooks;
+pub mod plan_task;
+
+pub use hooks::TddWorkflowHooks;
+pub use plan_task::PlanTask;
+mod acceptance_tests;
+mod demo;
+mod evaluate;
+mod green;
+mod plain_cli_output;
+mod planning;
+mod red;
+mod refactor;
+mod update_docs;
+mod validate_subagents;
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use tddy_core::backend::{CodingBackend, GoalHints, GoalId, PermissionHint};
+use tddy_core::workflow::graph::Graph;
+use tddy_core::workflow::hooks::RunnerHooks;
+use tddy_core::workflow::ids::WorkflowState;
+use tddy_core::workflow::recipe::{WorkflowEventSender, WorkflowRecipe};
+
+/// Default TDD workflow (feature development with plan → acceptance tests → red/green → …).
+#[derive(Clone, Copy, Default, Debug)]
+pub struct TddRecipe;
+
+impl TddRecipe {
+    /// Human-readable goal label (matches former `Goal` display / CLI UX).
+    fn display_name_for_goal(goal_id: &str) -> &'static str {
+        match goal_id {
+            "plan" => "Plan",
+            "acceptance-tests" => "Acceptance tests",
+            "red" => "Red",
+            "green" => "Green",
+            "demo" => "Demo",
+            "evaluate" => "Evaluate",
+            "validate" => "Validate",
+            "refactor" => "Refactor",
+            "update-docs" => "Update docs",
+            _ => "Unknown",
+        }
+    }
+
+    fn goal_hints_inner(&self, goal_id: &GoalId) -> Option<GoalHints> {
+        let tools = |f: fn() -> Vec<String>| f();
+        let is_plan = goal_id.as_str() == "plan";
+        let (permission, allowed_tools) = match goal_id.as_str() {
+            "plan" => (
+                PermissionHint::ReadOnly,
+                tools(crate::permissions::plan_allowlist),
+            ),
+            "acceptance-tests" | "red" | "green" => (
+                PermissionHint::AcceptEdits,
+                tools(crate::permissions::acceptance_tests_allowlist),
+            ),
+            "demo" => (
+                PermissionHint::AcceptEdits,
+                tools(crate::permissions::demo_allowlist),
+            ),
+            "evaluate" => (
+                PermissionHint::ReadOnly,
+                tools(crate::permissions::evaluate_allowlist),
+            ),
+            "validate" => (
+                PermissionHint::ReadOnly,
+                tools(crate::permissions::validate_subagents_allowlist),
+            ),
+            "refactor" => (
+                PermissionHint::AcceptEdits,
+                tools(crate::permissions::refactor_allowlist),
+            ),
+            "update-docs" => (
+                PermissionHint::AcceptEdits,
+                tools(crate::permissions::update_docs_allowlist),
+            ),
+            _ => return None,
+        };
+        Some(GoalHints {
+            display_name: Self::display_name_for_goal(goal_id.as_str()).to_string(),
+            permission,
+            allowed_tools,
+            default_model: None,
+            agent_output: matches!(
+                goal_id.as_str(),
+                "green" | "red" | "acceptance-tests" | "demo"
+            ),
+            planning_mode_intent: is_plan,
+            claude_nonzero_exit_ok_if_structured_response: is_plan,
+        })
+    }
+
+    fn next_goal_for_state_inner(&self, state: &WorkflowState) -> Option<GoalId> {
+        match state.as_str() {
+            "Init" | "Planning" => Some(GoalId::new("plan")),
+            "Planned" | "AcceptanceTesting" => Some(GoalId::new("acceptance-tests")),
+            "AcceptanceTestsReady" | "RedTesting" => Some(GoalId::new("red")),
+            "RedTestsReady" | "GreenImplementing" => Some(GoalId::new("green")),
+            "GreenComplete" | "DemoRunning" => Some(GoalId::new("demo")),
+            "DemoComplete" | "Evaluating" => Some(GoalId::new("evaluate")),
+            "Evaluated" | "Validating" => Some(GoalId::new("validate")),
+            "ValidateComplete" | "ValidateRefactorComplete" | "Refactoring" => {
+                Some(GoalId::new("refactor"))
+            }
+            "RefactorComplete" | "UpdatingDocs" => Some(GoalId::new("update-docs")),
+            "DocsUpdated" | "Failed" => None,
+            _ => Some(GoalId::new("plan")),
+        }
+    }
+
+    fn status_for_state_inner(&self, state: &WorkflowState) -> &'static str {
+        match state.as_str() {
+            "Init" | "Planned" | "AcceptanceTestsReady" | "RedTestsReady" => "Active",
+            "GreenComplete"
+            | "DemoComplete"
+            | "Evaluated"
+            | "ValidateComplete"
+            | "ValidateRefactorComplete"
+            | "RefactorComplete"
+            | "DocsUpdated" => "Completed",
+            "Failed" => "Failed",
+            _ => "Active",
+        }
+    }
+}
+
+impl WorkflowRecipe for TddRecipe {
+    fn name(&self) -> &str {
+        "tdd"
+    }
+
+    fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
+        graph::build_full_tdd_workflow_graph(backend, recipe)
+    }
+
+    fn create_hooks(&self, event_tx: Option<WorkflowEventSender>) -> Arc<dyn RunnerHooks> {
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
+        Arc::new(hooks::TddWorkflowHooks::with_event_tx_optional(
+            recipe, event_tx,
+        ))
+    }
+
+    fn goal_hints(&self, goal_id: &GoalId) -> Option<GoalHints> {
+        self.goal_hints_inner(goal_id)
+    }
+
+    fn goal_ids(&self) -> Vec<GoalId> {
+        [
+            "plan",
+            "acceptance-tests",
+            "red",
+            "green",
+            "demo",
+            "evaluate",
+            "validate",
+            "refactor",
+            "update-docs",
+        ]
+        .into_iter()
+        .map(GoalId::new)
+        .collect()
+    }
+
+    fn submit_key(&self, goal_id: &GoalId) -> GoalId {
+        if goal_id.as_str() == "evaluate" {
+            GoalId::new("evaluate-changes")
+        } else {
+            goal_id.clone()
+        }
+    }
+
+    fn next_goal_for_state(&self, state: &WorkflowState) -> Option<GoalId> {
+        self.next_goal_for_state_inner(state)
+    }
+
+    fn status_for_state(&self, state: &WorkflowState) -> &'static str {
+        self.status_for_state_inner(state)
+    }
+
+    fn initial_state(&self) -> WorkflowState {
+        WorkflowState::new("Init")
+    }
+
+    fn start_goal(&self) -> GoalId {
+        GoalId::new("plan")
+    }
+
+    fn default_models(&self) -> BTreeMap<GoalId, String> {
+        let mut m = BTreeMap::new();
+        m.insert(GoalId::new("plan"), "opus".to_string());
+        for g in ["acceptance-tests", "red", "green", "demo"] {
+            m.insert(GoalId::new(g), "sonnet".to_string());
+        }
+        m
+    }
+
+    fn default_artifacts(&self) -> BTreeMap<String, String> {
+        let mut a = BTreeMap::new();
+        a.insert("prd".to_string(), "PRD.md".to_string());
+        a.insert(
+            "acceptance_tests".to_string(),
+            "acceptance-tests.md".to_string(),
+        );
+        a.insert("red_output".to_string(), "red-output.md".to_string());
+        a.insert("progress".to_string(), "progress.md".to_string());
+        a.insert("demo_plan".to_string(), "demo-plan.md".to_string());
+        a.insert("demo_results".to_string(), "demo-results.md".to_string());
+        a.insert(
+            "system_prompt_plan".to_string(),
+            "system-prompt-plan.md".to_string(),
+        );
+        a
+    }
+
+    fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
+        &[
+            ("prd", "PRD.md"),
+            ("acceptance_tests", "acceptance-tests.md"),
+            ("progress", "progress.md"),
+            ("red_output", "red-output.md"),
+            ("evaluation_report", "evaluation-report.md"),
+            ("demo_plan", "demo-plan.md"),
+            ("demo_results", "demo-results.md"),
+            ("validate_tests", "validate-tests-report.md"),
+            ("validate_prod_ready", "validate-prod-ready-report.md"),
+            ("analyze_clean_code", "analyze-clean-code-report.md"),
+            ("refactoring_plan", "refactoring-plan.md"),
+            ("update_docs", "update-docs-report.md"),
+        ]
+    }
+
+    fn goal_requires_session_dir(&self, goal_id: &GoalId) -> bool {
+        !matches!(goal_id.as_str(), "plan")
+    }
+
+    fn summarize_last_goal_output(&self, raw_output: &str) -> Option<String> {
+        use crate::parser::{parse_refactor_response, parse_update_docs_response};
+        parse_update_docs_response(raw_output)
+            .ok()
+            .map(|r| format!("Docs updated: {}", r.docs_updated))
+            .or_else(|| {
+                parse_refactor_response(raw_output).ok().map(|r| {
+                    format!(
+                        "Tasks completed: {}\nTests passing: {}",
+                        r.tasks_completed, r.tests_passing
+                    )
+                })
+            })
+    }
+
+    fn plain_goal_cli_output(
+        &self,
+        goal_id: &GoalId,
+        output: Option<&str>,
+        session_dir: &std::path::Path,
+    ) -> Result<(), String> {
+        plain_cli_output::print_plain_goal_output(goal_id, output, session_dir)
+    }
+}
+
+#[cfg(test)]
+mod planning_intent_tests {
+    use super::TddRecipe;
+    use tddy_core::GoalId;
+    use tddy_core::WorkflowRecipe;
+
+    /// Backends must use [`tddy_core::backend::GoalHints::planning_mode_intent`] (not goal id) for plan-mode CLI flags.
+    #[test]
+    fn planning_mode_intent_is_true_only_for_plan_goal() {
+        let r = TddRecipe;
+        assert!(
+            r.goal_hints(&GoalId::new("plan"))
+                .unwrap()
+                .planning_mode_intent
+        );
+        assert!(
+            !r.goal_hints(&GoalId::new("evaluate"))
+                .unwrap()
+                .planning_mode_intent
+        );
+        assert!(
+            !r.goal_hints(&GoalId::new("validate"))
+                .unwrap()
+                .planning_mode_intent
+        );
+        assert!(
+            !r.goal_hints(&GoalId::new("red"))
+                .unwrap()
+                .planning_mode_intent
+        );
+    }
+}

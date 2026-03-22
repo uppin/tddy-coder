@@ -4,9 +4,11 @@ mod events;
 mod intent;
 mod presenter_events;
 mod presenter_impl;
+#[cfg(test)]
+mod presenter_test_recipe;
 mod state;
 mod view;
-mod workflow_runner;
+pub mod workflow_runner;
 
 pub use events::WorkflowCompletePayload;
 pub use events::WorkflowEvent;

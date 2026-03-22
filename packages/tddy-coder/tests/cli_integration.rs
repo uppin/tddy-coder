@@ -108,9 +108,9 @@ fn cli_plain_mode_plan_approval_approve_proceeds() {
         stderr
     );
     let last_line = stdout.trim().lines().last().unwrap_or("").trim();
-    let plan_dir = std::path::Path::new(last_line);
+    let session_dir = std::path::Path::new(last_line);
     assert!(
-        plan_dir.is_dir() && plan_dir.join("PRD.md").exists(),
+        session_dir.is_dir() && session_dir.join("PRD.md").exists(),
         "stdout should end with plan dir path with PRD.md, last_line={} stdout={}",
         last_line,
         stdout
@@ -271,9 +271,9 @@ fn cli_accepts_prompt_flag_instead_of_stdin() {
         stdout
     );
     let last_line = stdout.trim().lines().last().unwrap_or("").trim();
-    let plan_dir = std::path::Path::new(last_line);
+    let session_dir = std::path::Path::new(last_line);
     assert!(
-        plan_dir.is_dir() && plan_dir.join("PRD.md").exists(),
+        session_dir.is_dir() && session_dir.join("PRD.md").exists(),
         "stdout should end with plan dir path with PRD.md: {}",
         stdout
     );
@@ -370,9 +370,9 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
         stdout
     );
     let last_line = stdout.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("");
-    let plan_dir = std::path::Path::new(last_line.trim());
+    let session_dir = std::path::Path::new(last_line.trim());
     assert!(
-        plan_dir.is_dir() && plan_dir.join("PRD.md").exists(),
+        session_dir.is_dir() && session_dir.join("PRD.md").exists(),
         "stdout should end with plan dir path with PRD.md: {}",
         stdout
     );
@@ -393,10 +393,10 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
 
 #[test]
 #[cfg(unix)]
-fn cli_accepts_goal_acceptance_tests_with_plan_dir() {
-    let (output_dir, plan_dir) = common::temp_dir_with_git_repo("at-goal-test");
-    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
-    common::write_changeset_for_plan_session(&plan_dir, "fake-sess", &output_dir);
+fn cli_accepts_goal_acceptance_tests_with_session_dir() {
+    let (output_dir, session_dir) = common::temp_dir_with_git_repo("at-goal-test");
+    std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    common::write_changeset_for_session(&session_dir, "fake-sess", &output_dir);
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
@@ -409,8 +409,8 @@ fn cli_accepts_goal_acceptance_tests_with_plan_dir() {
             "stub",
             "--goal",
             "acceptance-tests",
-            "--plan-dir",
-            plan_dir.to_str().unwrap(),
+            "--session-dir",
+            session_dir.to_str().unwrap(),
         ])
         .write_stdin("Yes\n");
 
@@ -430,59 +430,20 @@ fn cli_accepts_goal_acceptance_tests_with_plan_dir() {
         stdout
     );
 
-    let _ = std::fs::remove_dir_all(plan_dir.parent().unwrap());
-}
-
-#[test]
-fn cli_errors_when_plan_dir_missing_for_evaluate_goal() {
-    let mut cmd = tddy_coder_bin();
-    cmd.args(["--agent", "stub", "--goal", "evaluate"]);
-
-    let output = cmd.output().expect("run tddy-coder");
-
-    assert!(
-        !output.status.success(),
-        "should fail when --plan-dir missing for evaluate goal"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("plan-dir") || stderr.contains("plan_dir"),
-        "error should mention plan-dir: {}",
-        stderr
-    );
-}
-
-#[test]
-fn cli_errors_when_plan_dir_missing_for_acceptance_tests_goal() {
-    let mut cmd = tddy_coder_bin();
-    cmd.args(["--agent", "stub", "--goal", "acceptance-tests"]);
-    // --plan-dir is NOT provided
-
-    let output = cmd.output().expect("run tddy-coder");
-
-    assert!(
-        !output.status.success(),
-        "should fail when --plan-dir missing"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("plan-dir") || stderr.contains("plan_dir"),
-        "error should mention plan-dir: {}",
-        stderr
-    );
+    let _ = std::fs::remove_dir_all(session_dir.parent().unwrap());
 }
 
 #[test]
 #[cfg(unix)]
-fn cli_accepts_goal_red_with_plan_dir() {
+fn cli_accepts_goal_red_with_session_dir() {
     let tmp = std::env::temp_dir().join("tddy-cli-red-goal-test");
     let _ = std::fs::create_dir_all(&tmp);
 
-    let plan_dir = tmp.join("plan-output");
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
-    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    let session_dir = tmp.join("plan-output");
+    std::fs::create_dir_all(&session_dir).expect("create plan dir");
+    std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     std::fs::write(
-        plan_dir.join("acceptance-tests.md"),
+        session_dir.join("acceptance-tests.md"),
         "# Acceptance Tests\n## Tests\n- test_foo",
     )
     .expect("write acceptance-tests.md");
@@ -495,8 +456,8 @@ fn cli_accepts_goal_red_with_plan_dir() {
             "stub",
             "--goal",
             "red",
-            "--plan-dir",
-            plan_dir.to_str().unwrap(),
+            "--session-dir",
+            session_dir.to_str().unwrap(),
         ]);
 
     let output = cmd.output().expect("run tddy-coder");
@@ -519,36 +480,16 @@ fn cli_accepts_goal_red_with_plan_dir() {
 }
 
 #[test]
-fn cli_errors_when_plan_dir_missing_for_red_goal() {
-    let mut cmd = tddy_coder_bin();
-    cmd.args(["--agent", "stub", "--goal", "red"]);
-    // --plan-dir is NOT provided
-
-    let output = cmd.output().expect("run tddy-coder");
-
-    assert!(
-        !output.status.success(),
-        "should fail when --plan-dir missing for red goal"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("plan-dir") || stderr.contains("plan_dir"),
-        "error should mention plan-dir: {}",
-        stderr
-    );
-}
-
-#[test]
 #[cfg(unix)]
-fn cli_accepts_goal_green_with_plan_dir() {
+fn cli_accepts_goal_green_with_session_dir() {
     let tmp = std::env::temp_dir().join("tddy-cli-green-goal-test");
     let _ = std::fs::create_dir_all(&tmp);
 
-    let plan_dir = tmp.join("plan-output");
-    std::fs::create_dir_all(&plan_dir).expect("create plan dir");
-    std::fs::write(plan_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    let session_dir = tmp.join("plan-output");
+    std::fs::create_dir_all(&session_dir).expect("create plan dir");
+    std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     std::fs::write(
-        plan_dir.join("acceptance-tests.md"),
+        session_dir.join("acceptance-tests.md"),
         "# Acceptance Tests\n## Tests\n### test_foo\n- **File**: src/foo.rs\n- **Line**: 10\n- **Status**: failing\n",
     )
     .expect("write acceptance-tests.md");
@@ -561,8 +502,8 @@ fn cli_accepts_goal_green_with_plan_dir() {
             "stub",
             "--goal",
             "red",
-            "--plan-dir",
-            plan_dir.to_str().unwrap(),
+            "--session-dir",
+            session_dir.to_str().unwrap(),
         ]);
 
     let output = cmd.output().expect("run tddy-coder red");
@@ -580,8 +521,8 @@ fn cli_accepts_goal_green_with_plan_dir() {
             "stub",
             "--goal",
             "green",
-            "--plan-dir",
-            plan_dir.to_str().unwrap(),
+            "--session-dir",
+            session_dir.to_str().unwrap(),
         ]);
 
     let output2 = cmd2.output().expect("run tddy-coder green");
@@ -603,26 +544,6 @@ fn cli_accepts_goal_green_with_plan_dir() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-#[test]
-fn cli_errors_when_plan_dir_missing_for_green_goal() {
-    let mut cmd = tddy_coder_bin();
-    cmd.args(["--agent", "stub", "--goal", "green"]);
-    // --plan-dir is NOT provided
-
-    let output = cmd.output().expect("run tddy-coder");
-
-    assert!(
-        !output.status.success(),
-        "should fail when --plan-dir missing for green goal"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("plan-dir") || stderr.contains("plan_dir"),
-        "error should mention plan-dir: {}",
-        stderr
-    );
-}
-
 // ── Full workflow: validate + refactor after evaluate ────────────────────────
 
 /// Full workflow (no --goal) must call validate and refactor after evaluate.
@@ -633,17 +554,19 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
     use std::sync::Arc;
     use tddy_core::changeset::read_changeset;
     use tddy_core::workflow::graph::ExecutionStatus;
-    use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
-    use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
+    use tddy_core::{
+        GoalId, MockBackend, SharedBackend, WorkflowEngine, WorkflowRecipe, WorkflowState,
+    };
+    use tddy_workflow_recipes::{TddRecipe, TddWorkflowHooks};
 
-    let (output_dir, plan_dir) = common::temp_dir_with_git_repo("full-wf-validate-refactor");
+    let (output_dir, session_dir) = common::temp_dir_with_git_repo("full-wf-validate-refactor");
     std::fs::write(
-        plan_dir.join("PRD.md"),
+        session_dir.join("PRD.md"),
         "# Feature PRD\n## Summary\nAuth system.",
     )
     .expect("write PRD");
-    std::fs::write(plan_dir.join("TODO.md"), "- [ ] Task 1").expect("write TODO");
-    common::write_changeset_for_plan_session(&plan_dir, "sess-plan-1", &output_dir);
+    std::fs::write(session_dir.join("TODO.md"), "- [ ] Task 1").expect("write TODO");
+    common::write_changeset_for_session(&session_dir, "sess-plan-1", &output_dir);
 
     const ACCEPTANCE_TESTS: &str = r#"{"goal":"acceptance-tests","summary":"Tests ready.","test_command":"cargo test","tests":[{"name":"t1","file":"test.rs","line":1,"status":"pass","kind":"unit"}]}"#;
     const RED: &str = r#"{"goal":"red","summary":"Failing tests written.","tests":[{"name":"t1","file":"test.rs","line":1,"status":"fail","kind":"unit"}],"skeletons":[],"markers":[],"marker_results":[]}"#;
@@ -666,10 +589,13 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
 
     let storage_dir = std::env::temp_dir().join("tddy-cli-full-wf-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
+    let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
+    let hooks = Arc::new(TddWorkflowHooks::new(recipe.clone()));
     let engine = WorkflowEngine::new(
+        recipe,
         SharedBackend::from_arc(backend.clone()),
         storage_dir,
-        Some(Arc::new(TddWorkflowHooks::new())),
+        Some(hooks),
     );
 
     let mut ctx = HashMap::new();
@@ -678,8 +604,8 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
         serde_json::json!("Build auth system"),
     );
     ctx.insert(
-        "plan_dir".to_string(),
-        serde_json::to_value(plan_dir.clone()).unwrap(),
+        "session_dir".to_string(),
+        serde_json::to_value(session_dir.clone()).unwrap(),
     );
     ctx.insert(
         "output_dir".to_string(),
@@ -688,7 +614,7 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
     ctx.insert("run_demo".to_string(), serde_json::json!(false));
 
     let result = engine
-        .run_workflow_from("acceptance-tests", ctx)
+        .run_workflow_from(&GoalId::new("acceptance-tests"), ctx)
         .await
         .expect("run workflow");
 
@@ -709,9 +635,10 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
         "should run acceptance-tests, red, green, evaluate, validate, refactor, update-docs"
     );
 
-    let changeset = read_changeset(&plan_dir).expect("changeset");
+    let changeset = read_changeset(&session_dir).expect("changeset");
     assert_eq!(
-        changeset.state.current, "DocsUpdated",
+        changeset.state.current,
+        WorkflowState::new("DocsUpdated"),
         "state should be DocsUpdated after full workflow"
     );
 

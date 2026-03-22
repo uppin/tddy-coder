@@ -4,14 +4,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crossterm::cursor::Show;
-use crossterm::event::{self, Event};
+use crossterm::event::{self, Event, KeyCode};
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use tddy_core::ViewConnection;
+use tddy_core::{AppMode, PresenterView, UserIntent, ViewConnection};
 
 use crate::capturing_writer::CapturingWriter;
 use crate::ctrl_interrupt::{ctrl_c_interrupt_session, key_is_ctrl_c_press};
@@ -59,6 +59,7 @@ pub fn run_event_loop(
 
     let mut state = conn.state_snapshot;
     let mut view = TuiView::new();
+    view.on_mode_changed(&state.mode);
     let mut event_rx = conn.event_rx;
     let intent_tx = conn.intent_tx;
 
@@ -114,10 +115,11 @@ pub fn run_event_loop(
                         vs.inbox_edit_buffer = edit_item.unwrap_or_default();
                     }
                     if consumed {
-                        if matches!(mode, tddy_core::AppMode::Select { .. }) {
+                        if matches!(&mode, AppMode::Select { .. })
+                            && matches!(key.code, KeyCode::Up | KeyCode::Down)
+                        {
                             let idx = view.view_state().select_selected;
-                            let _ =
-                                intent_tx.send(tddy_core::UserIntent::SelectHighlightChanged(idx));
+                            let _ = intent_tx.send(UserIntent::SelectHighlightChanged(idx));
                         }
                     } else if let Some(intent) = key_event_to_intent(key, &mode, view.view_state())
                     {

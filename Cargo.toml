@@ -16,4 +16,6 @@ members = [
     "packages/tddy-connectrpc",
     "packages/tddy-github",
     "packages/tddy-daemon",
+    "packages/tddy-workflow-recipes",
+    "packages/tddy-integration-tests",
 ]

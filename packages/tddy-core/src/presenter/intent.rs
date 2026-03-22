@@ -13,10 +13,11 @@ pub enum UserIntent {
     RefinePlan,
     /// User dismissed the markdown viewer (MarkdownViewer mode).
     DismissViewer,
+    /// User moved the highlight in Select mode (Up/Down / mouse). Keeps presenter state in sync for
+    /// `connect_view` / VirtualTui reconnect snapshots.
+    SelectHighlightChanged(usize),
     /// User selected option at index (Select mode).
     AnswerSelect(usize),
-    /// View-local highlight moved (arrow keys / mouse) before submit — syncs presenter snapshot for reconnect.
-    SelectHighlightChanged(usize),
     /// User typed custom answer for "Other" (Select mode).
     AnswerOther(String),
     /// User submitted multi-select answer: checked indices + optional other text.

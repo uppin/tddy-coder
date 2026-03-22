@@ -1,23 +1,25 @@
 //! Workflow thread runner — runs the full TDD workflow and sends events.
 //!
-//! Uses WorkflowEngine + FlowRunner with TddWorkflowHooks (event_tx) for TUI integration.
+//! Uses WorkflowEngine + FlowRunner with recipe-provided hooks (event_tx) for TUI integration.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Directory name for TUI workflow session storage under temp.
 const TUI_SESSION_DIR: &str = "tddy-flowrunner-tui-session";
 use std::sync::mpsc;
 
+use crate::backend::{GoalId, WorkflowRecipe};
 use crate::workflow::graph::{ElicitationEvent, ExecutionResult, ExecutionStatus};
 use crate::{
-    get_session_for_tag, next_goal_for_state, parse_refactor_response, parse_update_docs_response,
-    read_changeset, ClarificationQuestion, SharedBackend, WorkflowEngine,
+    get_session_for_tag, read_changeset, ClarificationQuestion, SharedBackend, WorkflowEngine,
 };
 
 use super::{WorkflowCompletePayload, WorkflowEvent};
 
 /// Context for elicitation (plan approval, refinement). Groups parameters passed to handle_elicitation.
 struct ElicitationContext<'a> {
+    recipe: &'a Arc<dyn WorkflowRecipe>,
     event_tx: &'a mpsc::Sender<WorkflowEvent>,
     answer_rx: &'a mpsc::Receiver<String>,
     rt: &'a tokio::runtime::Runtime,
@@ -121,7 +123,7 @@ fn demo_question() -> ClarificationQuestion {
 /// Returns once the user approves the plan.
 fn handle_elicitation(
     event: &ElicitationEvent,
-    plan_dir: &Path,
+    session_dir: &Path,
     ctx: &ElicitationContext<'_>,
 ) -> bool {
     match event {
@@ -144,28 +146,28 @@ fn handle_elicitation(
                 if answer.eq_ignore_ascii_case("approve") {
                     return true;
                 }
-                let feature_input = read_changeset(plan_dir)
+                let feature_input = read_changeset(session_dir)
                     .ok()
                     .and_then(|c| c.initial_prompt.clone())
                     .unwrap_or_else(|| "feature".to_string());
-                let session_id_for_refine = read_changeset(plan_dir)
+                let session_id_for_refine = read_changeset(session_dir)
                     .ok()
                     .and_then(|c| get_session_for_tag(&c, "plan"));
-                let output_dir_refine = read_changeset(plan_dir)
+                let output_dir_refine = read_changeset(session_dir)
                     .ok()
                     .and_then(|c| c.repo_path.clone())
                     .map(PathBuf::from)
-                    .or_else(|| plan_dir.parent().map(|p| p.to_path_buf()))
-                    .unwrap_or_else(|| plan_dir.to_path_buf());
+                    .or_else(|| session_dir.parent().map(|p| p.to_path_buf()))
+                    .unwrap_or_else(|| session_dir.to_path_buf());
                 let refine_storage = std::env::temp_dir().join("tddy-flowrunner-refine-session");
                 std::fs::create_dir_all(&refine_storage).ok();
-                let refine_hooks = std::sync::Arc::new(
-                    crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(
-                        ctx.event_tx.clone(),
-                    ),
+                let refine_hooks = ctx.recipe.create_hooks(Some(ctx.event_tx.clone()));
+                let refine_engine = WorkflowEngine::new(
+                    ctx.recipe.clone(),
+                    ctx.backend.clone(),
+                    refine_storage,
+                    Some(refine_hooks),
                 );
-                let refine_engine =
-                    WorkflowEngine::new(ctx.backend.clone(), refine_storage, Some(refine_hooks));
                 let mut refine_ctx = std::collections::HashMap::new();
                 refine_ctx.insert(
                     "feature_input".to_string(),
@@ -176,8 +178,8 @@ fn handle_elicitation(
                     serde_json::to_value(&output_dir_refine).unwrap(),
                 );
                 refine_ctx.insert(
-                    "plan_dir".to_string(),
-                    serde_json::to_value(plan_dir).unwrap(),
+                    "session_dir".to_string(),
+                    serde_json::to_value(session_dir).unwrap(),
                 );
                 refine_ctx.insert("refinement_feedback".to_string(), serde_json::json!(answer));
                 refine_ctx.insert(
@@ -200,16 +202,19 @@ fn handle_elicitation(
                 if let Some(p) = ctx.socket_path {
                     refine_ctx.insert("socket_path".to_string(), serde_json::to_value(p).unwrap());
                 }
-                let mut refine_result =
-                    match ctx.rt.block_on(refine_engine.run_goal("plan", refine_ctx)) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            let _ = ctx
-                                .event_tx
-                                .send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
-                            return false;
-                        }
-                    };
+                let plan_goal = GoalId::new("plan");
+                let mut refine_result = match ctx
+                    .rt
+                    .block_on(refine_engine.run_goal(&plan_goal, refine_ctx))
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let _ = ctx
+                            .event_tx
+                            .send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
+                        return false;
+                    }
+                };
                 loop {
                     match &refine_result.status {
                         ExecutionStatus::Completed
@@ -235,7 +240,7 @@ fn handle_elicitation(
                         }
                     }
                 }
-                current_prd = std::fs::read_to_string(plan_dir.join("PRD.md"))
+                current_prd = std::fs::read_to_string(session_dir.join("PRD.md"))
                     .unwrap_or_else(|_| "Could not read PRD.md".to_string());
             }
         }
@@ -250,9 +255,10 @@ fn handle_elicitation(
 }
 
 /// Run plan goal when output_dir is omitted (or "."). Creates session under ~/.tddy/sessions.
-/// Returns Some(plan_dir) on success, None when the caller should return.
+/// Returns Some(session_dir) on success, None when the caller should return.
 #[allow(clippy::too_many_arguments)]
 fn run_plan_without_output_dir(
+    recipe: Arc<dyn WorkflowRecipe>,
     backend: &SharedBackend,
     event_tx: &mpsc::Sender<WorkflowEvent>,
     answer_rx: &mpsc::Receiver<String>,
@@ -285,10 +291,8 @@ fn run_plan_without_output_dir(
 
     let storage_dir = std::env::temp_dir().join(TUI_SESSION_DIR);
     std::fs::create_dir_all(&storage_dir).ok();
-    let hooks = std::sync::Arc::new(crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(
-        event_tx.clone(),
-    ));
-    let engine = WorkflowEngine::new(backend.clone(), storage_dir, Some(hooks));
+    let hooks = recipe.create_hooks(Some(event_tx.clone()));
+    let engine = WorkflowEngine::new(recipe.clone(), backend.clone(), storage_dir, Some(hooks));
     let repo_path_str = output_dir_for_ctx.display().to_string();
     let mut context_values = std::collections::HashMap::new();
     context_values.insert("feature_input".to_string(), serde_json::json!(input));
@@ -319,7 +323,10 @@ fn run_plan_without_output_dir(
             ..crate::changeset::Changeset::default()
         };
         let _ = crate::changeset::write_changeset(dir, &init_cs);
-        context_values.insert("plan_dir".to_string(), serde_json::to_value(dir).unwrap());
+        context_values.insert(
+            "session_dir".to_string(),
+            serde_json::to_value(dir).unwrap(),
+        );
     }
     if debug_output_path.is_none() {
         if let Some(ref dir) = session_dir {
@@ -386,17 +393,17 @@ fn run_plan_without_output_dir(
         Err(()) => return None,
     };
 
-    let plan_dir = rt
+    let session_dir = rt
         .block_on(engine.get_session(&result.session_id))
         .ok()
         .flatten()
-        .and_then(|s| s.context.get_sync::<PathBuf>("plan_dir"))
+        .and_then(|s| s.context.get_sync::<PathBuf>("session_dir"))
         .unwrap_or_else(|| output_dir.join(crate::output::slugify_directory_name(input)));
 
     let conversation_output_resolved = crate::resolve_log_defaults(
         conversation_output_path.clone(),
         debug_output_path,
-        &plan_dir,
+        &session_dir,
     );
 
     if let Some(ref temp) = temp_conv_path {
@@ -414,6 +421,7 @@ fn run_plan_without_output_dir(
 
     if let ExecutionStatus::ElicitationNeeded { ref event } = result.status {
         let elicitation_ctx = ElicitationContext {
+            recipe: &recipe,
             event_tx,
             answer_rx,
             rt: &rt,
@@ -424,22 +432,23 @@ fn run_plan_without_output_dir(
             debug,
             socket_path,
         };
-        if !handle_elicitation(event, &plan_dir, &elicitation_ctx) {
+        if !handle_elicitation(event, &session_dir, &elicitation_ctx) {
             return None;
         }
     }
 
-    Some(plan_dir)
+    Some(session_dir)
 }
 
 /// Run the full workflow in a blocking thread. Sends events to event_tx, receives answers from answer_rx.
 #[allow(clippy::too_many_arguments)]
 pub fn run_workflow(
+    recipe: Arc<dyn WorkflowRecipe>,
     backend: SharedBackend,
     event_tx: mpsc::Sender<WorkflowEvent>,
     answer_rx: mpsc::Receiver<String>,
     output_dir: PathBuf,
-    plan_dir: Option<PathBuf>,
+    session_dir: Option<PathBuf>,
     session_id: Option<String>,
     model: Option<String>,
     initial_prompt: Option<String>,
@@ -459,7 +468,7 @@ pub fn run_workflow(
         output_dir
     };
 
-    let plan_dir = match plan_dir {
+    let session_dir = match session_dir {
         Some(p) => p,
         None => {
             let input = match initial_prompt {
@@ -482,6 +491,7 @@ pub fn run_workflow(
                 output_dir.as_path()
             };
             match run_plan_without_output_dir(
+                recipe.clone(),
                 &backend,
                 &event_tx,
                 &answer_rx,
@@ -501,9 +511,9 @@ pub fn run_workflow(
     };
 
     let conversation_output_path =
-        crate::resolve_log_defaults(conversation_output_path, debug_output_path, &plan_dir);
+        crate::resolve_log_defaults(conversation_output_path, debug_output_path, &session_dir);
 
-    let cs_pre = read_changeset(&plan_dir).ok();
+    let cs_pre = read_changeset(&session_dir).ok();
     // Use repo_path from changeset for resume from any directory; fall back to resolved output_dir.
     let effective_output_dir = cs_pre
         .as_ref()
@@ -512,8 +522,8 @@ pub fn run_workflow(
         .unwrap_or_else(|| output_dir.clone());
 
     let plan_needs_completion = cs_pre.as_ref().is_some_and(|c| {
-        c.state.current == "Init"
-            && (!plan_dir.join("PRD.md").exists() || get_session_for_tag(c, "plan").is_none())
+        c.state.current.as_str() == "Init"
+            && (!session_dir.join("PRD.md").exists() || get_session_for_tag(c, "plan").is_none())
     });
     if plan_needs_completion {
         let input = cs_pre
@@ -524,10 +534,9 @@ pub fn run_workflow(
             .to_string();
         if !input.is_empty() {
             let storage_dir = std::env::temp_dir().join(TUI_SESSION_DIR);
-            let hooks = std::sync::Arc::new(
-                crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(event_tx.clone()),
-            );
-            let engine = WorkflowEngine::new(backend.clone(), storage_dir, Some(hooks));
+            let hooks = recipe.create_hooks(Some(event_tx.clone()));
+            let engine =
+                WorkflowEngine::new(recipe.clone(), backend.clone(), storage_dir, Some(hooks));
             let mut ctx = std::collections::HashMap::new();
             ctx.insert("feature_input".to_string(), serde_json::json!(input));
             ctx.insert(
@@ -535,8 +544,8 @@ pub fn run_workflow(
                 serde_json::to_value(effective_output_dir.clone()).unwrap(),
             );
             ctx.insert(
-                "plan_dir".to_string(),
-                serde_json::to_value(plan_dir.clone()).unwrap(),
+                "session_dir".to_string(),
+                serde_json::to_value(session_dir.clone()).unwrap(),
             );
             ctx.insert(
                 "model".to_string(),
@@ -559,7 +568,8 @@ pub fn run_workflow(
                 .enable_all()
                 .build()
                 .expect("tokio runtime");
-            let result = match rt.block_on(engine.run_goal("plan", ctx)) {
+            let plan_gid = GoalId::new("plan");
+            let result = match rt.block_on(engine.run_goal(&plan_gid, ctx)) {
                 Ok(r) => r,
                 Err(e) => {
                     let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
@@ -574,6 +584,7 @@ pub fn run_workflow(
             };
             if let ExecutionStatus::ElicitationNeeded { ref event } = result.status {
                 let elicitation_ctx = ElicitationContext {
+                    recipe: &recipe,
                     event_tx: &event_tx,
                     answer_rx: &answer_rx,
                     rt: &rt,
@@ -584,7 +595,7 @@ pub fn run_workflow(
                     debug,
                     socket_path: socket_path.as_ref(),
                 };
-                if !handle_elicitation(event, &plan_dir, &elicitation_ctx) {
+                if !handle_elicitation(event, &session_dir, &elicitation_ctx) {
                     return;
                 }
             }
@@ -595,11 +606,36 @@ pub fn run_workflow(
     let mut run_demo = false;
     let mut demo_asked = false;
 
-    let cs = read_changeset(&plan_dir).ok();
+    let cs = read_changeset(&session_dir).ok();
+    // Feature text for PlanTask: UI prompt wins; otherwise resume from changeset when session_dir was set without initial_prompt.
+    let mut feature_input_for_workflow = initial_prompt_for_ctx.clone().or_else(|| {
+        cs.as_ref()
+            .and_then(|c| c.initial_prompt.clone())
+            .filter(|s| !s.trim().is_empty())
+    });
     let start_goal = cs
         .as_ref()
-        .and_then(|c| next_goal_for_state(&c.state.current))
-        .unwrap_or("plan");
+        .and_then(|c| recipe.next_goal_for_state(&c.state.current))
+        .unwrap_or_else(|| recipe.start_goal());
+    let start_is_full = start_goal == recipe.start_goal();
+
+    // Same as the no-session_dir path: allow TUI FeatureInput when plan requires a description.
+    if start_goal.as_str() == "plan" && feature_input_for_workflow.is_none() {
+        let _ = event_tx.send(WorkflowEvent::AwaitingFeatureInput);
+        match answer_rx.recv() {
+            Ok(s) => {
+                let t = s.trim().to_string();
+                if t.is_empty() {
+                    let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
+                        "empty feature description".into(),
+                    )));
+                    return;
+                }
+                feature_input_for_workflow = Some(t);
+            }
+            Err(_) => return,
+        }
+    }
 
     // Pre-set worktree_dir (from Presenter) takes priority; otherwise use changeset value (resume).
     let worktree_dir = worktree_dir.or_else(|| {
@@ -610,16 +646,14 @@ pub fn run_workflow(
 
     let storage_dir = std::env::temp_dir().join(TUI_SESSION_DIR);
     std::fs::create_dir_all(&storage_dir).ok();
-    let hooks = std::sync::Arc::new(crate::workflow::tdd_hooks::TddWorkflowHooks::with_event_tx(
-        event_tx.clone(),
-    ));
+    let hooks = recipe.create_hooks(Some(event_tx.clone()));
     let backend_for_refine = backend.clone();
-    let engine = WorkflowEngine::new(backend, storage_dir, Some(hooks));
+    let engine = WorkflowEngine::new(recipe.clone(), backend, storage_dir, Some(hooks));
 
     let mut context_values = std::collections::HashMap::new();
     context_values.insert(
-        "plan_dir".to_string(),
-        serde_json::to_value(plan_dir.clone()).unwrap(),
+        "session_dir".to_string(),
+        serde_json::to_value(session_dir.clone()).unwrap(),
     );
     context_values.insert(
         "output_dir".to_string(),
@@ -631,8 +665,8 @@ pub fn run_workflow(
             serde_json::to_value(wt).unwrap(),
         );
     }
-    if let Some(ref prompt) = initial_prompt_for_ctx {
-        context_values.insert("feature_input".to_string(), serde_json::json!(prompt));
+    if let Some(ref fi) = feature_input_for_workflow {
+        context_values.insert("feature_input".to_string(), serde_json::json!(fi));
     }
     context_values.insert(
         "model".to_string(),
@@ -658,10 +692,10 @@ pub fn run_workflow(
         .build()
         .expect("tokio runtime");
 
-    let result = if start_goal == "plan" {
+    let result = if start_is_full {
         rt.block_on(engine.run_full_workflow(context_values))
     } else {
-        rt.block_on(engine.run_workflow_from(start_goal, context_values))
+        rt.block_on(engine.run_workflow_from(&start_goal, context_values))
     };
     let mut result = match result {
         Ok(r) => r,
@@ -683,37 +717,19 @@ pub fn run_workflow(
                     .and_then(|s| s.context.get_sync("output"));
                 let summary = output
                     .as_ref()
-                    .and_then(|o| {
-                        parse_update_docs_response(o)
-                            .ok()
-                            .map(|r| {
-                                format!(
-                                    "Plan dir: {}\nDocs updated: {}",
-                                    plan_dir.display(),
-                                    r.docs_updated
-                                )
-                            })
-                            .or_else(|| {
-                                parse_refactor_response(o).ok().map(|r| {
-                                    format!(
-                                        "Plan dir: {}\nTasks completed: {}\nTests passing: {}",
-                                        plan_dir.display(),
-                                        r.tasks_completed,
-                                        r.tests_passing
-                                    )
-                                })
-                            })
-                    })
-                    .unwrap_or_else(|| format!("Plan dir: {}", plan_dir.display()));
+                    .and_then(|o| recipe.summarize_last_goal_output(o))
+                    .map(|s| format!("Session dir: {}\n{}", session_dir.display(), s))
+                    .unwrap_or_else(|| format!("Session dir: {}", session_dir.display()));
                 let payload = WorkflowCompletePayload {
                     summary,
-                    plan_dir: Some(plan_dir.clone()),
+                    session_dir: Some(session_dir.clone()),
                 };
                 let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Ok(payload)));
                 return;
             }
             ExecutionStatus::ElicitationNeeded { ref event } => {
                 let elicitation_ctx = ElicitationContext {
+                    recipe: &recipe,
                     event_tx: &event_tx,
                     answer_rx: &answer_rx,
                     rt: &rt,
@@ -724,7 +740,7 @@ pub fn run_workflow(
                     debug,
                     socket_path: socket_path.as_ref(),
                 };
-                if !handle_elicitation(event, &plan_dir, &elicitation_ctx) {
+                if !handle_elicitation(event, &session_dir, &elicitation_ctx) {
                     return;
                 }
                 result = match rt.block_on(engine.run_session(&result.session_id)) {
@@ -736,14 +752,14 @@ pub fn run_workflow(
                 };
             }
             ExecutionStatus::Paused { .. } => {
-                let current_state = read_changeset(&plan_dir)
+                let current_state = read_changeset(&session_dir)
                     .ok()
                     .map(|c| c.state.current)
                     .unwrap_or_default();
 
                 // Ask demo question only when we've reached GreenComplete (not earlier).
-                if current_state == "GreenComplete"
-                    && plan_dir.join("demo-plan.md").exists()
+                if current_state.as_str() == "GreenComplete"
+                    && session_dir.join("demo-plan.md").exists()
                     && !demo_asked
                 {
                     let run_demo_asked = event_tx.send(WorkflowEvent::ClarificationNeeded {
@@ -782,80 +798,5 @@ pub fn run_workflow(
                 return;
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{MockBackend, SharedBackend};
-    use serial_test::serial;
-    use std::sync::Arc;
-
-    /// When a plan goal fails (e.g. output parsing error), debug.log should still be
-    /// written to the session dir/logs/ so the developer can diagnose the failure.
-    /// Reproduces: resolve_log_defaults is only called on the success path in
-    /// run_plan_without_output_dir; on error the function returns None before
-    /// reaching the resolve_log_defaults call.
-    #[test]
-    #[serial]
-    #[cfg(unix)]
-    fn debug_log_written_to_session_dir_when_plan_fails() {
-        let tmp = std::env::temp_dir().join("tddy-debug-log-on-plan-fail");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-
-        let backend = Arc::new(MockBackend::new());
-        backend.push_ok("not valid plan json");
-
-        let (event_tx, event_rx) = mpsc::channel();
-        let (_answer_tx, answer_rx) = mpsc::channel();
-
-        let session_id = "test-debug-log-session";
-
-        crate::init_tddy_logger_legacy(false, None, None);
-
-        run_workflow(
-            SharedBackend::from_arc(backend),
-            event_tx,
-            answer_rx,
-            tmp.clone(),
-            None,
-            Some(session_id.to_string()),
-            None,
-            Some("Build test feature".to_string()),
-            None,
-            None,
-            false,
-            None,
-            None,
-        );
-
-        let mut got_error = false;
-        let mut error_msg = String::new();
-        while let Ok(event) = event_rx.try_recv() {
-            if let WorkflowEvent::WorkflowComplete(Err(ref msg)) = event {
-                got_error = true;
-                error_msg = msg.clone();
-            }
-        }
-        assert!(got_error, "should get a workflow error from plan failure");
-
-        let session_dir = tmp.join(crate::output::SESSIONS_SUBDIR).join(session_id);
-        assert!(
-            session_dir.exists(),
-            "session dir should be created by PlanTask at {}",
-            session_dir.display()
-        );
-
-        let debug_log = session_dir.join("logs").join("debug.log");
-        assert!(
-            debug_log.exists(),
-            "debug.log should exist at {}/logs/ even when plan fails (error: {})",
-            session_dir.display(),
-            error_msg,
-        );
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

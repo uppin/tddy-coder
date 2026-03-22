@@ -12,10 +12,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tddy_coder::{ActivityEntry, AppMode, Presenter, UserIntent};
 use tddy_core::{
-    backend::{CodingBackend, Goal, InvokeRequest, InvokeResponse},
+    backend::{CodingBackend, InvokeRequest, InvokeResponse},
     output::{SESSIONS_SUBDIR, TDDY_SESSIONS_DIR_ENV},
     BackendError, PresenterEvent, SharedBackend, StubBackend, WorkflowCompletePayload,
 };
+use tddy_workflow_recipes::TddRecipe;
 use tokio::sync::broadcast;
 
 /// Events collected from broadcast for assertions.
@@ -75,7 +76,7 @@ impl EventCollector {
 /// Creates a Presenter with broadcast and an EventCollector for assertions.
 fn presenter_with_events() -> (Presenter, EventCollector) {
     let (event_tx, event_rx) = broadcast::channel(256);
-    let presenter = Presenter::new("stub", "default").with_broadcast(event_tx);
+    let presenter = Presenter::new("stub", "default", Arc::new(TddRecipe)).with_broadcast(event_tx);
     let collector = EventCollector::new(event_rx);
     (presenter, collector)
 }
@@ -85,7 +86,7 @@ fn create_stub_backend() -> SharedBackend {
 }
 
 /// Backend that fails plan invocations when working_dir is not a git repo.
-/// Used to enforce that plan refinement uses repo_path (not plan_dir.parent()) when plan_dir is under sessions.
+/// Used to enforce that plan refinement uses repo_path (not session_dir.parent()) when session_dir is under sessions.
 struct AssertingRepoBackend {
     inner: StubBackend,
 }
@@ -105,7 +106,7 @@ impl CodingBackend for AssertingRepoBackend {
     }
 
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
-        if request.goal == Goal::Plan {
+        if request.goal_id.as_str() == "plan" {
             if let Some(ref wd) = request.working_dir {
                 let git_dir = wd.join(".git");
                 if !git_dir.exists() {
@@ -315,18 +316,18 @@ fn submit_feature_input_after_completion_restarts_workflow() {
     );
 }
 
-/// When output_dir is "." (TUI default), plan_dir must be under sessions_base_path (~/.tddy/sessions),
-/// not under the resolved current_dir. MDs (PRD.md, progress.md, etc.) go to plan_dir.
+/// When output_dir is "." (TUI default), session_dir must be under sessions_base_path (~/.tddy/sessions),
+/// not under the resolved current_dir. MDs (PRD.md, progress.md, etc.) go to session_dir.
 #[test]
 #[serial]
-fn plan_dir_under_sessions_base_when_output_dir_is_dot() {
-    let sessions_base = std::env::temp_dir().join("tddy-plan-dir-test-sessions");
+fn session_dir_under_sessions_base_when_output_dir_is_dot() {
+    let sessions_base = std::env::temp_dir().join("tddy-session-dir-test-sessions");
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
     let sessions_base_str = sessions_base.to_str().expect("path");
     std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base_str);
 
-    let (repo_dir, _) = common::temp_dir_with_git_repo("plan-dir-test");
+    let (repo_dir, _) = common::temp_dir_with_git_repo("session-dir-test");
 
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
@@ -385,24 +386,24 @@ fn plan_dir_under_sessions_base_when_output_dir_is_dot() {
         })
         .expect("WorkflowComplete(Ok) with payload");
 
-    let plan_dir = payload
-        .plan_dir
+    let session_dir = payload
+        .session_dir
         .as_ref()
-        .expect("plan_dir must be set in payload");
+        .expect("session_dir must be set in payload");
 
     let expected_sessions_base = Path::new(sessions_base_str);
     let expected_plan_parent = expected_sessions_base.join(SESSIONS_SUBDIR);
     assert!(
-        plan_dir.starts_with(&expected_plan_parent),
-        "plan_dir {:?} must be under {}/sessions/ (sessions_base_path), not under repo {:?}",
-        plan_dir,
+        session_dir.starts_with(&expected_plan_parent),
+        "session_dir {:?} must be under {}/sessions/ (sessions_base_path), not under repo {:?}",
+        session_dir,
         sessions_base_str,
         repo_dir
     );
     assert!(
-        !plan_dir.starts_with(&repo_dir),
-        "plan_dir {:?} must NOT be under repo {:?}",
-        plan_dir,
+        !session_dir.starts_with(&repo_dir),
+        "session_dir {:?} must NOT be under repo {:?}",
+        session_dir,
         repo_dir
     );
 
@@ -410,11 +411,11 @@ fn plan_dir_under_sessions_base_when_output_dir_is_dot() {
     let _ = std::fs::remove_dir_all(repo_dir.parent().unwrap_or(&repo_dir));
 }
 
-/// When plan_dir is under sessions (output_dir "."), RefinePlan must use repo_path from changeset
-/// for output_dir, not plan_dir.parent(). AssertingRepoBackend fails if plan working_dir lacks .git.
+/// When session_dir is under sessions (output_dir "."), RefinePlan must use repo_path from changeset
+/// for output_dir, not session_dir.parent(). AssertingRepoBackend fails if plan working_dir lacks .git.
 #[test]
 #[serial]
-fn plan_dir_under_sessions_refine_uses_repo_as_working_dir() {
+fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
     let sessions_base = std::env::temp_dir().join("tddy-plan-refine-sessions");
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
@@ -478,7 +479,7 @@ fn plan_dir_under_sessions_refine_uses_repo_as_working_dir() {
 
     assert!(
         !saw_error_recovery,
-        "refine must use repo_path for output_dir when plan_dir is under sessions; got ErrorRecovery: {:?}",
+        "refine must use repo_path for output_dir when session_dir is under sessions; got ErrorRecovery: {:?}",
         presenter.state().mode
     );
     assert!(
@@ -496,7 +497,7 @@ fn plan_dir_under_sessions_refine_uses_repo_as_working_dir() {
     assert!(
         evs.iter()
             .any(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_)))),
-        "expected WorkflowComplete(Ok); refine must use repo_path for output_dir when plan_dir is under sessions. Events: {:?}",
+        "expected WorkflowComplete(Ok); refine must use repo_path for output_dir when session_dir is under sessions. Events: {:?}",
         evs
     );
 }

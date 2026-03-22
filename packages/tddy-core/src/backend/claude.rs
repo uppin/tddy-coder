@@ -1,8 +1,7 @@
 //! Claude Code CLI backend implementation.
 
-use super::{Goal, InvokeRequest, InvokeResponse};
+use super::{InvokeRequest, InvokeResponse, PermissionHint};
 use crate::error::BackendError;
-use crate::permission;
 use crate::stream;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -181,28 +180,21 @@ fn create_mcp_config_temp_file() -> Option<PathBuf> {
     Some(tmp)
 }
 
+/// Maps [`InvokeRequest`] to Claude CLI config. [`GoalHints::planning_mode_intent`] comes from the
+/// active [`crate::workflow::recipe::WorkflowRecipe`]; Claude sets `--permission-mode plan` only when
+/// that flag is set (not for every read-only goal).
 fn goal_to_claude_config(request: &InvokeRequest) -> ClaudeInvokeConfig {
-    let (permission_mode, mut allowed_tools) = match request.goal {
-        Goal::Plan => (PermissionMode::Plan, permission::plan_allowlist()),
-        Goal::AcceptanceTests | Goal::Red | Goal::Green => (
-            PermissionMode::AcceptEdits,
-            permission::acceptance_tests_allowlist(),
-        ),
-        Goal::Demo => (PermissionMode::AcceptEdits, permission::demo_allowlist()),
-        Goal::Evaluate => (PermissionMode::Plan, permission::evaluate_allowlist()),
-        Goal::Validate => (
-            PermissionMode::Plan,
-            permission::validate_subagents_allowlist(),
-        ),
-        Goal::Refactor => (
-            PermissionMode::AcceptEdits,
-            permission::refactor_allowlist(),
-        ),
-        Goal::UpdateDocs => (
-            PermissionMode::AcceptEdits,
-            permission::update_docs_allowlist(),
-        ),
+    let permission_mode = match request.hints.permission {
+        PermissionHint::AcceptEdits => PermissionMode::AcceptEdits,
+        PermissionHint::ReadOnly => {
+            if request.hints.planning_mode_intent {
+                PermissionMode::Plan
+            } else {
+                PermissionMode::Default
+            }
+        }
     };
+    let mut allowed_tools = request.hints.allowed_tools.clone();
     if let Some(ref extras) = request.extra_allowed_tools {
         allowed_tools.extend(extras.iter().cloned());
     }
@@ -375,7 +367,7 @@ impl ClaudeCodeBackend {
         log::debug!("[tddy-coder] cwd: {}", cwd_str);
         log::debug!(
             "[tddy-coder] goal: {:?}, model: {:?}, session: {:?}",
-            request.goal,
+            request.goal_id,
             request.model,
             request.session
         );
@@ -402,8 +394,8 @@ impl ClaudeCodeBackend {
         if let Some(ref p) = request.working_dir {
             cmd.env("TDDY_REPO_DIR", p);
         }
-        if let Some(ref p) = request.plan_dir {
-            cmd.env("TDDY_PLAN_DIR", p);
+        if let Some(ref p) = request.session_dir {
+            cmd.env("TDDY_SESSION_DIR", p);
         }
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
@@ -514,7 +506,7 @@ impl ClaudeCodeBackend {
                 .unwrap_or((String::new(), false));
             let request_entry = serde_json::json!({
                 "type": "tddy-request",
-                "goal": format!("{:?}", request.goal),
+                "goal": request.hints.display_name,
                 "prompt": request.prompt,
                 "system_prompt": sys_prompt_content,
                 "model": request.model,
@@ -573,16 +565,17 @@ impl ClaudeCodeBackend {
         log::debug!(
             "[tddy-coder] Claude process exited with code {} (goal: {:?}, session_id: {:?})",
             exit_code,
-            request.goal,
+            request.goal_id,
             request.session
         );
 
         if exit_code != 0 {
             // When plan goal produced valid structured output, treat exit 1 as non-fatal.
             // CLI may exit 1 after session/ExitPlanMode issues despite successful output.
-            let has_plan_output = request.goal == Goal::Plan
-                && stream_result.result_text.contains("<structured-response");
-            if has_plan_output {
+            let has_structured_despite_nonzero =
+                request.hints.claude_nonzero_exit_ok_if_structured_response
+                    && stream_result.result_text.contains("<structured-response");
+            if has_structured_despite_nonzero {
                 log::debug!(
                     "[tddy-coder] CLI exited with code {} but plan output present; treating as success",
                     exit_code
@@ -619,7 +612,7 @@ impl ClaudeCodeBackend {
         if let Some(ref sink) = request.progress_sink {
             sink.emit(&stream::ProgressEvent::AgentExited {
                 exit_code,
-                goal: request.goal.submit_key().to_string(),
+                goal: request.submit_key.to_string(),
             });
         }
 
@@ -635,5 +628,79 @@ impl ClaudeCodeBackend {
             raw_stream,
             stderr,
         })
+    }
+}
+
+#[cfg(test)]
+mod claude_config_tests {
+    use super::{goal_to_claude_config, ClaudeInvokeConfig, PermissionMode};
+    use crate::backend::{GoalHints, GoalId, InvokeRequest, PermissionHint};
+
+    fn minimal_invoke(hints: GoalHints) -> InvokeRequest {
+        InvokeRequest {
+            prompt: "p".to_string(),
+            system_prompt: None,
+            system_prompt_path: None,
+            goal_id: GoalId::new("any"),
+            submit_key: GoalId::new("any"),
+            hints,
+            model: None,
+            session: None,
+            working_dir: None,
+            debug: false,
+            agent_output: false,
+            agent_output_sink: None,
+            progress_sink: None,
+            conversation_output_path: None,
+            inherit_stdin: false,
+            extra_allowed_tools: None,
+            socket_path: None,
+            session_dir: None,
+        }
+    }
+
+    #[test]
+    fn readonly_with_planning_intent_maps_to_plan_permission_mode() {
+        let hints = GoalHints {
+            display_name: "Plan".to_string(),
+            permission: PermissionHint::ReadOnly,
+            allowed_tools: vec![],
+            default_model: None,
+            agent_output: false,
+            planning_mode_intent: true,
+            claude_nonzero_exit_ok_if_structured_response: true,
+        };
+        let c: ClaudeInvokeConfig = goal_to_claude_config(&minimal_invoke(hints));
+        assert_eq!(c.permission_mode, PermissionMode::Plan);
+    }
+
+    #[test]
+    fn readonly_without_planning_intent_maps_to_default_permission_mode() {
+        let hints = GoalHints {
+            display_name: "Evaluate".to_string(),
+            permission: PermissionHint::ReadOnly,
+            allowed_tools: vec![],
+            default_model: None,
+            agent_output: false,
+            planning_mode_intent: false,
+            claude_nonzero_exit_ok_if_structured_response: false,
+        };
+        let c: ClaudeInvokeConfig = goal_to_claude_config(&minimal_invoke(hints));
+        assert_eq!(c.permission_mode, PermissionMode::Default);
+    }
+
+    #[test]
+    fn accept_edits_maps_to_accept_edits_permission_mode() {
+        let hints = GoalHints {
+            display_name: "Red".to_string(),
+            permission: PermissionHint::AcceptEdits,
+            allowed_tools: vec![],
+            default_model: None,
+            agent_output: false,
+            planning_mode_intent: false,
+            claude_nonzero_exit_ok_if_structured_response: false,
+        };
+        let c: ClaudeInvokeConfig = goal_to_claude_config(&minimal_invoke(hints));
+        assert_eq!(c.permission_mode, PermissionMode::AcceptEdits);
     }
 }

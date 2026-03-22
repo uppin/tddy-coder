@@ -72,7 +72,8 @@ pub fn workflow_event_to_server_message(event: WorkflowEvent) -> Option<ServerMe
         }),
         WorkflowEvent::Progress(_)
         | WorkflowEvent::ClarificationNeeded { .. }
-        | WorkflowEvent::WorktreeSwitched { .. } => return None,
+        | WorkflowEvent::WorktreeSwitched { .. }
+        | WorkflowEvent::AwaitingFeatureInput => return None,
     };
     Some(ServerMessage { event: Some(event) })
 }
@@ -255,6 +256,7 @@ fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
         UserIntent::ResumeFromError => return None,
         // skeleton: ContinueWithAgent has no proto message yet
         UserIntent::ContinueWithAgent => return None,
+        // Local-only (VirtualTui / TUI): sync Select highlight for reconnect snapshots
         UserIntent::SelectHighlightChanged(_) => return None,
     };
     Some(ClientMessage {

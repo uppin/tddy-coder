@@ -387,7 +387,9 @@ fn process_virtual_tui_input_chunk(
                     );
                 }
             }
-            if matches!(state.mode, AppMode::Select { .. }) {
+            if matches!(state.mode, AppMode::Select { .. })
+                && matches!(key.code, KeyCode::Up | KeyCode::Down)
+            {
                 let idx = view.view_state().select_selected;
                 let _ = intent_tx.send(UserIntent::SelectHighlightChanged(idx));
             }

@@ -22,7 +22,7 @@ fn temp_output_dir() -> PathBuf {
 /// TDDY_SESSIONS_DIR set to temp dir so tests do not write to production ~/.tddy.
 #[test]
 #[cfg(unix)]
-fn run_plan_via_flow_runner_produces_plan_directory() {
+fn run_plan_via_flow_runner_produces_session_directory() {
     let sessions_base = temp_output_dir();
     let sessions_base_str = sessions_base.to_str().expect("path");
 
@@ -41,23 +41,23 @@ fn run_plan_via_flow_runner_produces_plan_directory() {
     cmd.assert().success();
 
     let sessions_dir = sessions_base.join(tddy_core::output::SESSIONS_SUBDIR);
-    let plan_dir = std::fs::read_dir(&sessions_dir)
+    let session_dir = std::fs::read_dir(&sessions_dir)
         .expect("sessions dir should exist")
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .find(|p| p.is_dir())
         .expect("at least one session dir should exist");
     assert!(
-        plan_dir.is_dir(),
-        "plan_dir should be a directory: {}",
-        plan_dir.display()
+        session_dir.is_dir(),
+        "session_dir should be a directory: {}",
+        session_dir.display()
     );
-    let prd_path = plan_dir.join("PRD.md");
+    let prd_path = session_dir.join("PRD.md");
     assert!(
         prd_path.exists(),
-        "PRD.md should exist in plan_dir {}; contents: {:?}",
-        plan_dir.display(),
-        std::fs::read_dir(&plan_dir).ok().map(|d| d
+        "PRD.md should exist in session_dir {}; contents: {:?}",
+        session_dir.display(),
+        std::fs::read_dir(&session_dir).ok().map(|d| d
             .filter_map(|e| e.ok())
             .map(|e| e.file_name())
             .collect::<Vec<_>>())

@@ -8,7 +8,7 @@ use crate::{ClarificationQuestion, ProgressEvent};
 #[derive(Debug, Clone)]
 pub struct WorkflowCompletePayload {
     pub summary: String,
-    pub plan_dir: Option<PathBuf>,
+    pub session_dir: Option<PathBuf>,
 }
 
 /// Events the workflow thread sends to the Presenter.
@@ -28,6 +28,9 @@ pub enum WorkflowEvent {
     PlanApprovalNeeded {
         prd_content: String,
     },
+    /// Plan needs `feature_input` but none came from CLI or `changeset.yaml`; block on `answer_rx`.
+    /// Presenter should switch to [`crate::presenter::state::AppMode::FeatureInput`].
+    AwaitingFeatureInput,
     WorkflowComplete(Result<WorkflowCompletePayload, String>),
     AgentOutput(String),
     /// Worktree created and switched after plan approval. Path is the worktree directory.

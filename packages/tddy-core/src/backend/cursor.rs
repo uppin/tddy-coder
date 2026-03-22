@@ -4,7 +4,7 @@
 //! Some environments also expose the same flow as `cursor agent`; this backend targets the `agent` binary name.
 //! Based on Baker CLI's executeWithCursor.
 
-use super::{Goal, InvokeRequest, InvokeResponse};
+use super::{InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
 use crate::stream::cursor;
 use std::io::Write;
@@ -101,7 +101,7 @@ impl super::CodingBackend for CursorBackend {
 /// Builds argv for `cursor agent` (excluding the binary path). Used by [`CursorBackend::invoke_sync`] and tests.
 pub(crate) fn build_cursor_cli_args(request: &InvokeRequest, prompt: &str) -> Vec<String> {
     let mut args = Vec::new();
-    if request.goal == Goal::Plan {
+    if request.hints.planning_mode_intent {
         args.push("--plan".to_string());
     }
     if let Some(ref session) = request.session {
@@ -179,7 +179,7 @@ impl CursorBackend {
         log::debug!("[tddy-coder] cwd: {}", cwd_str);
         log::debug!(
             "[tddy-coder] goal: {:?}, model: {:?}, session: {:?}",
-            request.goal,
+            request.goal_id,
             request.model,
             request.session
         );
@@ -203,8 +203,8 @@ impl CursorBackend {
         if let Some(ref p) = request.working_dir {
             cmd.env("TDDY_REPO_DIR", p);
         }
-        if let Some(ref p) = request.plan_dir {
-            cmd.env("TDDY_PLAN_DIR", p);
+        if let Some(ref p) = request.session_dir {
+            cmd.env("TDDY_SESSION_DIR", p);
         }
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
@@ -311,7 +311,7 @@ impl CursorBackend {
                 .unwrap_or((String::new(), false));
             let request_entry = serde_json::json!({
                 "type": "tddy-request",
-                "goal": format!("{:?}", request.goal),
+                "goal": request.hints.display_name,
                 "prompt": request.prompt,
                 "system_prompt": system_content,
                 "model": request.model,
@@ -360,7 +360,7 @@ impl CursorBackend {
         log::debug!(
             "[tddy-coder] Cursor process exited with code {} (goal: {:?}, session_id: {:?})",
             exit_code,
-            request.goal,
+            request.goal_id,
             request.session
         );
 
@@ -404,7 +404,7 @@ impl CursorBackend {
         if let Some(ref sink) = request.progress_sink {
             sink.emit(&crate::stream::ProgressEvent::AgentExited {
                 exit_code,
-                goal: request.goal.submit_key().to_string(),
+                goal: request.submit_key.to_string(),
             });
         }
 
@@ -427,14 +427,49 @@ impl CursorBackend {
 mod tests {
     use super::build_cursor_cli_args;
     use super::CursorBackend;
-    use crate::backend::{Goal, InvokeRequest, SessionMode};
+    use crate::backend::{GoalHints, GoalId, InvokeRequest, PermissionHint, SessionMode};
 
-    fn minimal_request(goal: Goal, model: Option<&str>, prompt: &str) -> InvokeRequest {
+    /// Matches the default TDD recipe plan-goal hints (planning workflow → `--plan` on Cursor).
+    fn hints_tdd_plan_goal() -> GoalHints {
+        GoalHints {
+            display_name: "Plan".to_string(),
+            permission: PermissionHint::ReadOnly,
+            allowed_tools: vec![],
+            default_model: None,
+            agent_output: false,
+            planning_mode_intent: true,
+            claude_nonzero_exit_ok_if_structured_response: true,
+        }
+    }
+
+    /// Matches the default TDD recipe red-goal hints (no planning intent).
+    fn hints_tdd_red_goal() -> GoalHints {
+        GoalHints {
+            display_name: "Red".to_string(),
+            permission: PermissionHint::AcceptEdits,
+            allowed_tools: vec![],
+            default_model: None,
+            agent_output: true,
+            planning_mode_intent: false,
+            claude_nonzero_exit_ok_if_structured_response: false,
+        }
+    }
+
+    fn minimal_request(
+        goal_id: &str,
+        model: Option<&str>,
+        prompt: &str,
+        hints: GoalHints,
+    ) -> InvokeRequest {
+        let gid = GoalId::new(goal_id);
+        let sk = GoalId::new(goal_id);
         InvokeRequest {
             prompt: prompt.to_string(),
             system_prompt: None,
             system_prompt_path: None,
-            goal,
+            goal_id: gid,
+            submit_key: sk,
+            hints,
             model: model.map(std::string::ToString::to_string),
             session: None,
             working_dir: None,
@@ -446,13 +481,13 @@ mod tests {
             inherit_stdin: false,
             extra_allowed_tools: None,
             socket_path: None,
-            plan_dir: None,
+            session_dir: None,
         }
     }
 
     #[test]
     fn build_args_includes_model_when_set() {
-        let request = minimal_request(Goal::Plan, Some("composer-2"), "test");
+        let request = minimal_request("plan", Some("composer-2"), "test", hints_tdd_plan_goal());
         let args = build_cursor_cli_args(&request, "test prompt");
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"composer-2".to_string()));
@@ -460,21 +495,21 @@ mod tests {
 
     #[test]
     fn build_args_omits_model_when_none() {
-        let request = minimal_request(Goal::Plan, None, "test");
+        let request = minimal_request("plan", None, "test", hints_tdd_plan_goal());
         let args = build_cursor_cli_args(&request, "test prompt");
         assert!(!args.contains(&"--model".to_string()));
     }
 
     #[test]
-    fn build_args_plan_includes_plan_flag() {
-        let request = minimal_request(Goal::Plan, None, "x");
+    fn build_args_plan_includes_plan_flag_when_recipe_sets_planning_intent() {
+        let request = minimal_request("plan", None, "x", hints_tdd_plan_goal());
         let args = build_cursor_cli_args(&request, "p");
         assert!(args.contains(&"--plan".to_string()));
     }
 
     #[test]
     fn build_args_session_fresh_omits_session_flags() {
-        let mut request = minimal_request(Goal::Red, None, "x");
+        let mut request = minimal_request("red", None, "x", hints_tdd_red_goal());
         request.session = Some(SessionMode::Fresh("sid-1".to_string()));
         let args = build_cursor_cli_args(&request, "p");
         assert!(!args.iter().any(|a| a == "--session-id"));
@@ -483,7 +518,7 @@ mod tests {
 
     #[test]
     fn build_args_session_resume_includes_resume() {
-        let mut request = minimal_request(Goal::Red, None, "x");
+        let mut request = minimal_request("red", None, "x", hints_tdd_red_goal());
         request.session = Some(SessionMode::Resume("resume-id".to_string()));
         let args = build_cursor_cli_args(&request, "p");
         assert!(args.iter().any(|a| a == "--resume"));

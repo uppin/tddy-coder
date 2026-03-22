@@ -9,13 +9,12 @@ use std::sync::Arc;
 use tokio::sync::mpsc as tokio_mpsc;
 use tonic::{Request, Response, Status};
 
-use tddy_core::output::{
-    create_session_dir_under, parse_planning_response_with_base, PlanningOutput,
-};
+use tddy_core::output::create_session_dir_under;
 use tddy_core::read_changeset;
 use tddy_core::workflow::graph::{ElicitationEvent, ExecutionStatus};
-use tddy_core::workflow::tdd_hooks::TddWorkflowHooks;
-use tddy_core::{setup_worktree_for_session, SharedBackend, WorkflowEngine};
+use tddy_core::{setup_worktree_for_session, SharedBackend, WorkflowEngine, WorkflowRecipe};
+use tddy_workflow_recipes::{parse_planning_response_with_base, PlanningOutput};
+use tddy_workflow_recipes::{TddRecipe, TddWorkflowHooks};
 
 use crate::convert::{plan_approval_to_server_message, workflow_event_to_server_message};
 use crate::gen::{
@@ -34,7 +33,7 @@ const CTX_FEATURE_INPUT: &str = "feature_input";
 const CTX_OUTPUT_DIR: &str = "output_dir";
 const CTX_SESSION_BASE: &str = "session_base";
 const CTX_SESSION_ID: &str = "session_id";
-const CTX_PLAN_DIR: &str = "plan_dir";
+const CTX_SESSION_DIR: &str = "session_dir";
 const CTX_WORKTREE_DIR: &str = "worktree_dir";
 const PRD_FILENAME: &str = "PRD.md";
 const CHANGESET_FILENAME: &str = "changeset.yaml";
@@ -94,29 +93,24 @@ fn spawn_event_forwarder(
 pub struct DaemonService {
     sessions_base: PathBuf,
     backend: SharedBackend,
+    workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
 }
 
 impl DaemonService {
     pub fn new(sessions_base: PathBuf, backend: SharedBackend) -> Self {
+        Self::with_workflow_recipe(sessions_base, backend, std::sync::Arc::new(TddRecipe))
+    }
+
+    /// Use a specific workflow recipe (e.g. TDD, bug-fix). Default is [`TddRecipe`].
+    pub fn with_workflow_recipe(
+        sessions_base: PathBuf,
+        backend: SharedBackend,
+        workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
+    ) -> Self {
         Self {
             sessions_base,
             backend,
-        }
-    }
-
-    /// Derive session status from changeset state.
-    fn status_from_state(state: &str) -> &'static str {
-        match state {
-            "Init" | "Planned" | "AcceptanceTestsReady" | "RedTestsReady" => "Active",
-            "GreenComplete"
-            | "DemoComplete"
-            | "Evaluated"
-            | "ValidateComplete"
-            | "ValidateRefactorComplete"
-            | "RefactorComplete"
-            | "DocsUpdated" => "Completed",
-            "Failed" => "Failed",
-            _ => "Active",
+            workflow_recipe,
         }
     }
 }
@@ -133,6 +127,7 @@ impl TddyRemote for DaemonService {
         let handler = DaemonStreamHandler::new(
             self.sessions_base.clone(),
             self.backend.clone(),
+            self.workflow_recipe.clone(),
             request.into_inner(),
             tx,
         );
@@ -151,12 +146,14 @@ impl TddyRemote for DaemonService {
             return Err(Status::invalid_argument("session_id is required"));
         }
 
-        let plan_dir = self.sessions_base.join(&session_id);
-        let changeset = read_changeset(&plan_dir)
+        let session_dir = self.sessions_base.join(&session_id);
+        let changeset = read_changeset(&session_dir)
             .map_err(|e| Status::not_found(format!("session not found: {} — {}", session_id, e)))?;
 
-        let status = Self::status_from_state(&changeset.state.current);
-        let plan_dir_str = plan_dir.to_string_lossy().to_string();
+        let status = self
+            .workflow_recipe
+            .status_for_state(&changeset.state.current);
+        let session_dir_str = session_dir.to_string_lossy().to_string();
         let worktree = changeset.worktree.clone().unwrap_or_default();
         let branch = changeset.branch.clone().unwrap_or_default();
 
@@ -164,7 +161,7 @@ impl TddyRemote for DaemonService {
             session: Some(SessionInfo {
                 session_id: session_id.clone(),
                 status: status.to_string(),
-                plan_dir: plan_dir_str,
+                session_dir: session_dir_str,
                 worktree,
                 branch,
             }),
@@ -196,11 +193,13 @@ impl TddyRemote for DaemonService {
                             .and_then(|n| n.to_str())
                             .unwrap_or("")
                             .to_string();
-                        let status = Self::status_from_state(&changeset.state.current);
+                        let status = self
+                            .workflow_recipe
+                            .status_for_state(&changeset.state.current);
                         sessions.push(SessionInfo {
                             session_id,
                             status: status.to_string(),
-                            plan_dir: path.to_string_lossy().to_string(),
+                            session_dir: path.to_string_lossy().to_string(),
                             worktree: changeset.worktree.clone().unwrap_or_default(),
                             branch: changeset.branch.clone().unwrap_or_default(),
                         });
@@ -224,11 +223,12 @@ enum DaemonStreamState {
 struct DaemonStreamHandler {
     sessions_base: PathBuf,
     backend: SharedBackend,
+    workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
     client_stream: tonic::codec::Streaming<crate::gen::ClientMessage>,
     tx: tokio_mpsc::Sender<Result<ServerMessage, Status>>,
     state: DaemonStreamState,
     session_id: Option<String>,
-    plan_dir: Option<PathBuf>,
+    session_dir: Option<PathBuf>,
     repo_root: Option<PathBuf>,
     engine: Option<WorkflowEngine>,
 }
@@ -237,17 +237,19 @@ impl DaemonStreamHandler {
     fn new(
         sessions_base: PathBuf,
         backend: SharedBackend,
+        workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
         client_stream: tonic::codec::Streaming<crate::gen::ClientMessage>,
         tx: tokio_mpsc::Sender<Result<ServerMessage, Status>>,
     ) -> Self {
         Self {
             sessions_base,
             backend,
+            workflow_recipe,
             client_stream,
             tx,
             state: DaemonStreamState::Idle,
             session_id: None,
-            plan_dir: None,
+            session_dir: None,
             repo_root: None,
             engine: None,
         }
@@ -314,7 +316,7 @@ impl DaemonStreamHandler {
         let _ = tddy_core::changeset::write_changeset(&plan, &init_cs);
 
         self.session_id = Some(sid.clone());
-        self.plan_dir = Some(plan.clone());
+        self.session_dir = Some(plan.clone());
         self.repo_root = Some(repo.clone());
 
         let storage_dir = std::env::temp_dir().join(DAEMON_SESSION_TEMP_DIR);
@@ -322,8 +324,16 @@ impl DaemonStreamHandler {
 
         let (event_tx, rx) = mpsc::channel();
         spawn_event_forwarder(rx, self.tx.clone());
-        let hooks = Arc::new(TddWorkflowHooks::with_event_tx(event_tx));
-        let eng = WorkflowEngine::new(self.backend.clone(), storage_dir, Some(hooks));
+        let hooks = Arc::new(TddWorkflowHooks::with_event_tx(
+            self.workflow_recipe.clone(),
+            event_tx,
+        ));
+        let eng = WorkflowEngine::new(
+            self.workflow_recipe.clone(),
+            self.backend.clone(),
+            storage_dir,
+            Some(hooks),
+        );
         self.engine = Some(eng);
 
         let mut ctx = std::collections::HashMap::new();
@@ -338,7 +348,7 @@ impl DaemonStreamHandler {
         );
         ctx.insert(CTX_SESSION_ID.to_string(), serde_json::json!(sid.clone()));
         ctx.insert(
-            CTX_PLAN_DIR.to_string(),
+            CTX_SESSION_DIR.to_string(),
             serde_json::to_value(plan.clone()).unwrap(),
         );
         let conv_path = plan.join("logs").join("conversation.jsonl");
@@ -360,8 +370,9 @@ impl DaemonStreamHandler {
             .await;
 
         let rt = tokio::runtime::Handle::current();
+        let plan_goal = self.workflow_recipe.start_goal();
         let result = rt
-            .block_on(self.engine.as_ref().unwrap().run_goal("plan", ctx))
+            .block_on(self.engine.as_ref().unwrap().run_goal(&plan_goal, ctx))
             .map_err(|e| Status::internal(format!("run_goal: {}", e)))
             .unwrap();
 
@@ -393,7 +404,7 @@ impl DaemonStreamHandler {
     /// After plan approval, create worktree from origin/master and run the rest of the workflow.
     /// Returns true if the run loop should break (e.g. on error).
     async fn handle_approve_plan(&mut self) -> bool {
-        let plan_dir_path = self.plan_dir.as_ref().unwrap();
+        let session_dir_path = self.session_dir.as_ref().unwrap();
         let repo = self.repo_root.as_ref().unwrap();
 
         let planning: PlanningOutput = self
@@ -406,10 +417,10 @@ impl DaemonStreamHandler {
                     .flatten()
             })
             .and_then(|s| s.context.get_sync::<String>("output"))
-            .and_then(|o| parse_planning_response_with_base(&o, plan_dir_path).ok())
+            .and_then(|o| parse_planning_response_with_base(&o, session_dir_path).ok())
             .unwrap_or_else(|| {
-                let prd =
-                    std::fs::read_to_string(plan_dir_path.join(PRD_FILENAME)).unwrap_or_default();
+                let prd = std::fs::read_to_string(session_dir_path.join(PRD_FILENAME))
+                    .unwrap_or_default();
                 PlanningOutput {
                     prd,
                     name: None,
@@ -420,7 +431,7 @@ impl DaemonStreamHandler {
                 }
             });
 
-        let mut cs = read_changeset(plan_dir_path).unwrap_or_default();
+        let mut cs = read_changeset(session_dir_path).unwrap_or_default();
         if cs.branch_suggestion.is_none() {
             cs.branch_suggestion = planning
                 .branch_suggestion
@@ -434,9 +445,9 @@ impl DaemonStreamHandler {
                 .or_else(|| planning.name.clone())
                 .or_else(|| Some(DEFAULT_WORKTREE_SUGGESTION.to_string()));
         }
-        let _ = tddy_core::changeset::write_changeset(plan_dir_path, &cs);
+        let _ = tddy_core::changeset::write_changeset(session_dir_path, &cs);
 
-        let worktree_path = match setup_worktree_for_session(repo, plan_dir_path) {
+        let worktree_path = match setup_worktree_for_session(repo, session_dir_path) {
             Ok(p) => p,
             Err(e) => {
                 send_workflow_complete(&self.tx, false, e).await;
