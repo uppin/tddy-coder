@@ -11,6 +11,5 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 tddy-coder = { path = "../tddy-coder" }
-tddy-core = { path = "../tddy-core" }
 ctrlc = { version = "3", features = ["termination"] }
 crossterm = "0.29"
