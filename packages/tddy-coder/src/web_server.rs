@@ -15,6 +15,9 @@ pub struct ClientConfig {
     pub livekit_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub livekit_room: Option<String>,
+    /// Shared presence room (daemon `livekit.common_room`). Browser joins for participant list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub common_room: Option<String>,
     /// When true, server is tddy-daemon; show ConnectionScreen instead of ConnectionForm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub daemon_mode: Option<bool>,

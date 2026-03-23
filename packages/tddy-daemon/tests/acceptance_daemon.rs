@@ -38,6 +38,29 @@ allowed_tools:
     );
 }
 
+/// Acceptance: livekit.common_room is parsed for shared presence room.
+#[test]
+fn acceptance_config_livekit_common_room() {
+    let yaml = r#"
+listen:
+  web_port: 8899
+  web_host: "0.0.0.0"
+livekit:
+  url: ws://127.0.0.1:7880
+  common_room: tddy-lobby
+users:
+  - github_user: "a"
+    os_user: "b"
+"#;
+    let path = std::env::temp_dir().join("tddy-daemon-acceptance-common-room.yaml");
+    std::fs::write(&path, yaml).unwrap();
+    let config = DaemonConfig::load(&path).expect("config should load");
+    assert_eq!(
+        config.livekit.as_ref().unwrap().common_room.as_deref(),
+        Some("tddy-lobby")
+    );
+}
+
 /// Acceptance: spawn_mouse can be disabled in YAML.
 #[test]
 fn acceptance_config_spawn_mouse_false() {

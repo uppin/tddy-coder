@@ -116,6 +116,8 @@ fn main() -> anyhow::Result<()> {
         .and_then(|l| l.public_url.clone())
         .or_else(|| config.livekit.as_ref().and_then(|l| l.url.clone()));
 
+    let common_room = config.livekit.as_ref().and_then(|l| l.common_room.clone());
+
     let auth_result = tddy_daemon::auth::build_auth_entries(&config, host, port);
     let mut rpc_entries = auth_result.entries;
 
@@ -162,5 +164,6 @@ fn main() -> anyhow::Result<()> {
         bundle_path,
         rpc_entries,
         livekit_url,
+        common_room,
     ))
 }

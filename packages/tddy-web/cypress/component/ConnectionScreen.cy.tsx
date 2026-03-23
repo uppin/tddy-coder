@@ -14,6 +14,10 @@ import {
   GetAuthStatusResponseSchema,
   GitHubUserSchema,
 } from "../../src/gen/auth_pb";
+import {
+  GenerateTokenResponseSchema,
+  RefreshTokenResponseSchema,
+} from "../../src/gen/token_pb";
 
 const toArrayBuffer = (u8: Uint8Array) => {
   const buf = new ArrayBuffer(u8.length);
@@ -169,6 +173,72 @@ function interceptSignalSessionError() {
     });
   }).as("signalSessionError");
 }
+
+function interceptTokenForPresence() {
+  const mockToken = "mock-jwt-presence";
+  const mockTtl = 600;
+  const generateBody = toBinary(
+    GenerateTokenResponseSchema,
+    create(GenerateTokenResponseSchema, {
+      token: mockToken,
+      ttlSeconds: BigInt(mockTtl),
+    }),
+  );
+  const refreshBody = toBinary(
+    RefreshTokenResponseSchema,
+    create(RefreshTokenResponseSchema, {
+      token: mockToken,
+      ttlSeconds: BigInt(mockTtl),
+    }),
+  );
+  cy.intercept("POST", "**/rpc/token.TokenService/GenerateToken", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(generateBody),
+    });
+  }).as("generateTokenPresence");
+  cy.intercept("POST", "**/rpc/token.TokenService/RefreshToken", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(refreshBody),
+    });
+  }).as("refreshTokenPresence");
+}
+
+describe("ConnectionScreen connected participants", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("does not render presence panel without common room config", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION]);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get("[data-testid='sessions-table-proj-1']", { timeout: 5000 }).should("exist");
+    cy.get("[data-testid='connected-participants-panel']").should("not.exist");
+  });
+
+  it("renders presence panel when livekit URL and common room are provided", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION]);
+    interceptTokenForPresence();
+    cy.mount(
+      <ConnectionScreen livekitUrl="ws://127.0.0.1:7880" commonRoom="tddy-lobby" />,
+    );
+    cy.wait("@getAuthStatus");
+    cy.get("[data-testid='connected-participants-panel']", { timeout: 5000 }).should("exist");
+    cy.get("[data-testid='participant-list']", { timeout: 5000 }).should("exist");
+    cy.wait("@generateTokenPresence");
+    cy.get("[data-testid='participant-list']", { timeout: 20000 }).should(($el) => {
+      const status = $el.attr("data-room-status");
+      expect(status === "error" || status === "connected" || status === "connecting").to.be.true;
+    });
+  });
+});
 
 describe("ConnectionScreen Signal Dropdown", () => {
   beforeEach(() => {

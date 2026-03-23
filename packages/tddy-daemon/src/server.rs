@@ -13,6 +13,7 @@ pub async fn run_server(
     bundle_path: PathBuf,
     rpc_entries: Vec<tddy_rpc::ServiceEntry>,
     livekit_url: Option<String>,
+    common_room: Option<String>,
 ) -> anyhow::Result<()> {
     let rpc_router = if rpc_entries.is_empty() {
         None
@@ -24,6 +25,7 @@ pub async fn run_server(
     let client_config = ClientConfig {
         livekit_url,
         livekit_room: None,
+        common_room,
         daemon_mode: Some(true),
     };
     serve_web_bundle(host, port, bundle_path, rpc_router, Some(client_config)).await

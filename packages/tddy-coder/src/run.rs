@@ -756,6 +756,7 @@ fn build_client_config(args: &Args) -> crate::web_server::ClientConfig {
             .clone()
             .or_else(|| args.livekit_url.clone()),
         livekit_room: args.livekit_room.clone(),
+        common_room: None,
         daemon_mode: None,
     }
 }

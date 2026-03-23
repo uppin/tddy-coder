@@ -55,6 +55,14 @@ When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated us
 
 See [daemon project concept](../daemon/project-concept.md).
 
+### Shared LiveKit room (`livekit.common_room`)
+
+When the daemon sets **`livekit.common_room`** in YAML, that name is exposed to the web client as **`common_room`** in **`GET /api/config`** (with **`livekit_url`**). After GitHub sign-in, the browser joins that room with identity **`web-{githubLogin}`** and shows a **Connected participants** table on the session list screen (identity, role, joined time, metadata), updated live via LiveKit participant events. The fullscreen terminal opened by **Connect / Resume** is unchanged; the presence connection remains active in the background while the terminal is open.
+
+If **`common_room`** is unset or blank, that panel is not shown and no extra LiveKit connection is made for presence.
+
+Spawned **`tddy-*`** sessions use the same configured room for **`--livekit-room`** when **`common_room`** is set; each process still uses a distinct **`daemon-{session_id}`** LiveKit identity for terminal RPC. If **`common_room`** is unset, the room name is **`daemon-{session_id}`** per session. See [daemon changelog](../daemon/changelog.md).
+
 ## See also (development)
 
 - [LiveKit and gRPC terminal RPC E2E](../../dev/guides/livekit-terminal-rpc-e2e.md) — `tddy-e2e` tests, VirtualTui vs LiveKit bidi behavior, assertion patterns.

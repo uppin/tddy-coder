@@ -35,6 +35,9 @@ pub struct SpawnRequest {
     /// Passed as `--mouse` when true (default). Omit in JSON for legacy clients.
     #[serde(default = "default_spawn_mouse")]
     pub mouse: bool,
+    /// When set, spawned tool joins this LiveKit room (shared with browser presence). Omit for legacy clients.
+    #[serde(default)]
+    pub common_room: Option<String>,
 }
 
 /// Request to clone a git repository as an OS user.
@@ -208,6 +211,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                     url: req.livekit_url.clone(),
                     api_key: req.livekit_api_key.clone(),
                     api_secret: req.livekit_api_secret.clone(),
+                    common_room: req.common_room.clone(),
                 };
                 log::info!(
                     "spawn_worker: calling spawn_as_user session_id={}",
@@ -273,5 +277,6 @@ pub fn build_spawn_request(
         project_id: opts.project_id.map(String::from),
         agent: opts.agent.map(String::from),
         mouse: opts.mouse,
+        common_room: livekit.common_room.clone(),
     }
 }

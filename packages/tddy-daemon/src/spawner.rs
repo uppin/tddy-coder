@@ -9,12 +9,28 @@ use uuid::Uuid;
 use crate::config::DaemonConfig;
 
 /// LiveKit credentials to pass to spawned process (url, api_key, api_secret).
-/// Room and identity are generated per session.
+/// Optional `common_room` forces all daemon spawns into one LiveKit room (see [`resolve_livekit_room_name`]).
 #[derive(Debug, Clone)]
 pub struct LiveKitCreds {
     pub url: String,
     pub api_key: String,
     pub api_secret: String,
+    /// When set (non-empty after trim), spawned processes use this room instead of `daemon-{session_id}`.
+    pub common_room: Option<String>,
+}
+
+/// Picks the LiveKit room name for a spawned `tddy-*` process.
+///
+/// When `common_room` is set (non-empty after trim), every session uses that shared room so all
+/// daemon-spawned tools join the same room. Otherwise the room is `daemon-{session_id}`.
+pub(crate) fn resolve_livekit_room_name(common_room: Option<&str>, session_id: &str) -> String {
+    if let Some(cr) = common_room {
+        let t = cr.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    format!("daemon-{}", session_id)
 }
 
 /// Create child log config and stderr file. Returns (config_path, stderr_file).
@@ -226,7 +242,7 @@ pub fn spawn_as_user(
         .resume_session_id
         .map(String::from)
         .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let livekit_room = format!("daemon-{}", session_id);
+    let livekit_room = resolve_livekit_room_name(livekit.common_room.as_deref(), &session_id);
     // Each session has distinct server identity for LiveKit participant targeting
     let identity = format!("daemon-{}", session_id);
 
@@ -371,5 +387,34 @@ pub fn livekit_creds_from_config(config: &DaemonConfig) -> Option<LiveKitCreds> 
         url: lk.public_url.as_ref().cloned().unwrap_or(url),
         api_key,
         api_secret,
+        common_room: lk.common_room.clone(),
     })
+}
+
+#[cfg(test)]
+mod resolve_livekit_room_name_tests {
+    use super::resolve_livekit_room_name;
+
+    #[test]
+    fn when_common_room_configured_all_sessions_share_that_room_name() {
+        assert_eq!(
+            resolve_livekit_room_name(Some("tddy-lobby"), "session-uuid-a"),
+            "tddy-lobby"
+        );
+        assert_eq!(
+            resolve_livekit_room_name(Some("tddy-lobby"), "session-uuid-b"),
+            "tddy-lobby"
+        );
+    }
+
+    #[test]
+    fn when_common_room_unset_uses_daemon_prefixed_session_room() {
+        assert_eq!(resolve_livekit_room_name(None, "abc"), "daemon-abc");
+    }
+
+    #[test]
+    fn when_common_room_unset_or_whitespace_only_uses_daemon_prefixed_session_room() {
+        assert_eq!(resolve_livekit_room_name(Some(""), "abc"), "daemon-abc");
+        assert_eq!(resolve_livekit_room_name(Some("   "), "abc"), "daemon-abc");
+    }
 }

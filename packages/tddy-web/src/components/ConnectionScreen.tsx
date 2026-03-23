@@ -9,7 +9,10 @@ import {
   type ToolInfo,
 } from "../gen/connection_pb";
 import { GhosttyTerminalLiveKit } from "./GhosttyTerminalLiveKit";
+import { ParticipantList } from "./ParticipantList";
 import { useAuth } from "../hooks/useAuth";
+import { useCommonRoom } from "../hooks/useCommonRoom";
+import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { GitHubLoginButton } from "./GitHubLoginButton";
 import { UserAvatar } from "./UserAvatar";
 import { BUILD_ID } from "../buildId";
@@ -325,8 +328,14 @@ function ConnectedTerminal({
   );
 }
 
-export function ConnectionScreen() {
-  const { user, isAuthenticated, login, logout, sessionToken } = useAuth();
+export function ConnectionScreen({
+  livekitUrl,
+  commonRoom,
+}: {
+  livekitUrl?: string;
+  commonRoom?: string;
+} = {}) {
+  const { user, isAuthenticated, isLoading, login, logout, sessionToken } = useAuth();
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
@@ -346,6 +355,22 @@ export function ConnectionScreen() {
     debugLogging: boolean;
   } | null>(null);
   const client = useMemo(() => createConnectionClient(), []);
+
+  const presenceReady =
+    Boolean(commonRoom?.trim() && livekitUrl?.trim()) &&
+    isAuthenticated &&
+    !isLoading &&
+    Boolean(user);
+
+  const presenceIdentity = user ? `web-${user.login}` : undefined;
+
+  const { room: presenceRoom, status: presenceStatus, error: presenceError } = useCommonRoom(
+    presenceReady ? livekitUrl : undefined,
+    presenceReady ? commonRoom : undefined,
+    presenceReady ? presenceIdentity : undefined
+  );
+
+  const participants = useRoomParticipants(presenceReady ? presenceRoom : null);
 
   useEffect(() => {
     if (!sessionToken || !isAuthenticated) {
@@ -546,6 +571,26 @@ export function ConnectionScreen() {
       <h1>tddy-web</h1>
       {user && <UserAvatar user={user} onLogout={logout} />}
       <h2 style={{ marginTop: 24, fontSize: 18 }}>Start or connect to a session</h2>
+
+      {presenceReady && (
+        <div
+          data-testid="connected-participants-panel"
+          style={{
+            marginTop: 16,
+            marginBottom: 16,
+            border: "1px solid #ddd",
+            borderRadius: 4,
+            padding: 12,
+          }}
+        >
+          <h3 style={{ marginTop: 0, fontSize: 16 }}>Connected participants</h3>
+          <ParticipantList
+            participants={participants}
+            roomStatus={presenceStatus}
+            connectionError={presenceError}
+          />
+        </div>
+      )}
 
       <div style={{ marginTop: 16, marginBottom: 8 }}>
         <button

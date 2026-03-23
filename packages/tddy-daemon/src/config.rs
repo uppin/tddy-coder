@@ -72,6 +72,9 @@ pub struct LiveKitConfig {
     pub api_secret: Option<String>,
     #[serde(default)]
     pub public_url: Option<String>,
+    /// Shared LiveKit room for presence (browser + tddy-* tools). Exposed to web as `common_room` in `/api/config`.
+    #[serde(default)]
+    pub common_room: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize)]

@@ -21,6 +21,7 @@ livekit:
   api_key: devkey
   api_secret: secret
   public_url: ws://127.0.0.1:7880
+  common_room: tddy-lobby
 
 github:
   stub: true

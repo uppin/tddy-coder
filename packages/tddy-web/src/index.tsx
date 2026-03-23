@@ -309,19 +309,32 @@ function ConnectionForm() {
 
 export function App() {
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
-  const [daemonMode, setDaemonMode] = useState<boolean | null>(null);
+  const [appConfig, setAppConfig] = useState<{
+    daemonMode: boolean | null;
+    livekitUrl?: string;
+    commonRoom?: string;
+  }>({ daemonMode: null });
 
   useEffect(() => {
     fetch("/api/config")
       .then((r) => (r.ok ? r.json() : null))
-      .then((config: { daemon_mode?: boolean } | null) => {
-        setDaemonMode(config?.daemon_mode ?? false);
-      })
-      .catch(() => setDaemonMode(false));
+      .then(
+        (config: {
+          daemon_mode?: boolean;
+          livekit_url?: string;
+          common_room?: string;
+        } | null) => {
+          setAppConfig({
+            daemonMode: config?.daemon_mode ?? false,
+            livekitUrl: config?.livekit_url,
+            commonRoom: config?.common_room,
+          });
+        }
+      )
+      .catch(() => setAppConfig({ daemonMode: false }));
   }, []);
 
-  const MainScreen =
-    daemonMode === true ? ConnectionScreen : ConnectionForm;
+  const daemonMode = appConfig.daemonMode;
 
   return (
     <>
@@ -329,8 +342,10 @@ export function App() {
         <AuthCallback />
       ) : daemonMode === null ? (
         <div style={{ padding: 24 }}>Loading…</div>
+      ) : daemonMode === true ? (
+        <ConnectionScreen livekitUrl={appConfig.livekitUrl} commonRoom={appConfig.commonRoom} />
       ) : (
-        <MainScreen />
+        <ConnectionForm />
       )}
       <HmrOverlay />
     </>
