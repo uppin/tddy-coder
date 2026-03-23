@@ -1,0 +1,41 @@
+# Production template for tddy-daemon (installed to $INSTALL_CONFIG_DIR/daemon.yaml).
+# Placeholder __INSTALL_BIN_DIR__ is replaced at install time (default: /usr/local/bin).
+
+log:
+  loggers:
+    default:
+      output: { file: "/var/log/tddy-daemon/daemon" }
+      format: "{timestamp} [{level}] [{target}] {message}"
+  default:
+    level: info
+    logger: default
+
+listen:
+  web_port: 8899
+  web_host: "0.0.0.0"
+
+web_bundle_path: "/usr/local/share/tddy/web"
+
+auth_storage: "/var/lib/tddy/auth"
+
+# github:
+#   client_id: "<your-github-oauth-app-client-id>"
+#   client_secret: "<secret>"
+#   redirect_uri: "https://your-host:8899/auth/callback"
+
+# livekit:
+#   url: ws://127.0.0.1:7880
+#   api_key: "<key>"
+#   api_secret: "<secret>"
+#   public_url: ws://your-host:7880
+#   common_room: tddy-lobby
+
+users: []
+# - github_user: "octocat"
+#   os_user: "dev1"
+
+allowed_tools:
+  - path: "__INSTALL_BIN_DIR__/tddy-coder"
+    label: "tddy-coder"
+  - path: "__INSTALL_BIN_DIR__/tddy-tools"
+    label: "tddy-tools"

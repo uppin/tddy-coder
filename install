@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Install tddy-daemon (and tddy-coder, tddy-tools) as a systemd service.
+#
+# Usage: sudo ./install --systemd [--build]
+#
+#   --systemd   Required. Install release binaries, config template, unit file; enable+start service.
+#   --build     Optional. Run ./release before copying binaries.
+#
+# Environment (install paths — override for tests or non-FHS layouts):
+#   INSTALL_PREFIX       Base prefix (default: /usr/local). Binaries go to INSTALL_PREFIX/bin
+#                        unless INSTALL_BIN_DIR is set.
+#   INSTALL_BIN_DIR      Destination for binaries (default: ${INSTALL_PREFIX}/bin).
+#   INSTALL_CONFIG_DIR   Config directory (default: /etc/tddy); daemon.yaml lives here.
+#   INSTALL_SYSTEMD_DIR  systemd unit directory (default: /etc/systemd/system).
+#
+#   INSTALL_NO_SYSTEMCTL=1  Skip root check and systemctl (for automated tests).
+set -euo pipefail
+cd "$(dirname "$0")"
+
+ROOT_DIR="$(pwd)"
+BIN_DIR="${INSTALL_BIN_DIR:-${INSTALL_PREFIX:-/usr/local}/bin}"
+CONFIG_DIR="${INSTALL_CONFIG_DIR:-/etc/tddy}"
+SYSTEMD_DIR="${INSTALL_SYSTEMD_DIR:-/etc/systemd/system}"
+CONFIG_FILE="${CONFIG_DIR}/daemon.yaml"
+UNIT_PATH="${SYSTEMD_DIR}/tddy-daemon.service"
+NO_SYSTEMCTL="${INSTALL_NO_SYSTEMCTL:-0}"
+
+want_systemd=false
+want_build=false
+for arg in "$@"; do
+  case "$arg" in
+    --systemd) want_systemd=true ;;
+    --build) want_build=true ;;
+    *)
+      echo "Unknown option: $arg" >&2
+      echo "Usage: $0 --systemd [--build]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if ! "$want_systemd"; then
+  echo "Usage: $0 --systemd [--build]" >&2
+  exit 1
+fi
+
+if [[ "$NO_SYSTEMCTL" != "1" ]]; then
+  if [[ "$(id -u)" -ne 0 ]]; then
+    echo "install: must run as root (use sudo) or set INSTALL_NO_SYSTEMCTL=1 for test installs" >&2
+    exit 1
+  fi
+fi
+
+if "$want_build"; then
+  "${ROOT_DIR}/release"
+fi
+
+for name in tddy-daemon tddy-coder tddy-tools; do
+  src="${ROOT_DIR}/target/release/${name}"
+  if [[ ! -f "$src" ]]; then
+    echo "install: missing release binary: ${src}" >&2
+    echo "install: run ./release first or use --build" >&2
+    exit 1
+  fi
+done
+
+mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR"
+
+install -m 0755 "${ROOT_DIR}/target/release/tddy-daemon" "${BIN_DIR}/tddy-daemon"
+install -m 0755 "${ROOT_DIR}/target/release/tddy-coder" "${BIN_DIR}/tddy-coder"
+install -m 0755 "${ROOT_DIR}/target/release/tddy-tools" "${BIN_DIR}/tddy-tools"
+
+if [[ ! -f "$CONFIG_FILE" ]]; then
+  if [[ ! -f "${ROOT_DIR}/daemon.yaml.production" ]]; then
+    echo "install: missing ${ROOT_DIR}/daemon.yaml.production" >&2
+    exit 1
+  fi
+  sed "s|__INSTALL_BIN_DIR__|${BIN_DIR}|g" "${ROOT_DIR}/daemon.yaml.production" >"$CONFIG_FILE"
+  chmod 0644 "$CONFIG_FILE"
+fi
+
+cat >"$UNIT_PATH" <<UNIT
+[Unit]
+Description=tddy-daemon multi-user daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${BIN_DIR}/tddy-daemon -c ${CONFIG_FILE}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+chmod 0644 "$UNIT_PATH"
+
+if [[ "$NO_SYSTEMCTL" != "1" ]]; then
+  systemctl daemon-reload
+  systemctl enable tddy-daemon
+  systemctl start tddy-daemon
+fi
