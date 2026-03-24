@@ -232,6 +232,38 @@ function SignalDropdown({
   );
 }
 
+/** Resume + Delete for inactive session rows (project and orphan tables share stable `data-testid`s). */
+function InactiveSessionActions({
+  sessionId,
+  onResume,
+  onDelete,
+}: {
+  sessionId: string;
+  onResume: (sessionId: string) => void;
+  onDelete: (sessionId: string) => void | Promise<void>;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        data-testid={`resume-${sessionId}`}
+        onClick={() => onResume(sessionId)}
+        style={{ padding: "4px 8px" }}
+      >
+        Resume
+      </button>
+      <button
+        type="button"
+        data-testid={`delete-session-${sessionId}`}
+        onClick={() => void onDelete(sessionId)}
+        style={{ marginLeft: 8, padding: "4px 8px" }}
+      >
+        Delete
+      </button>
+    </>
+  );
+}
+
 function ConnectedTerminal({
   livekitUrl,
   roomName,
@@ -541,6 +573,21 @@ export function ConnectionScreen({
     }
   };
 
+  const handleDeleteSession = async (sessionId: string) => {
+    if (!sessionToken) return;
+    if (!window.confirm("Delete this session? This removes on-disk session data and cannot be undone.")) {
+      return;
+    }
+    setError(null);
+    try {
+      await client.deleteSession({ sessionToken, sessionId });
+      const res = await client.listSessions({ sessionToken });
+      setSessions(res.sessions);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete session");
+    }
+  };
+
   if (connected) {
     return (
       <ConnectedTerminal
@@ -740,14 +787,11 @@ export function ConnectionScreen({
                             />
                           </>
                         ) : (
-                          <button
-                            type="button"
-                            data-testid={`resume-${s.sessionId}`}
-                            onClick={() => handleResumeSession(s.sessionId)}
-                            style={{ padding: "4px 8px" }}
-                          >
-                            Resume
-                          </button>
+                          <InactiveSessionActions
+                            sessionId={s.sessionId}
+                            onResume={handleResumeSession}
+                            onDelete={handleDeleteSession}
+                          />
                         )}
                       </td>
                     </tr>
@@ -812,14 +856,11 @@ export function ConnectionScreen({
                         />
                       </>
                     ) : (
-                      <button
-                        type="button"
-                        data-testid={`resume-${s.sessionId}`}
-                        onClick={() => handleResumeSession(s.sessionId)}
-                        style={{ padding: "4px 8px" }}
-                      >
-                        Resume
-                      </button>
+                      <InactiveSessionActions
+                        sessionId={s.sessionId}
+                        onResume={handleResumeSession}
+                        onDelete={handleDeleteSession}
+                      />
                     )}
                   </td>
                 </tr>

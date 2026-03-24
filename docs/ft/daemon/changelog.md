@@ -1,5 +1,9 @@
 # Daemon product area changelog
 
+## 2026-03-24 — ConnectionService: DeleteSession
+
+- **`DeleteSession`**: Removes the on-disk session directory under the authenticated user’s sessions base when `.session.yaml` indicates an **inactive** session (no live process for the recorded PID, consistent with `ListSessions`). Rejects active sessions, missing sessions, and invalid session ids with the appropriate gRPC status. Filesystem removal errors return a generic **`INTERNAL`** message to clients; full error detail is logged on the server.
+
 ## 2026-03-22 — LiveKit: `livekit.common_room` for spawns
 
 - When **`livekit.common_room`** is set (non-empty), daemon-spawned **`tddy-*`** processes receive **`--livekit-room`** set to that value so all sessions share one room; **`--livekit-identity`** remains **`daemon-{session_id}`** per session. If unset or whitespace-only, the room name is **`daemon-{session_id}`** as before.
