@@ -11,6 +11,7 @@ service ConnectionService {
   rpc ConnectSession(ConnectSessionRequest) returns (ConnectSessionResponse);
   rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
   rpc SignalSession(SignalSessionRequest) returns (SignalSessionResponse);
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
 }
 
 message ListToolsRequest {}
@@ -115,4 +116,13 @@ message SignalSessionRequest {
 message SignalSessionResponse {
   bool ok = 1;
   string message = 2;
+}
+
+message DeleteSessionRequest {
+  string session_token = 1;
+  string session_id = 2;
+}
+
+message DeleteSessionResponse {
+  bool ok = 1;
 }

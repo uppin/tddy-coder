@@ -4,6 +4,7 @@
 # Run from nix shell: ./dev, then ./verify  (or: nix develop -c ./verify)
 # TDDY_SESSIONS_DIR ensures tests do not write to production ~/.tddy
 set -e
+set -o pipefail
 cd "$(dirname "$0")"
 export TDDY_SESSIONS_DIR="${TMPDIR:-/tmp}/tddy-test-sessions"
 cargo test -- --test-threads=1 2>&1 | tee .verify-result.txt
