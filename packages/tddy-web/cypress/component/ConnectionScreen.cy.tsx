@@ -66,6 +66,84 @@ const ORPHAN_INACTIVE_SESSION = {
   projectId: "unknown-project-id",
 };
 
+/** Project `proj-1` — for ordering specs; API returns this non-canonical order on purpose. */
+const PROJ_ORDER_ACTIVE_NEW = {
+  sessionId: "proj-order-active-new",
+  createdAt: "2026-03-21T12:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/project",
+  pid: 401,
+  isActive: true,
+  projectId: "proj-1",
+};
+const PROJ_ORDER_ACTIVE_OLD = {
+  sessionId: "proj-order-active-old",
+  createdAt: "2026-03-21T08:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/project",
+  pid: 402,
+  isActive: true,
+  projectId: "proj-1",
+};
+const PROJ_ORDER_INACTIVE_NEW = {
+  sessionId: "proj-order-inactive-new",
+  createdAt: "2026-03-21T11:00:00Z",
+  status: "exited",
+  repoPath: "/home/dev/project",
+  pid: 0,
+  isActive: false,
+  projectId: "proj-1",
+};
+const PROJ_ORDER_INACTIVE_OLD = {
+  sessionId: "proj-order-inactive-old",
+  createdAt: "2026-03-21T07:00:00Z",
+  status: "exited",
+  repoPath: "/home/dev/project",
+  pid: 0,
+  isActive: false,
+  projectId: "proj-1",
+};
+
+/** Orphans share a project id that is not in ListProjects. */
+const ORPHAN_ORDER_PROJECT_ID = "orphan-order-unknown-pid";
+
+const ORPH_ORDER_ACTIVE_NEW = {
+  sessionId: "orph-order-active-new",
+  createdAt: "2026-03-21T12:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/orphan-order",
+  pid: 501,
+  isActive: true,
+  projectId: ORPHAN_ORDER_PROJECT_ID,
+};
+const ORPH_ORDER_ACTIVE_OLD = {
+  sessionId: "orph-order-active-old",
+  createdAt: "2026-03-21T08:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/orphan-order",
+  pid: 502,
+  isActive: true,
+  projectId: ORPHAN_ORDER_PROJECT_ID,
+};
+const ORPH_ORDER_INACTIVE_NEW = {
+  sessionId: "orph-order-inactive-new",
+  createdAt: "2026-03-21T11:00:00Z",
+  status: "exited",
+  repoPath: "/home/dev/orphan-order",
+  pid: 0,
+  isActive: false,
+  projectId: ORPHAN_ORDER_PROJECT_ID,
+};
+const ORPH_ORDER_INACTIVE_OLD = {
+  sessionId: "orph-order-inactive-old",
+  createdAt: "2026-03-21T07:00:00Z",
+  status: "exited",
+  repoPath: "/home/dev/orphan-order",
+  pid: 0,
+  isActive: false,
+  projectId: ORPHAN_ORDER_PROJECT_ID,
+};
+
 const PROJECT = {
   projectId: "proj-1",
   name: "Test Project",
@@ -436,6 +514,68 @@ describe("ConnectionScreen Delete session", () => {
       .click();
     cy.wait("@deleteSession").then((interception) => {
       expect(interception.request.url).to.include("DeleteSession");
+    });
+  });
+});
+
+describe("ConnectionScreen session table ordering", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("ConnectionScreen — sorts project sessions with active on top then by createdAt descending", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    /** Deliberately wrong: inactive rows first; active newest last — sorted UI must fix order. */
+    const wrongApiOrder = [
+      PROJ_ORDER_INACTIVE_OLD,
+      PROJ_ORDER_ACTIVE_OLD,
+      PROJ_ORDER_INACTIVE_NEW,
+      PROJ_ORDER_ACTIVE_NEW,
+    ];
+    interceptAllRpcs(wrongApiOrder);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    const tableSel = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
+    cy.get(tableSel, { timeout: 5000 }).should("exist");
+    const expectedOrder = [
+      PROJ_ORDER_ACTIVE_NEW.sessionId,
+      PROJ_ORDER_ACTIVE_OLD.sessionId,
+      PROJ_ORDER_INACTIVE_NEW.sessionId,
+      PROJ_ORDER_INACTIVE_OLD.sessionId,
+    ];
+    expectedOrder.forEach((sessionId, index) => {
+      cy.get(`${tableSel} tbody tr`)
+        .eq(index)
+        .find(`[data-testid="connect-${sessionId}"], [data-testid="resume-${sessionId}"]`)
+        .should("exist");
+    });
+  });
+
+  it("ConnectionScreen — sorts orphan sessions with active on top then by createdAt descending", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    const wrongApiOrder = [
+      ORPH_ORDER_INACTIVE_OLD,
+      ORPH_ORDER_ACTIVE_OLD,
+      ORPH_ORDER_INACTIVE_NEW,
+      ORPH_ORDER_ACTIVE_NEW,
+    ];
+    interceptAllRpcs(wrongApiOrder);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get("[data-testid='sessions-table-orphan']", { timeout: 5000 }).should("exist");
+    const expectedOrder = [
+      ORPH_ORDER_ACTIVE_NEW.sessionId,
+      ORPH_ORDER_ACTIVE_OLD.sessionId,
+      ORPH_ORDER_INACTIVE_NEW.sessionId,
+      ORPH_ORDER_INACTIVE_OLD.sessionId,
+    ];
+    const tableSel = "[data-testid='sessions-table-orphan']";
+    expectedOrder.forEach((sessionId, index) => {
+      cy.get(`${tableSel} tbody tr`)
+        .eq(index)
+        .find(`[data-testid="connect-${sessionId}"], [data-testid="resume-${sessionId}"]`)
+        .should("exist");
     });
   });
 });
