@@ -2,6 +2,12 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-22 — Workflow recipes (pluggable workflows)
+
+- **Architecture**: `GoalId` and string-backed workflow state; **`WorkflowRecipe`** in **`tddy-core`**; concrete recipes in **`tddy-workflow-recipes`** (`TddRecipe`, **`BugfixRecipe`** stub). Graph, hooks, permissions, and backend hints are recipe-defined.
+- **CLI**: `--goal` validation uses the active recipe’s goal list.
+- **Docs**: [workflow-recipes.md](workflow-recipes.md).
+
 ## 2026-03-22 — web-dev: daemon-only
 
 - **Local web stack**: `./web-dev` runs **`tddy-daemon`** with **`dev.daemon.yaml`** at the repo root when **`DAEMON_CONFIG`** is unset; **`DAEMON_CONFIG`** selects another YAML path. The script resolves the debug or release daemon binary, writes a temp YAML with **`CURRENT_USER`** substituted, passes through CLI arguments, derives **`DAEMON_PORT`** from that YAML for the Vite **`/rpc`** proxy, and starts **`packages/tddy-web`** via Vite under **`./dev`**.
