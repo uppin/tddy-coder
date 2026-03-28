@@ -381,9 +381,10 @@ fn process_virtual_tui_input_chunk(
             continue;
         }
         let inbox_len = state.inbox.len();
+        let plan_pending = state.plan_refinement_pending;
         let view_consumed =
             view.view_state_mut()
-                .handle_key_view_local(key, &state.mode, inbox_len);
+                .handle_key_view_local(key, &state.mode, inbox_len, plan_pending);
         if view_consumed {
             log::trace!("VirtualTui: key {:?} consumed by view", key.code);
             if matches!(state.mode, AppMode::FeatureInput) {
@@ -404,7 +405,9 @@ fn process_virtual_tui_input_chunk(
                 let _ = intent_tx.send(UserIntent::SelectHighlightChanged(idx));
             }
             *updated = true;
-        } else if let Some(intent) = key_event_to_intent(key, &state.mode, view.view_state()) {
+        } else if let Some(intent) =
+            key_event_to_intent(key, &state.mode, view.view_state(), plan_pending)
+        {
             log::debug!("VirtualTui: intent {:?} -> presenter", intent);
             let _ = intent_tx.send(intent);
             *updated = true;
@@ -486,9 +489,26 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
     use std::time::Instant;
 
     match ev {
-        PresenterEvent::ModeChanged(mode) => {
-            state.mode = mode.clone();
-            view.on_mode_changed(&mode);
+        PresenterEvent::ModeChanged(details) => {
+            let prev_mode = state.mode.clone();
+            let prev_pending = state.plan_refinement_pending;
+            state.mode = details.mode.clone();
+            state.plan_refinement_pending = details.plan_refinement_pending;
+            log::info!(
+                "apply_event ModeChanged: mode_changed={} pending={}",
+                prev_mode != details.mode,
+                details.plan_refinement_pending
+            );
+            if prev_mode != details.mode {
+                view.on_mode_changed(&details.mode);
+            } else if details.plan_refinement_pending && !prev_pending {
+                log::debug!(
+                    "apply_event: plan refinement pending without mode change — reset refinement buffer"
+                );
+                let vs = view.view_state_mut();
+                vs.plan_refinement_input.clear();
+                vs.plan_refinement_cursor = 0;
+            }
         }
         PresenterEvent::ActivityLogged(entry) => {
             state.activity_log.push(entry.clone());
@@ -971,6 +991,7 @@ mod tests {
             inbox: Vec::new(),
             should_quit: false,
             exit_action: None,
+            plan_refinement_pending: false,
         };
         let mut vs = ViewState::new();
         vs.feature_input = input.clone();
@@ -1062,6 +1083,7 @@ mod tests {
             inbox: Vec::new(),
             should_quit: false,
             exit_action: None,
+            plan_refinement_pending: false,
         };
         let mut view = TuiView::new();
 
@@ -1109,6 +1131,7 @@ mod tests {
             inbox: Vec::new(),
             should_quit: false,
             exit_action: None,
+            plan_refinement_pending: false,
         };
         let mut view = TuiView::new();
 
