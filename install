@@ -11,19 +11,33 @@
 #                        unless INSTALL_BIN_DIR is set.
 #   INSTALL_BIN_DIR      Destination for binaries (default: ${INSTALL_PREFIX}/bin).
 #   INSTALL_CONFIG_DIR   Config directory (default: /etc/tddy); daemon.yaml lives here.
-#   INSTALL_SYSTEMD_DIR  systemd unit directory (default: /etc/systemd/system).
+#   INSTALL_SYSTEMD_DIR   systemd unit directory (default: /etc/systemd/system).
+#   INSTALL_WEB_BUNDLE_DIR  Directory for tddy-web static files (default: ${INSTALL_PREFIX}/share/tddy/web).
 #
 #   INSTALL_NO_SYSTEMCTL=1  Skip root check and systemctl (for automated tests).
+#
+#   INSTALL_OVERWRITE_SYSTEMD_UNIT=1  Replace tddy-daemon.service with the template from this script.
+#                        Default: if the unit file already exists, it is not overwritten (preserves
+#                        User=, Group=, drop-ins content in the main file, ExecStart edits, etc.).
+#
+# Progress: lines prefixed with "install:" go to stdout (paths, files touched, log dirs).
 set -euo pipefail
 cd "$(dirname "$0")"
 
 ROOT_DIR="$(pwd)"
 BIN_DIR="${INSTALL_BIN_DIR:-${INSTALL_PREFIX:-/usr/local}/bin}"
+WEB_BUNDLE_DIR="${INSTALL_WEB_BUNDLE_DIR:-${INSTALL_PREFIX:-/usr/local}/share/tddy/web}"
 CONFIG_DIR="${INSTALL_CONFIG_DIR:-/etc/tddy}"
 SYSTEMD_DIR="${INSTALL_SYSTEMD_DIR:-/etc/systemd/system}"
+WEB_DIST_SRC="${ROOT_DIR}/packages/tddy-web/dist"
 CONFIG_FILE="${CONFIG_DIR}/daemon.yaml"
 UNIT_PATH="${SYSTEMD_DIR}/tddy-daemon.service"
 NO_SYSTEMCTL="${INSTALL_NO_SYSTEMCTL:-0}"
+OVERWRITE_SYSTEMD_UNIT="${INSTALL_OVERWRITE_SYSTEMD_UNIT:-0}"
+
+# Paths referenced by daemon.yaml.production (log + auth); children use per-repo tmp/logs at runtime.
+DAEMON_LOG_DIR="/var/log/tddy-daemon"
+AUTH_STORAGE_DIR="/var/lib/tddy"
 
 want_systemd=false
 want_build=false
@@ -52,6 +66,7 @@ if [[ "$NO_SYSTEMCTL" != "1" ]]; then
 fi
 
 if "$want_build"; then
+  echo "install: running ${ROOT_DIR}/release"
   "${ROOT_DIR}/release"
 fi
 
@@ -64,22 +79,59 @@ for name in tddy-daemon tddy-coder tddy-tools; do
   fi
 done
 
-mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR"
+if [[ ! -f "${WEB_DIST_SRC}/index.html" ]]; then
+  echo "install: missing built tddy-web bundle: ${WEB_DIST_SRC}/index.html" >&2
+  echo "install: run from repo root: ./dev bun run build  (or: cd packages/tddy-web && bun run build)" >&2
+  exit 1
+fi
 
+echo "install: paths — BIN_DIR=${BIN_DIR}"
+echo "install: paths — CONFIG_DIR=${CONFIG_DIR} (daemon.yaml)"
+echo "install: paths — SYSTEMD_DIR=${SYSTEMD_DIR}"
+echo "install: paths — WEB_BUNDLE_DIR=${WEB_BUNDLE_DIR}"
+echo "install: logging — daemon process file log (from daemon.yaml.production): ${DAEMON_LOG_DIR}/daemon"
+echo "install: logging — OAuth/token storage (auth_storage): ${AUTH_STORAGE_DIR}"
+echo "install: logging — spawned tddy-coder sessions write under each repo: <repo>/tmp/logs/coder and <repo>/tmp/logs/child/ (runtime; not created by this script)"
+echo "install: per–OS-user spawn PATH (e.g. Cursor agent): ~/.tddy/config.yaml on the target user (spawn_path_extra); not created by this script"
+
+mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR" "$WEB_BUNDLE_DIR"
+
+if [[ "$NO_SYSTEMCTL" != "1" ]]; then
+  echo "install: ensuring system dirs for daemon log + auth: ${DAEMON_LOG_DIR}, ${AUTH_STORAGE_DIR}"
+  mkdir -p "$DAEMON_LOG_DIR" "$AUTH_STORAGE_DIR"
+fi
+
+echo "install: installing binaries -> ${BIN_DIR}/"
 install -m 0755 "${ROOT_DIR}/target/release/tddy-daemon" "${BIN_DIR}/tddy-daemon"
+echo "install:   updated ${BIN_DIR}/tddy-daemon"
 install -m 0755 "${ROOT_DIR}/target/release/tddy-coder" "${BIN_DIR}/tddy-coder"
+echo "install:   updated ${BIN_DIR}/tddy-coder"
 install -m 0755 "${ROOT_DIR}/target/release/tddy-tools" "${BIN_DIR}/tddy-tools"
+echo "install:   updated ${BIN_DIR}/tddy-tools"
+
+echo "install: copying web static bundle ${WEB_DIST_SRC}/ -> ${WEB_BUNDLE_DIR}/"
+cp -a "${WEB_DIST_SRC}/." "$WEB_BUNDLE_DIR/"
+echo "install:   web bundle deployed (e.g. index.html)"
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
   if [[ ! -f "${ROOT_DIR}/daemon.yaml.production" ]]; then
     echo "install: missing ${ROOT_DIR}/daemon.yaml.production" >&2
     exit 1
   fi
-  sed "s|__INSTALL_BIN_DIR__|${BIN_DIR}|g" "${ROOT_DIR}/daemon.yaml.production" >"$CONFIG_FILE"
+  echo "install: creating ${CONFIG_FILE} from daemon.yaml.production (placeholders: __INSTALL_BIN_DIR__, __WEB_BUNDLE_PATH__)"
+  sed -e "s#__INSTALL_BIN_DIR__#${BIN_DIR}#g" -e "s#__WEB_BUNDLE_PATH__#${WEB_BUNDLE_DIR}#g" \
+    "${ROOT_DIR}/daemon.yaml.production" >"$CONFIG_FILE"
   chmod 0644 "$CONFIG_FILE"
+else
+  echo "install: keeping existing config (not overwriting): ${CONFIG_FILE}"
 fi
 
-cat >"$UNIT_PATH" <<UNIT
+if [[ -f "$UNIT_PATH" ]] && [[ "$OVERWRITE_SYSTEMD_UNIT" != "1" ]]; then
+  echo "install: keeping existing systemd unit (not overwriting): ${UNIT_PATH}"
+  echo "install:   set INSTALL_OVERWRITE_SYSTEMD_UNIT=1 to replace with this script's template (ExecStart, User=, etc.)"
+else
+  echo "install: writing systemd unit ${UNIT_PATH}"
+  cat >"$UNIT_PATH" <<UNIT
 [Unit]
 Description=tddy-daemon multi-user daemon
 After=network.target
@@ -89,14 +141,26 @@ Type=simple
 ExecStart=${BIN_DIR}/tddy-daemon -c ${CONFIG_FILE}
 Restart=on-failure
 RestartSec=5
+# Default: runs as root so the daemon can spawn tddy-coder as different OS users (setuid/pre_exec).
+# Single-user homelab only: uncomment User=/Group= to match your mapped os_user so spawns use
+# same_user=true (skips pre_exec; avoids long NSS/initgroups stalls in cmd.spawn).
+# Ensure auth_storage, config dir, and listen port are usable by that user.
+#User=tddy
+#Group=tddy
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-chmod 0644 "$UNIT_PATH"
+  chmod 0644 "$UNIT_PATH"
+  echo "install:   ExecStart=${BIN_DIR}/tddy-daemon -c ${CONFIG_FILE}"
+fi
 
 if [[ "$NO_SYSTEMCTL" != "1" ]]; then
+  echo "install: systemctl daemon-reload; enable + start tddy-daemon"
   systemctl daemon-reload
   systemctl enable tddy-daemon
   systemctl start tddy-daemon
+  echo "install: done (service started). journal: journalctl -u tddy-daemon -f"
+else
+  echo "install: done (INSTALL_NO_SYSTEMCTL=1: skipped systemctl; skipped mkdir ${DAEMON_LOG_DIR} and ${AUTH_STORAGE_DIR}; skipped enable/start)"
 fi

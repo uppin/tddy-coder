@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tddy_core::backend::{MockBackend, StubBackend};
 use tddy_core::changeset::{write_changeset, Changeset};
-use tddy_core::output::slugify_directory_name;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::{ExecutionStatus, GraphBuilder};
 use tddy_core::workflow::runner::FlowRunner;
@@ -220,7 +219,7 @@ async fn workflow_engine_run_goal_plan_completes() {
     let _ = std::fs::remove_dir_all(&storage_dir);
     let output_dir = storage_dir.join("plan-output");
     std::fs::create_dir_all(&output_dir).unwrap();
-    let session_dir = output_dir.join(slugify_directory_name("SKIP_QUESTIONS feature"));
+    let session_dir = common::session_dir_for_new_session();
     std::fs::create_dir_all(&session_dir).unwrap();
     let init_cs = Changeset {
         initial_prompt: Some("SKIP_QUESTIONS feature".to_string()),
@@ -239,6 +238,10 @@ async fn workflow_engine_run_goal_plan_completes() {
     context_values.insert(
         "output_dir".to_string(),
         serde_json::to_value(output_dir.clone()).unwrap(),
+    );
+    context_values.insert(
+        "session_dir".to_string(),
+        serde_json::to_value(session_dir.clone()).unwrap(),
     );
 
     let plan_gid = GoalId::new("plan");
@@ -255,9 +258,6 @@ async fn workflow_engine_run_goal_plan_completes() {
         "plan should return Paused, Completed, or ElicitationNeeded; got {:?}",
         result.status
     );
-    let session_dir = output_dir.join(tddy_core::output::slugify_directory_name(
-        "SKIP_QUESTIONS feature",
-    ));
     assert!(session_dir.join("PRD.md").exists());
     let prd = std::fs::read_to_string(session_dir.join("PRD.md")).unwrap();
     assert!(
@@ -274,7 +274,7 @@ async fn workflow_engine_run_full_workflow_completes_with_stub() {
     let _ = std::fs::remove_dir_all(&storage_dir);
     let output_dir = storage_dir.join("plan-output");
     std::fs::create_dir_all(&output_dir).unwrap();
-    let session_dir = output_dir.join(slugify_directory_name("SKIP_QUESTIONS feature"));
+    let session_dir = common::session_dir_for_new_session();
     std::fs::create_dir_all(&session_dir).unwrap();
     let init_cs = Changeset {
         initial_prompt: Some("SKIP_QUESTIONS feature".to_string()),
@@ -293,6 +293,10 @@ async fn workflow_engine_run_full_workflow_completes_with_stub() {
     context_values.insert(
         "output_dir".to_string(),
         serde_json::to_value(output_dir.clone()).unwrap(),
+    );
+    context_values.insert(
+        "session_dir".to_string(),
+        serde_json::to_value(session_dir.clone()).unwrap(),
     );
     context_values.insert("run_demo".to_string(), serde_json::json!(false));
 

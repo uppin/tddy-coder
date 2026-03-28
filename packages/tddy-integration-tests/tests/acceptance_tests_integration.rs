@@ -21,7 +21,7 @@ const ACCEPTANCE_TESTS_JSON_OUTPUT: &str = r#"{"goal":"acceptance-tests","summar
 
 #[tokio::test]
 async fn acceptance_tests_workflow_reads_session_dir_and_invokes_backend_with_resumed_session() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("at-plan-dir-1", "feature");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("at-plan-dir-1");
     std::fs::write(
         session_dir.join("PRD.md"),
         "# PRD\n## Testing Plan\n- Test 1",
@@ -71,7 +71,7 @@ async fn acceptance_tests_workflow_reads_session_dir_and_invokes_backend_with_re
 
 #[tokio::test]
 async fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_ready_states() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("at-plan-dir-2", "feature");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("at-plan-dir-2");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-456");
 
@@ -111,7 +111,7 @@ async fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_rea
 
 #[tokio::test]
 async fn acceptance_tests_workflow_returns_error_when_session_dir_missing_prd() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("at-plan-dir-no-prd", "feature");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("at-plan-dir-no-prd");
     std::fs::write(session_dir.join(".session"), "sess-789").expect("write .session");
 
     let backend = Arc::new(MockBackend::new());
@@ -136,7 +136,7 @@ async fn acceptance_tests_workflow_returns_error_when_session_dir_missing_prd() 
 
 #[tokio::test]
 async fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("at-plan-dir-no-session", "feature");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("at-plan-dir-no-session");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
 
     let backend = Arc::new(MockBackend::new());
@@ -164,7 +164,7 @@ async fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
 
 #[tokio::test]
 async fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("at-allowlist-test", "feature");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("at-allowlist-test");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-allowlist");
 
@@ -234,7 +234,7 @@ async fn plan_workflow_passes_goal_to_invoke_request() {
 
 #[tokio::test]
 async fn acceptance_tests_workflow_writes_acceptance_tests_md_to_session_dir() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("at-writes-md", "feature");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("at-writes-md");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-writes-md");
 

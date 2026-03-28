@@ -131,6 +131,7 @@ fn create_asserting_repo_backend() -> SharedBackend {
 
 /// Full workflow scenario: SubmitFeatureInput → run to completion → assert WorkflowComplete(Ok).
 #[test]
+#[serial]
 fn full_workflow_completes_with_stub_backend() {
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
@@ -219,6 +220,7 @@ fn full_workflow_completes_with_stub_backend() {
 /// Acceptance: SubmitFeatureInput after completion spawns new workflow.
 /// Workflow completes -> FeatureInput -> user submits new feature -> new workflow runs to completion.
 #[test]
+#[serial]
 fn submit_feature_input_after_completion_restarts_workflow() {
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
@@ -504,6 +506,7 @@ fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
 
 /// Clarification scenario: StubBackend with CLARIFY → AnswerSelect → assert answers sent.
 #[test]
+#[serial]
 fn clarification_roundtrip_sends_answers() {
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
@@ -568,6 +571,7 @@ fn clarification_roundtrip_sends_answers() {
 
 /// Inbox scenario: QueuePrompt during Running → WorkflowComplete → assert dequeued.
 #[test]
+#[serial]
 fn inbox_queue_and_dequeue() {
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
@@ -628,6 +632,7 @@ fn inbox_queue_and_dequeue() {
 
 /// Plan approval: After plan completes, PlanReview mode appears. ApprovePlan proceeds to next step.
 #[test]
+#[serial]
 fn plan_approval_approve_proceeds_to_next_step() {
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
@@ -689,6 +694,7 @@ fn plan_approval_approve_proceeds_to_next_step() {
 
 /// Plan approval: ViewPlan opens MarkdownViewer, DismissViewer returns to PlanReview, ApprovePlan proceeds.
 #[test]
+#[serial]
 fn plan_approval_view_then_approve() {
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
@@ -754,6 +760,7 @@ fn plan_approval_view_then_approve() {
 
 /// Plan approval: RefinePlan enters TextInput, AnswerText sends feedback, plan re-runs, approval re-appears.
 #[test]
+#[serial]
 fn plan_approval_refine_re_shows_approval() {
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
@@ -814,6 +821,7 @@ fn plan_approval_refine_re_shows_approval() {
 /// Plan approval from viewer: ViewPlan → ApprovePlan directly in MarkdownViewer (no DismissViewer) → workflow completes.
 /// Asserts presenter is_done() and PlanReview appears exactly once (no return to PlanReview after viewer approval).
 #[test]
+#[serial]
 fn plan_approval_from_markdown_viewer() {
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
@@ -878,6 +886,7 @@ fn plan_approval_from_markdown_viewer() {
 
 /// Error scenario: StubBackend with FAIL_INVOKE → assert WorkflowComplete(Err).
 #[test]
+#[serial]
 fn workflow_error_propagates() {
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();

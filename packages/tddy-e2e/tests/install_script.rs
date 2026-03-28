@@ -6,8 +6,8 @@ use std::process::Command;
 
 use tddy_e2e::install_contract::{
     verify_build_flag_invokes_release, verify_env_override_references,
-    verify_install_script_contracts, verify_no_systemctl_support, verify_requires_systemd_flag,
-    verify_root_check, verify_syntax,
+    verify_install_overwrite_systemd_unit, verify_install_script_contracts,
+    verify_no_systemctl_support, verify_requires_systemd_flag, verify_root_check, verify_syntax,
 };
 
 fn repo_root() -> PathBuf {
@@ -18,6 +18,10 @@ fn repo_root() -> PathBuf {
 
 fn install_path() -> PathBuf {
     repo_root().join("install")
+}
+
+fn daemon_yaml_production_path() -> PathBuf {
+    repo_root().join("daemon.yaml.production")
 }
 
 fn read_install() -> String {
@@ -47,6 +51,11 @@ fn install_has_root_check() {
 }
 
 #[test]
+fn install_overwrite_systemd_unit_documented() {
+    verify_install_overwrite_systemd_unit(&read_install());
+}
+
+#[test]
 fn install_no_systemctl_support() {
     verify_no_systemctl_support(&read_install());
 }
@@ -58,7 +67,7 @@ fn install_build_flag_accepted() {
 
 #[test]
 fn install_full_contract_orchestration() {
-    verify_install_script_contracts(&install_path());
+    verify_install_script_contracts(&install_path(), &daemon_yaml_production_path());
 }
 
 fn copy_install_tree(dest: &Path) {
@@ -87,6 +96,9 @@ fn copy_install_tree(dest: &Path) {
             dest.display()
         )
     });
+    let dist = dest.join("packages").join("tddy-web").join("dist");
+    fs::create_dir_all(&dist).unwrap();
+    fs::write(dist.join("index.html"), "<!DOCTYPE html><html></html>\n").unwrap();
 }
 
 fn write_fake_release_binaries(root: &Path) {
@@ -127,6 +139,7 @@ fn install_copies_binaries_to_custom_dir() {
     let bin_dir = root.join("custom-bin");
     let cfg_dir = root.join("custom-etc");
     let sys_dir = root.join("custom-systemd");
+    let web_dir = root.join("custom-web");
 
     let st = run_install_in(
         root,
@@ -135,6 +148,7 @@ fn install_copies_binaries_to_custom_dir() {
             ("INSTALL_BIN_DIR", bin_dir.to_str().unwrap()),
             ("INSTALL_CONFIG_DIR", cfg_dir.to_str().unwrap()),
             ("INSTALL_SYSTEMD_DIR", sys_dir.to_str().unwrap()),
+            ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
         ],
     );
     assert!(
@@ -160,12 +174,14 @@ fn install_creates_config_only_if_absent() {
     let bin_dir = root.join("b");
     let cfg_dir = root.join("c");
     let sys_dir = root.join("s");
+    let web_dir = root.join("w");
 
     let env = [
         ("INSTALL_NO_SYSTEMCTL", "1"),
         ("INSTALL_BIN_DIR", bin_dir.to_str().unwrap()),
         ("INSTALL_CONFIG_DIR", cfg_dir.to_str().unwrap()),
         ("INSTALL_SYSTEMD_DIR", sys_dir.to_str().unwrap()),
+        ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
     ];
 
     let st = run_install_in(root, &env);
@@ -195,6 +211,7 @@ fn install_generates_unit_with_correct_paths() {
     let bin_dir = root.join("mybin");
     let cfg_dir = root.join("mycfg");
     let sys_dir = root.join("mysystemd");
+    let web_dir = root.join("myweb");
 
     let st = run_install_in(
         root,
@@ -203,6 +220,7 @@ fn install_generates_unit_with_correct_paths() {
             ("INSTALL_BIN_DIR", bin_dir.to_str().unwrap()),
             ("INSTALL_CONFIG_DIR", cfg_dir.to_str().unwrap()),
             ("INSTALL_SYSTEMD_DIR", sys_dir.to_str().unwrap()),
+            ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
         ],
     );
     assert!(st.success(), "install: {st:?}");
@@ -217,6 +235,67 @@ fn install_generates_unit_with_correct_paths() {
     assert!(
         unit.contains(&want_exec),
         "unit file missing expected ExecStart line.\nGot:\n{unit}"
+    );
+}
+
+#[test]
+fn install_preserves_systemd_unit_unless_overwrite_env() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    copy_install_tree(root);
+    write_fake_release_binaries(root);
+
+    let bin_dir = root.join("bin");
+    let cfg_dir = root.join("etc");
+    let sys_dir = root.join("systemd");
+    let web_dir = root.join("web");
+
+    let base_env = [
+        ("INSTALL_NO_SYSTEMCTL", "1"),
+        ("INSTALL_BIN_DIR", bin_dir.to_str().unwrap()),
+        ("INSTALL_CONFIG_DIR", cfg_dir.to_str().unwrap()),
+        ("INSTALL_SYSTEMD_DIR", sys_dir.to_str().unwrap()),
+        ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
+    ];
+
+    let st = run_install_in(root, &base_env);
+    assert!(st.success(), "first install: {st:?}");
+
+    let unit_path = sys_dir.join("tddy-daemon.service");
+    let mut unit = fs::read_to_string(&unit_path).unwrap();
+    assert!(
+        !unit.contains("User=preserve_test"),
+        "template should not contain marker yet"
+    );
+    unit.push_str("\nUser=preserve_test\n");
+    fs::write(&unit_path, &unit).unwrap();
+
+    let st2 = run_install_in(root, &base_env);
+    assert!(st2.success(), "second install: {st2:?}");
+    let after = fs::read_to_string(&unit_path).unwrap();
+    assert!(
+        after.contains("User=preserve_test"),
+        "unit must not be overwritten on reinstall; got:\n{after}"
+    );
+
+    let mut env_overwrite: Vec<(&str, &str)> = base_env.to_vec();
+    env_overwrite.push(("INSTALL_OVERWRITE_SYSTEMD_UNIT", "1"));
+    let st3 = run_install_in(root, &env_overwrite);
+    assert!(st3.success(), "third install with overwrite: {st3:?}");
+    let final_unit = fs::read_to_string(&unit_path).unwrap();
+    assert!(
+        !final_unit.contains("User=preserve_test"),
+        "INSTALL_OVERWRITE_SYSTEMD_UNIT=1 should replace unit; got:\n{final_unit}"
+    );
+    let cfg_file = cfg_dir.join("daemon.yaml");
+    let want_exec = format!(
+        "ExecStart={}/tddy-daemon -c {}",
+        bin_dir.display(),
+        cfg_file.display()
+    );
+    assert!(
+        final_unit.contains(&want_exec),
+        "fresh unit should contain ExecStart; got:\n{final_unit}"
     );
 }
 

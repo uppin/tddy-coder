@@ -3,7 +3,7 @@
 #
 # Prefer automated install from the repo root: sudo ./install --systemd
 # (optional: ./install --systemd --build to run ./release first). See daemon.yaml.production
-# and docs/ft/daemon/1-WIP/PRD-2026-03-23-install-systemd.md.
+# and docs/ft/daemon/systemd-install.md.
 #
 # Manual install: sudo cp tddy-daemon.service.example /etc/systemd/system/tddy-daemon.service
 # Enable:  sudo systemctl enable tddy-daemon

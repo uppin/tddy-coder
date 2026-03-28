@@ -95,6 +95,14 @@ fn main() -> anyhow::Result<()> {
 
     // Fork spawn worker before tokio — fork() from multi-threaded process can deadlock.
     let spawn_client = tddy_daemon::spawn_worker::fork_spawn_worker()?;
+    #[cfg(unix)]
+    if let Some((_, worker_pid)) = spawn_client.as_ref() {
+        log::info!(
+            "spawn worker pid={} (strace while debugging spawns: sudo strace -f -tt -T -p {})",
+            worker_pid,
+            worker_pid
+        );
+    }
 
     // Apply env overrides (e.g. from .env loaded by web-dev)
     apply_env_overrides(&mut config);

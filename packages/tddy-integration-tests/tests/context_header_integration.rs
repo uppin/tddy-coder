@@ -22,7 +22,7 @@ const ACCEPTANCE_TESTS_JSON: &str = r#"{"goal":"acceptance-tests","summary":"Cre
 /// Acceptance-tests prompt must start with the context header when PRD.md exists.
 #[tokio::test]
 async fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("ctx-hdr-at-prd", "feature");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("ctx-hdr-at-prd");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-ctx-hdr-1");
 
@@ -66,7 +66,7 @@ async fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
 /// Context header must list PRD.md with an absolute path.
 #[tokio::test]
 async fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("ctx-hdr-at-abs", "feature");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("ctx-hdr-at-abs");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-ctx-hdr-2");
 
@@ -121,7 +121,7 @@ async fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
 /// Context header must NOT mention artifacts that don't exist yet.
 #[tokio::test]
 async fn acceptance_tests_prompt_header_omits_missing_artifacts() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("ctx-hdr-at-omit", "feature");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("ctx-hdr-at-omit");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-ctx-hdr-3");
 
@@ -163,7 +163,7 @@ async fn acceptance_tests_prompt_header_omits_missing_artifacts() {
 /// Header block must be followed by a blank line before the original prompt content.
 #[tokio::test]
 async fn acceptance_tests_prompt_header_separated_from_body_by_blank_line() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("ctx-hdr-at-blank", "feature");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("ctx-hdr-at-blank");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-ctx-hdr-blank");
 

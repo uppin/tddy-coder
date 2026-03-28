@@ -12,7 +12,8 @@ use tddy_core::workflow::task::{NextAction, Task, TaskResult};
 
 use crate::parser::parse_planning_response_with_base;
 use crate::tdd::planning;
-use crate::writer::{create_session_dir_in, create_session_dir_with_id, slugify_directory_name};
+use crate::writer::{create_session_dir_in, create_session_dir_with_id};
+use tddy_core::output::new_session_dir;
 
 /// Plan step Task: invokes backend, parses response, writes PRD.md (with TODO section).
 pub struct PlanTask {
@@ -61,7 +62,8 @@ impl Task for PlanTask {
         } else if let Some(base) = context.get_sync::<PathBuf>("session_base") {
             create_session_dir_in(&base).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?
         } else {
-            output_dir.join(slugify_directory_name(feature_input))
+            new_session_dir()
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?
         };
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;

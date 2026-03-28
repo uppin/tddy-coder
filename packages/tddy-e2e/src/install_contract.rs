@@ -34,13 +34,15 @@ pub fn verify_requires_systemd_flag(contents: &str) {
     );
 }
 
-/// Script must honor INSTALL_PREFIX, INSTALL_BIN_DIR, INSTALL_CONFIG_DIR, INSTALL_SYSTEMD_DIR.
+/// Script must honor INSTALL_PREFIX, INSTALL_BIN_DIR, INSTALL_CONFIG_DIR, INSTALL_SYSTEMD_DIR,
+/// INSTALL_WEB_BUNDLE_DIR.
 pub fn verify_env_override_references(contents: &str) {
     for name in [
         "INSTALL_PREFIX",
         "INSTALL_BIN_DIR",
         "INSTALL_CONFIG_DIR",
         "INSTALL_SYSTEMD_DIR",
+        "INSTALL_WEB_BUNDLE_DIR",
     ] {
         assert!(
             contents.contains(name),
@@ -65,6 +67,14 @@ pub fn verify_no_systemctl_support(contents: &str) {
     );
 }
 
+/// Optional overwrite of systemd unit (preserve User= / manual edits by default).
+pub fn verify_install_overwrite_systemd_unit(contents: &str) {
+    assert!(
+        contents.contains("INSTALL_OVERWRITE_SYSTEMD_UNIT"),
+        "install must document INSTALL_OVERWRITE_SYSTEMD_UNIT for replacing the unit file"
+    );
+}
+
 /// Optional `--build` runs the release script.
 pub fn verify_build_flag_invokes_release(contents: &str) {
     assert!(contents.contains("--build"), "install must accept --build");
@@ -74,8 +84,26 @@ pub fn verify_build_flag_invokes_release(contents: &str) {
     );
 }
 
+/// `daemon.yaml.production` sets `web_bundle_path`; install must deploy `packages/tddy-web/dist`
+/// there so the path exists after install (otherwise the daemon serves a missing directory).
+pub fn verify_install_deploys_web_static_assets(
+    install_contents: &str,
+    daemon_yaml_production: &str,
+) {
+    let bundle_decl = daemon_yaml_production
+        .lines()
+        .find(|l| l.trim_start().starts_with("web_bundle_path:"))
+        .expect("daemon.yaml.production must declare web_bundle_path");
+    assert!(
+        install_contents.contains("packages/tddy-web/dist")
+            || install_contents.contains("tddy-web/dist"),
+        "install must copy the built tddy-web bundle into web_bundle_path ({bundle_decl}); \
+         otherwise that path is missing on disk and the daemon cannot serve static files"
+    );
+}
+
 /// Orchestration: syntax + static contracts (used by integration tests).
-pub fn verify_install_script_contracts(path: &Path) {
+pub fn verify_install_script_contracts(path: &Path, daemon_yaml_production_path: &Path) {
     verify_syntax(path);
     let contents =
         fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
@@ -83,7 +111,11 @@ pub fn verify_install_script_contracts(path: &Path) {
     verify_env_override_references(&contents);
     verify_root_check(&contents);
     verify_no_systemctl_support(&contents);
+    verify_install_overwrite_systemd_unit(&contents);
     verify_build_flag_invokes_release(&contents);
+    let prod = fs::read_to_string(daemon_yaml_production_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", daemon_yaml_production_path.display()));
+    verify_install_deploys_web_static_assets(&contents, &prod);
 }
 
 #[cfg(test)]
@@ -100,6 +132,18 @@ mod granular_tests {
 
     fn read_repo_install() -> String {
         let p = repo_install_path();
+        std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()))
+    }
+
+    fn repo_daemon_yaml_production_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("daemon.yaml.production")
+    }
+
+    fn read_repo_daemon_yaml_production() -> String {
+        let p = repo_daemon_yaml_production_path();
         std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()))
     }
 
@@ -129,7 +173,20 @@ mod granular_tests {
     }
 
     #[test]
+    fn install_overwrite_systemd_unit_granular() {
+        verify_install_overwrite_systemd_unit(&read_repo_install());
+    }
+
+    #[test]
     fn install_build_flag_granular() {
         verify_build_flag_invokes_release(&read_repo_install());
+    }
+
+    #[test]
+    fn install_deploys_web_bundle_granular() {
+        verify_install_deploys_web_static_assets(
+            &read_repo_install(),
+            &read_repo_daemon_yaml_production(),
+        );
     }
 }
