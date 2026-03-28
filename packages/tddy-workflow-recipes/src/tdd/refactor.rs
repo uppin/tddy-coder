@@ -17,7 +17,8 @@ You MUST:
 1. Execute tasks in priority order (critical → high → medium → low)
 2. Run tests after each change
 3. Stop if tests fail and report which task caused the failure
-4. When done, submit your output by calling:
+4. **Remove Red-phase TDD logging markers** from production (and shared library) sources before you finish: delete `eprintln!`/`println!`/stderr prints that emit JSON with a `"tddy"` key and `marker_id` (and any helper used only for those emissions). They existed only for Red output verification. If `refactoring-plan.md` already lists marker removal, do that work; if not, still strip these markers as mandatory cleanup in this goal.
+5. When done, submit your output by calling:
   tddy-tools submit --goal refactor --data '<your JSON output>'
 
 If you need to ask the user clarification questions, call:
@@ -69,6 +70,17 @@ mod tests {
         assert!(
             prompt.contains("Rename method"),
             "prompt must include plan content"
+        );
+    }
+
+    #[test]
+    fn system_prompt_requires_red_marker_removal_in_cleanup() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("Red-phase TDD logging markers")
+                && prompt.contains("tddy")
+                && prompt.contains("marker_id"),
+            "refactor prompt must require stripping Red JSON markers during cleanup"
         );
     }
 }

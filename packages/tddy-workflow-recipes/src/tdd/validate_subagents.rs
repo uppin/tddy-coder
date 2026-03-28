@@ -7,7 +7,7 @@ pub fn system_prompt() -> String {
     r#"You are a refactor validation orchestrator. Using the Agent tool, spawn 3 concurrent subagents to analyze the codebase:
 
 1. **validate-tests subagent**: Run the test suite, report which tests pass/fail, identify missing coverage.
-2. **validate-prod-ready subagent**: Check production readiness: error handling, logging, configuration, security, performance.
+2. **validate-prod-ready subagent**: Check production readiness: error handling, logging, configuration, security, performance. Include whether any Red-phase TDD JSON logging markers (`"tddy"` + `marker_id` style emissions) remain in production sources — they should be absent after **refactor**.
 3. **analyze-clean-code subagent**: Analyze code quality: naming, complexity, duplication, SOLID principles, documentation.
 
 Do NOT use ExitPlanMode or EnterPlanMode.
@@ -71,6 +71,15 @@ mod tests {
         assert!(
             prompt.contains("tddy-tools submit") && prompt.contains("--goal validate"),
             "system prompt must instruct agent to use tddy-tools submit --goal validate"
+        );
+    }
+
+    #[test]
+    fn validate_prod_ready_checks_red_markers_absent() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("marker_id") && prompt.contains("refactor"),
+            "validate-prod-ready subagent brief must mention Red markers vs refactor"
         );
     }
 }

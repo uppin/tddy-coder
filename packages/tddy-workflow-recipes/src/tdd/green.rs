@@ -18,9 +18,10 @@ You MUST:
 1. Read progress.md for the list of failing tests and skeleton implementations
 2. Implement production-grade code (not stubs or workarounds) to make each failing test pass
 3. Add detailed logging (log::debug!, log::info!) to reveal flows and system state during development — these will be cleaned in later phases
-4. After implementing, run the project's test command (e.g. cargo test) to verify all tests pass
-5. Run acceptance tests to verify end-to-end behavior
-6. When done, submit your output by calling:
+4. Do **not** add new Red-phase JSON `tddy` logging markers; **refactor** removes existing Red marker emissions from production code
+5. After implementing, run the project's test command (e.g. cargo test) to verify all tests pass
+6. Run acceptance tests to verify end-to-end behavior
+7. When done, submit your output by calling:
   tddy-tools submit --goal green --data '<your JSON output>'
 
 If you need to ask the user clarification questions, call:
@@ -108,6 +109,15 @@ mod tests {
         assert!(
             prompt.contains("tddy-tools submit") && prompt.contains("--goal green"),
             "system prompt must instruct agent to use tddy-tools submit --goal green"
+        );
+    }
+
+    #[test]
+    fn system_prompt_defers_red_marker_removal_to_refactor() {
+        let prompt = system_prompt(false);
+        assert!(
+            prompt.contains("refactor") && prompt.contains("Red-phase JSON"),
+            "green prompt must not add Red markers and must name refactor for their removal"
         );
     }
 }

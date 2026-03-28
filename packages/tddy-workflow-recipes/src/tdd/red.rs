@@ -26,7 +26,9 @@ The summary must describe what skeletons and tests were created and confirm all 
 **prerequisite_actions**: Suggest the cheapest approach. If the test command already compiles/builds (e.g. cargo test compiles first), use "None". Only suggest explicit build steps when needed (e.g. "npm install" before "npm test").
 **run_single_or_selected_tests**: How to run a single test or filter by name/pattern (e.g. `cargo test <name>`, `pytest -k <pattern>`, `npm test -- --testNamePattern=<pattern>`).
 
-**Production-only logging markers**: Logging markers MUST NOT appear in test code (unit tests, integration tests under `tests/`, `#[cfg(test)]` modules, or language-specific test file conventions). Place markers only at entry points in **production** source or skeleton code that new tests exercise; never in test-only files."#
+**Production-only logging markers**: Logging markers MUST NOT appear in test code (unit tests, integration tests under `tests/`, `#[cfg(test)]` modules, or language-specific test file conventions). Place markers only at entry points in **production** source or skeleton code that new tests exercise; never in test-only files.
+
+**Marker lifecycle (cleanup)**: JSON `tddy` / `marker_id` emissions are for Red verification only. They MUST NOT remain in merge-ready code. The **refactor** goal removes them from production sources (delete the `eprintln!`/`println!`/equivalent lines and any code used solely to emit markers), unless `refactoring-plan.md` already tracks that work — then complete it there."#
         .to_string()
 }
 
@@ -51,6 +53,8 @@ pub fn build_followup_prompt(
 Now create skeleton code and failing tests based on this PRD and acceptance tests.
 
 **Production-only logging markers**: Logging markers MUST NOT appear in test code. Place markers only at **production** skeleton entry points.
+
+**Marker lifecycle**: Remove JSON `tddy` / `marker_id` emissions in the **refactor** goal (see system prompt).
 
 ## PRD
 
@@ -100,6 +104,17 @@ mod tests {
                 && prompt.contains("test code")
                 && prompt.contains("production"),
             "system prompt must forbid markers in test code and tie markers to production skeleton entry points"
+        );
+    }
+
+    #[test]
+    fn system_prompt_requires_refactor_cleanup_for_red_markers() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("Marker lifecycle")
+                && prompt.contains("refactor")
+                && prompt.contains("marker_id"),
+            "system prompt must tie Red JSON marker removal to the refactor goal"
         );
     }
 }
