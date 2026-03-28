@@ -33,7 +33,7 @@ pub enum TestEvent {
 
 fn presenter_event_to_test_event(ev: PresenterEvent) -> Option<TestEvent> {
     match ev {
-        PresenterEvent::ModeChanged(mode) => Some(TestEvent::ModeChanged(mode)),
+        PresenterEvent::ModeChanged(details) => Some(TestEvent::ModeChanged(details.mode)),
         PresenterEvent::ActivityLogged(entry) => Some(TestEvent::ActivityLogged(entry)),
         PresenterEvent::GoalStarted(goal) => Some(TestEvent::GoalStarted(goal)),
         PresenterEvent::StateChanged { from, to } => Some(TestEvent::StateChanged { from, to }),
@@ -464,6 +464,12 @@ fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
+            && presenter.state().plan_refinement_pending
+        {
+            presenter.handle_intent(UserIntent::AnswerText(
+                "Add OAuth support to the plan".to_string(),
+            ));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
             presenter.handle_intent(UserIntent::AnswerText(
                 "Add OAuth support to the plan".to_string(),
@@ -758,7 +764,66 @@ fn plan_approval_view_then_approve() {
     );
 }
 
-/// Plan approval: RefinePlan enters TextInput, AnswerText sends feedback, plan re-runs, approval re-appears.
+/// PRD (activity pane): Refine from the markdown plan view must not replace the PRD with a
+/// full-screen TextInput — refinement is entered via the prompt bar while PRD stays visible.
+#[test]
+#[serial]
+fn plan_view_refinement_submits_without_dismissing_markdown() {
+    let (mut presenter, mut events) = presenter_with_events();
+    let backend = create_stub_backend();
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-refine-without-textinput");
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
+    presenter.start_workflow(
+        backend,
+        output_dir,
+        None,
+        Some("Build auth".to_string()),
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+    );
+
+    let mut iterations = 0;
+    let max_iterations = 4000;
+    let mut triggered_refine = false;
+    while !presenter.is_done() && iterations < max_iterations {
+        presenter.poll_workflow();
+        events.drain();
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ViewSessionDocument);
+        } else if matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
+            && !triggered_refine
+        {
+            presenter.handle_intent(UserIntent::RefineSessionDocument);
+            triggered_refine = true;
+            assert!(
+                !matches!(presenter.state().mode, AppMode::TextInput { .. }),
+                "RefineSessionDocument with PRD visible must not switch to TextInput; got {:?}",
+                presenter.state().mode
+            );
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("fallback".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        triggered_refine,
+        "expected to reach MarkdownViewer and issue RefineSessionDocument; last mode: {:?}",
+        presenter.state().mode
+    );
+}
+
+/// Plan approval: RefinePlan opens MarkdownViewer + prompt refinement; AnswerText sends feedback; plan re-runs, approval re-appears.
 #[test]
 #[serial]
 fn plan_approval_refine_re_shows_approval() {
@@ -797,6 +862,12 @@ fn plan_approval_refine_re_shows_approval() {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
+            && presenter.state().plan_refinement_pending
+        {
+            presenter.handle_intent(UserIntent::AnswerText(
+                "Add OAuth support to the plan".to_string(),
+            ));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
             presenter.handle_intent(UserIntent::AnswerText(
                 "Add OAuth support to the plan".to_string(),

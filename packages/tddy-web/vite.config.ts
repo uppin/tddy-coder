@@ -14,6 +14,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // Cypress / dev server resolve `tddy-livekit-web` without requiring a prior `dist` build.
+      "tddy-livekit-web": path.resolve(__dirname, "../tddy-livekit-web/src/index.ts"),
     },
   },
   build: {

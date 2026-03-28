@@ -104,9 +104,9 @@ pub fn session_document_approval_to_server_message(content: String) -> ServerMes
 pub fn event_to_server_message(event: PresenterEvent) -> ServerMessage {
     use server_message::Event;
     match event {
-        PresenterEvent::ModeChanged(mode) => ServerMessage {
+        PresenterEvent::ModeChanged(details) => ServerMessage {
             event: Some(Event::ModeChanged(ModeChanged {
-                mode: Some(app_mode_to_proto(&mode)),
+                mode: Some(app_mode_to_proto(&details.mode)),
             })),
         },
         PresenterEvent::ActivityLogged(entry) => ServerMessage {
@@ -228,6 +228,37 @@ fn activity_kind_to_str(k: &ActivityKind) -> String {
         ActivityKind::StateChange => "StateChange".to_string(),
         ActivityKind::Info => "Info".to_string(),
         ActivityKind::AgentOutput => "AgentOutput".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod acceptance_plan_approval_rpc {
+    use super::*;
+    use prost::Message;
+    use tddy_core::{AppMode, ModeChangedDetails, PresenterEvent};
+
+    /// When the workflow asks for session document approval, RPC `ModeChanged` must match
+    /// [`AppMode::DocumentReview`] from the presenter.
+    #[test]
+    fn service_mode_changed_still_serializes_plan_approval() {
+        let prd = "# Shared PRD body\n".to_string();
+        let from_workflow =
+            workflow_event_to_server_message(WorkflowEvent::SessionDocumentApprovalNeeded {
+                content: prd.clone(),
+            })
+            .expect("workflow event");
+        let from_document_review =
+            event_to_server_message(PresenterEvent::ModeChanged(ModeChangedDetails {
+                mode: AppMode::DocumentReview {
+                    content: prd.clone(),
+                },
+                plan_refinement_pending: false,
+            }));
+        assert_eq!(
+            from_workflow.encode_to_vec(),
+            from_document_review.encode_to_vec(),
+            "DocumentReview gate must serialize like SessionDocumentApprovalNeeded"
+        );
     }
 }
 

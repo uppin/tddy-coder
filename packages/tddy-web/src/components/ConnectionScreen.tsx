@@ -71,6 +71,8 @@ function createTokenClient() {
 type ProjectSessionForm = {
   toolPath: string;
   agent: string;
+  /** Workflow recipe: `tdd` or `bugfix` (matches `WorkflowRecipe::name()`). */
+  recipe: string;
   debugLogging: boolean;
   daemonInstanceId: string;
 };
@@ -80,6 +82,7 @@ function defaultProjectSessionForm(tools: ToolInfo[], daemons: EligibleDaemonEnt
   return {
     toolPath: tools[0]?.path ?? "",
     agent: "claude",
+    recipe: "tdd",
     debugLogging: false,
     daemonInstanceId: localDaemon?.instanceId ?? daemons[0]?.instanceId ?? "",
   };
@@ -107,11 +110,12 @@ function ProjectSessionOptions({
   const toolId = `tool-select-${projectId}`;
   const backendId = `backend-select-${projectId}`;
   const hostId = `host-select-${projectId}`;
+  const recipeId = `recipe-select-${projectId}`;
   const debugId = `debug-logging-${projectId}`;
   return (
     <>
       <p className="mb-2 mt-2 text-xs text-muted-foreground">
-        Tool, backend, host, and debug apply only to <strong>Start New Session</strong> and to{" "}
+        Tool, backend, workflow recipe, host, and debug apply only to <strong>Start New Session</strong> and to{" "}
         <strong>Connect / Resume</strong> in this project—not saved on the project.
       </p>
       <div className="flex min-w-0 flex-nowrap items-end gap-3 overflow-x-auto pb-1 pt-1 [scrollbar-width:thin]">
@@ -166,6 +170,21 @@ function ProjectSessionOptions({
             <option value="claude-acp">Claude ACP (opus)</option>
             <option value="cursor">Cursor (composer-2)</option>
             <option value="stub">Stub</option>
+          </select>
+        </div>
+        <div className="flex min-w-[10rem] shrink-0 flex-col gap-1">
+          <label className="text-sm font-medium leading-none" htmlFor={recipeId}>
+            Workflow recipe (this session)
+          </label>
+          <select
+            id={recipeId}
+            data-testid={recipeId}
+            value={form.recipe}
+            onChange={(e) => onChange({ recipe: e.target.value })}
+            className={sessionControlSelectClassName}
+          >
+            <option value="tdd">TDD (plan → implement)</option>
+            <option value="bugfix">Bugfix (reproduce → fix)</option>
           </select>
         </div>
         <label
@@ -517,6 +536,9 @@ export function ConnectionScreen({
           if (!existing.daemonInstanceId && def.daemonInstanceId) {
             next[p.projectId] = { ...next[p.projectId], daemonInstanceId: def.daemonInstanceId };
           }
+          if (!existing.recipe?.trim()) {
+            next[p.projectId] = { ...next[p.projectId], recipe: def.recipe };
+          }
         }
       }
       return next;
@@ -563,6 +585,7 @@ export function ConnectionScreen({
         projectId: projectId.trim(),
         agent: form.agent,
         daemonInstanceId: form.daemonInstanceId,
+        recipe: form.recipe,
       });
       setConnected({
         livekitUrl: res.livekitUrl,

@@ -84,6 +84,8 @@ message StartSessionRequest {
   string agent = 4;
   // Target daemon instance to run this session on. Empty or matching local instance = spawn locally.
   string daemon_instance_id = 5;
+  // Workflow recipe for the new session ("tdd" or "bugfix"). Empty means default (tdd).
+  string recipe = 6;
 }
 message StartSessionResponse {
   string session_id = 1;

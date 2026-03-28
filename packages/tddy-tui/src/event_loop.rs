@@ -102,13 +102,14 @@ pub fn run_event_loop(
                     }
 
                     let inbox_len = state.inbox.len();
+                    let plan_pending = state.plan_refinement_pending;
                     let mode = state.mode.clone();
                     let cursor = view.view_state().inbox_cursor;
                     let edit_item = state.inbox.get(cursor).cloned();
 
                     let vs = view.view_state_mut();
                     let was_list = matches!(vs.inbox_focus, crate::view_state::InboxFocus::List);
-                    let consumed = vs.handle_key_view_local(key, &mode, inbox_len);
+                    let consumed = vs.handle_key_view_local(key, &mode, inbox_len, plan_pending);
                     if was_list
                         && matches!(vs.inbox_focus, crate::view_state::InboxFocus::Editing)
                         && vs.inbox_edit_buffer.is_empty()
@@ -122,7 +123,8 @@ pub fn run_event_loop(
                             let idx = view.view_state().select_selected;
                             let _ = intent_tx.send(UserIntent::SelectHighlightChanged(idx));
                         }
-                    } else if let Some(intent) = key_event_to_intent(key, &mode, view.view_state())
+                    } else if let Some(intent) =
+                        key_event_to_intent(key, &mode, view.view_state(), plan_pending)
                     {
                         let _ = intent_tx.send(intent);
                     }

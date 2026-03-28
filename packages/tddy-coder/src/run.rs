@@ -19,7 +19,7 @@ use tddy_core::{
     PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend, WorkflowEngine,
     WorkflowRecipe,
 };
-use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response, TddRecipe};
+use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response};
 
 use crate::plain;
 use crate::tty::should_run_tui;
@@ -27,8 +27,37 @@ use tddy_core::Presenter;
 
 use crate::disable_raw_mode;
 
-fn tdd_recipe() -> Arc<dyn WorkflowRecipe> {
-    Arc::new(TddRecipe)
+fn recipe_arc_for_args(args: &Args) -> anyhow::Result<Arc<dyn WorkflowRecipe>> {
+    let name = args.recipe.as_deref().unwrap_or("tdd");
+    crate::resolve_workflow_recipe_from_cli_name(name.trim()).map_err(|e| anyhow::anyhow!(e))
+}
+
+fn validate_recipe_cli(args: &Args) -> anyhow::Result<()> {
+    let name = args.recipe.as_deref().unwrap_or("tdd");
+    crate::resolve_workflow_recipe_from_cli_name(name.trim())
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!(e))
+}
+
+fn apply_recipe_from_changeset_if_needed(args: &mut Args) -> anyhow::Result<()> {
+    if args.recipe.is_some() {
+        return Ok(());
+    }
+    let Some(ref session_dir) = args.session_dir else {
+        return Ok(());
+    };
+    let cs = match tddy_core::read_changeset(session_dir) {
+        Ok(cs) => cs,
+        Err(_) => return Ok(()),
+    };
+    if let Some(r) = cs.recipe.filter(|s| !s.trim().is_empty()) {
+        log::info!(
+            "apply_recipe_from_changeset_if_needed: recipe {:?} from changeset.yaml",
+            r
+        );
+        args.recipe = Some(r);
+    }
+    Ok(())
 }
 
 /// TokenProvider that delegates to TokenGenerator. Used when the daemon has API key/secret.
@@ -119,13 +148,21 @@ pub fn run_main(mut args: Args) {
         std::process::exit(1);
     }
 
+    if let Err(e) = apply_recipe_from_changeset_if_needed(&mut args) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
     if let Err(e) = apply_agent_from_changeset_if_needed(&mut args) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
 
     // Validate args before any stderr redirect (daemon redirects stderr to a file).
-    if let Err(e) = validate_web_args(&args).and_then(|_| validate_livekit_args(&args)) {
+    if let Err(e) = validate_web_args(&args)
+        .and_then(|_| validate_livekit_args(&args))
+        .and_then(|_| validate_recipe_cli(&args))
+    {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
@@ -267,6 +304,8 @@ pub struct Args {
 
     /// Path to the Cursor `agent` CLI. When set, overrides `TDDY_CURSOR_AGENT` and the default `agent` on `PATH`.
     pub cursor_agent_path: Option<PathBuf>,
+    /// Workflow recipe name (`tdd` or `bugfix`). `None` means default `tdd` or recipe from changeset on resume.
+    pub recipe: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -278,8 +317,8 @@ pub struct CoderArgs {
     #[arg(short = 'c', long = "config")]
     pub config: Option<PathBuf>,
 
-    /// Goal to execute: plan, acceptance-tests, red, green, demo, evaluate, validate, refactor. Omit to run full workflow.
-    #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
+    /// Goal to execute: plan / reproduce (recipe start), acceptance-tests, red, green, … Omit to run full workflow.
+    #[arg(long, value_parser = ["plan", "reproduce", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
     pub goal: Option<String>,
 
     /// Session directory for plan artifacts (default: `{TDDY_SESSIONS_DIR}/sessions/<session_id>/`). Optional override (e.g. tests).
@@ -398,6 +437,10 @@ pub struct CoderArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
+    /// Workflow recipe: `tdd` (default) or `bugfix` (reproduce-then-fix). Must match [`WorkflowRecipe::name`].
+    #[arg(long, value_parser = ["tdd", "bugfix"])]
+    pub recipe: Option<String>,
+
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
     #[arg(long, value_name = "PATH")]
     pub cursor_agent_path: Option<PathBuf>,
@@ -412,8 +455,8 @@ pub struct DemoArgs {
     #[arg(short = 'c', long = "config")]
     pub config: Option<PathBuf>,
 
-    /// Goal to execute: plan, acceptance-tests, red, green, demo, evaluate, validate, refactor. Omit to run full workflow.
-    #[arg(long, value_parser = ["plan", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
+    /// Goal to execute: plan / reproduce, acceptance-tests, … Omit to run full workflow.
+    #[arg(long, value_parser = ["plan", "reproduce", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
     pub goal: Option<String>,
 
     /// Session directory for plan artifacts (default: `{TDDY_SESSIONS_DIR}/sessions/<session_id>/`). Optional override (e.g. tests).
@@ -531,6 +574,10 @@ pub struct DemoArgs {
     /// Project ID for daemon sessions. Used when spawned by tddy-daemon.
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
+
+    /// Workflow recipe: `tdd` (default) or `bugfix`.
+    #[arg(long, value_parser = ["tdd", "bugfix"])]
+    pub recipe: Option<String>,
 }
 
 fn is_debug_mode(args: &Args) -> bool {
@@ -605,6 +652,7 @@ impl From<CoderArgs> for Args {
             mouse: a.mouse,
             project_id: a.project_id,
             cursor_agent_path: a.cursor_agent_path,
+            recipe: a.recipe,
         }
     }
 }
@@ -644,6 +692,7 @@ impl From<DemoArgs> for Args {
             mouse: a.mouse,
             project_id: a.project_id,
             cursor_agent_path: None,
+            recipe: a.recipe,
         }
     }
 }
@@ -766,6 +815,7 @@ fn build_client_config(args: &Args) -> crate::web_server::ClientConfig {
 pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     validate_web_args(args)?;
     validate_livekit_args(args)?;
+    validate_recipe_cli(args)?;
     if let Some(ref a) = args.agent {
         verify_tddy_tools_available(a)?;
     }
@@ -857,10 +907,15 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         return run_goal_plain(args, backend, "update-docs", ctx, true, &shutdown);
     }
 
-    if args.goal.as_deref() != Some("plan") {
+    let recipe = recipe_arc_for_args(args)?;
+    let start_goal_id = recipe.start_goal();
+    let start_g = start_goal_id.as_str();
+    if args.goal.as_deref() != Some(start_g) {
         anyhow::bail!(
-            "unsupported goal: {}",
-            args.goal.as_deref().unwrap_or("(none)")
+            "unsupported goal: {} (expected `{}` for recipe `{}`)",
+            args.goal.as_deref().unwrap_or("(none)"),
+            start_g,
+            recipe.name()
         );
     }
 
@@ -880,6 +935,14 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
     let output_dir_for_ctx =
         std::env::current_dir().context("current dir for agent working_dir")?;
 
+    let init_cs = tddy_core::changeset::Changeset {
+        initial_prompt: Some(input.clone()),
+        repo_path: Some(output_dir_for_ctx.display().to_string()),
+        recipe: Some(args.recipe.as_deref().unwrap_or("tdd").to_string()),
+        ..tddy_core::changeset::Changeset::default()
+    };
+    let _ = tddy_core::changeset::write_changeset(&session_dir, &init_cs);
+
     let conv = resolve_log_defaults(args, &session_dir);
     let ctx = build_goal_context(args, None, &conv, &resolved_agent, |c| {
         c.insert("feature_input".to_string(), serde_json::json!(input));
@@ -892,7 +955,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             serde_json::to_value(session_dir.clone()).unwrap(),
         );
     });
-    run_goal_plain(args, backend, "plan", ctx, true, &shutdown)
+    run_goal_plain(args, backend, start_g, ctx, true, &shutdown)
 }
 
 fn on_progress(_event: &ProgressEvent) {
@@ -975,7 +1038,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 args.model
                     .as_deref()
                     .unwrap_or_else(|| default_model_for_agent(agent_str)),
-                tdd_recipe(),
+                recipe_arc_for_args(args)?,
             )
             .with_broadcast(event_tx)
             .with_intent_sender(intent_tx);
@@ -1304,9 +1367,11 @@ fn apply_agent_from_changeset_if_needed(args: &mut Args) -> anyhow::Result<()> {
         Ok(cs) => cs,
         Err(_) => return Ok(()),
     };
-    if let Some(agent) =
-        tddy_core::resolve_agent_from_changeset(&cs, TddRecipe.start_goal().as_str())
-    {
+    let recipe_name = cs.recipe.as_deref().unwrap_or("tdd");
+    let recipe = crate::resolve_workflow_recipe_from_cli_name(recipe_name.trim())
+        .map_err(|e| anyhow::anyhow!(e))?;
+    let start_goal_id = recipe.start_goal();
+    if let Some(agent) = tddy_core::resolve_agent_from_changeset(&cs, start_goal_id.as_str()) {
         args.agent = Some(agent);
     }
     Ok(())
@@ -1421,7 +1486,7 @@ fn run_goal_plain(
         .map(|p| tddy_core::workflow::session::workflow_engine_storage_dir(&p))
         .unwrap_or_else(|| std::env::temp_dir().join("tddy-flowrunner-session"));
     std::fs::create_dir_all(&storage_dir).context("create session storage dir")?;
-    let recipe = tdd_recipe();
+    let recipe = recipe_arc_for_args(args)?;
     let hooks = recipe.create_hooks(None);
     let engine = WorkflowEngine::new(recipe.clone(), backend.clone(), storage_dir, Some(hooks));
 
@@ -1583,14 +1648,14 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 .model
                 .as_deref()
                 .unwrap_or_else(|| default_model_for_agent(a));
-            Presenter::new(a, m, tdd_recipe())
+            Presenter::new(a, m, recipe_arc_for_args(args)?)
         }
         None => {
             let m = args
                 .model
                 .as_deref()
                 .unwrap_or_else(|| default_model_for_agent("claude"));
-            Presenter::new("claude", m, tdd_recipe())
+            Presenter::new("claude", m, recipe_arc_for_args(args)?)
         }
     }
     .with_broadcast(event_tx.clone())
@@ -1924,7 +1989,7 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
     let agent_str = resolve_agent_for_full_workflow_plain(args)?;
     let backend = create_backend(&agent_str, args.cursor_agent_path.as_deref(), None, None);
 
-    let recipe = tdd_recipe();
+    let recipe = recipe_arc_for_args(args)?;
     let mut session_dir = args.session_dir.clone().context("session directory")?;
     if recipe.uses_primary_session_document()
         && recipe
@@ -1936,13 +2001,15 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
 
     // When the session has Init state and no primary session document (or no start-goal session), run start goal to complete it.
     let cs_pre = read_changeset(&session_dir).ok();
+    let start_goal_id = recipe.start_goal();
+    let start_tag_str = start_goal_id.as_str();
     let plan_needs_completion = cs_pre.as_ref().is_some_and(|c| {
         recipe.uses_primary_session_document()
             && c.state.current.as_str() == "Init"
             && (recipe
                 .read_primary_session_document_utf8(&session_dir)
                 .is_none()
-                || get_session_for_tag(c, recipe.start_goal().as_str()).is_none())
+                || get_session_for_tag(c, start_tag_str).is_none())
     });
     if plan_needs_completion {
         let input = cs_pre
@@ -2119,9 +2186,13 @@ fn run_plan_to_get_dir(
     .context("create session dir")?;
     let output_dir_for_ctx =
         std::env::current_dir().context("current dir for agent working_dir")?;
+    let recipe = recipe_arc_for_args(args)?;
+    let start_goal_id = recipe.start_goal();
+    let start_g = start_goal_id.as_str();
     let init_cs = tddy_core::changeset::Changeset {
         initial_prompt: Some(input.clone()),
         repo_path: Some(output_dir_for_ctx.display().to_string()),
+        recipe: Some(args.recipe.as_deref().unwrap_or("tdd").to_string()),
         ..tddy_core::changeset::Changeset::default()
     };
     let _ = tddy_core::changeset::write_changeset(&session_dir, &init_cs);
@@ -2138,7 +2209,7 @@ fn run_plan_to_get_dir(
             serde_json::to_value(session_dir.clone()).unwrap(),
         );
     });
-    run_goal_plain(args, backend, "plan", ctx, false, shutdown)?;
+    run_goal_plain(args, backend, start_g, ctx, false, shutdown)?;
     Ok(session_dir)
 }
 
@@ -2161,7 +2232,10 @@ fn run_plan_to_complete(
             c.insert("feature_input".to_string(), serde_json::json!(input));
         },
     );
-    run_goal_plain(args, backend, "plan", ctx, false, shutdown)?;
+    let recipe = recipe_arc_for_args(args)?;
+    let start_goal_id = recipe.start_goal();
+    let start_g = start_goal_id.as_str();
+    run_goal_plain(args, backend, start_g, ctx, false, shutdown)?;
     Ok(session_dir.clone())
 }
 
@@ -2177,16 +2251,22 @@ fn run_plan_refinement(
         .ok()
         .and_then(|c| c.initial_prompt.clone())
         .unwrap_or_else(|| "feature".to_string());
+    let recipe = recipe_arc_for_args(args)?;
+    let start_goal_id = recipe.start_goal();
+    let start_tag = start_goal_id.as_str();
     let session_id_for_refine = read_changeset(session_dir)
         .ok()
-        .and_then(|c| get_session_for_tag(&c, "plan"));
+        .and_then(|c| get_session_for_tag(&c, start_tag));
     // output_dir from build_goal_context (repo_path in changeset); session_dir.parent() wrong when under ~/.tddy/sessions/
     let refine_storage = tddy_core::workflow::session::workflow_engine_storage_dir(session_dir);
     std::fs::create_dir_all(&refine_storage).context("create refine session dir")?;
-    let recipe = tdd_recipe();
     let refine_hooks = recipe.create_hooks(None);
-    let refine_engine =
-        WorkflowEngine::new(recipe, backend.clone(), refine_storage, Some(refine_hooks));
+    let refine_engine = WorkflowEngine::new(
+        recipe.clone(),
+        backend.clone(),
+        refine_storage,
+        Some(refine_hooks),
+    );
     let session_dir_buf = session_dir.to_path_buf();
     let conv = resolve_log_defaults(args, &session_dir_buf);
     let mut refine_ctx =
@@ -2203,7 +2283,7 @@ fn run_plan_refinement(
     if let Some(sid) = session_id_for_refine {
         refine_ctx.insert("session_id".to_string(), serde_json::json!(sid));
     }
-    let plan_gid = GoalId::new("plan");
+    let plan_gid = recipe.start_goal();
     let mut refine_result = rt
         .block_on(refine_engine.run_goal(&plan_gid, refine_ctx))
         .map_err(|e| anyhow::anyhow!("refinement: {}", e))?;
@@ -2305,6 +2385,7 @@ mod resume_session_config_tests {
             mouse: false,
             project_id: None,
             cursor_agent_path: None,
+            recipe: None,
         };
 
         merge_session_coder_config_for_resume(&mut args).expect("merge");
@@ -2361,6 +2442,7 @@ mod resume_session_identity_tests {
             mouse: false,
             project_id: None,
             cursor_agent_path: None,
+            recipe: None,
         };
 
         assign_default_session_id(&mut args);
@@ -2420,6 +2502,7 @@ mod session_dir_sync_tests {
             mouse: false,
             project_id: None,
             cursor_agent_path: None,
+            recipe: None,
         };
 
         sync_session_dir_from_args(&mut args).expect("apply");
@@ -2493,6 +2576,7 @@ mod changeset_agent_resume_tests {
             mouse: false,
             project_id: None,
             cursor_agent_path: None,
+            recipe: None,
         };
 
         apply_agent_from_changeset_if_needed(&mut args).expect("apply");

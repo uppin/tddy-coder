@@ -52,6 +52,23 @@ pub fn handle_mouse_event(
                 _ => 0,
             };
             if rect_contains(&areas.activity_log, col, row) {
+                if matches!(mode, AppMode::MarkdownViewer { .. }) {
+                    let h = areas.activity_log.height;
+                    let footer_h = if h >= 2 { 2 } else { 1 }.min(h);
+                    let footer_top = areas.activity_log.y + h - footer_h;
+                    if h > 0 && row >= footer_top && row < areas.activity_log.y + h {
+                        log::trace!("mouse: scroll on plan footer ignored");
+                        return None;
+                    }
+                    view_state.markdown_scroll_offset = view_state
+                        .markdown_scroll_offset
+                        .saturating_add_signed(delta as isize);
+                    log::trace!(
+                        "mouse: markdown scroll offset={}",
+                        view_state.markdown_scroll_offset
+                    );
+                    return None;
+                }
                 view_state.scroll_offset = view_state
                     .scroll_offset
                     .saturating_add_signed(delta as isize);
@@ -62,6 +79,18 @@ pub fn handle_mouse_event(
             }
         }
         MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+            if matches!(mode, AppMode::MarkdownViewer { .. })
+                && rect_contains(&areas.activity_log, col, row)
+            {
+                let h = areas.activity_log.height;
+                let footer_h = if h >= 2 { 2 } else { 1 }.min(h);
+                let footer_top = areas.activity_log.y + h - footer_h;
+                if h > 0 && row >= footer_top && row < areas.activity_log.y + h {
+                    return plan_approval_activity_footer_click(view_state, areas, col, row);
+                }
+                log::trace!("mouse: click in markdown body (no intent)");
+                return None;
+            }
             if rect_contains(&areas.dynamic_area, col, row) {
                 return click_dynamic_area(mode, view_state, areas, row);
             }
@@ -184,6 +213,49 @@ fn click_dynamic_area(
     }
 }
 
+/// Plan approval footer: two stacked lines (Approve then Reject) like Select options, or one row
+/// split left/right when the activity pane is only one line tall.
+fn plan_approval_activity_footer_click(
+    view_state: &mut ViewState,
+    areas: &LayoutAreas,
+    col: u16,
+    row: u16,
+) -> Option<UserIntent> {
+    let h = areas.activity_log.height;
+    if h == 0 {
+        return None;
+    }
+    let footer_h = if h >= 2 { 2 } else { 1 }.min(h);
+    let footer_top = areas.activity_log.y + h - footer_h;
+    log::debug!(
+        "plan_approval_activity_footer_click: col={} row={} footer_top={} footer_h={} activity={:?}",
+        col,
+        row,
+        footer_top,
+        footer_h,
+        areas.activity_log
+    );
+    if footer_h >= 2 {
+        let rel = row.saturating_sub(footer_top);
+        if rel == 0 {
+            view_state.markdown_end_button_selected = 0;
+            Some(UserIntent::ApproveSessionDocument)
+        } else {
+            view_state.markdown_end_button_selected = 1;
+            Some(UserIntent::RefineSessionDocument)
+        }
+    } else {
+        let mid = areas.activity_log.x + areas.activity_log.width / 2;
+        if col < mid {
+            view_state.markdown_end_button_selected = 0;
+            Some(UserIntent::ApproveSessionDocument)
+        } else {
+            view_state.markdown_end_button_selected = 1;
+            Some(UserIntent::RefineSessionDocument)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,7 +263,11 @@ mod tests {
     use crossterm::event::MouseButton;
     use ratatui::layout::Rect;
 
-    fn areas_80x24() -> LayoutAreas {
+    /// Fixed rects for the **legacy** four-line PlanReview menu strip (pre–activity-pane redesign).
+    /// Kept to unit-test [`click_dynamic_area`] / scroll behavior for [`AppMode::PlanReview`];
+    /// real [`draw`] uses [`crate::layout::question_height`] (0 strip) — see
+    /// [`areas_from_real_layout_80x24_plan_review`].
+    fn legacy_plan_review_menu_strip_fixture_80x24() -> LayoutAreas {
         let activity = Rect::new(0, 0, 80, 18);
         let dynamic = Rect::new(0, 18, 80, 4);
         let status = Rect::new(0, 22, 80, 1);
@@ -250,24 +326,21 @@ mod tests {
         }
     }
 
-    /// Fixture must match real layout for DocumentReview 80x24. Fails if layout drifts.
+    /// Plan approval uses the activity region; the old four-line dynamic menu strip is not allocated.
     #[test]
-    fn fixture_matches_real_layout_document_review_80x24() {
-        let fixture = areas_80x24();
+    fn plan_review_real_layout_has_no_dynamic_menu_strip_80x24() {
         let real = areas_from_real_layout_80x24_document_review();
         assert_eq!(
-            fixture.dynamic_area.y, real.dynamic_area.y,
-            "dynamic_area.y must match: fixture={} real={}. Layout drift causes off-by-one.",
-            fixture.dynamic_area.y, real.dynamic_area.y
+            real.dynamic_area.height, 0,
+            "DocumentReview must not reserve a separate dynamic strip for View/Approve/Refine"
         );
-        assert_eq!(fixture.dynamic_area.height, real.dynamic_area.height);
     }
 
     /// When terminal sends row 19 for Approve click, caller must normalize before handle_mouse_event.
     #[test]
     fn click_row_19_when_terminal_sends_1_less_must_select_approve() {
         let mut vs = ViewState::new();
-        let areas = areas_80x24();
+        let areas = legacy_plan_review_menu_strip_fixture_80x24();
         let ev = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 5,
@@ -289,7 +362,7 @@ mod tests {
     #[test]
     fn scroll_in_activity_log_adjusts_scroll_offset() {
         let mut vs = ViewState::new();
-        let areas = areas_80x24();
+        let areas = legacy_plan_review_menu_strip_fixture_80x24();
         let ev = MouseEvent {
             kind: MouseEventKind::ScrollDown,
             column: 10,
@@ -304,7 +377,7 @@ mod tests {
     #[test]
     fn click_document_review_approve_produces_intent() {
         let mut vs = ViewState::new();
-        let areas = areas_80x24();
+        let areas = legacy_plan_review_menu_strip_fixture_80x24();
         // dynamic_area.y=18: row 18=header, 19=View, 20=Approve, 21=Refine
         let ev = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -324,7 +397,7 @@ mod tests {
     fn scroll_in_dynamic_area_navigates_document_review() {
         let mut vs = ViewState::new();
         vs.document_review_selected = 1;
-        let areas = areas_80x24();
+        let areas = legacy_plan_review_menu_strip_fixture_80x24();
         let ev = MouseEvent {
             kind: MouseEventKind::ScrollUp,
             column: 5,
@@ -344,7 +417,7 @@ mod tests {
     #[test]
     fn click_document_review_refine_selects_refine_not_approve() {
         let mut vs = ViewState::new();
-        let areas = areas_80x24();
+        let areas = legacy_plan_review_menu_strip_fixture_80x24();
         let ev = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 5,
@@ -369,7 +442,7 @@ mod tests {
     #[test]
     fn click_document_review_view_selects_view() {
         let mut vs = ViewState::new();
-        let areas = areas_80x24();
+        let areas = legacy_plan_review_menu_strip_fixture_80x24();
         let ev = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 5,
@@ -413,6 +486,56 @@ mod tests {
             "click Continue row after normalize must produce ContinueWithAgent; got {:?} (selection={})",
             intent,
             vs.error_recovery_selected
+        );
+    }
+
+    /// PRD: Approve / Refine sit at the bottom of the activity rect (not the old PlanReview strip).
+    /// With a normal layout, the footer is two lines; Approve is the upper line, Reject the lower.
+    #[test]
+    fn plan_approval_footer_buttons_in_activity_hit_test() {
+        let mut vs = ViewState::new();
+        let area = Rect::new(0, 0, 80, 24);
+        let dynamic_h = 0u16;
+        let prompt_h = 1u16;
+        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+            layout_chunks_with_inbox(area, dynamic_h, 0, prompt_h);
+        let areas = LayoutAreas {
+            activity_log,
+            dynamic_area,
+            status_bar,
+            prompt_bar,
+        };
+        let mode = AppMode::MarkdownViewer {
+            content: "# Plan".to_string(),
+        };
+        let h = activity_log.height;
+        let footer_h = if h >= 2 { 2 } else { 1 }.min(h);
+        let footer_top = activity_log.y + h - footer_h;
+        let approve_row = footer_top;
+        let reject_row = footer_top + footer_h.saturating_sub(1);
+        let ev_approve = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: approve_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent_approve = handle_mouse_event(ev_approve, &mode, &mut vs, &areas, 0);
+        assert_eq!(
+            intent_approve,
+            Some(UserIntent::ApproveSessionDocument),
+            "click on Approve footer line must approve"
+        );
+        let ev_reject = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: reject_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent_reject = handle_mouse_event(ev_reject, &mode, &mut vs, &areas, 0);
+        assert_eq!(
+            intent_reject,
+            Some(UserIntent::RefineSessionDocument),
+            "click on Reject footer line must request refinement"
         );
     }
 }
