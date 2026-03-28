@@ -320,6 +320,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 Some(t.to_string())
             }
         };
+        let recipe_for_spawn: Option<String> = {
+            let t = req.recipe.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
         let timeout = self.config.spawn_worker_request_timeout();
         let result = spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
             log::debug!(
@@ -328,6 +336,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             );
             let pid = Some(pid_for_spawn.as_str());
             let agent = agent_for_spawn.as_deref();
+            let recipe = recipe_for_spawn.as_deref();
             if let Some(ref client) = spawn_client {
                 let spawn_req = spawn_worker::build_spawn_request(
                     &os_user,
@@ -339,6 +348,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         project_id: pid,
                         agent,
                         mouse: spawn_mouse,
+                        recipe,
                     },
                 );
                 client.spawn(spawn_req)
@@ -353,6 +363,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         project_id: pid,
                         agent,
                         mouse: spawn_mouse,
+                        recipe,
                     },
                 )
             }
@@ -469,6 +480,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         project_id: pid,
                         agent: None,
                         mouse: spawn_mouse,
+                        recipe: None,
                     },
                 );
                 client.spawn(spawn_req)
@@ -483,6 +495,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         project_id: pid,
                         agent: None,
                         mouse: spawn_mouse,
+                        recipe: None,
                     },
                 )
             }

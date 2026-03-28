@@ -679,6 +679,32 @@ describe("ConnectionScreen multi-host daemon selection", () => {
       .should("have.value", DAEMON_LOCAL.instanceId);
   });
 
+  it("web_start_session_includes_recipe_field", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcsWithDaemons([]);
+
+    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+      req.reply({
+        statusCode: 200,
+        headers: { "Content-Type": "application/proto" },
+        body: toArrayBuffer(new Uint8Array(0)),
+      });
+    }).as("startSession");
+
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+
+    cy.get(`[data-testid="recipe-select-${PROJECT.projectId}"]`, { timeout: 5000 })
+      .select("bugfix");
+    cy.get(`[data-testid="start-session-${PROJECT.projectId}"]`).click();
+
+    cy.wait("@startSession").then((interception) => {
+      const bodyBytes = new Uint8Array(interception.request.body as ArrayBuffer);
+      const decoded = fromBinary(StartSessionRequestSchema, bodyBytes);
+      expect(decoded.recipe).to.eq("bugfix");
+    });
+  });
+
   it("sends daemonInstanceId in StartSession request", () => {
     window.localStorage.setItem("tddy_session_token", "fake-token");
     interceptAllRpcsWithDaemons([]);
