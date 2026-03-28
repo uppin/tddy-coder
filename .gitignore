@@ -4,6 +4,7 @@
 
 # Agent verification output (when terminal capture is broken)
 .verify-result.txt
+**/.tddy-red-test-output*.txt
 .red-markers-test-output.txt
 .green-web-dev-test-output.txt
 .red-web-dev-test-output.txt

@@ -29,7 +29,7 @@ tddy-coder currently operates as a CLI/TUI application. To enable remote observa
 
 When the terminal connects and renders, it supports:
 
-- **Fullscreen**: Fills 100% of the viewport (width and height). Overlay buttons: Disconnect and Ctrl+C.
+- **Fullscreen**: Fills 100% of the viewport (width and height). Overlay controls sit in a top-right row: **Ctrl+C** (injects ETX `0x03` into the terminal input stream), **Terminate** (present when the host supplies `connectionOverlay.onTerminate`; in daemon **ConnectionScreen** this maps to **`signalSession(..., SIGINT)`** for the active session), and **Disconnect** (clears connected state). A **build id** label appears top-left when provided. **Debug logging** for the LiveKit shell enables verbose `[GhosttyLiveKit]` traces and per-keystroke `[terminal→server]` dataflow logs; otherwise those keystroke logs are omitted.
 - **Auto-focus**: Keyboard focus is set on the terminal when ready. User can type immediately. (On mobile, auto-focus is disabled; see Mobile UX.)
 - **Adaptive size**: FitAddon auto-sizes the terminal to its container. Resize events are sent to the virtual TUI via `\x1b]resize;{cols};{rows}\x07`.
 - **Touch/mouse mode**: When `--mouse` is set on tddy-coder, the TUI sends EnableMouseCapture. GhosttyTerminal encodes SGR mouse sequences `\x1b[<Pb;Px;PyM/m` (press/release) and forwards them via onData. Click-to-select and scroll work. Touch events (touchstart/touchend) are forwarded for tap-to-click on mobile.
@@ -44,6 +44,10 @@ On touch-capable devices or narrow viewports (width &lt; 768px):
 - **Touch forwarding**: Tap-to-click works for TUI menus and interactive elements. Capture-phase touch handlers send SGR mouse sequences before focus prevention, so interactive TUIs (vim, htop) receive correct mouse events.
 - **Build ID**: A build timestamp is shown in the top-left when connected for cache verification on mobile.
 
+### Session end and return to Connection screen
+
+When the LiveKit **server/coder** participant disconnects (`ParticipantDisconnected` for the configured `serverIdentity`), the terminal shows the existing **`terminal-coder-unavailable`** banner and stops accepting input. The client invokes **`onRemoteSessionEnded`** once per session so the host shell (**ConnectionScreen** in daemon mode) clears **`connected`** state and returns to the session list—without requiring **Disconnect** after the session-ended overlay. **Connection RPC** errors (including a failed **Terminate** / **`signalSession`**) surface in a dismissible banner at the top of the full-screen container (**`data-testid="connection-error"`**) while the terminal remains open.
+
 ## Daemon mode: Connection screen (project-centric)
 
 When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated users see **ConnectionScreen** (not the manual LiveKit URL form):
@@ -52,6 +56,7 @@ When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated us
 - **Projects** as collapsible sections (`<details>`): each shows name, git URL, `main_repo_path`, then **Host** (target daemon instance from `ListEligibleDaemons`), **Tool** (from daemon `allowed_tools`), **Backend** (`agent` on `StartSession`), and **Debug logging** (browser terminal only)—all **per session**, not stored on the project—then **Start New Session** (`StartSession` with `project_id` and optional `daemon_instance_id`), and a table of sessions for that `project_id`. Session tables include a **Host** column (`daemon_instance_id` from `ListSessions`). Connect/Resume in that section uses that project’s debug setting.
 - **Other sessions**: Connect/Resume uses a separate **debug** checkbox for that list (sessions not tied to a listed project).
 - Sessions whose `project_id` is not in the listed projects appear under **Other sessions**.
+- **Connected session identity**: **`sessionId`** is stored on **`connected`** state for **Start**, **Connect**, and **Resume** so full-screen **Terminate** targets the correct **`signalSession`** request.
 
 ### Session table ordering
 
