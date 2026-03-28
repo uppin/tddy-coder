@@ -94,7 +94,7 @@ pub(crate) fn prepend_activity_to_status_line(
         spinner_frame,
         session_segment.chars().count()
     );
-    format!("{}{}{}", spinner_frame, session_segment, tail)
+    format!("{} {} {}", spinner_frame, session_segment, tail)
 }
 
 /// Full status bar text with a leading spinner frame and session segment before the existing
