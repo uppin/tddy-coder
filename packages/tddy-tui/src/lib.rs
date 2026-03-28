@@ -11,6 +11,7 @@ pub mod layout;
 pub mod mouse_map;
 pub mod raw;
 pub mod render;
+pub mod status_bar_activity;
 pub mod tui_view;
 pub mod ui;
 pub mod view_state;

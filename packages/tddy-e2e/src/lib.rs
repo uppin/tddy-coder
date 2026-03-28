@@ -16,7 +16,7 @@ use tddy_core::ViewConnection;
 use tddy_core::{AnyBackend, Presenter, PresenterHandle, SharedBackend, StubBackend};
 use tddy_service::gen::tddy_remote_server::TddyRemoteServer;
 use tddy_service::TddyRemoteService;
-use tddy_tui::{apply_event, render::draw, TuiView};
+use tddy_tui::{render::draw, virtual_tui::drain_presenter_broadcast, TuiView};
 use tddy_workflow_recipes::TddRecipe;
 
 use crate::test_util::temp_dir_with_git_repo;
@@ -177,6 +177,7 @@ pub fn spawn_presenter_with_grpc_and_tui(
         let mut state = conn.state_snapshot;
         let mut view = TuiView::new();
         let mut event_rx = conn.event_rx;
+        let critical_state = conn.critical_state;
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -185,9 +186,8 @@ pub fn spawn_presenter_with_grpc_and_tui(
             if shutdown_clone.load(Ordering::Relaxed) {
                 break;
             }
-            while let Ok(ev) = event_rx.try_recv() {
-                apply_event(&mut state, &mut view, ev);
-            }
+            let _ =
+                drain_presenter_broadcast(&mut event_rx, &mut state, &mut view, &critical_state);
             terminal
                 .draw(|f| draw(f, &state, view.view_state_mut(), false, None))
                 .unwrap();

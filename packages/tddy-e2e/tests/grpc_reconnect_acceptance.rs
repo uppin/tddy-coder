@@ -130,9 +130,12 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
         &reconnect_burst[..reconnect_burst.len().min(16)]
     );
 
+    // Full composited frame size varies slightly (e.g. idle status dot vs fast spinner ANSI churn).
+    const MIN_RECONNECT_FRAME_BYTES: usize = 500;
     assert!(
-        reconnect_burst.len() >= 700,
-        "reconnect initial output must be a substantial composited frame (>= 700 bytes), got {}",
+        reconnect_burst.len() >= MIN_RECONNECT_FRAME_BYTES,
+        "reconnect initial output must be a substantial composited frame (>= {} bytes), got {}",
+        MIN_RECONNECT_FRAME_BYTES,
         reconnect_burst.len()
     );
 

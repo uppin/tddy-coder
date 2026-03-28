@@ -24,7 +24,26 @@ When a backend reports a different agent thread id than the process-bound sessio
 
 ## Migration from non-unified trees
 
-Deployments that store session data outside `{sessions_base}/sessions/{session_id}/` do not appear in list or get flows that use the unified contract. Manual relocation steps are documented in [session-layout migration](../../dev/1-WIP/session-layout-migration.md).
+Deployments that store session data outside `{sessions_base}/sessions/{session_id}/` do not appear in list or get flows that use the unified contract.
+
+### Legacy flat layouts
+
+Older or manual setups may have stored session data **directly** under `{sessions_base}/` (or elsewhere) **without** the `sessions/` segment, or used ad hoc directory names.
+
+Those directories are **not** discovered by `ListSessions` / `GetSession`, which only scan and resolve paths under `{sessions_base}/sessions/`.
+
+### Manual upgrade path
+
+1. For each legacy session directory `L` that should remain active, choose the canonical `session_id` (single path segment: alphanumeric, `-`, `_`; no `/`, `\`, or `..`; see `tddy_core::session_lifecycle::validate_session_id_segment`).
+2. Create `{sessions_base}/sessions/{session_id}/`.
+3. Move the contents of `L` into that directory (preserve `changeset.yaml` and relative paths as needed).
+4. Restart clients so they use the same `session_id` string.
+
+Automated migration tooling is not part of the product; perform the above manually or with a one-off script in a controlled maintenance window.
+
+### Security note
+
+Always use validated `session_id` strings when constructing paths. APIs reject malformed ids so they cannot escape the `sessions/` subtree via `..` or path separators.
 
 ## Related documentation
 
