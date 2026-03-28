@@ -29,7 +29,7 @@ tddy-coder currently operates as a CLI/TUI application. To enable remote observa
 
 When the terminal connects and renders, it supports:
 
-- **Fullscreen**: Fills 100% of the viewport (width and height). Overlay buttons: Disconnect and Ctrl+C.
+- **Fullscreen**: Fills 100% of the viewport (width and height). Overlay controls sit above the terminal canvas (`z-index: 100`). **Build ID** appears top-left when provided. The right-hand cluster (from the viewport’s right edge inward) is: **Disconnect** (rightmost), optional **Terminate** (daemon session flows only), then **Ctrl+C**. **Ctrl+C** injects byte **0x03** on the same LiveKit terminal input queue as keyboard input. **Terminate** appears only when the host passes **`onSessionTerminate`** (daemon-backed **ConnectionScreen** flows with a **`sessionId`**); it invokes **`ConnectionService.SignalSession`** with **`SIGINT`** to the tracked session process—the same RPC path as **Interrupt (SIGINT)** on the Connection Screen session table—not the PTY **0x03** path. The manual **Connect by URL** flow omits **`onSessionTerminate`**, so that surface shows **Ctrl+C** and **Disconnect** only.
 - **Auto-focus**: Keyboard focus is set on the terminal when ready. User can type immediately. (On mobile, auto-focus is disabled; see Mobile UX.)
 - **Adaptive size**: FitAddon auto-sizes the terminal to its container. Resize events are sent to the virtual TUI via `\x1b]resize;{cols};{rows}\x07`.
 - **Touch/mouse mode**: When `--mouse` is set on tddy-coder, the TUI sends EnableMouseCapture. GhosttyTerminal encodes SGR mouse sequences `\x1b[<Pb;Px;PyM/m` (press/release) and forwards them via onData. Click-to-select and scroll work. Touch events (touchstart/touchend) are forwarded for tap-to-click on mobile.
@@ -43,6 +43,7 @@ On touch-capable devices or narrow viewports (width &lt; 768px):
 - **Focus prevention**: Tapping the terminal does not open the keyboard. The terminal uses `preventFocusOnTap` (event prevention + readonly textarea) so the keyboard opens only when the user taps the Keyboard button.
 - **Touch forwarding**: Tap-to-click works for TUI menus and interactive elements. Capture-phase touch handlers send SGR mouse sequences before focus prevention, so interactive TUIs (vim, htop) receive correct mouse events.
 - **Build ID**: A build timestamp is shown in the top-left when connected for cache verification on mobile.
+- **Fullscreen RPC errors**: When **`ConnectionScreen`** opens the daemon terminal, Connect-RPC failures from session actions (including **SignalSession** after **Terminate**) surface in a dismissible **`connection-error`** banner at the top of the fullscreen shell (`role="alert"`).
 
 ## Daemon mode: Connection screen (project-centric)
 

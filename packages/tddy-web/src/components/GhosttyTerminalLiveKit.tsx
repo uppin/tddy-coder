@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Room, RoomEvent } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
 import {
@@ -8,6 +8,10 @@ import {
 } from "tddy-livekit-web";
 import { create } from "@bufbuild/protobuf";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
+import {
+  buildTerminateOverlayAriaLabel,
+  handleTerminateOverlayClick,
+} from "../connection/sessionTerminateOverlay";
 
 /** Overlay buttons for live sessions: must sit above the canvas (z-index, DOM order) and enqueue bytes via the same path as Ghostty `onData`. */
 const CONNECTION_OVERLAY_BTN: React.CSSProperties = {
@@ -75,6 +79,11 @@ export interface GhosttyTerminalLiveKitProps {
   connectionOverlay?: {
     onDisconnect: () => void;
     buildId?: string;
+    /**
+     * When set, show **Terminate** (daemon `SignalSession` SIGINT — same path as Connection Screen Interrupt).
+     * Omit for flows without session signaling (e.g. Connect by URL).
+     */
+    onSessionTerminate?: () => void | Promise<void>;
   };
   /** When false, do not auto-focus terminal on ready (e.g. for mobile to avoid opening keyboard). Default true. */
   autoFocus?: boolean;
@@ -124,6 +133,29 @@ export function GhosttyTerminalLiveKit({
   const [highlightedLine, setHighlightedLine] = useState("");
   const [coderSessionActive, setCoderSessionActive] = useState(true);
   const coderAvailableRef = useRef(true);
+  /** Set after Terminate overlay successfully finishes `onSessionTerminate` (including Connect-RPC). */
+  const [terminateSignalRpcComplete, setTerminateSignalRpcComplete] = useState(false);
+
+  const runOverlayTerminate = useCallback(async () => {
+    const terminate = connectionOverlay?.onSessionTerminate;
+    if (!terminate) return;
+    setTerminateSignalRpcComplete(false);
+    try {
+      if (debugLogging) {
+        console.debug("[GhosttyTerminalLiveKit] Terminate: invoking onSessionTerminate");
+      }
+      await handleTerminateOverlayClick(terminate, { trace: debugLogging });
+      setTerminateSignalRpcComplete(true);
+      if (debugLogging) {
+        console.info("[GhosttyTerminalLiveKit] Terminate: session terminate callback completed");
+      }
+    } catch (e) {
+      if (debugLogging) {
+        console.error("[GhosttyTerminalLiveKit] Terminate: callback failed", e);
+      }
+      setTerminateSignalRpcComplete(false);
+    }
+  }, [connectionOverlay?.onSessionTerminate, debugLogging]);
 
   useEffect(() => {
     let room: Room | null = null;
@@ -522,7 +554,10 @@ export function GhosttyTerminalLiveKit({
             <button
               type="button"
               data-testid="ctrl-c-button"
-              style={{ ...CONNECTION_OVERLAY_BTN, right: 72 }}
+              style={{
+                ...CONNECTION_OVERLAY_BTN,
+                right: connectionOverlay.onSessionTerminate ? 192 : 72,
+              }}
               onClick={(ev) => {
                 ev.preventDefault();
                 ev.stopPropagation();
@@ -531,6 +566,22 @@ export function GhosttyTerminalLiveKit({
             >
               Ctrl+C
             </button>
+            {connectionOverlay.onSessionTerminate && (
+              <button
+                type="button"
+                data-testid="terminate-button"
+                data-sigint-wired="true"
+                aria-label={buildTerminateOverlayAriaLabel()}
+                style={{ ...CONNECTION_OVERLAY_BTN, right: 100 }}
+                onClick={(ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  void runOverlayTerminate();
+                }}
+              >
+                Terminate
+              </button>
+            )}
             <button
               type="button"
               data-testid="disconnect-button"
@@ -557,6 +608,13 @@ export function GhosttyTerminalLiveKit({
               >
                 {connectionOverlay.buildId}
               </span>
+            )}
+            {connectionOverlay.onSessionTerminate && terminateSignalRpcComplete && (
+              <div
+                data-testid="terminate-rpc-complete"
+                style={{ display: "none" }}
+                aria-hidden
+              />
             )}
           </>
         )}
