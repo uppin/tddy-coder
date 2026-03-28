@@ -27,6 +27,32 @@ fn parse_planning_response_resolves_prd_path_to_file_content() {
     let _ = std::fs::remove_dir_all(&session_dir);
 }
 
+/// When the agent submits `"prd": "PRD.md"` (a file path reference) but the file doesn't exist
+/// at `session_dir`, the parser must not silently use the literal string "PRD.md" as PRD content.
+/// In daemon mode `session_dir` is `~/.tddy/sessions/<uuid>/` while the agent writes to its
+/// working directory (repo root); so the file reference can't be resolved against session_dir.
+///
+/// Current behavior: the literal "PRD.md" becomes the PRD body, producing a placeholder plan.
+/// Expected behavior: the parser rejects the unresolvable file reference.
+#[test]
+fn parse_planning_response_rejects_unresolvable_prd_file_path() {
+    let session_dir = std::env::temp_dir().join("tddy-parse-prd-missing-file-test");
+    let _ = std::fs::remove_dir_all(&session_dir);
+    std::fs::create_dir_all(&session_dir).expect("create dir");
+
+    let json = r##"{"goal":"plan","prd":"PRD.md"}"##;
+    let result = parse_planning_response_with_base(json, Path::new(&session_dir));
+
+    assert!(
+        result.is_err(),
+        "parser should reject prd='PRD.md' when the file doesn't exist at session_dir, \
+         but got Ok with prd={:?} — the literal filename became PRD content",
+        result.as_ref().ok().map(|o| &o.prd)
+    );
+
+    let _ = std::fs::remove_dir_all(&session_dir);
+}
+
 #[test]
 fn parse_planning_response_accepts_valid_json() {
     let input = "{\"goal\":\"plan\",\"prd\":\"# PRD\\n\\n## Summary\\nFeature X\\n\\n## TODO\\n\\n- [ ] Task 1\"}";

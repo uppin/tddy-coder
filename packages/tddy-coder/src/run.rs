@@ -1844,25 +1844,23 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         .expect("connect_view requires broadcast and intent_tx");
     let shutdown_for_thread = shutdown.clone();
     let presenter_for_thread = presenter.clone();
-    let presenter_handle = std::thread::spawn(move || {
-        for _ in 0..100_000 {
-            if shutdown_for_thread.load(Ordering::Relaxed) {
+    let presenter_handle = std::thread::spawn(move || loop {
+        if shutdown_for_thread.load(Ordering::Relaxed) {
+            break;
+        }
+        while let Ok(intent) = intent_rx.try_recv() {
+            if let Ok(mut p) = presenter_for_thread.lock() {
+                p.handle_intent(intent);
+            }
+        }
+        if let Ok(mut p) = presenter_for_thread.lock() {
+            p.poll_tool_calls();
+            p.poll_workflow();
+            if p.state().should_quit {
                 break;
             }
-            while let Ok(intent) = intent_rx.try_recv() {
-                if let Ok(mut p) = presenter_for_thread.lock() {
-                    p.handle_intent(intent);
-                }
-            }
-            if let Ok(mut p) = presenter_for_thread.lock() {
-                p.poll_tool_calls();
-                p.poll_workflow();
-                if p.state().should_quit {
-                    break;
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
         }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     });
 
     tddy_tui::run_event_loop(
