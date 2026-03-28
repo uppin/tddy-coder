@@ -1,9 +1,9 @@
 //! Multi-host daemon selection — acceptance tests from the feature PRD Testing Plan.
 //!
-//! These assert routing, per-host project paths, and cross-daemon safety. They are expected to fail
-//! until the multi-host implementation is complete (red phase).
+//! These assert routing, per-host project paths, and cross-daemon safety.
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -12,7 +12,8 @@ use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ListEligibleDaemonsRequest,
+    ListSessionsRequest,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -24,9 +25,9 @@ users:
   - github_user: "testuser"
     os_user: "testdev"
 "#;
-    let path = std::env::temp_dir().join("tddy-multi-host-acceptance-config.yaml");
-    std::fs::write(&path, yaml).unwrap();
-    DaemonConfig::load(&path).unwrap()
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    tmp.write_all(yaml.as_bytes()).unwrap();
+    DaemonConfig::load(tmp.path()).unwrap()
 }
 
 fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
@@ -40,7 +41,7 @@ fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
             None
         }
     });
-    ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None)
+    ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None)
 }
 
 fn write_exited_session(session_dir: &std::path::Path, session_id: &str, pid: u32) {
@@ -114,6 +115,69 @@ fn start_session_targets_selected_daemon_identity() {
     assert_eq!(
         got, expected,
         "livekit_server_identity must match the selected daemon naming scheme"
+    );
+}
+
+/// ListEligibleDaemons must return at least the local daemon with `is_local: true`.
+#[tokio::test]
+async fn list_eligible_daemons_returns_local_daemon() {
+    let temp = tempfile::tempdir().unwrap();
+    let sessions_base = temp.path().join("sessions");
+    std::fs::create_dir_all(&sessions_base).unwrap();
+    let service = test_service(sessions_base);
+    let request = Request::new(ListEligibleDaemonsRequest {
+        session_token: "valid-token".to_string(),
+    });
+    let response = service
+        .list_eligible_daemons(request)
+        .await
+        .expect("ListEligibleDaemons must not return an error");
+    let daemons = &response.into_inner().daemons;
+    assert!(!daemons.is_empty(), "must return at least the local daemon");
+    assert_eq!(
+        daemons.iter().filter(|d| d.is_local).count(),
+        1,
+        "exactly one daemon must be marked is_local"
+    );
+    let local = daemons.iter().find(|d| d.is_local);
+    let local = local.unwrap();
+    assert!(
+        !local.instance_id.is_empty(),
+        "local daemon instance_id must not be empty"
+    );
+    assert!(
+        !local.label.is_empty(),
+        "local daemon label must not be empty"
+    );
+}
+
+/// SessionEntry.daemon_instance_id must be populated for listed sessions.
+#[tokio::test]
+async fn session_entry_includes_daemon_instance_id() {
+    let temp = tempfile::tempdir().unwrap();
+    let sessions_base = temp.path().join("sessions");
+    let session_id = "sess-host-check";
+    let session_dir = sessions_base.join(session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    write_exited_session(&session_dir, session_id, 99999);
+
+    let service = test_service(sessions_base);
+    let request = Request::new(ListSessionsRequest {
+        session_token: "valid-token".to_string(),
+    });
+    let response = service
+        .list_sessions(request)
+        .await
+        .expect("ListSessions must not return an error");
+    let sessions = &response.into_inner().sessions;
+    assert!(!sessions.is_empty(), "must list the written session");
+    let entry = sessions
+        .iter()
+        .find(|s| s.session_id == session_id)
+        .expect("session must be in the list");
+    assert!(
+        !entry.daemon_instance_id.is_empty(),
+        "daemon_instance_id must be populated on listed sessions, got empty string"
     );
 }
 

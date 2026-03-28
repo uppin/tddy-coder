@@ -135,7 +135,7 @@ export type StartSession = Message<"tddy.v1.StartSession"> & {
   prompt: string;
 
   /**
-   * Path to git repo root
+   * Required: absolute path to the git repository root (workflow git/worktree use this path).
    *
    * @generated from field: string repo_root = 2;
    */
