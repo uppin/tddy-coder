@@ -20,6 +20,7 @@ import { BUILD_ID } from "../buildId";
 import { useVisualViewport } from "../hooks/useVisualViewport";
 import { TokenService } from "../gen/token_pb";
 import { sortSessionsForDisplay } from "../utils/sessionSort";
+import { delegateSignalSessionRpc } from "../connection/sessionTerminateOverlay";
 
 const formStyle = {
   padding: 24,
@@ -295,6 +296,9 @@ function ConnectedTerminal({
   serverIdentity,
   debugLogging,
   onDisconnect,
+  onSessionTerminate,
+  connectionError,
+  onClearConnectionError,
 }: {
   livekitUrl: string;
   roomName: string;
@@ -302,6 +306,11 @@ function ConnectedTerminal({
   serverIdentity: string;
   debugLogging?: boolean;
   onDisconnect: () => void;
+  /** When set, fullscreen overlay shows Terminate (SignalSession SIGINT). Omit for URL-only flows. */
+  onSessionTerminate?: () => void | Promise<void>;
+  /** RPC/session errors from ConnectionScreen (e.g. SignalSession failure) while fullscreen. */
+  connectionError?: string | null;
+  onClearConnectionError?: () => void;
 }) {
   const tokenClient = useMemo(() => createTokenClient(), []);
   const [initialToken, setInitialToken] = useState<string | null>(null);
@@ -366,6 +375,36 @@ function ConnectedTerminal({
         flexDirection: "column",
       }}
     >
+      {connectionError && (
+        <div
+          data-testid="connection-error"
+          role="alert"
+          style={{
+            flexShrink: 0,
+            padding: "8px 12px",
+            fontSize: 14,
+            color: "#c00",
+            backgroundColor: "#fee",
+            borderBottom: "1px solid #fcc",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <span>{connectionError}</span>
+          {onClearConnectionError && (
+            <button
+              type="button"
+              data-testid="connection-error-dismiss"
+              onClick={onClearConnectionError}
+              style={{ padding: "4px 8px", fontSize: 12 }}
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
       <GhosttyTerminalLiveKit
         url={livekitUrl}
         token={initialToken}
@@ -378,7 +417,11 @@ function ConnectedTerminal({
         autoFocus={!isMobile}
         preventFocusOnTap={isMobile && !isKeyboardOpen}
         showMobileKeyboard={isMobile}
-        connectionOverlay={{ onDisconnect, buildId: BUILD_ID }}
+        connectionOverlay={{
+          onDisconnect,
+          buildId: BUILD_ID,
+          ...(onSessionTerminate ? { onSessionTerminate } : {}),
+        }}
       />
     </div>
   );
@@ -410,6 +453,8 @@ export function ConnectionScreen({
     identity: string;
     serverIdentity: string;
     debugLogging: boolean;
+    /** Daemon workflow session id for SignalSession / overlay Terminate. */
+    sessionId: string;
   } | null>(null);
   const client = useMemo(() => createConnectionClient(), []);
 
@@ -537,6 +582,7 @@ export function ConnectionScreen({
         identity: `browser-${res.sessionId}-${Date.now()}`,
         serverIdentity: res.livekitServerIdentity,
         debugLogging: form.debugLogging,
+        sessionId: res.sessionId,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start session");
@@ -575,6 +621,7 @@ export function ConnectionScreen({
         identity: `browser-${sessionId}-${Date.now()}`,
         serverIdentity: res.livekitServerIdentity,
         debugLogging: debugForSessionId(sessionId),
+        sessionId,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect to session");
@@ -592,19 +639,43 @@ export function ConnectionScreen({
         identity: `browser-${res.sessionId}-${Date.now()}`,
         serverIdentity: res.livekitServerIdentity,
         debugLogging: debugForSessionId(sessionId),
+        sessionId: res.sessionId,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to resume session");
     }
   };
 
-  const handleSignalSession = async (sessionId: string, signal: Signal) => {
+  const handleSignalSession = async (
+    sessionId: string,
+    signal: Signal,
+    opts?: { rethrowOnFailure?: boolean }
+  ) => {
     if (!sessionToken) return;
     setError(null);
+    const trace = import.meta.env.DEV;
+    if (trace) {
+      console.debug("[ConnectionScreen] SignalSession request", { sessionId, signal });
+    }
     try {
-      await client.signalSession({ sessionToken, sessionId, signal });
+      await delegateSignalSessionRpc({
+        sessionToken,
+        sessionId,
+        signal,
+        signalSession: (req) => client.signalSession(req),
+        trace,
+      });
+      if (trace) {
+        console.info("[ConnectionScreen] SignalSession completed", { sessionId, signal });
+      }
     } catch (e) {
+      if (trace) {
+        console.error("[ConnectionScreen] SignalSession failed", { sessionId, signal, err: e });
+      }
       setError(e instanceof Error ? e.message : "Failed to send signal");
+      if (opts?.rethrowOnFailure) {
+        throw e;
+      }
     }
   };
 
@@ -632,6 +703,11 @@ export function ConnectionScreen({
         serverIdentity={connected.serverIdentity}
         debugLogging={connected.debugLogging}
         onDisconnect={() => setConnected(null)}
+        connectionError={error}
+        onClearConnectionError={() => setError(null)}
+        onSessionTerminate={() =>
+          handleSignalSession(connected.sessionId, Signal.SIGINT, { rethrowOnFailure: true })
+        }
       />
     );
   }

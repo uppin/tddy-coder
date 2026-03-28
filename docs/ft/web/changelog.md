@@ -2,6 +2,13 @@
 
 Release note history for the Web product area.
 
+## 2026-03-28 — Fullscreen terminal: Terminate (daemon SIGINT)
+
+- **GhosttyTerminalLiveKit**: Optional **Terminate** overlay when **`connectionOverlay.onSessionTerminate`** is set. **Terminate** calls **`ConnectionService.SignalSession`** with **`SIGINT`** for the active daemon **`sessionId`** (parity with Connection Screen **Interrupt**). **Ctrl+C** sends byte **0x03** on the terminal input path. Layout: **build id** top-left; right-hand controls **Disconnect** (rightmost), **Terminate** (when wired), **Ctrl+C**. **`data-testid="terminate-button"`**, accessible label, and hidden **`terminate-rpc-complete`** support tests; successful RPC completion is recorded only when the session signal succeeds (rethrown failures keep the sentinel unset).
+- **ConnectionScreen**: Connected state stores **`sessionId`** from **Start / Connect / Resume**. Fullscreen **Terminate** delegates to **`handleSignalSession(sessionId, SIGINT)`** with **`delegateSignalSessionRpc`** as the shared Connect-RPC path. Fullscreen **`connection-error`** banner for RPC failures (dismiss control).
+- **Connect by URL** (`index.tsx`): No **`onSessionTerminate`**; overlays are **Ctrl+C** and **Disconnect** only.
+- **Tests**: Bun tests for **`delegateSignalSessionRpc`** and aria label; Cypress component tests for visibility, **SignalSession** intercept, absence of **Terminate** without a handler, and ConnectionScreen connect → fullscreen **Terminate**.
+
 ## 2026-03-28 — Connection screen: host selection (eligible daemons)
 
 - **ConnectionService**: **`ListEligibleDaemons`** lists daemon instances for the Host dropdown; **`StartSession`** and **`SessionEntry`** carry **`daemon_instance_id`**.

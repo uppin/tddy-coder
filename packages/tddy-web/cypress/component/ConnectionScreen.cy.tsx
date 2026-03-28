@@ -11,6 +11,9 @@ import {
   ListEligibleDaemonsResponseSchema,
   EligibleDaemonEntrySchema,
   StartSessionRequestSchema,
+  ConnectSessionResponseSchema,
+  SignalSessionRequestSchema,
+  Signal,
 } from "../../src/gen/connection_pb";
 import {
   GetAuthStatusResponseSchema,
@@ -607,6 +610,66 @@ describe("ConnectionScreen session table ordering", () => {
         .find(`[data-testid="connect-${sessionId}"], [data-testid="resume-${sessionId}"]`)
         .should("exist");
     });
+  });
+});
+
+function interceptConnectSessionSuccess() {
+  const body = toBinary(
+    ConnectSessionResponseSchema,
+    create(ConnectSessionResponseSchema, {
+      livekitRoom: "lk-room-acceptance",
+      livekitUrl: "ws://127.0.0.1:7880",
+      livekitServerIdentity: "server",
+    }),
+  );
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ConnectSession", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(body),
+    });
+  }).as("connectSessionAcceptance");
+}
+
+describe("ConnectionScreen fullscreen terminal — Terminate (SIGINT)", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("ConnectionScreen fullscreen terminal exposes Terminate after session connect", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION]);
+    interceptConnectSessionSuccess();
+    interceptTokenForPresence();
+    cy.intercept("POST", "**/rpc/connection.ConnectionService/SignalSession", (req) => {
+      const raw = req.body;
+      const ab =
+        raw instanceof ArrayBuffer
+          ? raw
+          : typeof raw === "string"
+            ? new TextEncoder().encode(raw).buffer
+            : (raw as ArrayBuffer);
+      const decoded = fromBinary(SignalSessionRequestSchema, new Uint8Array(ab));
+      expect(decoded.sessionId).to.eq(ACTIVE_SESSION.sessionId);
+      expect(decoded.signal).to.eq(Signal.SIGINT);
+      expect(decoded.sessionToken).to.eq("fake-token");
+      req.reply({
+        statusCode: 200,
+        headers: { "Content-Type": "application/proto" },
+        body: toArrayBuffer(new Uint8Array([0x08, 0x01])),
+      });
+    }).as("signalSessionFullscreenTerminate");
+
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
+    cy.wait("@connectSessionAcceptance");
+    cy.wait("@generateTokenPresence");
+    cy.get("[data-testid='connected-terminal-container']", { timeout: 20000 }).should("exist");
+    cy.get("[data-testid='terminate-button']", { timeout: 15000 }).should("be.visible");
+    cy.get("[data-testid='terminate-button']").click();
+    cy.wait("@signalSessionFullscreenTerminate");
   });
 });
 
