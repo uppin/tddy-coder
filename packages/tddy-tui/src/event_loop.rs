@@ -62,6 +62,7 @@ pub fn run_event_loop(
     view.on_mode_changed(&state.mode);
     let mut event_rx = conn.event_rx;
     let intent_tx = conn.intent_tx;
+    let critical_state = conn.critical_state;
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
@@ -69,7 +70,7 @@ pub fn run_event_loop(
         }
 
         // Apply any pending events from broadcast (handle Lagged per tokio semantics).
-        let _ = drain_presenter_broadcast(&mut event_rx, &mut state, &mut view);
+        let _ = drain_presenter_broadcast(&mut event_rx, &mut state, &mut view, &critical_state);
 
         let mut layout_areas = crate::mouse_map::LayoutAreas {
             activity_log: ratatui::layout::Rect::default(),

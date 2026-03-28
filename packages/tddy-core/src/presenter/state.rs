@@ -61,6 +61,16 @@ pub enum AppMode {
     ErrorRecovery { error_message: String },
 }
 
+/// Critical state fields that must survive broadcast overflow.
+/// Shared between Presenter (writer) and TUI views (reader) via `Arc<Mutex<_>>`.
+/// When the broadcast channel lags, the TUI resyncs goal and workflow state from
+/// this shared snapshot instead of relying on lost `GoalStarted`/`StateChanged` events.
+#[derive(Clone, Debug, Default)]
+pub struct CriticalPresenterState {
+    pub current_goal: Option<String>,
+    pub current_state: Option<String>,
+}
+
 /// Top-level application state owned by the Presenter.
 #[derive(Debug, Clone)]
 pub struct PresenterState {

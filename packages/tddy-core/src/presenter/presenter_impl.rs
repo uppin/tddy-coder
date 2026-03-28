@@ -11,7 +11,9 @@ use crate::{ClarificationQuestion, SharedBackend, WorkflowRecipe};
 
 use crate::presenter::intent::UserIntent;
 use crate::presenter::presenter_events::{PresenterEvent, ViewConnection};
-use crate::presenter::state::{ActivityEntry, ActivityKind, AppMode, PresenterState};
+use crate::presenter::state::{
+    ActivityEntry, ActivityKind, AppMode, CriticalPresenterState, PresenterState,
+};
 use crate::presenter::workflow_runner;
 use crate::presenter::{WorkflowCompletePayload, WorkflowEvent};
 
@@ -87,6 +89,9 @@ pub struct Presenter {
     deferred_cli_model: Option<String>,
     /// Active workflow definition (TDD, bug-fix, …).
     workflow_recipe: Arc<dyn WorkflowRecipe>,
+    /// Shared critical state for broadcast lag recovery.
+    /// Updated on every GoalStarted/StateChanged; views read after Lagged.
+    critical_state: Arc<std::sync::Mutex<CriticalPresenterState>>,
 }
 
 fn format_session_id_for_log(id: &str) -> String {
@@ -146,6 +151,7 @@ impl Presenter {
             pending_workflow_start: None,
             deferred_cli_model: None,
             workflow_recipe,
+            critical_state: Arc::new(std::sync::Mutex::new(CriticalPresenterState::default())),
         }
     }
 
@@ -176,6 +182,7 @@ impl Presenter {
             state_snapshot: self.state.clone(),
             event_rx: broadcast_tx.subscribe(),
             intent_tx,
+            critical_state: self.critical_state.clone(),
         })
     }
 
@@ -863,6 +870,9 @@ impl Presenter {
                 }
                 WorkflowEvent::StateChange { from, to } => {
                     self.state.current_state = Some(to.clone());
+                    if let Ok(mut cs) = self.critical_state.lock() {
+                        cs.current_state = Some(to.clone());
+                    }
                     let entry = ActivityEntry {
                         text: format!("State: {} → {}", from, to),
                         kind: ActivityKind::StateChange,
@@ -876,6 +886,9 @@ impl Presenter {
                 }
                 WorkflowEvent::GoalStarted(goal) => {
                     self.state.current_goal = Some(goal.clone());
+                    if let Ok(mut cs) = self.critical_state.lock() {
+                        cs.current_goal = Some(goal.clone());
+                    }
                     self.state.goal_start_time = std::time::Instant::now();
                     if matches!(self.state.mode, AppMode::FeatureInput) {
                         self.state.mode = AppMode::Running;

@@ -157,6 +157,7 @@ pub fn run_virtual_tui(
         let mut input_rx = input_rx;
         let mut event_rx = conn.event_rx;
         let intent_tx = conn.intent_tx;
+        let critical_state = conn.critical_state;
 
         // Periodic render interval to keep animations alive (spinner, elapsed timer),
         // matching the real TUI event loop (event_loop.rs:69) which draws every ~50ms.
@@ -170,7 +171,8 @@ pub fn run_virtual_tui(
         loop {
             let mut updated = false;
 
-            let had_events = drain_presenter_broadcast(&mut event_rx, &mut state, &mut view);
+            let had_events =
+                drain_presenter_broadcast(&mut event_rx, &mut state, &mut view, &critical_state);
             if had_events {
                 log::debug!("VirtualTui: drained PresenterEvents from broadcast");
                 updated = true;
@@ -181,8 +183,12 @@ pub fn run_virtual_tui(
                     Ok(bytes) if !bytes.is_empty() => {
                         // Mode may change between the top-of-loop drain and this chunk (e.g. Select
                         // after plan clarification). Drain again so key handling sees current mode.
-                        let had_more =
-                            drain_presenter_broadcast(&mut event_rx, &mut state, &mut view);
+                        let had_more = drain_presenter_broadcast(
+                            &mut event_rx,
+                            &mut state,
+                            &mut view,
+                            &critical_state,
+                        );
                         if had_more {
                             updated = true;
                             log::debug!("VirtualTui: drained PresenterEvents before input chunk");
@@ -247,8 +253,12 @@ pub fn run_virtual_tui(
                 loop {
                     match input_rx.try_recv() {
                         Ok(bytes) if !bytes.is_empty() => {
-                            let had_more =
-                                drain_presenter_broadcast(&mut event_rx, &mut state, &mut view);
+                            let had_more = drain_presenter_broadcast(
+                                &mut event_rx,
+                                &mut state,
+                                &mut view,
+                                &critical_state,
+                            );
                             if had_more {
                                 straggler_updated = true;
                             }
@@ -433,10 +443,15 @@ fn apply_resize<B: Backend>(
 /// returns. A plain `while let Ok(ev) = try_recv()` stops on `Lagged` and defers processing
 /// until a later poll. This loop retries on `Lagged` (same idea as tokio's `Receiver` drop
 /// implementation) without spinning on empty.
+///
+/// When `Lagged` occurs, critical state (goal, workflow state) is resynced from
+/// `critical_state` — a shared snapshot updated by the presenter on every change.
+/// This ensures `GoalStarted`/`StateChanged` events lost to overflow are recovered.
 pub(crate) fn drain_presenter_broadcast(
     event_rx: &mut tokio::sync::broadcast::Receiver<PresenterEvent>,
     state: &mut PresenterState,
     view: &mut TuiView,
+    critical_state: &std::sync::Mutex<tddy_core::CriticalPresenterState>,
 ) -> bool {
     let mut any = false;
     loop {
@@ -451,9 +466,14 @@ pub(crate) fn drain_presenter_broadcast(
             }
             Err(TryRecvError::Lagged(skipped)) => {
                 log::warn!(
-                    "VirtualTui: broadcast receiver lagged; skipped {} presenter event(s)",
+                    "VirtualTui: broadcast receiver lagged; skipped {} presenter event(s) — resyncing critical state",
                     skipped
                 );
+                if let Ok(cs) = critical_state.lock() {
+                    state.current_goal = cs.current_goal.clone();
+                    state.current_state = cs.current_state.clone();
+                }
+                any = true;
                 continue;
             }
             Err(TryRecvError::Empty) | Err(TryRecvError::Closed) => break,
@@ -993,14 +1013,76 @@ mod tests {
         }
     }
 
+    /// When the broadcast buffer overflows (Lagged), critical state events like GoalStarted
+    /// may be among the dropped messages. After draining, the TUI's local state must still
+    /// reflect the latest goal — otherwise the activity pane and status bar appear frozen
+    /// even though the workflow continues (changeset.yaml keeps updating).
+    ///
+    /// Bug: during heavy agent activity, 256+ events accumulate between drain cycles.
+    /// GoalStarted events sent early in the burst are pushed out of the 256-slot buffer,
+    /// leaving the TUI showing a stale/missing goal permanently.
+    #[test]
+    fn drain_broadcast_preserves_goal_after_overflow() {
+        use std::sync::{Arc, Mutex};
+        use std::time::Instant;
+
+        use tddy_core::presenter::{ActivityEntry, ActivityKind};
+        use tddy_core::CriticalPresenterState;
+
+        let (tx, mut rx) = tokio::sync::broadcast::channel(256);
+
+        // Shared critical state — the presenter keeps this up to date
+        let critical_state = Arc::new(Mutex::new(CriticalPresenterState {
+            current_goal: Some("acceptance-tests".to_string()),
+            current_state: None,
+        }));
+
+        // GoalStarted is sent first (e.g. new TDD phase begins)
+        tx.send(PresenterEvent::GoalStarted("acceptance-tests".to_string()))
+            .unwrap();
+
+        // Then a burst of 300 ActivityLogged events pushes GoalStarted out of the buffer
+        for i in 0..300 {
+            tx.send(PresenterEvent::ActivityLogged(ActivityEntry {
+                text: format!("Tool: Read file-{}.rs", i),
+                kind: ActivityKind::ToolUse,
+            }))
+            .unwrap();
+        }
+
+        let mut state = PresenterState {
+            agent: String::new(),
+            model: String::new(),
+            mode: AppMode::Running,
+            current_goal: None,
+            current_state: None,
+            workflow_session_id: None,
+            goal_start_time: Instant::now(),
+            activity_log: Vec::new(),
+            inbox: Vec::new(),
+            should_quit: false,
+            exit_action: None,
+        };
+        let mut view = TuiView::new();
+
+        drain_presenter_broadcast(&mut rx, &mut state, &mut view, &critical_state);
+
+        assert_eq!(
+            state.current_goal.as_deref(),
+            Some("acceptance-tests"),
+            "GoalStarted event was lost to broadcast overflow — TUI shows stale goal"
+        );
+    }
+
     /// Capacity 2 + three sends without reading forces `TryRecvError::Lagged` on the first
     /// `try_recv`; the drain loop must retry so `IntentReceived(Quit)` still applies.
     #[test]
     fn drain_broadcast_retries_after_lagged_so_quit_applies() {
+        use std::sync::{Arc, Mutex};
         use std::time::Instant;
 
         use tddy_core::presenter::{ActivityEntry, ActivityKind};
-        use tddy_core::UserIntent;
+        use tddy_core::{CriticalPresenterState, UserIntent};
 
         let (tx, mut rx) = tokio::sync::broadcast::channel(2);
         let entry = |text: &str| {
@@ -1014,6 +1096,7 @@ mod tests {
         tx.send(PresenterEvent::IntentReceived(UserIntent::Quit))
             .unwrap();
 
+        let critical_state = Arc::new(Mutex::new(CriticalPresenterState::default()));
         let mut state = PresenterState {
             agent: String::new(),
             model: String::new(),
@@ -1030,7 +1113,7 @@ mod tests {
         let mut view = TuiView::new();
 
         assert!(
-            drain_presenter_broadcast(&mut rx, &mut state, &mut view),
+            drain_presenter_broadcast(&mut rx, &mut state, &mut view, &critical_state),
             "expected at least one event after lag"
         );
         assert!(
