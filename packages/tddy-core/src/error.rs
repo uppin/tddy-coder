@@ -51,8 +51,8 @@ pub enum WorkflowError {
 /// Errors from parsing LLM output.
 #[derive(Error, Debug)]
 pub enum ParseError {
-    #[error("missing PRD section")]
-    MissingPrd,
+    #[error("missing primary document section")]
+    MissingPrimaryDocumentSection,
 
     #[error("missing TODO section")]
     MissingTodo,

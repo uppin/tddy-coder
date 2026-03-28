@@ -298,7 +298,7 @@ mod relocation_tests {
         let dir_name = "2026-03-08-my-feature";
         let staging = output_dir.join(dir_name);
         fs::create_dir_all(&staging).unwrap();
-        fs::write(staging.join("PRD.md"), "# PRD").unwrap();
+        fs::write(staging.join("SessionDoc.md"), "# Doc").unwrap();
 
         let result = relocate_session_dir(&staging, "docs/plans/", dir_name, &output_dir)
             .expect("valid suggestion should succeed");
@@ -310,8 +310,8 @@ mod relocation_tests {
         );
         assert!(expected.exists(), "target directory should exist");
         assert!(
-            expected.join("PRD.md").exists(),
-            "PRD.md should be present at target"
+            expected.join("SessionDoc.md").exists(),
+            "SessionDoc.md should be present at target"
         );
 
         let _ = fs::remove_dir_all(&root);
@@ -448,9 +448,9 @@ mod context_header_tests {
     use super::*;
     use std::fs;
 
-    /// Test-only basenames (production passes [`crate::workflow::recipe::WorkflowRecipe::context_header_session_artifact_filenames`]).
-    const CTX_TEST_PRD: &[&str] = &["PRD.md"];
-    const CTX_TEST_PRD_AND_AT: &[&str] = &["PRD.md", "acceptance-tests.md"];
+    /// Test-only basenames (production passes manifest-derived basenames from the workflow-recipes layer).
+    const CTX_TEST_PRIMARY_DOC: &[&str] = &["SessionDoc.md"];
+    const CTX_TEST_PRIMARY_DOC_AND_AT: &[&str] = &["SessionDoc.md", "acceptance-tests.md"];
     const CTX_TEST_REFACTOR: &[&str] = &["refactoring-plan.md"];
 
     fn temp_dir(label: &str) -> PathBuf {
@@ -465,16 +465,19 @@ mod context_header_tests {
     #[test]
     fn test_context_header_lists_existing_md_files() {
         let dir = temp_dir("lists-existing");
-        fs::write(dir.join("PRD.md"), "# PRD").unwrap();
+        fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
 
-        let header = build_context_header(Some(&dir), None, CTX_TEST_PRD);
+        let header = build_context_header(Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
         assert!(
             header.starts_with("**CRITICAL FOR CONTEXT AND SUMMARY**\n"),
             "header must start with the marker line, got: {:?}",
             &header[..header.len().min(200)]
         );
-        assert!(header.contains("PRD.md:"), "header must list PRD.md");
+        assert!(
+            header.contains("SessionDoc.md:"),
+            "header must list SessionDoc.md"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -484,12 +487,15 @@ mod context_header_tests {
     #[test]
     fn test_context_header_omits_missing_files() {
         let dir = temp_dir("omits-missing");
-        fs::write(dir.join("PRD.md"), "# PRD").unwrap();
+        fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
         // acceptance-tests.md is NOT created
 
-        let header = build_context_header(Some(&dir), None, CTX_TEST_PRD_AND_AT);
+        let header = build_context_header(Some(&dir), None, CTX_TEST_PRIMARY_DOC_AND_AT);
 
-        assert!(header.contains("PRD.md:"), "should list PRD.md");
+        assert!(
+            header.contains("SessionDoc.md:"),
+            "should list SessionDoc.md"
+        );
         assert!(
             !header.contains("acceptance-tests.md:"),
             "must not list missing acceptance-tests.md"
@@ -505,7 +511,7 @@ mod context_header_tests {
         let dir = temp_dir("empty-dir");
         // No .md files
 
-        let header = build_context_header(Some(&dir), None, CTX_TEST_PRD);
+        let header = build_context_header(Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
         assert!(
             header.is_empty(),
@@ -520,7 +526,7 @@ mod context_header_tests {
 
     #[test]
     fn test_context_header_empty_for_none_session_dir() {
-        let header = build_context_header(None, None, CTX_TEST_PRD);
+        let header = build_context_header(None, None, CTX_TEST_PRIMARY_DOC);
 
         assert!(
             header.is_empty(),
@@ -533,19 +539,19 @@ mod context_header_tests {
     #[test]
     fn test_context_header_uses_absolute_paths() {
         let dir = temp_dir("abs-paths");
-        fs::write(dir.join("PRD.md"), "# PRD").unwrap();
+        fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
 
-        let header = build_context_header(Some(&dir), None, CTX_TEST_PRD);
+        let header = build_context_header(Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
-        let prd_line = header
+        let doc_line = header
             .lines()
-            .find(|l| l.starts_with("PRD.md:"))
-            .expect("header must contain a PRD.md line");
-        let path_str = prd_line.trim_start_matches("PRD.md:").trim();
+            .find(|l| l.starts_with("SessionDoc.md:"))
+            .expect("header must contain a SessionDoc.md line");
+        let path_str = doc_line.trim_start_matches("SessionDoc.md:").trim();
 
         assert!(
             std::path::Path::new(path_str).is_absolute(),
-            "PRD.md path must be absolute, got: {}",
+            "SessionDoc.md path must be absolute, got: {}",
             path_str
         );
         assert!(
@@ -562,10 +568,11 @@ mod context_header_tests {
     #[test]
     fn test_prepend_adds_header_before_prompt() {
         let dir = temp_dir("prepend-adds");
-        fs::write(dir.join("PRD.md"), "# PRD").unwrap();
+        fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
 
         let original = "Do the task.".to_string();
-        let result = prepend_context_header(original.clone(), Some(&dir), None, CTX_TEST_PRD);
+        let result =
+            prepend_context_header(original.clone(), Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
         assert!(
             result.starts_with("<context-reminder>"),
@@ -597,9 +604,10 @@ mod context_header_tests {
     #[test]
     fn test_prepend_wraps_header_in_context_reminder_tags() {
         let dir = temp_dir("wrap-tags");
-        fs::write(dir.join("PRD.md"), "# PRD").unwrap();
+        fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
 
-        let result = prepend_context_header("Task.".to_string(), Some(&dir), None, CTX_TEST_PRD);
+        let result =
+            prepend_context_header("Task.".to_string(), Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
         assert!(
             result.starts_with("<context-reminder>\n"),
@@ -650,7 +658,8 @@ mod context_header_tests {
         // No .md files → build_context_header returns ""
 
         let original = "Do the task.".to_string();
-        let result = prepend_context_header(original.clone(), Some(&dir), None, CTX_TEST_PRD);
+        let result =
+            prepend_context_header(original.clone(), Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
         assert_eq!(
             result, original,

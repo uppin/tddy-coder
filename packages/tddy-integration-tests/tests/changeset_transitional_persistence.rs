@@ -75,7 +75,7 @@ async fn before_task_persists_planning_when_plan_starts() {
     std::fs::create_dir_all(&session_dir).expect("mkdir");
     write_changeset_with_state(&session_dir, "Init", "sess-plan");
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("backend_name", "claude".to_string());
@@ -104,7 +104,7 @@ async fn before_task_persists_acceptance_testing_when_acceptance_tests_start() {
     write_changeset_with_state(&session_dir, "Planned", "sess-at");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Summary\nx").expect("PRD");
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("output_dir", output_dir.clone());
@@ -133,7 +133,7 @@ async fn before_task_persists_red_testing_when_red_starts() {
     write_session_dir_red_ready(&session_dir);
     write_changeset_with_state(&session_dir, "AcceptanceTestsReady", "sess-red");
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("backend_name", "claude".to_string());
@@ -158,7 +158,7 @@ async fn before_task_persists_green_implementing_when_green_starts() {
     let _ = std::fs::remove_dir_all(&session_dir);
     write_session_dir_green_ready(&session_dir);
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("backend_name", "claude".to_string());
@@ -186,7 +186,7 @@ async fn before_task_persists_demo_running_when_demo_starts() {
     write_changeset_with_state(&session_dir, "GreenComplete", "sess-demo");
     std::fs::write(session_dir.join("demo-plan.md"), "# Demo\nsteps\n").expect("demo-plan");
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("backend_name", "claude".to_string());
@@ -213,7 +213,7 @@ async fn before_task_persists_validating_when_validate_starts() {
     write_changeset_with_state(&session_dir, "Evaluated", "sess-val");
     write_evaluation_report_to_session_dir(&session_dir);
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("backend_name", "claude".to_string());
@@ -242,7 +242,7 @@ async fn before_task_persists_refactoring_when_refactor_starts() {
     write_changeset_with_state(&session_dir, "ValidateComplete", "sess-ref");
     write_refactoring_plan(&session_dir);
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("backend_name", "claude".to_string());
@@ -271,7 +271,7 @@ async fn before_task_persists_updating_docs_when_update_docs_starts() {
     write_changeset_with_state(&session_dir, "RefactorComplete", "sess-docs");
     std::fs::write(session_dir.join("PRD.md"), "# P\n").expect("PRD");
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("backend_name", "claude".to_string());

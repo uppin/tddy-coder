@@ -64,7 +64,7 @@ fn prompt_text(state: &PresenterState, view_state: &ViewState) -> String {
                 format!("> {}", view_state.text_input)
             }
         }
-        AppMode::PlanReview { .. } => "Up/Down navigate  Enter select".to_string(),
+        AppMode::DocumentReview { .. } => "Up/Down navigate  Enter select".to_string(),
         AppMode::MarkdownViewer { .. } => "Q or Esc to close".to_string(),
         AppMode::ErrorRecovery { .. } => "Up/Down navigate  Enter select".to_string(),
     }
@@ -193,8 +193,8 @@ pub fn draw(
             AppMode::Select { .. } | AppMode::MultiSelect { .. } | AppMode::TextInput { .. } => {
                 render_question(frame, state, view_state, dynamic_area);
             }
-            AppMode::PlanReview { .. } => {
-                render_plan_review(frame, state, view_state, dynamic_area);
+            AppMode::DocumentReview { .. } => {
+                render_document_review(frame, state, view_state, dynamic_area);
             }
             AppMode::ErrorRecovery { .. } => {
                 render_error_recovery(frame, state, view_state, dynamic_area);
@@ -413,7 +413,7 @@ fn render_question(
 }
 
 /// Render plan approval 3-option menu
-fn render_plan_review(
+fn render_document_review(
     frame: &mut Frame,
     _state: &PresenterState,
     view_state: &ViewState,
@@ -436,13 +436,13 @@ fn render_plan_review(
         Style::default().add_modifier(Modifier::BOLD),
     ))];
     for (i, (label, desc)) in options.iter().enumerate() {
-        let prefix = if view_state.plan_review_selected == i {
+        let prefix = if view_state.document_review_selected == i {
             "> "
         } else {
             "  "
         };
         let text = format!("{}{} -- {}", prefix, label, desc);
-        let style = if view_state.plan_review_selected == i {
+        let style = if view_state.document_review_selected == i {
             Style::default().add_modifier(Modifier::REVERSED)
         } else {
             Style::default()

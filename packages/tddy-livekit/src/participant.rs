@@ -75,9 +75,7 @@ impl SharedPublisher {
                     return Ok(());
                 }
                 if attempt == 0 {
-                    log::debug!(
-                        "[reconnect] publish_data failed, waiting for new participant"
-                    );
+                    log::debug!("[reconnect] publish_data failed, waiting for new participant");
                 }
             }
             tokio::select! {
@@ -151,7 +149,9 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             "[echo_server] LiveKitParticipant connected (reconnect), identity={:?}",
             room.local_participant().identity()
         );
-        shared_publisher.update(room.local_participant().clone()).await;
+        shared_publisher
+            .update(room.local_participant().clone())
+            .await;
         Ok(Self {
             room,
             bridge,

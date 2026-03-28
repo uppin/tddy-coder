@@ -14,7 +14,7 @@ use tddy_core::output::create_session_dir_in;
 use tddy_core::workflow::graph::{ExecutionResult, ExecutionStatus};
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::{GoalId, SharedBackend, WorkflowEngine, WorkflowRecipe};
-use tddy_workflow_recipes::TddRecipe;
+use tddy_workflow_recipes::{SessionArtifactManifest, TddRecipe};
 
 static IT_SESSION_BASE_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -25,6 +25,11 @@ fn unique_sessions_base_for_test() -> PathBuf {
 
 /// Default TDD recipe for integration tests (same behavior as tddy-coder).
 pub fn tdd_recipe() -> Arc<dyn WorkflowRecipe> {
+    Arc::new(TddRecipe)
+}
+
+/// Session artifact manifest paired with [`tdd_recipe`] (same [`TddRecipe`] instance semantics).
+pub fn tdd_manifest() -> Arc<dyn SessionArtifactManifest> {
     Arc::new(TddRecipe)
 }
 

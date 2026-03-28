@@ -3,6 +3,7 @@
 pub mod bugfix;
 pub mod parser;
 pub mod permissions;
+pub mod session_artifact_manifest;
 pub mod tdd;
 pub mod writer;
 
@@ -23,6 +24,7 @@ pub use permissions::{
     plan_allowlist, red_allowlist, refactor_allowlist, update_docs_allowlist,
     validate_subagents_allowlist,
 };
+pub use session_artifact_manifest::SessionArtifactManifest;
 pub use tdd::{PlanTask, TddRecipe, TddWorkflowHooks};
 pub use writer::{
     create_session_dir_in, create_session_dir_under, create_session_dir_with_id,

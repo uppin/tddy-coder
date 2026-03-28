@@ -1,9 +1,9 @@
-//! Workflow layer: artifact roots, primary approval paths, and manifest-driven layout.
+//! Workflow layer: session artifact roots and manifest-driven layout paths.
 
 pub mod artifact_paths;
 
 pub use artifact_paths::{
-    primary_planning_artifact_path_for_basename, read_primary_planning_document_utf8,
-    read_primary_planning_document_utf8_or_placeholder, resolve_existing_primary_planning_document,
-    session_artifacts_root, PRIMARY_PLANNING_DOCUMENT_READ_PLACEHOLDER,
+    canonical_artifact_write_path, read_session_artifact_utf8,
+    read_session_artifact_utf8_or_placeholder, resolve_existing_session_artifact,
+    session_artifacts_root, SESSION_ARTIFACT_READ_PLACEHOLDER,
 };

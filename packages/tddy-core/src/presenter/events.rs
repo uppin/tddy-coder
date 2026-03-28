@@ -24,9 +24,9 @@ pub enum WorkflowEvent {
     ClarificationNeeded {
         questions: Vec<ClarificationQuestion>,
     },
-    /// Plan approval gate: user must View, Approve, or Refine before proceeding.
-    PlanApprovalNeeded {
-        prd_content: String,
+    /// Session document approval: user must View, Approve, or Refine before proceeding.
+    SessionDocumentApprovalNeeded {
+        content: String,
     },
     /// Plan needs `feature_input` but none came from CLI or `changeset.yaml`; block on `answer_rx`.
     /// Presenter should switch to [`crate::presenter::state::AppMode::FeatureInput`].

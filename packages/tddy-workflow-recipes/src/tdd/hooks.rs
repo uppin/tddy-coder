@@ -37,46 +37,55 @@ use tddy_core::workflow::graph::ElicitationEvent;
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::recipe::WorkflowRecipe;
+
+use crate::SessionArtifactManifest;
 use tddy_core::workflow::task::TaskResult;
 use tddy_core::workflow::{find_git_root, prepend_context_header};
 
 /// Read primary planning document bytes using recipe basename and migration-aware resolution.
-fn read_primary_planning_document(
+fn read_primary_session_document(
     session_dir: &Path,
-    recipe: &dyn WorkflowRecipe,
+    manifest: &dyn SessionArtifactManifest,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
-    let bn = recipe.primary_planning_artifact_basename();
-    let path = tddy_workflow::resolve_existing_primary_planning_document(session_dir, &bn)
-        .ok_or_else(|| {
+    let bn = manifest
+        .primary_document_basename()
+        .ok_or("recipe has no primary session document key (prd) in manifest")?;
+    let path =
+        tddy_workflow::resolve_existing_session_artifact(session_dir, &bn).ok_or_else(|| {
             format!(
                 "primary planning document ({}) not found under {:?}",
                 bn, session_dir
             )
         })?;
-    log::debug!("[tdd hooks] read_primary_planning_document: {:?}", path);
+    log::debug!("[tdd hooks] read_primary_session_document: {:?}", path);
     std::fs::read_to_string(&path)
         .map_err(|e| format!("read primary planning document {}: {}", path.display(), e).into())
 }
 
-fn read_primary_planning_document_optional(
+fn read_primary_session_document_optional(
     session_dir: &Path,
-    recipe: &dyn WorkflowRecipe,
+    manifest: &dyn SessionArtifactManifest,
 ) -> Option<String> {
-    let bn = recipe.primary_planning_artifact_basename();
-    tddy_workflow::read_primary_planning_document_utf8(session_dir, &bn)
+    let bn = manifest.primary_document_basename()?;
+    tddy_workflow::read_session_artifact_utf8(session_dir, &bn)
 }
 
 /// Hooks for the TDD workflow. Handles file I/O. Event emission for TUI when event_tx is set.
 pub struct TddWorkflowHooks {
     recipe: Arc<dyn WorkflowRecipe>,
+    manifest: Arc<dyn SessionArtifactManifest>,
     event_tx: Option<mpsc::Sender<WorkflowEvent>>,
 }
 
 impl TddWorkflowHooks {
     /// Create hooks for CLI path (file I/O only, no events).
-    pub fn new(recipe: Arc<dyn WorkflowRecipe>) -> Self {
+    pub fn new(
+        recipe: Arc<dyn WorkflowRecipe>,
+        manifest: Arc<dyn SessionArtifactManifest>,
+    ) -> Self {
         Self {
             recipe,
+            manifest,
             event_tx: None,
         }
     }
@@ -84,19 +93,26 @@ impl TddWorkflowHooks {
     /// Create hooks with event emission for TUI (GoalStarted, StateChange).
     pub fn with_event_tx(
         recipe: Arc<dyn WorkflowRecipe>,
+        manifest: Arc<dyn SessionArtifactManifest>,
         event_tx: mpsc::Sender<WorkflowEvent>,
     ) -> Self {
         Self {
             recipe,
+            manifest,
             event_tx: Some(event_tx),
         }
     }
 
     pub fn with_event_tx_optional(
         recipe: Arc<dyn WorkflowRecipe>,
+        manifest: Arc<dyn SessionArtifactManifest>,
         event_tx: Option<mpsc::Sender<WorkflowEvent>>,
     ) -> Self {
-        Self { recipe, event_tx }
+        Self {
+            recipe,
+            manifest,
+            event_tx,
+        }
     }
 }
 
@@ -238,8 +254,9 @@ fn before_acceptance_tests(
     session_dir: &Path,
     context: &Context,
     recipe: &dyn WorkflowRecipe,
+    manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let prd = read_primary_planning_document(session_dir, recipe)?;
+    let prd = read_primary_session_document(session_dir, manifest)?;
     let changeset = read_changeset(session_dir).map_err(|e| e.to_string())?;
     let defaults = recipe_default_models_str(recipe);
     let model = resolve_model(
@@ -256,7 +273,7 @@ fn before_acceptance_tests(
     let repo_dir: Option<PathBuf> = context
         .get_sync("worktree_dir")
         .or_else(|| context.get_sync("output_dir"));
-    let ctx_artifacts = recipe.context_header_session_artifact_filenames();
+    let ctx_artifacts = manifest.context_header_filenames();
     let prompt = prepend_context_header(
         prompt,
         Some(session_dir),
@@ -282,8 +299,9 @@ fn before_red(
     session_dir: &Path,
     context: &Context,
     recipe: &dyn WorkflowRecipe,
+    manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let prd = read_primary_planning_document(session_dir, recipe)?;
+    let prd = read_primary_session_document(session_dir, manifest)?;
     let at = std::fs::read_to_string(session_dir.join("acceptance-tests.md"))
         .map_err(|e| format!("read acceptance-tests.md: {}", e))?;
     let changeset = read_changeset(session_dir).ok();
@@ -302,7 +320,7 @@ fn before_red(
     let repo_dir: Option<PathBuf> = context
         .get_sync("worktree_dir")
         .or_else(|| context.get_sync("output_dir"));
-    let ctx_artifacts = recipe.context_header_session_artifact_filenames();
+    let ctx_artifacts = manifest.context_header_filenames();
     let prompt = prepend_context_header(
         prompt,
         Some(session_dir),
@@ -327,10 +345,11 @@ fn before_green(
     session_dir: &Path,
     context: &Context,
     recipe: &dyn WorkflowRecipe,
+    manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let progress = std::fs::read_to_string(session_dir.join("progress.md"))
         .map_err(|e| format!("read progress.md: {}", e))?;
-    let prd = read_primary_planning_document_optional(session_dir, recipe);
+    let prd = read_primary_session_document_optional(session_dir, manifest);
     let at = std::fs::read_to_string(session_dir.join("acceptance-tests.md")).ok();
     let changeset = read_changeset(session_dir).ok();
     let session_id = resolve_agent_session_id(session_dir).map_err(|e| {
@@ -388,9 +407,10 @@ fn before_demo(session_dir: &Path, context: &Context) -> Result<(), Box<dyn Erro
 fn before_evaluate(
     session_dir: &Path,
     context: &Context,
-    recipe: &dyn WorkflowRecipe,
+    _recipe: &dyn WorkflowRecipe,
+    manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let prd = read_primary_planning_document_optional(session_dir, recipe);
+    let prd = read_primary_session_document_optional(session_dir, manifest);
     let changeset_raw = std::fs::read_to_string(session_dir.join("changeset.yaml")).ok();
     let prompt = evaluate::build_prompt(prd.as_deref(), changeset_raw.as_deref());
     let session_id = resolve_agent_session_id(session_dir)?;
@@ -449,21 +469,30 @@ fn before_refactor(
 }
 
 fn before_update_docs(
+    manifest: &dyn SessionArtifactManifest,
     session_dir: &Path,
     context: &Context,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut artifacts = Vec::new();
-    for (name, path) in [
-        ("PRD.md", "PRD.md"),
-        ("progress.md", "progress.md"),
-        ("changeset.yaml", "changeset.yaml"),
-        ("acceptance-tests.md", "acceptance-tests.md"),
-        ("evaluation-report.md", "evaluation-report.md"),
-        ("refactoring-plan.md", "refactoring-plan.md"),
-    ] {
-        if session_dir.join(path).exists() {
-            artifacts.push(format!("- {}: available", name));
+    for (key, filename) in manifest.known_artifacts() {
+        let available = if *key == "prd" {
+            manifest
+                .primary_document_basename()
+                .map(|bn| {
+                    tddy_workflow::resolve_existing_session_artifact(session_dir, &bn).is_some()
+                })
+                .unwrap_or(false)
+        } else {
+            session_dir.join(filename).exists()
+                || session_dir.join("artifacts").join(filename).exists()
+        };
+        if available {
+            artifacts.push(format!("- {}: available", filename));
         }
+    }
+    // Workflow state file (not listed in `known_artifacts` — avoids bloating every context header).
+    if session_dir.join("changeset.yaml").exists() {
+        artifacts.push("- changeset.yaml: available".to_string());
     }
     let artifacts_summary = if artifacts.is_empty() {
         "No artifacts found.".to_string()
@@ -495,6 +524,7 @@ fn before_update_docs(
 
 fn after_plan(
     recipe: &dyn WorkflowRecipe,
+    manifest: &dyn SessionArtifactManifest,
     session_dir: &Path,
     context: &Context,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -505,9 +535,11 @@ fn after_plan(
             parse_planning_response_with_base(&output, session_dir).ok()
         })
         .ok_or("plan after_task requires parsed_planning or parseable output in context")?;
-    let prd_bn = recipe.primary_planning_artifact_basename();
+    let prd_bn = manifest
+        .primary_document_basename()
+        .ok_or("plan after_task requires primary session document basename (prd) in manifest")?;
     log::info!(
-        "[tdd hooks] after_plan writing primary planning artifact basename={:?} under {:?}",
+        "[tdd hooks] after_plan writing session document basename={:?} under {:?}",
         prd_bn,
         session_dir
     );
@@ -526,13 +558,14 @@ fn after_plan(
     cs.branch_suggestion = planning.branch_suggestion.clone();
     cs.worktree_suggestion = planning.worktree_suggestion.clone();
     let session_exists = cs.sessions.iter().any(|s| s.id == session_id);
+    let start_tag = recipe.start_goal().as_str().to_string();
     if session_exists {
         update_state(&mut cs, WorkflowState::new("Planned"));
     } else {
         append_session_and_update_state(
             &mut cs,
             session_id,
-            "plan",
+            &start_tag,
             WorkflowState::new("Planned"),
             &backend_name,
             Some("system-prompt-plan.md".to_string()),
@@ -699,6 +732,7 @@ impl RunnerHooks for TddWorkflowHooks {
             .unwrap_or_else(|| "claude".to_string());
         let event_tx = self.event_tx.clone();
 
+        let recipe_for_progress = self.recipe.clone();
         Some(ProgressSink::new(move |ev: &StreamProgressEvent| {
             if let StreamProgressEvent::SessionStarted { session_id } = ev {
                 if let Some(ref dir) = session_dir {
@@ -706,15 +740,15 @@ impl RunnerHooks for TddWorkflowHooks {
                         let already_exists = cs.sessions.iter().any(|s| s.id == *session_id);
                         if !already_exists {
                             let tag = match task_id.as_deref() {
-                                Some("red") => "impl",
-                                Some(t) => t,
-                                None => "plan",
+                                Some("red") => "impl".to_string(),
+                                Some(t) => t.to_string(),
+                                None => recipe_for_progress.start_goal().to_string(),
                             };
                             let now = chrono::Utc::now().to_rfc3339();
                             cs.sessions.push(SessionEntry {
                                 id: session_id.clone(),
                                 agent: backend_name.clone(),
-                                tag: tag.to_string(),
+                                tag,
                                 created_at: now,
                                 system_prompt_file: None,
                             });
@@ -756,15 +790,35 @@ impl RunnerHooks for TddWorkflowHooks {
                     context,
                     self.event_tx.as_ref(),
                 )?;
-                before_acceptance_tests(&session_dir, context, self.recipe.as_ref())?;
+                before_acceptance_tests(
+                    &session_dir,
+                    context,
+                    self.recipe.as_ref(),
+                    self.manifest.as_ref(),
+                )?;
             }
-            "red" => before_red(&session_dir, context, self.recipe.as_ref())?,
-            "green" => before_green(&session_dir, context, self.recipe.as_ref())?,
+            "red" => before_red(
+                &session_dir,
+                context,
+                self.recipe.as_ref(),
+                self.manifest.as_ref(),
+            )?,
+            "green" => before_green(
+                &session_dir,
+                context,
+                self.recipe.as_ref(),
+                self.manifest.as_ref(),
+            )?,
             "demo" => before_demo(&session_dir, context)?,
-            "evaluate" => before_evaluate(&session_dir, context, self.recipe.as_ref())?,
+            "evaluate" => before_evaluate(
+                &session_dir,
+                context,
+                self.recipe.as_ref(),
+                self.manifest.as_ref(),
+            )?,
             "validate" => before_validate(&session_dir, context)?,
             "refactor" => before_refactor(&session_dir, context)?,
-            "update-docs" => before_update_docs(&session_dir, context)?,
+            "update-docs" => before_update_docs(self.manifest.as_ref(), &session_dir, context)?,
             _ => {}
         }
         // Emit transitional state (e.g. RedTesting, GreenImplementing) when starting a goal.
@@ -844,7 +898,12 @@ impl RunnerHooks for TddWorkflowHooks {
                 let session_dir: PathBuf = context
                     .get_sync("session_dir")
                     .ok_or("plan after_task requires session_dir in context (set by PlanTask)")?;
-                after_plan(self.recipe.as_ref(), &session_dir, context)?;
+                after_plan(
+                    self.recipe.as_ref(),
+                    self.manifest.as_ref(),
+                    &session_dir,
+                    context,
+                )?;
             }
             "acceptance-tests" | "red" | "green" | "evaluate" => {
                 let session_dir: PathBuf = context
@@ -888,21 +947,22 @@ impl RunnerHooks for TddWorkflowHooks {
         context: &Context,
         _result: &TaskResult,
     ) -> Option<ElicitationEvent> {
-        if task_id != "plan" {
+        if task_id != self.recipe.start_goal().as_str() {
             return None;
         }
         let session_dir: PathBuf = context
             .get_sync("session_dir")
             .or_else(|| context.get_sync("output_dir"))?;
-        let basename = self.recipe.primary_planning_artifact_basename();
-        let prd_path =
-            tddy_workflow::resolve_existing_primary_planning_document(&session_dir, &basename)?;
+        let basename = self.manifest.primary_document_basename()?;
+        let prd_path = tddy_workflow::resolve_existing_session_artifact(&session_dir, &basename)?;
         log::debug!(
-            "[tdd hooks] elicitation PlanApproval reading {:?}",
+            "[tdd hooks] elicitation DocumentApproval reading {:?}",
             prd_path
         );
         let prd_content = std::fs::read_to_string(&prd_path).ok()?;
-        Some(ElicitationEvent::PlanApproval { prd_content })
+        Some(ElicitationEvent::DocumentApproval {
+            content: prd_content,
+        })
     }
 
     fn on_error(&self, _task_id: &str, context: &Context, error: &(dyn Error + Send + Sync)) {

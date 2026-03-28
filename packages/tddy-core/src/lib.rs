@@ -46,9 +46,9 @@ pub use session_metadata::{
 pub use source_path::{classify_rust_source_path, RustSourcePathKind};
 pub use stream::ProgressEvent;
 pub use tddy_workflow::{
-    primary_planning_artifact_path_for_basename, read_primary_planning_document_utf8,
-    read_primary_planning_document_utf8_or_placeholder, resolve_existing_primary_planning_document,
-    session_artifacts_root, PRIMARY_PLANNING_DOCUMENT_READ_PLACEHOLDER,
+    canonical_artifact_write_path, read_session_artifact_utf8,
+    read_session_artifact_utf8_or_placeholder, resolve_existing_session_artifact,
+    session_artifacts_root, SESSION_ARTIFACT_READ_PLACEHOLDER,
 };
 pub use workflow::{
     engine::WorkflowEngine,
@@ -65,7 +65,7 @@ pub use worktree::{
 
 #[cfg(test)]
 mod workflow_decouple_acceptance {
-    /// After decoupling, the legacy PRD path helper must not be re-exported from the crate root.
+    /// After decoupling, the legacy session primary-document path helper must not be re-exported from the crate root.
     #[test]
     fn core_src_free_of_prd_path_helper() {
         let lib_rs = include_str!("lib.rs");

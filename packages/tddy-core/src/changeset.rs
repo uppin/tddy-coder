@@ -38,7 +38,7 @@ pub struct QuestionOptionForQa {
 /// Changeset manifest stored in plan directory.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Changeset {
-    /// PRD/feature name from plan agent (e.g. "Auth Feature").
+    /// Human-readable feature title from the planning step (e.g. "Auth Feature").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Initial user prompt (goal/feature description from stdin).
@@ -217,12 +217,12 @@ pub fn get_session_for_tag(changeset: &Changeset, tag: &str) -> Option<String> {
         .map(|s| s.id.clone())
 }
 
-/// Backend `agent` from the latest session with `tag == "plan"`, else the last session entry.
-pub fn resolve_agent_from_changeset(changeset: &Changeset) -> Option<String> {
+/// Backend `agent` from the latest session with `tag == preferred_tag`, else the last session entry.
+pub fn resolve_agent_from_changeset(changeset: &Changeset, preferred_tag: &str) -> Option<String> {
     changeset
         .sessions
         .iter()
-        .rfind(|s| s.tag == "plan")
+        .rfind(|s| s.tag == preferred_tag)
         .map(|s| s.agent.clone())
         .or_else(|| changeset.sessions.last().map(|s| s.agent.clone()))
 }
@@ -318,7 +318,10 @@ mod resolve_agent_tests {
             "claude",
             None,
         );
-        assert_eq!(resolve_agent_from_changeset(&cs).as_deref(), Some("cursor"));
+        assert_eq!(
+            resolve_agent_from_changeset(&cs, "plan").as_deref(),
+            Some("cursor")
+        );
     }
 
     #[test]
@@ -332,6 +335,9 @@ mod resolve_agent_tests {
             "stub",
             None,
         );
-        assert_eq!(resolve_agent_from_changeset(&cs).as_deref(), Some("stub"));
+        assert_eq!(
+            resolve_agent_from_changeset(&cs, "plan").as_deref(),
+            Some("stub")
+        );
     }
 }

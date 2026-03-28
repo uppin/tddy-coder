@@ -575,7 +575,7 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
     use tddy_core::{
         GoalId, MockBackend, SharedBackend, WorkflowEngine, WorkflowRecipe, WorkflowState,
     };
-    use tddy_workflow_recipes::{TddRecipe, TddWorkflowHooks};
+    use tddy_workflow_recipes::{SessionArtifactManifest, TddRecipe, TddWorkflowHooks};
 
     let (output_dir, session_dir) = common::temp_dir_with_git_repo("full-wf-validate-refactor");
     std::fs::create_dir_all(session_dir.join("artifacts")).expect("create artifacts");
@@ -609,7 +609,8 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
     let storage_dir = std::env::temp_dir().join("tddy-cli-full-wf-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
-    let hooks = Arc::new(TddWorkflowHooks::new(recipe.clone()));
+    let manifest: Arc<dyn SessionArtifactManifest> = Arc::new(TddRecipe);
+    let hooks = Arc::new(TddWorkflowHooks::new(recipe.clone(), manifest));
     let engine = WorkflowEngine::new(
         recipe,
         SharedBackend::from_arc(backend.clone()),

@@ -10,7 +10,9 @@ use tonic::Request;
 use tddy_e2e::{connect_grpc, spawn_presenter_with_grpc};
 use tddy_service::gen::app_mode_proto;
 use tddy_service::gen::server_message;
-use tddy_service::gen::{client_message, AnswerSelect, ApprovePlan, ClientMessage, QueuePrompt};
+use tddy_service::gen::{
+    client_message, AnswerSelect, ApproveSessionDocument, ClientMessage, QueuePrompt,
+};
 
 #[tokio::test]
 async fn clarification_flow_submit_answer_select_workflow_completes() {
@@ -73,13 +75,15 @@ async fn clarification_flow_submit_answer_select_workflow_completes() {
                                     .await
                                     .unwrap();
                                     tokio::time::sleep(Duration::from_millis(1000)).await;
-                                } else if let Some(app_mode_proto::Variant::PlanReview(_)) =
+                                } else if let Some(app_mode_proto::Variant::DocumentReview(_)) =
                                     &mode.variant
                                 {
                                     tx.send(ClientMessage {
-                                        intent: Some(client_message::Intent::ApprovePlan(
-                                            ApprovePlan {},
-                                        )),
+                                        intent: Some(
+                                            client_message::Intent::ApproveSessionDocument(
+                                                ApproveSessionDocument {},
+                                            ),
+                                        ),
                                     })
                                     .await
                                     .unwrap();

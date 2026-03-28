@@ -43,7 +43,10 @@ async fn changeset_persists_failed_when_runner_task_errors() {
 
     storage.save(&session).await.unwrap();
 
-    let hooks = Arc::new(TddWorkflowHooks::new(common::tdd_recipe()));
+    let hooks = Arc::new(TddWorkflowHooks::new(
+        common::tdd_recipe(),
+        common::tdd_manifest(),
+    ));
     let runner = FlowRunner::new_with_hooks(graph, storage.clone(), Some(hooks));
     let result = runner.run("s1").await;
     assert!(result.is_err());

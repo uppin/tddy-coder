@@ -3,14 +3,14 @@
 //! Mirrors graph-flow session concepts.
 //!
 //! JSON snapshots (`*.session.json`) live under [`workflow_engine_storage_dir`] — typically
-//! `<session_dir>/.workflow/` so they stay with PRD/changeset/logs under one artifact tree.
+//! `<session_dir>/.workflow/` so they stay with session documents/changeset/logs under one artifact tree.
 
 use crate::workflow::context::Context;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Subdirectory of the artifact session directory used only for workflow engine JSON
-/// (`FileSessionStorage`). Not for PRD, changeset, or agent files.
+/// (`FileSessionStorage`). Not for user-facing session markdown, changeset, or agent files.
 pub const WORKFLOW_ENGINE_STORAGE_SUBDIR: &str = ".workflow";
 
 /// Directory for [`FileSessionStorage`] under the given artifact session directory.

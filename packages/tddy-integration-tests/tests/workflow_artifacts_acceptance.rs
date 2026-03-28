@@ -10,10 +10,9 @@ use std::sync::Arc;
 
 use tddy_core::workflow::build_context_header;
 use tddy_core::workflow::graph::ExecutionStatus;
-use tddy_core::{GoalId, MockBackend, SharedBackend, WorkflowEngine, WorkflowRecipe};
-use tddy_workflow::{
-    read_primary_planning_document_utf8, resolve_existing_primary_planning_document,
-};
+use tddy_core::{GoalId, MockBackend, SharedBackend, WorkflowEngine};
+use tddy_workflow::{read_session_artifact_utf8, resolve_existing_session_artifact};
+use tddy_workflow_recipes::SessionArtifactManifest;
 use tddy_workflow_recipes::TddRecipe;
 
 /// Plan output as JSON (tddy-tools submit format).
@@ -97,17 +96,15 @@ fn approval_content_matches_recipe_primary_artifact() {
 
     let recipe = TddRecipe;
     let basename = recipe
-        .default_artifacts()
-        .get("prd")
-        .expect("TddRecipe maps prd output key")
-        .clone();
+        .primary_document_basename()
+        .expect("TddRecipe primary document basename");
     let primary_path = base.join("artifacts").join(&basename);
     std::fs::write(&primary_path, "PRIMARY_PLAN_BODY_FROM_RECIPE_PATH").unwrap();
 
-    let resolved = resolve_existing_primary_planning_document(&base, &basename)
-        .expect("resolver must find primary planning document for approval / elicitation");
-    let resolved_bytes = read_primary_planning_document_utf8(&base, &basename)
-        .expect("read helper must load primary planning document bytes");
+    let resolved = resolve_existing_session_artifact(&base, &basename)
+        .expect("resolver must find primary session document for approval / elicitation");
+    let resolved_bytes = read_session_artifact_utf8(&base, &basename)
+        .expect("read helper must load primary session document bytes");
     let recipe_bytes = std::fs::read_to_string(&primary_path).unwrap();
 
     assert_eq!(
@@ -131,7 +128,7 @@ fn approval_content_matches_recipe_primary_artifact() {
 #[test]
 fn context_header_uses_recipe_artifact_basenames() {
     let recipe = TddRecipe;
-    let basenames: Vec<&str> = recipe.context_header_session_artifact_filenames();
+    let basenames: Vec<&str> = recipe.context_header_filenames();
 
     let dir = std::env::temp_dir().join(format!("tddy-ctx-header-recipe-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

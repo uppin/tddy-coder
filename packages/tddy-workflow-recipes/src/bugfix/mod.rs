@@ -15,6 +15,8 @@ use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::recipe::{WorkflowEventSender, WorkflowRecipe};
 use tddy_core::workflow::task::{EchoTask, EndTask};
 
+use crate::SessionArtifactManifest;
+
 /// Minimal bug-fix recipe: reproduce then green (echo tasks for wiring tests).
 #[derive(Clone, Copy, Default, Debug)]
 pub struct BugfixRecipe;
@@ -54,7 +56,7 @@ impl WorkflowRecipe for BugfixRecipe {
             allowed_tools: vec![],
             default_model: None,
             agent_output: false,
-            planning_mode_intent: false,
+            agent_cli_plan_mode: false,
             claude_nonzero_exit_ok_if_structured_response: false,
         })
     }
@@ -96,14 +98,6 @@ impl WorkflowRecipe for BugfixRecipe {
         BTreeMap::new()
     }
 
-    fn default_artifacts(&self) -> BTreeMap<String, String> {
-        BTreeMap::new()
-    }
-
-    fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
-        &[]
-    }
-
     fn goal_requires_session_dir(&self, _goal_id: &GoalId) -> bool {
         false
     }
@@ -119,6 +113,16 @@ impl WorkflowRecipe for BugfixRecipe {
         }
         println!("\nSession dir: {}", session_dir.display());
         Ok(())
+    }
+}
+
+impl SessionArtifactManifest for BugfixRecipe {
+    fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
+        &[]
+    }
+
+    fn default_artifacts(&self) -> BTreeMap<String, String> {
+        BTreeMap::new()
     }
 }
 

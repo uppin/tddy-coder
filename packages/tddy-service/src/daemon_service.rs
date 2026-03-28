@@ -15,9 +15,11 @@ use tddy_core::workflow::graph::{ElicitationEvent, ExecutionStatus};
 use tddy_core::workflow::session::workflow_engine_storage_dir;
 use tddy_core::{setup_worktree_for_session, SharedBackend, WorkflowEngine, WorkflowRecipe};
 use tddy_workflow_recipes::{parse_planning_response_with_base, PlanningOutput};
-use tddy_workflow_recipes::{TddRecipe, TddWorkflowHooks};
+use tddy_workflow_recipes::{SessionArtifactManifest, TddRecipe, TddWorkflowHooks};
 
-use crate::convert::{plan_approval_to_server_message, workflow_event_to_server_message};
+use crate::convert::{
+    session_document_approval_to_server_message, workflow_event_to_server_message,
+};
 use crate::gen::{
     client_message, server_message, tddy_remote_server::TddyRemote, GetSessionRequest,
     GetSessionResponse, ListSessionsRequest, ListSessionsResponse, ServerMessage, SessionCreated,
@@ -107,23 +109,33 @@ pub struct DaemonService {
     sessions_base: PathBuf,
     backend: SharedBackend,
     workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
+    artifact_manifest: std::sync::Arc<dyn SessionArtifactManifest>,
 }
 
 impl DaemonService {
     pub fn new(sessions_base: PathBuf, backend: SharedBackend) -> Self {
-        Self::with_workflow_recipe(sessions_base, backend, std::sync::Arc::new(TddRecipe))
+        let tdd: std::sync::Arc<TddRecipe> = std::sync::Arc::new(TddRecipe);
+        Self::with_workflow_recipe(
+            sessions_base,
+            backend,
+            tdd.clone() as std::sync::Arc<dyn WorkflowRecipe>,
+            tdd as std::sync::Arc<dyn SessionArtifactManifest>,
+        )
     }
 
-    /// Use a specific workflow recipe (e.g. TDD, bug-fix). Default is [`TddRecipe`].
+    /// Use a specific workflow recipe (e.g. TDD, bug-fix) and matching session-artifact manifest.
+    /// Default [`new`] pairs [`TddRecipe`] for both.
     pub fn with_workflow_recipe(
         sessions_base: PathBuf,
         backend: SharedBackend,
         workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
+        artifact_manifest: std::sync::Arc<dyn SessionArtifactManifest>,
     ) -> Self {
         Self {
             sessions_base,
             backend,
             workflow_recipe,
+            artifact_manifest,
         }
     }
 }
@@ -141,6 +153,7 @@ impl TddyRemote for DaemonService {
             self.sessions_base.clone(),
             self.backend.clone(),
             self.workflow_recipe.clone(),
+            self.artifact_manifest.clone(),
             request.into_inner(),
             tx,
         );
@@ -228,7 +241,7 @@ impl TddyRemote for DaemonService {
 #[derive(Clone)]
 enum DaemonStreamState {
     Idle,
-    WaitingApprovePlan,
+    WaitingSessionDocumentApproval,
     PlanComplete,
 }
 
@@ -237,6 +250,7 @@ struct DaemonStreamHandler {
     sessions_base: PathBuf,
     backend: SharedBackend,
     workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
+    artifact_manifest: std::sync::Arc<dyn SessionArtifactManifest>,
     client_stream: tonic::codec::Streaming<crate::gen::ClientMessage>,
     tx: tokio_mpsc::Sender<Result<ServerMessage, Status>>,
     state: DaemonStreamState,
@@ -251,6 +265,7 @@ impl DaemonStreamHandler {
         sessions_base: PathBuf,
         backend: SharedBackend,
         workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
+        artifact_manifest: std::sync::Arc<dyn SessionArtifactManifest>,
         client_stream: tonic::codec::Streaming<crate::gen::ClientMessage>,
         tx: tokio_mpsc::Sender<Result<ServerMessage, Status>>,
     ) -> Self {
@@ -258,6 +273,7 @@ impl DaemonStreamHandler {
             sessions_base,
             backend,
             workflow_recipe,
+            artifact_manifest,
             client_stream,
             tx,
             state: DaemonStreamState::Idle,
@@ -287,9 +303,9 @@ impl DaemonStreamHandler {
                         false
                     }
                 }
-                DaemonStreamState::WaitingApprovePlan => {
-                    if let Some(client_message::Intent::ApprovePlan(_)) = msg.intent {
-                        if self.handle_approve_plan().await {
+                DaemonStreamState::WaitingSessionDocumentApproval => {
+                    if let Some(client_message::Intent::ApproveSessionDocument(_)) = msg.intent {
+                        if self.handle_approve_session_document().await {
                             break;
                         }
                     }
@@ -345,6 +361,7 @@ impl DaemonStreamHandler {
         spawn_event_forwarder(rx, self.tx.clone());
         let hooks = Arc::new(TddWorkflowHooks::with_event_tx(
             self.workflow_recipe.clone(),
+            self.artifact_manifest.clone(),
             event_tx,
         ));
         let eng = WorkflowEngine::new(
@@ -397,13 +414,13 @@ impl DaemonStreamHandler {
 
         match result.status {
             ExecutionStatus::ElicitationNeeded {
-                event: ElicitationEvent::PlanApproval { prd_content },
+                event: ElicitationEvent::DocumentApproval { content },
             } => {
                 let _ = self
                     .tx
-                    .send(Ok(plan_approval_to_server_message(prd_content)))
+                    .send(Ok(session_document_approval_to_server_message(content)))
                     .await;
-                self.state = DaemonStreamState::WaitingApprovePlan;
+                self.state = DaemonStreamState::WaitingSessionDocumentApproval;
             }
             ExecutionStatus::Completed => {
                 self.state = DaemonStreamState::PlanComplete;
@@ -420,9 +437,9 @@ impl DaemonStreamHandler {
         false
     }
 
-    /// After plan approval, create worktree from origin/master and run the rest of the workflow.
+    /// After session-document approval, create worktree from origin/master and run the rest of the workflow.
     /// Returns true if the run loop should break (e.g. on error).
-    async fn handle_approve_plan(&mut self) -> bool {
+    async fn handle_approve_session_document(&mut self) -> bool {
         let session_dir_path = self.session_dir.as_ref().unwrap();
         let repo = self.repo_root.as_ref().unwrap();
 
@@ -438,13 +455,12 @@ impl DaemonStreamHandler {
             .and_then(|s| s.context.get_sync::<String>("output"))
             .and_then(|o| parse_planning_response_with_base(&o, session_dir_path).ok())
             .unwrap_or_else(|| {
-                let recipe = TddRecipe;
-                let bn = recipe.primary_planning_artifact_basename();
-                let prd = tddy_workflow::read_primary_planning_document_utf8(session_dir_path, &bn)
+                let prd = self
+                    .workflow_recipe
+                    .read_primary_session_document_utf8(session_dir_path)
                     .unwrap_or_default();
                 log::debug!(
-                    "[daemon] approve_plan fallback planning from primary artifact basename={}",
-                    bn
+                    "[daemon] approve_session_document fallback planning from primary session document"
                 );
                 PlanningOutput {
                     prd,
