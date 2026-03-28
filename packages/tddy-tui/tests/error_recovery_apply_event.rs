@@ -19,6 +19,7 @@ fn sample_state() -> PresenterState {
         inbox: Vec::new(),
         should_quit: false,
         exit_action: None,
+        plan_refinement_pending: false,
     }
 }
 
@@ -96,7 +97,7 @@ fn error_recovery_exit_selection_enter_maps_to_quit_intent() {
         error_message: "workflow failed".to_string(),
     };
     let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
-    let intent = key_event_to_intent(key, &mode, &vs);
+    let intent = key_event_to_intent(key, &mode, &vs, false);
     assert!(
         matches!(intent, Some(UserIntent::Quit)),
         "Exit is index 2; Enter must produce Quit, got {:?}",

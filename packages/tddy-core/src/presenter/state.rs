@@ -29,7 +29,7 @@ pub enum ExitAction {
 }
 
 /// The current interaction mode (minimal — no input buffers).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppMode {
     /// Waiting for the user to type a feature description.
     FeatureInput,
@@ -87,6 +87,8 @@ pub struct PresenterState {
     pub should_quit: bool,
     /// When set, the TUI caller should perform this action after exit.
     pub exit_action: Option<ExitAction>,
+    /// Plan refinement is being collected in the prompt bar while [`AppMode::MarkdownViewer`] stays active.
+    pub plan_refinement_pending: bool,
 }
 
 #[cfg(test)]
@@ -137,6 +139,7 @@ mod tests {
             inbox: Vec::new(),
             should_quit: false,
             exit_action: None,
+            plan_refinement_pending: false,
         };
         assert!(state.exit_action.is_none());
     }

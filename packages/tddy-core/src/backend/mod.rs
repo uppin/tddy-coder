@@ -313,7 +313,7 @@ pub(crate) fn path_with_exe_dir() -> std::ffi::OsString {
 }
 
 /// Structured clarification question from AskUserQuestion tool.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ClarificationQuestion {
     pub header: String,
     pub question: String,
@@ -326,7 +326,7 @@ pub struct ClarificationQuestion {
 }
 
 /// Option for a clarification question.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QuestionOption {
     pub label: String,
     /// Secondary line in the TUI; omit in JSON when unused (`tddy-tools ask`).

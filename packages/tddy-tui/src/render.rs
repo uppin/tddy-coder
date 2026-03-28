@@ -1,5 +1,8 @@
 //! Frame rendering: draw activity log, status bar, prompt bar.
 
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
@@ -15,6 +18,45 @@ use crate::ui::{
     status_bar_style_for_goal,
 };
 use crate::view_state::{InboxFocus, ViewState};
+
+/// Wrapped line count for markdown [`Text`] at a given width (used for scroll bounds and end-of-doc).
+fn markdown_wrapped_line_count(text: &Text, width: u16) -> usize {
+    let w = width as usize;
+    if w == 0 {
+        return text.lines.len().max(1);
+    }
+    let mut total = 0usize;
+    for line in &text.lines {
+        let lw = line.width();
+        total += lw.div_ceil(w).max(1);
+    }
+    total.max(1)
+}
+
+fn markdown_viewer_prompt_for_plan_approval(
+    state: &PresenterState,
+    view_state: &ViewState,
+) -> String {
+    log::debug!(
+        "markdown_viewer_prompt: pending={} markdown_end_button_selected={}",
+        state.plan_refinement_pending,
+        view_state.markdown_end_button_selected
+    );
+    if state.plan_refinement_pending {
+        if view_state.plan_refinement_input.is_empty() {
+            "> Type refinement feedback and press Enter...".to_string()
+        } else {
+            format!("> {}", view_state.plan_refinement_input)
+        }
+    } else if !view_state.plan_refinement_input.is_empty() {
+        format!("> {}", view_state.plan_refinement_input)
+    } else if view_state.markdown_at_end && view_state.markdown_end_button_selected == 1 {
+        "Type refinement feedback in the prompt below, then press Enter  |  Q/Esc to close"
+            .to_string()
+    } else {
+        "Q or Esc to close  |  Alt+A=Approve  Alt+R=Reject/refine  |  PgUp/PgDn scroll".to_string()
+    }
+}
 
 /// Return the prompt bar text for the current mode and view state.
 fn prompt_text(state: &PresenterState, view_state: &ViewState) -> String {
@@ -65,7 +107,9 @@ fn prompt_text(state: &PresenterState, view_state: &ViewState) -> String {
             }
         }
         AppMode::PlanReview { .. } => "Up/Down navigate  Enter select".to_string(),
-        AppMode::MarkdownViewer { .. } => "Q or Esc to close".to_string(),
+        AppMode::MarkdownViewer { .. } => {
+            markdown_viewer_prompt_for_plan_approval(state, view_state)
+        }
         AppMode::ErrorRecovery { .. } => "Up/Down navigate  Enter select".to_string(),
     }
 }
@@ -161,11 +205,126 @@ pub fn draw(
 
     if activity_log.height > 0 {
         match &state.mode {
+            AppMode::PlanReview { prd_content } => {
+                const MENU_LINES: u16 = 4;
+                let menu_h = MENU_LINES.min(activity_log.height);
+                let body_h = activity_log.height.saturating_sub(menu_h);
+                if body_h > 0 {
+                    let body_area =
+                        Rect::new(activity_log.x, activity_log.y, activity_log.width, body_h);
+                    let text = tui_markdown::from_str(prd_content);
+                    let widget = Paragraph::new(text).scroll((view_state.scroll_offset as u16, 0));
+                    frame.render_widget(widget, body_area);
+                }
+                if menu_h > 0 {
+                    let menu_y = activity_log.y.saturating_add(body_h);
+                    let menu_area = Rect::new(activity_log.x, menu_y, activity_log.width, menu_h);
+                    render_plan_review(frame, state, view_state, menu_area);
+                }
+            }
             AppMode::MarkdownViewer { content } => {
+                let footer_h: u16 = if activity_log.height == 0 {
+                    0
+                } else if activity_log.height == 1 {
+                    1
+                } else {
+                    2
+                };
+                let body_h = activity_log.height.saturating_sub(footer_h);
+                let body_area =
+                    Rect::new(activity_log.x, activity_log.y, activity_log.width, body_h);
                 let text = tui_markdown::from_str(content);
-                let widget =
-                    Paragraph::new(text).scroll((view_state.markdown_scroll_offset as u16, 0));
-                frame.render_widget(widget, activity_log);
+                let total_lines = markdown_wrapped_line_count(&text, body_area.width);
+                let visible = body_h as usize;
+                let max_scroll = if visible == 0 {
+                    0
+                } else {
+                    total_lines.saturating_sub(visible)
+                };
+                view_state.markdown_scroll_offset =
+                    view_state.markdown_scroll_offset.min(max_scroll);
+                view_state.markdown_at_end = visible == 0
+                    || max_scroll == 0
+                    || view_state.markdown_scroll_offset >= max_scroll;
+                if body_h > 0 {
+                    let widget =
+                        Paragraph::new(text).scroll((view_state.markdown_scroll_offset as u16, 0));
+                    frame.render_widget(widget, body_area);
+                }
+                if footer_h > 0 {
+                    let footer_area = Rect::new(
+                        activity_log.x,
+                        activity_log.y.saturating_add(body_h),
+                        activity_log.width,
+                        footer_h,
+                    );
+                    log::debug!(
+                        "render: plan approval footer ({} lines × {} cols)",
+                        footer_h,
+                        activity_log.width
+                    );
+                    if footer_h >= 2 {
+                        let approve_prefix = if view_state.markdown_end_button_selected == 0 {
+                            "> "
+                        } else {
+                            "  "
+                        };
+                        let reject_prefix = if view_state.markdown_end_button_selected == 1 {
+                            "> "
+                        } else {
+                            "  "
+                        };
+                        let approve_line = format!("{}Approve", approve_prefix);
+                        let reject_line = format!("{}Reject", reject_prefix);
+                        let approve_style = if view_state.markdown_end_button_selected == 0 {
+                            Style::default().add_modifier(Modifier::REVERSED)
+                        } else {
+                            Style::default()
+                        };
+                        let reject_style = if view_state.markdown_end_button_selected == 1 {
+                            Style::default().add_modifier(Modifier::REVERSED)
+                        } else {
+                            Style::default()
+                        };
+                        let lines = vec![
+                            Line::from(Span::styled(approve_line, approve_style)),
+                            Line::from(Span::styled(reject_line, reject_style)),
+                        ];
+                        frame.render_widget(Paragraph::new(lines), footer_area);
+                    } else {
+                        let w = activity_log.width as usize;
+                        let half = w / 2;
+                        let approve_prefix = if view_state.markdown_end_button_selected == 0 {
+                            "> "
+                        } else {
+                            "  "
+                        };
+                        let reject_prefix = if view_state.markdown_end_button_selected == 1 {
+                            "> "
+                        } else {
+                            "  "
+                        };
+                        let left =
+                            format!("{:<w1$}", format!("{}Approve", approve_prefix), w1 = half);
+                        let right =
+                            format!("{:>w2$}", format!("{}Reject", reject_prefix), w2 = w - half);
+                        let left_style = if view_state.markdown_end_button_selected == 0 {
+                            Style::default().add_modifier(Modifier::REVERSED)
+                        } else {
+                            Style::default()
+                        };
+                        let right_style = if view_state.markdown_end_button_selected == 1 {
+                            Style::default().add_modifier(Modifier::REVERSED)
+                        } else {
+                            Style::default()
+                        };
+                        let footer_line = Line::from(vec![
+                            Span::styled(left, left_style),
+                            Span::styled(right, right_style),
+                        ]);
+                        frame.render_widget(Paragraph::new(footer_line), footer_area);
+                    }
+                }
             }
             _ => {
                 let content = state
@@ -192,9 +351,6 @@ pub fn draw(
         match &state.mode {
             AppMode::Select { .. } | AppMode::MultiSelect { .. } | AppMode::TextInput { .. } => {
                 render_question(frame, state, view_state, dynamic_area);
-            }
-            AppMode::PlanReview { .. } => {
-                render_plan_review(frame, state, view_state, dynamic_area);
             }
             AppMode::ErrorRecovery { .. } => {
                 render_error_recovery(frame, state, view_state, dynamic_area);
@@ -588,6 +744,7 @@ mod tests {
             inbox: Vec::new(),
             should_quit: false,
             exit_action: None,
+            plan_refinement_pending: false,
         };
         let mut vs = ViewState::new();
         let mut areas = LayoutAreas {
@@ -636,6 +793,7 @@ mod tests {
             inbox: Vec::new(),
             should_quit: false,
             exit_action: None,
+            plan_refinement_pending: false,
         }
     }
 
@@ -695,6 +853,254 @@ mod tests {
             content.contains("backend timeout"),
             "Error recovery should render the error message, got: {}",
             content.trim()
+        );
+    }
+
+    /// PRD: While the PRD is visible in the activity pane, the prompt bar tells the user they can
+    /// type refinement feedback (e.g. after Reject or when the refine affordance is focused).
+    #[test]
+    fn markdown_viewer_prompt_shows_refinement_hint_when_reject_or_focused() {
+        let state = make_state(AppMode::MarkdownViewer {
+            content: "# My PRD".to_string(),
+        });
+        let mut vs = ViewState::new();
+        vs.markdown_at_end = true;
+        vs.markdown_end_button_selected = 1;
+        let text = prompt_text(&state, &vs);
+        let lower = text.to_lowercase();
+        assert!(
+            lower.contains("feedback") && text.contains("Enter"),
+            "prompt must describe typing refinement feedback and submission while PRD remains visible; got {:?}",
+            text
+        );
+    }
+
+    #[test]
+    fn plan_review_frame_shows_view_approve_refine_menu() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let state = make_state(AppMode::PlanReview {
+            prd_content: "# Plan".to_string(),
+        });
+        let mut vs = ViewState::new();
+        vs.plan_review_selected = 1;
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+        };
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            content.contains("Plan generated. Choose an action:"),
+            "expected plan approval menu header in rendered frame"
+        );
+        assert!(
+            content.contains("View") && content.contains("Approve") && content.contains("Refine"),
+            "expected View, Approve, and Refine labels from the plan approval menu in the frame"
+        );
+    }
+
+    #[test]
+    fn markdown_viewer_draw_marks_at_end_when_scrolled_to_bottom() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let state = make_state(AppMode::MarkdownViewer {
+            content: "# Long PRD\n\n".to_string() + &"line\n".repeat(200),
+        });
+        let mut vs = ViewState::new();
+        vs.markdown_scroll_offset = 50_000;
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+        };
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+        assert!(
+            vs.markdown_at_end,
+            "scrolling to the document end must enable footer Approve/Reject navigation"
+        );
+    }
+
+    fn count_reversed_on_footer_line(
+        buffer: &Buffer,
+        activity: Rect,
+        line_index_in_footer: u16,
+    ) -> usize {
+        let footer_h = if activity.height >= 2 { 2 } else { 1 }.min(activity.height);
+        let footer_top = activity.y + activity.height - footer_h;
+        let y = footer_top + line_index_in_footer;
+        (activity.x..activity.x + activity.width)
+            .filter(|&x| {
+                buffer
+                    .cell(Position::new(x, y))
+                    .is_some_and(|c| c.style().add_modifier.contains(Modifier::REVERSED))
+            })
+            .count()
+    }
+
+    #[test]
+    fn markdown_viewer_footer_reverses_approve_line_when_approve_selected() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let state = make_state(AppMode::MarkdownViewer {
+            content: "# p".to_string(),
+        });
+        let mut vs = ViewState::new();
+        vs.markdown_at_end = true;
+        vs.markdown_end_button_selected = 0;
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+        };
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+        assert!(
+            areas.activity_log.height >= 2,
+            "fixture expects a two-line plan footer (stacked Approve / Reject)"
+        );
+        let buffer = terminal.backend().buffer();
+        let approve_line = count_reversed_on_footer_line(buffer, areas.activity_log, 0);
+        let reject_line = count_reversed_on_footer_line(buffer, areas.activity_log, 1);
+        assert!(
+            approve_line > 0 && reject_line == 0,
+            "only the Approve line must use REVERSED when Approve is focused; approve_line={approve_line} reject_line={reject_line}"
+        );
+    }
+
+    #[test]
+    fn markdown_viewer_footer_reverses_reject_line_when_reject_selected() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let state = make_state(AppMode::MarkdownViewer {
+            content: "# p".to_string(),
+        });
+        let mut vs = ViewState::new();
+        vs.markdown_at_end = true;
+        vs.markdown_end_button_selected = 1;
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+        };
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+        assert!(
+            areas.activity_log.height >= 2,
+            "fixture expects a two-line plan footer (stacked Approve / Reject)"
+        );
+        let buffer = terminal.backend().buffer();
+        let approve_line = count_reversed_on_footer_line(buffer, areas.activity_log, 0);
+        let reject_line = count_reversed_on_footer_line(buffer, areas.activity_log, 1);
+        assert!(
+            approve_line == 0 && reject_line > 0,
+            "only the Reject line must use REVERSED when Reject is focused; approve_line={approve_line} reject_line={reject_line}"
+        );
+    }
+
+    #[test]
+    fn markdown_viewer_footer_shows_approve_and_reject_options() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let state = make_state(AppMode::MarkdownViewer {
+            content: "# p".to_string(),
+        });
+        let mut vs = ViewState::new();
+        vs.markdown_at_end = true;
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+        };
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            content.contains("Approve") && content.contains("Reject"),
+            "activity footer must label the two actions Approve and Reject when the plan end is reached"
+        );
+    }
+
+    #[test]
+    fn markdown_viewer_reject_button_visible_in_short_terminal() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 4);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let state = make_state(AppMode::MarkdownViewer {
+            content: "# Plan".to_string(),
+        });
+        let mut vs = ViewState::new();
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+        };
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let flat: String = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            flat.contains("Reject"),
+            "Reject must stay visible in the plan viewer footer"
         );
     }
 }

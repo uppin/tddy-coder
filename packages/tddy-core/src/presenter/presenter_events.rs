@@ -9,11 +9,19 @@ use tokio::sync::broadcast;
 use crate::presenter::intent::UserIntent;
 use crate::presenter::state::{ActivityEntry, AppMode, CriticalPresenterState, PresenterState};
 
+/// Payload for [`PresenterEvent::ModeChanged`]: mode plus fields that are not inferable from [`AppMode`] alone.
+#[derive(Debug, Clone)]
+pub struct ModeChangedDetails {
+    pub mode: AppMode,
+    /// When true, the user is entering plan refinement text via the prompt bar while the PRD stays visible.
+    pub plan_refinement_pending: bool,
+}
+
 /// Events the Presenter broadcasts to subscribers (e.g. gRPC clients).
 /// Mirrors PresenterView callbacks for remote observation.
 #[derive(Debug, Clone)]
 pub enum PresenterEvent {
-    ModeChanged(AppMode),
+    ModeChanged(ModeChangedDetails),
     ActivityLogged(ActivityEntry),
     GoalStarted(String),
     StateChanged {

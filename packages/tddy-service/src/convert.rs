@@ -4,12 +4,12 @@ use tddy_core::{ActivityKind, AppMode, PresenterEvent, UserIntent, WorkflowEvent
 
 use crate::gen::{
     app_mode_proto, client_message, server_message, ActivityLogged, AgentOutput, AnswerMultiSelect,
-    AnswerOther, AnswerSelect, AnswerText, AppModeDone, AppModeFeatureInput, AppModeMarkdownViewer,
-    AppModeMultiSelect, AppModePlanReview, AppModeProto, AppModeRunning, AppModeSelect,
-    AppModeTextInput, ApprovePlan, ClarificationQuestionProto, ClientMessage, DeleteInboxItem,
-    DismissViewer, EditInboxItem, GoalStarted, InboxChanged, IntentReceived, ModeChanged,
-    QuestionOptionProto, QueuePrompt, Quit, RefinePlan, Scroll, ServerMessage, StateChanged,
-    SubmitFeatureInput, ViewPlan, WorkflowComplete,
+    AnswerOther, AnswerSelect, AnswerText, AppModeDone, AppModeFeatureInput, AppModeMultiSelect,
+    AppModePlanReview, AppModeProto, AppModeRunning, AppModeSelect, AppModeTextInput, ApprovePlan,
+    ClarificationQuestionProto, ClientMessage, DeleteInboxItem, DismissViewer, EditInboxItem,
+    GoalStarted, InboxChanged, IntentReceived, ModeChanged, QuestionOptionProto, QueuePrompt, Quit,
+    RefinePlan, Scroll, ServerMessage, StateChanged, SubmitFeatureInput, ViewPlan,
+    WorkflowComplete,
 };
 
 /// Convert ClientMessage to UserIntent. Returns None if the message has no intent.
@@ -96,9 +96,9 @@ pub fn plan_approval_to_server_message(prd_content: String) -> ServerMessage {
 pub fn event_to_server_message(event: PresenterEvent) -> ServerMessage {
     use server_message::Event;
     match event {
-        PresenterEvent::ModeChanged(mode) => ServerMessage {
+        PresenterEvent::ModeChanged(details) => ServerMessage {
             event: Some(Event::ModeChanged(ModeChanged {
-                mode: Some(app_mode_to_proto(&mode)),
+                mode: Some(app_mode_to_proto(&details.mode)),
             })),
         },
         PresenterEvent::ActivityLogged(entry) => ServerMessage {
@@ -184,8 +184,11 @@ fn app_mode_to_proto(mode: &AppMode) -> AppModeProto {
             })
         }
         AppMode::MarkdownViewer { content } => {
-            app_mode_proto::Variant::MarkdownViewer(AppModeMarkdownViewer {
-                content: content.clone(),
+            log::debug!(
+                "app_mode_to_proto: MarkdownViewer (on-screen PRD) serialized as PlanReview for RPC parity"
+            );
+            app_mode_proto::Variant::PlanReview(AppModePlanReview {
+                prd_content: content.clone(),
             })
         }
         // skeleton: ErrorRecovery has no proto representation yet
@@ -220,6 +223,36 @@ fn activity_kind_to_str(k: &ActivityKind) -> String {
         ActivityKind::StateChange => "StateChange".to_string(),
         ActivityKind::Info => "Info".to_string(),
         ActivityKind::AgentOutput => "AgentOutput".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod acceptance_plan_approval_rpc {
+    use super::*;
+    use prost::Message;
+    use tddy_core::{ModeChangedDetails, PresenterEvent};
+
+    /// When the TUI shows the PRD for approval, RPC `ModeChanged` must stay coherent with
+    /// `WorkflowEvent::PlanApprovalNeeded` so clients that only understand PlanReview still work.
+    #[test]
+    fn service_mode_changed_still_serializes_plan_approval() {
+        let prd = "# Shared PRD body\n".to_string();
+        let from_workflow = workflow_event_to_server_message(WorkflowEvent::PlanApprovalNeeded {
+            prd_content: prd.clone(),
+        })
+        .expect("workflow event");
+        let from_markdown_viewer =
+            event_to_server_message(PresenterEvent::ModeChanged(ModeChangedDetails {
+                mode: AppMode::MarkdownViewer {
+                    content: prd.clone(),
+                },
+                plan_refinement_pending: false,
+            }));
+        assert_eq!(
+            from_workflow.encode_to_vec(),
+            from_markdown_viewer.encode_to_vec(),
+            "markdown viewer used for on-screen plan approval must serialize like PlanApprovalNeeded"
+        );
     }
 }
 

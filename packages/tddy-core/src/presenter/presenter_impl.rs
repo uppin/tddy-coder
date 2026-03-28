@@ -10,7 +10,7 @@ use crate::toolcall::{ToolCallRequest, ToolCallResponse};
 use crate::{ClarificationQuestion, SharedBackend, WorkflowRecipe};
 
 use crate::presenter::intent::UserIntent;
-use crate::presenter::presenter_events::{PresenterEvent, ViewConnection};
+use crate::presenter::presenter_events::{ModeChangedDetails, PresenterEvent, ViewConnection};
 use crate::presenter::state::{
     ActivityEntry, ActivityKind, AppMode, CriticalPresenterState, PresenterState,
 };
@@ -70,8 +70,6 @@ pub struct Presenter {
     broadcast_tx: Option<tokio::sync::broadcast::Sender<PresenterEvent>>,
     /// When set, connect_view() returns this for external views to send intents.
     intent_tx: Option<mpsc::Sender<UserIntent>>,
-    /// When true, next AnswerText is refinement feedback (not clarification).
-    plan_refinement_pending: bool,
     /// Receiver for tddy-tools relay requests (Submit, Ask, Approve).
     tool_call_rx: Option<mpsc::Receiver<ToolCallRequest>>,
     /// When set, answers go to tool call response (Ask/Approve from tddy-tools) instead of answer_tx.
@@ -122,6 +120,7 @@ impl Presenter {
             inbox: Vec::new(),
             should_quit: false,
             exit_action: None,
+            plan_refinement_pending: false,
         };
         Presenter {
             state,
@@ -141,7 +140,6 @@ impl Presenter {
             workflow_handle: None,
             broadcast_tx: None,
             intent_tx: None,
-            plan_refinement_pending: false,
             tool_call_rx: None,
             pending_tool_call_response: None,
             workflow_socket_path: None,
@@ -192,6 +190,35 @@ impl Presenter {
         }
     }
 
+    fn broadcast_mode_changed(&mut self) {
+        log::debug!(
+            "broadcast_mode_changed: mode={:?} plan_refinement_pending={}",
+            self.state.mode,
+            self.state.plan_refinement_pending
+        );
+        self.broadcast(PresenterEvent::ModeChanged(ModeChangedDetails {
+            mode: self.state.mode.clone(),
+            plan_refinement_pending: self.state.plan_refinement_pending,
+        }));
+    }
+
+    fn prd_body_for_plan_review(&self, prd_fallback: &str) -> String {
+        self.workflow_session_dir
+            .as_ref()
+            .map(|d| crate::session_plan_prd::plan_prd_path_for_session_dir(d.as_path()))
+            .and_then(|p| std::fs::read_to_string(&p).ok())
+            .unwrap_or_else(|| prd_fallback.to_string())
+    }
+
+    /// Send workflow answer `Approve`, switch to [`AppMode::Running`], and broadcast (shared by PlanReview and MarkdownViewer).
+    fn approve_plan_from_review_or_viewer(&mut self) {
+        if let Some(ref tx) = self.answer_tx {
+            let _ = tx.send("Approve".to_string());
+        }
+        self.state.mode = AppMode::Running;
+        self.broadcast_mode_changed();
+    }
+
     /// Show interactive backend selection (synthetic single-select question).
     pub fn show_backend_selection(
         &mut self,
@@ -208,7 +235,7 @@ impl Presenter {
             total_questions: 1,
             initial_selected,
         };
-        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+        self.broadcast_mode_changed();
     }
 
     /// Configure backend creation + first workflow start after interactive backend selection (tddy-coder TUI).
@@ -231,7 +258,7 @@ impl Presenter {
 
     fn broadcast_error_recovery(&mut self, error_message: String) {
         self.state.mode = AppMode::ErrorRecovery { error_message };
-        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+        self.broadcast_mode_changed();
     }
 
     fn start_workflow_from_pending_if_any(&mut self, backend: SharedBackend) {
@@ -281,7 +308,7 @@ impl Presenter {
         self.current_question_index = 0;
         self.collected_answers.clear();
         self.state.mode = AppMode::FeatureInput;
-        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+        self.broadcast_mode_changed();
         self.broadcast(PresenterEvent::BackendSelected {
             agent: agent_str.clone(),
             model: self.state.model.clone(),
@@ -323,7 +350,7 @@ impl Presenter {
             total_questions,
             initial_selected: idx,
         };
-        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+        self.broadcast_mode_changed();
     }
 
     /// Handle a user intent. Updates state and may send answers to workflow.
@@ -359,46 +386,56 @@ impl Presenter {
                 }
             }
             UserIntent::ApprovePlan => {
-                if matches!(self.state.mode, AppMode::PlanReview { .. }) {
-                    // Existing: approve from PlanReview menu
-                    if let Some(ref tx) = self.answer_tx {
-                        let _ = tx.send("Approve".to_string());
-                    }
-                    self.state.mode = AppMode::Running;
-                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
-                } else if matches!(self.state.mode, AppMode::MarkdownViewer { .. }) {
-                    if let Some(ref tx) = self.answer_tx {
-                        let _ = tx.send("Approve".to_string());
-                    }
-                    self.state.mode = AppMode::Running;
-                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                self.state.plan_refinement_pending = false;
+                log::info!("ApprovePlan: mode={:?}", self.state.mode);
+                if matches!(
+                    self.state.mode,
+                    AppMode::PlanReview { .. } | AppMode::MarkdownViewer { .. }
+                ) {
+                    self.approve_plan_from_review_or_viewer();
                 }
             }
             UserIntent::ViewPlan => {
                 if let AppMode::PlanReview { ref prd_content } = self.state.mode {
-                    let content = self
-                        .workflow_session_dir
-                        .as_ref()
-                        .map(|d| crate::session_plan_prd::plan_prd_path_for_session_dir(d))
-                        .and_then(|p| std::fs::read_to_string(&p).ok())
-                        .unwrap_or_else(|| prd_content.clone());
+                    let content = self.prd_body_for_plan_review(prd_content);
+                    self.state.plan_refinement_pending = false;
                     self.state.mode = AppMode::MarkdownViewer { content };
-                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                    self.broadcast_mode_changed();
                 }
             }
             UserIntent::RefinePlan => {
-                self.plan_refinement_pending = true;
-                self.state.mode = AppMode::TextInput {
-                    prompt: "Enter refinement feedback:".to_string(),
-                };
-                self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                log::info!("RefinePlan: mode={:?}", self.state.mode);
+                self.state.plan_refinement_pending = true;
+                match self.state.mode.clone() {
+                    AppMode::MarkdownViewer { .. } => {
+                        log::debug!("RefinePlan: keep MarkdownViewer; refinement via prompt bar");
+                        self.broadcast_mode_changed();
+                    }
+                    AppMode::PlanReview { prd_content } => {
+                        let content = self.prd_body_for_plan_review(&prd_content);
+                        self.state.mode = AppMode::MarkdownViewer { content };
+                        log::debug!("RefinePlan: opened MarkdownViewer from PlanReview");
+                        self.broadcast_mode_changed();
+                    }
+                    _ => {
+                        log::warn!(
+                            "RefinePlan: unexpected mode {:?}; using TextInput fallback",
+                            self.state.mode
+                        );
+                        self.state.mode = AppMode::TextInput {
+                            prompt: "Enter refinement feedback:".to_string(),
+                        };
+                        self.broadcast_mode_changed();
+                    }
+                }
             }
             UserIntent::DismissViewer => {
+                self.state.plan_refinement_pending = false;
                 if let AppMode::MarkdownViewer { ref content } = self.state.mode {
                     self.state.mode = AppMode::PlanReview {
                         prd_content: content.clone(),
                     };
-                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                    self.broadcast_mode_changed();
                 }
             }
             UserIntent::AnswerSelect(idx) => {
@@ -444,13 +481,26 @@ impl Presenter {
                 }
             }
             UserIntent::AnswerText(text) => {
-                if self.plan_refinement_pending {
-                    self.plan_refinement_pending = false;
+                if self.state.plan_refinement_pending {
+                    log::info!("AnswerText: plan refinement feedback (len={})", text.len());
+                    self.state.plan_refinement_pending = false;
                     if let Some(ref tx) = self.answer_tx {
                         let _ = tx.send(text);
                     }
                     self.state.mode = AppMode::Running;
-                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                    self.broadcast_mode_changed();
+                } else if matches!(self.state.mode, AppMode::MarkdownViewer { .. })
+                    && !text.is_empty()
+                {
+                    log::info!(
+                        "AnswerText: plan refinement (direct entry, len={})",
+                        text.len()
+                    );
+                    if let Some(ref tx) = self.answer_tx {
+                        let _ = tx.send(text);
+                    }
+                    self.state.mode = AppMode::Running;
+                    self.broadcast_mode_changed();
                 } else {
                     self.collected_answers.push(text);
                     self.current_question_index += 1;
@@ -590,7 +640,7 @@ impl Presenter {
                     None
                 };
                 self.state.mode = AppMode::Running;
-                self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                self.broadcast_mode_changed();
                 if let (Some(backend), Some(output_dir)) = (
                     self.workflow_backend.clone(),
                     self.workflow_output_dir.clone(),
@@ -666,7 +716,7 @@ impl Presenter {
     fn advance_to_next_question(&mut self) {
         if self.current_question_index >= self.pending_questions.len() {
             self.state.mode = AppMode::Running;
-            self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+            self.broadcast_mode_changed();
         } else {
             let q = self.pending_questions[self.current_question_index].clone();
             let total = self.pending_questions.len();
@@ -684,7 +734,7 @@ impl Presenter {
                     initial_selected: 0,
                 };
             }
-            self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+            self.broadcast_mode_changed();
         }
     }
 
@@ -891,7 +941,7 @@ impl Presenter {
                     self.state.goal_start_time = std::time::Instant::now();
                     if matches!(self.state.mode, AppMode::FeatureInput) {
                         self.state.mode = AppMode::Running;
-                        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                        self.broadcast_mode_changed();
                     }
                     self.broadcast(PresenterEvent::GoalStarted(goal.clone()));
                 }
@@ -904,12 +954,12 @@ impl Presenter {
                 }
                 WorkflowEvent::AwaitingFeatureInput => {
                     self.state.mode = AppMode::FeatureInput;
-                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                    self.broadcast_mode_changed();
                 }
                 WorkflowEvent::PlanApprovalNeeded { prd_content } => {
                     self.flush_agent_output_buffer();
                     self.state.mode = AppMode::PlanReview { prd_content };
-                    self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                    self.broadcast_mode_changed();
                     // Resync goal/state in case client missed GoalStarted/StateChanged due to broadcast Lagged
                     if let Some(ref g) = self.state.current_goal {
                         self.broadcast(PresenterEvent::GoalStarted(g.clone()));
@@ -938,7 +988,7 @@ impl Presenter {
                         let prefixed = format!("{}{}", QUEUED_INSTRUCTION_PREFIX, item);
                         self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
                         self.state.mode = AppMode::Running;
-                        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                        self.broadcast_mode_changed();
                         // Workflow thread has exited; restart with dequeued prompt.
                         // Pass session_dir so we resume in the same session (avoids re-creating worktree).
                         let session_dir = result.as_ref().ok().and_then(|p| p.session_dir.clone());
@@ -988,7 +1038,7 @@ impl Presenter {
                                 self.state.mode = AppMode::FeatureInput;
                             }
                         }
-                        self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+                        self.broadcast_mode_changed();
                     }
                 }
                 WorkflowEvent::AgentOutput(text) => {
@@ -1071,7 +1121,7 @@ impl Presenter {
             }
             self.workflow_result = None;
             self.state.mode = AppMode::Running;
-            self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
+            self.broadcast_mode_changed();
             self.spawn_workflow(
                 backend,
                 output_dir,

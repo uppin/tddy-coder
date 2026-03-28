@@ -15,6 +15,7 @@ pub fn key_event_to_intent(
     key: KeyEvent,
     mode: &AppMode,
     view_state: &ViewState,
+    plan_refinement_pending: bool,
 ) -> Option<UserIntent> {
     if key.kind != KeyEventKind::Press {
         return None;
@@ -29,7 +30,9 @@ pub fn key_event_to_intent(
         AppMode::FeatureInput => feature_input_key(key, view_state),
         AppMode::Running => running_key(key, view_state),
         AppMode::PlanReview { .. } => plan_review_key(key, view_state),
-        AppMode::MarkdownViewer { .. } => markdown_viewer_key(key, view_state),
+        AppMode::MarkdownViewer { .. } => {
+            markdown_viewer_key(key, view_state, plan_refinement_pending)
+        }
         AppMode::Select { question, .. } => select_key(key, question, view_state),
         AppMode::MultiSelect { question, .. } => multiselect_key(key, question, view_state),
         AppMode::TextInput { .. } => text_input_key(key, view_state),
@@ -51,7 +54,30 @@ fn plan_review_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
     }
 }
 
-fn markdown_viewer_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
+fn markdown_viewer_key(
+    key: KeyEvent,
+    vs: &ViewState,
+    plan_refinement_pending: bool,
+) -> Option<UserIntent> {
+    if let Some(intent) = plan_view_approve_reject_shortcuts(key) {
+        return Some(intent);
+    }
+    if !plan_refinement_pending
+        && !vs.plan_refinement_input.is_empty()
+        && key.code == KeyCode::Enter
+    {
+        return Some(UserIntent::AnswerText(vs.plan_refinement_input.clone()));
+    }
+    if plan_refinement_pending {
+        if key.code == KeyCode::Enter && !vs.plan_refinement_input.is_empty() {
+            log::info!(
+                "markdown_viewer_key: submitting refinement ({} chars)",
+                vs.plan_refinement_input.len()
+            );
+            return Some(UserIntent::AnswerText(vs.plan_refinement_input.clone()));
+        }
+        return None;
+    }
     match key.code {
         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => Some(UserIntent::DismissViewer),
         KeyCode::Enter => {
@@ -64,6 +90,23 @@ fn markdown_viewer_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
             } else {
                 None
             }
+        }
+        _ => None,
+    }
+}
+
+fn plan_view_approve_reject_shortcuts(key: KeyEvent) -> Option<UserIntent> {
+    if !key.modifiers.contains(KeyModifiers::ALT) || key.modifiers.contains(KeyModifiers::CONTROL) {
+        return None;
+    }
+    match key.code {
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            log::debug!("plan_view_approve_reject_shortcuts: ApprovePlan (Alt+A)");
+            Some(UserIntent::ApprovePlan)
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            log::debug!("plan_view_approve_reject_shortcuts: RefinePlan (Alt+R)");
+            Some(UserIntent::RefinePlan)
         }
         _ => None,
     }
@@ -213,7 +256,7 @@ mod tests {
     fn feature_input_enter_with_text_returns_submit() {
         let mut vs = ViewState::new();
         vs.feature_input = "Build auth".to_string();
-        let intent = key_event_to_intent(enter_key(), &AppMode::FeatureInput, &vs);
+        let intent = key_event_to_intent(enter_key(), &AppMode::FeatureInput, &vs, false);
         assert!(matches!(
             intent,
             Some(UserIntent::SubmitFeatureInput(s)) if s == "Build auth"
@@ -223,7 +266,7 @@ mod tests {
     #[test]
     fn feature_input_enter_empty_returns_none() {
         let vs = ViewState::new();
-        let intent = key_event_to_intent(enter_key(), &AppMode::FeatureInput, &vs);
+        let intent = key_event_to_intent(enter_key(), &AppMode::FeatureInput, &vs, false);
         assert!(intent.is_none());
     }
 
@@ -235,7 +278,7 @@ mod tests {
         let mode = AppMode::MarkdownViewer {
             content: "plan content".to_string(),
         };
-        let intent = key_event_to_intent(enter_key(), &mode, &vs);
+        let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
         assert!(matches!(intent, Some(UserIntent::ApprovePlan)));
     }
 
@@ -247,7 +290,7 @@ mod tests {
         let mode = AppMode::MarkdownViewer {
             content: "plan content".to_string(),
         };
-        let intent = key_event_to_intent(enter_key(), &mode, &vs);
+        let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
         assert!(matches!(intent, Some(UserIntent::RefinePlan)));
     }
 
@@ -258,7 +301,7 @@ mod tests {
         let mode = AppMode::MarkdownViewer {
             content: "plan content".to_string(),
         };
-        let intent = key_event_to_intent(enter_key(), &mode, &vs);
+        let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
         assert!(intent.is_none());
     }
 
@@ -269,7 +312,7 @@ mod tests {
         let mode = AppMode::ErrorRecovery {
             error_message: "some error".to_string(),
         };
-        let intent = key_event_to_intent(enter_key(), &mode, &vs);
+        let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
         assert!(matches!(intent, Some(UserIntent::ResumeFromError)));
     }
 
@@ -280,7 +323,7 @@ mod tests {
         let mode = AppMode::ErrorRecovery {
             error_message: "some error".to_string(),
         };
-        let intent = key_event_to_intent(enter_key(), &mode, &vs);
+        let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
         assert!(matches!(intent, Some(UserIntent::ContinueWithAgent)));
     }
 
@@ -291,7 +334,35 @@ mod tests {
         let mode = AppMode::ErrorRecovery {
             error_message: "some error".to_string(),
         };
-        let intent = key_event_to_intent(enter_key(), &mode, &vs);
+        let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
         assert!(matches!(intent, Some(UserIntent::Quit)));
+    }
+
+    #[test]
+    fn markdown_viewer_approval_and_refine_use_alt_modifier() {
+        let vs = ViewState::new();
+        let mode = AppMode::MarkdownViewer {
+            content: "# PRD".to_string(),
+        };
+        let plain_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty());
+        assert!(
+            key_event_to_intent(plain_a, &mode, &vs, false).is_none(),
+            "plain a is for typing in the prompt, not approve"
+        );
+        let plain_r = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::empty());
+        assert!(
+            key_event_to_intent(plain_r, &mode, &vs, false).is_none(),
+            "plain r is for typing in the prompt, not refine"
+        );
+        let alt_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::ALT);
+        assert_eq!(
+            key_event_to_intent(alt_a, &mode, &vs, false),
+            Some(UserIntent::ApprovePlan)
+        );
+        let alt_r = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::ALT);
+        assert_eq!(
+            key_event_to_intent(alt_r, &mode, &vs, false),
+            Some(UserIntent::RefinePlan)
+        );
     }
 }

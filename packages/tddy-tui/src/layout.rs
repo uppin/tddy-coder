@@ -12,8 +12,9 @@ pub fn question_height(mode: &AppMode) -> u16 {
             // header(1) + question(1) + options + Other(1) when allow_other
             2 + question.options.len() as u16 + if question.allow_other { 1 } else { 0 }
         }
-        AppMode::TextInput { .. } => 2,     // prompt + blank
-        AppMode::PlanReview { .. } => 4,    // header + 3 options (View, Approve, Refine)
+        AppMode::TextInput { .. } => 2, // prompt + blank
+        // PlanReview menu is in the activity pane; no extra strip in the dynamic/question region.
+        AppMode::PlanReview { .. } => 0,
         AppMode::ErrorRecovery { .. } => 5, // error + blank + 3 options
         _ => 0,
     }
@@ -215,5 +216,42 @@ mod tests {
         let (_activity, _spacer, _status, _inbox, _debug, prompt) =
             layout_chunks_with_inbox(area, 0, 0, prompt_h);
         assert_eq!(prompt.height, prompt_h);
+    }
+
+    /// PRD (plan approval activity pane): PRD + footer live in the activity region; the dynamic
+    /// strip below activity must not reserve extra rows for the old PlanReview three-option menu.
+    #[test]
+    fn layout_reserves_status_and_prompt_when_plan_approval_visible() {
+        let mode = AppMode::PlanReview {
+            prd_content: "# PRD".to_string(),
+        };
+        assert_eq!(
+            question_height(&mode),
+            0,
+            "plan approval surface is activity-only: question strip height must be 0 (no View/Approve/Refine menu block)"
+        );
+        let area = Rect::new(0, 0, 80, 24);
+        let dynamic_h = question_height(&mode).max(inbox_height(0, false));
+        let (activity, spacer, dynamic, status, _debug, prompt) =
+            layout_chunks_with_inbox(area, dynamic_h, 0, 1);
+        assert_eq!(spacer.height, 1, "status spacer row");
+        assert_eq!(
+            dynamic.height, 0,
+            "no separate dynamic strip for plan approval menu"
+        );
+        assert_eq!(status.height, 1, "status bar is one row");
+        assert_eq!(prompt.height, 1, "prompt bar is one line in this fixture");
+        assert_eq!(activity.y, 0);
+        assert_eq!(
+            status.y,
+            activity.y + activity.height + spacer.height + dynamic.height,
+            "status must sit below activity, not inside it"
+        );
+        assert_eq!(
+            prompt.y,
+            status.y + status.height,
+            "prompt must be below status"
+        );
+        assert!(activity.height > 0, "non-zero activity on 24×80");
     }
 }

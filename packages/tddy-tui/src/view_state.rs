@@ -64,6 +64,10 @@ pub struct ViewState {
     pub markdown_at_end: bool,
     /// Index of the selected inline button at end of document (0=Approve, 1=Refine).
     pub markdown_end_button_selected: usize,
+    /// Prompt-bar buffer while [`AppMode::MarkdownViewer`] + presenter `plan_refinement_pending`.
+    pub plan_refinement_input: String,
+    /// Byte cursor into [`Self::plan_refinement_input`].
+    pub plan_refinement_cursor: usize,
     /// Selected option index in ErrorRecovery mode (0=Resume, 1=Exit).
     pub error_recovery_selected: usize,
     /// Frame counter for the spinner animation.
@@ -149,6 +153,8 @@ impl ViewState {
                 self.markdown_scroll_offset = 0;
                 self.markdown_at_end = false;
                 self.markdown_end_button_selected = 0;
+                self.plan_refinement_input.clear();
+                self.plan_refinement_cursor = 0;
             }
             AppMode::Done => {}
             AppMode::ErrorRecovery { .. } => {
@@ -166,6 +172,7 @@ impl ViewState {
         key: KeyEvent,
         mode: &AppMode,
         inbox_len: usize,
+        plan_refinement_pending: bool,
     ) -> bool {
         if key.kind != KeyEventKind::Press {
             return false;
@@ -175,7 +182,9 @@ impl ViewState {
             AppMode::FeatureInput => self.handle_feature_input_key(key),
             AppMode::Running => self.handle_running_key_view_local(key, inbox_len),
             AppMode::PlanReview { .. } => self.handle_plan_review_key_view_local(key),
-            AppMode::MarkdownViewer { .. } => self.handle_markdown_viewer_key_view_local(key),
+            AppMode::MarkdownViewer { .. } => {
+                self.handle_markdown_viewer_key_view_local(key, plan_refinement_pending)
+            }
             AppMode::Select { question, .. } => self.handle_select_key_view_local(key, question),
             AppMode::MultiSelect { question, .. } => {
                 self.handle_multiselect_key_view_local(key, question)
@@ -246,12 +255,71 @@ impl ViewState {
         }
     }
 
-    fn handle_markdown_viewer_key_view_local(&mut self, key: KeyEvent) -> bool {
+    fn handle_plan_refinement_prompt_key_local(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char(' ') => {
-                self.markdown_scroll_offset = self.markdown_scroll_offset.saturating_add(10);
+            KeyCode::Char(c)
+                if !c.is_control()
+                    && !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.plan_refinement_input
+                    .insert(self.plan_refinement_cursor, c);
+                self.plan_refinement_cursor += c.len_utf8();
                 true
             }
+            KeyCode::Backspace if self.plan_refinement_cursor > 0 => {
+                let prev =
+                    prev_char_boundary(&self.plan_refinement_input, self.plan_refinement_cursor);
+                self.plan_refinement_cursor = prev;
+                self.plan_refinement_input
+                    .remove(self.plan_refinement_cursor);
+                true
+            }
+            KeyCode::Left => {
+                self.plan_refinement_cursor =
+                    prev_char_boundary(&self.plan_refinement_input, self.plan_refinement_cursor);
+                true
+            }
+            KeyCode::Right => {
+                self.plan_refinement_cursor = advance_cursor_by_char(
+                    &self.plan_refinement_input,
+                    self.plan_refinement_cursor,
+                );
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_markdown_viewer_key_view_local(
+        &mut self,
+        key: KeyEvent,
+        plan_refinement_pending: bool,
+    ) -> bool {
+        if plan_refinement_pending {
+            log::debug!("markdown viewer: key routed to plan refinement prompt");
+            return self.handle_plan_refinement_prompt_key_local(key);
+        }
+
+        match key.code {
+            KeyCode::Backspace | KeyCode::Left | KeyCode::Right => {
+                if self.handle_plan_refinement_prompt_key_local(key) {
+                    return true;
+                }
+            }
+            KeyCode::Char(c)
+                if !c.is_control()
+                    && !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                if self.handle_plan_refinement_prompt_key_local(key) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+
+        match key.code {
             KeyCode::PageUp => {
                 self.markdown_scroll_offset = self.markdown_scroll_offset.saturating_sub(10);
                 true
@@ -267,14 +335,6 @@ impl ViewState {
             }
             KeyCode::Down if self.markdown_at_end => {
                 self.markdown_end_button_selected = (self.markdown_end_button_selected + 1).min(1);
-                true
-            }
-            KeyCode::Up => {
-                self.markdown_scroll_offset = self.markdown_scroll_offset.saturating_sub(1);
-                true
-            }
-            KeyCode::Down => {
-                self.markdown_scroll_offset = self.markdown_scroll_offset.saturating_add(1);
                 true
             }
             _ => false,
@@ -622,7 +682,7 @@ impl ViewState {
 
 #[cfg(test)]
 mod tests {
-    use crossterm::event::{KeyEventKind, KeyModifiers};
+    use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 
     use super::*;
 
@@ -636,7 +696,7 @@ mod tests {
             KeyEventKind::Press,
         );
         assert!(
-            !vs.handle_key_view_local(ctrl_c, &AppMode::FeatureInput, 0),
+            !vs.handle_key_view_local(ctrl_c, &AppMode::FeatureInput, 0, false),
             "Ctrl+C must not be consumed as text; key_map handles Quit"
         );
         assert!(vs.feature_input.is_empty());
@@ -666,29 +726,149 @@ mod tests {
         // Emoji is 4 bytes in UTF-8; cursor was incremented by 1 before fix, causing panic on next insert
         let emoji = KeyEvent::new(KeyCode::Char('😀'), KeyModifiers::empty());
         let a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty());
-        assert!(vs.handle_key_view_local(emoji, &AppMode::FeatureInput, 0));
+        assert!(vs.handle_key_view_local(emoji, &AppMode::FeatureInput, 0, false));
         assert_eq!(vs.feature_input, "😀");
         assert_eq!(vs.feature_cursor, 4); // byte index
-        assert!(vs.handle_key_view_local(a, &AppMode::FeatureInput, 0));
+        assert!(vs.handle_key_view_local(a, &AppMode::FeatureInput, 0, false));
         assert_eq!(vs.feature_input, "😀a");
         // Backspace removes 'a', Left moves to start of emoji
         let backspace = KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty());
-        assert!(vs.handle_key_view_local(backspace, &AppMode::FeatureInput, 0));
+        assert!(vs.handle_key_view_local(backspace, &AppMode::FeatureInput, 0, false));
         assert_eq!(vs.feature_input, "😀");
         let left = KeyEvent::new(KeyCode::Left, KeyModifiers::empty());
-        assert!(vs.handle_key_view_local(left, &AppMode::FeatureInput, 0));
+        assert!(vs.handle_key_view_local(left, &AppMode::FeatureInput, 0, false));
         assert_eq!(vs.feature_cursor, 0);
     }
 
     #[test]
-    fn space_key_pages_down_in_markdown_viewer() {
+    fn page_down_scrolls_markdown_viewer_body() {
         let mut vs = ViewState::new();
         let mode = AppMode::MarkdownViewer {
             content: "test content".to_string(),
         };
-        let space = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::empty());
-        vs.handle_key_view_local(space, &mode, 0);
+        let pg = KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty());
+        vs.handle_key_view_local(pg, &mode, 0, false);
         assert_eq!(vs.markdown_scroll_offset, 10);
+    }
+
+    #[test]
+    fn markdown_viewer_inserts_plain_a_into_refinement_buffer() {
+        let mut vs = ViewState::new();
+        let mode = AppMode::MarkdownViewer {
+            content: "# p".to_string(),
+        };
+        let key = KeyEvent::new_with_kind(
+            KeyCode::Char('a'),
+            KeyModifiers::empty(),
+            KeyEventKind::Press,
+        );
+        assert!(vs.handle_key_view_local(key, &mode, 0, false));
+        assert_eq!(vs.plan_refinement_input, "a");
+    }
+
+    #[test]
+    fn markdown_viewer_inserts_plain_r_into_refinement_buffer() {
+        let mut vs = ViewState::new();
+        let mode = AppMode::MarkdownViewer {
+            content: "# p".to_string(),
+        };
+        let key = KeyEvent::new_with_kind(
+            KeyCode::Char('r'),
+            KeyModifiers::empty(),
+            KeyEventKind::Press,
+        );
+        assert!(vs.handle_key_view_local(key, &mode, 0, false));
+        assert_eq!(vs.plan_refinement_input, "r");
+    }
+
+    #[test]
+    fn markdown_viewer_accepts_text_for_refinement_while_prd_stays_open() {
+        let mut vs = ViewState::new();
+        let mode = AppMode::MarkdownViewer {
+            content: "# My PRD".to_string(),
+        };
+        let key = KeyEvent::new_with_kind(
+            KeyCode::Char('f'),
+            KeyModifiers::empty(),
+            KeyEventKind::Press,
+        );
+        assert!(
+            vs.handle_key_view_local(key, &mode, 0, false),
+            "printable keys should update the refinement buffer while the PRD remains visible"
+        );
+        assert_eq!(vs.plan_refinement_input, "f");
+    }
+
+    #[test]
+    fn markdown_viewer_backspace_edits_refinement_buffer_without_pending_flag() {
+        let mut vs = ViewState::new();
+        vs.plan_refinement_input = "hi".to_string();
+        vs.plan_refinement_cursor = 2;
+        let mode = AppMode::MarkdownViewer {
+            content: "# p".to_string(),
+        };
+        let bs = KeyEvent::new_with_kind(
+            KeyCode::Backspace,
+            KeyModifiers::empty(),
+            KeyEventKind::Press,
+        );
+        assert!(vs.handle_key_view_local(bs, &mode, 0, false));
+        assert_eq!(vs.plan_refinement_input, "h");
+        assert_eq!(vs.plan_refinement_cursor, 1);
+    }
+
+    #[test]
+    fn markdown_viewer_space_inserts_into_refinement_buffer_without_pending_flag() {
+        let mut vs = ViewState::new();
+        vs.plan_refinement_input = "a".to_string();
+        vs.plan_refinement_cursor = 1;
+        let mode = AppMode::MarkdownViewer {
+            content: "# p".to_string(),
+        };
+        let sp = KeyEvent::new_with_kind(
+            KeyCode::Char(' '),
+            KeyModifiers::empty(),
+            KeyEventKind::Press,
+        );
+        assert!(vs.handle_key_view_local(sp, &mode, 0, false));
+        assert_eq!(vs.plan_refinement_input, "a ");
+        assert_eq!(vs.plan_refinement_cursor, 2);
+        assert_eq!(vs.markdown_scroll_offset, 0);
+    }
+
+    #[test]
+    fn markdown_viewer_scroll_does_not_use_space_or_line_arrows() {
+        let mut vs = ViewState::new();
+        vs.markdown_at_end = false;
+        vs.markdown_scroll_offset = 100;
+        let mode = AppMode::MarkdownViewer {
+            content: "# p".to_string(),
+        };
+        let space = KeyEvent::new_with_kind(
+            KeyCode::Char(' '),
+            KeyModifiers::empty(),
+            KeyEventKind::Press,
+        );
+        assert!(vs.handle_key_view_local(space, &mode, 0, false));
+        assert_eq!(
+            vs.markdown_scroll_offset, 100,
+            "space must not scroll the plan body"
+        );
+        vs.plan_refinement_input.clear();
+        vs.plan_refinement_cursor = 0;
+        let up = KeyEvent::new_with_kind(KeyCode::Up, KeyModifiers::empty(), KeyEventKind::Press);
+        vs.handle_key_view_local(up, &mode, 0, false);
+        assert_eq!(
+            vs.markdown_scroll_offset, 100,
+            "Up must not line-scroll; use PgUp/PgDown only"
+        );
+        let down =
+            KeyEvent::new_with_kind(KeyCode::Down, KeyModifiers::empty(), KeyEventKind::Press);
+        vs.handle_key_view_local(down, &mode, 0, false);
+        assert_eq!(
+            vs.markdown_scroll_offset, 100,
+            "Down must not line-scroll; use PgUp/PgDown only"
+        );
     }
 
     #[test]
@@ -699,7 +879,7 @@ mod tests {
             content: "test content".to_string(),
         };
         let down = KeyEvent::new(KeyCode::Down, KeyModifiers::empty());
-        vs.handle_key_view_local(down, &mode, 0);
+        vs.handle_key_view_local(down, &mode, 0, false);
         assert_eq!(vs.markdown_end_button_selected, 1);
     }
 
@@ -712,7 +892,7 @@ mod tests {
             content: "test content".to_string(),
         };
         let up = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
-        vs.handle_key_view_local(up, &mode, 0);
+        vs.handle_key_view_local(up, &mode, 0, false);
         assert_eq!(vs.markdown_end_button_selected, 0);
     }
 
@@ -737,27 +917,27 @@ mod tests {
         let up = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
 
         // Start at 0 (Resume), Down → 1 (Continue with agent)
-        vs.handle_key_view_local(down, &mode, 0);
+        vs.handle_key_view_local(down, &mode, 0, false);
         assert_eq!(vs.error_recovery_selected, 1);
 
         // Down → 2 (Exit)
-        vs.handle_key_view_local(down, &mode, 0);
+        vs.handle_key_view_local(down, &mode, 0, false);
         assert_eq!(vs.error_recovery_selected, 2);
 
         // Down → wraps to 0
-        vs.handle_key_view_local(down, &mode, 0);
+        vs.handle_key_view_local(down, &mode, 0, false);
         assert_eq!(vs.error_recovery_selected, 0);
 
         // Up from 0 → wraps to 2
-        vs.handle_key_view_local(up, &mode, 0);
+        vs.handle_key_view_local(up, &mode, 0, false);
         assert_eq!(vs.error_recovery_selected, 2);
 
         // Up from 2 → 1
-        vs.handle_key_view_local(up, &mode, 0);
+        vs.handle_key_view_local(up, &mode, 0, false);
         assert_eq!(vs.error_recovery_selected, 1);
 
         // Up from 1 → 0
-        vs.handle_key_view_local(up, &mode, 0);
+        vs.handle_key_view_local(up, &mode, 0, false);
         assert_eq!(vs.error_recovery_selected, 0);
     }
 }
