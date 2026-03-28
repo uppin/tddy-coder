@@ -11,6 +11,7 @@ export TDDY_SESSIONS_DIR="${TMPDIR:-/tmp}/tddy-test-sessions"
 nix develop --profile ./.nix-profile -c bash -c '
   set -e
   set -o pipefail
-  cargo build -p tddy-coder -p tddy-tools -p tddy-livekit --examples
+  # --bins: required alongside --examples so tddy-acp-stub (bin-only, no examples) is built.
+  cargo build -p tddy-coder -p tddy-tools -p tddy-livekit -p tddy-acp-stub --examples --bins
   cargo test "$@" -- --test-threads=1 2>&1 | tee .verify-result.txt
 ' -- "$@"
