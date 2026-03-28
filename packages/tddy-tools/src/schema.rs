@@ -1,27 +1,20 @@
 //! JSON Schema validation for structured agent output.
 //!
-//! Schemas are embedded in the binary via `include_dir`. All schema interaction
-//! is via tddy-tools; no schema files are written to disk by tddy-core.
+//! Goal ↔ schema file mapping is generated from `tddy-workflow-recipes/goals.json` (`build.rs` → `OUT_DIR/goal_registry.rs`).
+//! Embedded files come from `tddy-workflow-recipes/generated/` (see that crate's `build.rs`).
+//! All schema interaction is via tddy-tools; no schema files are written to disk by tddy-core.
 
 use include_dir::{include_dir, Dir};
 use jsonschema::Resource;
+use log::{debug, error, info};
 use serde_json::Value;
 use std::path::Path;
+use std::sync::OnceLock;
 
-static SCHEMAS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/schemas");
+static SCHEMAS_DIR: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/../tddy-workflow-recipes/generated");
 
-/// Goal name (from JSON "goal" field) to schema file mapping.
-const GOAL_SCHEMA_FILES: &[(&str, &str)] = &[
-    ("plan", "plan.schema.json"),
-    ("acceptance-tests", "acceptance-tests.schema.json"),
-    ("red", "red.schema.json"),
-    ("green", "green.schema.json"),
-    ("evaluate-changes", "evaluate.schema.json"),
-    ("validate", "validate-subagents.schema.json"),
-    ("refactor", "refactor.schema.json"),
-    ("update-docs", "update-docs.schema.json"),
-    ("demo", "demo.schema.json"),
-];
+include!(concat!(env!("OUT_DIR"), "/goal_registry.rs"));
 
 /// Common schema files (in common/ subdir) with their $id URIs.
 const COMMON_SCHEMAS: &[(&str, &str)] = &[
@@ -49,6 +42,9 @@ const COMMON_SCHEMAS: &[(&str, &str)] = &[
     ),
 ];
 
+static COMMON_SCHEMAS_PARSED: OnceLock<Result<Vec<(&'static str, Value)>, String>> =
+    OnceLock::new();
+
 /// A single validation error with instance path and message.
 #[derive(Debug, Clone)]
 pub struct SchemaError {
@@ -57,30 +53,75 @@ pub struct SchemaError {
     pub message: String,
 }
 
+/// CLI goal names from `goals.json` (same order as registry).
+pub fn goal_cli_names() -> Vec<&'static str> {
+    GOAL_SCHEMA_FILES.iter().map(|(g, _)| *g).collect()
+}
+
+fn load_common_schemas() -> Result<Vec<(&'static str, Value)>, String> {
+    let mut out = Vec::with_capacity(COMMON_SCHEMAS.len());
+    for (uri, path) in COMMON_SCHEMAS {
+        let file = SCHEMAS_DIR
+            .get_file(path)
+            .ok_or_else(|| format!("missing embedded common schema file: {}", path))?;
+        let s = file
+            .contents_utf8()
+            .ok_or_else(|| format!("common schema not utf-8: {}", path))?;
+        let v: Value = serde_json::from_str(s)
+            .map_err(|e| format!("invalid JSON in embedded common schema {}: {}", path, e))?;
+        debug!(
+            target: "tddy_tools::schema",
+            "loaded common schema uri={} path={}",
+            uri,
+            path
+        );
+        out.push((*uri, v));
+    }
+    Ok(out)
+}
+
+fn common_schemas_or_err() -> Result<&'static Vec<(&'static str, Value)>, String> {
+    let r = COMMON_SCHEMAS_PARSED.get_or_init(load_common_schemas);
+    match r {
+        Ok(v) => Ok(v),
+        Err(e) => Err(e.clone()),
+    }
+}
+
 /// Returns the raw JSON Schema string for a goal, or None if not found.
 pub fn get_schema(goal: &str) -> Option<&'static str> {
     let (_, filename) = GOAL_SCHEMA_FILES.iter().find(|(g, _)| *g == goal)?;
+    debug!(
+        target: "tddy_tools::schema",
+        "resolve goal schema goal={} file={}",
+        goal,
+        filename
+    );
     let file = SCHEMAS_DIR.get_file(filename)?;
     file.contents_utf8()
 }
 
-/// Returns (uri, parsed Value) for all common schemas.
-fn get_all_common_schemas() -> Vec<(&'static str, Value)> {
-    let mut out = Vec::with_capacity(COMMON_SCHEMAS.len());
-    for (uri, path) in COMMON_SCHEMAS {
-        if let Some(file) = SCHEMAS_DIR.get_file(path) {
-            if let Some(s) = file.contents_utf8() {
-                if let Ok(v) = serde_json::from_str(s) {
-                    out.push((*uri, v));
-                }
-            }
-        }
-    }
-    out
-}
-
 /// Validates JSON string against the goal's schema. Returns Ok(()) if valid, Err with error list if invalid.
 pub fn validate_output(goal: &str, json_str: &str) -> Result<(), Vec<SchemaError>> {
+    info!(
+        target: "tddy_tools::schema",
+        "validate_output start goal={} bytes={}",
+        goal,
+        json_str.len()
+    );
+
+    let common_list = match common_schemas_or_err() {
+        Ok(v) => v,
+        Err(msg) => {
+            error!(target: "tddy_tools::schema", "{}", msg);
+            return Err(vec![SchemaError {
+                instance_path: String::new(),
+                schema_path: String::new(),
+                message: msg,
+            }]);
+        }
+    };
+
     let schema_str = get_schema(goal).ok_or_else(|| {
         vec![SchemaError {
             instance_path: String::new(),
@@ -106,8 +147,8 @@ pub fn validate_output(goal: &str, json_str: &str) -> Result<(), Vec<SchemaError
     })?;
 
     let mut opts = jsonschema::options();
-    for (uri, common_schema) in get_all_common_schemas() {
-        opts = opts.with_resource(uri, Resource::from_contents(common_schema));
+    for (uri, common_schema) in common_list.iter() {
+        opts = opts.with_resource(*uri, Resource::from_contents(common_schema.clone()));
     }
 
     let validator = opts.build(&schema).map_err(|e| {
@@ -128,8 +169,15 @@ pub fn validate_output(goal: &str, json_str: &str) -> Result<(), Vec<SchemaError
         .collect();
 
     if errors.is_empty() {
+        info!(target: "tddy_tools::schema", "validate_output ok goal={}", goal);
         Ok(())
     } else {
+        debug!(
+            target: "tddy_tools::schema",
+            "validate_output errors goal={} count={}",
+            goal,
+            errors.len()
+        );
         Err(errors)
     }
 }
@@ -186,7 +234,7 @@ pub fn write_schema_to_path(goal: &str, out_path: &Path) -> std::io::Result<()> 
 /// Tip for validation errors.
 pub fn validation_error_tip(goal: &str) -> String {
     format!(
-        "Tip: Run `tddy-tools get-schema {}` to see the expected output format.",
+        "Tip: Run `tddy-tools get-schema {}` for the expected JSON shape; run `tddy-tools list-schemas` to list all workflow goals.",
         goal
     )
 }
@@ -208,5 +256,10 @@ mod tests {
     #[test]
     fn get_schema_returns_none_for_unknown_goal() {
         assert!(get_schema("unknown").is_none());
+    }
+
+    #[test]
+    fn common_schemas_load_successfully() {
+        common_schemas_or_err().expect("all embedded common schemas must parse");
     }
 }

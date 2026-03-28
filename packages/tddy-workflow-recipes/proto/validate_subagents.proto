@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Validate (subagents) goal output. JSON Schema: validate-subagents.schema.json.
+message ValidateSubagentsOutput {
+  string goal = 1;
+  string summary = 2;
+}

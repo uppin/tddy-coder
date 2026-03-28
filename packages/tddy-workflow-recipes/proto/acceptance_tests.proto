@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Acceptance-tests goal output. JSON Schema: acceptance-tests.schema.json.
+message AcceptanceTestsOutput {
+  string goal = 1;
+  string summary = 2;
+}

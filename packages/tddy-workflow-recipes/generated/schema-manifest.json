@@ -1,0 +1,50 @@
+{
+  "goals": [
+    {
+      "name": "plan",
+      "proto": "plan.proto",
+      "schema": "plan.schema.json"
+    },
+    {
+      "name": "acceptance-tests",
+      "proto": "acceptance_tests.proto",
+      "schema": "acceptance-tests.schema.json"
+    },
+    {
+      "name": "red",
+      "proto": "red.proto",
+      "schema": "red.schema.json"
+    },
+    {
+      "name": "green",
+      "proto": "green.proto",
+      "schema": "green.schema.json"
+    },
+    {
+      "name": "evaluate-changes",
+      "proto": "evaluate_changes.proto",
+      "schema": "evaluate.schema.json"
+    },
+    {
+      "name": "validate",
+      "proto": "validate_subagents.proto",
+      "schema": "validate-subagents.schema.json"
+    },
+    {
+      "name": "refactor",
+      "proto": "refactor.proto",
+      "schema": "refactor.schema.json"
+    },
+    {
+      "name": "update-docs",
+      "proto": "update_docs.proto",
+      "schema": "update-docs.schema.json"
+    },
+    {
+      "name": "demo",
+      "proto": "demo.proto",
+      "schema": "demo.schema.json"
+    }
+  ],
+  "version": 1
+}
