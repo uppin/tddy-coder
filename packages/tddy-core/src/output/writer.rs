@@ -145,11 +145,13 @@ pub fn create_session_dir_with_id(base: &Path, session_id: &str) -> Result<PathB
     Ok(session_dir)
 }
 
-/// Create a session directory directly at `{base}/{id}/`. Used when base is already the sessions dir (e.g. daemon mode).
+/// Create a session directory at `{base}/sessions/{id}/`.
+///
+/// Historically some call sites treated `base` as “already the sessions folder”; the unified
+/// contract (CLI, daemon, RPC) is always `{base}/sessions/<session_id>/`, same as
+/// [`create_session_dir_with_id`].
 pub fn create_session_dir_under(base: &Path, session_id: &str) -> Result<PathBuf, WorkflowError> {
-    let session_dir = base.join(session_id);
-    fs::create_dir_all(&session_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
-    Ok(session_dir)
+    create_session_dir_with_id(base, session_id)
 }
 
 #[cfg(test)]

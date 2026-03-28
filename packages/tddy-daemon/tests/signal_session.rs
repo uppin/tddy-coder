@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
@@ -77,8 +78,8 @@ async fn signal_session_sends_sigint_to_pid() {
     let pid = child.id();
 
     let temp = tempfile::tempdir().unwrap();
-    let sessions_base = temp.path().join("sessions");
-    let session_dir = sessions_base.join("test-session");
+    let sessions_base = temp.path().to_path_buf();
+    let session_dir = unified_session_dir_path(&sessions_base, "test-session");
     std::fs::create_dir_all(&session_dir).unwrap();
     write_session_yaml(&session_dir, pid);
 
@@ -108,8 +109,8 @@ async fn signal_session_returns_error_for_dead_pid() {
     let _ = child.wait();
 
     let temp = tempfile::tempdir().unwrap();
-    let sessions_base = temp.path().join("sessions");
-    let session_dir = sessions_base.join("dead-session");
+    let sessions_base = temp.path().to_path_buf();
+    let session_dir = unified_session_dir_path(&sessions_base, "dead-session");
     std::fs::create_dir_all(&session_dir).unwrap();
     write_session_yaml(&session_dir, pid);
 

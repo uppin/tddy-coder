@@ -5770,6 +5770,7 @@ dependencies = [
  "tddy-workflow-recipes",
  "tokio",
  "tokio-util",
+ "uuid",
 ]
 
 [[package]]

@@ -95,8 +95,9 @@ users:
 #[test]
 fn acceptance_session_reader_lists_sessions_from_dir() {
     let temp = tempfile::tempdir().unwrap();
-    let sessions_base = temp.path().join("sessions");
-    let session_dir = sessions_base.join("session-123");
+    let sessions_base = temp.path().to_path_buf();
+    let session_dir =
+        tddy_core::session_lifecycle::unified_session_dir_path(&sessions_base, "session-123");
     std::fs::create_dir_all(&session_dir).unwrap();
     let metadata = r#"
 session_id: "session-123"
@@ -111,7 +112,7 @@ livekit_room: "daemon-session-123"
 "#;
     std::fs::write(session_dir.join(".session.yaml"), metadata).unwrap();
 
-    let sessions = session_reader::list_sessions_in_dir(&sessions_base).unwrap();
+    let sessions = session_reader::list_sessions_in_dir(sessions_base.as_path()).unwrap();
     assert!(
         !sessions.is_empty(),
         "expected at least one session when .session.yaml exists"

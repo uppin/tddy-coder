@@ -1,5 +1,11 @@
 # Daemon product area changelog
 
+## 2026-03-28 — Unified session tree and `session_id` validation
+
+- **Filesystem**: Session directories use `{sessions_base}/sessions/{session_id}/` consistently for listing, connect, resume, signal, delete, and headless `GetSession` / `ListSessions`.
+- **Validation**: `session_id` is validated as a single safe path segment on **ConnectSession**, **ResumeSession**, **SignalSession**, **DeleteSession**, and service-side **GetSession** before paths are built (aligned with `session_deletion` rules).
+- **Feature reference**: [Session directory layout](../coder/session-layout.md). Operational migration notes: [session-layout migration](../../dev/1-WIP/session-layout-migration.md).
+
 ## 2026-03-28 — ConnectionService: ListEligibleDaemons and host fields
 
 - **`ListEligibleDaemons`**: Returns eligible daemon entries from **`EligibleDaemonSource`** (local instance; LiveKit peer discovery deferred).

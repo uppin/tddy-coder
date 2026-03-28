@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
-    preselected_index_for_agent, read_changeset, read_session_metadata, AnyBackend,
-    ClaudeAcpBackend, ClaudeCodeBackend, CodingBackend, CursorBackend, GoalId,
+    output::SESSIONS_SUBDIR, preselected_index_for_agent, read_changeset, read_session_metadata,
+    AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodingBackend, CursorBackend, GoalId,
     PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend, WorkflowEngine,
     WorkflowRecipe,
 };
@@ -914,8 +914,12 @@ fn livekit_daemon_workflow_paths(
 ) -> (PathBuf, PathBuf, Option<PathBuf>) {
     let session_artifact_dir = resume_from
         .or(session_id)
-        .map(|id| sessions_base.join(id))
-        .unwrap_or_else(|| sessions_base.join("tddy-daemon-session"));
+        .map(|id| sessions_base.join(SESSIONS_SUBDIR).join(id))
+        .unwrap_or_else(|| {
+            sessions_base
+                .join(SESSIONS_SUBDIR)
+                .join("tddy-daemon-session")
+        });
 
     let agent_working_dir = if resume_from.is_some() {
         read_session_metadata(&session_artifact_dir)

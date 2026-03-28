@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_core::read_session_metadata;
+use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::connection::{
     ConnectSessionRequest, ConnectSessionResponse, ConnectionService as ConnectionServiceTrait,
@@ -383,7 +384,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
         let sessions_base = (self.sessions_base_for_user)(os_user)
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        let session_dir = sessions_base.join(&req.session_id);
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
         let livekit_url = self
@@ -429,7 +432,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
         let sessions_base = (self.sessions_base_for_user)(os_user)
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        let session_dir = sessions_base.join(&req.session_id);
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
         let repo_path = metadata
@@ -515,8 +520,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
         let sessions_base = (self.sessions_base_for_user)(os_user)
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
 
-        let session_dir = sessions_base.join(&req.session_id);
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
 
@@ -638,6 +645,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 #[cfg(test)]
 mod signal_session_unit_tests {
     use super::*;
+    use tddy_core::session_lifecycle::unified_session_dir_path;
     use tddy_core::SessionMetadata;
 
     fn make_unit_config() -> crate::config::DaemonConfig {
@@ -687,7 +695,7 @@ mod signal_session_unit_tests {
     #[tokio::test]
     async fn signal_session_unit_rejects_invalid_token() {
         let temp = tempfile::tempdir().unwrap();
-        let service = make_unit_service(temp.path().join("sessions"));
+        let service = make_unit_service(temp.path().to_path_buf());
         let request = Request::new(SignalSessionRequest {
             session_token: "bad-token".to_string(),
             session_id: "any".to_string(),
@@ -702,8 +710,7 @@ mod signal_session_unit_tests {
     #[tokio::test]
     async fn signal_session_unit_returns_error_for_missing_session() {
         let temp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(temp.path().join("sessions")).unwrap();
-        let service = make_unit_service(temp.path().join("sessions"));
+        let service = make_unit_service(temp.path().to_path_buf());
         let request = Request::new(SignalSessionRequest {
             session_token: "valid".to_string(),
             session_id: "no-such-session".to_string(),
@@ -724,8 +731,8 @@ mod signal_session_unit_tests {
         let pid = child.id();
 
         let temp = tempfile::tempdir().unwrap();
-        let sessions_base = temp.path().join("sessions");
-        let session_dir = sessions_base.join("sigkill-session");
+        let sessions_base = temp.path().to_path_buf();
+        let session_dir = unified_session_dir_path(&sessions_base, "sigkill-session");
         std::fs::create_dir_all(&session_dir).unwrap();
         write_unit_session(&session_dir, pid);
 
@@ -774,8 +781,7 @@ mod delete_session_unit_tests {
     #[tokio::test]
     async fn delete_session_unit_rejects_invalid_token() {
         let temp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(temp.path().join("sessions")).unwrap();
-        let service = make_unit_service(temp.path().join("sessions"));
+        let service = make_unit_service(temp.path().to_path_buf());
         let request = Request::new(DeleteSessionRequest {
             session_token: "bad-token".to_string(),
             session_id: "any-session".to_string(),

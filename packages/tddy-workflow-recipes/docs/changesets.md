@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-workflow-recipes.
 
+- **2026-03-28** [Feature] Plan task session id resolution — **`PlanTask`** and TDD hooks use **`tddy_core::session_lifecycle::resolve_effective_session_id`** after successful backend submit so the engine keeps the process-bound session id when the backend reports a different id. (tddy-workflow-recipes, tddy-core)
 - **2026-03-28** [Architecture] Recipe-owned session artifacts — **`SessionArtifactManifest`**; TDD hooks and **`TddRecipe::read_primary_session_document_utf8`** use **`tddy_workflow::artifact_paths`** for `artifacts/` vs legacy layout; **`before_update_docs`** builds availability from **`known_artifacts()`**; no core fallback for primary PRD basename. (tddy-workflow-recipes, tddy-workflow, tddy-core)
 - **2026-03-28** [Feature] Workflow JSON Schemas — `goals.json` single registry; `schemas/` → `generated/` build; `proto/` IDL files; `schema_pipeline` and contract tests. See `docs/ft/coder/workflow-json-schemas.md` and `packages/tddy-workflow-recipes/docs/workflow-schemas.md`. (tddy-workflow-recipes, tddy-tools)
 - **2026-03-22** [Feature] Workflow abstraction layer — New crate: **`TddRecipe`** (full TDD graph, hooks, parsers, permissions), **`BugfixRecipe`** stub for OCP; `WorkflowRecipe` implementation. TDD-specific graph/hooks live here instead of `tddy-core`. See [docs/ft/coder/workflow-recipes.md](../../../../docs/ft/coder/workflow-recipes.md). (tddy-workflow-recipes, tddy-core, tddy-coder, tddy-service, tddy-daemon, tddy-demo)

@@ -9,8 +9,9 @@ use std::sync::Arc;
 use tokio::sync::mpsc as tokio_mpsc;
 use tonic::{Request, Response, Status};
 
-use tddy_core::output::create_session_dir_under;
+use tddy_core::output::{create_session_dir_under, SESSIONS_SUBDIR};
 use tddy_core::read_changeset;
+use tddy_core::session_lifecycle::validate_session_id_segment;
 use tddy_core::workflow::graph::{ElicitationEvent, ExecutionStatus};
 use tddy_core::workflow::session::workflow_engine_storage_dir;
 use tddy_core::{setup_worktree_for_session, SharedBackend, WorkflowEngine, WorkflowRecipe};
@@ -168,11 +169,10 @@ impl TddyRemote for DaemonService {
         request: Request<GetSessionRequest>,
     ) -> Result<Response<GetSessionResponse>, Status> {
         let session_id = request.into_inner().session_id;
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id is required"));
-        }
+        validate_session_id_segment(&session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
 
-        let session_dir = self.sessions_base.join(&session_id);
+        let session_dir = self.sessions_base.join(SESSIONS_SUBDIR).join(&session_id);
         let changeset = read_changeset(&session_dir)
             .map_err(|e| Status::not_found(format!("session not found: {} — {}", session_id, e)))?;
 
@@ -200,11 +200,12 @@ impl TddyRemote for DaemonService {
     ) -> Result<Response<ListSessionsResponse>, Status> {
         let mut sessions = Vec::new();
 
-        if !self.sessions_base.exists() {
+        let sessions_root = self.sessions_base.join(SESSIONS_SUBDIR);
+        if !sessions_root.exists() {
             return Ok(Response::new(ListSessionsResponse { sessions }));
         }
 
-        let entries = std::fs::read_dir(&self.sessions_base)
+        let entries = std::fs::read_dir(&sessions_root)
             .map_err(|e| Status::internal(format!("read sessions dir: {}", e)))?;
 
         for entry in entries {

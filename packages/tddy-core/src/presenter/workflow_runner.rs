@@ -31,6 +31,38 @@ struct ElicitationContext<'a> {
     socket_path: Option<&'a PathBuf>,
 }
 
+/// Model, agent I/O, logging, optional `run_demo`, and optional socket — shared across plan/start/refine contexts.
+fn insert_engine_io_and_demo_flags(
+    ctx: &mut std::collections::HashMap<String, serde_json::Value>,
+    model: &Option<String>,
+    inherit_stdin: bool,
+    conversation_output_path: &Option<PathBuf>,
+    debug: bool,
+    run_demo: Option<bool>,
+    socket_path: Option<&PathBuf>,
+) {
+    ctx.insert(
+        "model".to_string(),
+        serde_json::to_value(model.clone()).unwrap(),
+    );
+    ctx.insert("agent_output".to_string(), serde_json::json!(true));
+    ctx.insert(
+        "inherit_stdin".to_string(),
+        serde_json::json!(inherit_stdin),
+    );
+    ctx.insert(
+        "conversation_output_path".to_string(),
+        serde_json::to_value(conversation_output_path.clone()).unwrap(),
+    );
+    ctx.insert("debug".to_string(), serde_json::json!(debug));
+    if let Some(rd) = run_demo {
+        ctx.insert("run_demo".to_string(), serde_json::json!(rd));
+    }
+    if let Some(p) = socket_path {
+        ctx.insert("socket_path".to_string(), serde_json::to_value(p).unwrap());
+    }
+}
+
 /// Loop on WaitingForInput until status is Completed, Paused, or ElicitationNeeded.
 /// Returns Ok(result) or Err(()) if the caller should return.
 fn run_until_not_waiting_for_input(
@@ -183,25 +215,18 @@ fn handle_elicitation(
                     serde_json::to_value(session_dir).unwrap(),
                 );
                 refine_ctx.insert("refinement_feedback".to_string(), serde_json::json!(answer));
-                refine_ctx.insert(
-                    "model".to_string(),
-                    serde_json::to_value(ctx.model.clone().unwrap_or_default()).unwrap(),
+                let refine_model = Some(ctx.model.clone().unwrap_or_default());
+                insert_engine_io_and_demo_flags(
+                    &mut refine_ctx,
+                    &refine_model,
+                    ctx.inherit_stdin,
+                    ctx.conversation_output_path,
+                    ctx.debug,
+                    None,
+                    ctx.socket_path,
                 );
-                refine_ctx.insert("agent_output".to_string(), serde_json::json!(true));
-                refine_ctx.insert(
-                    "inherit_stdin".to_string(),
-                    serde_json::json!(ctx.inherit_stdin),
-                );
-                refine_ctx.insert(
-                    "conversation_output_path".to_string(),
-                    serde_json::to_value(ctx.conversation_output_path.clone()).unwrap(),
-                );
-                refine_ctx.insert("debug".to_string(), serde_json::json!(ctx.debug));
                 if let Some(sid) = session_id_for_refine {
                     refine_ctx.insert("session_id".to_string(), serde_json::json!(sid));
-                }
-                if let Some(p) = ctx.socket_path {
-                    refine_ctx.insert("socket_path".to_string(), serde_json::to_value(p).unwrap());
                 }
                 let start_goal = ctx.recipe.start_goal().clone();
                 let mut refine_result = match ctx
@@ -343,15 +368,6 @@ fn run_start_goal_without_output_dir(
             log::set_max_level(log::LevelFilter::Debug);
         }
     }
-    context_values.insert(
-        "model".to_string(),
-        serde_json::to_value(model.clone()).unwrap(),
-    );
-    context_values.insert("agent_output".to_string(), serde_json::json!(true));
-    context_values.insert(
-        "inherit_stdin".to_string(),
-        serde_json::json!(inherit_stdin),
-    );
     let (temp_conv_path, session_conv_path) = if conversation_output_path.is_none() {
         if let Some(ref dir) = session_dir {
             let conv_path = dir.join("logs").join("conversation.jsonl");
@@ -372,15 +388,15 @@ fn run_start_goal_without_output_dir(
         .clone()
         .or(session_conv_path)
         .or_else(|| temp_conv_path.clone());
-    context_values.insert(
-        "conversation_output_path".to_string(),
-        serde_json::to_value(conv_for_ctx).unwrap(),
+    insert_engine_io_and_demo_flags(
+        &mut context_values,
+        model,
+        inherit_stdin,
+        &conv_for_ctx,
+        debug,
+        Some(false),
+        socket_path,
     );
-    context_values.insert("debug".to_string(), serde_json::json!(debug));
-    context_values.insert("run_demo".to_string(), serde_json::json!(false));
-    if let Some(p) = socket_path {
-        context_values.insert("socket_path".to_string(), serde_json::to_value(p).unwrap());
-    }
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -404,16 +420,46 @@ fn run_start_goal_without_output_dir(
         .block_on(engine.get_session(&result.session_id))
         .ok()
         .flatten()
-        .and_then(|s| s.context.get_sync::<PathBuf>("session_dir"))
     {
-        Some(p) => p,
-        None => match crate::output::new_session_dir() {
-            Ok(p) => p,
-            Err(e) => {
-                let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
+        Some(s) => {
+            if let Some(p) = s.context.get_sync::<PathBuf>("session_dir") {
+                log::debug!(
+                    "workflow_runner: using session_dir from engine context {:?}",
+                    p
+                );
+                p
+            } else if let (Some(base), Some(sid)) = (
+                s.context.get_sync::<PathBuf>("session_base"),
+                s.context.get_sync::<String>("session_id"),
+            ) {
+                log::info!(
+                    "workflow_runner: session_dir missing; materializing from session_base {:?} and session_id",
+                    base
+                );
+                match crate::output::create_session_dir_with_id(&base, &sid) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
+                        return None;
+                    }
+                }
+            } else {
+                log::error!(
+                    "workflow_runner: missing session_dir and session_base+session_id in engine context after workflow"
+                );
+                let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
+                    "session directory could not be resolved: workflow context missing session_dir and session_base/session_id"
+                        .into(),
+                )));
                 return None;
             }
-        },
+        }
+        None => {
+            let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
+                "session not found after workflow".into(),
+            )));
+            return None;
+        }
     };
 
     let conversation_output_resolved = crate::resolve_log_defaults(
@@ -573,23 +619,15 @@ pub fn run_workflow(
                 "session_dir".to_string(),
                 serde_json::to_value(session_dir.clone()).unwrap(),
             );
-            ctx.insert(
-                "model".to_string(),
-                serde_json::to_value(model.clone()).unwrap(),
+            insert_engine_io_and_demo_flags(
+                &mut ctx,
+                &model,
+                inherit_stdin,
+                &conversation_output_path,
+                debug,
+                None,
+                socket_path.as_ref(),
             );
-            ctx.insert("agent_output".to_string(), serde_json::json!(true));
-            ctx.insert(
-                "inherit_stdin".to_string(),
-                serde_json::json!(inherit_stdin),
-            );
-            ctx.insert(
-                "conversation_output_path".to_string(),
-                serde_json::to_value(conversation_output_path.clone()).unwrap(),
-            );
-            ctx.insert("debug".to_string(), serde_json::json!(debug));
-            if let Some(ref p) = socket_path {
-                ctx.insert("socket_path".to_string(), serde_json::to_value(p).unwrap());
-            }
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -694,24 +732,15 @@ pub fn run_workflow(
     if let Some(ref fi) = feature_input_for_workflow {
         context_values.insert("feature_input".to_string(), serde_json::json!(fi));
     }
-    context_values.insert(
-        "model".to_string(),
-        serde_json::to_value(model.clone()).unwrap(),
+    insert_engine_io_and_demo_flags(
+        &mut context_values,
+        &model,
+        inherit_stdin,
+        &conversation_output_path,
+        debug,
+        Some(run_demo),
+        socket_path.as_ref(),
     );
-    context_values.insert("agent_output".to_string(), serde_json::json!(true));
-    context_values.insert(
-        "inherit_stdin".to_string(),
-        serde_json::json!(inherit_stdin),
-    );
-    context_values.insert(
-        "conversation_output_path".to_string(),
-        serde_json::to_value(conversation_output_path.clone()).unwrap(),
-    );
-    context_values.insert("debug".to_string(), serde_json::json!(debug));
-    context_values.insert("run_demo".to_string(), serde_json::json!(run_demo));
-    if let Some(ref p) = socket_path {
-        context_values.insert("socket_path".to_string(), serde_json::to_value(p).unwrap());
-    }
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
