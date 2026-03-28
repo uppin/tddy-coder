@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import { emitConnectionChromeMarker } from "./connectionChromeMarkers";
 import { dataConnectionStatusValue } from "./connectionChromeStatus";
 
 const CHROME_BTN: React.CSSProperties = {
@@ -58,27 +57,15 @@ export function ConnectionTerminalChrome({
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    emitConnectionChromeMarker("M001", "ConnectionTerminalChrome:mount", {
-      overlayStatus,
-      hasTerminate: !!onTerminate,
-    });
-    console.info("[ConnectionTerminalChrome] mounted", { overlayStatus, hasTerminate: !!onTerminate });
-  }, [overlayStatus, onTerminate]);
-
-  useEffect(() => {
     if (!menuOpen) return;
     const onPointerDown = (e: MouseEvent) => {
       const t = e.target as Node;
       if (dotRef.current?.contains(t)) return;
       if (menuRef.current?.contains(t)) return;
-      emitConnectionChromeMarker("M007", "ConnectionTerminalChrome:outsideDismiss", {});
-      console.debug("[ConnectionTerminalChrome] dismiss menu (outside click)");
       setMenuOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        emitConnectionChromeMarker("M008", "ConnectionTerminalChrome:escapeDismiss", {});
-        console.debug("[ConnectionTerminalChrome] dismiss menu (Escape)");
         setMenuOpen(false);
       }
     };
@@ -91,21 +78,15 @@ export function ConnectionTerminalChrome({
   }, [menuOpen]);
 
   const toggleMenu = () => {
-    emitConnectionChromeMarker("M002", "ConnectionTerminalChrome:toggleMenu", { next: !menuOpen });
-    console.info("[ConnectionTerminalChrome] toggle menu", { next: !menuOpen });
     setMenuOpen((o) => !o);
   };
 
   const handleDisconnectClick = () => {
-    emitConnectionChromeMarker("M003", "ConnectionTerminalChrome:handleDisconnectClick", {});
-    console.info("[ConnectionTerminalChrome] Disconnect chosen");
     setMenuOpen(false);
     onDisconnect();
   };
 
   const handleTerminateClick = () => {
-    emitConnectionChromeMarker("M004", "ConnectionTerminalChrome:handleTerminateClick", {});
-    console.info("[ConnectionTerminalChrome] Terminate chosen");
     setMenuOpen(false);
     onTerminate?.();
   };
@@ -113,8 +94,6 @@ export function ConnectionTerminalChrome({
   const handleStopClick = (ev: React.MouseEvent) => {
     ev.preventDefault();
     ev.stopPropagation();
-    emitConnectionChromeMarker("M005", "ConnectionTerminalChrome:handleStopClick", {});
-    console.info("[ConnectionTerminalChrome] Stop (0x03) clicked");
     onStopInterrupt();
   };
 

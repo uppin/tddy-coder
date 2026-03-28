@@ -113,16 +113,6 @@ export function GhosttyTerminalLiveKit({
   const [coderSessionActive, setCoderSessionActive] = useState(true);
   const coderAvailableRef = useRef(true);
 
-  const hasConnectionOverlay = Boolean(connectionOverlay);
-  useEffect(() => {
-    if (!hasConnectionOverlay) return;
-    console.info("[GhosttyTerminalLiveKit] connection chrome integration", {
-      status,
-      hasTerminate: Boolean(connectionOverlay?.onTerminate),
-      buildId: connectionOverlay?.buildId,
-    });
-  }, [hasConnectionOverlay, status, connectionOverlay?.onTerminate, connectionOverlay?.buildId]);
-
   useEffect(() => {
     let room: Room | null = null;
     let bufferInterval: ReturnType<typeof setInterval> | null = null;

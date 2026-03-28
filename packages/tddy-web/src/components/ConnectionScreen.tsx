@@ -406,9 +406,7 @@ function ConnectedTerminal({
             buildId={BUILD_ID}
             onDisconnect={onDisconnect}
             onTerminate={onTerminate}
-            onStopInterrupt={() => {
-              console.info("[ConnectionScreen ConnectedTerminal] Stop before token ready");
-            }}
+            onStopInterrupt={() => {}}
           />
         </div>
       </div>

@@ -173,9 +173,7 @@ function ConnectedTerminal({
             buildId={BUILD_ID}
             onDisconnect={onDisconnect}
             onTerminate={onTerminate}
-            onStopInterrupt={() => {
-              console.info("[ConnectedTerminal] Stop before token ready — no terminal queue");
-            }}
+            onStopInterrupt={() => {}}
           />
         </div>
       </div>
