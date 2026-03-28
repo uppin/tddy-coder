@@ -12,6 +12,9 @@
 .red-submit.json
 .validate-submit.json
 .evaluate-submit.json
+.evaluate-changes-submit.json
+.plan-review-*.json
+.plan-review-*.txt
 .refactor-submit.json
 .update-docs-submit.json
 
