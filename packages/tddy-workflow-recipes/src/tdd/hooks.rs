@@ -29,7 +29,6 @@ use tddy_core::changeset::{
 };
 use tddy_core::error::WorkflowError;
 use tddy_core::output::new_session_dir;
-use tddy_core::plan_prd_path_for_session_dir;
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::setup_worktree_for_session;
 use tddy_core::stream::ProgressEvent as StreamProgressEvent;
@@ -40,6 +39,32 @@ use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::recipe::WorkflowRecipe;
 use tddy_core::workflow::task::TaskResult;
 use tddy_core::workflow::{find_git_root, prepend_context_header};
+
+/// Read primary planning document bytes using recipe basename and migration-aware resolution.
+fn read_primary_planning_document(
+    session_dir: &Path,
+    recipe: &dyn WorkflowRecipe,
+) -> Result<String, Box<dyn Error + Send + Sync>> {
+    let bn = recipe.primary_planning_artifact_basename();
+    let path = tddy_workflow::resolve_existing_primary_planning_document(session_dir, &bn)
+        .ok_or_else(|| {
+            format!(
+                "primary planning document ({}) not found under {:?}",
+                bn, session_dir
+            )
+        })?;
+    log::debug!("[tdd hooks] read_primary_planning_document: {:?}", path);
+    std::fs::read_to_string(&path)
+        .map_err(|e| format!("read primary planning document {}: {}", path.display(), e).into())
+}
+
+fn read_primary_planning_document_optional(
+    session_dir: &Path,
+    recipe: &dyn WorkflowRecipe,
+) -> Option<String> {
+    let bn = recipe.primary_planning_artifact_basename();
+    tddy_workflow::read_primary_planning_document_utf8(session_dir, &bn)
+}
 
 /// Hooks for the TDD workflow. Handles file I/O. Event emission for TUI when event_tx is set.
 pub struct TddWorkflowHooks {
@@ -214,8 +239,7 @@ fn before_acceptance_tests(
     context: &Context,
     recipe: &dyn WorkflowRecipe,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let prd = std::fs::read_to_string(session_dir.join("PRD.md"))
-        .map_err(|e| format!("read PRD.md: {}", e))?;
+    let prd = read_primary_planning_document(session_dir, recipe)?;
     let changeset = read_changeset(session_dir).map_err(|e| e.to_string())?;
     let defaults = recipe_default_models_str(recipe);
     let model = resolve_model(
@@ -259,8 +283,7 @@ fn before_red(
     context: &Context,
     recipe: &dyn WorkflowRecipe,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let prd = std::fs::read_to_string(session_dir.join("PRD.md"))
-        .map_err(|e| format!("read PRD.md: {}", e))?;
+    let prd = read_primary_planning_document(session_dir, recipe)?;
     let at = std::fs::read_to_string(session_dir.join("acceptance-tests.md"))
         .map_err(|e| format!("read acceptance-tests.md: {}", e))?;
     let changeset = read_changeset(session_dir).ok();
@@ -307,7 +330,7 @@ fn before_green(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let progress = std::fs::read_to_string(session_dir.join("progress.md"))
         .map_err(|e| format!("read progress.md: {}", e))?;
-    let prd = std::fs::read_to_string(session_dir.join("PRD.md")).ok();
+    let prd = read_primary_planning_document_optional(session_dir, recipe);
     let at = std::fs::read_to_string(session_dir.join("acceptance-tests.md")).ok();
     let changeset = read_changeset(session_dir).ok();
     let session_id = resolve_agent_session_id(session_dir).map_err(|e| {
@@ -365,8 +388,9 @@ fn before_demo(session_dir: &Path, context: &Context) -> Result<(), Box<dyn Erro
 fn before_evaluate(
     session_dir: &Path,
     context: &Context,
+    recipe: &dyn WorkflowRecipe,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let prd = std::fs::read_to_string(session_dir.join("PRD.md")).ok();
+    let prd = read_primary_planning_document_optional(session_dir, recipe);
     let changeset_raw = std::fs::read_to_string(session_dir.join("changeset.yaml")).ok();
     let prompt = evaluate::build_prompt(prd.as_deref(), changeset_raw.as_deref());
     let session_id = resolve_agent_session_id(session_dir)?;
@@ -469,7 +493,11 @@ fn before_update_docs(
     Ok(())
 }
 
-fn after_plan(session_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn after_plan(
+    recipe: &dyn WorkflowRecipe,
+    session_dir: &Path,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let planning: PlanningOutput = context
         .get_sync("parsed_planning")
         .or_else(|| {
@@ -477,7 +505,13 @@ fn after_plan(session_dir: &Path, context: &Context) -> Result<(), Box<dyn Error
             parse_planning_response_with_base(&output, session_dir).ok()
         })
         .ok_or("plan after_task requires parsed_planning or parseable output in context")?;
-    write_artifacts(session_dir, &planning)?;
+    let prd_bn = recipe.primary_planning_artifact_basename();
+    log::info!(
+        "[tdd hooks] after_plan writing primary planning artifact basename={:?} under {:?}",
+        prd_bn,
+        session_dir
+    );
+    write_artifacts(session_dir, &planning, &prd_bn)?;
     let session_id: String = context
         .get_sync("session_id")
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -727,7 +761,7 @@ impl RunnerHooks for TddWorkflowHooks {
             "red" => before_red(&session_dir, context, self.recipe.as_ref())?,
             "green" => before_green(&session_dir, context, self.recipe.as_ref())?,
             "demo" => before_demo(&session_dir, context)?,
-            "evaluate" => before_evaluate(&session_dir, context)?,
+            "evaluate" => before_evaluate(&session_dir, context, self.recipe.as_ref())?,
             "validate" => before_validate(&session_dir, context)?,
             "refactor" => before_refactor(&session_dir, context)?,
             "update-docs" => before_update_docs(&session_dir, context)?,
@@ -810,7 +844,7 @@ impl RunnerHooks for TddWorkflowHooks {
                 let session_dir: PathBuf = context
                     .get_sync("session_dir")
                     .ok_or("plan after_task requires session_dir in context (set by PlanTask)")?;
-                after_plan(&session_dir, context)?;
+                after_plan(self.recipe.as_ref(), &session_dir, context)?;
             }
             "acceptance-tests" | "red" | "green" | "evaluate" => {
                 let session_dir: PathBuf = context
@@ -860,10 +894,13 @@ impl RunnerHooks for TddWorkflowHooks {
         let session_dir: PathBuf = context
             .get_sync("session_dir")
             .or_else(|| context.get_sync("output_dir"))?;
-        let prd_path = plan_prd_path_for_session_dir(&session_dir);
-        if !prd_path.exists() {
-            return None;
-        }
+        let basename = self.recipe.primary_planning_artifact_basename();
+        let prd_path =
+            tddy_workflow::resolve_existing_primary_planning_document(&session_dir, &basename)?;
+        log::debug!(
+            "[tdd hooks] elicitation PlanApproval reading {:?}",
+            prd_path
+        );
         let prd_content = std::fs::read_to_string(&prd_path).ok()?;
         Some(ElicitationEvent::PlanApproval { prd_content })
     }

@@ -118,11 +118,13 @@ impl WorkflowRecipe for EmptyPresenterTestRecipe {
     }
 
     fn default_artifacts(&self) -> BTreeMap<String, String> {
-        BTreeMap::new()
+        let mut m = BTreeMap::new();
+        m.insert("prd".to_string(), "PRD.md".to_string());
+        m
     }
 
     fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
-        &[]
+        &[("prd", "PRD.md")]
     }
 
     fn goal_requires_session_dir(&self, _goal_id: &GoalId) -> bool {

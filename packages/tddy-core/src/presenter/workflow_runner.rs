@@ -241,10 +241,11 @@ fn handle_elicitation(
                         }
                     }
                 }
-                current_prd = std::fs::read_to_string(
-                    crate::session_plan_prd::plan_prd_path_for_session_dir(session_dir),
-                )
-                .unwrap_or_else(|_| "Could not read PRD.md".to_string());
+                let basename = ctx.recipe.primary_planning_artifact_basename();
+                current_prd = tddy_workflow::read_primary_planning_document_utf8_or_placeholder(
+                    session_dir,
+                    &basename,
+                );
             }
         }
         ElicitationEvent::WorktreeConfirmation { .. } => {
@@ -537,11 +538,21 @@ pub fn run_workflow(
         .map(PathBuf::from)
         .unwrap_or_else(|| output_dir.clone());
 
+    let plan_basename = recipe.primary_planning_artifact_basename();
     let plan_needs_completion = cs_pre.as_ref().is_some_and(|c| {
         c.state.current.as_str() == "Init"
-            && (!crate::session_plan_prd::plan_prd_path_for_session_dir(&session_dir).exists()
+            && (tddy_workflow::resolve_existing_primary_planning_document(
+                &session_dir,
+                &plan_basename,
+            )
+            .is_none()
                 || get_session_for_tag(c, "plan").is_none())
     });
+    log::debug!(
+        "[workflow_runner] plan_basename={:?} plan_needs_completion={}",
+        plan_basename,
+        plan_needs_completion
+    );
     if plan_needs_completion {
         let input = cs_pre
             .as_ref()

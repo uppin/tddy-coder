@@ -43,10 +43,10 @@ pub fn slugify_directory_name(feature: &str) -> String {
     format!("{}-{}", date, slug)
 }
 
-/// Root directory for plan markdown and other session artifacts — always exactly `session_dir`.
+/// Root directory for plan markdown and other workflow artifacts — `session_dir/artifacts/`.
 #[inline]
 pub fn plan_artifacts_root(session_dir: &Path) -> PathBuf {
-    session_dir.to_path_buf()
+    tddy_workflow::session_artifacts_root(session_dir)
 }
 
 /// Allocates a new session directory when no `session_dir` / `session_base`+`session_id` is in
@@ -157,7 +157,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plan_artifacts_root_is_session_dir() {
+    fn plan_artifacts_root_is_under_session_dir() {
         let root = std::env::temp_dir().join(format!(
             "tddy-plan-artifact-sessions-{}",
             std::process::id()
@@ -166,7 +166,7 @@ mod tests {
         let sessions = root.join("sessions");
         let sid = sessions.join("a97addd3-c31b-442b-a6b0-a63abe99e11d");
         std::fs::create_dir_all(&sid).unwrap();
-        assert_eq!(plan_artifacts_root(&sid), sid);
+        assert_eq!(plan_artifacts_root(&sid), sid.join("artifacts"));
         let _ = std::fs::remove_dir_all(&root);
     }
 

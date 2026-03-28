@@ -1,0 +1,9 @@
+[package]
+name = "tddy-workflow"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Workflow artifact layout and manifest wiring (decouples tddy-core from fixed PRD paths)"
+
+[dependencies]
+log = "0.4"

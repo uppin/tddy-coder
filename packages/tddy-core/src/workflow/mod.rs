@@ -211,15 +211,29 @@ pub fn build_context_header(
     if let Some(dir) = session_dir {
         log::debug!("[build_context_header] scanning {:?} for artifacts", dir);
         for artifact in artifact_basenames {
-            let path = dir.join(artifact);
-            if path.exists() {
-                let canonical = std::fs::canonicalize(&path).unwrap_or(path);
+            let under_artifacts = dir.join("artifacts").join(artifact);
+            let at_root = dir.join(artifact);
+            let path = if under_artifacts.exists() {
                 log::debug!(
-                    "[build_context_header] found artifact: {}",
-                    canonical.display()
+                    "[build_context_header] using {:?} (under session artifacts/)",
+                    under_artifacts
                 );
-                lines.push(format!("{}: {}", artifact, canonical.display()));
-            }
+                under_artifacts
+            } else if at_root.exists() {
+                log::debug!(
+                    "[build_context_header] using {:?} (legacy session root)",
+                    at_root
+                );
+                at_root
+            } else {
+                continue;
+            };
+            let canonical = std::fs::canonicalize(&path).unwrap_or(path);
+            log::debug!(
+                "[build_context_header] found artifact: {}",
+                canonical.display()
+            );
+            lines.push(format!("{}: {}", artifact, canonical.display()));
         }
     }
 

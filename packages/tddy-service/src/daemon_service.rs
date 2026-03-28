@@ -35,7 +35,6 @@ const CTX_SESSION_BASE: &str = "session_base";
 const CTX_SESSION_ID: &str = "session_id";
 const CTX_SESSION_DIR: &str = "session_dir";
 const CTX_WORKTREE_DIR: &str = "worktree_dir";
-const PRD_FILENAME: &str = "PRD.md";
 const CHANGESET_FILENAME: &str = "changeset.yaml";
 
 // --- Helpers ---
@@ -439,8 +438,14 @@ impl DaemonStreamHandler {
             .and_then(|s| s.context.get_sync::<String>("output"))
             .and_then(|o| parse_planning_response_with_base(&o, session_dir_path).ok())
             .unwrap_or_else(|| {
-                let prd = std::fs::read_to_string(session_dir_path.join(PRD_FILENAME))
+                let recipe = TddRecipe;
+                let bn = recipe.primary_planning_artifact_basename();
+                let prd = tddy_workflow::read_primary_planning_document_utf8(session_dir_path, &bn)
                     .unwrap_or_default();
+                log::debug!(
+                    "[daemon] approve_plan fallback planning from primary artifact basename={}",
+                    bn
+                );
                 PlanningOutput {
                     prd,
                     name: None,

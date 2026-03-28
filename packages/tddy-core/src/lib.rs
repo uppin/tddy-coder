@@ -7,7 +7,6 @@ pub mod log_backend;
 pub mod output;
 pub mod presenter;
 pub mod session_metadata;
-pub mod session_plan_prd;
 pub mod source_path;
 pub mod stream;
 pub mod toolcall;
@@ -44,9 +43,13 @@ pub use presenter::{
 pub use session_metadata::{
     read_session_metadata, write_session_metadata, SessionMetadata, SESSION_METADATA_FILENAME,
 };
-pub use session_plan_prd::plan_prd_path_for_session_dir;
 pub use source_path::{classify_rust_source_path, RustSourcePathKind};
 pub use stream::ProgressEvent;
+pub use tddy_workflow::{
+    primary_planning_artifact_path_for_basename, read_primary_planning_document_utf8,
+    read_primary_planning_document_utf8_or_placeholder, resolve_existing_primary_planning_document,
+    session_artifacts_root, PRIMARY_PLANNING_DOCUMENT_READ_PLACEHOLDER,
+};
 pub use workflow::{
     engine::WorkflowEngine,
     find_git_root,
@@ -59,3 +62,22 @@ pub use worktree::{
     create_worktree, fetch_origin_master, list_worktrees, remove_worktree,
     setup_worktree_for_session, worktree_dir, WorktreeInfo,
 };
+
+#[cfg(test)]
+mod workflow_decouple_acceptance {
+    /// After decoupling, the legacy PRD path helper must not be re-exported from the crate root.
+    #[test]
+    fn core_src_free_of_prd_path_helper() {
+        let lib_rs = include_str!("lib.rs");
+        let forbidden = [
+            "pub ",
+            "use session_plan_prd::",
+            "plan_prd_path_for_session_dir",
+        ]
+        .concat();
+        assert!(
+            !lib_rs.contains(&forbidden),
+            "tddy-core lib.rs must not re-export the legacy session_plan_prd helper; use workflow manifest resolvers"
+        );
+    }
+}

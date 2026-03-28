@@ -67,6 +67,23 @@ pub trait WorkflowRecipe: Send + Sync {
 
     fn known_artifacts(&self) -> &[(&'static str, &'static str)];
 
+    /// Basename of the primary human-reviewed planning document under `session_dir/artifacts/` (from manifest / `default_artifacts`).
+    fn primary_planning_artifact_basename(&self) -> String {
+        self.default_artifacts()
+            .get("prd")
+            .cloned()
+            .or_else(|| {
+                self.known_artifacts()
+                    .iter()
+                    .find(|(k, _)| *k == "prd")
+                    .map(|(_, name)| (*name).to_string())
+            })
+            .unwrap_or_else(|| {
+                // FIXME: remove fallback when every shipped recipe defines `prd` in `default_artifacts`
+                "PRD.md".to_string()
+            })
+    }
+
     /// Basenames under the session directory to consider when building `<context-reminder>` artifact lines (existing files only).
     /// Default: filenames from [`Self::known_artifacts`].
     fn context_header_session_artifact_filenames(&self) -> Vec<&'static str> {

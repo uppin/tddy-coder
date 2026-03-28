@@ -14,10 +14,11 @@ use std::sync::{Arc, Mutex};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
-    plan_prd_path_for_session_dir, preselected_index_for_agent, read_changeset,
-    read_session_metadata, AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodingBackend,
-    CursorBackend, GoalId, PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend,
-    WorkflowEngine, WorkflowRecipe,
+    preselected_index_for_agent, read_changeset,
+    read_primary_planning_document_utf8_or_placeholder, read_session_metadata,
+    resolve_existing_primary_planning_document, AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend,
+    CodingBackend, CursorBackend, GoalId, PendingWorkflowStart, ProgressEvent, SharedBackend,
+    StubBackend, WorkflowEngine, WorkflowRecipe,
 };
 use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response, TddRecipe};
 
@@ -1504,10 +1505,11 @@ fn run_goal_plain(
                                 break;
                             }
                             run_plan_refinement(args, &backend, &rt, &session_dir, &answer)?;
-                            current_prd = std::fs::read_to_string(plan_prd_path_for_session_dir(
+                            let bn = recipe.primary_planning_artifact_basename();
+                            current_prd = read_primary_planning_document_utf8_or_placeholder(
                                 &session_dir,
-                            ))
-                            .unwrap_or_else(|_| "Could not read PRD.md".to_string());
+                                &bn,
+                            );
                         }
                     }
                     tddy_core::ElicitationEvent::WorktreeConfirmation { .. } => {
@@ -1927,16 +1929,18 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
     let agent_str = resolve_agent_for_full_workflow_plain(args)?;
     let backend = create_backend(&agent_str, args.cursor_agent_path.as_deref(), None, None);
 
+    let recipe = tdd_recipe();
+    let plan_bn = recipe.primary_planning_artifact_basename();
     let mut session_dir = args.session_dir.clone().context("session directory")?;
-    if !plan_prd_path_for_session_dir(&session_dir).exists() {
+    if resolve_existing_primary_planning_document(&session_dir, &plan_bn).is_none() {
         session_dir = run_plan_to_get_dir(args, backend.clone(), &agent_str, &shutdown)?;
     }
 
-    // When the session has Init state and no PRD (or no plan session), run plan to complete it.
+    // When the session has Init state and no primary planning artifact (or no plan session), run plan to complete it.
     let cs_pre = read_changeset(&session_dir).ok();
     let plan_needs_completion = cs_pre.as_ref().is_some_and(|c| {
         c.state.current.as_str() == "Init"
-            && (!plan_prd_path_for_session_dir(&session_dir).exists()
+            && (resolve_existing_primary_planning_document(&session_dir, &plan_bn).is_none()
                 || get_session_for_tag(c, "plan").is_none())
     });
     if plan_needs_completion {
@@ -1962,7 +1966,6 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         && plain::read_demo_choice_plain().context("read demo choice")?;
 
     let cs = read_changeset(&session_dir).ok();
-    let recipe = tdd_recipe();
     let start_goal = cs
         .as_ref()
         .and_then(|c| recipe.next_goal_for_state(&c.state.current))
@@ -1973,7 +1976,7 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
     std::fs::create_dir_all(&storage_dir).context("create session storage dir")?;
     let hooks = recipe.create_hooks(None);
     let backend_for_refine = backend.clone();
-    let engine = WorkflowEngine::new(recipe, backend, storage_dir, Some(hooks));
+    let engine = WorkflowEngine::new(recipe.clone(), backend, storage_dir, Some(hooks));
 
     let feature_input = cs_pre
         .as_ref()
@@ -2076,10 +2079,11 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
                                 &session_dir,
                                 &answer,
                             )?;
-                            current_prd = std::fs::read_to_string(plan_prd_path_for_session_dir(
+                            let bn = recipe.primary_planning_artifact_basename();
+                            current_prd = read_primary_planning_document_utf8_or_placeholder(
                                 &session_dir,
-                            ))
-                            .unwrap_or_else(|_| "Could not read PRD.md".to_string());
+                                &bn,
+                            );
                         }
                     }
                     tddy_core::ElicitationEvent::WorktreeConfirmation { .. } => {

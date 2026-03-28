@@ -6,10 +6,11 @@ use crate::parser::{
 use std::fs;
 use std::path::{Path, PathBuf};
 use tddy_core::error::WorkflowError;
+use tddy_workflow::session_artifacts_root;
 
-/// Inject a "Related Documents" section with relative links to peer .md files.
-pub fn inject_cross_references(content: &str, session_dir: &Path, self_name: &str) -> String {
-    let mut peers: Vec<String> = fs::read_dir(session_dir)
+/// Inject a "Related Documents" section with relative links to peer .md files in `peer_scan_root`.
+pub fn inject_cross_references(content: &str, peer_scan_root: &Path, self_name: &str) -> String {
+    let mut peers: Vec<String> = fs::read_dir(peer_scan_root)
         .ok()
         .into_iter()
         .flatten()
@@ -91,9 +92,14 @@ pub fn read_impl_session_file(session_dir: &Path) -> Result<String, WorkflowErro
     fs::read_to_string(&session_path).map_err(|e| WorkflowError::SessionMissing(format!("{}", e)))
 }
 
-/// Write PRD.md. PRD must include ## TODO section (parser/agent responsibility).
-/// Injects cross-references to peer documents.
-pub fn write_artifacts(output_dir: &Path, planning: &PlanningOutput) -> Result<(), WorkflowError> {
+/// Write the primary planning document under `session_dir/artifacts/<prd_basename>`.
+/// PRD must include ## TODO section (parser/agent responsibility).
+/// Injects cross-references to peer documents in the same `artifacts/` directory.
+pub fn write_artifacts(
+    output_dir: &Path,
+    planning: &PlanningOutput,
+    prd_basename: &str,
+) -> Result<(), WorkflowError> {
     if planning.prd.trim().is_empty() {
         return Err(WorkflowError::WriteFailed(
             "PRD content is empty or whitespace-only".into(),
@@ -106,8 +112,15 @@ pub fn write_artifacts(output_dir: &Path, planning: &PlanningOutput) -> Result<(
         write_demo_plan_file(output_dir, demo)?;
     }
 
-    let prd_path = output_dir.join("PRD.md");
-    let prd_content = inject_cross_references(&planning.prd, output_dir, "PRD.md");
+    let artifacts_root = session_artifacts_root(output_dir);
+    fs::create_dir_all(&artifacts_root).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    log::info!(
+        "[tddy-workflow-recipes] write_artifacts prd at {:?}/{}",
+        artifacts_root,
+        prd_basename
+    );
+    let prd_path = artifacts_root.join(prd_basename);
+    let prd_content = inject_cross_references(&planning.prd, &artifacts_root, prd_basename);
     fs::write(&prd_path, prd_content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
     Ok(())

@@ -66,9 +66,9 @@ async fn planning_workflow_produces_prd_and_todo_in_output_directory() {
 
     assert!(output_path.is_dir(), "output should be a directory");
 
-    let prd_path = output_path.join("PRD.md");
+    let prd_path = output_path.join("artifacts").join("PRD.md");
 
-    assert!(prd_path.exists(), "PRD.md should exist");
+    assert!(prd_path.exists(), "artifacts/PRD.md should exist");
 
     let prd_content = std::fs::read_to_string(&prd_path).expect("read PRD");
 
@@ -163,8 +163,9 @@ async fn planning_workflow_with_stub_backend_transitions_to_planned() {
     .await
     .expect("second call with answers should succeed");
 
-    assert!(session_dir.join("PRD.md").exists(), "PRD.md should exist");
-    let prd = std::fs::read_to_string(session_dir.join("PRD.md")).unwrap();
+    let prd_path = session_dir.join("artifacts").join("PRD.md");
+    assert!(prd_path.exists(), "artifacts/PRD.md should exist");
+    let prd = std::fs::read_to_string(&prd_path).unwrap();
     assert!(
         prd.contains("- [ ]") || prd.contains("## TODO"),
         "PRD.md should contain TODO content (merged as last section)"
@@ -349,7 +350,8 @@ async fn planning_workflow_produces_prd_after_clarification_answers() {
 
     assert!(output_path.is_dir());
 
-    let prd_content = std::fs::read_to_string(output_path.join("PRD.md")).expect("read PRD");
+    let prd_content =
+        std::fs::read_to_string(output_path.join("artifacts").join("PRD.md")).expect("read PRD");
     assert!(prd_content.contains("User authentication"));
 
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -384,8 +386,9 @@ async fn planning_workflow_stub_backend_clarification_roundtrip() {
         .expect("second call with answers should succeed");
 
     assert!(output_path.is_dir());
-    assert!(output_path.join("PRD.md").exists());
-    let prd = std::fs::read_to_string(output_path.join("PRD.md")).unwrap();
+    let prd_path = output_path.join("artifacts").join("PRD.md");
+    assert!(prd_path.exists());
+    let prd = std::fs::read_to_string(&prd_path).unwrap();
     assert!(
         prd.contains("- [ ]") || prd.contains("## TODO"),
         "PRD.md should contain TODO content (merged as last section)"

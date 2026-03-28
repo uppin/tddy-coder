@@ -6,6 +6,7 @@ description = "Pluggable workflow recipes (TDD, bug-fix, …) for tddy-coder"
 
 [dependencies]
 tddy-core = { path = "../tddy-core" }
+tddy-workflow = { path = "../tddy-workflow" }
 async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 log = "0.4"

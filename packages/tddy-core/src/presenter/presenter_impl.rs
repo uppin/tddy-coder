@@ -369,11 +369,13 @@ impl Presenter {
             }
             UserIntent::ViewPlan => {
                 if let AppMode::PlanReview { ref prd_content } = self.state.mode {
+                    let basename = self.workflow_recipe.primary_planning_artifact_basename();
                     let content = self
                         .workflow_session_dir
                         .as_ref()
-                        .map(|d| crate::session_plan_prd::plan_prd_path_for_session_dir(d))
-                        .and_then(|p| std::fs::read_to_string(&p).ok())
+                        .and_then(|d| {
+                            tddy_workflow::read_primary_planning_document_utf8(d, &basename)
+                        })
                         .unwrap_or_else(|| prd_content.clone());
                     self.state.mode = AppMode::MarkdownViewer { content };
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
