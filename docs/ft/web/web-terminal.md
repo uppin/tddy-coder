@@ -63,6 +63,16 @@ Each project’s session table and the **Other sessions** table list rows in thi
 
 The client applies **`sortSessionsForDisplay`** (`packages/tddy-web/src/utils/sessionSort.ts`) to the session array already held in React state after **`ListSessions`**—no additional RPC for ordering. In Vite development builds, optional **`console.debug`** / **`console.info`** traces run when **`import.meta.env.DEV`** is true.
 
+### Session workflow status (TUI parity)
+
+Project session tables and the **Other sessions** table include five additional columns—**Goal**, **Workflow**, **Elapsed**, **Agent**, and **Model**—alongside ID, Date, Status, Repo, PID, and Actions. The UI renders the string fields on each **`SessionEntry`** returned by **`ListSessions`**: **`workflow_goal`**, **`workflow_state`**, **`elapsed_display`**, **`agent`**, and **`model`**. Empty or whitespace-only values display an em dash (`—`).
+
+The daemon fills these fields from each session directory’s **`.session.yaml`** (session identity) and, when present, **`changeset.yaml`**: the workflow goal is the matching session row’s **tag**; workflow state is **`state.current`**; the agent is the row’s **agent**; the model label is **`models[tag]`** when defined. **Elapsed** is a compact duration string produced with the same rules as the TUI status bar formatter (**`tddy_core::format_elapsed_compact`**), computed from persisted **`state.history`** timestamps (last transition whose state matches **`state.current`**, or **`state.updated_at`**). The browser shows a horizontally scrollable table when the viewport is narrower than the full column set.
+
+While the session list includes at least one row with **`isActive`**, the client requests **`ListSessions`** every **2** seconds; when every row is inactive, the interval is **5** seconds. **`ListProjects`** continues to refresh every **5** seconds. Authentication and user mapping for **`ListSessions`** match other RPCs (GitHub token → mapped OS user → sessions base).
+
+Semantics for comparing elapsed with the in-terminal TUI status bar (persisted YAML versus in-process clock) are described in **[web-session-status-elapsed-semantics.md](../../dev/1-WIP/web-session-status-elapsed-semantics.md)**.
+
 ### Inactive session deletion
 
 - **Inactive rows** (`!isActive`): The actions column shows **Resume** and **Delete**. **Delete** opens a browser **confirm** dialog; on confirmation the client calls **`DeleteSession`** with the session id, reloads the session list on success, and shows RPC errors in the same error area as other connection actions.

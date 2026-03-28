@@ -7,6 +7,7 @@ import {
   TerminalInputSchema,
 } from "tddy-livekit-web";
 import { create } from "@bufbuild/protobuf";
+import { Button } from "@/components/ui/button";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 
 /** Overlay buttons for live sessions: must sit above the canvas (z-index, DOM order) and enqueue bytes via the same path as Ghostty `onData`. */
@@ -519,10 +520,12 @@ export function GhosttyTerminalLiveKit({
         )}
         {connectionOverlay && (
           <>
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               data-testid="ctrl-c-button"
-              style={{ ...CONNECTION_OVERLAY_BTN, right: 72 }}
+              className="pointer-events-auto absolute top-2 right-[72px] z-[100] bg-background/90 shadow-md backdrop-blur-sm"
               onClick={(ev) => {
                 ev.preventDefault();
                 ev.stopPropagation();
@@ -530,11 +533,13 @@ export function GhosttyTerminalLiveKit({
               }}
             >
               Ctrl+C
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               data-testid="disconnect-button"
-              style={{ ...CONNECTION_OVERLAY_BTN, right: 8 }}
+              className="pointer-events-auto absolute top-2 right-2 z-[100] bg-background/90 shadow-md backdrop-blur-sm"
               onClick={(ev) => {
                 ev.preventDefault();
                 ev.stopPropagation();
@@ -542,7 +547,7 @@ export function GhosttyTerminalLiveKit({
               }}
             >
               Disconnect
-            </button>
+            </Button>
             {connectionOverlay.buildId !== undefined && (
               <span
                 data-testid="build-id"

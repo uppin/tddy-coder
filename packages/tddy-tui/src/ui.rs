@@ -5,21 +5,11 @@ use std::borrow::Cow;
 use std::time::Duration;
 
 use ratatui::style::{Color, Modifier, Style};
+use tddy_core::format_elapsed_compact;
 
 /// Format an elapsed duration as a compact human-readable string.
 pub fn format_elapsed(duration: Duration) -> String {
-    let secs = duration.as_secs();
-    if secs < 60 {
-        format!("{}s", secs)
-    } else if secs < 3600 {
-        let m = secs / 60;
-        let s = secs % 60;
-        format!("{}m {}s", m, s)
-    } else {
-        let h = secs / 3600;
-        let m = (secs % 3600) / 60;
-        format!("{}h {}m", h, m)
-    }
+    format_elapsed_compact(duration)
 }
 
 /// Format the status bar line.
