@@ -7,6 +7,7 @@ pub mod multi_host;
 pub mod project_storage;
 pub mod server;
 pub mod session_deletion;
+pub mod session_list_enrichment;
 pub mod session_reader;
 pub mod spawn_worker;
 pub mod spawner;

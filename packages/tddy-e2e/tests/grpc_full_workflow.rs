@@ -158,7 +158,7 @@ async fn full_workflow_asserts_each_state_transition() {
     /// `Planning→Planned`. With demo: 22 transitions; without demo: 20 (no demo clarification answer
     /// in this test → `run_demo` stays false).
     const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
-        ("Init", "Planning"),
+        ("Planning", "Planning"),
         ("Planning", "Planned"),
         ("Planning", "Planned"),
         ("Planning", "Planning"),
@@ -182,7 +182,7 @@ async fn full_workflow_asserts_each_state_transition() {
         ("UpdatingDocs", "DocsUpdated"),
     ];
     const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
-        ("Init", "Planning"),
+        ("Planning", "Planning"),
         ("Planning", "Planned"),
         ("Planning", "Planned"),
         ("Planning", "Planning"),

@@ -28,6 +28,7 @@ use crate::ctrl_interrupt::{ctrl_c_interrupt_session, key_is_ctrl_c_press};
 use crate::key_map::key_event_to_intent;
 use crate::mouse_map::{handle_mouse_event, LayoutAreas};
 use crate::render::draw;
+use crate::status_bar_activity::virtual_tui_periodic_render_interval;
 use crate::tui_view::TuiView;
 
 /// Runs a VirtualTui in a dedicated thread. Renders on events, streams ANSI bytes.
@@ -159,9 +160,7 @@ pub fn run_virtual_tui(
         let intent_tx = conn.intent_tx;
         let critical_state = conn.critical_state;
 
-        // Periodic render interval to keep animations alive (spinner, elapsed timer),
-        // matching the real TUI event loop (event_loop.rs:69) which draws every ~50ms.
-        let render_interval = Duration::from_millis(200);
+        // Periodic render interval: legacy 200 ms; Green aligns with 1 Hz idle dot in user-wait modes.
         let mut last_render = std::time::Instant::now();
 
         let mut recv_chunk_count: u64 = 0;
@@ -225,6 +224,7 @@ pub fn run_virtual_tui(
 
             // Render on events/input immediately, or periodically to keep the
             // spinner and elapsed timer alive.
+            let render_interval = virtual_tui_periodic_render_interval(&state.mode);
             let render_reason = if updated {
                 "events/input"
             } else if last_render.elapsed() >= render_interval {
@@ -233,7 +233,11 @@ pub fn run_virtual_tui(
                 ""
             };
             if !render_reason.is_empty() {
-                log::debug!("VirtualTui: render ({})", render_reason);
+                log::debug!(
+                    "VirtualTui: render ({}) periodic_interval_ms={}",
+                    render_reason,
+                    render_interval.as_millis()
+                );
                 render_and_send(
                     &mut terminal,
                     &state,
@@ -450,7 +454,7 @@ fn apply_resize<B: Backend>(
 /// When `Lagged` occurs, critical state (goal, workflow state) is resynced from
 /// `critical_state` — a shared snapshot updated by the presenter on every change.
 /// This ensures `GoalStarted`/`StateChanged` events lost to overflow are recovered.
-pub(crate) fn drain_presenter_broadcast(
+pub fn drain_presenter_broadcast(
     event_rx: &mut tokio::sync::broadcast::Receiver<PresenterEvent>,
     state: &mut PresenterState,
     view: &mut TuiView,

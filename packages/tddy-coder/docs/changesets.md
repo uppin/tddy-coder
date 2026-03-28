@@ -2,6 +2,8 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-03-28** [Feature] Daemon and CLI session paths — **`run.rs`** aligns daemon-spawned and local flows with **`{sessions_base}/sessions/{session_id}/`** and lifecycle helpers from **`tddy_core`**. [docs/ft/coder/session-layout.md](../../../docs/ft/coder/session-layout.md). (tddy-coder)
+- **2026-03-28** [Feature] Selectable workflow recipes — **`--recipe tdd`** (default) and **`--recipe bugfix`**; optional config **`recipe:`**; **`changeset.yaml`** optional **`recipe:`** for resume; **`SpawnRequest.recipe`** and daemon spawn pass **`--recipe`** to **`tddy-coder`**. See [docs/ft/coder/workflow-recipes.md](../../../docs/ft/coder/workflow-recipes.md). (tddy-coder)
 - **2026-03-22** [Feature] Workflow abstraction layer — CLI `--goal` and recipe wiring use `TddRecipe` (default); dynamic goal list from recipe. See [docs/ft/coder/workflow-recipes.md](../../../docs/ft/coder/workflow-recipes.md). (tddy-coder)
 - **2026-03-22** [Feature] Local web dev script — Root **`./web-dev`** runs **`tddy-daemon`** with **`dev.daemon.yaml`** (or **`DAEMON_CONFIG`**); Vite proxy uses **`DAEMON_PORT`** from that YAML. Documented under [local-web-dev.md](../../../docs/ft/web/local-web-dev.md). (tddy-coder)
 - **2026-03-22** [Feature] Toolcall submit relay — `daemon_toolcall_poll_regression` documents that `run_daemon` calls `poll_tool_calls` like the TUI so `SubmitActivity` reaches the activity log; aligned with immediate submit ack in `tddy-core`. (tddy-coder)

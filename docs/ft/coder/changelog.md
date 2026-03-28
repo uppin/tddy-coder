@@ -9,6 +9,25 @@ Release note history for the Coder product area.
 - **TDD graph**: Boolean session key **`run_optional_step_x`** selects the demo branch after green; recipe hooks use **`tddy-tools ask`** and **`set-session-context`** to record the choice.
 - **Docs**: [workflow-recipes.md](workflow-recipes.md) (session context section), [workflow-json-schemas.md](workflow-json-schemas.md) (`set-session-context`), [implementation-step.md](implementation-step.md) (demo workflow and state machine).
 
+## 2026-03-28 — Session directory layout (unified `sessions/<id>/`)
+
+- **Contract**: Plan and workflow state use `{sessions_base}/sessions/{session_id}/`; process-bound session id takes precedence over backend-reported ids where they differ (`tddy_core::session_lifecycle`).
+- **Presenter**: The workflow runner resolves `session_dir` from engine context or materializes from `session_base` + `session_id`; missing both yields a clear workflow error (no anonymous fallback directory).
+- **Docs**: [Session directory layout](session-layout.md) (including [migration from non-unified trees](session-layout.md#migration-from-non-unified-trees)).
+
+## 2026-03-28 — Bugfix workflow recipe (selectable `tdd` / `bugfix`)
+
+- **Recipes**: **`tddy-workflow-recipes::recipe_resolve`** provides **`workflow_recipe_and_manifest_from_cli_name`** and **`resolve_workflow_recipe_from_cli_name`**; **`tddy-coder`** uses **`--recipe`** and optional config **`recipe:`**; **`changeset.yaml`** optional **`recipe:`** for resume; default **`tdd`** when unset.
+- **BugfixRecipe**: Start goal **`reproduce`**; primary session document **`fix-plan.md`**; approval gate before **green**; **`uses_primary_session_document`** **`true`**.
+- **Daemon / web**: **`StartSession` / `StartSessionRequest`** **`recipe`** field; **`tddy-daemon`** passes **`--recipe`** to spawned **`tddy-coder`**; **`ConnectionScreen`** workflow recipe dropdown on **Start New Session**.
+- **Docs**: [workflow-recipes.md](workflow-recipes.md) ([Developer reference (TDD vs Bugfix)](workflow-recipes.md#developer-reference-tdd-vs-bugfix)).
+
+## 2026-03-28 — TUI status bar: idle wait vs agent activity
+
+- **Activity**: In `Running`, the status line uses the fast spinner and live goal elapsed. In clarification waits (`Select`, `MultiSelect`, `TextInput`), the displayed goal elapsed is frozen and the leading indicator is a one-second ·/• pulse; `VirtualTui` periodic renders align (~200 ms vs ~1 s) so streamed frames match local behavior without unnecessary traffic during waits.
+- **Code**: `status_bar_activity` module; `ViewState` anchors for frozen elapsed and idle phase; shared `draw()` for local and remote.
+- **Docs**: [tui-status-bar.md](tui-status-bar.md), `packages/tddy-tui/docs/architecture.md`.
+
 ## 2026-03-28 — Recipe-owned session artifacts (core decoupling)
 
 - **Behavior**: Primary planning document paths and **`session_dir/artifacts/`** layout are driven by **`WorkflowRecipe`** + **`SessionArtifactManifest`** and **`tddy-workflow`** path helpers, not hard-coded **`PRD.md`** defaults in **`tddy-core`**.

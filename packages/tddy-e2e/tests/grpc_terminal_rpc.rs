@@ -261,6 +261,7 @@ async fn drain_output(
 }
 
 /// Collect gRPC terminal output until `min_bytes` received or `timeout` elapses.
+#[allow(dead_code)] // Used by some scenarios; idle-cadence tests use [`count_terminal_chunks_in_window`].
 async fn collect_output(
     stream: &mut tonic::Streaming<tddy_service::proto::terminal::TerminalOutput>,
     min_bytes: usize,
@@ -310,6 +311,35 @@ async fn collect_output(
         received.len()
     );
     Ok(received)
+}
+
+/// Count gRPC terminal output messages received during a wall-clock window (no minimum byte threshold).
+async fn count_terminal_chunks_in_window(
+    stream: &mut tonic::Streaming<tddy_service::proto::terminal::TerminalOutput>,
+    window: Duration,
+    phase: &str,
+) -> anyhow::Result<usize> {
+    let mut n = 0usize;
+    let deadline = tokio::time::Instant::now() + window;
+    log::trace!(
+        "[BIDI_TRACE] count_terminal_chunks_in_window: phase={} window={:?}",
+        phase,
+        window
+    );
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(50), stream.message()).await {
+            Ok(Ok(Some(_))) => n += 1,
+            Ok(Ok(None)) => break,
+            Ok(Err(e)) => return Err(anyhow::anyhow!("stream error in {}: {}", phase, e)),
+            Err(_) => {}
+        }
+    }
+    log::trace!(
+        "[BIDI_TRACE] count_terminal_chunks_in_window: phase={} done chunks={}",
+        phase,
+        n
+    );
+    Ok(n)
 }
 
 #[tokio::test]
@@ -433,7 +463,8 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
         || text.contains("GreenComplete")
         || text.contains("Workflow complete")
         || text.contains("DocsUpdated")
-        || text.contains("Type your feature");
+        || text.contains("Type your feature")
+        || text.contains("Planning→Planned");
 
     assert!(
         progressed,
@@ -535,7 +566,8 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
         || visible.contains("GreenComplete")
         || visible.contains("Workflow complete")
         || visible.contains("DocsUpdated")
-        || visible.contains("Type your feature");
+        || visible.contains("Type your feature")
+        || visible.contains("Planning→Planned");
 
     assert!(
         progressed,
@@ -547,17 +579,13 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Bug reproduction: VirtualTui only renders when a PresenterEvent or keyboard input
-/// arrives. The status-bar spinner (cycling |, /, -, \) and elapsed timer freeze
-/// between events because the render loop gates on `if updated { render(); }`.
+/// VirtualTui must keep rendering during clarification wait so highlights stay coherent,
+/// but the **idle** status animation should follow ~1 Hz dot pulse + frozen elapsed — not
+/// ~200ms full-frame churn driven by the fast spinner (PRD: tui-idle-status-loader).
 ///
-/// The real TUI event loop (event_loop.rs) renders every ~50ms unconditionally,
-/// keeping the spinner alive. The VirtualTui should do the same — periodic re-renders
-/// even when idle.
-///
-/// Setup: connect gRPC terminal, let the workflow reach Select mode (waiting for user
-/// input, no more PresenterEvents), then verify output CONTINUES to arrive without
-/// any keyboard input — proving the TUI is re-rendering autonomously.
+/// Setup: connect gRPC terminal, reach Select mode (no further PresenterEvents), send no
+/// input. We still expect autonomous output (periodic refresh), but **few** streamed chunks
+/// in a 2s window when only the idle dot phase would change (~1 Hz), not one per 200ms tick.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn grpc_virtual_tui_refreshes_autonomously_without_input() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -595,28 +623,72 @@ async fn grpc_virtual_tui_refreshes_autonomously_without_input() -> anyhow::Resu
 
     // Now: presenter is in Select mode, waiting for user input.
     // No PresenterEvents will arrive. No keyboard input is sent.
-    // The VirtualTui SHOULD still re-render periodically — the status-bar
-    // spinner cycles through |, /, -, \ and the elapsed timer ticks.
-    //
-    // With the bug, `updated` is never set to true, render() is never called,
-    // and zero bytes are emitted. The spinner and timer freeze.
-    let autonomous_output = collect_output(
-        &mut stream,
-        1, // min_bytes: we just need ANY output to prove re-rendering
-        Duration::from_secs(2),
-        "autonomous-refresh",
-    )
-    .await?;
+    // We still expect *some* autonomous output for responsive UI, but not ~10 full frames
+    // in 2s from a 200ms periodic timer when the only visible animation is a 1 Hz idle dot.
+    let chunk_count =
+        count_terminal_chunks_in_window(&mut stream, Duration::from_secs(2), "idle-cadence")
+            .await?;
 
     shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
     drop(input_tx);
 
     assert!(
-        !autonomous_output.is_empty(),
-        "VirtualTui should re-render autonomously (spinner tick, elapsed timer) \
-         even without PresenterEvents or keyboard input, but received 0 bytes \
-         in 2 seconds. The render loop only triggers on events/input — \
-         it needs a periodic re-render like the real TUI event loop (every ~50ms)."
+        chunk_count > 0,
+        "VirtualTui should still emit occasional frames during Select wait (responsive UI), \
+         but received 0 chunks in 2 seconds."
+    );
+    assert!(
+        chunk_count <= 5,
+        "PRD: idle clarification wait should not stream a full status-bar update every \
+         ~200ms (~10 chunks / 2s); expect ~1 Hz idle animation cadence, got {chunk_count} chunks"
+    );
+
+    Ok(())
+}
+
+/// Acceptance (PRD): `virtual_tui_idle_animation_cadence` — during Select wait, streamed chunks
+/// over a 2s window must stay in the ~1 Hz range (not fast-spinner / 200ms cadence).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn grpc_virtual_tui_idle_animation_cadence() -> anyhow::Result<()> {
+    let _ = env_logger::builder().is_test(true).try_init();
+    let (_handle, port, shutdown) =
+        spawn_presenter_with_terminal_service(Some("Build auth".to_string()));
+
+    let mut client = connect_terminal_grpc(port).await?;
+
+    let (input_tx, input_rx) = tokio::sync::mpsc::channel(64);
+    let input_stream = tokio_stream::wrappers::ReceiverStream::new(input_rx);
+
+    let mut stream = client
+        .stream_terminal_io(tonic::Request::new(input_stream))
+        .await?
+        .into_inner();
+
+    input_tx.send(TerminalInput { data: vec![] }).await?;
+
+    let initial = drain_output(&mut stream, Duration::from_millis(500), "init-burst").await?;
+    let initial_text = ansi_to_text(&initial);
+    assert!(
+        initial.len() > 50,
+        "Should receive initial TUI render, got {} bytes",
+        initial.len()
+    );
+    assert!(
+        initial_text.contains("Email/password") || initial_text.contains("Scope"),
+        "Should reach Select mode; got: {:?}",
+        &initial_text[..initial_text.len().min(300)]
+    );
+
+    let chunks =
+        count_terminal_chunks_in_window(&mut stream, Duration::from_secs(2), "cadence").await?;
+
+    shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+    drop(input_tx);
+
+    assert!(
+        chunks <= 5,
+        "PRD: VirtualTui idle animation should not emit ~200ms spinner-driven frames in \
+         Select wait; expect at most ~5 chunks / 2s (~1 Hz dot), got {chunks}"
     );
 
     Ok(())

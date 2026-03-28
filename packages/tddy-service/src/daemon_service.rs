@@ -4,18 +4,18 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::sync::Arc;
 
 use tokio::sync::mpsc as tokio_mpsc;
 use tonic::{Request, Response, Status};
 
-use tddy_core::output::create_session_dir_under;
+use tddy_core::output::{create_session_dir_under, SESSIONS_SUBDIR};
 use tddy_core::read_changeset;
+use tddy_core::session_lifecycle::validate_session_id_segment;
 use tddy_core::workflow::graph::{ElicitationEvent, ExecutionStatus};
 use tddy_core::workflow::session::workflow_engine_storage_dir;
 use tddy_core::{setup_worktree_for_session, SharedBackend, WorkflowEngine, WorkflowRecipe};
 use tddy_workflow_recipes::{parse_planning_response_with_base, PlanningOutput};
-use tddy_workflow_recipes::{SessionArtifactManifest, TddRecipe, TddWorkflowHooks};
+use tddy_workflow_recipes::{workflow_recipe_and_manifest_from_cli_name, SessionArtifactManifest};
 
 use crate::convert::{
     session_document_approval_to_server_message, workflow_event_to_server_message,
@@ -79,12 +79,12 @@ async fn send_workflow_complete(
 fn spawn_event_forwarder(
     rx: mpsc::Receiver<tddy_core::WorkflowEvent>,
     tx: tokio_mpsc::Sender<Result<ServerMessage, Status>>,
+    runtime: tokio::runtime::Handle,
 ) {
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Handle::current();
         while let Ok(ev) = rx.recv() {
             if let Some(msg) = workflow_event_to_server_message(ev) {
-                let _ = rt.block_on(tx.send(Ok(msg)));
+                let _ = runtime.block_on(tx.send(Ok(msg)));
             }
         }
     });
@@ -114,17 +114,13 @@ pub struct DaemonService {
 
 impl DaemonService {
     pub fn new(sessions_base: PathBuf, backend: SharedBackend) -> Self {
-        let tdd: std::sync::Arc<TddRecipe> = std::sync::Arc::new(TddRecipe);
-        Self::with_workflow_recipe(
-            sessions_base,
-            backend,
-            tdd.clone() as std::sync::Arc<dyn WorkflowRecipe>,
-            tdd as std::sync::Arc<dyn SessionArtifactManifest>,
-        )
+        let (workflow_recipe, artifact_manifest) =
+            workflow_recipe_and_manifest_from_cli_name("tdd").expect("tdd always resolves");
+        Self::with_workflow_recipe(sessions_base, backend, workflow_recipe, artifact_manifest)
     }
 
     /// Use a specific workflow recipe (e.g. TDD, bug-fix) and matching session-artifact manifest.
-    /// Default [`new`] pairs [`TddRecipe`] for both.
+    /// Default [`new`] uses [`workflow_recipe_and_manifest_from_cli_name`] with `"tdd"`.
     pub fn with_workflow_recipe(
         sessions_base: PathBuf,
         backend: SharedBackend,
@@ -168,11 +164,10 @@ impl TddyRemote for DaemonService {
         request: Request<GetSessionRequest>,
     ) -> Result<Response<GetSessionResponse>, Status> {
         let session_id = request.into_inner().session_id;
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id is required"));
-        }
+        validate_session_id_segment(&session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
 
-        let session_dir = self.sessions_base.join(&session_id);
+        let session_dir = self.sessions_base.join(SESSIONS_SUBDIR).join(&session_id);
         let changeset = read_changeset(&session_dir)
             .map_err(|e| Status::not_found(format!("session not found: {} — {}", session_id, e)))?;
 
@@ -200,11 +195,12 @@ impl TddyRemote for DaemonService {
     ) -> Result<Response<ListSessionsResponse>, Status> {
         let mut sessions = Vec::new();
 
-        if !self.sessions_base.exists() {
+        let sessions_root = self.sessions_base.join(SESSIONS_SUBDIR);
+        if !sessions_root.exists() {
             return Ok(Response::new(ListSessionsResponse { sessions }));
         }
 
-        let entries = std::fs::read_dir(&self.sessions_base)
+        let entries = std::fs::read_dir(&sessions_root)
             .map_err(|e| Status::internal(format!("read sessions dir: {}", e)))?;
 
         for entry in entries {
@@ -323,6 +319,30 @@ impl DaemonStreamHandler {
     /// Returns true if the run loop should break (e.g. on Error).
     async fn handle_start_session(&mut self, start: &crate::gen::StartSession) -> bool {
         let prompt = start.prompt.clone();
+        let recipe_key = start.recipe.trim();
+        let recipe_key = if recipe_key.is_empty() {
+            "tdd"
+        } else {
+            recipe_key
+        };
+        log::info!(
+            "handle_start_session: recipe from client={:?} (normalized={})",
+            start.recipe,
+            recipe_key
+        );
+
+        let (workflow_recipe, artifact_manifest) =
+            match workflow_recipe_and_manifest_from_cli_name(recipe_key) {
+                Ok(pair) => pair,
+                Err(msg) => {
+                    send_workflow_complete(&self.tx, false, msg).await;
+                    return true;
+                }
+            };
+
+        self.workflow_recipe = workflow_recipe.clone();
+        self.artifact_manifest = artifact_manifest.clone();
+
         let repo = match resolve_start_session_repo(&start.repo_root) {
             Ok(p) => p,
             Err(e) => {
@@ -331,9 +351,10 @@ impl DaemonStreamHandler {
             }
         };
 
-        std::fs::create_dir_all(&self.sessions_base)
-            .map_err(|e| Status::internal(format!("create sessions base: {}", e)))
-            .ok();
+        if let Err(e) = std::fs::create_dir_all(&self.sessions_base) {
+            send_workflow_complete(&self.tx, false, format!("create sessions base: {}", e)).await;
+            return true;
+        }
 
         let sid = uuid::Uuid::now_v7().to_string();
         let plan = create_session_dir_under(&self.sessions_base, &sid)
@@ -342,9 +363,14 @@ impl DaemonStreamHandler {
 
         let init_cs = tddy_core::changeset::Changeset {
             initial_prompt: Some(prompt.clone()),
+            recipe: Some(recipe_key.to_string()),
             ..tddy_core::changeset::Changeset::default()
         };
         let _ = tddy_core::changeset::write_changeset(&plan, &init_cs);
+        log::debug!(
+            "handle_start_session: wrote changeset.yaml with recipe={}",
+            recipe_key
+        );
 
         self.session_id = Some(sid.clone());
         self.session_dir = Some(plan.clone());
@@ -358,14 +384,11 @@ impl DaemonStreamHandler {
         }
 
         let (event_tx, rx) = mpsc::channel();
-        spawn_event_forwarder(rx, self.tx.clone());
-        let hooks = Arc::new(TddWorkflowHooks::with_event_tx(
-            self.workflow_recipe.clone(),
-            self.artifact_manifest.clone(),
-            event_tx,
-        ));
+        let rt_handle = tokio::runtime::Handle::current();
+        spawn_event_forwarder(rx, self.tx.clone(), rt_handle);
+        let hooks = workflow_recipe.create_hooks(Some(event_tx));
         let eng = WorkflowEngine::new(
-            self.workflow_recipe.clone(),
+            workflow_recipe.clone(),
             self.backend.clone(),
             workflow_storage,
             Some(hooks),
@@ -406,7 +429,7 @@ impl DaemonStreamHandler {
             .await;
 
         let rt = tokio::runtime::Handle::current();
-        let plan_goal = self.workflow_recipe.start_goal();
+        let plan_goal = workflow_recipe.start_goal();
         let result = rt
             .block_on(self.engine.as_ref().unwrap().run_goal(&plan_goal, ctx))
             .map_err(|e| Status::internal(format!("run_goal: {}", e)))

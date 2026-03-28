@@ -100,7 +100,7 @@ The `--daemon` flag starts a headless gRPC server (no TUI) suitable for systemd 
 
 **Terminal resize**: Local event loop handles `Event::Resize` with `terminal.clear()` for a clean redraw. Virtual TUI accepts `\x1b]resize;cols;rows\x07`; after `terminal.resize()` it calls `terminal.clear()` and resets the frame buffer so the next render sends a full frame to the client. Scroll offsets are clamped after resize.
 
-**Status bar**: The status line includes a leading spinner and optional workflow session segment before `Goal:`, built from shared `tddy-tui` helpers and `PresenterState::workflow_session_id`. Streamed frames use the same `draw()` path as the local TUI, so remote viewers see the same status line layout. See [TUI status bar](tui-status-bar.md).
+**Status bar**: The status line includes a leading activity indicator and optional workflow session segment before `Goal:`. In agent-active workflow modes the indicator is a fast cycling spinner and goal elapsed advances each frame; in clarification waits (select, multi-select, text input) the displayed goal elapsed stays fixed and the indicator pulses on a one-second cadence (·/•). `VirtualTui` uses the same `draw()` path as the local TUI; autonomous re-render intervals follow those semantics. See [TUI status bar](tui-status-bar.md).
 
 ### 7. Codegen tooling
 

@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
@@ -23,7 +24,8 @@ users:
   - github_user: "testuser"
     os_user: "testdev"
 "#;
-    let path = std::env::temp_dir().join("tddy-delete-session-test-config.yaml");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
     DaemonConfig::load(&path).unwrap()
 }
@@ -73,8 +75,8 @@ async fn daemon_delete_removes_inactive_session_directory() {
     let _ = child.wait();
 
     let temp = tempfile::tempdir().unwrap();
-    let sessions_base = temp.path().join("sessions");
-    let session_dir = sessions_base.join("inactive-delete-me");
+    let sessions_base = temp.path().to_path_buf();
+    let session_dir = unified_session_dir_path(&sessions_base, "inactive-delete-me");
     std::fs::create_dir_all(&session_dir).unwrap();
     write_session_yaml(&session_dir, pid);
 
@@ -120,8 +122,8 @@ async fn daemon_delete_rejects_active_session() {
     let pid = child.id();
 
     let temp = tempfile::tempdir().unwrap();
-    let sessions_base = temp.path().join("sessions");
-    let session_dir = sessions_base.join("active-no-delete");
+    let sessions_base = temp.path().to_path_buf();
+    let session_dir = unified_session_dir_path(&sessions_base, "active-no-delete");
     std::fs::create_dir_all(&session_dir).unwrap();
     write_session_yaml(&session_dir, pid);
 

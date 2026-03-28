@@ -155,9 +155,10 @@ async fn list_eligible_daemons_returns_local_daemon() {
 #[tokio::test]
 async fn session_entry_includes_daemon_instance_id() {
     let temp = tempfile::tempdir().unwrap();
-    let sessions_base = temp.path().join("sessions");
+    let sessions_base = temp.path().to_path_buf();
     let session_id = "sess-host-check";
-    let session_dir = sessions_base.join(session_id);
+    let session_dir =
+        tddy_core::session_lifecycle::unified_session_dir_path(&sessions_base, session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
     write_exited_session(&session_dir, session_id, 99999);
 

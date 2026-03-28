@@ -1,7 +1,8 @@
-//! Read session metadata from user's ~/.tddy/sessions/.
+//! Read session metadata from user's `~/.tddy/sessions/<session_id>/`.
 
 use std::path::Path;
 
+use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::{read_session_metadata, SessionMetadata};
 
 /// Session entry for listing (from .session.yaml).
@@ -31,12 +32,13 @@ pub(crate) fn is_pid_alive(_pid: u32) -> bool {
     false
 }
 
-/// List sessions in the given sessions base directory.
-/// Each subdir with .session.yaml is returned.
+/// List sessions under `{sessions_base}/sessions/`.
+/// Each subdir with `.session.yaml` is returned.
 /// is_active is true when pid is set and the process is alive.
 pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionEntry>> {
     let mut result = Vec::new();
-    let entries = match std::fs::read_dir(sessions_base) {
+    let sessions_root = sessions_base.join(SESSIONS_SUBDIR);
+    let entries = match std::fs::read_dir(&sessions_root) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
         Err(e) => return Err(e.into()),
