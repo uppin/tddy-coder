@@ -140,12 +140,14 @@ describe("App", () => {
     cy.get("button[type='submit']").click();
 
     cy.wait("@generateToken");
-    cy.get("[data-testid='livekit-status']", { timeout: 5000 }).should("exist");
+    // Token fetch phase: primary status is the connection chrome (dot), not text-only livekit-status alone.
+    cy.get("[data-testid='connection-status-dot']", { timeout: 5000 }).should("exist");
     cy.get("#livekit-url").should("not.exist");
 
-    // Acceptance: when connected, overlay shows Disconnect and Ctrl+C buttons
-    cy.get("[data-testid='disconnect-button']").should("exist").and("have.text", "Disconnect");
-    cy.get("[data-testid='ctrl-c-button']").should("exist");
+    // Acceptance: new chrome — top-right status dot (with state) and bottom-right Stop; no top Ctrl+C row.
+    cy.get("[data-testid='connection-status-dot']").should("have.attr", "data-connection-status");
+    cy.get("[data-testid='terminal-stop-button']", { timeout: 5000 }).should("exist");
+    cy.get("[data-testid='ctrl-c-button']").should("not.exist");
 
     // Acceptance: connected terminal container is fullscreen (100vw x 100vh)
     cy.get("[data-testid='connected-terminal-container']")

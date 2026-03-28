@@ -1,9 +1,10 @@
 import "./index.css";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { GhosttyTerminalLiveKit } from "./components/GhosttyTerminalLiveKit";
+import { ConnectionTerminalChrome } from "./components/connection/ConnectionTerminalChrome";
 import { BUILD_ID } from "./buildId";
 
 function HmrOverlay() {
@@ -101,12 +102,15 @@ function ConnectedTerminal({
   roomName,
   debugLogging,
   onDisconnect,
+  onTerminate,
 }: {
   url: string;
   identity: string;
   roomName: string;
   debugLogging?: boolean;
   onDisconnect: () => void;
+  /** Standalone GitHub flow has no daemon session — omit Terminate. */
+  onTerminate?: () => void;
 }) {
   const client = useMemo(() => createTokenClient(), []);
   const [initialToken, setInitialToken] = useState<string | null>(null);
@@ -148,29 +152,36 @@ function ConnectedTerminal({
       </div>
     );
   }
+  const fullscreenContainerStyle: CSSProperties = {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: viewportHeight,
+    margin: 0,
+    overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
+  };
+
   if (!initialToken || ttlSeconds === null) {
     return (
-      <div style={{ padding: 24 }}>
-        <div data-testid="livekit-status">connecting</div>
+      <div data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
+        <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+          <ConnectionTerminalChrome
+            overlayStatus="connecting"
+            buildId={BUILD_ID}
+            onDisconnect={onDisconnect}
+            onTerminate={onTerminate}
+            onStopInterrupt={() => {}}
+          />
+        </div>
       </div>
     );
   }
 
   return (
-    <div
-      data-testid="connected-terminal-container"
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: viewportHeight,
-        margin: 0,
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
+    <div data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
       <GhosttyTerminalLiveKit
         url={url}
         token={initialToken}
@@ -182,7 +193,7 @@ function ConnectedTerminal({
         autoFocus={!isMobile}
         preventFocusOnTap={isMobile && !isKeyboardOpen}
         showMobileKeyboard={isMobile}
-        connectionOverlay={{ onDisconnect, buildId: BUILD_ID }}
+        connectionOverlay={{ onDisconnect, buildId: BUILD_ID, onTerminate }}
       />
     </div>
   );

@@ -29,10 +29,21 @@ tddy-coder currently operates as a CLI/TUI application. To enable remote observa
 
 When the terminal connects and renders, it supports:
 
-- **Fullscreen**: Fills 100% of the viewport (width and height). Overlay buttons: Disconnect and Ctrl+C.
+- **Fullscreen**: Fills 100% of the viewport (width and height). **Connection chrome** overlays sit above the terminal canvas (high `z-index`, pointer events on controls only).
 - **Auto-focus**: Keyboard focus is set on the terminal when ready. User can type immediately. (On mobile, auto-focus is disabled; see Mobile UX.)
 - **Adaptive size**: FitAddon auto-sizes the terminal to its container. Resize events are sent to the virtual TUI via `\x1b]resize;{cols};{rows}\x07`.
 - **Touch/mouse mode**: When `--mouse` is set on tddy-coder, the TUI sends EnableMouseCapture. GhosttyTerminal encodes SGR mouse sequences `\x1b[<Pb;Px;PyM/m` (press/release) and forwards them via onData. Click-to-select and scroll work. Touch events (touchstart/touchend) are forwarded for tap-to-click on mobile.
+
+### Connection chrome (LiveKit overlay)
+
+When **`GhosttyTerminalLiveKit`** is mounted with **`connectionOverlay`**, the shell includes:
+
+- **Build ID**: Shown top-left when provided (`data-testid="build-id"`).
+- **Status dot**: Fixed top-right (`data-testid="connection-status-dot"`). Attribute **`data-connection-status`** reads **`connecting`**, **`connected`**, or **`error`** for the LiveKit / token phase. While **`connecting`**, the dot uses a pulse animation; steady colors distinguish **`connected`** and **`error`**. Users who prefer reduced motion receive a non-animated connecting state via **`prefers-reduced-motion`**.
+- **Menu**: Activating the dot opens a menu with **Disconnect** (room leave / existing disconnect callback) and **Terminate** when the host passes **`onTerminate`** (daemon flows with session context). The standalone GitHub connect flow omits **Terminate** when no session-backed handler exists. The menu closes on **Escape** or an outside pointer press.
+- **Stop**: A **Stop** control (`data-testid="terminal-stop-button"`, bottom-right, touch-friendly minimum size) sends byte **0x03** through the same **`enqueueTerminalInput`** path as keyboard **Ctrl+C**.
+
+**ConnectedTerminal** wrappers (**App** after connect and **ConnectionScreen** after session connect) render the fullscreen **`connected-terminal-container`** with this chrome during JWT acquisition so the status dot carries the loading phase instead of a text-only **`livekit-status`** screen alone.
 
 ### Mobile UX
 
@@ -94,6 +105,10 @@ When the daemon sets **`livekit.common_room`** in YAML, that name is exposed to 
 If **`common_room`** is unset or blank, that panel is not shown and no extra LiveKit connection is made for presence.
 
 Spawned **`tddy-*`** sessions use the same configured room for **`--livekit-room`** when **`common_room`** is set; each process still uses a distinct **`daemon-{session_id}`** LiveKit identity for terminal RPC. If **`common_room`** is unset, the room name is **`daemon-{session_id}`** per session. See [daemon changelog](../daemon/changelog.md).
+
+### Fullscreen terminal session chrome
+
+The fullscreen **GhosttyTerminalLiveKit** view opened from **Connect / Resume** uses the **connection chrome** described under [Connection chrome (LiveKit overlay)](#connection-chrome-livekit-overlay). **Terminate** in the dot menu calls **`SignalSession`** with SIGTERM when the UI holds an active **session id** (same semantics as **Terminate (SIGTERM)** in the per-session **Signal** dropdown).
 
 ### Eligible daemons and host selection
 

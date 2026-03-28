@@ -8,6 +8,14 @@ Release note history for the Web product area.
 - **Vite**: **`tddy-livekit-web`** resolves via **`resolve.alias`** to package source for component tests and dev without a prior **`dist`** build.
 - **Feature docs**: [workflow-recipes.md](../coder/workflow-recipes.md), [web-terminal.md](web-terminal.md) (Connection screen).
 
+## 2026-03-28 — Connection chrome: status dot, menu, Stop
+
+- **`GhosttyTerminalLiveKit`** **`connectionOverlay`**: Top-left **build id**; top-right **status dot** with **`data-connection-status`** (values **`connecting`**, **`connected`**, **`error`**); dot menu lists **Disconnect** and **Terminate** when **`onTerminate`** is provided (SIGTERM). **Stop** (`data-testid="terminal-stop-button"`) sits bottom-right and enqueues **0x03** on the same terminal input queue as keyboard interrupt. Implementation: **`ConnectionTerminalChrome`**, **`dataConnectionStatusValue`**; pulse animation for **`connecting`** respects **`prefers-reduced-motion`**; menu dismisses on outside click or **Escape**.
+- **ConnectedTerminal** (**standalone** and **ConnectionScreen**): During JWT fetch, the fullscreen container shows the same chrome so the primary loading indicator is the dot (not a **`livekit-status`**-only screen).
+- **ConnectionScreen**: Connected state carries **`sessionId`**; **Terminate** in the dot menu invokes **`SignalSession`** (SIGTERM), aligned with the session table **Signal** dropdown.
+- **Tests**: Bun **`connectionChromeStatus.test.ts`**; Cypress component specs **`App.cy.tsx`**, **`ConnectionScreen.cy.tsx`**, **`GhosttyTerminalLiveKit.cy.tsx`**.
+- **Feature doc**: [web-terminal.md](web-terminal.md) (Connection chrome; Fullscreen terminal session chrome).
+
 ## 2026-03-28 — Connection screen: host selection + session workflow status (TUI parity)
 
 - **ConnectionService**: **`ListEligibleDaemons`** lists daemon instances for the Host dropdown; **`StartSession`** and **`SessionEntry`** carry **`daemon_instance_id`**, and **`ListSessions`** includes workflow columns (**`workflow_goal`**, **`workflow_state`**, **`elapsed_display`**, **`agent`**, **`model`**).
