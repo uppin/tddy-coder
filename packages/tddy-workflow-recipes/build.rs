@@ -1,4 +1,4 @@
-//! Deterministic pipeline: copy canonical JSON Schemas from `schemas/` into `generated/`,
+//! Deterministic pipeline: copy canonical JSON Schemas from `schemas/` into `generated/{recipe}/`,
 //! write `schema-manifest.json`, and emit `generated/proto_basenames.rs` from `goals.json`
 //! (single source of truth for CLI goal name ↔ schema file ↔ proto file).
 
@@ -6,11 +6,14 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+const RECIPE_NAME: &str = "tdd";
+
 fn main() -> io::Result<()> {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let goals_path = manifest_dir.join("goals.json");
     let schemas_src = manifest_dir.join("schemas");
     let generated = manifest_dir.join("generated");
+    let recipe_dir = generated.join(RECIPE_NAME);
 
     println!("cargo:rerun-if-changed={}", goals_path.display());
     println!("cargo:rerun-if-changed={}", schemas_src.display());
@@ -57,9 +60,9 @@ fn main() -> io::Result<()> {
     }
 
     fs::create_dir_all(&generated)?;
-    fs::create_dir_all(generated.join("common"))?;
+    fs::create_dir_all(&recipe_dir)?;
 
-    copy_json_tree(&schemas_src, &generated)?;
+    copy_json_tree(&schemas_src, &recipe_dir)?;
 
     let manifest_goals: Vec<serde_json::Value> = goals_arr
         .iter()
@@ -98,7 +101,7 @@ fn main() -> io::Result<()> {
     println!(
         "tddy-workflow-recipes: wrote {}, proto_basenames.rs, and synced schemas into {}",
         manifest_path.display(),
-        generated.display()
+        recipe_dir.display()
     );
 
     Ok(())

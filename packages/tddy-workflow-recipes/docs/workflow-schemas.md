@@ -24,8 +24,13 @@ Exposes **`proto_root()`**, **`expected_proto_basenames()`**, and **`generated_m
 - **`tests/proto_goal_files.rs`** — Expected proto files exist; generated manifest exists.
 - **`tests/proto_workflow_contracts.rs`** — `proto/` directory exists.
 
+## Editing contracts
+
+1. Edit **`goals.json`** together with the matching **`.schema.json`** and **`.proto`** files.
+2. Run **`cargo build -p tddy-workflow-recipes`** (or any build that compiles **`tddy-tools`**) so **`generated/`** refreshes.
+3. Run **`cargo test -p tddy-tools -p tddy-workflow-recipes`**.
+
 ## Related
 
 - [Workflow JSON Schemas (feature)](../../../../docs/ft/coder/workflow-json-schemas.md)  
 - [Workflow recipes (feature)](../../../../docs/ft/coder/workflow-recipes.md)  
-- `docs/dev/1-WIP/workflow-schema-pipeline.md` — contributor edit workflow  

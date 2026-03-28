@@ -192,14 +192,15 @@ fn invalid_validate_subagents_wrong_goal_fails() {
     assert!(!err.is_empty());
 }
 
-/// `red.schema.json` must stay identical between source `schemas/` and `generated/` (build pipeline).
+/// `red.schema.json` must stay identical between source `schemas/` and `generated/tdd/` (build pipeline).
 #[test]
 fn red_schema_parity_recipes_and_generated() {
     const RECIPES: &str = include_str!("../../tddy-workflow-recipes/schemas/red.schema.json");
-    const GENERATED: &str = include_str!("../../tddy-workflow-recipes/generated/red.schema.json");
+    const GENERATED: &str =
+        include_str!("../../tddy-workflow-recipes/generated/tdd/red.schema.json");
     assert_eq!(
         RECIPES, GENERATED,
-        "packages/tddy-workflow-recipes/schemas/red.schema.json must match generated/red.schema.json"
+        "packages/tddy-workflow-recipes/schemas/red.schema.json must match generated/tdd/red.schema.json"
     );
     assert!(
         RECIPES.contains("\"source_file\""),

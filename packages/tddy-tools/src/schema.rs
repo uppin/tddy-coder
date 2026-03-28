@@ -16,29 +16,32 @@ static SCHEMAS_DIR: Dir<'_> =
 
 include!(concat!(env!("OUT_DIR"), "/goal_registry.rs"));
 
-/// Common schema files (in common/ subdir) with their $id URIs.
+/// Common schema files (under `tdd/common/` subdir) with their `$id` URIs.
 const COMMON_SCHEMAS: &[(&str, &str)] = &[
-    ("urn:tddy:common/test-info", "common/test-info.schema.json"),
+    (
+        "urn:tddy:common/test-info",
+        "tdd/common/test-info.schema.json",
+    ),
     (
         "urn:tddy:common/skeleton-info",
-        "common/skeleton-info.schema.json",
+        "tdd/common/skeleton-info.schema.json",
     ),
     (
         "urn:tddy:common/build-result",
-        "common/build-result.schema.json",
+        "tdd/common/build-result.schema.json",
     ),
-    ("urn:tddy:common/issue", "common/issue.schema.json"),
+    ("urn:tddy:common/issue", "tdd/common/issue.schema.json"),
     (
         "urn:tddy:common/changeset-sync",
-        "common/changeset-sync.schema.json",
+        "tdd/common/changeset-sync.schema.json",
     ),
     (
         "urn:tddy:common/file-analyzed",
-        "common/file-analyzed.schema.json",
+        "tdd/common/file-analyzed.schema.json",
     ),
     (
         "urn:tddy:common/test-impact",
-        "common/test-impact.schema.json",
+        "tdd/common/test-impact.schema.json",
     ),
 ];
 
