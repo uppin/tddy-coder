@@ -45,6 +45,16 @@ JSON Schemas for workflow goals (`plan`, `red`, `green`, etc.) live in **`tddy-w
 
 Custom recipes **must** declare a `prd` (or equivalent) key if they rely on planning-specific paths; there is no silent core fallback string for the primary planning basename.
 
+## Session context and conditional transitions
+
+Workflow transitions read **boolean conditions** from the engine `Context` (declarative `goal_conditions` on `WorkflowTransition`). The TDD recipe supplies keys such as **`run_optional_step_x`** so the full graph branches after green without presenter-specific branching for demo vs evaluate.
+
+**Session storage:** **`tddy-tools set-session-context`** merges JSON into **`.workflow/<session-id>.session.json`** under the session directory (`TDDY_SESSION_DIR`, `TDDY_WORKFLOW_SESSION_ID`). Values sync into the workflow engine context via **`Context::merge_json_object_sync`** before transition evaluation.
+
+**Recipe hooks:** Green-completion hooks in the TDD recipe instruct the agent to call **`tddy-tools ask`**, then **`tddy-tools set-session-context`** with `{"run_optional_step_x":true}` or `{"run_optional_step_x":false}` so the next transition predicate matches.
+
+**Authoring:** Declare **`goal_conditions`** on transitions in workflow JSON; use **`merge_json_object_sync`**-compatible keys in session documents. See [Workflow JSON Schemas](workflow-json-schemas.md) for the goals registry and schema layout.
+
 ## Related
 
 - [Coder overview](1-OVERVIEW.md) — capabilities and integration points  

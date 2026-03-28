@@ -12,6 +12,8 @@ Each entry contains:
 - **`schema`** — File under `generated/{recipe}/` (e.g. `evaluate.schema.json`).
 - **`proto`** — File under `proto/` (e.g. `evaluate_changes.proto`).
 
+Session utilities such as **`tddy-tools set-session-context`** are **not** listed here; they have no embedded JSON Schema in the manifest.
+
 The build script validates that every referenced schema and proto file exists under `generated/{recipe}/`, writes **`generated/schema-manifest.json`** (includes `proto` per goal), and emits **`generated/proto_basenames.rs`** for `schema_pipeline::expected_proto_basenames()`.
 
 ## Module `schema_pipeline`

@@ -88,34 +88,34 @@ async fn full_graph_topology_includes_all_goals() {
     assert!(task_ids.contains(&"end".to_string()), "must have end");
 }
 
-/// Full graph: conditional edge from green — run_demo true -> demo, false -> evaluate.
+/// Full graph: conditional edge from green — run_optional_step_x true -> demo, false -> evaluate.
 #[tokio::test]
 async fn full_graph_conditional_demo_edge() {
     let backend = Arc::new(StubBackend::new());
     let graph = build_full_tdd_workflow_graph(backend, common::tdd_recipe());
 
     let ctx_skip = Context::new();
-    ctx_skip.set_sync("run_demo", false);
+    ctx_skip.set_sync("run_optional_step_x", false);
 
     let ctx_run = Context::new();
-    ctx_run.set_sync("run_demo", true);
+    ctx_run.set_sync("run_optional_step_x", true);
 
     assert_eq!(
         graph.next_task_id("green", &ctx_skip),
         Some("evaluate".to_string()),
-        "run_demo false -> evaluate"
+        "run_optional_step_x false -> evaluate"
     );
     assert_eq!(
         graph.next_task_id("green", &ctx_run),
         Some("demo".to_string()),
-        "run_demo true -> demo"
+        "run_optional_step_x true -> demo"
     );
 
     let ctx_default = Context::new();
     assert_eq!(
         graph.next_task_id("green", &ctx_default),
         Some("evaluate".to_string()),
-        "run_demo unset -> evaluate (default)"
+        "run_optional_step_x unset -> evaluate (default)"
     );
 
     assert_eq!(

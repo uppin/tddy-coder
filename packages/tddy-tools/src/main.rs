@@ -37,6 +37,9 @@ enum Subcommand {
 
     /// List registered workflow goals (JSON on stdout).
     ListSchemas(cli::ListSchemasArgs),
+
+    /// Merge JSON into the active workflow session context (requires TDDY_SESSION_DIR / TDDY_WORKFLOW_SESSION_ID).
+    SetSessionContext(cli::SetSessionContextArgs),
 }
 
 #[tokio::main]
@@ -55,6 +58,7 @@ async fn main() -> Result<()> {
         Some(Subcommand::Ask(s)) => cli::run_ask(s)?,
         Some(Subcommand::GetSchema(s)) => cli::run_get_schema(s)?,
         Some(Subcommand::ListSchemas(s)) => cli::run_list_schemas(s)?,
+        Some(Subcommand::SetSessionContext(s)) => cli::run_set_session_context(s)?,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);

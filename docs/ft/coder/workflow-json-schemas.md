@@ -28,6 +28,12 @@ Structured outputs for workflow goals (plan, red, green, acceptance-tests, evalu
 
 Workflow **behavior** (graphs, hooks, parsers) lives in **`tddy-workflow-recipes`** recipes. **Schema contracts** for agent-facing JSON are shared through `goals.json` and the paths above; see [Workflow recipes](workflow-recipes.md) for pluggable workflow architecture.
 
+## Session context CLI (`set-session-context`)
+
+**`tddy-tools set-session-context`** merges a JSON object into the workflow session file (`.workflow/<id>.session.json`). Environment: **`TDDY_SESSION_DIR`** (session root), **`TDDY_WORKFLOW_SESSION_ID`** (session id). The merge aligns with the workflow engine: values feed **`Context::merge_json_object_sync`** so **`goal_conditions`** on transitions evaluate against the same key/value map.
+
+This command is **not** listed in **`goals.json`**; it is a session utility, not a JSON-schema-backed planning goal. See **`packages/tddy-tools/docs/json-schema.md`** for the CLI table.
+
 ## Related
 
 - [Workflow recipes](workflow-recipes.md) — `TddRecipe`, goals as strings, engine integration  

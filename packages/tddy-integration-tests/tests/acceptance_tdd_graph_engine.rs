@@ -299,7 +299,7 @@ async fn workflow_engine_run_full_workflow_completes_with_stub() {
         "session_dir".to_string(),
         serde_json::to_value(session_dir.clone()).unwrap(),
     );
-    context_values.insert("run_demo".to_string(), serde_json::json!(false));
+    context_values.insert("run_optional_step_x".to_string(), serde_json::json!(false));
 
     let result = engine.run_full_workflow(context_values).await.unwrap();
 

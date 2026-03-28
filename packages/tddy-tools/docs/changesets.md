@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-tools.
 
+- **2026-03-28** [Feature] Session context CLI — `set-session-context` merges JSON into `.workflow/<id>.session.json` (`TDDY_SESSION_DIR`, `TDDY_WORKFLOW_SESSION_ID`); aligns with `Context::merge_json_object_sync` for `goal_conditions`. See `docs/ft/coder/workflow-json-schemas.md` and this file’s CLI table. (tddy-tools, tddy-core)
 - **2026-03-28** [Feature] Workflow JSON Schemas — Embeds schemas from `tddy-workflow-recipes/generated/` via `goals.json`-driven build; CLI `list-schemas`, manifest module `schema_manifest`, common-schema load fail-fast with cache, stdin size cap. See `docs/ft/coder/workflow-json-schemas.md` and `packages/tddy-tools/docs/json-schema.md`. (tddy-tools, tddy-workflow-recipes)
 - **2026-03-22** [Feature] Toolcall submit immediate acknowledgment — Relay writes `SubmitOk` before presenter scheduling; integration test `submit_relay_no_poll` (dev-dependency on `tddy-core` for `start_toolcall_listener` only in tests). (tddy-tools, tddy-core)
 - **2026-03-22** [Feature] Production-only red logging markers — `red.schema.json`: optional `source_file` on each `markers[]` item; parity with `packages/tddy-core/schemas/red.schema.json`; schema validation tests cover `source_file`. (tddy-tools, tddy-core)

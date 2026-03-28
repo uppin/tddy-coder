@@ -56,7 +56,7 @@ pub fn build_tdd_workflow_graph(
 /// Build the full TDD workflow graph including demo, evaluate, validate, refactor.
 ///
 /// Topology: plan -> acceptance-tests -> red -> green -> (conditional: demo | evaluate) -> validate -> refactor -> end.
-/// When context has "run_demo": true, green transitions to demo; else to evaluate.
+/// When context has `run_optional_step_x`: true, green transitions to demo; else to evaluate.
 /// Demo always transitions to evaluate.
 pub fn build_full_tdd_workflow_graph(
     backend: Arc<dyn CodingBackend>,
@@ -129,7 +129,7 @@ pub fn build_full_tdd_workflow_graph(
         .add_edge("red", "green")
         .add_conditional_edge(
             "green",
-            |ctx| ctx.get_sync::<bool>("run_demo").unwrap_or(false),
+            |ctx| ctx.get_sync::<bool>("run_optional_step_x").unwrap_or(false),
             "demo",
             "evaluate",
         )

@@ -631,7 +631,7 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
         "output_dir".to_string(),
         serde_json::to_value(output_dir.clone()).unwrap(),
     );
-    ctx.insert("run_demo".to_string(), serde_json::json!(false));
+    ctx.insert("run_optional_step_x".to_string(), serde_json::json!(false));
 
     let result = engine
         .run_workflow_from(&GoalId::new("acceptance-tests"), ctx)

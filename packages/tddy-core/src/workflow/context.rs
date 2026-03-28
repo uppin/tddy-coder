@@ -60,6 +60,52 @@ impl Context {
     pub fn remove_sync(&self, key: &str) {
         self.inner.remove(key);
     }
+
+    /// Merge top-level JSON object entries into this context (tool-driven session updates).
+    /// Existing keys are overwritten when the patch contains the same key.
+    pub fn merge_json_object_sync(&self, map: &serde_json::Map<String, serde_json::Value>) {
+        log::debug!(
+            target: "tddy_core::workflow::context",
+            "merge_json_object_sync: merging {} key(s)",
+            map.len()
+        );
+        for (k, v) in map {
+            log::debug!(
+                target: "tddy_core::workflow::context",
+                "merge_json_object_sync: set key={} value_type={}",
+                k,
+                if v.is_null() {
+                    "null"
+                } else if v.is_object() {
+                    "object"
+                } else if v.is_array() {
+                    "array"
+                } else {
+                    "scalar"
+                }
+            );
+            self.inner.insert(k.clone(), v.clone());
+        }
+    }
+}
+
+#[cfg(test)]
+mod merge_json_tests {
+    use super::Context;
+    use serde_json::json;
+
+    #[test]
+    fn merge_json_object_sync_inserts_keys() {
+        let ctx = Context::new();
+        let mut map = serde_json::Map::new();
+        map.insert("run_optional_step_x".to_string(), json!(true));
+        ctx.merge_json_object_sync(&map);
+        assert_eq!(
+            ctx.get_sync::<bool>("run_optional_step_x"),
+            Some(true),
+            "merge_json_object_sync must persist keys into context"
+        );
+    }
 }
 
 impl Serialize for Context {

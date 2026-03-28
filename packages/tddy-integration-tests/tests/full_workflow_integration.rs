@@ -498,7 +498,7 @@ async fn plain_full_workflow_uses_single_workflow_instance() {
         None,
         None,
     );
-    ctx.insert("run_demo".to_string(), serde_json::json!(true));
+    ctx.insert("run_optional_step_x".to_string(), serde_json::json!(true));
     let plan_gid = GoalId::new("plan");
     let result = engine.run_workflow_from(&plan_gid, ctx).await.unwrap();
 
