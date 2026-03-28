@@ -129,11 +129,21 @@ impl TerminalService for TerminalServiceVirtualTui {
 
         let (tx, rx) = mpsc::channel(64);
         tokio::spawn(async move {
+            let mut output_count: u64 = 0;
             while let Some(bytes) = output_rx.recv().await {
+                output_count += 1;
                 if tx.send(Ok(TerminalOutput { data: bytes })).await.is_err() {
+                    log::debug!(
+                        "[BIDI_TRACE] terminal_service: output consumer gone after {} chunks",
+                        output_count,
+                    );
                     break;
                 }
             }
+            log::debug!(
+                "[BIDI_TRACE] terminal_service: output stream ended after {} chunks",
+                output_count,
+            );
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))

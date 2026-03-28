@@ -198,6 +198,10 @@ export function GhosttyTerminalLiveKit({
           console.log("[LiveKit] ParticipantDisconnected", participant.identity);
           if (participant.identity !== serverIdentity) return;
           if (cancelled) return;
+          console.warn(
+            "[GhosttyTerminalLiveKit] server participant disconnected — terminal session marked inactive",
+            { serverIdentity, participantIdentity: participant.identity },
+          );
           coderAvailableRef.current = false;
           setCoderSessionActive(false);
         });
@@ -274,8 +278,8 @@ export function GhosttyTerminalLiveKit({
         const stream = client.streamTerminalIO(inputGen());
 
         (async () => {
+          let count = 0;
           try {
-            let count = 0;
             let sample = "";
             for await (const output of stream) {
               if (output.data.length === 0) continue;
@@ -313,9 +317,10 @@ export function GhosttyTerminalLiveKit({
               }
             }
             log("lifecycle: stream ended");
+            console.warn("[GhosttyTerminalLiveKit] output stream ended after", count, "chunks — terminal will no longer receive updates");
           } catch (e) {
             log("lifecycle: stream error", e);
-            console.error("Stream error:", e);
+            console.error("[GhosttyTerminalLiveKit] output stream error after", count, "chunks:", e);
           }
         })();
 
