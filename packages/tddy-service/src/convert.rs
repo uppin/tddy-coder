@@ -231,37 +231,6 @@ fn activity_kind_to_str(k: &ActivityKind) -> String {
     }
 }
 
-#[cfg(test)]
-mod acceptance_plan_approval_rpc {
-    use super::*;
-    use prost::Message;
-    use tddy_core::{AppMode, ModeChangedDetails, PresenterEvent};
-
-    /// When the workflow asks for session document approval, RPC `ModeChanged` must match
-    /// [`AppMode::DocumentReview`] from the presenter.
-    #[test]
-    fn service_mode_changed_still_serializes_plan_approval() {
-        let prd = "# Shared PRD body\n".to_string();
-        let from_workflow =
-            workflow_event_to_server_message(WorkflowEvent::SessionDocumentApprovalNeeded {
-                content: prd.clone(),
-            })
-            .expect("workflow event");
-        let from_document_review =
-            event_to_server_message(PresenterEvent::ModeChanged(ModeChangedDetails {
-                mode: AppMode::DocumentReview {
-                    content: prd.clone(),
-                },
-                plan_refinement_pending: false,
-            }));
-        assert_eq!(
-            from_workflow.encode_to_vec(),
-            from_document_review.encode_to_vec(),
-            "DocumentReview gate must serialize like SessionDocumentApprovalNeeded"
-        );
-    }
-}
-
 fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
     use client_message::Intent;
     let intent = match intent {
@@ -305,4 +274,35 @@ fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
     Some(ClientMessage {
         intent: Some(intent),
     })
+}
+
+#[cfg(test)]
+mod acceptance_plan_approval_rpc {
+    use super::*;
+    use prost::Message;
+    use tddy_core::{AppMode, ModeChangedDetails, PresenterEvent};
+
+    /// When the workflow asks for session document approval, RPC `ModeChanged` must match
+    /// [`AppMode::DocumentReview`] from the presenter.
+    #[test]
+    fn service_mode_changed_still_serializes_plan_approval() {
+        let prd = "# Shared PRD body\n".to_string();
+        let from_workflow =
+            workflow_event_to_server_message(WorkflowEvent::SessionDocumentApprovalNeeded {
+                content: prd.clone(),
+            })
+            .expect("workflow event");
+        let from_document_review =
+            event_to_server_message(PresenterEvent::ModeChanged(ModeChangedDetails {
+                mode: AppMode::DocumentReview {
+                    content: prd.clone(),
+                },
+                plan_refinement_pending: false,
+            }));
+        assert_eq!(
+            from_workflow.encode_to_vec(),
+            from_document_review.encode_to_vec(),
+            "DocumentReview gate must serialize like SessionDocumentApprovalNeeded"
+        );
+    }
 }

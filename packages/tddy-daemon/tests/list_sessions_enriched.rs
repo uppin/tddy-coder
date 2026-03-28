@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::SessionMetadata;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
@@ -43,8 +44,8 @@ fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
 #[tokio::test]
 async fn list_sessions_includes_workflow_fields_from_changeset() {
     let temp = tempfile::tempdir().unwrap();
-    let sessions_base = temp.path().join("sessions");
-    let session_dir = sessions_base.join("enriched-sess-1");
+    let sessions_base = temp.path().to_path_buf();
+    let session_dir = sessions_base.join(SESSIONS_SUBDIR).join("enriched-sess-1");
     std::fs::create_dir_all(&session_dir).unwrap();
 
     let metadata = SessionMetadata {

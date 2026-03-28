@@ -254,8 +254,19 @@ impl Task for BackendInvokeTask {
 
         if let Some(output) = submit_output {
             context.set_sync("output", output.clone());
-            if let Some(sid) = &response.session_id {
-                context.set_sync("session_id", sid.clone());
+            let prior = context.get_sync::<String>("session_id");
+            if let Some(eff) = crate::session_lifecycle::resolve_effective_session_id(
+                prior.as_deref(),
+                response.session_id.as_deref(),
+            ) {
+                log::debug!(
+                    "BackendInvokeTask {}: session_id {:?} -> {} (backend reported {:?})",
+                    self.id,
+                    prior,
+                    eff,
+                    response.session_id
+                );
+                context.set_sync("session_id", eff);
             }
             return Ok(TaskResult {
                 response: output,

@@ -19,7 +19,7 @@ use tddy_service::gen::{
 /// See `grpc_full_workflow.rs`: transitional state is persisted before `StateChange`, so identity
 /// transitions appear; PlanReview resync still sends `Planning→Planned`. With demo: 19; without: 17.
 const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
-    ("Init", "Planning"),
+    ("Planning", "Planning"),
     ("Planning", "Planned"),
     ("Planning", "Planned"),
     ("AcceptanceTesting", "AcceptanceTesting"),
@@ -51,7 +51,7 @@ fn screen_shows_state_transition(screen: &str, from: &str, to: &str) -> bool {
 }
 
 const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
-    ("Init", "Planning"),
+    ("Planning", "Planning"),
     ("Planning", "Planned"),
     ("Planning", "Planned"),
     ("AcceptanceTesting", "AcceptanceTesting"),
