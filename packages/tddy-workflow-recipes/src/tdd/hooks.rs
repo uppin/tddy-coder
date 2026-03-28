@@ -367,14 +367,21 @@ fn before_green(
         context.get_sync::<String>("model").as_deref(),
         Some(&defaults),
     );
-    let run_demo = context.get_sync::<bool>("run_demo").unwrap_or(false);
+    let run_optional_step_x = context
+        .get_sync::<bool>("run_optional_step_x")
+        .unwrap_or(false);
+    log::debug!(
+        target: "tddy_workflow_recipes::tdd::hooks",
+        "before_green: run_optional_step_x={}",
+        run_optional_step_x
+    );
     let answers: Option<String> = context.get_sync("answers");
     let prompt = match &answers {
         Some(a) => green::build_followup_prompt(&progress, a, prd.as_deref(), at.as_deref()),
         None => green::build_prompt(&progress, prd.as_deref(), at.as_deref()),
     };
     context.set_sync("prompt", prompt);
-    context.set_sync("system_prompt", green::system_prompt(run_demo));
+    context.set_sync("system_prompt", green::system_prompt(run_optional_step_x));
     context.set_sync("session_dir", session_dir.to_path_buf());
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", true);

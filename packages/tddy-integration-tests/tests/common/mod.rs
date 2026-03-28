@@ -142,12 +142,12 @@ pub fn ctx_plan(
 
 /// Build context for acceptance-tests goal.
 /// output_dir: repo root (required for worktree creation in before_acceptance_tests hook).
-/// run_demo: when true, green will transition to demo (used when running full chain).
+/// run_optional_step_x: when true, green will transition to demo (used when running full chain).
 pub fn ctx_acceptance_tests(
     session_dir: PathBuf,
     output_dir: Option<PathBuf>,
     answers: Option<&str>,
-    run_demo: bool,
+    run_optional_step_x: bool,
 ) -> HashMap<String, serde_json::Value> {
     let mut m = HashMap::new();
     m.insert(
@@ -157,7 +157,10 @@ pub fn ctx_acceptance_tests(
     if let Some(ref d) = output_dir {
         m.insert("output_dir".to_string(), serde_json::to_value(d).unwrap());
     }
-    m.insert("run_demo".to_string(), serde_json::json!(run_demo));
+    m.insert(
+        "run_optional_step_x".to_string(),
+        serde_json::json!(run_optional_step_x),
+    );
     if let Some(a) = answers {
         m.insert("answers".to_string(), serde_json::json!(a));
     }
@@ -181,14 +184,17 @@ pub fn ctx_red(session_dir: PathBuf, answers: Option<&str>) -> HashMap<String, s
 pub fn ctx_green(
     session_dir: PathBuf,
     answers: Option<&str>,
-    run_demo: bool,
+    run_optional_step_x: bool,
 ) -> HashMap<String, serde_json::Value> {
     let mut m = HashMap::new();
     m.insert(
         "session_dir".to_string(),
         serde_json::to_value(session_dir).unwrap(),
     );
-    m.insert("run_demo".to_string(), serde_json::json!(run_demo));
+    m.insert(
+        "run_optional_step_x".to_string(),
+        serde_json::json!(run_optional_step_x),
+    );
     if let Some(a) = answers {
         m.insert("answers".to_string(), serde_json::json!(a));
     }

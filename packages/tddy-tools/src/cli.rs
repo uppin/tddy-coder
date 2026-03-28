@@ -1,4 +1,4 @@
-//! CLI subcommands: `submit`, `ask`, `get-schema`, `list-schemas`.
+//! CLI subcommands: `submit`, `ask`, `get-schema`, `list-schemas`, `set-session-context`.
 //!
 //! Workflow goal names and schema filenames are defined in `packages/tddy-workflow-recipes/goals.json`
 //! (see [`tddy_tools::schema`] and [`tddy_tools::schema_manifest`]).
@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use tddy_tools::schema;
 use tddy_tools::schema_manifest;
+use tddy_tools::session_context;
 
 /// Maximum bytes read from stdin or accepted inline `--data` for `submit` / `ask` (DoS guard).
 const MAX_CLI_INPUT_BYTES: usize = 16 * 1024 * 1024;
@@ -46,6 +47,15 @@ pub struct AskArgs {
 #[derive(Parser)]
 #[command(name = "list-schemas")]
 pub struct ListSchemasArgs {}
+
+/// Merge JSON key/value pairs into the active workflow session context.
+#[derive(Parser)]
+#[command(name = "set-session-context")]
+pub struct SetSessionContextArgs {
+    /// JSON object to merge into session context (same size limits as submit).
+    #[arg(long)]
+    pub data: Option<String>,
+}
 
 /// Get JSON schema for a goal.
 #[derive(Parser)]
@@ -352,6 +362,34 @@ pub fn run_list_schemas(_args: ListSchemasArgs) -> Result<()> {
     let out = serde_json::json!({ "goals": goals });
     println!("{}", serde_json::to_string(&out)?);
     Ok(())
+}
+
+pub fn run_set_session_context(args: SetSessionContextArgs) -> Result<()> {
+    info!(
+        target: "tddy_tools::cli",
+        "set-session-context: merging payload into workflow session"
+    );
+    let json_str = read_input(&args.data, false)?;
+    let patch: serde_json::Value = match serde_json::from_str(&json_str) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("invalid JSON: {}", e);
+            std::process::exit(1);
+        }
+    };
+    if !patch.is_object() {
+        eprintln!(
+            "invalid payload: expected a JSON object at the top level (non-array, non-scalar)"
+        );
+        std::process::exit(1);
+    }
+    let session_dir = std::env::var("TDDY_SESSION_DIR")
+        .map_err(|_| anyhow::anyhow!("TDDY_SESSION_DIR is required for set-session-context"))?;
+    let session_id = std::env::var("TDDY_WORKFLOW_SESSION_ID").map_err(|_| {
+        anyhow::anyhow!("TDDY_WORKFLOW_SESSION_ID is required for set-session-context")
+    })?;
+    let workflow_dir = PathBuf::from(session_dir).join(".workflow");
+    session_context::apply_session_context_merge(&workflow_dir, &session_id, &patch)
 }
 
 pub fn run_get_schema(args: GetSchemaArgs) -> Result<()> {

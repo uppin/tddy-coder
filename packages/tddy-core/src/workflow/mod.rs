@@ -10,6 +10,7 @@ pub use agent_output::{
 };
 pub mod context;
 pub mod engine;
+pub mod goal_conditions;
 pub mod graph;
 pub mod hooks;
 pub mod runner;

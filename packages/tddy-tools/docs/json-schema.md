@@ -19,6 +19,7 @@ The library embeds workflow JSON Schemas from **`tddy-workflow-recipes/generated
 | `get-schema <goal>` | Prints schema JSON; `-o` writes goal file and `common/` subtree |
 | `list-schemas` | Prints `{"goals":[...]}` |
 | `ask` | Clarification relay (separate JSON schema) |
+| `set-session-context` | Merges JSON into `.workflow/<id>.session.json` (`TDDY_SESSION_DIR`, `TDDY_WORKFLOW_SESSION_ID`); not listed in `goals.json` |
 
 ## Logging
 

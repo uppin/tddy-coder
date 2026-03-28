@@ -8,3 +8,4 @@
 
 pub mod schema;
 pub mod schema_manifest;
+pub mod session_context;

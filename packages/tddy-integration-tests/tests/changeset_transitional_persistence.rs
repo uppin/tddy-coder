@@ -162,7 +162,7 @@ async fn before_task_persists_green_implementing_when_green_starts() {
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("backend_name", "claude".to_string());
-    ctx.set_sync("run_demo", false);
+    ctx.set_sync("run_optional_step_x", false);
 
     hooks.before_task("green", &ctx).expect("before_task green");
 

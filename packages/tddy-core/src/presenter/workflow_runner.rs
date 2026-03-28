@@ -132,25 +132,6 @@ fn handle_clarification_round(
     }
 }
 
-fn demo_question() -> ClarificationQuestion {
-    ClarificationQuestion {
-        header: "Demo".to_string(),
-        question: "Create & run a demo?".to_string(),
-        options: vec![
-            crate::QuestionOption {
-                label: "Create & run".to_string(),
-                description: "Create and run the demo script".to_string(),
-            },
-            crate::QuestionOption {
-                label: "Skip".to_string(),
-                description: "Skip demo".to_string(),
-            },
-        ],
-        multi_select: false,
-        allow_other: false,
-    }
-}
-
 /// Handle an ElicitationNeeded result: show approval UI, handle refinement loop.
 /// Returns once the user approves the plan.
 fn handle_elicitation(
@@ -397,6 +378,7 @@ fn run_start_goal_without_output_dir(
         Some(false),
         socket_path,
     );
+    context_values.insert("run_optional_step_x".to_string(), serde_json::json!(false));
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -666,10 +648,6 @@ pub fn run_workflow(
         }
     }
 
-    // Demo question is asked only when we reach GreenComplete (after green), not before.
-    let mut run_demo = false;
-    let mut demo_asked = false;
-
     let cs = read_changeset(&session_dir).ok();
     // Feature text for PlanTask: UI prompt wins; otherwise resume from changeset when session_dir was set without initial_prompt.
     let mut feature_input_for_workflow = initial_prompt_for_ctx.clone().or_else(|| {
@@ -738,9 +716,10 @@ pub fn run_workflow(
         inherit_stdin,
         &conversation_output_path,
         debug,
-        Some(run_demo),
+        Some(false),
         socket_path.as_ref(),
     );
+    context_values.insert("run_optional_step_x".to_string(), serde_json::json!(false));
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -807,31 +786,10 @@ pub fn run_workflow(
                 };
             }
             ExecutionStatus::Paused { .. } => {
-                let current_state = read_changeset(&session_dir)
-                    .ok()
-                    .map(|c| c.state.current)
-                    .unwrap_or_default();
-
-                // Ask demo question only when we've reached GreenComplete (not earlier).
-                if current_state.as_str() == "GreenComplete"
-                    && session_dir.join("demo-plan.md").exists()
-                    && !demo_asked
-                {
-                    let run_demo_asked = event_tx.send(WorkflowEvent::ClarificationNeeded {
-                        questions: vec![demo_question()],
-                    });
-                    if run_demo_asked.is_ok() {
-                        demo_asked = true;
-                        run_demo = match answer_rx.recv() {
-                            Ok(choice) => !choice.eq_ignore_ascii_case("skip"),
-                            Err(_) => false,
-                        };
-                        let mut updates = std::collections::HashMap::new();
-                        updates.insert("run_demo".to_string(), serde_json::json!(run_demo));
-                        let _ =
-                            rt.block_on(engine.update_session_context(&result.session_id, updates));
-                    }
-                }
+                log::debug!(
+                    target: "tddy_core::presenter::workflow_runner",
+                    "workflow paused; optional branch flags come from recipe + tddy-tools set-session-context (no presenter demo-plan special case)"
+                );
                 result = match rt.block_on(engine.run_session(&result.session_id)) {
                     Ok(r) => r,
                     Err(e) => {

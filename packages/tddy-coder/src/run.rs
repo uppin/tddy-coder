@@ -860,7 +860,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         let session_dir = args.session_dir.as_ref().context("session directory")?;
         let conv = resolve_log_defaults(args, session_dir);
         let ctx = build_goal_context(args, Some(session_dir), &conv, &resolved_agent, |c| {
-            c.insert("run_demo".to_string(), serde_json::json!(false));
+            c.insert("run_optional_step_x".to_string(), serde_json::json!(false));
         });
         return run_goal_plain(args, backend, "green", ctx, true, &shutdown);
     }
@@ -2034,7 +2034,7 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         }
     }
 
-    let run_demo = session_dir.join("demo-plan.md").exists()
+    let run_optional_step_x = session_dir.join("demo-plan.md").exists()
         && plain::read_demo_choice_plain().context("read demo choice")?;
 
     let cs = read_changeset(&session_dir).ok();
@@ -2065,7 +2065,10 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
             "feature_input".to_string(),
             serde_json::json!(feature_input),
         );
-        c.insert("run_demo".to_string(), serde_json::json!(run_demo));
+        c.insert(
+            "run_optional_step_x".to_string(),
+            serde_json::json!(run_optional_step_x),
+        );
     });
 
     let rt = tokio::runtime::Builder::new_current_thread()

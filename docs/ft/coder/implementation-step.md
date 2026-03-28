@@ -2,11 +2,11 @@
 
 **Product Area**: Coder
 **Status**: Complete
-**Updated**: 2026-03-10
+**Updated**: 2026-03-28
 
 ## Summary
 
-The Implementation Step is the TDD Red-Green phase of the tddy-coder workflow. The **red** goal reads PRD.md and acceptance-tests.md from the session directory, creates skeleton production code and failing lower-level tests, and persists its session to `changeset.yaml`. The **green** goal resumes the red session via `changeset.yaml`, reads progress.md (required) plus PRD.md and acceptance-tests.md (optional for context), implements production-grade code to make all failing tests pass, updates progress.md and acceptance-tests.md with results, and verifies completion by running both unit and acceptance tests. The **demo** goal runs after green (prompted in full workflow); it executes the demo plan from `demo-plan.md` when present. The **evaluate** goal analyzes git changes for risks and produces `evaluation-report.md`.
+The Implementation Step is the TDD Red-Green phase of the tddy-coder workflow. The **red** goal reads PRD.md and acceptance-tests.md from the session directory, creates skeleton production code and failing lower-level tests, and persists its session to `changeset.yaml`. The **green** goal resumes the red session via `changeset.yaml`, reads progress.md (required) plus PRD.md and acceptance-tests.md (optional for context), implements production-grade code to make all failing tests pass, updates progress.md and acceptance-tests.md with results, and verifies completion by running both unit and acceptance tests. In the full TDD graph, the path after green uses session context key **`run_optional_step_x`** (via **`tddy-tools set-session-context`**) to select demo or evaluate. The **demo** goal executes the demo plan from `demo-plan.md` when that path runs. The **evaluate** goal analyzes git changes for risks and produces `evaluation-report.md`.
 
 ## Background
 
@@ -84,16 +84,16 @@ tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → 
 
 1. **Red goal**: Transitions `Init`/`Planned`/`AcceptanceTestsReady` → `RedTesting` → `RedTestsReady` (or `Failed`)
 2. **Green goal**: Transitions `RedTestsReady` → `GreenImplementing` → `GreenComplete` (or `Failed`)
-3. **Demo goal**: Transitions `GreenComplete` → `DemoRunning` → `DemoComplete`
-4. **Evaluate goal**: Transitions `GreenComplete`/`DemoComplete` → `Evaluating` → `Evaluated` (when demo skipped, goes directly from GreenComplete)
+3. **Demo goal**: In the full TDD graph, `GreenComplete` leads to `DemoRunning` → `DemoComplete` when the demo branch is active; session context key **`run_optional_step_x`** selects demo vs evaluate.
+4. **Evaluate goal**: Transitions `GreenComplete`/`DemoComplete` → `Evaluating` → `Evaluated` (evaluate follows green when the demo branch is skipped in the full graph)
 
 ### Demo Workflow
 
-1. Runs after green in full workflow (user prompted: Run or Skip)
+1. In the full TDD workflow, after green the graph branches using boolean session context **`run_optional_step_x`** (set via **`tddy-tools set-session-context`** after **`tddy-tools ask`** per recipe hooks).
 2. Standalone `--goal demo --session-dir <path>` runs demo against existing plan dir
 3. Requires `demo-plan.md` in session directory
 4. Executes demo steps, writes `demo-results.md`
-5. State transitions: `GreenComplete` → `DemoRunning` → `DemoComplete`
+5. State transitions when demo runs: `GreenComplete` → `DemoRunning` → `DemoComplete`
 
 ### Evaluate Workflow
 

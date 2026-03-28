@@ -2,11 +2,11 @@
 
 /// Build the green goal system prompt.
 ///
-/// When `run_demo` is true and demo-plan.md exists, the agent runs the demo by executing
+/// When `include_demo` is true (session key `run_optional_step_x`) and demo-plan.md exists, the agent runs the demo by executing
 /// a pre-made shell script (e.g. demo.sh) in the plan directory using tools. The script
 /// must launch the app in its own terminal window. See AGENTS.md.
-pub fn system_prompt(run_demo: bool) -> String {
-    let demo_instruction = if run_demo {
+pub fn system_prompt(include_demo: bool) -> String {
+    let demo_instruction = if include_demo {
         "**demo_results** (required when demo-plan.md exists): Run the demo by executing the pre-made shell script in the plan directory (e.g. ./demo.sh or bash demo.sh). The script must launch the app in its own terminal window. Use tools (Bash) to run it. Report summary and steps_completed in demo_results."
     } else {
         "**demo_results**: The user chose to skip the demo. Do NOT run demo steps. Omit demo_results from your output."
@@ -43,6 +43,12 @@ pub fn build_prompt(
 ) -> String {
     let mut out = String::from("Implement production code to make all failing tests pass. Use progress.md as the primary guide:\n\n## Progress\n\n");
     out.push_str(progress_content);
+    out.push_str(
+        "\n\n## Optional Demo branch (after green)\n\n\
+If the plan includes a Demo (demo-plan.md) and you need the user to choose whether to run it: use `tddy-tools ask` with clear options, \
+then persist the choice with `tddy-tools set-session-context --data '{\"run_optional_step_x\":true}'` or `false`. \
+The workflow uses the session key `run_optional_step_x` to branch to the demo goal vs evaluate — set this before the engine continues past green.\n",
+    );
     if let Some(prd) = prd_content {
         out.push_str("\n\n## PRD (context)\n\n");
         out.push_str(prd);
