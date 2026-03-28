@@ -37,6 +37,13 @@ message SessionEntry {
   uint32 pid = 5;
   bool is_active = 6;
   string project_id = 7;
+  // Workflow / TUI parity (from .session.yaml + changeset.yaml enrichment).
+  string workflow_goal = 8;
+  string workflow_state = 9;
+  // Human-readable elapsed for the active goal/step, or persisted timestamp display.
+  string elapsed_display = 10;
+  string agent = 11;
+  string model = 12;
 }
 
 message ProjectEntry {

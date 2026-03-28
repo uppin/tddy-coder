@@ -175,17 +175,22 @@ function mockListToolsResponse() {
   );
 }
 
-function mockListSessionsResponse(
-  sessions: Array<{
-    sessionId: string;
-    createdAt: string;
-    status: string;
-    repoPath: string;
-    pid: number;
-    isActive: boolean;
-    projectId: string;
-  }>,
-) {
+type MockSessionRow = {
+  sessionId: string;
+  createdAt: string;
+  status: string;
+  repoPath: string;
+  pid: number;
+  isActive: boolean;
+  projectId: string;
+  workflowGoal?: string;
+  workflowState?: string;
+  elapsedDisplay?: string;
+  agent?: string;
+  model?: string;
+};
+
+function mockListSessionsResponse(sessions: MockSessionRow[]) {
   return toBinary(
     ListSessionsResponseSchema,
     create(ListSessionsResponseSchema, {
@@ -203,17 +208,7 @@ function mockListProjectsResponse() {
   );
 }
 
-function interceptAllRpcs(
-  sessions: Array<{
-    sessionId: string;
-    createdAt: string;
-    status: string;
-    repoPath: string;
-    pid: number;
-    isActive: boolean;
-    projectId: string;
-  }>,
-) {
+function interceptAllRpcs(sessions: MockSessionRow[]) {
   const authBody = mockAuthAuthenticated();
   cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
     req.reply({
@@ -577,5 +572,108 @@ describe("ConnectionScreen session table ordering", () => {
         .find(`[data-testid="connect-${sessionId}"], [data-testid="resume-${sessionId}"]`)
         .should("exist");
     });
+  });
+});
+
+/** Extended ListSessions payload — acceptance / TUI parity (workflow columns). */
+const STATUS_PARITY_SESSION_V1: MockSessionRow = {
+  sessionId: "session-status-parity-1",
+  createdAt: "2026-03-21T10:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/project",
+  pid: 12345,
+  isActive: true,
+  projectId: "proj-1",
+  workflowGoal: "acceptance-tests",
+  workflowState: "Red",
+  elapsedDisplay: "1m 2s",
+  agent: "claude",
+  model: "sonnet-4",
+};
+
+const STATUS_PARITY_SESSION_V2: MockSessionRow = {
+  ...STATUS_PARITY_SESSION_V1,
+  workflowState: "Green",
+  elapsedDisplay: "3m 0s",
+};
+
+function interceptAllRpcsWithListSessionsFactory(getSessions: () => MockSessionRow[]) {
+  const authBody = mockAuthAuthenticated();
+  cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(authBody),
+    });
+  }).as("getAuthStatus");
+
+  const toolsBody = mockListToolsResponse();
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(toolsBody),
+    });
+  }).as("listTools");
+
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
+    const sessionsBody = mockListSessionsResponse(getSessions());
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(sessionsBody),
+    });
+  }).as("listSessions");
+
+  const projectsBody = mockListProjectsResponse();
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(projectsBody),
+    });
+  }).as("listProjects");
+}
+
+describe("ConnectionScreen session status (TUI parity)", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("connection_screen_renders_status_columns_from_extended_session_entry", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([STATUS_PARITY_SESSION_V1]);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    const sid = STATUS_PARITY_SESSION_V1.sessionId;
+    cy.get(`[data-testid="session-row-workflow-goal-${sid}"]`, { timeout: 8000 })
+      .scrollIntoView()
+      .should("be.visible")
+      .and("contain.text", "acceptance-tests");
+    cy.get(`[data-testid="session-row-workflow-state-${sid}"]`)
+      .should("contain.text", "Red");
+    cy.get(`[data-testid="session-row-agent-${sid}"]`).should("contain.text", "claude");
+    cy.get(`[data-testid="session-row-model-${sid}"]`).should("contain.text", "sonnet-4");
+  });
+
+  it("connection_screen_updates_row_when_live_status_payload_changes", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    let call = 0;
+    interceptAllRpcsWithListSessionsFactory(() => {
+      call += 1;
+      return [call === 1 ? STATUS_PARITY_SESSION_V1 : STATUS_PARITY_SESSION_V2];
+    });
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@listSessions");
+    const sid = STATUS_PARITY_SESSION_V1.sessionId;
+    cy.get(`[data-testid="session-row-workflow-state-${sid}"]`, { timeout: 8000 }).should(
+      "contain.text",
+      "Red",
+    );
+    cy.wait(5500);
+    cy.wait("@listSessions");
+    cy.get(`[data-testid="session-row-workflow-state-${sid}"]`).should("contain.text", "Green");
+    cy.get(`[data-testid="session-row-elapsed-${sid}"]`).should("contain.text", "3m 0s");
   });
 });

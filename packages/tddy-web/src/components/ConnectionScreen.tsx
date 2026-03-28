@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
@@ -19,6 +19,7 @@ import { BUILD_ID } from "../buildId";
 import { useVisualViewport } from "../hooks/useVisualViewport";
 import { TokenService } from "../gen/token_pb";
 import { sortSessionsForDisplay } from "../utils/sessionSort";
+import { SessionWorkflowStatusCells } from "./SessionWorkflowStatusCells";
 
 const formStyle = {
   padding: 24,
@@ -42,6 +43,12 @@ const tableStyle = {
   borderCollapse: "collapse" as const,
   marginTop: 12,
   marginBottom: 12,
+};
+
+const sessionTableScrollWrapStyle = {
+  overflowX: "auto" as const,
+  maxWidth: "100%",
+  WebkitOverflowScrolling: "touch" as const,
 };
 
 function createConnectionClient() {
@@ -199,7 +206,7 @@ function SignalDropdown({
             border: "1px solid #ccc",
             borderRadius: 4,
             boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
-            zIndex: 10,
+            zIndex: 1000,
             minWidth: 180,
           }}
         >
@@ -405,6 +412,19 @@ export function ConnectionScreen({
 
   const participants = useRoomParticipants(presenceReady ? presenceRoom : null);
 
+  const hasActiveSession = useMemo(
+    () => sessions.some((s) => s.isActive),
+    [sessions]
+  );
+
+  const loadSessions = useCallback(() => {
+    if (!sessionToken) return;
+    client
+      .listSessions({ sessionToken })
+      .then((res) => setSessions(res.sessions))
+      .catch(() => setSessions([]));
+  }, [client, sessionToken]);
+
   useEffect(() => {
     if (!sessionToken || !isAuthenticated) {
       setLoading(false);
@@ -418,12 +438,6 @@ export function ConnectionScreen({
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to list tools"))
       .finally(() => setLoading(false));
 
-    const loadSessions = () => {
-      client
-        .listSessions({ sessionToken })
-        .then((res) => setSessions(res.sessions))
-        .catch(() => setSessions([]));
-    };
     const loadProjects = () => {
       client
         .listProjects({ sessionToken })
@@ -432,12 +446,18 @@ export function ConnectionScreen({
     };
     loadSessions();
     loadProjects();
-    const interval = setInterval(() => {
-      loadSessions();
-      loadProjects();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [client, sessionToken, isAuthenticated]);
+    const projectInterval = setInterval(loadProjects, 5000);
+    return () => clearInterval(projectInterval);
+  }, [client, sessionToken, isAuthenticated, loadSessions]);
+
+  useEffect(() => {
+    if (!sessionToken || !isAuthenticated) {
+      return;
+    }
+    const sessionPollMs = hasActiveSession ? 2000 : 5000;
+    const sessionInterval = setInterval(loadSessions, sessionPollMs);
+    return () => clearInterval(sessionInterval);
+  }, [sessionToken, isAuthenticated, hasActiveSession, loadSessions]);
 
   useEffect(() => {
     setProjectForms((prev) => {
@@ -755,6 +775,7 @@ export function ConnectionScreen({
               {projectSessions.length === 0 ? (
                 <p style={{ fontSize: 14, color: "#666" }}>No sessions for this project.</p>
               ) : (
+                <div style={sessionTableScrollWrapStyle}>
                 <table style={tableStyle} data-testid={`sessions-table-${p.projectId}`}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>
@@ -763,6 +784,11 @@ export function ConnectionScreen({
                       <th style={{ padding: 8 }}>Status</th>
                       <th style={{ padding: 8 }}>Repo</th>
                       <th style={{ padding: 8 }}>PID</th>
+                      <th style={{ padding: 8 }}>Goal</th>
+                      <th style={{ padding: 8 }}>Workflow</th>
+                      <th style={{ padding: 8 }}>Elapsed</th>
+                      <th style={{ padding: 8 }}>Agent</th>
+                      <th style={{ padding: 8 }}>Model</th>
                       <th style={{ padding: 8 }}>Actions</th>
                     </tr>
                   </thead>
@@ -774,6 +800,7 @@ export function ConnectionScreen({
                         <td style={{ padding: 8 }}>{s.status}</td>
                         <td style={{ padding: 8 }}>{s.repoPath}</td>
                         <td style={{ padding: 8 }}>{s.pid}</td>
+                        <SessionWorkflowStatusCells session={s} />
                         <td style={{ padding: 8 }}>
                           {s.isActive ? (
                             <>
@@ -802,6 +829,7 @@ export function ConnectionScreen({
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </details>
           );
@@ -825,6 +853,7 @@ export function ConnectionScreen({
             />
             Debug logging (browser terminal, Connect / Resume below)
           </label>
+          <div style={sessionTableScrollWrapStyle}>
           <table style={tableStyle} data-testid="sessions-table-orphan">
             <thead>
               <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>
@@ -833,6 +862,11 @@ export function ConnectionScreen({
                 <th style={{ padding: 8 }}>Status</th>
                 <th style={{ padding: 8 }}>Repo</th>
                 <th style={{ padding: 8 }}>PID</th>
+                <th style={{ padding: 8 }}>Goal</th>
+                <th style={{ padding: 8 }}>Workflow</th>
+                <th style={{ padding: 8 }}>Elapsed</th>
+                <th style={{ padding: 8 }}>Agent</th>
+                <th style={{ padding: 8 }}>Model</th>
                 <th style={{ padding: 8 }}>Actions</th>
               </tr>
             </thead>
@@ -844,6 +878,7 @@ export function ConnectionScreen({
                   <td style={{ padding: 8 }}>{s.status}</td>
                   <td style={{ padding: 8 }}>{s.repoPath}</td>
                   <td style={{ padding: 8 }}>{s.pid}</td>
+                  <SessionWorkflowStatusCells session={s} />
                   <td style={{ padding: 8 }}>
                     {s.isActive ? (
                       <>
@@ -872,6 +907,7 @@ export function ConnectionScreen({
               ))}
             </tbody>
           </table>
+          </div>
         </>
       )}
     </div>
