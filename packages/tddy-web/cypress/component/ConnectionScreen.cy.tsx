@@ -11,6 +11,7 @@ import {
   ListEligibleDaemonsResponseSchema,
   EligibleDaemonEntrySchema,
   StartSessionRequestSchema,
+  ConnectSessionResponseSchema,
 } from "../../src/gen/connection_pb";
 import {
   GetAuthStatusResponseSchema,
@@ -315,6 +316,24 @@ function interceptDeleteSessionSuccess() {
   }).as("deleteSession");
 }
 
+function interceptConnectSessionSuccess() {
+  const body = toBinary(
+    ConnectSessionResponseSchema,
+    create(ConnectSessionResponseSchema, {
+      livekitRoom: "session-room-ct",
+      livekitUrl: "ws://127.0.0.1:7880",
+      livekitServerIdentity: "server",
+    }),
+  );
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ConnectSession", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(body),
+    });
+  }).as("connectSession");
+}
+
 function interceptTokenForPresence() {
   const mockToken = "mock-jwt-presence";
   const mockTtl = 600;
@@ -347,6 +366,31 @@ function interceptTokenForPresence() {
     });
   }).as("refreshTokenPresence");
 }
+
+describe("ConnectionScreen terminal chrome — status dot menu", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("ConnectionScreen connected daemon session exposes Terminate from the dot menu", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION]);
+    interceptConnectSessionSuccess();
+    interceptTokenForPresence();
+    interceptSignalSessionSuccess();
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
+    cy.wait("@connectSession");
+    cy.get("[data-testid='connected-terminal-container']", { timeout: 5000 }).should("exist");
+    // Token fetch uses standalone chrome; after the JWT arrives Ghostty mounts and replaces the tree — wait for LiveKit UI before clicking the dot (avoids detached DOM).
+    cy.get("[data-testid='livekit-status']", { timeout: 20000 }).should("exist");
+    cy.get("[data-testid='connection-status-dot']", { timeout: 5000 }).should("be.visible").click();
+    cy.get("[data-testid='connection-menu-terminate']", { timeout: 3000 }).should("be.visible").click();
+    cy.wait("@signalSession").its("request.url").should("include", "SignalSession");
+  });
+});
 
 describe("ConnectionScreen connected participants", () => {
   beforeEach(() => {

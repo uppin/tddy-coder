@@ -8,21 +8,7 @@ import {
 } from "tddy-livekit-web";
 import { create } from "@bufbuild/protobuf";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
-
-/** Overlay buttons for live sessions: must sit above the canvas (z-index, DOM order) and enqueue bytes via the same path as Ghostty `onData`. */
-const CONNECTION_OVERLAY_BTN: React.CSSProperties = {
-  position: "absolute",
-  top: 8,
-  padding: "4px 12px",
-  fontSize: 12,
-  cursor: "pointer",
-  backgroundColor: "rgba(0,0,0,0.6)",
-  color: "#ccc",
-  border: "1px solid #555",
-  borderRadius: 4,
-  zIndex: 100,
-  pointerEvents: "auto",
-};
+import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 
 /** Human-readable description of a terminal input byte sequence. */
 function describeKey(bytes: Uint8Array): string {
@@ -71,10 +57,12 @@ export interface GhosttyTerminalLiveKitProps {
   debugLogging?: boolean;
   /** Called with a function to focus the terminal. Used by mobile keyboard button. */
   onRegisterFocus?: (focus: () => void) => void;
-  /** When set, show Disconnect + Ctrl+C above the terminal; they enqueue bytes on the same RPC path as keyboard input. */
+  /** When set, show connection chrome (status dot menu, Stop); Stop uses the same RPC input path as keyboard. */
   connectionOverlay?: {
     onDisconnect: () => void;
     buildId?: string;
+    /** When set, dot menu includes Terminate (daemon session SIGTERM path). */
+    onTerminate?: () => void;
   };
   /** When false, do not auto-focus terminal on ready (e.g. for mobile to avoid opening keyboard). Default true. */
   autoFocus?: boolean;
@@ -124,6 +112,16 @@ export function GhosttyTerminalLiveKit({
   const [highlightedLine, setHighlightedLine] = useState("");
   const [coderSessionActive, setCoderSessionActive] = useState(true);
   const coderAvailableRef = useRef(true);
+
+  const hasConnectionOverlay = Boolean(connectionOverlay);
+  useEffect(() => {
+    if (!hasConnectionOverlay) return;
+    console.info("[GhosttyTerminalLiveKit] connection chrome integration", {
+      status,
+      hasTerminate: Boolean(connectionOverlay?.onTerminate),
+      buildId: connectionOverlay?.buildId,
+    });
+  }, [hasConnectionOverlay, status, connectionOverlay?.onTerminate, connectionOverlay?.buildId]);
 
   useEffect(() => {
     let room: Room | null = null;
@@ -518,47 +516,15 @@ export function GhosttyTerminalLiveKit({
           />
         )}
         {connectionOverlay && (
-          <>
-            <button
-              type="button"
-              data-testid="ctrl-c-button"
-              style={{ ...CONNECTION_OVERLAY_BTN, right: 72 }}
-              onClick={(ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                enqueueTerminalInput(new Uint8Array([0x03]));
-              }}
-            >
-              Ctrl+C
-            </button>
-            <button
-              type="button"
-              data-testid="disconnect-button"
-              style={{ ...CONNECTION_OVERLAY_BTN, right: 8 }}
-              onClick={(ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                connectionOverlay.onDisconnect();
-              }}
-            >
-              Disconnect
-            </button>
-            {connectionOverlay.buildId !== undefined && (
-              <span
-                data-testid="build-id"
-                style={{
-                  ...CONNECTION_OVERLAY_BTN,
-                  left: 8,
-                  right: "auto",
-                  fontSize: 10,
-                  color: "#888",
-                  cursor: "default",
-                }}
-              >
-                {connectionOverlay.buildId}
-              </span>
-            )}
-          </>
+          <ConnectionTerminalChrome
+            overlayStatus={status}
+            buildId={connectionOverlay.buildId}
+            onDisconnect={connectionOverlay.onDisconnect}
+            onTerminate={connectionOverlay.onTerminate}
+            onStopInterrupt={() => {
+              enqueueTerminalInput(new Uint8Array([0x03]));
+            }}
+          />
         )}
       </div>
       {firstOutputReceived && (

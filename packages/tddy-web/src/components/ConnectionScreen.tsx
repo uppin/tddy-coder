@@ -10,6 +10,7 @@ import {
   type EligibleDaemonEntry,
 } from "../gen/connection_pb";
 import { GhosttyTerminalLiveKit } from "./GhosttyTerminalLiveKit";
+import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 import { ParticipantList } from "./ParticipantList";
 import { useAuth } from "../hooks/useAuth";
 import { useCommonRoom } from "../hooks/useCommonRoom";
@@ -312,6 +313,7 @@ function ConnectedTerminal({
   serverIdentity,
   debugLogging,
   onDisconnect,
+  onTerminate,
 }: {
   livekitUrl: string;
   roomName: string;
@@ -319,6 +321,7 @@ function ConnectedTerminal({
   serverIdentity: string;
   debugLogging?: boolean;
   onDisconnect: () => void;
+  onTerminate?: () => void | Promise<void>;
 }) {
   const tokenClient = useMemo(() => createTokenClient(), []);
   const [initialToken, setInitialToken] = useState<string | null>(null);
@@ -353,6 +356,18 @@ function ConnectedTerminal({
     [tokenClient, roomName, identity]
   );
 
+  const fullscreenContainerStyle = {
+    position: "fixed" as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    height: viewportHeight,
+    margin: 0,
+    overflow: "hidden" as const,
+    display: "flex" as const,
+    flexDirection: "column" as const,
+  };
+
   if (error) {
     return (
       <div style={{ padding: 24 }}>
@@ -362,27 +377,24 @@ function ConnectedTerminal({
   }
   if (!initialToken || ttlSeconds === null) {
     return (
-      <div style={{ padding: 24 }}>
-        <div data-testid="livekit-status">connecting</div>
+      <div data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
+        <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+          <ConnectionTerminalChrome
+            overlayStatus="connecting"
+            buildId={BUILD_ID}
+            onDisconnect={onDisconnect}
+            onTerminate={onTerminate}
+            onStopInterrupt={() => {
+              console.info("[ConnectionScreen ConnectedTerminal] Stop before token ready");
+            }}
+          />
+        </div>
       </div>
     );
   }
 
   return (
-    <div
-      data-testid="connected-terminal-container"
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: viewportHeight,
-        margin: 0,
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
+    <div data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
       <GhosttyTerminalLiveKit
         url={livekitUrl}
         token={initialToken}
@@ -395,7 +407,7 @@ function ConnectedTerminal({
         autoFocus={!isMobile}
         preventFocusOnTap={isMobile && !isKeyboardOpen}
         showMobileKeyboard={isMobile}
-        connectionOverlay={{ onDisconnect, buildId: BUILD_ID }}
+        connectionOverlay={{ onDisconnect, buildId: BUILD_ID, onTerminate }}
       />
     </div>
   );
@@ -427,6 +439,7 @@ export function ConnectionScreen({
     identity: string;
     serverIdentity: string;
     debugLogging: boolean;
+    sessionId: string;
   } | null>(null);
   const client = useMemo(() => createConnectionClient(), []);
 
@@ -555,6 +568,7 @@ export function ConnectionScreen({
         identity: `browser-${res.sessionId}-${Date.now()}`,
         serverIdentity: res.livekitServerIdentity,
         debugLogging: form.debugLogging,
+        sessionId: res.sessionId,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start session");
@@ -593,6 +607,7 @@ export function ConnectionScreen({
         identity: `browser-${sessionId}-${Date.now()}`,
         serverIdentity: res.livekitServerIdentity,
         debugLogging: debugForSessionId(sessionId),
+        sessionId,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect to session");
@@ -610,6 +625,7 @@ export function ConnectionScreen({
         identity: `browser-${res.sessionId}-${Date.now()}`,
         serverIdentity: res.livekitServerIdentity,
         debugLogging: debugForSessionId(sessionId),
+        sessionId: res.sessionId,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to resume session");
@@ -650,6 +666,7 @@ export function ConnectionScreen({
         serverIdentity={connected.serverIdentity}
         debugLogging={connected.debugLogging}
         onDisconnect={() => setConnected(null)}
+        onTerminate={() => void handleSignalSession(connected.sessionId, Signal.SIGTERM)}
       />
     );
   }

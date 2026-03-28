@@ -10,6 +10,7 @@
     "test": "bun run cypress:component && bun run cypress:e2e",
     "storybook": "storybook dev -p 6006 --host 0.0.0.0",
     "build-storybook": "storybook build",
+    "test:unit": "bun test src/components/connection",
     "cypress:component": "ELECTRON_EXTRA_LAUNCH_ARGS='--disable-gpu --no-sandbox' cypress run --component",
     "cypress:component:debug": "DEBUG=cypress:* bun run cypress:component",
     "cypress:e2e": "bun run build-storybook && start-server-and-test 'npx http-server storybook-static -p 9786 -c-1 --cors' http://localhost:9786/iframe.html 'ELECTRON_EXTRA_LAUNCH_ARGS=\"--disable-gpu --no-sandbox\" CYPRESS_BASE_URL=http://localhost:9786 cypress run --e2e'",
