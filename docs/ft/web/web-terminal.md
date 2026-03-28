@@ -71,7 +71,11 @@ The daemon fills these fields from each session directory’s **`.session.yaml`*
 
 While the session list includes at least one row with **`isActive`**, the client requests **`ListSessions`** every **2** seconds; when every row is inactive, the interval is **5** seconds. **`ListProjects`** continues to refresh every **5** seconds. Authentication and user mapping for **`ListSessions`** match other RPCs (GitHub token → mapped OS user → sessions base).
 
-Semantics for comparing elapsed with the in-terminal TUI status bar (persisted YAML versus in-process clock) are described in **[web-session-status-elapsed-semantics.md](../../dev/1-WIP/web-session-status-elapsed-semantics.md)**.
+#### TUI vs web elapsed (QA)
+
+- **TUI (`format_status_bar`)**: Elapsed is **`goal_start_time.elapsed()`** — an in-memory **`Instant`** from when the current workflow step started in the running **`tddy-coder`** process.
+- **Web / daemon (`ListSessions` enrichment)**: Elapsed is **`format_elapsed_compact(now - step_start)`** where **`step_start`** is parsed from **`changeset.yaml`**: the **`at`** timestamp of the **last** **`state.history`** entry whose **`state`** matches **`state.current`**, or else **`state.updated_at`**. The web shows **persisted** wall-clock duration since the last recorded transition, not the in-process **`Instant`**.
+- **Comparison**: When the workflow has **persisted** the latest state to **`changeset.yaml`**, web and TUI **should align** on goal, state, agent, model, and a **similar** elapsed string (same formatting rules in **`tddy_core::format_elapsed_compact`** and TUI **`format_elapsed`**). If the live process has **not yet written** **`changeset.yaml`**, the web may show an **older** elapsed or placeholders until the next **`ListSessions`** poll picks up new disk state.
 
 ### Inactive session deletion
 
