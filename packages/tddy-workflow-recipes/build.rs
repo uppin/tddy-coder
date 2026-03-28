@@ -1,22 +1,20 @@
-//! Deterministic pipeline: copy canonical JSON Schemas from `schemas/` into `generated/{recipe}/`,
-//! write `schema-manifest.json`, and emit `generated/proto_basenames.rs` from `goals.json`
+//! Validate `generated/{recipe}/` schemas and protos referenced in `goals.json`,
+//! write `schema-manifest.json`, and emit `generated/proto_basenames.rs`
 //! (single source of truth for CLI goal name ↔ schema file ↔ proto file).
 
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const RECIPE_NAME: &str = "tdd";
 
 fn main() -> io::Result<()> {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let goals_path = manifest_dir.join("goals.json");
-    let schemas_src = manifest_dir.join("schemas");
     let generated = manifest_dir.join("generated");
     let recipe_dir = generated.join(RECIPE_NAME);
 
     println!("cargo:rerun-if-changed={}", goals_path.display());
-    println!("cargo:rerun-if-changed={}", schemas_src.display());
     println!(
         "cargo:rerun-if-changed={}",
         manifest_dir.join("build.rs").display()
@@ -25,6 +23,7 @@ fn main() -> io::Result<()> {
         "cargo:rerun-if-changed={}",
         manifest_dir.join("proto").display()
     );
+    println!("cargo:rerun-if-changed={}", recipe_dir.display());
 
     let goals_raw = fs::read_to_string(&goals_path)?;
     let root: serde_json::Value = serde_json::from_str(&goals_raw)
@@ -43,11 +42,11 @@ fn main() -> io::Result<()> {
         let proto = g["proto"]
             .as_str()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "goal entry: proto"))?;
-        let schema_path = schemas_src.join(schema);
+        let schema_path = recipe_dir.join(schema);
         if !schema_path.is_file() {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("missing schema source {}", schema_path.display()),
+                format!("missing schema {}", schema_path.display()),
             ));
         }
         let proto_path = manifest_dir.join("proto").join(proto);
@@ -60,9 +59,6 @@ fn main() -> io::Result<()> {
     }
 
     fs::create_dir_all(&generated)?;
-    fs::create_dir_all(&recipe_dir)?;
-
-    copy_json_tree(&schemas_src, &recipe_dir)?;
 
     let manifest_goals: Vec<serde_json::Value> = goals_arr
         .iter()
@@ -99,33 +95,10 @@ fn main() -> io::Result<()> {
     fs::write(generated.join("proto_basenames.rs"), proto_rs)?;
 
     println!(
-        "tddy-workflow-recipes: wrote {}, proto_basenames.rs, and synced schemas into {}",
+        "tddy-workflow-recipes: wrote {}, proto_basenames.rs; validated schemas in {}",
         manifest_path.display(),
         recipe_dir.display()
     );
 
-    Ok(())
-}
-
-fn copy_json_tree(src: &Path, dst: &Path) -> io::Result<()> {
-    let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
-    while let Some((s, d)) = stack.pop() {
-        let mut entries: Vec<_> = fs::read_dir(&s)?.collect::<Result<_, _>>()?;
-        entries.sort_by_key(|e| e.file_name());
-        for e in entries {
-            let p = e.path();
-            let name = e.file_name();
-            let target = d.join(&name);
-            if p.is_dir() {
-                fs::create_dir_all(&target)?;
-                stack.push((p, target));
-            } else if p.extension().and_then(|x| x.to_str()) == Some("json") {
-                if let Some(parent) = target.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                fs::copy(&p, &target)?;
-            }
-        }
-    }
     Ok(())
 }

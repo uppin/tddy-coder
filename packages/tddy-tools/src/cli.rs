@@ -54,7 +54,7 @@ pub struct GetSchemaArgs {
     /// Goal name (plan, red, green, acceptance-tests, evaluate-changes, validate, refactor, update-docs, demo).
     pub goal: String,
 
-    /// Write schema to file (creates schemas/ and common/ subdirs).
+    /// Write schema to file (creates common/ subdirs as needed).
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 }

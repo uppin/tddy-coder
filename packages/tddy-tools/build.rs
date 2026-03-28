@@ -12,7 +12,6 @@ fn main() -> io::Result<()> {
     let out_dir = env::var("OUT_DIR").map_err(io::Error::other)?;
 
     println!("cargo:rerun-if-changed={}", goals_path.display());
-    println!("cargo:rerun-if-changed=../tddy-workflow-recipes/schemas");
     println!("cargo:rerun-if-changed=../tddy-workflow-recipes/generated");
     println!("cargo:rerun-if-changed=../tddy-workflow-recipes/build.rs");
     println!("cargo:rerun-if-changed=../tddy-workflow-recipes/goals.json");
