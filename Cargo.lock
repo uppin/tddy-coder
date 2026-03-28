@@ -5675,6 +5675,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum 0.8.8",
+ "chrono",
  "clap",
  "libc",
  "log",
@@ -5770,6 +5771,7 @@ dependencies = [
  "tddy-workflow-recipes",
  "tokio",
  "tokio-util",
+ "uuid",
 ]
 
 [[package]]

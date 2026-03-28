@@ -1,78 +1,29 @@
 //! Filesystem-safe deletion of inactive session directories under a resolved sessions tree.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use tddy_core::read_session_metadata;
+use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::Status;
 
 use crate::session_reader::is_pid_alive;
 
 /// Validates `session_id` for use as a single path segment under the sessions base.
+#[inline]
 pub fn validate_session_id_for_delete(session_id: &str) -> Result<(), Status> {
-    let s = session_id.trim();
-    if s.is_empty() {
-        log::debug!("validate_session_id_for_delete: empty session_id");
-        return Err(Status::invalid_argument("session_id is required"));
-    }
-    if s.len() > 512 {
-        return Err(Status::invalid_argument("session_id is too long"));
-    }
-    if s.contains('/') || s.contains('\\') || s.contains('\0') {
-        log::debug!("validate_session_id_for_delete: rejected path separators in session_id");
-        return Err(Status::invalid_argument(
-            "session_id must be a single path segment",
-        ));
-    }
-    if s == "." || s == ".." {
-        return Err(Status::invalid_argument("invalid session_id"));
-    }
-    for ch in s.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-            continue;
-        }
-        log::debug!(
-            "validate_session_id_for_delete: invalid character in session_id (codepoint={:?})",
-            ch
-        );
-        return Err(Status::invalid_argument(
-            "session_id contains invalid characters",
-        ));
-    }
-    Ok(())
+    validate_session_id_segment(session_id).map_err(|e| {
+        log::debug!("validate_session_id_for_delete: {:?}", e);
+        Status::invalid_argument(e.message())
+    })
 }
 
-/// Returns true when `candidate` is `base` plus exactly one additional normal path segment.
-fn path_is_single_segment_under_base(base: &Path, candidate: &Path) -> bool {
-    let base_components: Vec<Component<'_>> = base.components().collect();
-    let cand_components: Vec<Component<'_>> = candidate.components().collect();
-    if cand_components.len() != base_components.len() + 1 {
-        return false;
-    }
-    for i in 0..base_components.len() {
-        if base_components[i] != cand_components[i] {
-            return false;
-        }
-    }
-    matches!(cand_components.last(), Some(Component::Normal(_)))
-}
-
-/// Resolves `sessions_base.join(session_id)` after validating the id (directory may not exist yet).
+/// Resolves `{sessions_base}/sessions/{session_id}/` after validating the id (directory may not exist yet).
 pub fn resolve_session_directory_for_delete(
     sessions_base: &Path,
     session_id: &str,
 ) -> Result<PathBuf, Status> {
     validate_session_id_for_delete(session_id)?;
-    let joined = sessions_base.join(session_id.trim());
-    if !path_is_single_segment_under_base(sessions_base, &joined) {
-        log::debug!(
-            "resolve_session_directory_for_delete: path not a single segment under base (base={:?}, joined={:?})",
-            sessions_base,
-            joined
-        );
-        return Err(Status::invalid_argument(
-            "session directory path must be directly under the sessions base",
-        ));
-    }
+    let joined = unified_session_dir_path(sessions_base, session_id.trim());
     log::debug!(
         "resolve_session_directory_for_delete: resolved {:?}",
         joined
@@ -150,6 +101,7 @@ pub fn delete_inactive_session_directory(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tddy_core::session_lifecycle::unified_session_dir_path;
     use tddy_core::SessionMetadata;
 
     fn write_dead_pid_session(dir: &Path, sid: &str, pid: u32) {
@@ -183,7 +135,7 @@ mod tests {
         let base = Path::new("/tmp/tddy-sessions-test");
         let r = resolve_session_directory_for_delete(base, "abc-def-123");
         assert!(r.is_ok(), "expected resolved path under base");
-        assert_eq!(r.unwrap(), base.join("abc-def-123"));
+        assert_eq!(r.unwrap(), unified_session_dir_path(base, "abc-def-123"));
     }
 
     /// Lower-level: full delete succeeds for an inactive fixture directory.
@@ -194,9 +146,9 @@ mod tests {
         let _ = child.wait();
 
         let temp = tempfile::tempdir().unwrap();
-        let base = temp.path().join("sessions");
+        let base = temp.path().join("tddy-home");
         let sid = "unit-inactive-sid";
-        let dir = base.join(sid);
+        let dir = unified_session_dir_path(&base, sid);
         std::fs::create_dir_all(&dir).unwrap();
         write_dead_pid_session(&dir, sid, pid);
 

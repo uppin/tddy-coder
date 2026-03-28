@@ -35,23 +35,5 @@ function compareSessionsForDisplay(a: SessionEntry, b: SessionEntry): number {
  * (lexicographic ascending), per PRD.
  */
 export function sortSessionsForDisplay(sessions: SessionEntry[]): SessionEntry[] {
-  const dev = import.meta.env?.DEV === true;
-  if (dev) {
-    console.debug(
-      "[tddy-web] sortSessionsForDisplay: input",
-      JSON.stringify({
-        count: sessions.length,
-        sessionIds: sessions.map((s) => s.sessionId),
-        activeCount: sessions.filter((s) => s.isActive).length,
-      }),
-    );
-  }
-  const out = [...sessions].sort(compareSessionsForDisplay);
-  if (dev) {
-    console.info(
-      "[tddy-web] sortSessionsForDisplay: ordered sessionIds",
-      out.map((s) => s.sessionId).join(", "),
-    );
-  }
-  return out;
+  return [...sessions].sort(compareSessionsForDisplay);
 }

@@ -114,6 +114,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **write_evaluation_report**: Writes evaluation-report.md to plan_dir from EvaluateOutput.
 - **slugify_directory_name**: Generates directory names (YYYY-MM-DD-<slug>).
 - **create_session_dir_in**: Creates `{base}/sessions/{uuid}/` for stable session directory. Uses `SESSIONS_SUBDIR` constant. When `output_dir == "."`, CLI uses `$HOME/.tddy` as base; PlanTask uses `session_base` from context.
+- **session_lifecycle** (`session_lifecycle.rs`): `materialize_unified_session_directory`, `unified_session_dir_path`, `resolve_effective_session_id` (process-bound id wins over backend id), `validate_session_id_segment` / `SessionIdValidationError`, `UnifiedSessionTreeBootstrap` as the default `SessionLifecycleBootstrap` for the unified tree. Product reference: [session-layout.md](../../../docs/ft/coder/session-layout.md).
 
 ## Data Flow
 

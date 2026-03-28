@@ -32,6 +32,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 | **LiveKit** | `--livekit-url`, `--livekit-room`, `--livekit-identity` with either `--livekit-token` or `--livekit-api-key`/`--livekit-api-secret`. Key/secret generate tokens locally and auto-refresh before expiry. |
 | **Web Bundle** | `--web-port` and `--web-bundle-path` serve pre-built tddy-web static assets over HTTP (TUI and daemon modes) |
 | **Backend selection** | With `--agent` omitted, users pick the coding backend (Claude, Claude ACP, Cursor, Stub) via TUI `AppMode::Select` or a plain numbered menu. With `--agent` set, selection is skipped. Per-backend default models apply; `--model` overrides. Cursor receives `--model` on `cursor agent` when configured. |
+| **Workflow recipe** | **`--recipe tdd`** (default) runs **`TddRecipe`**; **`--recipe bugfix`** runs **`BugfixRecipe`** (reproduce-first, fix-plan approval before green). Optional YAML **`recipe:`**; **`changeset.yaml`** stores **`recipe`** for resume. |
 
 ## Backend selection at session start
 
@@ -46,7 +47,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 | Feature | Description |
 |---------|-------------|
 | [Workflow JSON Schemas](workflow-json-schemas.md) | JSON Schema contracts per goal; `goals.json` registry; `tddy-tools` `get-schema`, `list-schemas`, `submit` validation |
-| [Workflow recipes](workflow-recipes.md) | Pluggable `WorkflowRecipe`; `TddRecipe` (default TDD pipeline); `BugfixRecipe` stub; `GoalId` / string states |
+| [Workflow recipes](workflow-recipes.md) | Pluggable `WorkflowRecipe`; `TddRecipe` (default) and `BugfixRecipe` (selectable); `recipe_resolve` in `tddy-workflow-recipes`; `GoalId` / string states |
 | [Planning Step](planning-step.md) | Plan goal, acceptance-tests goal, plan approval gate, CLI interface, LLM backend abstraction |
 | [Implementation Step](implementation-step.md) | Red, green, demo, evaluate goals; state machine; output artifacts |
 | [gRPC Remote Control](grpc-remote-control.md) | `--grpc` flag, bidirectional streaming, programmatic control for E2E and automation |
@@ -55,7 +56,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 ## Integration Points
 
 - **tddy-core**: Workflow engine (`WorkflowEngine`), recipe trait (`WorkflowRecipe`), graph execution, `RunnerHooks`, `CodingBackend` trait; goals and states are string IDs, not a fixed enum
-- **tddy-workflow-recipes**: Pluggable workflows (`TddRecipe` default, `BugfixRecipe` stub); graph definitions, hooks, parsers, and backend hints per recipe
+- **tddy-workflow-recipes**: `TddRecipe`, `BugfixRecipe`, and **`recipe_resolve`** (single source for CLI/daemon recipe names); graph definitions, hooks, parsers, and backend hints per recipe
 - **tddy-tui**: Ratatui view layer, PresenterView implementation, key mapping
 - **tddy-service**: gRPC service, proto definitions, event conversion (renamed from tddy-grpc; contains EchoServiceImpl, TerminalServiceImpl, DaemonService)
 - **tddy-demo**: Same app with StubBackend for demos and E2E tests

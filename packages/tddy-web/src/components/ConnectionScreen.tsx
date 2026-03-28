@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Trash2 } from "lucide-react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
@@ -19,13 +20,26 @@ import { UserAvatar } from "./UserAvatar";
 import { BUILD_ID } from "../buildId";
 import { useVisualViewport } from "../hooks/useVisualViewport";
 import { TokenService } from "../gen/token_pb";
+import {
+  formatSessionCreatedAt,
+  sessionIdFirstSegment,
+  sessionPidDisplay,
+} from "../utils/sessionDisplay";
 import { sortSessionsForDisplay } from "../utils/sessionSort";
+import { SessionWorkflowStatusCells } from "./SessionWorkflowStatusCells";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-const formStyle = {
-  padding: 24,
-  fontFamily: "system-ui, sans-serif",
-  maxWidth: 720,
-} as const;
+/** Full viewport width shell (session tables are not max-width capped). */
+const screenShellClassName =
+  "min-h-svh w-full min-w-0 box-border px-4 py-6 sm:px-6 font-sans text-foreground";
 
 const inputStyle = {
   display: "block",
@@ -37,13 +51,6 @@ const inputStyle = {
 };
 
 const labelStyle = { display: "block", marginBottom: 4, fontWeight: 500 };
-
-const tableStyle = {
-  width: "100%",
-  borderCollapse: "collapse" as const,
-  marginTop: 12,
-  marginBottom: 12,
-};
 
 function createConnectionClient() {
   const transport = createConnectTransport({
@@ -61,14 +68,11 @@ function createTokenClient() {
   return createClient(TokenService, transport);
 }
 
-function truncateId(id: string, maxLen = 12): string {
-  if (id.length <= maxLen) return id;
-  return `${id.slice(0, 6)}…${id.slice(-4)}`;
-}
-
 type ProjectSessionForm = {
   toolPath: string;
   agent: string;
+  /** Workflow recipe: `tdd` or `bugfix` (matches `WorkflowRecipe::name()`). */
+  recipe: string;
   debugLogging: boolean;
   daemonInstanceId: string;
 };
@@ -78,10 +82,14 @@ function defaultProjectSessionForm(tools: ToolInfo[], daemons: EligibleDaemonEnt
   return {
     toolPath: tools[0]?.path ?? "",
     agent: "claude",
+    recipe: "tdd",
     debugLogging: false,
     daemonInstanceId: localDaemon?.instanceId ?? daemons[0]?.instanceId ?? "",
   };
 }
+
+const sessionControlSelectClassName =
+  "box-border w-full min-w-[9rem] max-w-[16rem] rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /** Tool, backend, host, and browser-terminal debug for one project—per session / connection, not stored on the project. */
 function ProjectSessionOptions({
@@ -90,83 +98,113 @@ function ProjectSessionOptions({
   daemons,
   form,
   onChange,
+  startSessionButton,
 }: {
   projectId: string;
   tools: ToolInfo[];
   daemons: EligibleDaemonEntry[];
   form: ProjectSessionForm;
   onChange: (patch: Partial<ProjectSessionForm>) => void;
+  startSessionButton: ReactNode;
 }) {
   const toolId = `tool-select-${projectId}`;
   const backendId = `backend-select-${projectId}`;
   const hostId = `host-select-${projectId}`;
+  const recipeId = `recipe-select-${projectId}`;
   const debugId = `debug-logging-${projectId}`;
   return (
     <>
-      <p style={{ fontSize: 12, color: "#666", marginTop: 8, marginBottom: 8 }}>
-        Tool, backend, host, and debug apply only to <strong>Start New Session</strong> and to{" "}
+      <p className="mb-2 mt-2 text-xs text-muted-foreground">
+        Tool, backend, workflow recipe, host, and debug apply only to <strong>Start New Session</strong> and to{" "}
         <strong>Connect / Resume</strong> in this project—not saved on the project.
       </p>
-      <label style={labelStyle} htmlFor={hostId}>
-        Host (this session)
-      </label>
-      <select
-        id={hostId}
-        data-testid={hostId}
-        value={form.daemonInstanceId}
-        onChange={(e) => onChange({ daemonInstanceId: e.target.value })}
-        style={{ ...inputStyle, marginBottom: 12 }}
-      >
-        {daemons.map((d) => (
-          <option key={d.instanceId} value={d.instanceId}>
-            {d.label || d.instanceId}
-          </option>
-        ))}
-      </select>
-      <label style={labelStyle} htmlFor={toolId}>
-        Tool (this session)
-      </label>
-      <select
-        id={toolId}
-        data-testid={toolId}
-        value={form.toolPath}
-        onChange={(e) => onChange({ toolPath: e.target.value })}
-        style={{ ...inputStyle, marginBottom: 12 }}
-      >
-        {tools.map((t) => (
-          <option key={t.path} value={t.path}>
-            {t.label || t.path}
-          </option>
-        ))}
-      </select>
-      <label style={labelStyle} htmlFor={backendId}>
-        Backend (this session)
-      </label>
-      <select
-        id={backendId}
-        data-testid={backendId}
-        value={form.agent}
-        onChange={(e) => onChange({ agent: e.target.value })}
-        style={{ ...inputStyle, marginBottom: 12 }}
-      >
-        <option value="claude">Claude (opus)</option>
-        <option value="claude-acp">Claude ACP (opus)</option>
-        <option value="cursor">Cursor (composer-2)</option>
-        <option value="stub">Stub</option>
-      </select>
-      <label
-        style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}
-        htmlFor={debugId}
-      >
-        <input
-          id={debugId}
-          data-testid={debugId}
-          type="checkbox"
-          checked={form.debugLogging}
-          onChange={(e) => onChange({ debugLogging: e.target.checked })}
-        />
-        Debug logging (browser terminal, this connection)
-      </label>
+      <div className="flex min-w-0 flex-nowrap items-end gap-3 overflow-x-auto pb-1 pt-1 [scrollbar-width:thin]">
+        <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
+          <label className="text-sm font-medium leading-none" htmlFor={hostId}>
+            Host (this session)
+          </label>
+          <select
+            id={hostId}
+            data-testid={hostId}
+            value={form.daemonInstanceId}
+            onChange={(e) => onChange({ daemonInstanceId: e.target.value })}
+            className={sessionControlSelectClassName}
+          >
+            {daemons.map((d) => (
+              <option key={d.instanceId} value={d.instanceId}>
+                {d.label || d.instanceId}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
+          <label className="text-sm font-medium leading-none" htmlFor={toolId}>
+            Tool (this session)
+          </label>
+          <select
+            id={toolId}
+            data-testid={toolId}
+            value={form.toolPath}
+            onChange={(e) => onChange({ toolPath: e.target.value })}
+            className={sessionControlSelectClassName}
+          >
+            {tools.map((t) => (
+              <option key={t.path} value={t.path}>
+                {t.label || t.path}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
+          <label className="text-sm font-medium leading-none" htmlFor={backendId}>
+            Backend (this session)
+          </label>
+          <select
+            id={backendId}
+            data-testid={backendId}
+            value={form.agent}
+            onChange={(e) => onChange({ agent: e.target.value })}
+            className={sessionControlSelectClassName}
+          >
+            <option value="claude">Claude (opus)</option>
+            <option value="claude-acp">Claude ACP (opus)</option>
+            <option value="cursor">Cursor (composer-2)</option>
+            <option value="stub">Stub</option>
+          </select>
+        </div>
+        <div className="flex min-w-[10rem] shrink-0 flex-col gap-1">
+          <label className="text-sm font-medium leading-none" htmlFor={recipeId}>
+            Workflow recipe (this session)
+          </label>
+          <select
+            id={recipeId}
+            data-testid={recipeId}
+            value={form.recipe}
+            onChange={(e) => onChange({ recipe: e.target.value })}
+            className={sessionControlSelectClassName}
+          >
+            <option value="tdd">TDD (plan → implement)</option>
+            <option value="bugfix">Bugfix (reproduce → fix)</option>
+          </select>
+        </div>
+        <label
+          className="flex shrink-0 cursor-pointer items-center gap-2 pb-2 text-sm leading-tight"
+          htmlFor={debugId}
+        >
+          <input
+            id={debugId}
+            data-testid={debugId}
+            type="checkbox"
+            className="size-4 shrink-0 rounded border border-input accent-primary"
+            checked={form.debugLogging}
+            onChange={(e) => onChange({ debugLogging: e.target.checked })}
+          />
+          <span className="max-w-[11rem] sm:max-w-none sm:whitespace-nowrap">
+            Debug logging (browser terminal, this connection)
+          </span>
+        </label>
+        <div className="shrink-0 pb-0.5">{startSessionButton}</div>
+      </div>
     </>
   );
 }
@@ -202,54 +240,51 @@ function SignalDropdown({
   };
 
   return (
-    <div ref={ref} style={{ display: "inline-block", position: "relative", marginLeft: 4 }}>
-      <button
+    <div ref={ref} className="relative ml-1 inline-block">
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         data-testid={`signal-dropdown-${sessionId}`}
         onClick={() => setOpen((o) => !o)}
-        style={{ padding: "4px 8px" }}
       >
         Signal ▾
-      </button>
+      </Button>
       {open && (
         <div
           data-testid={`signal-menu-${sessionId}`}
-          style={{
-            position: "absolute",
-            top: "100%",
-            left: 0,
-            background: "#fff",
-            border: "1px solid #ccc",
-            borderRadius: 4,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
-            zIndex: 10,
-            minWidth: 180,
-          }}
+          className="absolute top-full left-0 z-[1000] min-w-[180px] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
         >
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             data-testid={`signal-sigint-${sessionId}`}
+            className="h-auto w-full justify-start rounded-sm px-3 py-2 font-normal"
             onClick={() => handleClick(Signal.SIGINT)}
-            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", background: "none", cursor: "pointer" }}
           >
             Interrupt (SIGINT)
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             data-testid={`signal-sigterm-${sessionId}`}
+            className="h-auto w-full justify-start rounded-sm px-3 py-2 font-normal"
             onClick={() => handleClick(Signal.SIGTERM)}
-            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", background: "none", cursor: "pointer" }}
           >
             Terminate (SIGTERM)
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             data-testid={`signal-sigkill-${sessionId}`}
+            className="h-auto w-full justify-start rounded-sm px-3 py-2 font-normal text-destructive hover:text-destructive"
             onClick={() => handleClick(Signal.SIGKILL)}
-            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", border: "none", background: "none", cursor: "pointer" }}
           >
             Kill (SIGKILL)
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -267,24 +302,28 @@ function InactiveSessionActions({
   onDelete: (sessionId: string) => void | Promise<void>;
 }) {
   return (
-    <>
-      <button
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <Button
         type="button"
+        variant="secondary"
+        size="sm"
         data-testid={`resume-${sessionId}`}
         onClick={() => onResume(sessionId)}
-        style={{ padding: "4px 8px" }}
       >
         Resume
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
+        variant="destructive"
+        size="icon-sm"
+        aria-label="Delete session"
+        title="Delete session"
         data-testid={`delete-session-${sessionId}`}
         onClick={() => void onDelete(sessionId)}
-        style={{ marginLeft: 8, padding: "4px 8px" }}
       >
-        Delete
-      </button>
-    </>
+        <Trash2 />
+      </Button>
+    </span>
   );
 }
 
@@ -429,6 +468,19 @@ export function ConnectionScreen({
 
   const participants = useRoomParticipants(presenceReady ? presenceRoom : null);
 
+  const hasActiveSession = useMemo(
+    () => sessions.some((s) => s.isActive),
+    [sessions]
+  );
+
+  const loadSessions = useCallback(() => {
+    if (!sessionToken) return;
+    client
+      .listSessions({ sessionToken })
+      .then((res) => setSessions(res.sessions))
+      .catch(() => setSessions([]));
+  }, [client, sessionToken]);
+
   useEffect(() => {
     if (!sessionToken || !isAuthenticated) {
       setLoading(false);
@@ -447,12 +499,6 @@ export function ConnectionScreen({
       .then((res) => setDaemons(res.daemons))
       .catch(() => setDaemons([]));
 
-    const loadSessions = () => {
-      client
-        .listSessions({ sessionToken })
-        .then((res) => setSessions(res.sessions))
-        .catch(() => setSessions([]));
-    };
     const loadProjects = () => {
       client
         .listProjects({ sessionToken })
@@ -461,12 +507,18 @@ export function ConnectionScreen({
     };
     loadSessions();
     loadProjects();
-    const interval = setInterval(() => {
-      loadSessions();
-      loadProjects();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [client, sessionToken, isAuthenticated]);
+    const projectInterval = setInterval(loadProjects, 5000);
+    return () => clearInterval(projectInterval);
+  }, [client, sessionToken, isAuthenticated, loadSessions]);
+
+  useEffect(() => {
+    if (!sessionToken || !isAuthenticated) {
+      return;
+    }
+    const sessionPollMs = hasActiveSession ? 2000 : 5000;
+    const sessionInterval = setInterval(loadSessions, sessionPollMs);
+    return () => clearInterval(sessionInterval);
+  }, [sessionToken, isAuthenticated, hasActiveSession, loadSessions]);
 
   useEffect(() => {
     setProjectForms((prev) => {
@@ -483,6 +535,9 @@ export function ConnectionScreen({
           }
           if (!existing.daemonInstanceId && def.daemonInstanceId) {
             next[p.projectId] = { ...next[p.projectId], daemonInstanceId: def.daemonInstanceId };
+          }
+          if (!existing.recipe?.trim()) {
+            next[p.projectId] = { ...next[p.projectId], recipe: def.recipe };
           }
         }
       }
@@ -530,6 +585,7 @@ export function ConnectionScreen({
         projectId: projectId.trim(),
         agent: form.agent,
         daemonInstanceId: form.daemonInstanceId,
+        recipe: form.recipe,
       });
       setConnected({
         livekitUrl: res.livekitUrl,
@@ -638,9 +694,9 @@ export function ConnectionScreen({
 
   if (!isAuthenticated) {
     return (
-      <div style={formStyle}>
+      <div className={screenShellClassName}>
         <h1>tddy-web</h1>
-        <p style={{ marginBottom: 16, fontSize: 14, color: "#444" }}>
+        <p className="mb-4 text-sm text-muted-foreground">
           Sign in with GitHub to access the terminal.
         </p>
         <GitHubLoginButton onClick={login} />
@@ -649,7 +705,7 @@ export function ConnectionScreen({
   }
 
   return (
-    <div style={formStyle}>
+    <div className={screenShellClassName}>
       <h1>tddy-web</h1>
       {user && <UserAvatar user={user} onLogout={logout} />}
       <h2 style={{ marginTop: 24, fontSize: 18 }}>Start or connect to a session</h2>
@@ -674,15 +730,15 @@ export function ConnectionScreen({
         </div>
       )}
 
-      <div style={{ marginTop: 16, marginBottom: 8 }}>
-        <button
+      <div className="my-4">
+        <Button
           type="button"
+          variant="outline"
           data-testid="toggle-create-project"
           onClick={() => setCreateProjectOpen((o) => !o)}
-          style={{ padding: "6px 12px", fontSize: 14 }}
         >
           {createProjectOpen ? "Hide" : "Create project"}
-        </button>
+        </Button>
       </div>
 
       {createProjectOpen && (
@@ -731,15 +787,14 @@ export function ConnectionScreen({
             onChange={(e) => setNewProjectUserRelativePath(e.target.value)}
             style={inputStyle}
           />
-          <button
+          <Button
             type="button"
             data-testid="create-project-submit"
             onClick={handleCreateProject}
             disabled={!newProjectName.trim() || !newProjectGitUrl.trim()}
-            style={{ padding: "8px 16px" }}
           >
             Create
-          </button>
+          </Button>
         </div>
       )}
 
@@ -773,54 +828,60 @@ export function ConnectionScreen({
                 daemons={daemons}
                 form={projectForms[p.projectId] ?? defaultProjectSessionForm(tools, daemons)}
                 onChange={(patch) => updateProjectForm(p.projectId, patch)}
-              />
-              <button
-                type="button"
-                data-testid={`start-session-${p.projectId}`}
-                onClick={() => handleStartSession(p.projectId)}
-                disabled={
-                  loading ||
-                  !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, daemons)).toolPath
+                startSessionButton={
+                  <Button
+                    type="button"
+                    data-testid={`start-session-${p.projectId}`}
+                    onClick={() => handleStartSession(p.projectId)}
+                    disabled={
+                      loading ||
+                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, daemons)).toolPath
+                    }
+                  >
+                    Start New Session
+                  </Button>
                 }
-                style={{ marginTop: 8, marginBottom: 8, padding: "8px 16px" }}
-              >
-                Start New Session
-              </button>
+              />
               {projectSessions.length === 0 ? (
                 <p style={{ fontSize: 14, color: "#666" }}>No sessions for this project.</p>
               ) : (
-                <table style={tableStyle} data-testid={`sessions-table-${p.projectId}`}>
-                  <thead>
-                    <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>
-                      <th style={{ padding: 8 }}>ID</th>
-                      <th style={{ padding: 8 }}>Date</th>
-                      <th style={{ padding: 8 }}>Status</th>
-                      <th style={{ padding: 8 }}>Host</th>
-                      <th style={{ padding: 8 }}>Repo</th>
-                      <th style={{ padding: 8 }}>PID</th>
-                      <th style={{ padding: 8 }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table className="mt-3 w-full min-w-0" data-testid={`sessions-table-${p.projectId}`}>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Host</TableHead>
+                      <TableHead>PID</TableHead>
+                      <TableHead>Goal</TableHead>
+                      <TableHead>Workflow</TableHead>
+                      <TableHead>Elapsed</TableHead>
+                      <TableHead>Agent</TableHead>
+                      <TableHead>Model</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {projectSessions.map((s) => (
-                      <tr key={s.sessionId} style={{ borderBottom: "1px solid #eee" }}>
-                        <td style={{ padding: 8 }}>{truncateId(s.sessionId)}</td>
-                        <td style={{ padding: 8 }}>{s.createdAt}</td>
-                        <td style={{ padding: 8 }}>{s.status}</td>
-                        <td style={{ padding: 8 }}>{s.daemonInstanceId || "—"}</td>
-                        <td style={{ padding: 8 }}>{s.repoPath}</td>
-                        <td style={{ padding: 8 }}>{s.pid}</td>
-                        <td style={{ padding: 8 }}>
+                      <TableRow key={s.sessionId}>
+                        <TableCell>{sessionIdFirstSegment(s.sessionId)}</TableCell>
+                        <TableCell>{formatSessionCreatedAt(s.createdAt)}</TableCell>
+                        <TableCell>{s.status}</TableCell>
+                        <TableCell>{s.daemonInstanceId || "—"}</TableCell>
+                        <TableCell>{sessionPidDisplay(s.isActive, s.pid)}</TableCell>
+                        <SessionWorkflowStatusCells session={s} />
+                        <TableCell>
                           {s.isActive ? (
                             <>
-                              <button
+                              <Button
                                 type="button"
+                                size="sm"
                                 data-testid={`connect-${s.sessionId}`}
+                                className="mr-1"
                                 onClick={() => handleConnectSession(s.sessionId)}
-                                style={{ marginRight: 4, padding: "4px 8px" }}
                               >
                                 Connect
-                              </button>
+                              </Button>
                               <SignalDropdown
                                 sessionId={s.sessionId}
                                 onSignal={handleSignalSession}
@@ -833,11 +894,11 @@ export function ConnectionScreen({
                               onDelete={handleDeleteSession}
                             />
                           )}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               )}
             </details>
           );
@@ -861,38 +922,43 @@ export function ConnectionScreen({
             />
             Debug logging (browser terminal, Connect / Resume below)
           </label>
-          <table style={tableStyle} data-testid="sessions-table-orphan">
-            <thead>
-              <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>
-                <th style={{ padding: 8 }}>ID</th>
-                <th style={{ padding: 8 }}>Date</th>
-                <th style={{ padding: 8 }}>Status</th>
-                <th style={{ padding: 8 }}>Host</th>
-                <th style={{ padding: 8 }}>Repo</th>
-                <th style={{ padding: 8 }}>PID</th>
-                <th style={{ padding: 8 }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="mt-3 w-full min-w-0" data-testid="sessions-table-orphan">
+            <TableHeader>
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Host</TableHead>
+                <TableHead>PID</TableHead>
+                <TableHead>Goal</TableHead>
+                <TableHead>Workflow</TableHead>
+                <TableHead>Elapsed</TableHead>
+                <TableHead>Agent</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {orphanSessions.map((s) => (
-                <tr key={s.sessionId} style={{ borderBottom: "1px solid #eee" }}>
-                  <td style={{ padding: 8 }}>{truncateId(s.sessionId)}</td>
-                  <td style={{ padding: 8 }}>{s.createdAt}</td>
-                  <td style={{ padding: 8 }}>{s.status}</td>
-                  <td style={{ padding: 8 }}>{s.daemonInstanceId || "—"}</td>
-                  <td style={{ padding: 8 }}>{s.repoPath}</td>
-                  <td style={{ padding: 8 }}>{s.pid}</td>
-                  <td style={{ padding: 8 }}>
+                <TableRow key={s.sessionId}>
+                  <TableCell>{sessionIdFirstSegment(s.sessionId)}</TableCell>
+                  <TableCell>{formatSessionCreatedAt(s.createdAt)}</TableCell>
+                  <TableCell>{s.status}</TableCell>
+                  <TableCell>{s.daemonInstanceId || "—"}</TableCell>
+                  <TableCell>{sessionPidDisplay(s.isActive, s.pid)}</TableCell>
+                  <SessionWorkflowStatusCells session={s} />
+                  <TableCell>
                     {s.isActive ? (
                       <>
-                        <button
+                        <Button
                           type="button"
+                          size="sm"
                           data-testid={`connect-${s.sessionId}`}
+                          className="mr-1"
                           onClick={() => handleConnectSession(s.sessionId)}
-                          style={{ marginRight: 4, padding: "4px 8px" }}
                         >
                           Connect
-                        </button>
+                        </Button>
                         <SignalDropdown
                           sessionId={s.sessionId}
                           onSignal={handleSignalSession}
@@ -905,11 +971,11 @@ export function ConnectionScreen({
                         onDelete={handleDeleteSession}
                       />
                     )}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </>
       )}
     </div>

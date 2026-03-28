@@ -14,6 +14,8 @@ listen:
   web_port: 8899
   web_host: 127.0.0.1
 
+# Production web bundle (used when hitting the daemon port directly). For live dev + HMR use
+# ./web-dev and open the Vite port (default 5173), not this port — see docs/ft/web/local-web-dev.md.
 web_bundle_path: packages/tddy-web/dist
 
 livekit:

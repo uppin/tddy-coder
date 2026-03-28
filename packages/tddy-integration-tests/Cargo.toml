@@ -15,6 +15,7 @@ serde_yaml = "0.9"
 serial_test = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "process", "sync", "net", "io-util", "time"] }
 tokio-util = { version = "0.7", features = ["compat"] }
+uuid = { version = "1", features = ["v7"] }
 tddy-core = { path = "../tddy-core" }
 tddy-workflow = { path = "../tddy-workflow" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }

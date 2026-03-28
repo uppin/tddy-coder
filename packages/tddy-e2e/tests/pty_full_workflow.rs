@@ -17,11 +17,8 @@ use tddy_service::gen::{
 };
 
 /// See `grpc_full_workflow.rs`: transitional state is persisted before `StateChange`, so identity
-/// transitions appear; PlanReview resync still sends `Planning→Planned`. With demo: 22; without: 20.
+/// transitions appear; PlanReview resync still sends `Planning→Planned`. With demo: 19; without: 17.
 const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
-    ("Init", "Planning"),
-    ("Planning", "Planned"),
-    ("Planning", "Planned"),
     ("Planning", "Planning"),
     ("Planning", "Planned"),
     ("Planning", "Planned"),
@@ -43,9 +40,6 @@ const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
     ("UpdatingDocs", "DocsUpdated"),
 ];
 const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
-    ("Init", "Planning"),
-    ("Planning", "Planned"),
-    ("Planning", "Planned"),
     ("Planning", "Planning"),
     ("Planning", "Planned"),
     ("Planning", "Planned"),
@@ -69,8 +63,10 @@ const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
 /// gRPC events drive the flow; after each StateChanged, UI buffer is asserted.
 #[tokio::test]
 async fn pty_full_workflow_asserts_each_state_transition() {
+    // None: do not auto-start the workflow — avoids broadcast events before the gRPC stream
+    // subscribes (same as grpc_full_workflow). Feature text is sent via SubmitFeatureInput below.
     let (_presenter_handle, port, shutdown, screen_buffer) =
-        spawn_presenter_with_grpc_and_tui(Some("Build auth".to_string()));
+        spawn_presenter_with_grpc_and_tui(None);
 
     let mut client = connect_grpc(port).await.expect("connect gRPC");
 

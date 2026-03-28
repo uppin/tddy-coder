@@ -562,12 +562,15 @@ mod daemon_tests {
     use std::path::PathBuf;
 
     use tonic::transport::Server;
+    use tonic::Code;
     use tonic::Request;
 
     use crate::gen::tddy_remote_server::TddyRemoteServer;
     use crate::gen::{GetSessionRequest, ListSessionsRequest};
     use crate::test_util::spawn_server_and_connect;
     use crate::DaemonService;
+    use tddy_core::output::SESSIONS_SUBDIR;
+    use tddy_core::read_changeset;
     use tddy_core::write_changeset;
     use tddy_core::WorkflowState;
 
@@ -587,7 +590,7 @@ mod daemon_tests {
     #[tokio::test]
     async fn get_session_returns_status_from_disk() {
         let base = temp_sessions_dir("get-session");
-        let session_dir = base.join("session-1");
+        let session_dir = base.join(SESSIONS_SUBDIR).join("session-1");
         fs::create_dir_all(&session_dir).unwrap();
 
         let changeset = tddy_core::Changeset {
@@ -627,10 +630,68 @@ mod daemon_tests {
     }
 
     #[tokio::test]
+    async fn get_session_rejects_invalid_session_id() {
+        let base = temp_sessions_dir("get-session-invalid");
+        let backend = tddy_core::SharedBackend::from_any(tddy_core::AnyBackend::Stub(
+            tddy_core::StubBackend::new(),
+        ));
+        let service = DaemonService::new(base.clone(), backend);
+        let router = Server::builder().add_service(TddyRemoteServer::new(service));
+        let mut client = spawn_server_and_connect(router).await;
+
+        let err = client
+            .get_session(Request::new(GetSessionRequest {
+                session_id: "../escape".to_string(),
+            }))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), Code::InvalidArgument);
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn list_sessions_only_sees_unified_sessions_subdir() {
+        let base = temp_sessions_dir("list-legacy-skip");
+        // Legacy-style tree: changeset directly under base (not under sessions/) — must not appear in list.
+        let legacy = base.join("legacy-flat-session");
+        fs::create_dir_all(&legacy).unwrap();
+        let mut legacy_cs = tddy_core::Changeset::default();
+        legacy_cs.state.current = WorkflowState::new("Init");
+        write_changeset(&legacy, &legacy_cs).unwrap();
+
+        let unified = base.join(SESSIONS_SUBDIR).join("unified-one");
+        fs::create_dir_all(&unified).unwrap();
+        write_changeset(&unified, &legacy_cs).unwrap();
+
+        let base_canonical = base.canonicalize().unwrap();
+        let backend = tddy_core::SharedBackend::from_any(tddy_core::AnyBackend::Stub(
+            tddy_core::StubBackend::new(),
+        ));
+        let service = DaemonService::new(base_canonical.clone(), backend);
+        let router = Server::builder().add_service(TddyRemoteServer::new(service));
+        let mut client = spawn_server_and_connect(router).await;
+
+        let response = client
+            .list_sessions(Request::new(ListSessionsRequest {
+                repo_root: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(response.sessions.len(), 1);
+        assert_eq!(response.sessions[0].session_id, "unified-one");
+
+        let _ = fs::remove_dir_all(&base_canonical);
+    }
+
+    #[tokio::test]
     async fn list_sessions_returns_all_sessions() {
         let base = temp_sessions_dir("list-sessions");
         for (name, state) in [("s1", "Planned"), ("s2", "Completed"), ("s3", "Init")] {
-            let dir = base.join(name);
+            let dir = base.join(SESSIONS_SUBDIR).join(name);
             fs::create_dir_all(&dir).unwrap();
             let mut changeset = tddy_core::Changeset::default();
             changeset.state.current = WorkflowState::new(state);
@@ -700,6 +761,7 @@ mod daemon_tests {
                 intent: Some(client_message::Intent::StartSession(crate::gen::StartSession {
                     prompt: "add auth feature".to_string(),
                     repo_root: repo.to_string_lossy().to_string(),
+                    recipe: String::new(),
                 })),
             };
         };
@@ -723,6 +785,84 @@ mod daemon_tests {
             ),
             "expected SessionCreated or ModeChanged (plan approval), got {:?}",
             event
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// **daemon_or_rpc_start_session_matches_single_dir_contract**: RPC `StartSession` must resolve
+    /// `session_dir` the same way as CLI: `{sessions_base}/sessions/<session_id>/`, not a bare
+    /// `{sessions_base}/<session_id>/` path.
+    #[test]
+    fn daemon_or_rpc_start_session_matches_single_dir_contract() {
+        let base = temp_sessions_dir("single-dir-contract");
+        let sid = uuid::Uuid::now_v7().to_string();
+
+        let daemon_style = tddy_core::output::create_session_dir_under(&base, &sid).unwrap();
+        let cli_style = tddy_core::output::create_session_dir_with_id(&base, &sid).unwrap();
+
+        assert_eq!(
+            daemon_style, cli_style,
+            "daemon/RPC session directory must match CLI: use sessions/{{id}} under the sessions base"
+        );
+    }
+
+    /// Acceptance (bugfix recipe PRD): StartSession.recipe is persisted on the session changeset so
+    /// the spawned workflow and UI can resolve `tdd` vs `bugfix`.
+    #[tokio::test]
+    async fn daemon_start_session_passes_recipe_to_workflow() {
+        let base = temp_sessions_dir("start-session-recipe");
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        let backend = tddy_core::SharedBackend::from_any(tddy_core::AnyBackend::Stub(
+            tddy_core::StubBackend::new(),
+        ));
+        let service = DaemonService::new(base.clone(), backend);
+        let router = Server::builder().add_service(TddyRemoteServer::new(service));
+        let mut client = spawn_server_and_connect(router).await;
+
+        use crate::gen::client_message;
+        use crate::gen::ClientMessage;
+        use async_stream::stream;
+
+        let request = stream! {
+            yield ClientMessage {
+                intent: Some(client_message::Intent::StartSession(crate::gen::StartSession {
+                    prompt: "repro the crash".to_string(),
+                    repo_root: repo.to_string_lossy().to_string(),
+                    recipe: "bugfix".to_string(),
+                })),
+            };
+        };
+
+        let mut stream = client
+            .stream(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let mut session_dir: Option<std::path::PathBuf> = None;
+        for _ in 0..40 {
+            let msg = stream.message().await.ok().flatten();
+            let Some(m) = msg else { break };
+            if let Some(crate::gen::server_message::Event::SessionCreated(ev)) = m.event {
+                session_dir = Some(base.join(SESSIONS_SUBDIR).join(&ev.session_id));
+                break;
+            }
+        }
+
+        let session_dir = session_dir.expect("expected SessionCreated with session_id");
+        let cs = read_changeset(&session_dir).expect("changeset.yaml must exist after start");
+        assert_eq!(
+            cs.recipe.as_deref(),
+            Some("bugfix"),
+            "changeset must record StartSession.recipe for resume and session list"
         );
 
         let _ = fs::remove_dir_all(&base);

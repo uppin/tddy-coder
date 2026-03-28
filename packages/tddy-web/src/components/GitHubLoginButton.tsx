@@ -1,22 +1,14 @@
-const buttonStyle = {
-  padding: "10px 20px",
-  fontSize: 14,
-  cursor: "pointer",
-  backgroundColor: "#24292e",
-  color: "#fff",
-  border: "none",
-  borderRadius: 6,
-  fontWeight: 500,
-} as const;
+import { Button } from "@/components/ui/button";
 
 export function GitHubLoginButton({ onClick }: { onClick: () => void }) {
   return (
-    <button
+    <Button
+      type="button"
       data-testid="github-login-button"
       onClick={onClick}
-      style={buttonStyle}
+      className="bg-[#24292f] text-white hover:bg-[#24292f]/90 dark:bg-[#24292f] dark:hover:bg-[#24292f]/90"
     >
       Sign in with GitHub
-    </button>
+    </Button>
   );
 }

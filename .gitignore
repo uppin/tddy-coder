@@ -8,6 +8,7 @@
 .green-web-dev-test-output.txt
 .red-web-dev-test-output.txt
 .red-phase-test-output.txt
+.red-session-lifecycle-test-output.txt
 .green-submit.json
 .red-submit.json
 .validate-submit.json

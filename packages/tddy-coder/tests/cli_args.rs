@@ -45,6 +45,38 @@ fn create_fake_tddy_tools(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// `--recipe tdd|bugfix` is accepted; invalid values are rejected.
+#[test]
+fn cli_accepts_recipe_flag() {
+    let mut cmd = tddy_coder_bin();
+    cmd.arg("--help");
+
+    let output = cmd.output().expect("run tddy-coder --help");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--recipe"),
+        "--recipe should appear in help output, stdout: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("bugfix") && stdout.contains("tdd"),
+        "help should mention tdd and bugfix recipes, stdout: {}",
+        stdout
+    );
+
+    let mut cmd_bad = tddy_coder_bin();
+    cmd_bad.args(["--recipe", "unknown-recipe"]);
+    let out_bad = cmd_bad
+        .output()
+        .expect("run tddy-coder --recipe unknown-recipe");
+    let stderr_bad = String::from_utf8_lossy(&out_bad.stderr);
+    assert!(
+        stderr_bad.contains("invalid value") || stderr_bad.contains("isn't a valid value"),
+        "invalid --recipe should be rejected, stderr: {}",
+        stderr_bad
+    );
+}
+
 /// Acceptance: --mouse flag is accepted by CLI for enabling mouse/touch mode in TUI.
 #[test]
 fn cli_accepts_mouse_flag() {

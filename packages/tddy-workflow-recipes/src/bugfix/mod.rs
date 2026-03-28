@@ -102,6 +102,16 @@ impl WorkflowRecipe for BugfixRecipe {
         false
     }
 
+    fn uses_primary_session_document(&self) -> bool {
+        log::debug!("BugfixRecipe::uses_primary_session_document -> true (fix-plan approval gate)");
+        true
+    }
+
+    fn read_primary_session_document_utf8(&self, session_dir: &Path) -> Option<String> {
+        self.primary_document_basename()
+            .and_then(|b| tddy_workflow::read_session_artifact_utf8(session_dir, &b))
+    }
+
     fn plain_goal_cli_output(
         &self,
         _goal_id: &GoalId,
@@ -118,11 +128,17 @@ impl WorkflowRecipe for BugfixRecipe {
 
 impl SessionArtifactManifest for BugfixRecipe {
     fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
-        &[]
+        &[("fix_plan", "fix-plan.md")]
     }
 
     fn default_artifacts(&self) -> BTreeMap<String, String> {
-        BTreeMap::new()
+        let mut a = BTreeMap::new();
+        a.insert("fix_plan".to_string(), "fix-plan.md".to_string());
+        a
+    }
+
+    fn primary_document_basename(&self) -> Option<String> {
+        Some("fix-plan.md".to_string())
     }
 }
 
@@ -137,5 +153,16 @@ mod tests {
         assert_eq!(r.name(), "bugfix");
         assert_eq!(r.start_goal().as_str(), "reproduce");
         assert_eq!(r.goal_ids().len(), 2);
+    }
+
+    /// After the reproduce goal completes, the fix-plan session document must gate the green/fix
+    /// phase (preview + approve / reject / refine), same approval machinery as TDD plan PRD.
+    #[test]
+    fn bugfix_reproduce_emits_session_document_approval_before_green() {
+        let r = BugfixRecipe;
+        assert!(
+            r.uses_primary_session_document(),
+            "BugfixRecipe must require session document approval before green/fix"
+        );
     }
 }
