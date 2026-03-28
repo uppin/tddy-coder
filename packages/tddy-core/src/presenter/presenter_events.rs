@@ -2,12 +2,12 @@
 //! PresenterHandle — bridge between Presenter and gRPC service.
 //! ViewConnection — snapshot + event subscription for per-connection virtual TUIs.
 
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 
 use tokio::sync::broadcast;
 
 use crate::presenter::intent::UserIntent;
-use crate::presenter::state::{ActivityEntry, AppMode, PresenterState};
+use crate::presenter::state::{ActivityEntry, AppMode, CriticalPresenterState, PresenterState};
 
 /// Events the Presenter broadcasts to subscribers (e.g. gRPC clients).
 /// Mirrors PresenterView callbacks for remote observation.
@@ -49,4 +49,8 @@ pub struct ViewConnection {
     pub event_rx: broadcast::Receiver<PresenterEvent>,
     /// Sender for UserIntents; view forwards user input here.
     pub intent_tx: mpsc::Sender<UserIntent>,
+    /// Shared critical state for lag recovery. When the broadcast overflows,
+    /// the TUI resyncs goal and workflow state from this instead of relying
+    /// on lost `GoalStarted`/`StateChanged` events.
+    pub critical_state: Arc<Mutex<CriticalPresenterState>>,
 }

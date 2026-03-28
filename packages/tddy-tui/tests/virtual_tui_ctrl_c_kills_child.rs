@@ -60,6 +60,9 @@ fn virtual_tui_rpc_ctrl_c_byte_kills_tracked_child_like_local_tui() {
         state_snapshot: running_presenter_state(),
         event_rx: event_tx.subscribe(),
         intent_tx,
+        critical_state: std::sync::Arc::new(std::sync::Mutex::new(
+            tddy_core::CriticalPresenterState::default(),
+        )),
     };
 
     let (output_tx, _output_rx) = mpsc::channel(64);
