@@ -69,6 +69,8 @@ pub struct PresenterState {
     pub mode: AppMode,
     pub current_goal: Option<String>,
     pub current_state: Option<String>,
+    /// Workflow engine session id (e.g. UUID string) when connected; drives the short segment in the TUI status bar.
+    pub workflow_session_id: Option<String>,
     pub goal_start_time: Instant,
     pub activity_log: Vec<ActivityEntry>,
     pub inbox: Vec<String>,
@@ -119,6 +121,7 @@ mod tests {
             mode: AppMode::FeatureInput,
             current_goal: None,
             current_state: None,
+            workflow_session_id: None,
             goal_start_time: std::time::Instant::now(),
             activity_log: Vec::new(),
             inbox: Vec::new(),

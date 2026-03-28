@@ -30,6 +30,7 @@ fn running_presenter_state() -> PresenterState {
         mode: AppMode::Running,
         current_goal: Some("test-goal".to_string()),
         current_state: None,
+        workflow_session_id: None,
         goal_start_time: Instant::now(),
         activity_log: vec![ActivityEntry {
             text: "running".to_string(),

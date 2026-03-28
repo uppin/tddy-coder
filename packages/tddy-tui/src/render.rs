@@ -9,7 +9,11 @@ use crate::layout::{
     debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_height, question_height,
 };
 use crate::mouse_map::LayoutAreas;
-use crate::ui::{format_status_bar, status_bar_style_for_goal};
+use crate::ui::{
+    first_hyphen_segment_of_workflow_session_id, format_status_bar_idle,
+    format_status_bar_with_activity_prefix, prepend_activity_to_status_line,
+    status_bar_style_for_goal,
+};
 use crate::view_state::{InboxFocus, ViewState};
 
 /// Return the prompt bar text for the current mode and view state.
@@ -69,6 +73,53 @@ fn prompt_text(state: &PresenterState, view_state: &ViewState) -> String {
 /// Draw the TUI layout: activity log, status bar, prompt bar.
 /// When `debug` is true, the debug log area is shown; otherwise it is hidden.
 const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
+
+/// Builds the single-line status bar text for the primary and Virtual TUI [`draw`] path.
+///
+/// Leading content is the cycling spinner frame (driven by [`ViewState::spinner_tick`]) and the
+/// workflow session segment (or placeholder), then the existing `Goal:` … tail.
+fn status_bar_text_for_draw(state: &PresenterState, view_state: &ViewState) -> String {
+    let spinner_char = SPINNER_FRAMES[(view_state.spinner_tick / 4) % SPINNER_FRAMES.len()];
+    log::trace!(
+        "status_bar_text_for_draw: tick={} frame={:?} workflow_session_id={:?}",
+        view_state.spinner_tick,
+        spinner_char,
+        state
+            .workflow_session_id
+            .as_deref()
+            .map(truncate_session_id_for_log)
+    );
+    let segment = first_hyphen_segment_of_workflow_session_id(state.workflow_session_id.as_deref());
+    let segment_str = segment.as_ref();
+    match (&state.current_goal, &state.current_state) {
+        (Some(goal), Some(s)) => {
+            let elapsed = state.goal_start_time.elapsed();
+            format_status_bar_with_activity_prefix(
+                spinner_char,
+                segment_str,
+                goal,
+                s,
+                elapsed,
+                &state.agent,
+                &state.model,
+            )
+        }
+        _ => {
+            let idle_tail = format_status_bar_idle(&state.agent, &state.model);
+            prepend_activity_to_status_line(spinner_char, segment_str, &idle_tail)
+        }
+    }
+}
+
+/// Truncate long session ids in trace logs (correlation id, not a secret, but avoid full dumps).
+fn truncate_session_id_for_log(id: &str) -> String {
+    const MAX: usize = 12;
+    if id.len() <= MAX {
+        id.to_string()
+    } else {
+        format!("{}…", &id[..MAX])
+    }
+}
 
 /// Draw the TUI. When `layout_areas` is Some, stores the layout rects for mouse hit-testing.
 pub fn draw(
@@ -170,16 +221,7 @@ pub fn draw(
     }
 
     if status_bar.height > 0 {
-        let text = match (&state.current_goal, &state.current_state) {
-            (Some(goal), Some(s)) => {
-                let elapsed = state.goal_start_time.elapsed();
-                format_status_bar(goal, s, elapsed, &state.agent, &state.model)
-            }
-            _ => format!(
-                "Goal: — │ State: — │ Ready │ {} {} │ PgUp/PgDn scroll",
-                state.agent, state.model
-            ),
-        };
+        let text = status_bar_text_for_draw(state, view_state);
         let style = status_bar_style_for_goal(state.current_goal.as_deref());
         let widget = Paragraph::new(text).style(style);
         frame.render_widget(widget, status_bar);
@@ -205,13 +247,9 @@ pub fn draw(
         frame.render_widget(widget, prompt_bar);
     }
 
-    // Spinner in the top-right corner (~5 rotations/sec at 50ms poll rate)
+    // Advance spinner phase once per frame (~5 rotations/sec at 50ms poll rate), matching the old
+    // top-right overlay cadence. The frame character is drawn inside the status bar row.
     if area.width >= 2 && area.height >= 1 {
-        let spinner_char = SPINNER_FRAMES[(view_state.spinner_tick / 4) % SPINNER_FRAMES.len()];
-        let spinner_area = ratatui::layout::Rect::new(area.width - 2, 0, 1, 1);
-        let spinner = Paragraph::new(spinner_char.to_string())
-            .style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray));
-        frame.render_widget(spinner, spinner_area);
         view_state.spinner_tick = view_state.spinner_tick.wrapping_add(1);
     }
 }
@@ -510,6 +548,81 @@ mod tests {
     use std::time::Instant;
     use tddy_core::{AppMode, PresenterState};
 
+    use crate::mouse_map::LayoutAreas;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::{Position, Rect};
+
+    fn status_bar_row_compact_prefix(buffer: &Buffer, area: Rect) -> String {
+        let y = area.y;
+        (area.x..area.x.saturating_add(area.width))
+            .filter_map(|col| {
+                buffer
+                    .cell(Position::new(col, y))
+                    .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            })
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    /// Acceptance (PRD): Virtual TUI uses the same `draw()` path as the local TUI; autonomous
+    /// periodic re-renders must advance the spinner and elapsed timer without freezing. After
+    /// relocation, the cycling spinner frame must be the leading content of the status bar row
+    /// (before `Goal:`), not only a detached top-right cell.
+    #[test]
+    fn virtual_tui_still_emits_bytes_while_idle() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let state = PresenterState {
+            agent: "agent".to_string(),
+            model: "model".to_string(),
+            mode: AppMode::Running,
+            current_goal: Some("plan".to_string()),
+            current_state: Some("Running".to_string()),
+            workflow_session_id: None,
+            goal_start_time: Instant::now(),
+            activity_log: Vec::new(),
+            inbox: Vec::new(),
+            should_quit: false,
+            exit_action: None,
+        };
+        let mut vs = ViewState::new();
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+        };
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let line = status_bar_row_compact_prefix(buf, areas.status_bar);
+        let first = line.chars().next();
+        assert!(
+            first.is_some_and(|c| super::SPINNER_FRAMES.contains(&c)),
+            "status bar must lead with a spinner frame before Goal: (shared with Virtual TUI); \
+             first char={first:?} line={line:?}"
+        );
+        let goal_pos = line.find("Goal:").expect("Goal: in status bar");
+        let spin_pos = line
+            .chars()
+            .enumerate()
+            .find(|(_, c)| super::SPINNER_FRAMES.contains(c))
+            .map(|(i, _)| i)
+            .expect("spinner in line");
+        assert!(
+            spin_pos < goal_pos,
+            "spinner must appear before Goal: in status line, got {line:?}"
+        );
+    }
+
     fn make_state(mode: AppMode) -> PresenterState {
         PresenterState {
             agent: "test-agent".to_string(),
@@ -517,6 +630,7 @@ mod tests {
             mode,
             current_goal: None,
             current_state: None,
+            workflow_session_id: None,
             goal_start_time: Instant::now(),
             activity_log: Vec::new(),
             inbox: Vec::new(),

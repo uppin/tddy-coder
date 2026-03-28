@@ -89,6 +89,15 @@ pub struct Presenter {
     workflow_recipe: Arc<dyn WorkflowRecipe>,
 }
 
+fn format_session_id_for_log(id: &str) -> String {
+    const MAX: usize = 12;
+    if id.len() <= MAX {
+        id.to_string()
+    } else {
+        format!("{}…", &id[..MAX])
+    }
+}
+
 impl Presenter {
     /// Create a new Presenter in FeatureInput mode.
     pub fn new(
@@ -102,6 +111,7 @@ impl Presenter {
             mode: AppMode::FeatureInput,
             current_goal: None,
             current_state: None,
+            workflow_session_id: None,
             goal_start_time: std::time::Instant::now(),
             activity_log: Vec::new(),
             inbox: Vec::new(),
@@ -808,6 +818,16 @@ impl Presenter {
         for ev in events {
             match ev {
                 WorkflowEvent::Progress(pev) => {
+                    if let crate::ProgressEvent::SessionStarted { session_id } = &pev {
+                        log::info!(
+                            "Workflow engine session started; TUI status segment will use id prefix"
+                        );
+                        log::debug!(
+                            "workflow_session_id set for status bar: {}",
+                            format_session_id_for_log(session_id)
+                        );
+                        self.state.workflow_session_id = Some(session_id.clone());
+                    }
                     let entry = match &pev {
                         crate::ProgressEvent::ToolUse {
                             name,
@@ -917,6 +937,10 @@ impl Presenter {
                                 let _ = h.join();
                             }
                             self.workflow_result = None;
+                            self.state.workflow_session_id = None;
+                            log::debug!(
+                                "WorkflowComplete: inbox restart — cleared workflow_session_id until SessionStarted"
+                            );
                             self.spawn_workflow(
                                 backend,
                                 output_dir,
@@ -934,6 +958,7 @@ impl Presenter {
                         match result {
                             Err(ref msg) => {
                                 log::error!("Workflow failed: {}", msg);
+                                self.state.workflow_session_id = None;
                                 self.log_activity(
                                     format!("Workflow failed: {}", msg),
                                     ActivityKind::Info,
@@ -946,6 +971,7 @@ impl Presenter {
                                 log::info!(
                                     "WorkflowComplete Ok → FeatureInput (ready for new workflow)"
                                 );
+                                self.state.workflow_session_id = None;
                                 self.state.mode = AppMode::FeatureInput;
                             }
                         }
@@ -999,6 +1025,15 @@ impl Presenter {
         self.workflow_debug = debug;
         self.tool_call_rx = tool_call_rx;
         self.workflow_socket_path = socket_path.clone();
+        self.state.workflow_session_id = session_id.clone();
+        log::debug!(
+            "start_workflow: initial workflow_session_id={}",
+            self.state
+                .workflow_session_id
+                .as_deref()
+                .map(format_session_id_for_log)
+                .unwrap_or_else(|| "None".to_string())
+        );
         self.spawn_workflow(
             backend,
             output_dir,
@@ -1123,6 +1158,70 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         tx.send(event).unwrap();
         presenter.workflow_event_rx = Some(rx);
+    }
+
+    fn inject_workflow_events(presenter: &mut Presenter, events: Vec<WorkflowEvent>) {
+        let (tx, rx) = mpsc::channel();
+        for e in events {
+            tx.send(e).unwrap();
+        }
+        drop(tx);
+        presenter.workflow_event_rx = Some(rx);
+    }
+
+    #[test]
+    fn progress_session_started_sets_workflow_session_id() {
+        let mut p = make_presenter();
+        let sid = "550e8400-e29b-41d4-a716-446655440000";
+        inject_workflow_event(
+            &mut p,
+            WorkflowEvent::Progress(crate::ProgressEvent::SessionStarted {
+                session_id: sid.to_string(),
+            }),
+        );
+        p.poll_workflow();
+        assert_eq!(p.state().workflow_session_id.as_deref(), Some(sid));
+    }
+
+    #[test]
+    fn workflow_complete_ok_clears_workflow_session_id_after_session_started() {
+        let mut p = make_presenter();
+        inject_workflow_events(
+            &mut p,
+            vec![
+                WorkflowEvent::Progress(crate::ProgressEvent::SessionStarted {
+                    session_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+                }),
+                WorkflowEvent::WorkflowComplete(Ok(WorkflowCompletePayload {
+                    summary: "done".to_string(),
+                    session_dir: None,
+                })),
+            ],
+        );
+        p.poll_workflow();
+        assert!(
+            p.state().workflow_session_id.is_none(),
+            "expected workflow_session_id cleared after successful completion"
+        );
+    }
+
+    #[test]
+    fn workflow_complete_err_clears_workflow_session_id_after_session_started() {
+        let mut p = make_presenter();
+        inject_workflow_events(
+            &mut p,
+            vec![
+                WorkflowEvent::Progress(crate::ProgressEvent::SessionStarted {
+                    session_id: "deadbeef-cafe-0000-0000-000000000001".to_string(),
+                }),
+                WorkflowEvent::WorkflowComplete(Err("boom".to_string())),
+            ],
+        );
+        p.poll_workflow();
+        assert!(
+            p.state().workflow_session_id.is_none(),
+            "expected workflow_session_id cleared after error completion"
+        );
     }
 
     #[test]
