@@ -12,6 +12,9 @@ use crate::layout::{
     debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_height, question_height,
 };
 use crate::mouse_map::LayoutAreas;
+use crate::status_bar_activity::{
+    activity_prefix_char_for_draw, display_elapsed_for_goal_row, status_activity_is_agent_active,
+};
 use crate::ui::{
     first_hyphen_segment_of_workflow_session_id, format_status_bar_idle,
     format_status_bar_with_activity_prefix, prepend_activity_to_status_line,
@@ -120,12 +123,15 @@ const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
 
 /// Builds the single-line status bar text for the primary and Virtual TUI [`draw`] path.
 ///
-/// Leading content is the cycling spinner frame (driven by [`ViewState::spinner_tick`]) and the
-/// workflow session segment (or placeholder), then the existing `Goal:` … tail.
-fn status_bar_text_for_draw(state: &PresenterState, view_state: &ViewState) -> String {
-    let spinner_char = SPINNER_FRAMES[(view_state.spinner_tick / 4) % SPINNER_FRAMES.len()];
+/// Leading content is the cycling spinner (agent-active) or 1 Hz idle dot (clarification wait), then
+/// the workflow session segment and `Goal:` … tail.
+fn status_bar_text_for_draw(state: &PresenterState, view_state: &mut ViewState) -> String {
+    view_state.sync_status_bar_with_presenter(state);
+    let agent_active = status_activity_is_agent_active(&state.mode);
+    let spinner_char = activity_prefix_char_for_draw(&state.mode, view_state, SPINNER_FRAMES);
     log::trace!(
-        "status_bar_text_for_draw: tick={} frame={:?} workflow_session_id={:?}",
+        "status_bar_text_for_draw: agent_active={} tick={} prefix={:?} workflow_session_id={:?}",
+        agent_active,
         view_state.spinner_tick,
         spinner_char,
         state
@@ -137,7 +143,7 @@ fn status_bar_text_for_draw(state: &PresenterState, view_state: &ViewState) -> S
     let segment_str = segment.as_ref();
     match (&state.current_goal, &state.current_state) {
         (Some(goal), Some(s)) => {
-            let elapsed = state.goal_start_time.elapsed();
+            let elapsed = display_elapsed_for_goal_row(state, view_state);
             format_status_bar_with_activity_prefix(
                 spinner_char,
                 segment_str,
@@ -403,9 +409,9 @@ pub fn draw(
         frame.render_widget(widget, prompt_bar);
     }
 
-    // Advance spinner phase once per frame (~5 rotations/sec at 50ms poll rate), matching the old
-    // top-right overlay cadence. The frame character is drawn inside the status bar row.
-    if area.width >= 2 && area.height >= 1 {
+    // Advance fast spinner phase only while agent-active (Running). Clarification wait uses a 1 Hz
+    // idle dot driven by wall time, not `spinner_tick`.
+    if area.width >= 2 && area.height >= 1 && status_activity_is_agent_active(&state.mode) {
         view_state.spinner_tick = view_state.spinner_tick.wrapping_add(1);
     }
 }
@@ -702,7 +708,7 @@ fn render_inbox(
 mod tests {
     use super::*;
     use std::time::Instant;
-    use tddy_core::{AppMode, PresenterState};
+    use tddy_core::{AppMode, ClarificationQuestion, PresenterState, QuestionOption};
 
     use crate::mouse_map::LayoutAreas;
     use ratatui::buffer::Buffer;
@@ -795,6 +801,141 @@ mod tests {
             exit_action: None,
             plan_refinement_pending: false,
         }
+    }
+
+    /// Third pipe-separated segment in the `… │ … │ …` status tail (elapsed like `3s`, or `Ready` in idle).
+    fn elapsed_segment_from_goal_status_line(line: &str) -> Option<String> {
+        let parts: Vec<&str> = line.split(" │ ").collect();
+        if parts.len() >= 3 {
+            Some(parts[2].to_string())
+        } else {
+            None
+        }
+    }
+
+    fn first_activity_char(line: &str) -> Option<char> {
+        line.chars().next()
+    }
+
+    /// PRD: idle clarification wait uses middle-dot / bullet pulse (not `SPINNER_FRAMES`).
+    const IDLE_DOT_PULSE_CHARS: &[char] = &['·', '•'];
+
+    fn select_mode_with_goal() -> AppMode {
+        AppMode::Select {
+            question: ClarificationQuestion {
+                header: "Scope".to_string(),
+                question: "Pick one".to_string(),
+                options: vec![QuestionOption {
+                    label: "A".to_string(),
+                    description: String::new(),
+                }],
+                multi_select: false,
+                allow_other: false,
+            },
+            question_index: 0,
+            total_questions: 1,
+            initial_selected: 0,
+        }
+    }
+
+    /// Acceptance (PRD): `status_bar_frozen_elapsed_in_select_mode` — in Select with an active goal,
+    /// the compact elapsed token in the status line must not advance across wall time while the
+    /// mode is unchanged (clock frozen during clarification wait).
+    #[test]
+    fn status_bar_frozen_elapsed_in_select_mode() {
+        let mut state = make_state(select_mode_with_goal());
+        state.current_goal = Some("plan".to_string());
+        state.current_state = Some("Running".to_string());
+        state.goal_start_time = Instant::now();
+        let mut vs = ViewState::new();
+
+        let before = status_bar_text_for_draw(&state, &mut vs);
+        let e0 = elapsed_segment_from_goal_status_line(&before).expect("elapsed segment");
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        vs.spinner_tick = vs.spinner_tick.wrapping_add(400);
+        let after = status_bar_text_for_draw(&state, &mut vs);
+        let e1 = elapsed_segment_from_goal_status_line(&after).expect("elapsed segment");
+
+        assert_eq!(
+            e0, e1,
+            "PRD: elapsed display must stay fixed in Select while waiting; before={before:?} after={after:?}"
+        );
+    }
+
+    /// Acceptance (PRD): `status_bar_idle_dot_not_spinner_in_text_input` — TextInput wait must use
+    /// the idle dot pulse (`·` / `•`), not characters from `SPINNER_FRAMES`.
+    #[test]
+    fn status_bar_idle_dot_not_spinner_in_text_input() {
+        let mut state = make_state(AppMode::TextInput {
+            prompt: "Why?".to_string(),
+        });
+        state.current_goal = Some("acceptance-tests".to_string());
+        state.current_state = Some("Running".to_string());
+        state.goal_start_time = Instant::now();
+        let mut vs = ViewState::new();
+
+        let line = status_bar_text_for_draw(&state, &mut vs);
+        let lead = first_activity_char(&line).expect("leading char");
+        assert!(
+            !super::SPINNER_FRAMES.contains(&lead),
+            "expected idle dot prefix, not spinner frame {lead:?} in {line:?}"
+        );
+        assert!(
+            IDLE_DOT_PULSE_CHARS.contains(&lead),
+            "expected idle pulse glyph (· or •), got {lead:?} in {line:?}"
+        );
+    }
+
+    /// Acceptance (PRD): `status_bar_running_mode_uses_spinner_and_live_elapsed` — Running keeps a
+    /// fast spinner and a live elapsed clock; user-wait modes must not cycle `SPINNER_FRAMES` on
+    /// tick advances (idle dot only).
+    #[test]
+    fn status_bar_running_mode_uses_spinner_and_live_elapsed() {
+        let start = Instant::now();
+        let mut running = make_state(AppMode::Running);
+        running.current_goal = Some("plan".to_string());
+        running.current_state = Some("Running".to_string());
+        running.goal_start_time = start;
+        let mut vs_run = ViewState::new();
+        let line_tick0 = status_bar_text_for_draw(&running, &mut vs_run);
+        vs_run.spinner_tick = 4;
+        let line_tick4 = status_bar_text_for_draw(&running, &mut vs_run);
+        let c0 = first_activity_char(&line_tick0).unwrap();
+        let c4 = first_activity_char(&line_tick4).unwrap();
+        assert!(
+            super::SPINNER_FRAMES.contains(&c0) && super::SPINNER_FRAMES.contains(&c4),
+            "Running mode should use spinner frames; tick0={c0:?} tick4={c4:?}"
+        );
+        assert_ne!(
+            c0, c4,
+            "Running spinner should advance between tick 0 and 4; lines {line_tick0:?} {line_tick4:?}"
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let line_late = status_bar_text_for_draw(&running, &mut vs_run);
+        let e_early = elapsed_segment_from_goal_status_line(&line_tick0).unwrap();
+        let e_late = elapsed_segment_from_goal_status_line(&line_late).unwrap();
+        assert_ne!(
+            e_early, e_late,
+            "Running elapsed display should advance over wall time; early={e_early} late={e_late}"
+        );
+
+        let mut state_sel = make_state(select_mode_with_goal());
+        state_sel.current_goal = Some("plan".to_string());
+        state_sel.current_state = Some("Running".to_string());
+        state_sel.goal_start_time = start;
+        let mut vs_sel = ViewState::new();
+        let s0 = first_activity_char(&status_bar_text_for_draw(&state_sel, &mut vs_sel)).unwrap();
+        vs_sel.spinner_tick = 4;
+        let s4 = first_activity_char(&status_bar_text_for_draw(&state_sel, &mut vs_sel)).unwrap();
+        assert!(
+            IDLE_DOT_PULSE_CHARS.contains(&s0) && IDLE_DOT_PULSE_CHARS.contains(&s4),
+            "Select wait must use idle dot glyphs only, not spinner; s0={s0:?} s4={s4:?}"
+        );
+        assert_eq!(
+            s0, s4,
+            "Select idle prefix should not advance on fast ticks (1 Hz pulse); s0={s0:?} s4={s4:?}"
+        );
     }
 
     #[test]

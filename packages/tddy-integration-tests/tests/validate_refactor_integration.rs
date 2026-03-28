@@ -442,10 +442,8 @@ async fn validate_submit_refactoring_plan_field_written_to_refactoring_plan_md()
 /// step doesn't crash with "No such file or directory".
 #[tokio::test]
 async fn validate_without_refactoring_plan_still_creates_file_for_refactor() {
-    let session_dir = std::env::temp_dir().join(format!(
-        "tddy-vr-no-plan-field-{}",
-        std::process::id()
-    ));
+    let session_dir =
+        std::env::temp_dir().join(format!("tddy-vr-no-plan-field-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
     write_evaluation_report_to_session_dir(&session_dir);

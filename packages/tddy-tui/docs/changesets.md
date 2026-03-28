@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-tui.
 
+- **2026-03-28** [Feature] Idle-aware status bar — Agent-active (`Running`) keeps fast spinner and live goal elapsed; clarification waits (`Select`/`MultiSelect`/`TextInput`) freeze displayed elapsed and use ·/• pulse at 1 Hz; `status_bar_activity` module; `ViewState` freeze anchors; `virtual_tui_periodic_render_interval`; spinner_tick gated to agent-active. Feature doc `docs/ft/coder/tui-status-bar.md`, architecture updated. (tddy-tui)
 - **2026-03-28** [Feature] Status bar activity — Spinner and workflow session segment (UUID first-field or em-dash placeholder) lead the status line before `Goal:`; `format_status_bar_idle`, `prepend_activity_to_status_line`, `first_hyphen_segment_of_workflow_session_id`; corner spinner removed; per-frame logs at `trace` on hot path. `packages/tddy-tui/docs/architecture.md`. (tddy-tui)
 - **2026-03-21** [Feature] Backend Select `initial_selected`; Ctrl+C parity — `view_state` / `render` / `layout` / `key_map` / `mouse_map` handle `Select` with `initial_selected`. `ctrl_interrupt` module: `key_is_ctrl_c_press`, `ctrl_c_interrupt_session` shared by `event_loop` and `virtual_tui` (RPC ETX 0x03 kills tracked child like local TUI). Integration test `virtual_tui_ctrl_c_kills_child` (unix). (tddy-tui)
 - **2026-03-18** [Feature] VirtualTui Debug Logs — log::trace! → log::debug! for input bytes, keys, mouse, resize, PresenterEvent, render reason, frame sent, disconnect. updated = true when intent sent. Visible with --debug for remote TUI troubleshooting. (tddy-tui)
