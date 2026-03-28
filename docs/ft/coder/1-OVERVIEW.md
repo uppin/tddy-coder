@@ -49,6 +49,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 | [Planning Step](planning-step.md) | Plan goal, acceptance-tests goal, plan approval gate, CLI interface, LLM backend abstraction |
 | [Implementation Step](implementation-step.md) | Red, green, demo, evaluate goals; state machine; output artifacts |
 | [gRPC Remote Control](grpc-remote-control.md) | `--grpc` flag, bidirectional streaming, programmatic control for E2E and automation |
+| [TUI status bar](tui-status-bar.md) | Spinner and session segment on the status line; parity with Virtual TUI / streamed frames |
 
 ## Integration Points
 

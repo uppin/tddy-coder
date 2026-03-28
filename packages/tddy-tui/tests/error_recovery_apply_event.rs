@@ -13,6 +13,7 @@ fn sample_state() -> PresenterState {
         mode: AppMode::Running,
         current_goal: Some("refactor".to_string()),
         current_state: Some("Refactoring".to_string()),
+        workflow_session_id: None,
         goal_start_time: Instant::now(),
         activity_log: Vec::new(),
         inbox: Vec::new(),
