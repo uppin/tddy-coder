@@ -8,16 +8,17 @@ use tddy_core::read_session_metadata;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::connection::{
     ConnectSessionRequest, ConnectSessionResponse, ConnectionService as ConnectionServiceTrait,
-    CreateProjectRequest, CreateProjectResponse, ListProjectsRequest, ListProjectsResponse,
-    ListSessionsRequest, ListSessionsResponse, ListToolsRequest, ListToolsResponse,
-    ProjectEntry as ProtoProjectEntry, ResumeSessionRequest, ResumeSessionResponse,
-    SessionEntry as ProtoSessionEntry, Signal, SignalSessionRequest, SignalSessionResponse,
-    StartSessionRequest, StartSessionResponse, ToolInfo,
+    CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
+    ListProjectsRequest, ListProjectsResponse, ListSessionsRequest, ListSessionsResponse,
+    ListToolsRequest, ListToolsResponse, ProjectEntry as ProtoProjectEntry, ResumeSessionRequest,
+    ResumeSessionResponse, SessionEntry as ProtoSessionEntry, Signal, SignalSessionRequest,
+    SignalSessionResponse, StartSessionRequest, StartSessionResponse, ToolInfo,
 };
 use uuid::Uuid;
 
 use crate::config::DaemonConfig;
 use crate::project_storage::{self, ProjectData};
+use crate::session_deletion;
 use crate::session_reader;
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
@@ -534,6 +535,34 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             ))
         }
     }
+
+    async fn delete_session(
+        &self,
+        request: Request<DeleteSessionRequest>,
+    ) -> Result<Response<DeleteSessionResponse>, Status> {
+        let req = request.into_inner();
+        let session_id = req.session_id.trim();
+        if session_id.is_empty() {
+            return Err(Status::invalid_argument("session_id is required"));
+        }
+        log::debug!("DeleteSession: requested session_id={}", session_id);
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let sessions_base = (self.sessions_base_for_user)(os_user)
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        log::debug!(
+            "DeleteSession: resolved sessions_base={:?} for os_user={}",
+            sessions_base,
+            os_user
+        );
+        session_deletion::delete_inactive_session_directory(&sessions_base, session_id)?;
+        log::info!("DeleteSession: successfully removed session {}", session_id);
+        Ok(Response::new(DeleteSessionResponse { ok: true }))
+    }
 }
 
 #[cfg(test)]
@@ -641,5 +670,48 @@ mod signal_session_unit_tests {
 
         let status = child.wait().unwrap();
         assert!(!status.success(), "process should have been killed");
+    }
+}
+
+#[cfg(test)]
+mod delete_session_unit_tests {
+    use super::*;
+    use tddy_service::proto::connection::DeleteSessionRequest;
+
+    fn make_unit_config() -> crate::config::DaemonConfig {
+        let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        crate::config::DaemonConfig::load(&path).unwrap()
+    }
+
+    fn make_unit_service(sessions_base: std::path::PathBuf) -> ConnectionServiceImpl {
+        let config = make_unit_config();
+        let base = sessions_base.clone();
+        let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
+        let user_resolver: SessionUserResolver = Arc::new(|token| {
+            if token == "valid" {
+                Some("u".to_string())
+            } else {
+                None
+            }
+        });
+        ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None)
+    }
+
+    /// Unit: delete_session rejects an invalid session token before touching the filesystem.
+    #[tokio::test]
+    async fn delete_session_unit_rejects_invalid_token() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("sessions")).unwrap();
+        let service = make_unit_service(temp.path().join("sessions"));
+        let request = Request::new(DeleteSessionRequest {
+            session_token: "bad-token".to_string(),
+            session_id: "any-session".to_string(),
+        });
+        let result = service.delete_session(request).await;
+        assert!(result.is_err(), "invalid token should return error");
+        assert_eq!(result.unwrap_err().code, tddy_rpc::Code::Unauthenticated);
     }
 }

@@ -12,6 +12,15 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | `CreateProject` | Clone (or adopt existing path) + append registry |
 | `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id` |
 | `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata) |
+| `DeleteSession` | Removes `~/.tddy/sessions/<session_id>/` when the session is inactive (PID in metadata not alive); rejects active sessions, unknown ids, and path-unsafe ids (implementation in `session_deletion`) |
+| `SignalSession` | Send Unix signal to recorded PID for an active session |
+
+## DeleteSession behavior
+
+- **Auth**: Same `session_token` → GitHub user → mapped OS user → `sessions_base` as `ListSessions`.
+- **Safety**: Session id is a single path segment (no `/`, `..`, or separators); resolved directory must sit directly under `sessions_base`.
+- **Inactive check**: Matches session listing: `is_active` is true only when `metadata.pid` is present and the process is alive (`kill(pid, 0)` on Unix).
+- **Errors**: Invalid id → `INVALID_ARGUMENT`; missing directory or unreadable metadata → `NOT_FOUND`; live PID → `FAILED_PRECONDITION`; filesystem removal failure → `INTERNAL` with a generic client message; details are logged server-side.
 
 ## Paths (per mapped OS user)
 

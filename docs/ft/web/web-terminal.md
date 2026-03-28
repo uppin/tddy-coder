@@ -53,6 +53,14 @@ When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated us
 - **Other sessions**: Connect/Resume uses a separate **debug** checkbox for that list (sessions not tied to a listed project).
 - Sessions whose `project_id` is not in the listed projects appear under **Other sessions**.
 
+### Inactive session deletion
+
+- **Inactive rows** (`!isActive`): The actions column shows **Resume** and **Delete**. **Delete** opens a browser **confirm** dialog; on confirmation the client calls **`DeleteSession`** with the session id, reloads the session list on success, and shows RPC errors in the same error area as other connection actions.
+- **Active rows**: **Connect** and **Signal** appear; **Delete** is absent.
+- **Orphan table** follows the same inactive vs active rules as project session tables.
+
+The daemon implements **`DeleteSession`** with the same GitHub user → OS user → sessions base resolution as **`ListSessions`**, removes only the target directory under that tree when the session is inactive (no live PID for the value stored in `.session.yaml`), and returns gRPC errors for missing sessions, active processes, or invalid ids. See [daemon changelog](../daemon/changelog.md) and [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md).
+
 See [daemon project concept](../daemon/project-concept.md).
 
 ### Shared LiveKit room (`livekit.common_room`)

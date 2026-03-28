@@ -7,6 +7,13 @@
 .red-markers-test-output.txt
 .green-web-dev-test-output.txt
 .red-web-dev-test-output.txt
+.red-phase-test-output.txt
+.green-submit.json
+.red-submit.json
+.validate-submit.json
+.evaluate-submit.json
+.refactor-submit.json
+.update-docs-submit.json
 
 # Build artifacts
 target/
