@@ -21,6 +21,7 @@ use tddy_workflow_recipes::TddRecipe;
 
 use crate::test_util::temp_dir_with_git_repo;
 
+pub mod install_contract;
 pub mod rpc_frontend;
 pub mod test_util;
 pub mod web_dev_contract;

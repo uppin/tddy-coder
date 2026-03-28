@@ -1,12 +1,14 @@
 //! Process spawner — fork + setuid/setgid to run tddy-* as target OS user.
 
 use std::fs::File;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use uuid::Uuid;
 
 use crate::config::DaemonConfig;
+use crate::tddy_user_config;
 
 /// LiveKit credentials to pass to spawned process (url, api_key, api_secret).
 /// Optional `common_room` forces all daemon spawns into one LiveKit room (see [`resolve_livekit_room_name`]).
@@ -33,16 +35,29 @@ pub(crate) fn resolve_livekit_room_name(common_room: Option<&str>, session_id: &
     format!("daemon-{}", session_id)
 }
 
-/// Create child log config and stderr file. Returns (config_path, stderr_file).
+/// Paths and open files for child `--config`, stderr, stdout, and the shared app log target.
+///
 /// Child needs a real stderr so crossterm/terminal APIs work; Stdio::null() can cause SIGSEGV.
+/// Stdout is also captured to a file so early panics / print output are visible when debugging hangs.
 ///
 /// Appends to `tmp/logs/coder` (same path as `dev.config.yaml`’s default file logger) so
 /// backend invoke lines (e.g. Cursor CLI) appear alongside `tddy_coder::run` startup logs.
 /// `rotation.max_rotated: 0` avoids renaming the shared file on each session start.
-fn create_child_log_config_and_stderr(
+#[cfg(unix)]
+struct ChildProcessLogFiles {
+    config_path: PathBuf,
+    stderr_path: PathBuf,
+    stdout_path: PathBuf,
+    app_log_path: PathBuf,
+    stderr: File,
+    stdout: File,
+}
+
+#[cfg(unix)]
+fn create_child_log_config_and_streams(
     repo_path: &Path,
     session_id: &str,
-) -> anyhow::Result<(PathBuf, File)> {
+) -> anyhow::Result<ChildProcessLogFiles> {
     let child_logs_dir = repo_path.join("tmp").join("logs").join("child");
     std::fs::create_dir_all(&child_logs_dir).map_err(|e| {
         anyhow::anyhow!(
@@ -94,7 +109,23 @@ fn create_child_log_config_and_stderr(
         )
     })?;
 
-    Ok((config_path, stderr_file))
+    let stdout_path = child_logs_dir.join(format!("{}_stdout", session_id));
+    let stdout_file = File::create(&stdout_path).map_err(|e| {
+        anyhow::anyhow!(
+            "failed to create child stdout {}: {}",
+            stdout_path.display(),
+            e
+        )
+    })?;
+
+    Ok(ChildProcessLogFiles {
+        config_path,
+        stderr_path,
+        stdout_path,
+        app_log_path: log_file_abs,
+        stderr: stderr_file,
+        stdout: stdout_file,
+    })
 }
 
 /// Optional flags for [`spawn_as_user`] (session identity, agent, mouse).
@@ -104,6 +135,49 @@ pub struct SpawnOptions<'a> {
     pub project_id: Option<&'a str>,
     pub agent: Option<&'a str>,
     pub mouse: bool,
+}
+
+/// Merge the daemon process `PATH` with an optional prefix (from the target user's `~/.tddy/config.yaml`).
+pub fn merge_spawn_child_path(path_extra: Option<&str>) -> String {
+    const FALLBACK: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+    let base = std::env::var("PATH").unwrap_or_else(|_| FALLBACK.to_string());
+    let Some(extra) = path_extra.map(str::trim).filter(|s| !s.is_empty()) else {
+        return base;
+    };
+    format!("{}:{}", extra.trim_end_matches(':'), base)
+}
+
+/// Default gRPC port when `tddy-coder` omits `--grpc`; probe uses the same bind shape as the child.
+const DEFAULT_TDDY_CODER_GRPC_PORT: u16 = 50051;
+/// How many successive ports to try after [`DEFAULT_TDDY_CODER_GRPC_PORT`] when the default is busy.
+const GRPC_LISTEN_PORT_SEARCH_LEN: u32 = 4096;
+
+/// Probes `0.0.0.0:{port}` (same as `tddy-coder` daemon bind). `Ok(())` means the port was free
+/// at probe time; `Err` with [`ErrorKind::AddrInUse`] means another listener holds it.
+pub fn verify_tcp_listen_port_free(port: u16) -> std::io::Result<()> {
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = std::net::TcpListener::bind(addr)?;
+    drop(listener);
+    Ok(())
+}
+
+fn allocate_verified_grpc_listen_port() -> std::io::Result<u16> {
+    for i in 0..GRPC_LISTEN_PORT_SEARCH_LEN {
+        let p = u32::from(DEFAULT_TDDY_CODER_GRPC_PORT).saturating_add(i);
+        if p > u32::from(u16::MAX) {
+            break;
+        }
+        let port = p as u16;
+        match verify_tcp_listen_port_free(port) {
+            Ok(()) => return Ok(port),
+            Err(e) if e.kind() == ErrorKind::AddrInUse => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        ErrorKind::AddrNotAvailable,
+        "no free TCP port for tddy-coder gRPC in search range",
+    ))
 }
 
 /// Result of spawning a session.
@@ -124,6 +198,22 @@ pub fn clone_as_user(os_user: &str, git_url: &str, destination: &Path) -> anyhow
     let dest_str = destination
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("destination path is not valid UTF-8"))?;
+
+    // Match shell `if test -e "$1"; then exit 0; fi` without fork/pre_exec — avoids NSS hangs
+    // in setuid/initgroups when the tree is already present.
+    if destination.exists() {
+        log::info!(
+            "clone_as_user: destination already exists, skipping fork (dest={})",
+            destination.display()
+        );
+        return Ok(());
+    }
+
+    log::info!(
+        "clone_as_user: will run git clone as os_user={} dest={}",
+        os_user,
+        destination.display()
+    );
 
     let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
     let mut buf = vec![0u8; 16384];
@@ -148,6 +238,11 @@ pub fn clone_as_user(os_user: &str, git_url: &str, destination: &Path) -> anyhow
     if passwd.pw_dir.is_null() {
         anyhow::bail!("user '{}' has no home directory", os_user);
     }
+    if passwd.pw_name.is_null() {
+        anyhow::bail!("user '{}' has no passwd pw_name", os_user);
+    }
+    // initgroups(3) requires a non-NULL user; NULL yields EINVAL on Linux and is not POSIX.
+    let pw_name = unsafe { std::ffi::CStr::from_ptr(passwd.pw_name).to_owned() };
 
     let home_dir = unsafe { std::ffi::CStr::from_ptr(passwd.pw_dir) }
         .to_string_lossy()
@@ -175,7 +270,7 @@ pub fn clone_as_user(os_user: &str, git_url: &str, destination: &Path) -> anyhow
                 if libc::setgid(gid) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
-                if libc::initgroups(std::ptr::null(), gid) != 0 {
+                if libc::initgroups(pw_name.as_ptr(), gid) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
                 if libc::setuid(uid) != 0 {
@@ -185,6 +280,12 @@ pub fn clone_as_user(os_user: &str, git_url: &str, destination: &Path) -> anyhow
             });
         }
     }
+
+    log::debug!(
+        "clone_as_user: invoking sh/git same_user={} dest={}",
+        same_user,
+        destination.display()
+    );
 
     let output = cmd
         .output()
@@ -237,6 +338,10 @@ pub fn spawn_as_user(
     if passwd.pw_dir.is_null() {
         anyhow::bail!("user '{}' has no home directory", os_user);
     }
+    if passwd.pw_name.is_null() {
+        anyhow::bail!("user '{}' has no passwd pw_name", os_user);
+    }
+    let pw_name = unsafe { std::ffi::CStr::from_ptr(passwd.pw_name).to_owned() };
 
     let session_id = opts
         .resume_session_id
@@ -250,15 +355,34 @@ pub fn spawn_as_user(
         .to_string_lossy()
         .into_owned();
 
-    let (config_path, stderr_file) = create_child_log_config_and_stderr(repo_path, &session_id)?;
+    let same_user = uid == unsafe { libc::getuid() } && gid == unsafe { libc::getgid() };
+
+    let logs = create_child_log_config_and_streams(repo_path, &session_id)?;
+
+    let user_cfg = Path::new(&home_dir).join(".tddy").join("config.yaml");
+    let path_extra = tddy_user_config::spawn_path_extra_for_home(Path::new(&home_dir));
+    let child_path = merge_spawn_child_path(path_extra.as_deref());
+    if let Some(ref extra) = path_extra {
+        log::info!(
+            "spawner: child PATH prepends spawn_path_extra from {}: {}",
+            user_cfg.display(),
+            extra
+        );
+    }
+
+    let grpc_port = allocate_verified_grpc_listen_port()
+        .map_err(|e| anyhow::anyhow!("allocate gRPC listen port for tddy-coder: {}", e))?;
 
     let mut cmd = std::process::Command::new(tool_path);
     cmd.current_dir(repo_path)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::from(stderr_file))
+        .stdout(Stdio::from(logs.stdout))
+        .stderr(Stdio::from(logs.stderr))
         .env("HOME", &home_dir)
+        .env("PATH", &child_path)
         .arg("--daemon")
+        .arg("--grpc")
+        .arg(grpc_port.to_string())
         .arg("--livekit-url")
         .arg(&livekit.url)
         .arg("--livekit-api-key")
@@ -293,24 +417,55 @@ pub fn spawn_as_user(
         cmd.arg("--mouse");
     }
 
-    cmd.arg("--config").arg(&config_path);
+    cmd.arg("--config").arg(&logs.config_path);
+
+    let cfg_abs = logs
+        .config_path
+        .canonicalize()
+        .unwrap_or_else(|_| logs.config_path.clone());
+    let err_abs = logs
+        .stderr_path
+        .canonicalize()
+        .unwrap_or_else(|_| logs.stderr_path.clone());
+    let out_abs = logs
+        .stdout_path
+        .canonicalize()
+        .unwrap_or_else(|_| logs.stdout_path.clone());
+    let app_abs = logs
+        .app_log_path
+        .canonicalize()
+        .unwrap_or_else(|_| logs.app_log_path.clone());
 
     log::info!(
-        "spawning process os_user={} tool={} repo={} session_id={} livekit_room={} livekit_identity={} livekit_url={}",
+        "spawning process os_user={} tool={} repo={} session_id={} grpc_port={} livekit_room={} livekit_identity={} livekit_url={}",
         os_user,
         tool_path,
         repo_path.display(),
         session_id,
+        grpc_port,
         livekit_room,
         identity,
         livekit.url
     );
+    log::info!(
+        "spawner: child I/O same_user={} stderr={} stdout={} daemon_config={} app_file_log={}",
+        same_user,
+        err_abs.display(),
+        out_abs.display(),
+        cfg_abs.display(),
+        app_abs.display()
+    );
+    if !same_user {
+        log::info!(
+            "spawner: cmd.spawn() blocks until child finishes pre_exec (setgid/initgroups/setuid) and exec; if this hangs, check NSS/LDAP for os_user={} (often stuck in initgroups)",
+            os_user
+        );
+    }
 
     log::debug!("spawner: about to cmd.spawn() session_id={}", session_id);
 
     // When spawning as same user, skip pre_exec — avoids fork() which can deadlock in some envs.
     // pre_exec forces the slow fork path; plain spawn may use posix_spawn.
-    let same_user = uid == unsafe { libc::getuid() } && gid == unsafe { libc::getgid() };
     if !same_user {
         let home_dir_pre = home_dir.clone();
         unsafe {
@@ -319,7 +474,7 @@ pub fn spawn_as_user(
                 if libc::setgid(gid) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
-                if libc::initgroups(std::ptr::null(), gid) != 0 {
+                if libc::initgroups(pw_name.as_ptr(), gid) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
                 if libc::setuid(uid) != 0 {
@@ -416,5 +571,29 @@ mod resolve_livekit_room_name_tests {
     fn when_common_room_unset_or_whitespace_only_uses_daemon_prefixed_session_room() {
         assert_eq!(resolve_livekit_room_name(Some(""), "abc"), "daemon-abc");
         assert_eq!(resolve_livekit_room_name(Some("   "), "abc"), "daemon-abc");
+    }
+}
+
+#[cfg(test)]
+mod grpc_listen_port_tests {
+    use std::io::ErrorKind;
+    use std::net::TcpListener;
+
+    use super::verify_tcp_listen_port_free;
+
+    #[test]
+    fn verify_tcp_listen_port_free_ok_after_listener_dropped() {
+        let l = TcpListener::bind("0.0.0.0:0").expect("bind ephemeral");
+        let port = l.local_addr().expect("addr").port();
+        drop(l);
+        verify_tcp_listen_port_free(port).expect("port free after drop");
+    }
+
+    #[test]
+    fn verify_tcp_listen_port_free_err_addr_in_use() {
+        let holder = TcpListener::bind("0.0.0.0:0").expect("bind holder");
+        let port = holder.local_addr().expect("addr").port();
+        let err = verify_tcp_listen_port_free(port).expect_err("second bind should fail");
+        assert_eq!(err.kind(), ErrorKind::AddrInUse);
     }
 }

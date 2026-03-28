@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tddy_core::read_session_metadata;
 use tddy_rpc::{Request, Response, Status};
@@ -24,6 +25,34 @@ use crate::spawner::{self, SpawnOptions};
 use crate::user_sessions_path::{
     project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
 };
+
+/// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
+async fn spawn_blocking_with_timeout<T: Send + 'static>(
+    timeout: Duration,
+    op_label: &'static str,
+    f: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
+) -> Result<T, Status> {
+    match tokio::time::timeout(timeout, tokio::task::spawn_blocking(f)).await {
+        Ok(Ok(Ok(v))) => Ok(v),
+        Ok(Ok(Err(e))) => {
+            log::error!("{} failed: {}", op_label, e);
+            Err(Status::internal(e.to_string()))
+        }
+        Ok(Err(join_err)) => Err(Status::internal(join_err.to_string())),
+        Err(_elapsed) => {
+            log::error!(
+                "{} timed out after {}s (spawn_worker_request_timeout_secs); blocking task may still run in the pool",
+                op_label,
+                timeout.as_secs()
+            );
+            Err(Status::deadline_exceeded(format!(
+                "{}: timed out after {}s (see daemon log: spawner: child I/O paths; if same_user=false, parent blocks until pre_exec/initgroups completes)",
+                op_label,
+                timeout.as_secs()
+            )))
+        }
+    }
+}
 
 /// Resolves session token to GitHub user login.
 pub type SessionUserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -171,8 +200,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let os_user_owned = os_user.to_string();
         let git_url_owned = git_url.to_string();
         let dest_path = destination.clone();
+        let timeout = self.config.spawn_worker_request_timeout();
 
-        tokio::task::spawn_blocking(move || {
+        spawn_blocking_with_timeout(timeout, "create_project: clone_repo", move || {
             if let Some(ref client) = spawn_client {
                 client.clone_repo(spawn_worker::CloneRequest {
                     os_user: os_user_owned,
@@ -183,12 +213,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
             }
         })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?
-        .map_err(|e| {
-            log::error!("clone project failed: {}", e);
-            Status::internal(e.to_string())
-        })?;
+        .await?;
 
         let main_repo_path = destination
             .canonicalize()
@@ -264,7 +289,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 Some(t.to_string())
             }
         };
-        let result = tokio::task::spawn_blocking(move || {
+        let timeout = self.config.spawn_worker_request_timeout();
+        let result = spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
             log::debug!(
                 "StartSession: spawn_blocking running, using_spawn_worker={}",
                 spawn_client.is_some()
@@ -300,12 +326,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 )
             }
         })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?
-        .map_err(|e| {
-            log::error!("spawn failed: {}", e);
-            Status::internal(e.to_string())
-        })?;
+        .await?;
         log::debug!(
             "StartSession: spawn_blocking returned, session_id={}",
             result.session_id
@@ -387,7 +408,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_id = req.session_id.clone();
         let livekit = livekit.clone();
         let project_id_resume = metadata.project_id.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let timeout = self.config.spawn_worker_request_timeout();
+        let result = spawn_blocking_with_timeout(timeout, "ResumeSession: spawn", move || {
             let pid = if project_id_resume.is_empty() {
                 None
             } else {
@@ -422,12 +444,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 )
             }
         })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?
-        .map_err(|e| {
-            log::error!("spawn (resume) failed: {}", e);
-            Status::internal(e.to_string())
-        })?;
+        .await?;
         Ok(Response::new(ResumeSessionResponse {
             session_id: result.session_id,
             livekit_room: result.livekit_room,

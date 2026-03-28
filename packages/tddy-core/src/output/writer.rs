@@ -43,6 +43,19 @@ pub fn slugify_directory_name(feature: &str) -> String {
     format!("{}-{}", date, slug)
 }
 
+/// Root directory for plan markdown and other session artifacts — always exactly `session_dir`.
+#[inline]
+pub fn plan_artifacts_root(session_dir: &Path) -> PathBuf {
+    session_dir.to_path_buf()
+}
+
+/// Allocates a new session directory when no `session_dir` / `session_base`+`session_id` is in
+/// context yet: `{sessions_base}/sessions/{uuid-v7}/`. The name does not derive from feature
+/// text; UUID v7 is time-ordered so canonical hyphenated form sorts lexicographically by creation time.
+pub fn new_session_dir() -> Result<PathBuf, WorkflowError> {
+    create_session_dir_in(&sessions_base_path()?)
+}
+
 fn format_date_today() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
@@ -92,7 +105,7 @@ pub fn read_impl_session_file(session_dir: &Path) -> Result<String, WorkflowErro
 pub const SESSIONS_SUBDIR: &str = "sessions";
 
 /// Environment variable to override the session base path. When set, sessions go to
-/// `{TDDY_SESSIONS_DIR}/sessions/{uuid}/` instead of `$HOME/.tddy/sessions/{uuid}/`.
+/// `{TDDY_SESSIONS_DIR}/sessions/{uuid-v7}/` instead of `$HOME/.tddy/sessions/{uuid-v7}/`.
 /// Use in tests to avoid writing to production ~/.tddy (e.g. set to `$TMPDIR/tddy-test`).
 pub const TDDY_SESSIONS_DIR_ENV: &str = "TDDY_SESSIONS_DIR";
 
@@ -117,10 +130,10 @@ pub fn sessions_base_path() -> Result<PathBuf, WorkflowError> {
     }
 }
 
-/// Create a session directory at `{base}/sessions/{uuid}/` and return its path.
+/// Create a session directory at `{base}/sessions/{uuid-v7}/` and return its path.
 pub fn create_session_dir_in(base: &Path) -> Result<PathBuf, WorkflowError> {
     use uuid::Uuid;
-    let id = Uuid::new_v4();
+    let id = Uuid::now_v7();
     create_session_dir_with_id(base, &id.to_string())
 }
 
@@ -137,4 +150,37 @@ pub fn create_session_dir_under(base: &Path, session_id: &str) -> Result<PathBuf
     let session_dir = base.join(session_id);
     fs::create_dir_all(&session_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     Ok(session_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plan_artifacts_root_is_session_dir() {
+        let root = std::env::temp_dir().join(format!(
+            "tddy-plan-artifact-sessions-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let sessions = root.join("sessions");
+        let sid = sessions.join("a97addd3-c31b-442b-a6b0-a63abe99e11d");
+        std::fs::create_dir_all(&sid).unwrap();
+        assert_eq!(plan_artifacts_root(&sid), sid);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn new_session_dir_not_under_repo_path() {
+        let repo =
+            std::env::temp_dir().join(format!("tddy-plan-artifact-repo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        std::fs::create_dir_all(&repo).unwrap();
+        let got = new_session_dir().unwrap();
+        assert!(
+            !got.starts_with(&repo),
+            "session dir must not be derived from repo path"
+        );
+        let _ = std::fs::remove_dir_all(&repo);
+    }
 }

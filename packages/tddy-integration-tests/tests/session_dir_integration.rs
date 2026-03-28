@@ -40,7 +40,7 @@ fn test_create_session_dir_creates_under_base() {
         "session dirname should be a 36-char UUID, got: {}",
         uuid_part
     );
-    // UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx — 4 hyphens
+    // UUID v7 format: xxxxxxxx-xxxx-7xxx-xxxx-xxxxxxxxxxxx — 4 hyphens, lexicographic order ≈ time order
     assert_eq!(
         uuid_part.chars().filter(|&c| c == '-').count(),
         4,

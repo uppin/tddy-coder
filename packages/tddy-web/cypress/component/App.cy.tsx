@@ -82,6 +82,13 @@ describe("App", () => {
   beforeEach(() => {
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
+    // App gates on GET /api/config (vite proxies to DAEMON_PORT). A real daemon may return
+    // daemon_mode: true → ConnectionScreen without #livekit-url. Force standalone form for CT.
+    cy.intercept("GET", "**/api/config", {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: { daemon_mode: false },
+    }).as("apiConfig");
   });
 
   it("shows login button when not authenticated", () => {

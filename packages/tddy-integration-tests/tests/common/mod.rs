@@ -5,14 +5,23 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
 use tddy_core::backend::InvokeRequest;
 use tddy_core::changeset::{write_changeset, Changeset, ChangesetState};
-use tddy_core::output::slugify_directory_name;
+use tddy_core::output::create_session_dir_in;
 use tddy_core::workflow::graph::{ExecutionResult, ExecutionStatus};
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::{GoalId, SharedBackend, WorkflowEngine, WorkflowRecipe};
 use tddy_workflow_recipes::TddRecipe;
+
+static IT_SESSION_BASE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn unique_sessions_base_for_test() -> PathBuf {
+    let n = IT_SESSION_BASE_SEQ.fetch_add(1, Ordering::SeqCst);
+    std::env::temp_dir().join(format!("tddy-integration-{}-{}", std::process::id(), n))
+}
 
 /// Default TDD recipe for integration tests (same behavior as tddy-coder).
 pub fn tdd_recipe() -> Arc<dyn WorkflowRecipe> {
@@ -54,14 +63,17 @@ pub fn stub_invoke_request(prompt: impl Into<String>, goal_id: &str) -> InvokeRe
     }
 }
 
-/// Session directory path for a given input (matches Workflow::plan behavior).
-pub fn session_dir_for_input(parent: &std::path::Path, input: &str) -> PathBuf {
-    parent.join(slugify_directory_name(input))
+/// New session directory `{unique_base}/sessions/{uuid}/` — isolated per call (no shared env, safe with parallel tests).
+pub fn session_dir_for_new_session() -> PathBuf {
+    let base = unique_sessions_base_for_test();
+    std::fs::create_dir_all(&base).expect("sessions base");
+    create_session_dir_in(&base).expect("create_session_dir_in")
 }
 
 /// Create a temp directory with a git repo (init, commit, origin/master) for worktree tests.
-/// Returns (output_dir, session_dir) where output_dir is the repo root and session_dir = output_dir/slug.
-pub fn temp_dir_with_git_repo(label: &str, input: &str) -> (PathBuf, PathBuf) {
+/// Returns `(repo_root, session_dir)` where `session_dir` is under the integration test session base
+/// (see [`session_dir_for_new_session`]), not under `output_dir`.
+pub fn temp_dir_with_git_repo(label: &str) -> (PathBuf, PathBuf) {
     let output_dir = std::env::temp_dir().join(format!("tddy-{}-{}", label, std::process::id()));
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create repo dir");
@@ -83,21 +95,21 @@ pub fn temp_dir_with_git_repo(label: &str, input: &str) -> (PathBuf, PathBuf) {
     run(&["remote", "add", "origin", output_dir.to_str().unwrap()]);
     run(&["push", "-u", "origin", "master"]);
 
-    let session_dir = session_dir_for_input(&output_dir, input);
+    let session_dir = session_dir_for_new_session();
     std::fs::create_dir_all(&session_dir).expect("create session dir");
     (output_dir, session_dir)
 }
 
 /// Build context for plan goal.
-/// output_dir is the repo root (parent of session_dir); agent runs in output_dir to discover Cargo.toml, etc.
-/// session_dir is output_dir/slug; defaults to output_dir.join(slugify(feature_input)) if not provided.
+/// `output_dir` is the repo root; agent runs there to discover `Cargo.toml`, etc.
+/// `session_dir` must be the session directory for this run (e.g. from [`session_dir_for_new_session`]).
 pub fn ctx_plan(
     feature_input: &str,
     output_dir: PathBuf,
+    session_dir: PathBuf,
     answers: Option<&str>,
     conversation_output_path: Option<PathBuf>,
 ) -> HashMap<String, serde_json::Value> {
-    let session_dir = session_dir_for_input(&output_dir, feature_input);
     let mut m = HashMap::new();
     m.insert(
         "feature_input".to_string(),
@@ -270,7 +282,7 @@ pub async fn run_plan_with_conversation_output(
     answers: Option<&str>,
     conversation_output_path: Option<PathBuf>,
 ) -> Result<(PathBuf, String), Box<dyn std::error::Error + Send + Sync>> {
-    let session_dir = session_dir_for_input(output_dir, input);
+    let session_dir = session_dir_for_new_session();
     std::fs::create_dir_all(&session_dir)?;
     let init_cs = Changeset {
         initial_prompt: Some(input.to_string()),
@@ -281,6 +293,7 @@ pub async fn run_plan_with_conversation_output(
     let context = ctx_plan(
         input,
         output_dir.to_path_buf(),
+        session_dir.clone(),
         answers,
         conversation_output_path,
     );

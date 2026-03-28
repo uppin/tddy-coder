@@ -322,6 +322,13 @@ impl Presenter {
                 if text.is_empty() {
                     return;
                 }
+                // Previous run finished (`workflow_result` set): start a new workflow. Do not send on
+                // `answer_tx` — it may still be `Some` until the worker thread exits, and a buffered
+                // send would skip `restart_workflow` and drop the second run.
+                if self.is_done() {
+                    self.restart_workflow(text);
+                    return;
+                }
                 let text_for_restart = if let Some(ref tx) = self.answer_tx {
                     match tx.send(text) {
                         Ok(()) => None,
@@ -352,9 +359,13 @@ impl Presenter {
             }
             UserIntent::ViewPlan => {
                 if let AppMode::PlanReview { ref prd_content } = self.state.mode {
-                    self.state.mode = AppMode::MarkdownViewer {
-                        content: prd_content.clone(),
-                    };
+                    let content = self
+                        .workflow_session_dir
+                        .as_ref()
+                        .map(|d| crate::session_plan_prd::plan_prd_path_for_session_dir(d))
+                        .and_then(|p| std::fs::read_to_string(&p).ok())
+                        .unwrap_or_else(|| prd_content.clone());
+                    self.state.mode = AppMode::MarkdownViewer { content };
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
             }
@@ -1477,5 +1488,80 @@ mod tests {
             "TUI apply_event relies on this event to set local should_quit, got {:?}",
             ev
         );
+    }
+
+    #[test]
+    fn view_plan_markdown_viewer_shows_prd_on_disk_not_stale_snapshot() {
+        let tmp = std::env::temp_dir().join("tddy-test-view-plan-disk-prd");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let on_disk = "# Plan\n\nPRD_FROM_DISK_UNIQUE_42\n";
+        std::fs::write(tmp.join("PRD.md"), on_disk).unwrap();
+
+        let mut p = make_presenter();
+        p.workflow_session_dir = Some(tmp.clone());
+        p.state.mode = AppMode::PlanReview {
+            prd_content: "STALE_SNAPSHOT_NOT_ON_DISK".to_string(),
+        };
+
+        p.handle_intent(UserIntent::ViewPlan);
+
+        match &p.state().mode {
+            AppMode::MarkdownViewer { content } => {
+                assert!(
+                    content.contains("PRD_FROM_DISK_UNIQUE_42"),
+                    "View Plan must show PRD.md from workflow_session_dir; got: {:?}",
+                    content
+                );
+                assert!(
+                    !content.contains("STALE_SNAPSHOT_NOT_ON_DISK"),
+                    "must not show stale in-memory snapshot when disk differs; got: {:?}",
+                    content
+                );
+            }
+            other => panic!("expected MarkdownViewer, got {:?}", other),
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn view_plan_markdown_viewer_shows_uuid_root_prd_when_workflow_dir_nested() {
+        let root =
+            std::env::temp_dir().join(format!("tddy-test-view-plan-nested-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let uuid = root
+            .join("sessions")
+            .join("a97addd3-c31b-442b-a6b0-a63abe99e11d");
+        let nested = uuid.join("2026-03-24-feature-slug");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(uuid.join("PRD.md"), "# Full\n\nCANONICAL_UUID_BODY\n").unwrap();
+        std::fs::write(nested.join("PRD.md"), "## Related\nlegacy nested only\n").unwrap();
+
+        let mut p = make_presenter();
+        p.workflow_session_dir = Some(nested.clone());
+        p.state.mode = AppMode::PlanReview {
+            prd_content: "STALE".to_string(),
+        };
+
+        p.handle_intent(UserIntent::ViewPlan);
+
+        match &p.state().mode {
+            AppMode::MarkdownViewer { content } => {
+                assert!(
+                    content.contains("CANONICAL_UUID_BODY"),
+                    "View Plan must show sessions/<uuid>/PRD.md when nested; got: {:?}",
+                    content
+                );
+                assert!(
+                    !content.contains("legacy nested only"),
+                    "must not show nested duplicate PRD; got: {:?}",
+                    content
+                );
+            }
+            other => panic!("expected MarkdownViewer, got {:?}", other),
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

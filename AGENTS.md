@@ -32,7 +32,8 @@ With **direnv**: `direnv allow` once; the shell loads automatically when you `cd
 | Script | Purpose |
 |--------|---------|
 | `./dev` | Enter nix dev shell with profile (persists across `nix gc`). With args: run command inside shell, e.g. `./dev cargo test` or `./dev echo "Hello"`. |
-| `./release` | Build optimized production binaries (tddy-coder, tddy-tools). Output: `target/release/tddy-coder`, `target/release/tddy-tools`. |
+| `./release` | Build optimized production binaries (`tddy-coder`, `tddy-tools`, `tddy-daemon`). Output: `target/release/...`. |
+| `./install` | Install **`tddy-daemon`**, **`tddy-coder`**, **`tddy-tools`** as a systemd service: `sudo ./install --systemd` (optional `--build` runs `./release`). Copies **`packages/tddy-web/dist`** to the web bundle path (requires `bun run build` first). Path overrides: `INSTALL_PREFIX`, `INSTALL_BIN_DIR`, `INSTALL_CONFIG_DIR`, `INSTALL_SYSTEMD_DIR`, `INSTALL_WEB_BUNDLE_DIR`; test harness: `INSTALL_NO_SYSTEMCTL=1` skips root check and `systemctl`. |
 | `./test` | Build tddy-coder + tddy-tools, run all tests. Writes output to `.verify-result.txt` (agent workaround for Cursor terminal capture). Usage: `./test` — all tests; `./test -p tddy-core` — one package; `./test -- test_name` — specific test. |
 | `./clean` | Remove stale Cargo build fingerprints, deps, incremental. Keeps newest per crate in `target/debug` and `target/release`. Frees disk space without full `cargo clean`. |
 | `./verify` | Run `cargo test` and write output to `.verify-result.txt`. Use when agent terminal capture fails; read that file for verification evidence. |

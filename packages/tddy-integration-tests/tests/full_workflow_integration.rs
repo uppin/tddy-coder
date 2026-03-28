@@ -9,7 +9,7 @@ mod common;
 
 use common::{
     ctx_acceptance_tests, ctx_green, ctx_plan, ctx_red, run_goal_until_done, run_plan,
-    session_dir_for_input, temp_dir_with_git_repo, write_changeset_with_state,
+    session_dir_for_new_session, temp_dir_with_git_repo, write_changeset_with_state,
 };
 use std::sync::Arc;
 use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
@@ -34,7 +34,7 @@ const EVALUATE_OUTPUT_CHAIN: &str = r#"{"goal":"evaluate-changes","summary":"Eva
 /// Now expects ElicitationNeeded after plan, then resume completes the rest.
 #[tokio::test]
 async fn full_workflow_chains_all_steps() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("full-workflow-chain", "Build auth");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("full-workflow-chain");
     let init_cs = Changeset {
         initial_prompt: Some("Build auth".to_string()),
         ..Changeset::default()
@@ -58,7 +58,13 @@ async fn full_workflow_chains_all_steps() {
         storage_dir.clone(),
     );
 
-    let ctx = ctx_plan("Build auth", output_dir.clone(), None, None);
+    let ctx = ctx_plan(
+        "Build auth",
+        output_dir.clone(),
+        session_dir.clone(),
+        None,
+        None,
+    );
     let plan_gid = GoalId::new("plan");
     let result = engine.run_workflow_from(&plan_gid, ctx).await.unwrap();
 
@@ -95,7 +101,7 @@ async fn full_workflow_chains_all_steps() {
 /// StubBackend always asks clarification (plan) and permission (acceptance-tests).
 #[tokio::test]
 async fn full_workflow_with_stub_backend_reaches_green_complete() {
-    let (output_dir, _) = temp_dir_with_git_repo("full-workflow-stub", "Add a feature");
+    let (output_dir, _) = temp_dir_with_git_repo("full-workflow-stub");
 
     let backend = Arc::new(StubBackend::new());
     let storage_dir = std::env::temp_dir().join("tddy-full-stub-engine");
@@ -194,7 +200,7 @@ fn next_goal_for_state_maps_states_correctly() {
 /// Resume from Planned: skip plan, run acceptance-tests -> red -> green -> evaluate -> validate -> refactor.
 #[tokio::test]
 async fn full_workflow_resume_from_planned() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("full-resume-planned", "Build auth");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("full-resume-planned");
     std::fs::write(
         session_dir.join("PRD.md"),
         "# PRD\n## Testing Plan\n\n## TODO\n\n- [ ] Task 1",
@@ -293,7 +299,7 @@ const DEMO_OUTPUT: &str = r#"{"goal":"demo","summary":"Demo ran successfully. CL
 /// AC1, AC7: Full workflow chains plan → acceptance-tests → red → green → demo → evaluate → validate → refactor
 #[tokio::test]
 async fn full_workflow_includes_demo_and_evaluate() {
-    let (output_dir, _) = temp_dir_with_git_repo("full-wf-demo-evaluate", "Build auth");
+    let (output_dir, _) = temp_dir_with_git_repo("full-wf-demo-evaluate");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
@@ -341,7 +347,7 @@ async fn full_workflow_includes_demo_and_evaluate() {
 /// AC2, AC3: Full workflow where demo is skipped proceeds green → evaluate → validate → refactor → update-docs.
 #[tokio::test]
 async fn full_workflow_skip_demo_goes_to_evaluate() {
-    let (output_dir, _) = temp_dir_with_git_repo("full-wf-skip-demo", "Build auth");
+    let (output_dir, _) = temp_dir_with_git_repo("full-wf-skip-demo");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
@@ -454,7 +460,7 @@ fn next_goal_docs_updated_returns_none() {
 /// With hook-triggered elicitation: plan returns ElicitationNeeded, then resume completes.
 #[tokio::test]
 async fn plain_full_workflow_uses_single_workflow_instance() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("single-instance-test", "Build auth");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("single-instance-test");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
@@ -485,7 +491,13 @@ async fn plain_full_workflow_uses_single_workflow_instance() {
     )
     .expect("write demo-plan.md");
 
-    let mut ctx = ctx_plan("Build auth", output_dir.clone(), None, None);
+    let mut ctx = ctx_plan(
+        "Build auth",
+        output_dir.clone(),
+        session_dir.clone(),
+        None,
+        None,
+    );
     ctx.insert("run_demo".to_string(), serde_json::json!(true));
     let plan_gid = GoalId::new("plan");
     let result = engine.run_workflow_from(&plan_gid, ctx).await.unwrap();
@@ -536,7 +548,7 @@ const UPDATE_DOCS_OUTPUT: &str =
 /// Phase 5 / PRD R7: Full workflow chains all 9 steps (plan through update-docs).
 #[tokio::test]
 async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
-    let (output_dir, _) = temp_dir_with_git_repo("full-wf-8-steps", "Build auth");
+    let (output_dir, _) = temp_dir_with_git_repo("full-wf-8-steps");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);
@@ -702,7 +714,7 @@ async fn full_workflow_returns_elicitation_needed_after_plan() {
     let output_dir = std::env::temp_dir().join("tddy-full-wf-elicit");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
-    let session_dir = session_dir_for_input(&output_dir, "Build auth");
+    let session_dir = session_dir_for_new_session();
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
     let init_cs = Changeset {
         initial_prompt: Some("Build auth".to_string()),
@@ -717,7 +729,13 @@ async fn full_workflow_returns_elicitation_needed_after_plan() {
     let _ = std::fs::remove_dir_all(&storage_dir);
     let engine = common::tdd_engine(SharedBackend::from_arc(backend), storage_dir.clone());
 
-    let ctx = ctx_plan("Build auth", output_dir.clone(), None, None);
+    let ctx = ctx_plan(
+        "Build auth",
+        output_dir.clone(),
+        session_dir.clone(),
+        None,
+        None,
+    );
     let plan_gid = GoalId::new("plan");
     let result = engine.run_workflow_from(&plan_gid, ctx).await.unwrap();
 
@@ -745,7 +763,7 @@ async fn full_workflow_returns_elicitation_needed_after_plan() {
 /// Full workflow: after ElicitationNeeded, caller can resume and workflow continues.
 #[tokio::test]
 async fn full_workflow_resumes_after_elicitation_approval() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("full-wf-elicit-resume", "Build auth");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("full-wf-elicit-resume");
     let init_cs = Changeset {
         initial_prompt: Some("Build auth".to_string()),
         ..Changeset::default()
@@ -769,7 +787,13 @@ async fn full_workflow_resumes_after_elicitation_approval() {
         storage_dir.clone(),
     );
 
-    let ctx = ctx_plan("Build auth", output_dir.clone(), None, None);
+    let ctx = ctx_plan(
+        "Build auth",
+        output_dir.clone(),
+        session_dir.clone(),
+        None,
+        None,
+    );
     let plan_gid = GoalId::new("plan");
     let result = engine.run_workflow_from(&plan_gid, ctx).await.unwrap();
     assert!(
@@ -804,7 +828,7 @@ async fn full_workflow_resumes_after_elicitation_approval() {
 /// Phase 5: Full workflow with skipped demo still includes validate, refactor, and update-docs.
 #[tokio::test]
 async fn full_workflow_skip_demo_includes_validate_and_refactor() {
-    let (output_dir, _) = temp_dir_with_git_repo("full-wf-skip-demo-8", "Build auth");
+    let (output_dir, _) = temp_dir_with_git_repo("full-wf-skip-demo-8");
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);

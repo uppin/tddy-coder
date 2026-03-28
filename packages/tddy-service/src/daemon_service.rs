@@ -12,6 +12,7 @@ use tonic::{Request, Response, Status};
 use tddy_core::output::create_session_dir_under;
 use tddy_core::read_changeset;
 use tddy_core::workflow::graph::{ElicitationEvent, ExecutionStatus};
+use tddy_core::workflow::session::workflow_engine_storage_dir;
 use tddy_core::{setup_worktree_for_session, SharedBackend, WorkflowEngine, WorkflowRecipe};
 use tddy_workflow_recipes::{parse_planning_response_with_base, PlanningOutput};
 use tddy_workflow_recipes::{TddRecipe, TddWorkflowHooks};
@@ -26,7 +27,6 @@ use crate::gen::{
 // --- Constants ---
 
 const STREAM_CHANNEL_CAPACITY: usize = 64;
-const DAEMON_SESSION_TEMP_DIR: &str = "tddy-daemon-session";
 const DEFAULT_BRANCH_SUGGESTION: &str = "feature/impl";
 const DEFAULT_WORKTREE_SUGGESTION: &str = "feature-impl";
 const CTX_FEATURE_INPUT: &str = "feature_input";
@@ -87,6 +87,20 @@ fn spawn_event_forwarder(
             }
         }
     });
+}
+
+/// Validates `StartSession.repo_root` for the TddyRemote bidirectional stream.
+/// Must be non-empty after trim (absolute path to the git repository root).
+pub(crate) fn resolve_start_session_repo(repo_root: &str) -> Result<PathBuf, String> {
+    let t = repo_root.trim();
+    if t.is_empty() {
+        return Err(
+            "StartSession.repo_root is required: set the absolute path to the git repository root \
+             (the project directory, same as used for tddy-coder --daemon cwd / .session.yaml repo_path)"
+                .to_string(),
+        );
+    }
+    Ok(PathBuf::from(t))
 }
 
 /// Daemon gRPC service. Reads session state from disk; runs workflow on Stream.
@@ -294,17 +308,19 @@ impl DaemonStreamHandler {
     /// Returns true if the run loop should break (e.g. on Error).
     async fn handle_start_session(&mut self, start: &crate::gen::StartSession) -> bool {
         let prompt = start.prompt.clone();
-        let repo = if start.repo_root.is_empty() {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        } else {
-            PathBuf::from(&start.repo_root)
+        let repo = match resolve_start_session_repo(&start.repo_root) {
+            Ok(p) => p,
+            Err(e) => {
+                send_workflow_complete(&self.tx, false, e).await;
+                return true;
+            }
         };
 
         std::fs::create_dir_all(&self.sessions_base)
             .map_err(|e| Status::internal(format!("create sessions base: {}", e)))
             .ok();
 
-        let sid = uuid::Uuid::new_v4().to_string();
+        let sid = uuid::Uuid::now_v7().to_string();
         let plan = create_session_dir_under(&self.sessions_base, &sid)
             .map_err(|e| Status::internal(format!("create session dir: {}", e)))
             .unwrap();
@@ -319,8 +335,12 @@ impl DaemonStreamHandler {
         self.session_dir = Some(plan.clone());
         self.repo_root = Some(repo.clone());
 
-        let storage_dir = std::env::temp_dir().join(DAEMON_SESSION_TEMP_DIR);
-        std::fs::create_dir_all(&storage_dir).ok();
+        let workflow_storage = workflow_engine_storage_dir(&plan);
+        if let Err(e) = std::fs::create_dir_all(&workflow_storage) {
+            send_workflow_complete(&self.tx, false, format!("create workflow storage: {}", e))
+                .await;
+            return true;
+        }
 
         let (event_tx, rx) = mpsc::channel();
         spawn_event_forwarder(rx, self.tx.clone());
@@ -331,7 +351,7 @@ impl DaemonStreamHandler {
         let eng = WorkflowEngine::new(
             self.workflow_recipe.clone(),
             self.backend.clone(),
-            storage_dir,
+            workflow_storage,
             Some(hooks),
         );
         self.engine = Some(eng);
@@ -514,5 +534,26 @@ impl DaemonStreamHandler {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod start_session_repo_tests {
+    use super::resolve_start_session_repo;
+    use std::path::PathBuf;
+
+    #[test]
+    fn empty_repo_root_is_rejected() {
+        assert!(resolve_start_session_repo("").is_err());
+        assert!(resolve_start_session_repo("   ").is_err());
+    }
+
+    #[test]
+    fn non_empty_repo_root_is_accepted() {
+        let p = PathBuf::from("/tmp/tddy-test-repo-root");
+        assert_eq!(
+            resolve_start_session_repo("/tmp/tddy-test-repo-root").unwrap(),
+            p
+        );
     }
 }
