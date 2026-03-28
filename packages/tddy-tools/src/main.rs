@@ -34,10 +34,16 @@ enum Subcommand {
 
     /// Output JSON schema for a goal. Use -o to write to file.
     GetSchema(cli::GetSchemaArgs),
+
+    /// List registered workflow goals (JSON on stdout).
+    ListSchemas(cli::ListSchemasArgs),
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
+        .try_init();
+
     let args = Args::parse();
 
     if args.mcp {
@@ -45,14 +51,16 @@ async fn main() -> Result<()> {
     }
 
     match args.subcommand {
-        Some(Subcommand::Submit(s)) => cli::run_submit(s),
-        Some(Subcommand::Ask(s)) => cli::run_ask(s),
-        Some(Subcommand::GetSchema(s)) => cli::run_get_schema(s),
+        Some(Subcommand::Submit(s)) => cli::run_submit(s)?,
+        Some(Subcommand::Ask(s)) => cli::run_ask(s)?,
+        Some(Subcommand::GetSchema(s)) => cli::run_get_schema(s)?,
+        Some(Subcommand::ListSchemas(s)) => cli::run_list_schemas(s)?,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);
         }
     }
+    Ok(())
 }
 
 async fn run_mcp_server() -> Result<()> {

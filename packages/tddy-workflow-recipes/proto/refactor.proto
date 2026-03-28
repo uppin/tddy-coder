@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Refactor goal output. JSON Schema: refactor.schema.json.
+message RefactorOutput {
+  string goal = 1;
+  string summary = 2;
+}

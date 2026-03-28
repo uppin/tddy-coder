@@ -188,6 +188,98 @@ fn test_prepend_context_header_includes_repo_dir() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// setup_worktree_for_session retries with suffixed branch/worktree names when branch exists.
+#[test]
+fn test_setup_worktree_retries_with_suffix_when_branch_exists() {
+    let base = temp_dir("retry-suffix");
+    let repo = base.join("repo");
+    fs::create_dir_all(&repo).unwrap();
+
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["config", "user.email", "test@test.com"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["config", "user.name", "Test"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    fs::write(repo.join("README"), "initial").unwrap();
+    std::process::Command::new("git")
+        .args(["add", "README"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["branch", "-M", "master"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["remote", "add", "origin", repo.to_str().unwrap()])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["push", "-u", "origin", "master"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+
+    // Pre-create the branch so it conflicts with the worktree suggestion
+    std::process::Command::new("git")
+        .args(["branch", "feature/auth"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+
+    let session_dir = base.join("plan");
+    fs::create_dir_all(&session_dir).unwrap();
+    let cs = Changeset {
+        name: Some("Auth Feature".to_string()),
+        initial_prompt: Some("add auth".to_string()),
+        state: ChangesetState {
+            current: WorkflowState::new("Planned"),
+            ..Changeset::default().state
+        },
+        branch_suggestion: Some("feature/auth".to_string()),
+        worktree_suggestion: Some("feature-auth".to_string()),
+        ..Changeset::default()
+    };
+    write_changeset(&session_dir, &cs).unwrap();
+    fs::write(session_dir.join("PRD.md"), "# PRD\n## TODO\n- [ ] Do").unwrap();
+
+    let result = setup_worktree_for_session(&repo, &session_dir);
+    assert!(
+        result.is_ok(),
+        "setup_worktree_for_session should retry with a suffix when branch exists, got: {:?}",
+        result.err()
+    );
+    let worktree_path = result.unwrap();
+    assert!(worktree_path.exists());
+
+    let cs_after = read_changeset(&session_dir).unwrap();
+    let branch = cs_after.branch.as_deref().unwrap();
+    assert!(
+        branch.starts_with("feature/auth-"),
+        "branch should have a numeric suffix, got: {}",
+        branch
+    );
+
+    let _ = fs::remove_dir_all(&base);
+}
+
 /// create_worktree with start_point creates branch from origin/master.
 #[test]
 fn test_create_worktree_with_start_point_uses_origin_master() {

@@ -73,6 +73,37 @@ pub fn create_worktree(
     Ok(worktree_path.canonicalize().unwrap_or(worktree_path))
 }
 
+const MAX_WORKTREE_RETRIES: u32 = 20;
+
+/// Try `create_worktree`; on "branch ... already exists" retry with `-1`, `-2`, etc.
+/// Returns `(worktree_path, actual_branch_name)`.
+fn create_worktree_with_retry(
+    repo_root: &Path,
+    name: &str,
+    branch: &str,
+    start_point: Option<&str>,
+) -> Result<(PathBuf, String), String> {
+    match create_worktree(repo_root, name, branch, start_point) {
+        Ok(path) => return Ok((path, branch.to_string())),
+        Err(e) if e.contains("already exists") => {
+            log::debug!("worktree branch {branch:?} exists, retrying with suffix");
+        }
+        Err(e) => return Err(e),
+    }
+    for i in 1..=MAX_WORKTREE_RETRIES {
+        let suffixed_branch = format!("{branch}-{i}");
+        let suffixed_name = format!("{name}-{i}");
+        match create_worktree(repo_root, &suffixed_name, &suffixed_branch, start_point) {
+            Ok(path) => return Ok((path, suffixed_branch)),
+            Err(e) if e.contains("already exists") => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(format!(
+        "exhausted {MAX_WORKTREE_RETRIES} retries for branch {branch:?}"
+    ))
+}
+
 /// Create worktree for a session from origin/master. Fetches first, then creates,
 /// updates changeset with worktree, branch, repo_path. Returns the worktree path.
 pub fn setup_worktree_for_session(repo_root: &Path, session_dir: &Path) -> Result<PathBuf, String> {
@@ -96,10 +127,12 @@ pub fn setup_worktree_for_session(repo_root: &Path, session_dir: &Path) -> Resul
         .ok_or("no worktree suggestion or name for worktree")?;
 
     fetch_origin_master(repo_root)?;
-    let worktree_path = create_worktree(repo_root, &worktree_name, &branch, Some("origin/master"))?;
+
+    let (worktree_path, actual_branch) =
+        create_worktree_with_retry(repo_root, &worktree_name, &branch, Some("origin/master"))?;
 
     cs.worktree = Some(worktree_path.to_string_lossy().to_string());
-    cs.branch = Some(branch);
+    cs.branch = Some(actual_branch);
     cs.repo_path = Some(worktree_path.to_string_lossy().to_string());
     write_changeset(session_dir, &cs).map_err(|e| e.to_string())?;
 

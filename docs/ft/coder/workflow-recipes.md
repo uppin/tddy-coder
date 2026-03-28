@@ -31,8 +31,13 @@ The default recipe is **`TddRecipe`** (plan → acceptance-tests → red → gre
 | **`tddy-workflow-recipes`** | Concrete recipes (`TddRecipe`, `BugfixRecipe`), hooks moved from TDD-specific core modules. |
 | **`tddy-coder`**, **`tddy-service`**, **`tddy-daemon`**, **`tddy-demo`** | Construct or default to `TddRecipe` (or configured recipe). |
 
+## Structured output contracts
+
+JSON Schemas for workflow goals (`plan`, `red`, `green`, etc.) live in **`tddy-workflow-recipes`**; **`tddy-tools`** embeds them for `get-schema`, `list-schemas`, and `submit` validation. See [Workflow JSON Schemas](workflow-json-schemas.md) for the registry (`goals.json`), CLI behavior, and links to package-level technical notes.
+
 ## Related
 
 - [Coder overview](1-OVERVIEW.md) — capabilities and integration points  
+- [Workflow JSON Schemas](workflow-json-schemas.md) — schema ownership, `tddy-tools` CLI, `goals.json`  
 - [Planning step](planning-step.md), [Implementation step](implementation-step.md) — goal-level behavior (TDD recipe)  
 - [gRPC remote control](grpc-remote-control.md) — string goals/states in RPC  

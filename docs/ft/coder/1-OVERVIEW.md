@@ -45,6 +45,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 
 | Feature | Description |
 |---------|-------------|
+| [Workflow JSON Schemas](workflow-json-schemas.md) | JSON Schema contracts per goal; `goals.json` registry; `tddy-tools` `get-schema`, `list-schemas`, `submit` validation |
 | [Workflow recipes](workflow-recipes.md) | Pluggable `WorkflowRecipe`; `TddRecipe` (default TDD pipeline); `BugfixRecipe` stub; `GoalId` / string states |
 | [Planning Step](planning-step.md) | Plan goal, acceptance-tests goal, plan approval gate, CLI interface, LLM backend abstraction |
 | [Implementation Step](implementation-step.md) | Red, green, demo, evaluate goals; state machine; output artifacts |

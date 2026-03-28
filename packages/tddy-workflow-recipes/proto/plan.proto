@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Structured output for the plan goal. JSON Schema: plan.schema.json (generated artifact).
+message PlanOutput {
+  string goal = 1;
+  string prd = 2;
+  optional string name = 3;
+}
