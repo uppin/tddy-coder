@@ -8,6 +8,10 @@ import {
 } from "tddy-livekit-web";
 import { create } from "@bufbuild/protobuf";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
+import {
+  handleTerminateOverlayClick,
+  notifyRemoteSessionEnded,
+} from "../lib/ghosttyTerminalSessionHandlers";
 
 /** Overlay buttons for live sessions: must sit above the canvas (z-index, DOM order) and enqueue bytes via the same path as Ghostty `onData`. */
 const CONNECTION_OVERLAY_BTN: React.CSSProperties = {
@@ -74,8 +78,19 @@ export interface GhosttyTerminalLiveKitProps {
   /** When set, show Disconnect + Ctrl+C above the terminal; they enqueue bytes on the same RPC path as keyboard input. */
   connectionOverlay?: {
     onDisconnect: () => void;
+    /** Terminate (SIGINT) via Connection RPC; parent calls signalSession. */
+    onTerminate?: () => void;
     buildId?: string;
   };
+  /** Called when the remote coder/server session ends (e.g. server participant left). Parent should clear connected state. */
+  onRemoteSessionEnded?: () => void;
+  /** Current session id for signalSession(SIGINT); threaded from ConnectionScreen. */
+  activeSessionId?: string;
+  /**
+   * After this many milliseconds, simulates the server/coder leaving (sets session inactive). For Storybook /
+   * component tests only; do not set in the production app shell.
+   */
+  simulateRemoteDisconnectAfterMs?: number;
   /** When false, do not auto-focus terminal on ready (e.g. for mobile to avoid opening keyboard). Default true. */
   autoFocus?: boolean;
   /** When true, prevent terminal from receiving focus on pointer/touch (e.g. mobile when keyboard closed). */
@@ -101,6 +116,9 @@ export function GhosttyTerminalLiveKit({
   showMobileKeyboard = false,
   serverIdentity = "server",
   connectionOverlay,
+  onRemoteSessionEnded,
+  activeSessionId,
+  simulateRemoteDisconnectAfterMs,
 }: GhosttyTerminalLiveKitProps) {
   const log = debugLogging
     ? (...args: unknown[]) => console.log("[GhosttyLiveKit]", ...args)
@@ -124,6 +142,31 @@ export function GhosttyTerminalLiveKit({
   const [highlightedLine, setHighlightedLine] = useState("");
   const [coderSessionActive, setCoderSessionActive] = useState(true);
   const coderAvailableRef = useRef(true);
+  const remoteEndedNotifiedRef = useRef(false);
+
+  useEffect(() => {
+    if (!coderSessionActive && onRemoteSessionEnded && !remoteEndedNotifiedRef.current) {
+      remoteEndedNotifiedRef.current = true;
+      console.info("[GhosttyTerminalLiveKit] coder session inactive → onRemoteSessionEnded", {
+        activeSessionId,
+      });
+      notifyRemoteSessionEnded(onRemoteSessionEnded);
+    }
+  }, [coderSessionActive, onRemoteSessionEnded, activeSessionId]);
+
+  useEffect(() => {
+    if (simulateRemoteDisconnectAfterMs === undefined) return;
+    console.debug(
+      "[GhosttyTerminalLiveKit] simulateRemoteDisconnectAfterMs scheduled",
+      simulateRemoteDisconnectAfterMs,
+    );
+    const t = window.setTimeout(() => {
+      console.info("[GhosttyTerminalLiveKit] simulated server disconnect (component test / Storybook only)");
+      coderAvailableRef.current = false;
+      setCoderSessionActive(false);
+    }, simulateRemoteDisconnectAfterMs);
+    return () => window.clearTimeout(t);
+  }, [simulateRemoteDisconnectAfterMs]);
 
   useEffect(() => {
     let room: Room | null = null;
@@ -132,6 +175,7 @@ export function GhosttyTerminalLiveKit({
 
     const run = async () => {
       try {
+        remoteEndedNotifiedRef.current = false;
         coderAvailableRef.current = true;
         setCoderSessionActive(true);
 
@@ -198,6 +242,11 @@ export function GhosttyTerminalLiveKit({
           console.log("[LiveKit] ParticipantDisconnected", participant.identity);
           if (participant.identity !== serverIdentity) return;
           if (cancelled) return;
+          console.debug("[GhosttyTerminalLiveKit] server participant disconnected", {
+            serverIdentity,
+            participantIdentity: participant.identity,
+            activeSessionId,
+          });
           console.warn(
             "[GhosttyTerminalLiveKit] server participant disconnected — terminal session marked inactive",
             { serverIdentity, participantIdentity: participant.identity },
@@ -356,7 +405,18 @@ export function GhosttyTerminalLiveKit({
       if (bufferInterval) clearInterval(bufferInterval);
       if (room) room.disconnect();
     };
-  }, [url, token, getToken, ttlSecondsProp, roomName, serverIdentity, showBufferTextForTest, debugMode, debugLogging]);
+  }, [
+    url,
+    token,
+    getToken,
+    ttlSecondsProp,
+    roomName,
+    serverIdentity,
+    showBufferTextForTest,
+    debugMode,
+    debugLogging,
+    onRemoteSessionEnded,
+  ]);
 
   useEffect(() => {
     if (onRegisterFocus) {
@@ -381,12 +441,12 @@ export function GhosttyTerminalLiveKit({
     zIndex: 10,
   };
 
-  /** Single path to the LiveKit input stream (same queue as Ghostty `onData`). Always logs `[terminal→server]` like keyboard. */
+  /** Single path to the LiveKit input stream (same queue as Ghostty `onData`). When debugLogging, logs `[terminal→server]` like keyboard. */
   const enqueueTerminalInput = (encoded: Uint8Array) => {
     if (!coderAvailableRef.current) return;
     inputQueueRef.current.push(encoded);
     const keyName = describeKey(encoded);
-    console.log("[terminal→server]", keyName, `(${encoded.length} bytes)`, Array.from(encoded));
+    log("dataflow: [terminal→server]", keyName, `(${encoded.length} bytes)`, Array.from(encoded));
   };
 
   const pushInput = (data: string | Uint8Array) => {
@@ -519,30 +579,6 @@ export function GhosttyTerminalLiveKit({
         )}
         {connectionOverlay && (
           <>
-            <button
-              type="button"
-              data-testid="ctrl-c-button"
-              style={{ ...CONNECTION_OVERLAY_BTN, right: 72 }}
-              onClick={(ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                enqueueTerminalInput(new Uint8Array([0x03]));
-              }}
-            >
-              Ctrl+C
-            </button>
-            <button
-              type="button"
-              data-testid="disconnect-button"
-              style={{ ...CONNECTION_OVERLAY_BTN, right: 8 }}
-              onClick={(ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                connectionOverlay.onDisconnect();
-              }}
-            >
-              Disconnect
-            </button>
             {connectionOverlay.buildId !== undefined && (
               <span
                 data-testid="build-id"
@@ -558,6 +594,60 @@ export function GhosttyTerminalLiveKit({
                 {connectionOverlay.buildId}
               </span>
             )}
+            <div
+              style={{
+                position: "absolute",
+                top: 8,
+                right: 8,
+                display: "flex",
+                flexDirection: "row",
+                gap: 8,
+                zIndex: 100,
+                pointerEvents: "auto",
+              }}
+            >
+              <button
+                type="button"
+                data-testid="ctrl-c-button"
+                style={{ ...CONNECTION_OVERLAY_BTN, position: "relative", top: 0, right: 0 }}
+                onClick={(ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  enqueueTerminalInput(new Uint8Array([0x03]));
+                }}
+              >
+                Ctrl+C
+              </button>
+              {connectionOverlay.onTerminate !== undefined && (
+                <button
+                  type="button"
+                  data-testid="terminal-overlay-terminate"
+                  style={{ ...CONNECTION_OVERLAY_BTN, position: "relative", top: 0, right: 0 }}
+                  onClick={(ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    console.debug("[GhosttyTerminalLiveKit] Terminate overlay click", {
+                      activeSessionId,
+                    });
+                    handleTerminateOverlayClick(connectionOverlay.onTerminate);
+                  }}
+                >
+                  Terminate
+                </button>
+              )}
+              <button
+                type="button"
+                data-testid="disconnect-button"
+                style={{ ...CONNECTION_OVERLAY_BTN, position: "relative", top: 0, right: 0 }}
+                onClick={(ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  connectionOverlay.onDisconnect();
+                }}
+              >
+                Disconnect
+              </button>
+            </div>
           </>
         )}
       </div>

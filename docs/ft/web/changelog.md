@@ -2,6 +2,14 @@
 
 Release note history for the Web product area.
 
+## 2026-03-28 — Browser terminal: Terminate (SIGINT) and return to Connection screen
+
+- **GhosttyTerminalLiveKit**: Full-screen overlay includes **Terminate** beside **Ctrl+C** and **Disconnect** when the parent passes **`connectionOverlay.onTerminate`**. The control uses **`data-testid="terminal-overlay-terminate"`**. **ConnectionScreen** wires **`onTerminate`** to **`signalSession(..., SIGINT)`** using **`sessionId`** on **`connected`** state (start, connect, resume paths).
+- **Remote session end**: After the LiveKit server participant leaves, the existing **`terminal-coder-unavailable`** state applies; **`onRemoteSessionEnded`** runs once so **ConnectionScreen** clears **`connected`** and shows the session list without an extra **Disconnect** past the session-ended overlay.
+- **RPC errors in full-screen**: Failed **signalSession** (and other connection RPC errors while connected) appear in a top banner with **`data-testid="connection-error"`** and a dismiss control.
+- **Helpers**: **`handleTerminateOverlayClick`** and **`notifyRemoteSessionEnded`** live in **`packages/tddy-web/src/lib/ghosttyTerminalSessionHandlers.ts`**; **Bun** and **Cypress** component tests cover the overlay and parent wiring.
+- **Feature doc**: [web-terminal.md](web-terminal.md) (Connected Terminal UX; Session end and return to Connection screen; Daemon mode: **`sessionId`** on connected state).
+
 ## 2026-03-28 — Connection screen: host selection (eligible daemons)
 
 - **ConnectionService**: **`ListEligibleDaemons`** lists daemon instances for the Host dropdown; **`StartSession`** and **`SessionEntry`** carry **`daemon_instance_id`**.

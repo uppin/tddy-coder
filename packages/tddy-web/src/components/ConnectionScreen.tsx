@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
@@ -294,14 +294,27 @@ function ConnectedTerminal({
   identity,
   serverIdentity,
   debugLogging,
+  sessionId,
+  connectionRpcError,
+  onDismissConnectionRpcError,
   onDisconnect,
+  onRemoteSessionEnded,
+  onTerminate,
 }: {
   livekitUrl: string;
   roomName: string;
   identity: string;
   serverIdentity: string;
   debugLogging?: boolean;
+  /** Active Connection RPC session id (start / connect / resume). */
+  sessionId: string;
+  /** Connection RPC errors (e.g. signalSession) while full-screen; same banner semantics as session list. */
+  connectionRpcError: string | null;
+  onDismissConnectionRpcError: () => void;
   onDisconnect: () => void;
+  onRemoteSessionEnded: () => void;
+  /** Sends SIGINT via Connection RPC (same as session table Interrupt). */
+  onTerminate: () => void | Promise<void>;
 }) {
   const tokenClient = useMemo(() => createTokenClient(), []);
   const [initialToken, setInitialToken] = useState<string | null>(null);
@@ -366,20 +379,65 @@ function ConnectedTerminal({
         flexDirection: "column",
       }}
     >
-      <GhosttyTerminalLiveKit
-        url={livekitUrl}
-        token={initialToken}
-        getToken={getToken}
-        ttlSeconds={ttlSeconds}
-        roomName={roomName}
-        serverIdentity={serverIdentity}
-        debugMode={false}
-        debugLogging={debugLogging ?? false}
-        autoFocus={!isMobile}
-        preventFocusOnTap={isMobile && !isKeyboardOpen}
-        showMobileKeyboard={isMobile}
-        connectionOverlay={{ onDisconnect, buildId: BUILD_ID }}
-      />
+      {connectionRpcError ? (
+        <div
+          role="alert"
+          data-testid="connection-error"
+          style={{
+            flexShrink: 0,
+            padding: "8px 12px",
+            backgroundColor: "rgba(60, 20, 20, 0.95)",
+            color: "#f8b4b4",
+            fontSize: 13,
+            borderBottom: "1px solid #800",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <span style={{ flex: 1 }}>{connectionRpcError}</span>
+          <button
+            type="button"
+            data-testid="connected-terminal-dismiss-rpc-error"
+            onClick={onDismissConnectionRpcError}
+            style={{
+              flexShrink: 0,
+              padding: "4px 10px",
+              fontSize: 12,
+              cursor: "pointer",
+              background: "#5a2020",
+              color: "#eee",
+              border: "1px solid #a44",
+              borderRadius: 4,
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <GhosttyTerminalLiveKit
+          url={livekitUrl}
+          token={initialToken}
+          getToken={getToken}
+          ttlSeconds={ttlSeconds}
+          roomName={roomName}
+          serverIdentity={serverIdentity}
+          activeSessionId={sessionId}
+          onRemoteSessionEnded={onRemoteSessionEnded}
+          debugMode={false}
+          debugLogging={debugLogging ?? false}
+          autoFocus={!isMobile}
+          preventFocusOnTap={isMobile && !isKeyboardOpen}
+          showMobileKeyboard={isMobile}
+          connectionOverlay={{
+            onDisconnect,
+            onTerminate,
+            buildId: BUILD_ID,
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -410,6 +468,7 @@ export function ConnectionScreen({
     identity: string;
     serverIdentity: string;
     debugLogging: boolean;
+    sessionId: string;
   } | null>(null);
   const client = useMemo(() => createConnectionClient(), []);
 
@@ -537,6 +596,7 @@ export function ConnectionScreen({
         identity: `browser-${res.sessionId}-${Date.now()}`,
         serverIdentity: res.livekitServerIdentity,
         debugLogging: form.debugLogging,
+        sessionId: res.sessionId,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start session");
@@ -575,6 +635,7 @@ export function ConnectionScreen({
         identity: `browser-${sessionId}-${Date.now()}`,
         serverIdentity: res.livekitServerIdentity,
         debugLogging: debugForSessionId(sessionId),
+        sessionId,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect to session");
@@ -592,6 +653,7 @@ export function ConnectionScreen({
         identity: `browser-${res.sessionId}-${Date.now()}`,
         serverIdentity: res.livekitServerIdentity,
         debugLogging: debugForSessionId(sessionId),
+        sessionId: res.sessionId,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to resume session");
@@ -607,6 +669,28 @@ export function ConnectionScreen({
       setError(e instanceof Error ? e.message : "Failed to send signal");
     }
   };
+
+  const exitTerminalToConnectionScreen = useCallback(() => {
+    setConnected(null);
+  }, []);
+
+  const sendSigintToConnectedSession = useCallback(async () => {
+    if (!sessionToken || !connected) return;
+    setError(null);
+    try {
+      await client.signalSession({
+        sessionToken,
+        sessionId: connected.sessionId,
+        signal: Signal.SIGINT,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to send signal");
+    }
+  }, [sessionToken, connected, client]);
+
+  const clearConnectionError = useCallback(() => {
+    setError(null);
+  }, []);
 
   const handleDeleteSession = async (sessionId: string) => {
     if (!sessionToken) return;
@@ -631,7 +715,12 @@ export function ConnectionScreen({
         identity={connected.identity}
         serverIdentity={connected.serverIdentity}
         debugLogging={connected.debugLogging}
-        onDisconnect={() => setConnected(null)}
+        sessionId={connected.sessionId}
+        connectionRpcError={error}
+        onDismissConnectionRpcError={clearConnectionError}
+        onDisconnect={exitTerminalToConnectionScreen}
+        onRemoteSessionEnded={exitTerminalToConnectionScreen}
+        onTerminate={sendSigintToConnectedSession}
       />
     );
   }
