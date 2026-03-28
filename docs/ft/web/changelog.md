@@ -2,6 +2,13 @@
 
 Release note history for the Web product area.
 
+## 2026-03-28 — Connection screen: host selection (eligible daemons)
+
+- **ConnectionService**: **`ListEligibleDaemons`** lists daemon instances for the Host dropdown; **`StartSession`** and **`SessionEntry`** carry **`daemon_instance_id`**.
+- **ConnectionScreen**: Per-project **Host** dropdown (populated after auth), **Host** column on project and **Other sessions** tables, **`daemonInstanceId`** passed on **`StartSession`**. Cypress component tests cover dropdown, default local selection, encoded **`StartSession`** body, column display, and single-daemon case.
+- **Deferred**: LiveKit common-room peer discovery and cross-daemon spawn routing remain future work; the daemon rejects non-local **`daemon_instance_id`** until that ships.
+- **Feature doc**: [web-terminal.md](web-terminal.md) (Daemon mode: Connection screen; Eligible daemons and host selection).
+
 ## 2026-03-24 — Connection screen: delete inactive sessions
 
 - **ConnectionScreen**: Inactive session rows include **Resume** and **Delete** (project session tables and **Other sessions**). **Delete** uses a browser **confirm**, invokes **`DeleteSession`**, refreshes the session list after success, and surfaces RPC errors in the shared connection error area. Active rows show **Connect** and **Signal** only.
