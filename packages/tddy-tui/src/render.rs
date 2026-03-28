@@ -106,7 +106,7 @@ fn prompt_text(state: &PresenterState, view_state: &ViewState) -> String {
                 format!("> {}", view_state.text_input)
             }
         }
-        AppMode::PlanReview { .. } => "Up/Down navigate  Enter select".to_string(),
+        AppMode::DocumentReview { .. } => "Up/Down navigate  Enter select".to_string(),
         AppMode::MarkdownViewer { .. } => {
             markdown_viewer_prompt_for_plan_approval(state, view_state)
         }
@@ -205,21 +205,21 @@ pub fn draw(
 
     if activity_log.height > 0 {
         match &state.mode {
-            AppMode::PlanReview { prd_content } => {
+            AppMode::DocumentReview { content } => {
                 const MENU_LINES: u16 = 4;
                 let menu_h = MENU_LINES.min(activity_log.height);
                 let body_h = activity_log.height.saturating_sub(menu_h);
                 if body_h > 0 {
                     let body_area =
                         Rect::new(activity_log.x, activity_log.y, activity_log.width, body_h);
-                    let text = tui_markdown::from_str(prd_content);
+                    let text = tui_markdown::from_str(content);
                     let widget = Paragraph::new(text).scroll((view_state.scroll_offset as u16, 0));
                     frame.render_widget(widget, body_area);
                 }
                 if menu_h > 0 {
                     let menu_y = activity_log.y.saturating_add(body_h);
                     let menu_area = Rect::new(activity_log.x, menu_y, activity_log.width, menu_h);
-                    render_plan_review(frame, state, view_state, menu_area);
+                    render_document_review(frame, state, view_state, menu_area);
                 }
             }
             AppMode::MarkdownViewer { content } => {
@@ -569,7 +569,7 @@ fn render_question(
 }
 
 /// Render plan approval 3-option menu
-fn render_plan_review(
+fn render_document_review(
     frame: &mut Frame,
     _state: &PresenterState,
     view_state: &ViewState,
@@ -592,13 +592,13 @@ fn render_plan_review(
         Style::default().add_modifier(Modifier::BOLD),
     ))];
     for (i, (label, desc)) in options.iter().enumerate() {
-        let prefix = if view_state.plan_review_selected == i {
+        let prefix = if view_state.document_review_selected == i {
             "> "
         } else {
             "  "
         };
         let text = format!("{}{} -- {}", prefix, label, desc);
-        let style = if view_state.plan_review_selected == i {
+        let style = if view_state.document_review_selected == i {
             Style::default().add_modifier(Modifier::REVERSED)
         } else {
             Style::default()
@@ -882,11 +882,11 @@ mod tests {
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
-        let state = make_state(AppMode::PlanReview {
-            prd_content: "# Plan".to_string(),
+        let state = make_state(AppMode::DocumentReview {
+            content: "# Plan".to_string(),
         });
         let mut vs = ViewState::new();
-        vs.plan_review_selected = 1;
+        vs.document_review_selected = 1;
         let mut areas = LayoutAreas {
             activity_log: Rect::default(),
             dynamic_area: Rect::default(),

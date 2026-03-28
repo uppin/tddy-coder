@@ -15,6 +15,7 @@ log = "0.4"
 prost = "0.13"
 serde_json = "1"
 tddy-core = { path = "../tddy-core" }
+tddy-workflow = { path = "../tddy-workflow" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-tui = { path = "../tddy-tui" }

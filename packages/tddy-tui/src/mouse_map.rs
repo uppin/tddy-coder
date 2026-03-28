@@ -128,9 +128,9 @@ fn scroll_dynamic_area(
             view_state.multiselect_cursor = new_idx;
             None
         }
-        AppMode::PlanReview { .. } => {
-            let new_idx = (view_state.plan_review_selected as i32 + delta).clamp(0, 2) as usize;
-            view_state.plan_review_selected = new_idx;
+        AppMode::DocumentReview { .. } => {
+            let new_idx = (view_state.document_review_selected as i32 + delta).clamp(0, 2) as usize;
+            view_state.document_review_selected = new_idx;
             None
         }
         AppMode::ErrorRecovery { .. } => {
@@ -173,7 +173,7 @@ fn click_dynamic_area(
             view_state.select_selected = option_idx;
             None
         }
-        AppMode::PlanReview { .. } => {
+        AppMode::DocumentReview { .. } => {
             let header_lines = 1;
             if row_offset < header_lines {
                 return None;
@@ -182,13 +182,13 @@ fn click_dynamic_area(
             if option_idx > 2 {
                 return None;
             }
-            view_state.plan_review_selected = option_idx;
+            view_state.document_review_selected = option_idx;
             if option_idx == 0 {
-                Some(UserIntent::ViewPlan)
+                Some(UserIntent::ViewSessionDocument)
             } else if option_idx == 1 {
-                Some(UserIntent::ApprovePlan)
+                Some(UserIntent::ApproveSessionDocument)
             } else {
-                Some(UserIntent::RefinePlan)
+                Some(UserIntent::RefineSessionDocument)
             }
         }
         AppMode::ErrorRecovery { .. } => {
@@ -239,19 +239,19 @@ fn plan_approval_activity_footer_click(
         let rel = row.saturating_sub(footer_top);
         if rel == 0 {
             view_state.markdown_end_button_selected = 0;
-            Some(UserIntent::ApprovePlan)
+            Some(UserIntent::ApproveSessionDocument)
         } else {
             view_state.markdown_end_button_selected = 1;
-            Some(UserIntent::RefinePlan)
+            Some(UserIntent::RefineSessionDocument)
         }
     } else {
         let mid = areas.activity_log.x + areas.activity_log.width / 2;
         if col < mid {
             view_state.markdown_end_button_selected = 0;
-            Some(UserIntent::ApprovePlan)
+            Some(UserIntent::ApproveSessionDocument)
         } else {
             view_state.markdown_end_button_selected = 1;
-            Some(UserIntent::RefinePlan)
+            Some(UserIntent::RefineSessionDocument)
         }
     }
 }
@@ -280,12 +280,12 @@ mod tests {
         }
     }
 
-    /// Compute layout the same way draw() does for PlanReview on 80x24.
+    /// Compute layout the same way draw() does for DocumentReview on 80x24.
     /// Ensures tests use the real layout, not a stale fixture.
-    fn areas_from_real_layout_80x24_plan_review() -> LayoutAreas {
+    fn areas_from_real_layout_80x24_document_review() -> LayoutAreas {
         let area = Rect::new(0, 0, 80, 24);
-        let mode = AppMode::PlanReview {
-            prd_content: String::new(),
+        let mode = AppMode::DocumentReview {
+            content: String::new(),
         };
         let dynamic_h = question_height(&mode);
         let debug_h = 0u16;
@@ -326,13 +326,13 @@ mod tests {
         }
     }
 
-    /// Plan approval uses the activity region; the old four-line PlanReview strip is not allocated.
+    /// Plan approval uses the activity region; the old four-line dynamic menu strip is not allocated.
     #[test]
     fn plan_review_real_layout_has_no_dynamic_menu_strip_80x24() {
-        let real = areas_from_real_layout_80x24_plan_review();
+        let real = areas_from_real_layout_80x24_document_review();
         assert_eq!(
             real.dynamic_area.height, 0,
-            "PlanReview must not reserve a separate dynamic strip for View/Approve/Refine"
+            "DocumentReview must not reserve a separate dynamic strip for View/Approve/Refine"
         );
     }
 
@@ -348,15 +348,15 @@ mod tests {
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
         let ev_normalized = normalize_mouse_coords_for_local(ev);
-        let mode = AppMode::PlanReview {
-            prd_content: "plan".to_string(),
+        let mode = AppMode::DocumentReview {
+            content: "plan".to_string(),
         };
         let intent = handle_mouse_event(ev_normalized, &mode, &mut vs, &areas, 0);
         assert_eq!(
-            vs.plan_review_selected, 1,
+            vs.document_review_selected, 1,
             "When terminal sends row 19 for Approve click, must select Approve (off-by-one bug)"
         );
-        assert!(matches!(intent, Some(UserIntent::ApprovePlan)));
+        assert!(matches!(intent, Some(UserIntent::ApproveSessionDocument)));
     }
 
     #[test]
@@ -375,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn click_plan_review_approve_produces_intent() {
+    fn click_document_review_approve_produces_intent() {
         let mut vs = ViewState::new();
         let areas = legacy_plan_review_menu_strip_fixture_80x24();
         // dynamic_area.y=18: row 18=header, 19=View, 20=Approve, 21=Refine
@@ -385,18 +385,18 @@ mod tests {
             row: 20,
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
-        let mode = AppMode::PlanReview {
-            prd_content: "plan".to_string(),
+        let mode = AppMode::DocumentReview {
+            content: "plan".to_string(),
         };
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
-        assert_eq!(vs.plan_review_selected, 1);
-        assert!(matches!(intent, Some(UserIntent::ApprovePlan)));
+        assert_eq!(vs.document_review_selected, 1);
+        assert!(matches!(intent, Some(UserIntent::ApproveSessionDocument)));
     }
 
     #[test]
-    fn scroll_in_dynamic_area_navigates_plan_review() {
+    fn scroll_in_dynamic_area_navigates_document_review() {
         let mut vs = ViewState::new();
-        vs.plan_review_selected = 1;
+        vs.document_review_selected = 1;
         let areas = legacy_plan_review_menu_strip_fixture_80x24();
         let ev = MouseEvent {
             kind: MouseEventKind::ScrollUp,
@@ -404,18 +404,18 @@ mod tests {
             row: 20,
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
-        let mode = AppMode::PlanReview {
-            prd_content: "plan".to_string(),
+        let mode = AppMode::DocumentReview {
+            content: "plan".to_string(),
         };
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
         assert!(intent.is_none());
-        assert_eq!(vs.plan_review_selected, 0);
+        assert_eq!(vs.document_review_selected, 0);
     }
 
     /// Regression: mouse click must select the option at the clicked row, not 1 line above.
     /// dynamic_area.y=18: row 18=header, 19=View, 20=Approve, 21=Refine.
     #[test]
-    fn click_plan_review_refine_selects_refine_not_approve() {
+    fn click_document_review_refine_selects_refine_not_approve() {
         let mut vs = ViewState::new();
         let areas = legacy_plan_review_menu_strip_fixture_80x24();
         let ev = MouseEvent {
@@ -424,23 +424,23 @@ mod tests {
             row: 21,
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
-        let mode = AppMode::PlanReview {
-            prd_content: "plan".to_string(),
+        let mode = AppMode::DocumentReview {
+            content: "plan".to_string(),
         };
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
         assert_eq!(
-            vs.plan_review_selected, 2,
+            vs.document_review_selected, 2,
             "clicking Refine row (21) must select option 2, not option 1 (off-by-one bug)"
         );
         assert!(
-            matches!(intent, Some(UserIntent::RefinePlan)),
-            "clicking Refine row must produce RefinePlan intent, not ApprovePlan"
+            matches!(intent, Some(UserIntent::RefineSessionDocument)),
+            "clicking Refine row must produce RefineSessionDocument intent, not ApproveSessionDocument"
         );
     }
 
     /// Regression: click on View (first option) must select View.
     #[test]
-    fn click_plan_review_view_selects_view() {
+    fn click_document_review_view_selects_view() {
         let mut vs = ViewState::new();
         let areas = legacy_plan_review_menu_strip_fixture_80x24();
         let ev = MouseEvent {
@@ -449,16 +449,16 @@ mod tests {
             row: 19,
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
-        let mode = AppMode::PlanReview {
-            prd_content: "plan".to_string(),
+        let mode = AppMode::DocumentReview {
+            content: "plan".to_string(),
         };
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
-        assert_eq!(vs.plan_review_selected, 0);
-        assert!(matches!(intent, Some(UserIntent::ViewPlan)));
+        assert_eq!(vs.document_review_selected, 0);
+        assert!(matches!(intent, Some(UserIntent::ViewSessionDocument)));
     }
 
     /// `event_loop` applies `normalize_mouse_coords_for_local` before `handle_mouse_event`.
-    /// Same pattern as PlanReview: some terminals report the click row one less than the cell row;
+    /// Same pattern as DocumentReview: some terminals report the click row one less than the cell row;
     /// raw `dynamic_area.y + 2` becomes `y + 3` after normalize, which is the Continue line.
     #[test]
     fn click_error_recovery_continue_with_agent_after_normalize_matches_event_loop() {
@@ -522,7 +522,7 @@ mod tests {
         let intent_approve = handle_mouse_event(ev_approve, &mode, &mut vs, &areas, 0);
         assert_eq!(
             intent_approve,
-            Some(UserIntent::ApprovePlan),
+            Some(UserIntent::ApproveSessionDocument),
             "click on Approve footer line must approve"
         );
         let ev_reject = MouseEvent {
@@ -534,7 +534,7 @@ mod tests {
         let intent_reject = handle_mouse_event(ev_reject, &mode, &mut vs, &areas, 0);
         assert_eq!(
             intent_reject,
-            Some(UserIntent::RefinePlan),
+            Some(UserIntent::RefineSessionDocument),
             "click on Reject footer line must request refinement"
         );
     }

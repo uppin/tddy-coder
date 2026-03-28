@@ -118,7 +118,7 @@ fn write_artifacts_rejects_empty_prd() {
         branch_suggestion: None,
         worktree_suggestion: None,
     };
-    let result = write_artifacts(&session_dir, &planning);
+    let result = write_artifacts(&session_dir, &planning, "PRD.md");
     assert!(
         result.is_err(),
         "write_artifacts should reject empty prd, got Ok"
@@ -144,7 +144,7 @@ fn write_artifacts_rejects_whitespace_only_prd() {
         branch_suggestion: None,
         worktree_suggestion: None,
     };
-    let result = write_artifacts(&session_dir, &planning);
+    let result = write_artifacts(&session_dir, &planning, "PRD.md");
     assert!(
         result.is_err(),
         "write_artifacts should reject whitespace-only prd, got Ok"
@@ -170,9 +170,10 @@ fn markdown_cross_references_added() {
         branch_suggestion: None,
         worktree_suggestion: None,
     };
-    write_artifacts(&session_dir, &planning).expect("write artifacts");
+    write_artifacts(&session_dir, &planning, "PRD.md").expect("write artifacts");
 
-    let prd_content = std::fs::read_to_string(session_dir.join("PRD.md")).expect("read PRD");
+    let prd_content =
+        std::fs::read_to_string(session_dir.join("artifacts").join("PRD.md")).expect("read PRD");
     assert!(
         prd_content.contains("## TODO") && prd_content.contains("Task 1"),
         "PRD.md should contain TODO content as last section"

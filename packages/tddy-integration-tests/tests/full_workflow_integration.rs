@@ -607,7 +607,7 @@ async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
 
 // ── Hook-Triggered Elicitation acceptance tests ──────────────────────────────
 
-/// TddWorkflowHooks triggers PlanApproval after plan task when PRD.md exists.
+/// TddWorkflowHooks triggers DocumentApproval after plan task when PRD.md exists.
 #[tokio::test]
 async fn tdd_hooks_elicitation_returns_plan_approval_when_prd_exists() {
     let session_dir = std::env::temp_dir().join("tddy-hooks-elicit-prd");
@@ -615,7 +615,7 @@ async fn tdd_hooks_elicitation_returns_plan_approval_when_prd_exists() {
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
     std::fs::write(session_dir.join("PRD.md"), "# Test PRD\n\nContent here.").expect("write PRD");
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = tddy_core::workflow::context::Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
 
@@ -632,14 +632,14 @@ async fn tdd_hooks_elicitation_returns_plan_approval_when_prd_exists() {
         "elicitation_after_task should return Some when PRD.md exists"
     );
     match event {
-        Some(tddy_core::ElicitationEvent::PlanApproval { prd_content }) => {
+        Some(tddy_core::ElicitationEvent::DocumentApproval { content }) => {
             assert!(
-                prd_content.contains("Test PRD"),
-                "prd_content should contain PRD file contents"
+                content.contains("Test PRD"),
+                "content should contain PRD file contents"
             );
         }
         Some(tddy_core::ElicitationEvent::WorktreeConfirmation { .. }) => {
-            panic!("expected PlanApproval, got WorktreeConfirmation");
+            panic!("expected DocumentApproval, got WorktreeConfirmation");
         }
         None => {}
     }
@@ -655,7 +655,7 @@ async fn tdd_hooks_elicitation_returns_none_for_non_plan_tasks() {
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
     std::fs::write(session_dir.join("PRD.md"), "# PRD").expect("write PRD");
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = tddy_core::workflow::context::Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
 
@@ -687,7 +687,7 @@ async fn tdd_hooks_elicitation_returns_none_when_no_prd() {
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = tddy_core::workflow::context::Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
 
@@ -747,11 +747,11 @@ async fn full_workflow_returns_elicitation_needed_after_plan() {
 
     if let ExecutionStatus::ElicitationNeeded { ref event } = result.status {
         match event {
-            tddy_core::ElicitationEvent::PlanApproval { ref prd_content } => {
-                assert!(!prd_content.is_empty(), "prd_content should not be empty");
+            tddy_core::ElicitationEvent::DocumentApproval { ref content } => {
+                assert!(!content.is_empty(), "content should not be empty");
             }
             tddy_core::ElicitationEvent::WorktreeConfirmation { .. } => {
-                panic!("test expects PlanApproval, not WorktreeConfirmation");
+                panic!("test expects DocumentApproval, not WorktreeConfirmation");
             }
         }
     }

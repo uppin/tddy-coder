@@ -35,6 +35,16 @@ The default recipe is **`TddRecipe`** (plan → acceptance-tests → red → gre
 
 JSON Schemas for workflow goals (`plan`, `red`, `green`, etc.) live in **`tddy-workflow-recipes`**; **`tddy-tools`** embeds them for `get-schema`, `list-schemas`, and `submit` validation. See [Workflow JSON Schemas](workflow-json-schemas.md) for the registry (`goals.json`), CLI behavior, and links to package-level technical notes.
 
+## Session artifacts and primary planning documents
+
+**Goal IDs** (e.g. `"plan"`) stay stable as wire/API identifiers. **Filenames and on-disk layout** for the primary planning document and related artifacts are defined by each recipe’s manifest (**`SessionArtifactManifest`**, `default_artifacts` / `known_artifacts`), not by fixed defaults inside **`tddy-core`**.
+
+- **`tddy-core`** exposes **`WorkflowRecipe::uses_primary_session_document`** and **`read_primary_session_document_utf8`** for approval gates, plain CLI, and daemon flows.
+- **`tddy-workflow`** provides **`artifact_paths`** helpers (`session_dir/artifacts/`, legacy `sessions/<uuid>/` layouts, resolution order).
+- The shipped **TDD** recipe continues to use **`prd` → `PRD.md`** in its manifest; behavior for default TDD is unchanged.
+
+Custom recipes **must** declare a `prd` (or equivalent) key if they rely on planning-specific paths; there is no silent core fallback string for the primary planning basename.
+
 ## Related
 
 - [Coder overview](1-OVERVIEW.md) — capabilities and integration points  

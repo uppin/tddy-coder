@@ -304,7 +304,7 @@ async fn before_demo_hook_sets_system_prompt_with_submit_contract() {
     cs.state.session_id = Some("hook-test-agent-session".to_string());
     write_changeset(&session_dir, &cs).expect("write changeset for resolve_agent_session_id");
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
 

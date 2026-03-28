@@ -202,15 +202,14 @@ impl Presenter {
         }));
     }
 
-    fn prd_body_for_plan_review(&self, prd_fallback: &str) -> String {
+    fn prd_body_for_plan_review(&self, content_fallback: &str) -> String {
         self.workflow_session_dir
             .as_ref()
-            .map(|d| crate::session_plan_prd::plan_prd_path_for_session_dir(d.as_path()))
-            .and_then(|p| std::fs::read_to_string(&p).ok())
-            .unwrap_or_else(|| prd_fallback.to_string())
+            .and_then(|d| self.workflow_recipe.read_primary_session_document_utf8(d))
+            .unwrap_or_else(|| content_fallback.to_string())
     }
 
-    /// Send workflow answer `Approve`, switch to [`AppMode::Running`], and broadcast (shared by PlanReview and MarkdownViewer).
+    /// Send workflow answer `Approve`, switch to [`AppMode::Running`], and broadcast (shared by DocumentReview and MarkdownViewer).
     fn approve_plan_from_review_or_viewer(&mut self) {
         if let Some(ref tx) = self.answer_tx {
             let _ = tx.send("Approve".to_string());
@@ -385,41 +384,49 @@ impl Presenter {
                     self.restart_workflow(prompt);
                 }
             }
-            UserIntent::ApprovePlan => {
+            UserIntent::ApproveSessionDocument => {
                 self.state.plan_refinement_pending = false;
-                log::info!("ApprovePlan: mode={:?}", self.state.mode);
+                log::info!("ApproveSessionDocument: mode={:?}", self.state.mode);
                 if matches!(
                     self.state.mode,
-                    AppMode::PlanReview { .. } | AppMode::MarkdownViewer { .. }
+                    AppMode::DocumentReview { .. } | AppMode::MarkdownViewer { .. }
                 ) {
                     self.approve_plan_from_review_or_viewer();
                 }
             }
-            UserIntent::ViewPlan => {
-                if let AppMode::PlanReview { ref prd_content } = self.state.mode {
-                    let content = self.prd_body_for_plan_review(prd_content);
+            UserIntent::ViewSessionDocument => {
+                if let AppMode::DocumentReview { ref content } = self.state.mode {
+                    let viewer_content = self.prd_body_for_plan_review(content);
                     self.state.plan_refinement_pending = false;
-                    self.state.mode = AppMode::MarkdownViewer { content };
+                    self.state.mode = AppMode::MarkdownViewer {
+                        content: viewer_content,
+                    };
                     self.broadcast_mode_changed();
                 }
             }
-            UserIntent::RefinePlan => {
-                log::info!("RefinePlan: mode={:?}", self.state.mode);
+            UserIntent::RefineSessionDocument => {
+                log::info!("RefineSessionDocument: mode={:?}", self.state.mode);
                 self.state.plan_refinement_pending = true;
                 match self.state.mode.clone() {
                     AppMode::MarkdownViewer { .. } => {
-                        log::debug!("RefinePlan: keep MarkdownViewer; refinement via prompt bar");
+                        log::debug!(
+                            "RefineSessionDocument: keep MarkdownViewer; refinement via prompt bar"
+                        );
                         self.broadcast_mode_changed();
                     }
-                    AppMode::PlanReview { prd_content } => {
-                        let content = self.prd_body_for_plan_review(&prd_content);
-                        self.state.mode = AppMode::MarkdownViewer { content };
-                        log::debug!("RefinePlan: opened MarkdownViewer from PlanReview");
+                    AppMode::DocumentReview { content } => {
+                        let viewer_content = self.prd_body_for_plan_review(&content);
+                        self.state.mode = AppMode::MarkdownViewer {
+                            content: viewer_content,
+                        };
+                        log::debug!(
+                            "RefineSessionDocument: opened MarkdownViewer from DocumentReview"
+                        );
                         self.broadcast_mode_changed();
                     }
                     _ => {
                         log::warn!(
-                            "RefinePlan: unexpected mode {:?}; using TextInput fallback",
+                            "RefineSessionDocument: unexpected mode {:?}; using TextInput fallback",
                             self.state.mode
                         );
                         self.state.mode = AppMode::TextInput {
@@ -432,8 +439,8 @@ impl Presenter {
             UserIntent::DismissViewer => {
                 self.state.plan_refinement_pending = false;
                 if let AppMode::MarkdownViewer { ref content } = self.state.mode {
-                    self.state.mode = AppMode::PlanReview {
-                        prd_content: content.clone(),
+                    self.state.mode = AppMode::DocumentReview {
+                        content: content.clone(),
                     };
                     self.broadcast_mode_changed();
                 }
@@ -956,9 +963,9 @@ impl Presenter {
                     self.state.mode = AppMode::FeatureInput;
                     self.broadcast_mode_changed();
                 }
-                WorkflowEvent::PlanApprovalNeeded { prd_content } => {
+                WorkflowEvent::SessionDocumentApprovalNeeded { content } => {
                     self.flush_agent_output_buffer();
-                    self.state.mode = AppMode::PlanReview { prd_content };
+                    self.state.mode = AppMode::DocumentReview { content };
                     self.broadcast_mode_changed();
                     // Resync goal/state in case client missed GoalStarted/StateChanged due to broadcast Lagged
                     if let Some(ref g) = self.state.current_goal {
@@ -1653,26 +1660,26 @@ mod tests {
     }
 
     #[test]
-    fn view_plan_markdown_viewer_shows_prd_on_disk_not_stale_snapshot() {
-        let tmp = std::env::temp_dir().join("tddy-test-view-plan-disk-prd");
+    fn view_session_document_markdown_viewer_shows_disk_not_stale_snapshot() {
+        let tmp = std::env::temp_dir().join("tddy-test-view-doc-disk");
         let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-        let on_disk = "# Plan\n\nPRD_FROM_DISK_UNIQUE_42\n";
-        std::fs::write(tmp.join("PRD.md"), on_disk).unwrap();
+        std::fs::create_dir_all(tmp.join("artifacts")).unwrap();
+        let on_disk = "# Plan\n\nDOC_FROM_DISK_UNIQUE_42\n";
+        std::fs::write(tmp.join("artifacts").join("SessionDoc.md"), on_disk).unwrap();
 
         let mut p = make_presenter();
         p.workflow_session_dir = Some(tmp.clone());
-        p.state.mode = AppMode::PlanReview {
-            prd_content: "STALE_SNAPSHOT_NOT_ON_DISK".to_string(),
+        p.state.mode = AppMode::DocumentReview {
+            content: "STALE_SNAPSHOT_NOT_ON_DISK".to_string(),
         };
 
-        p.handle_intent(UserIntent::ViewPlan);
+        p.handle_intent(UserIntent::ViewSessionDocument);
 
         match &p.state().mode {
             AppMode::MarkdownViewer { content } => {
                 assert!(
-                    content.contains("PRD_FROM_DISK_UNIQUE_42"),
-                    "View Plan must show PRD.md from workflow_session_dir; got: {:?}",
+                    content.contains("DOC_FROM_DISK_UNIQUE_42"),
+                    "View session document must show primary artifact from workflow_session_dir; got: {:?}",
                     content
                 );
                 assert!(
@@ -1688,36 +1695,44 @@ mod tests {
     }
 
     #[test]
-    fn view_plan_markdown_viewer_shows_uuid_root_prd_when_workflow_dir_nested() {
+    fn view_session_document_markdown_viewer_shows_uuid_root_when_workflow_dir_nested() {
         let root =
-            std::env::temp_dir().join(format!("tddy-test-view-plan-nested-{}", std::process::id()));
+            std::env::temp_dir().join(format!("tddy-test-view-doc-nested-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let uuid = root
             .join("sessions")
             .join("a97addd3-c31b-442b-a6b0-a63abe99e11d");
         let nested = uuid.join("2026-03-24-feature-slug");
         std::fs::create_dir_all(&nested).unwrap();
-        std::fs::write(uuid.join("PRD.md"), "# Full\n\nCANONICAL_UUID_BODY\n").unwrap();
-        std::fs::write(nested.join("PRD.md"), "## Related\nlegacy nested only\n").unwrap();
+        std::fs::write(
+            uuid.join("SessionDoc.md"),
+            "# Full\n\nCANONICAL_UUID_BODY\n",
+        )
+        .unwrap();
+        std::fs::write(
+            nested.join("SessionDoc.md"),
+            "## Related\nlegacy nested only\n",
+        )
+        .unwrap();
 
         let mut p = make_presenter();
         p.workflow_session_dir = Some(nested.clone());
-        p.state.mode = AppMode::PlanReview {
-            prd_content: "STALE".to_string(),
+        p.state.mode = AppMode::DocumentReview {
+            content: "STALE".to_string(),
         };
 
-        p.handle_intent(UserIntent::ViewPlan);
+        p.handle_intent(UserIntent::ViewSessionDocument);
 
         match &p.state().mode {
             AppMode::MarkdownViewer { content } => {
                 assert!(
                     content.contains("CANONICAL_UUID_BODY"),
-                    "View Plan must show sessions/<uuid>/PRD.md when nested; got: {:?}",
+                    "View session document must prefer sessions/<uuid>/ primary doc when nested; got: {:?}",
                     content
                 );
                 assert!(
                     !content.contains("legacy nested only"),
-                    "must not show nested duplicate PRD; got: {:?}",
+                    "must not show nested duplicate doc; got: {:?}",
                     content
                 );
             }

@@ -9,6 +9,7 @@ serde_json = "1"
 
 [dependencies]
 tddy-core = { path = "../tddy-core" }
+tddy-workflow = { path = "../tddy-workflow" }
 log = "0.4"
 async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

@@ -29,7 +29,7 @@ pub fn key_event_to_intent(
     match mode {
         AppMode::FeatureInput => feature_input_key(key, view_state),
         AppMode::Running => running_key(key, view_state),
-        AppMode::PlanReview { .. } => plan_review_key(key, view_state),
+        AppMode::DocumentReview { .. } => document_review_key(key, view_state),
         AppMode::MarkdownViewer { .. } => {
             markdown_viewer_key(key, view_state, plan_refinement_pending)
         }
@@ -41,12 +41,12 @@ pub fn key_event_to_intent(
     }
 }
 
-fn plan_review_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
+fn document_review_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
     if key.code == KeyCode::Enter {
-        match vs.plan_review_selected {
-            0 => Some(UserIntent::ViewPlan),
-            1 => Some(UserIntent::ApprovePlan),
-            2 => Some(UserIntent::RefinePlan),
+        match vs.document_review_selected {
+            0 => Some(UserIntent::ViewSessionDocument),
+            1 => Some(UserIntent::ApproveSessionDocument),
+            2 => Some(UserIntent::RefineSessionDocument),
             _ => None,
         }
     } else {
@@ -83,8 +83,8 @@ fn markdown_viewer_key(
         KeyCode::Enter => {
             if vs.markdown_at_end {
                 match vs.markdown_end_button_selected {
-                    0 => Some(UserIntent::ApprovePlan),
-                    1 => Some(UserIntent::RefinePlan),
+                    0 => Some(UserIntent::ApproveSessionDocument),
+                    1 => Some(UserIntent::RefineSessionDocument),
                     _ => None,
                 }
             } else {
@@ -101,12 +101,12 @@ fn plan_view_approve_reject_shortcuts(key: KeyEvent) -> Option<UserIntent> {
     }
     match key.code {
         KeyCode::Char('a') | KeyCode::Char('A') => {
-            log::debug!("plan_view_approve_reject_shortcuts: ApprovePlan (Alt+A)");
-            Some(UserIntent::ApprovePlan)
+            log::debug!("plan_view_approve_reject_shortcuts: ApproveSessionDocument (Alt+A)");
+            Some(UserIntent::ApproveSessionDocument)
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
-            log::debug!("plan_view_approve_reject_shortcuts: RefinePlan (Alt+R)");
-            Some(UserIntent::RefinePlan)
+            log::debug!("plan_view_approve_reject_shortcuts: RefineSessionDocument (Alt+R)");
+            Some(UserIntent::RefineSessionDocument)
         }
         _ => None,
     }
@@ -271,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn enter_at_end_approve_returns_approve_plan() {
+    fn enter_at_end_approve_returns_approve_session_document() {
         let mut vs = ViewState::new();
         vs.markdown_at_end = true;
         vs.markdown_end_button_selected = 0;
@@ -279,11 +279,11 @@ mod tests {
             content: "plan content".to_string(),
         };
         let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
-        assert!(matches!(intent, Some(UserIntent::ApprovePlan)));
+        assert!(matches!(intent, Some(UserIntent::ApproveSessionDocument)));
     }
 
     #[test]
-    fn enter_at_end_refine_returns_refine_plan() {
+    fn enter_at_end_refine_returns_refine_session_document() {
         let mut vs = ViewState::new();
         vs.markdown_at_end = true;
         vs.markdown_end_button_selected = 1;
@@ -291,7 +291,7 @@ mod tests {
             content: "plan content".to_string(),
         };
         let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
-        assert!(matches!(intent, Some(UserIntent::RefinePlan)));
+        assert!(matches!(intent, Some(UserIntent::RefineSessionDocument)));
     }
 
     #[test]
@@ -357,12 +357,12 @@ mod tests {
         let alt_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::ALT);
         assert_eq!(
             key_event_to_intent(alt_a, &mode, &vs, false),
-            Some(UserIntent::ApprovePlan)
+            Some(UserIntent::ApproveSessionDocument)
         );
         let alt_r = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::ALT);
         assert_eq!(
             key_event_to_intent(alt_r, &mode, &vs, false),
-            Some(UserIntent::RefinePlan)
+            Some(UserIntent::RefineSessionDocument)
         );
     }
 }

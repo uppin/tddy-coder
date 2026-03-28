@@ -5,7 +5,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use tddy_core::AppMode;
 
 /// Compute the height (in lines) for the question display region.
-/// Used when in Select, MultiSelect, TextInput, or PlanReview mode.
+/// Used when in Select, MultiSelect, TextInput, or DocumentReview mode.
 pub fn question_height(mode: &AppMode) -> u16 {
     match mode {
         AppMode::Select { question, .. } | AppMode::MultiSelect { question, .. } => {
@@ -13,8 +13,8 @@ pub fn question_height(mode: &AppMode) -> u16 {
             2 + question.options.len() as u16 + if question.allow_other { 1 } else { 0 }
         }
         AppMode::TextInput { .. } => 2, // prompt + blank
-        // PlanReview menu is in the activity pane; no extra strip in the dynamic/question region.
-        AppMode::PlanReview { .. } => 0,
+        // DocumentReview menu is in the activity pane; no extra strip in the dynamic/question region.
+        AppMode::DocumentReview { .. } => 0,
         AppMode::ErrorRecovery { .. } => 5, // error + blank + 3 options
         _ => 0,
     }
@@ -222,8 +222,8 @@ mod tests {
     /// strip below activity must not reserve extra rows for the old PlanReview three-option menu.
     #[test]
     fn layout_reserves_status_and_prompt_when_plan_approval_visible() {
-        let mode = AppMode::PlanReview {
-            prd_content: "# PRD".to_string(),
+        let mode = AppMode::DocumentReview {
+            content: "# PRD".to_string(),
         };
         assert_eq!(
             question_height(&mode),

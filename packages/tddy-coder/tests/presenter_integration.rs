@@ -156,8 +156,8 @@ fn full_workflow_completes_with_stub_backend() {
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
         events.drain();
-        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
-            presenter.handle_intent(UserIntent::ApprovePlan);
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
@@ -245,8 +245,8 @@ fn submit_feature_input_after_completion_restarts_workflow() {
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
         events.drain();
-        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
-            presenter.handle_intent(UserIntent::ApprovePlan);
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
@@ -286,8 +286,8 @@ fn submit_feature_input_after_completion_restarts_workflow() {
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
         events.drain();
-        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
-            presenter.handle_intent(UserIntent::ApprovePlan);
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
@@ -356,8 +356,8 @@ fn session_dir_under_sessions_base_when_output_dir_is_dot() {
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
         events.drain();
-        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
-            presenter.handle_intent(UserIntent::ApprovePlan);
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
@@ -453,12 +453,12 @@ fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
     while !presenter.is_done() && !saw_error_recovery && iterations < max_iterations {
         presenter.poll_workflow();
         events.drain();
-        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
             plan_review_count += 1;
             if plan_review_count == 1 {
-                presenter.handle_intent(UserIntent::RefinePlan);
+                presenter.handle_intent(UserIntent::RefineSessionDocument);
             } else {
-                presenter.handle_intent(UserIntent::ApprovePlan);
+                presenter.handle_intent(UserIntent::ApproveSessionDocument);
             }
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
@@ -498,7 +498,7 @@ fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
     );
     assert!(
         plan_review_count >= 2,
-        "expected PlanReview at least twice (initial + after refine)"
+        "expected DocumentReview at least twice (initial + after refine)"
     );
     events.drain();
     let evs = events.events();
@@ -536,8 +536,8 @@ fn clarification_roundtrip_sends_answers() {
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
         events.drain();
-        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
-            presenter.handle_intent(UserIntent::ApprovePlan);
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
@@ -560,7 +560,7 @@ fn clarification_roundtrip_sends_answers() {
     assert!(
         evs.iter().any(
             |e| matches!(e, TestEvent::ModeChanged(AppMode::Select { .. }))
-                || matches!(e, TestEvent::ModeChanged(AppMode::PlanReview { .. }))
+                || matches!(e, TestEvent::ModeChanged(AppMode::DocumentReview { .. }))
         ),
         "expected Select mode during clarification: {:?}",
         evs
@@ -604,8 +604,8 @@ fn inbox_queue_and_dequeue() {
         presenter.poll_workflow();
         events.drain();
         // Handle intents; approve sets Running, so we can queue in same iteration.
-        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
-            presenter.handle_intent(UserIntent::ApprovePlan);
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
         }
         if matches!(presenter.state().mode, AppMode::Running) && !queued {
             presenter.handle_intent(UserIntent::QueuePrompt("fix the login bug".to_string()));
@@ -636,7 +636,7 @@ fn inbox_queue_and_dequeue() {
     );
 }
 
-/// Plan approval: After plan completes, PlanReview mode appears. ApprovePlan proceeds to next step.
+/// Plan approval: After plan completes, DocumentReview mode appears. ApprovePlan proceeds to next step.
 #[test]
 #[serial]
 fn plan_approval_approve_proceeds_to_next_step() {
@@ -663,8 +663,8 @@ fn plan_approval_approve_proceeds_to_next_step() {
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
         events.drain();
-        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
-            presenter.handle_intent(UserIntent::ApprovePlan);
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
@@ -686,8 +686,8 @@ fn plan_approval_approve_proceeds_to_next_step() {
     let evs = events.events();
     assert!(
         evs.iter()
-            .any(|e| matches!(e, TestEvent::ModeChanged(AppMode::PlanReview { .. }))),
-        "expected PlanReview mode: {:?}",
+            .any(|e| matches!(e, TestEvent::ModeChanged(AppMode::DocumentReview { .. }))),
+        "expected DocumentReview mode: {:?}",
         evs
     );
     assert!(
@@ -698,7 +698,7 @@ fn plan_approval_approve_proceeds_to_next_step() {
     );
 }
 
-/// Plan approval: ViewPlan opens MarkdownViewer, DismissViewer returns to PlanReview, ApprovePlan proceeds.
+/// Plan approval: ViewPlan opens MarkdownViewer, DismissViewer returns to DocumentReview, ApprovePlan proceeds.
 #[test]
 #[serial]
 fn plan_approval_view_then_approve() {
@@ -731,11 +731,11 @@ fn plan_approval_view_then_approve() {
                 presenter.handle_intent(UserIntent::DismissViewer);
                 viewed = true;
             }
-        } else if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+        } else if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
             if viewed {
-                presenter.handle_intent(UserIntent::ApprovePlan);
+                presenter.handle_intent(UserIntent::ApproveSessionDocument);
             } else {
-                presenter.handle_intent(UserIntent::ViewPlan);
+                presenter.handle_intent(UserIntent::ViewSessionDocument);
             }
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
@@ -793,16 +793,16 @@ fn plan_view_refinement_submits_without_dismissing_markdown() {
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
         events.drain();
-        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
-            presenter.handle_intent(UserIntent::ViewPlan);
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ViewSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
             && !triggered_refine
         {
-            presenter.handle_intent(UserIntent::RefinePlan);
+            presenter.handle_intent(UserIntent::RefineSessionDocument);
             triggered_refine = true;
             assert!(
                 !matches!(presenter.state().mode, AppMode::TextInput { .. }),
-                "RefinePlan with PRD visible must not switch to TextInput; got {:?}",
+                "RefineSessionDocument with PRD visible must not switch to TextInput; got {:?}",
                 presenter.state().mode
             );
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
@@ -818,7 +818,7 @@ fn plan_view_refinement_submits_without_dismissing_markdown() {
 
     assert!(
         triggered_refine,
-        "expected to reach MarkdownViewer and issue RefinePlan; last mode: {:?}",
+        "expected to reach MarkdownViewer and issue RefineSessionDocument; last mode: {:?}",
         presenter.state().mode
     );
 }
@@ -851,12 +851,12 @@ fn plan_approval_refine_re_shows_approval() {
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
         events.drain();
-        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) {
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
             plan_review_count += 1;
             if plan_review_count == 1 {
-                presenter.handle_intent(UserIntent::RefinePlan);
+                presenter.handle_intent(UserIntent::RefineSessionDocument);
             } else {
-                presenter.handle_intent(UserIntent::ApprovePlan);
+                presenter.handle_intent(UserIntent::ApproveSessionDocument);
             }
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
@@ -885,12 +885,12 @@ fn plan_approval_refine_re_shows_approval() {
     );
     assert!(
         plan_review_count >= 2,
-        "expected PlanReview at least twice (initial + after refine)"
+        "expected DocumentReview at least twice (initial + after refine)"
     );
 }
 
 /// Plan approval from viewer: ViewPlan → ApprovePlan directly in MarkdownViewer (no DismissViewer) → workflow completes.
-/// Asserts presenter is_done() and PlanReview appears exactly once (no return to PlanReview after viewer approval).
+/// Asserts presenter is_done() and DocumentReview appears exactly once (no return to DocumentReview after viewer approval).
 #[test]
 #[serial]
 fn plan_approval_from_markdown_viewer() {
@@ -918,12 +918,13 @@ fn plan_approval_from_markdown_viewer() {
     while !presenter.is_done() && iterations < max_iterations {
         presenter.poll_workflow();
         events.drain();
-        if matches!(presenter.state().mode, AppMode::PlanReview { .. }) && !approved_from_viewer {
-            presenter.handle_intent(UserIntent::ViewPlan);
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) && !approved_from_viewer
+        {
+            presenter.handle_intent(UserIntent::ViewSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
             && !approved_from_viewer
         {
-            presenter.handle_intent(UserIntent::ApprovePlan);
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
             approved_from_viewer = true;
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
@@ -946,11 +947,11 @@ fn plan_approval_from_markdown_viewer() {
     let evs = events.events();
     let plan_review_count = evs
         .iter()
-        .filter(|e| matches!(e, TestEvent::ModeChanged(AppMode::PlanReview { .. })))
+        .filter(|e| matches!(e, TestEvent::ModeChanged(AppMode::DocumentReview { .. })))
         .count();
     assert_eq!(
         plan_review_count, 1,
-        "PlanReview should appear exactly once when approving directly from viewer: {:?}",
+        "DocumentReview should appear exactly once when approving directly from viewer: {:?}",
         evs
     );
 }

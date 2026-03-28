@@ -19,8 +19,10 @@ mod update_docs;
 mod validate_subagents;
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 
+use crate::SessionArtifactManifest;
 use tddy_core::backend::{CodingBackend, GoalHints, GoalId, PermissionHint};
 use tddy_core::workflow::graph::Graph;
 use tddy_core::workflow::hooks::RunnerHooks;
@@ -91,7 +93,7 @@ impl TddRecipe {
                 goal_id.as_str(),
                 "green" | "red" | "acceptance-tests" | "demo"
             ),
-            planning_mode_intent: is_plan,
+            agent_cli_plan_mode: is_plan,
             claude_nonzero_exit_ok_if_structured_response: is_plan,
         })
     }
@@ -142,8 +144,9 @@ impl WorkflowRecipe for TddRecipe {
 
     fn create_hooks(&self, event_tx: Option<WorkflowEventSender>) -> Arc<dyn RunnerHooks> {
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
+        let manifest: Arc<dyn SessionArtifactManifest> = Arc::new(*self);
         Arc::new(hooks::TddWorkflowHooks::with_event_tx_optional(
-            recipe, event_tx,
+            recipe, manifest, event_tx,
         ))
     }
 
@@ -201,39 +204,13 @@ impl WorkflowRecipe for TddRecipe {
         m
     }
 
-    fn default_artifacts(&self) -> BTreeMap<String, String> {
-        let mut a = BTreeMap::new();
-        a.insert("prd".to_string(), "PRD.md".to_string());
-        a.insert(
-            "acceptance_tests".to_string(),
-            "acceptance-tests.md".to_string(),
-        );
-        a.insert("red_output".to_string(), "red-output.md".to_string());
-        a.insert("progress".to_string(), "progress.md".to_string());
-        a.insert("demo_plan".to_string(), "demo-plan.md".to_string());
-        a.insert("demo_results".to_string(), "demo-results.md".to_string());
-        a.insert(
-            "system_prompt_plan".to_string(),
-            "system-prompt-plan.md".to_string(),
-        );
-        a
+    fn uses_primary_session_document(&self) -> bool {
+        true
     }
 
-    fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
-        &[
-            ("prd", "PRD.md"),
-            ("acceptance_tests", "acceptance-tests.md"),
-            ("progress", "progress.md"),
-            ("red_output", "red-output.md"),
-            ("evaluation_report", "evaluation-report.md"),
-            ("demo_plan", "demo-plan.md"),
-            ("demo_results", "demo-results.md"),
-            ("validate_tests", "validate-tests-report.md"),
-            ("validate_prod_ready", "validate-prod-ready-report.md"),
-            ("analyze_clean_code", "analyze-clean-code-report.md"),
-            ("refactoring_plan", "refactoring-plan.md"),
-            ("update_docs", "update-docs-report.md"),
-        ]
+    fn read_primary_session_document_utf8(&self, session_dir: &Path) -> Option<String> {
+        self.primary_document_basename()
+            .and_then(|b| tddy_workflow::read_session_artifact_utf8(session_dir, &b))
     }
 
     fn goal_requires_session_dir(&self, goal_id: &GoalId) -> bool {
@@ -265,35 +242,72 @@ impl WorkflowRecipe for TddRecipe {
     }
 }
 
+impl SessionArtifactManifest for TddRecipe {
+    fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
+        &[
+            ("prd", "PRD.md"),
+            ("acceptance_tests", "acceptance-tests.md"),
+            ("progress", "progress.md"),
+            ("red_output", "red-output.md"),
+            ("evaluation_report", "evaluation-report.md"),
+            ("demo_plan", "demo-plan.md"),
+            ("demo_results", "demo-results.md"),
+            ("validate_tests", "validate-tests-report.md"),
+            ("validate_prod_ready", "validate-prod-ready-report.md"),
+            ("analyze_clean_code", "analyze-clean-code-report.md"),
+            ("refactoring_plan", "refactoring-plan.md"),
+            ("update_docs", "update-docs-report.md"),
+        ]
+    }
+
+    fn default_artifacts(&self) -> BTreeMap<String, String> {
+        let mut a = BTreeMap::new();
+        a.insert("prd".to_string(), "PRD.md".to_string());
+        a.insert(
+            "acceptance_tests".to_string(),
+            "acceptance-tests.md".to_string(),
+        );
+        a.insert("red_output".to_string(), "red-output.md".to_string());
+        a.insert("progress".to_string(), "progress.md".to_string());
+        a.insert("demo_plan".to_string(), "demo-plan.md".to_string());
+        a.insert("demo_results".to_string(), "demo-results.md".to_string());
+        a.insert(
+            "system_prompt_plan".to_string(),
+            "system-prompt-plan.md".to_string(),
+        );
+        a
+    }
+}
+
 #[cfg(test)]
 mod planning_intent_tests {
     use super::TddRecipe;
     use tddy_core::GoalId;
     use tddy_core::WorkflowRecipe;
 
-    /// Backends must use [`tddy_core::backend::GoalHints::planning_mode_intent`] (not goal id) for plan-mode CLI flags.
+    /// Backends must use [`tddy_core::backend::GoalHints::agent_cli_plan_mode`] (not goal id) for vendor plan-mode CLI flags.
     #[test]
-    fn planning_mode_intent_is_true_only_for_plan_goal() {
+    fn agent_cli_plan_mode_is_true_only_for_plan_goal() {
         let r = TddRecipe;
         assert!(
             r.goal_hints(&GoalId::new("plan"))
                 .unwrap()
-                .planning_mode_intent
+                .agent_cli_plan_mode
         );
         assert!(
             !r.goal_hints(&GoalId::new("evaluate"))
                 .unwrap()
-                .planning_mode_intent
+                .agent_cli_plan_mode
         );
         assert!(
             !r.goal_hints(&GoalId::new("validate"))
                 .unwrap()
-                .planning_mode_intent
+                .agent_cli_plan_mode
         );
         assert!(
             !r.goal_hints(&GoalId::new("red"))
                 .unwrap()
-                .planning_mode_intent
+                .agent_cli_plan_mode
         );
     }
 }
