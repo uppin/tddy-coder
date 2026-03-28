@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file connection.proto.
  */
 export const file_connection: GenFile = /*@__PURE__*/
-  fileDesc("ChBjb25uZWN0aW9uLnByb3RvEgpjb25uZWN0aW9uIhIKEExpc3RUb29sc1JlcXVlc3QiOAoRTGlzdFRvb2xzUmVzcG9uc2USIwoFdG9vbHMYASADKAsyFC5jb25uZWN0aW9uLlRvb2xJbmZvIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkiLAoTTGlzdFNlc3Npb25zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIkIKFExpc3RTZXNzaW9uc1Jlc3BvbnNlEioKCHNlc3Npb25zGAEgAygLMhguY29ubmVjdGlvbi5TZXNzaW9uRW50cnkijQEKDFNlc3Npb25FbnRyeRISCgpzZXNzaW9uX2lkGAEgASgJEhIKCmNyZWF0ZWRfYXQYAiABKAkSDgoGc3RhdHVzGAMgASgJEhEKCXJlcG9fcGF0aBgEIAEoCRILCgNwaWQYBSABKA0SEQoJaXNfYWN0aXZlGAYgASgIEhIKCnByb2plY3RfaWQYByABKAkiWQoMUHJvamVjdEVudHJ5EhIKCnByb2plY3RfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhYKDm1haW5fcmVwb19wYXRoGAQgASgJIiwKE0xpc3RQcm9qZWN0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJCChRMaXN0UHJvamVjdHNSZXNwb25zZRIqCghwcm9qZWN0cxgBIAMoCzIYLmNvbm5lY3Rpb24uUHJvamVjdEVudHJ5ImgKFENyZWF0ZVByb2plY3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhoKEnVzZXJfcmVsYXRpdmVfcGF0aBgEIAEoCSJCChVDcmVhdGVQcm9qZWN0UmVzcG9uc2USKQoHcHJvamVjdBgBIAEoCzIYLmNvbm5lY3Rpb24uUHJvamVjdEVudHJ5ImIKE1N0YXJ0U2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIRCgl0b29sX3BhdGgYAiABKAkSEgoKcHJvamVjdF9pZBgDIAEoCRINCgVhZ2VudBgEIAEoCSJ2ChRTdGFydFNlc3Npb25SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGxpdmVraXRfcm9vbRgCIAEoCRITCgtsaXZla2l0X3VybBgDIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgEIAEoCSJCChVDb25uZWN0U2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJImQKFkNvbm5lY3RTZXNzaW9uUmVzcG9uc2USFAoMbGl2ZWtpdF9yb29tGAEgASgJEhMKC2xpdmVraXRfdXJsGAIgASgJEh8KF2xpdmVraXRfc2VydmVyX2lkZW50aXR5GAMgASgJIkEKFFJlc3VtZVNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJ3ChVSZXN1bWVTZXNzaW9uUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIUCgxsaXZla2l0X3Jvb20YAiABKAkSEwoLbGl2ZWtpdF91cmwYAyABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYBCABKAkiUQoUU2lnbmFsU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBnNpZ25hbBgDIAEoBSI0ChVTaWduYWxTZXNzaW9uUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJBChREZWxldGVTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiIwoVRGVsZXRlU2Vzc2lvblJlc3BvbnNlEgoKAm9rGAEgASgIKkMKBlNpZ25hbBIRCg1TSUdOQUxfU0lHSU5UEAASEgoOU0lHTkFMX1NJR1RFUk0QARISCg5TSUdOQUxfU0lHS0lMTBACMocGChFDb25uZWN0aW9uU2VydmljZRJICglMaXN0VG9vbHMSHC5jb25uZWN0aW9uLkxpc3RUb29sc1JlcXVlc3QaHS5jb25uZWN0aW9uLkxpc3RUb29sc1Jlc3BvbnNlElEKDExpc3RTZXNzaW9ucxIfLmNvbm5lY3Rpb24uTGlzdFNlc3Npb25zUmVxdWVzdBogLmNvbm5lY3Rpb24uTGlzdFNlc3Npb25zUmVzcG9uc2USUQoMTGlzdFByb2plY3RzEh8uY29ubmVjdGlvbi5MaXN0UHJvamVjdHNSZXF1ZXN0GiAuY29ubmVjdGlvbi5MaXN0UHJvamVjdHNSZXNwb25zZRJUCg1DcmVhdGVQcm9qZWN0EiAuY29ubmVjdGlvbi5DcmVhdGVQcm9qZWN0UmVxdWVzdBohLmNvbm5lY3Rpb24uQ3JlYXRlUHJvamVjdFJlc3BvbnNlElEKDFN0YXJ0U2Vzc2lvbhIfLmNvbm5lY3Rpb24uU3RhcnRTZXNzaW9uUmVxdWVzdBogLmNvbm5lY3Rpb24uU3RhcnRTZXNzaW9uUmVzcG9uc2USVwoOQ29ubmVjdFNlc3Npb24SIS5jb25uZWN0aW9uLkNvbm5lY3RTZXNzaW9uUmVxdWVzdBoiLmNvbm5lY3Rpb24uQ29ubmVjdFNlc3Npb25SZXNwb25zZRJUCg1SZXN1bWVTZXNzaW9uEiAuY29ubmVjdGlvbi5SZXN1bWVTZXNzaW9uUmVxdWVzdBohLmNvbm5lY3Rpb24uUmVzdW1lU2Vzc2lvblJlc3BvbnNlElQKDVNpZ25hbFNlc3Npb24SIC5jb25uZWN0aW9uLlNpZ25hbFNlc3Npb25SZXF1ZXN0GiEuY29ubmVjdGlvbi5TaWduYWxTZXNzaW9uUmVzcG9uc2USVAoNRGVsZXRlU2Vzc2lvbhIgLmNvbm5lY3Rpb24uRGVsZXRlU2Vzc2lvblJlcXVlc3QaIS5jb25uZWN0aW9uLkRlbGV0ZVNlc3Npb25SZXNwb25zZWIGcHJvdG8z");
+  fileDesc("ChBjb25uZWN0aW9uLnByb3RvEgpjb25uZWN0aW9uIhIKEExpc3RUb29sc1JlcXVlc3QiOAoRTGlzdFRvb2xzUmVzcG9uc2USIwoFdG9vbHMYASADKAsyFC5jb25uZWN0aW9uLlRvb2xJbmZvIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkiLAoTTGlzdFNlc3Npb25zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIkIKFExpc3RTZXNzaW9uc1Jlc3BvbnNlEioKCHNlc3Npb25zGAEgAygLMhguY29ubmVjdGlvbi5TZXNzaW9uRW50cnkiqQEKDFNlc3Npb25FbnRyeRISCgpzZXNzaW9uX2lkGAEgASgJEhIKCmNyZWF0ZWRfYXQYAiABKAkSDgoGc3RhdHVzGAMgASgJEhEKCXJlcG9fcGF0aBgEIAEoCRILCgNwaWQYBSABKA0SEQoJaXNfYWN0aXZlGAYgASgIEhIKCnByb2plY3RfaWQYByABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAggASgJIlkKDFByb2plY3RFbnRyeRISCgpwcm9qZWN0X2lkGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHZ2l0X3VybBgDIAEoCRIWCg5tYWluX3JlcG9fcGF0aBgEIAEoCSIsChNMaXN0UHJvamVjdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiQgoUTGlzdFByb2plY3RzUmVzcG9uc2USKgoIcHJvamVjdHMYASADKAsyGC5jb25uZWN0aW9uLlByb2plY3RFbnRyeSJoChRDcmVhdGVQcm9qZWN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHZ2l0X3VybBgDIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYBCABKAkiQgoVQ3JlYXRlUHJvamVjdFJlc3BvbnNlEikKB3Byb2plY3QYASABKAsyGC5jb25uZWN0aW9uLlByb2plY3RFbnRyeSJ+ChNTdGFydFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEQoJdG9vbF9wYXRoGAIgASgJEhIKCnByb2plY3RfaWQYAyABKAkSDQoFYWdlbnQYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJInYKFFN0YXJ0U2Vzc2lvblJlc3BvbnNlEhIKCnNlc3Npb25faWQYASABKAkSFAoMbGl2ZWtpdF9yb29tGAIgASgJEhMKC2xpdmVraXRfdXJsGAMgASgJEh8KF2xpdmVraXRfc2VydmVyX2lkZW50aXR5GAQgASgJIkIKFUNvbm5lY3RTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiZAoWQ29ubmVjdFNlc3Npb25SZXNwb25zZRIUCgxsaXZla2l0X3Jvb20YASABKAkSEwoLbGl2ZWtpdF91cmwYAiABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYAyABKAkiQQoUUmVzdW1lU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIncKFVJlc3VtZVNlc3Npb25SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGxpdmVraXRfcm9vbRgCIAEoCRITCgtsaXZla2l0X3VybBgDIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgEIAEoCSJRChRTaWduYWxTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGc2lnbmFsGAMgASgFIjQKFVNpZ25hbFNlc3Npb25SZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIkEKFERlbGV0ZVNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIjChVEZWxldGVTZXNzaW9uUmVzcG9uc2USCgoCb2sYASABKAgiMwoaTGlzdEVsaWdpYmxlRGFlbW9uc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJLChNFbGlnaWJsZURhZW1vbkVudHJ5EhMKC2luc3RhbmNlX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEhAKCGlzX2xvY2FsGAMgASgIIk8KG0xpc3RFbGlnaWJsZURhZW1vbnNSZXNwb25zZRIwCgdkYWVtb25zGAEgAygLMh8uY29ubmVjdGlvbi5FbGlnaWJsZURhZW1vbkVudHJ5KkMKBlNpZ25hbBIRCg1TSUdOQUxfU0lHSU5UEAASEgoOU0lHTkFMX1NJR1RFUk0QARISCg5TSUdOQUxfU0lHS0lMTBACMu8GChFDb25uZWN0aW9uU2VydmljZRJICglMaXN0VG9vbHMSHC5jb25uZWN0aW9uLkxpc3RUb29sc1JlcXVlc3QaHS5jb25uZWN0aW9uLkxpc3RUb29sc1Jlc3BvbnNlElEKDExpc3RTZXNzaW9ucxIfLmNvbm5lY3Rpb24uTGlzdFNlc3Npb25zUmVxdWVzdBogLmNvbm5lY3Rpb24uTGlzdFNlc3Npb25zUmVzcG9uc2USUQoMTGlzdFByb2plY3RzEh8uY29ubmVjdGlvbi5MaXN0UHJvamVjdHNSZXF1ZXN0GiAuY29ubmVjdGlvbi5MaXN0UHJvamVjdHNSZXNwb25zZRJUCg1DcmVhdGVQcm9qZWN0EiAuY29ubmVjdGlvbi5DcmVhdGVQcm9qZWN0UmVxdWVzdBohLmNvbm5lY3Rpb24uQ3JlYXRlUHJvamVjdFJlc3BvbnNlElEKDFN0YXJ0U2Vzc2lvbhIfLmNvbm5lY3Rpb24uU3RhcnRTZXNzaW9uUmVxdWVzdBogLmNvbm5lY3Rpb24uU3RhcnRTZXNzaW9uUmVzcG9uc2USVwoOQ29ubmVjdFNlc3Npb24SIS5jb25uZWN0aW9uLkNvbm5lY3RTZXNzaW9uUmVxdWVzdBoiLmNvbm5lY3Rpb24uQ29ubmVjdFNlc3Npb25SZXNwb25zZRJUCg1SZXN1bWVTZXNzaW9uEiAuY29ubmVjdGlvbi5SZXN1bWVTZXNzaW9uUmVxdWVzdBohLmNvbm5lY3Rpb24uUmVzdW1lU2Vzc2lvblJlc3BvbnNlElQKDVNpZ25hbFNlc3Npb24SIC5jb25uZWN0aW9uLlNpZ25hbFNlc3Npb25SZXF1ZXN0GiEuY29ubmVjdGlvbi5TaWduYWxTZXNzaW9uUmVzcG9uc2USVAoNRGVsZXRlU2Vzc2lvbhIgLmNvbm5lY3Rpb24uRGVsZXRlU2Vzc2lvblJlcXVlc3QaIS5jb25uZWN0aW9uLkRlbGV0ZVNlc3Npb25SZXNwb25zZRJmChNMaXN0RWxpZ2libGVEYWVtb25zEiYuY29ubmVjdGlvbi5MaXN0RWxpZ2libGVEYWVtb25zUmVxdWVzdBonLmNvbm5lY3Rpb24uTGlzdEVsaWdpYmxlRGFlbW9uc1Jlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message connection.ListToolsRequest
@@ -136,6 +136,11 @@ export type SessionEntry = Message<"connection.SessionEntry"> & {
    * @generated from field: string project_id = 7;
    */
   projectId: string;
+
+  /**
+   * @generated from field: string daemon_instance_id = 8;
+   */
+  daemonInstanceId: string;
 };
 
 /**
@@ -290,6 +295,13 @@ export type StartSessionRequest = Message<"connection.StartSessionRequest"> & {
    * @generated from field: string agent = 4;
    */
   agent: string;
+
+  /**
+   * Target daemon instance to run this session on. Empty or matching local instance = spawn locally.
+   *
+   * @generated from field: string daemon_instance_id = 5;
+   */
+  daemonInstanceId: string;
 };
 
 /**
@@ -523,6 +535,67 @@ export const DeleteSessionResponseSchema: GenMessage<DeleteSessionResponse> = /*
   messageDesc(file_connection, 20);
 
 /**
+ * @generated from message connection.ListEligibleDaemonsRequest
+ */
+export type ListEligibleDaemonsRequest = Message<"connection.ListEligibleDaemonsRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+};
+
+/**
+ * Describes the message connection.ListEligibleDaemonsRequest.
+ * Use `create(ListEligibleDaemonsRequestSchema)` to create a new message.
+ */
+export const ListEligibleDaemonsRequestSchema: GenMessage<ListEligibleDaemonsRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 21);
+
+/**
+ * @generated from message connection.EligibleDaemonEntry
+ */
+export type EligibleDaemonEntry = Message<"connection.EligibleDaemonEntry"> & {
+  /**
+   * @generated from field: string instance_id = 1;
+   */
+  instanceId: string;
+
+  /**
+   * @generated from field: string label = 2;
+   */
+  label: string;
+
+  /**
+   * @generated from field: bool is_local = 3;
+   */
+  isLocal: boolean;
+};
+
+/**
+ * Describes the message connection.EligibleDaemonEntry.
+ * Use `create(EligibleDaemonEntrySchema)` to create a new message.
+ */
+export const EligibleDaemonEntrySchema: GenMessage<EligibleDaemonEntry> = /*@__PURE__*/
+  messageDesc(file_connection, 22);
+
+/**
+ * @generated from message connection.ListEligibleDaemonsResponse
+ */
+export type ListEligibleDaemonsResponse = Message<"connection.ListEligibleDaemonsResponse"> & {
+  /**
+   * @generated from field: repeated connection.EligibleDaemonEntry daemons = 1;
+   */
+  daemons: EligibleDaemonEntry[];
+};
+
+/**
+ * Describes the message connection.ListEligibleDaemonsResponse.
+ * Use `create(ListEligibleDaemonsResponseSchema)` to create a new message.
+ */
+export const ListEligibleDaemonsResponseSchema: GenMessage<ListEligibleDaemonsResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 23);
+
+/**
  * @generated from enum connection.Signal
  */
 export enum Signal {
@@ -623,6 +696,14 @@ export const ConnectionService: GenService<{
     methodKind: "unary";
     input: typeof DeleteSessionRequestSchema;
     output: typeof DeleteSessionResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.ListEligibleDaemons
+   */
+  listEligibleDaemons: {
+    methodKind: "unary";
+    input: typeof ListEligibleDaemonsRequestSchema;
+    output: typeof ListEligibleDaemonsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_connection, 0);

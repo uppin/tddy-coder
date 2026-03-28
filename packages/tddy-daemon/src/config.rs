@@ -42,6 +42,10 @@ pub struct DaemonConfig {
     /// `clone_as_user`). Minimum effective value is 1.
     #[serde(default = "default_spawn_worker_request_timeout_secs")]
     pub spawn_worker_request_timeout_secs: u64,
+    /// Stable id for this daemon in a shared LiveKit room (multi-host). When set, spawned tools
+    /// and ConnectSession use `daemon-{instance_id}-{session_id}` as LiveKit server identity.
+    #[serde(default)]
+    pub daemon_instance_id: Option<String>,
 }
 
 impl Default for DaemonConfig {
@@ -58,6 +62,7 @@ impl Default for DaemonConfig {
             repos_base_path: None,
             spawn_mouse: true,
             spawn_worker_request_timeout_secs: default_spawn_worker_request_timeout_secs(),
+            daemon_instance_id: None,
         }
     }
 }

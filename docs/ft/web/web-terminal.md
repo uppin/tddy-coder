@@ -49,7 +49,7 @@ On touch-capable devices or narrow viewports (width &lt; 768px):
 When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated users see **ConnectionScreen** (not the manual LiveKit URL form):
 
 - **Create project** (collapsible): name + git URL → `CreateProject` (clone or adopt existing path under `~/repos/<name>/` by default). Optional **path under home** overrides the clone destination (e.g. `Code/my-app`).
-- **Projects** as collapsible sections (`<details>`): each shows name, git URL, `main_repo_path`, then **Tool** (from daemon `allowed_tools`), **Backend** (`agent` on `StartSession`), and **Debug logging** (browser terminal only)—all **per session**, not stored on the project—then **Start New Session** (`StartSession` with `project_id`), and a table of sessions for that `project_id`. Connect/Resume in that section uses that project’s debug setting.
+- **Projects** as collapsible sections (`<details>`): each shows name, git URL, `main_repo_path`, then **Host** (target daemon instance from `ListEligibleDaemons`), **Tool** (from daemon `allowed_tools`), **Backend** (`agent` on `StartSession`), and **Debug logging** (browser terminal only)—all **per session**, not stored on the project—then **Start New Session** (`StartSession` with `project_id` and optional `daemon_instance_id`), and a table of sessions for that `project_id`. Session tables include a **Host** column (`daemon_instance_id` from `ListSessions`). Connect/Resume in that section uses that project’s debug setting.
 - **Other sessions**: Connect/Resume uses a separate **debug** checkbox for that list (sessions not tied to a listed project).
 - Sessions whose `project_id` is not in the listed projects appear under **Other sessions**.
 
@@ -81,12 +81,19 @@ If **`common_room`** is unset or blank, that panel is not shown and no extra Liv
 
 Spawned **`tddy-*`** sessions use the same configured room for **`--livekit-room`** when **`common_room`** is set; each process still uses a distinct **`daemon-{session_id}`** LiveKit identity for terminal RPC. If **`common_room`** is unset, the room name is **`daemon-{session_id}`** per session. See [daemon changelog](../daemon/changelog.md).
 
+### Eligible daemons and host selection
+
+- **`ListEligibleDaemons`**: After sign-in, **ConnectionScreen** loads eligible daemon entries (`instance_id`, `label`, `is_local`) alongside tools and projects. The daemon implementation lists instances from **`EligibleDaemonSource`** (currently the local daemon; LiveKit common-room peer discovery is deferred).
+- **Host dropdown**: Per project, the selected host is sent as **`daemon_instance_id`** on **`StartSession`**. Empty or matching the local instance keeps the existing local spawn path. Selecting a non-local instance is rejected by the daemon until cross-daemon spawn routing exists.
+- **Session host column**: **`ListSessions`** returns **`daemon_instance_id`** per row; the UI shows it in project and **Other sessions** tables.
+
 ## See also (development)
 
 - [LiveKit and gRPC terminal RPC E2E](../../dev/guides/livekit-terminal-rpc-e2e.md) — `tddy-e2e` tests, VirtualTui vs LiveKit bidi behavior, assertion patterns.
 
 ## Future Scope
 
+- LiveKit-based **peer daemon discovery** and **cross-daemon `StartSession` routing** (gateway delegates spawn to a peer over the common room control plane)
 - Multi-session support
 - Authentication and access control
 - Session persistence and reconnection

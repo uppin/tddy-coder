@@ -88,14 +88,20 @@ pub fn delete_inactive_session_directory(
     let session_id = session_id.trim();
     let session_dir = resolve_session_directory_for_delete(sessions_base, session_id)?;
     log::debug!(
-        "delete_inactive_session_directory: session_dir={:?} session_id={}",
+        "delete_inactive_session_directory: session_dir={:?} session_id={} sessions_base={:?}",
         session_dir,
-        session_id
+        session_id,
+        sessions_base
     );
 
     if !session_dir.is_dir() {
-        log::debug!("delete_inactive_session_directory: session directory missing");
-        return Err(Status::not_found("session not found"));
+        log::info!(
+            "delete_inactive_session_directory: no session directory on this daemon (session_id={}); refusing as wrong routing / ownership",
+            session_id
+        );
+        return Err(Status::failed_precondition(
+            "session is not present on this daemon; use the daemon that owns it (check routing / host)",
+        ));
     }
 
     let metadata = match read_session_metadata(&session_dir) {
@@ -209,5 +215,16 @@ mod tests {
     fn validate_rejects_slash_in_session_id() {
         let e = validate_session_id_for_delete("evil/id").unwrap_err();
         assert_eq!(e.code, tddy_rpc::Code::InvalidArgument);
+    }
+
+    /// Delete for a session id not present on this daemon’s tree signals wrong-daemon / routing (failed_precondition).
+    #[test]
+    fn delete_missing_session_uses_failed_precondition_for_cross_daemon_routing() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().join("sessions_this_daemon");
+        std::fs::create_dir_all(&base).unwrap();
+        let err = delete_inactive_session_directory(&base, "session-owned-on-another-daemon")
+            .unwrap_err();
+        assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
     }
 }
