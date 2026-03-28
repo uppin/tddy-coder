@@ -14,6 +14,7 @@ use crate::parser::parse_planning_response_with_base;
 use crate::tdd::planning;
 use crate::writer::{create_session_dir_in, create_session_dir_with_id};
 use tddy_core::output::new_session_dir;
+use tddy_core::session_lifecycle::resolve_effective_session_id;
 
 /// Plan step Task: invokes backend, parses response, writes PRD.md (with TODO section).
 pub struct PlanTask {
@@ -87,6 +88,8 @@ impl Task for PlanTask {
             }
         });
 
+        let bound_process_session_id: Option<String> = context.get_sync("session_id");
+
         let gid = GoalId::new("plan");
         let hints = self
             .recipe
@@ -137,8 +140,16 @@ impl Task for PlanTask {
 
             context.set_sync("parsed_planning", planning);
             context.set_sync("session_dir", session_dir.clone());
-            if let Some(sid) = &response.session_id {
-                context.set_sync("session_id", sid.clone());
+            if let Some(eff) = resolve_effective_session_id(
+                bound_process_session_id.as_deref(),
+                response.session_id.as_deref(),
+            ) {
+                log::info!(
+                    "PlanTask: engine session_id set to {} (backend reported {:?})",
+                    eff,
+                    response.session_id
+                );
+                context.set_sync("session_id", eff);
             }
 
             return Ok(TaskResult {

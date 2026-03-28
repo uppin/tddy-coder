@@ -2,10 +2,12 @@
 
 pub mod backend;
 pub mod changeset;
+pub mod elapsed_format;
 pub mod error;
 pub mod log_backend;
 pub mod output;
 pub mod presenter;
+pub mod session_lifecycle;
 pub mod session_metadata;
 pub mod source_path;
 pub mod stream;
@@ -28,6 +30,7 @@ pub use changeset::{
     ChangesetState, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
     QuestionOptionForQa, SessionEntry, StateTransition,
 };
+pub use elapsed_format::format_elapsed_compact;
 pub use error::{BackendError, ParseError, WorkflowError};
 pub use log_backend::{
     config_has_file_output, default_log_config, find_matching_policy, get_buffered_logs,
@@ -39,6 +42,11 @@ pub use presenter::{
     ActivityEntry, ActivityKind, AppMode, CriticalPresenterState, ExitAction, ModeChangedDetails,
     PendingWorkflowStart, Presenter, PresenterEvent, PresenterHandle, PresenterState,
     PresenterView, UserIntent, ViewConnection, WorkflowCompletePayload, WorkflowEvent,
+};
+pub use session_lifecycle::{
+    materialize_unified_session_directory, resolve_effective_session_id, unified_session_dir_path,
+    validate_session_id_segment, SessionIdValidationError, SessionLifecycleBootstrap,
+    UnifiedSessionTreeBootstrap,
 };
 pub use session_metadata::{
     read_session_metadata, write_session_metadata, SessionMetadata, SESSION_METADATA_FILENAME,

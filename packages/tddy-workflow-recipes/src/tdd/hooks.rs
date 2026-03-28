@@ -165,7 +165,9 @@ fn before_plan(session_dir: &Path, context: &Context) -> Result<(), Box<dyn Erro
         context.get_sync::<String>("feature_input"),
     ) {
         let input = feature_input.trim();
-        if !input.is_empty() {
+        // Process-bound session_id: never allocate a second anonymous dir under TDDY_SESSIONS_DIR.
+        if !input.is_empty() && context.get_sync::<String>("session_id").is_none() {
+            log::info!("[tdd hooks] before_plan: allocating new session dir (no bound session_id)");
             new_session_dir().map_err(|e| e.to_string())?
         } else {
             session_dir.to_path_buf()

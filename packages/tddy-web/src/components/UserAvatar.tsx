@@ -1,4 +1,5 @@
 import type { GitHubUser } from "../gen/auth_pb";
+import { Button } from "@/components/ui/button";
 
 const containerStyle = {
   display: "flex",
@@ -11,15 +12,6 @@ const avatarStyle = {
   width: 32,
   height: 32,
   borderRadius: "50%",
-} as const;
-
-const logoutButtonStyle = {
-  padding: "4px 10px",
-  fontSize: 12,
-  cursor: "pointer",
-  backgroundColor: "transparent",
-  border: "1px solid #ccc",
-  borderRadius: 4,
 } as const;
 
 export function UserAvatar({
@@ -38,13 +30,9 @@ export function UserAvatar({
         style={avatarStyle}
       />
       <span data-testid="user-login">{user.login}</span>
-      <button
-        data-testid="logout-button"
-        onClick={onLogout}
-        style={logoutButtonStyle}
-      >
+      <Button type="button" variant="outline" size="sm" data-testid="logout-button" onClick={onLogout}>
         Sign out
-      </button>
+      </Button>
     </div>
   );
 }

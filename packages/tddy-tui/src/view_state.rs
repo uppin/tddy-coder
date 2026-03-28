@@ -3,9 +3,14 @@
 //! The Presenter owns application state; the View owns this view-local state
 //! (editing buffers, cursor positions, scroll offset).
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::time::{Duration, Instant};
+
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use tddy_core::AppMode;
 use tddy_core::ClarificationQuestion;
+use tddy_core::PresenterState;
 
 /// Which sub-element has focus when the inbox is visible during Running mode.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -74,6 +79,12 @@ pub struct ViewState {
     pub spinner_tick: usize,
     /// Last Select question identity — used to avoid clearing Other-typing state on highlight-only ModeChanged.
     last_select_identity: Option<(String, String)>,
+    /// Stable key for the current [`AppMode`] variant + question identity (status bar freeze boundaries).
+    status_bar_mode_identity_cache: Option<u64>,
+    /// Snapshot of `goal_start_time.elapsed()` when entering clarification wait while a goal row is shown.
+    pub(crate) frozen_goal_elapsed_for_status_bar: Option<Duration>,
+    /// Wall-clock anchor for 1 Hz idle dot (· ↔ •) in user-wait modes.
+    pub(crate) idle_dot_animation_anchor: Option<Instant>,
 }
 
 /// Byte index of the start of the character immediately before `idx`.
@@ -101,9 +112,72 @@ fn advance_cursor_by_char(s: &str, idx: usize) -> usize {
         .unwrap_or(idx)
 }
 
+/// Hash [`AppMode`] so distinct clarification questions get distinct status-bar animation state.
+fn status_bar_mode_identity_key(mode: &AppMode) -> u64 {
+    let mut h = DefaultHasher::new();
+    std::mem::discriminant(mode).hash(&mut h);
+    match mode {
+        AppMode::Select {
+            question,
+            question_index,
+            ..
+        } => {
+            question_index.hash(&mut h);
+            question.header.hash(&mut h);
+            question.question.hash(&mut h);
+        }
+        AppMode::MultiSelect {
+            question,
+            question_index,
+            ..
+        } => {
+            question_index.hash(&mut h);
+            question.header.hash(&mut h);
+            question.question.hash(&mut h);
+        }
+        AppMode::TextInput { prompt } => {
+            prompt.hash(&mut h);
+        }
+        _ => {}
+    }
+    h.finish()
+}
+
 impl ViewState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Update frozen goal elapsed and idle-dot anchor when [`PresenterState::mode`] identity changes.
+    /// Call at the start of each frame before building status bar text (see [`crate::render::draw`]).
+    pub fn sync_status_bar_with_presenter(&mut self, state: &PresenterState) {
+        let key = status_bar_mode_identity_key(&state.mode);
+        if Some(key) != self.status_bar_mode_identity_cache {
+            log::debug!(
+                "view_state: status bar mode identity {:?} -> {:?}",
+                self.status_bar_mode_identity_cache,
+                Some(key)
+            );
+            self.status_bar_mode_identity_cache = Some(key);
+            let user_wait = matches!(
+                &state.mode,
+                AppMode::Select { .. } | AppMode::MultiSelect { .. } | AppMode::TextInput { .. }
+            );
+            let active_goal_row = state.current_goal.is_some() && state.current_state.is_some();
+            if user_wait && active_goal_row {
+                let elapsed = state.goal_start_time.elapsed();
+                self.frozen_goal_elapsed_for_status_bar = Some(elapsed);
+                self.idle_dot_animation_anchor = Some(Instant::now());
+                log::info!(
+                    "status bar: clarification wait — froze goal elapsed display at {:?}, idle dot anchor set",
+                    elapsed
+                );
+            } else {
+                self.frozen_goal_elapsed_for_status_bar = None;
+                self.idle_dot_animation_anchor = None;
+                log::debug!("status bar: cleared frozen elapsed / idle anchor (not user-wait or no goal row)");
+            }
+        }
     }
 
     /// Reset view state when entering a new mode. Call from TuiView when mode changes.
