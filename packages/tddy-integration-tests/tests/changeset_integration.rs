@@ -12,7 +12,7 @@ use tddy_core::{GoalId, MockBackend, SharedBackend, WorkflowEngine};
 
 use common::{
     ctx_acceptance_tests, ctx_plan, ctx_red, get_session_dir_from_session, run_goal_until_done,
-    run_plan, session_dir_for_input, temp_dir_with_git_repo,
+    run_plan, session_dir_for_new_session, temp_dir_with_git_repo,
 };
 use fixtures::*;
 
@@ -587,9 +587,9 @@ async fn changeset_contains_clarification_qa() {
     );
 
     let input = "Feature Z";
-    let session_dir = session_dir_for_input(&output_dir, input);
+    let session_dir = session_dir_for_new_session();
     std::fs::create_dir_all(&session_dir).unwrap();
-    let ctx = ctx_plan(input, output_dir.clone(), None, None);
+    let ctx = ctx_plan(input, output_dir.clone(), session_dir.clone(), None, None);
     let result = engine.run_goal(&GoalId::new("plan"), ctx).await.unwrap();
 
     assert!(
@@ -686,7 +686,7 @@ async fn changeset_yaml_sessions_array_tracks_all_sessions() {
     backend.push_ok(REFACTOR_JSON);
     backend.push_ok(UPDATE_DOCS_JSON); // red goal -> green -> ... -> refactor -> update-docs
 
-    let (output_dir, _) = temp_dir_with_git_repo("changeset-sessions", "Build auth");
+    let (output_dir, _) = temp_dir_with_git_repo("changeset-sessions");
 
     let storage_dir = std::env::temp_dir().join("tddy-changeset-sessions-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
@@ -821,9 +821,9 @@ async fn changeset_written_before_plan_agent() {
     );
 
     let input = "Build auth with early changeset";
-    let session_dir = session_dir_for_input(&output_dir, input);
+    let session_dir = session_dir_for_new_session();
     std::fs::create_dir_all(&session_dir).unwrap();
-    let ctx = ctx_plan(input, output_dir.clone(), None, None);
+    let ctx = ctx_plan(input, output_dir.clone(), session_dir.clone(), None, None);
     let _ = engine.run_goal(&GoalId::new("plan"), ctx).await;
 
     let captured_state = changeset_state.lock().unwrap().clone();

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{CodingBackend, CursorBackend, GoalId, SharedBackend};
 
-use common::{ctx_plan, session_dir_for_input, stub_invoke_request};
+use common::{ctx_plan, session_dir_for_new_session, stub_invoke_request};
 
 /// CursorBackend spawns agent with -p, --output-format stream-json, --force, --trust.
 #[test]
@@ -535,9 +535,9 @@ exit 0
     let _ = std::fs::remove_dir_all(&storage_dir);
     let engine = common::tdd_engine(SharedBackend::from_arc(backend), storage_dir);
 
-    let session_dir = session_dir_for_input(&tmp, "Feature X");
+    let session_dir = session_dir_for_new_session();
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
-    let ctx = ctx_plan("Feature X", tmp.clone(), None, None);
+    let ctx = ctx_plan("Feature X", tmp.clone(), session_dir.clone(), None, None);
     let plan_gid = GoalId::new("plan");
     let result = engine.run_goal(&plan_gid, ctx).await.expect("run_goal");
 

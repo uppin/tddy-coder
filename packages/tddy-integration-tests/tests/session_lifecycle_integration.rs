@@ -11,7 +11,7 @@
 mod common;
 
 use common::{
-    ctx_acceptance_tests, ctx_green, session_dir_for_input, temp_dir_with_git_repo,
+    ctx_acceptance_tests, ctx_green, session_dir_for_new_session, temp_dir_with_git_repo,
     write_changeset_with_state,
 };
 use std::sync::Arc;
@@ -72,7 +72,7 @@ async fn changeset_exists_before_workflow_starts() {
 /// Plan-mode sessions cannot be resumed; acceptance-tests must use a new session.
 #[tokio::test]
 async fn acceptance_tests_creates_fresh_session_no_crash() {
-    let (output_dir, session_dir) = temp_dir_with_git_repo("session-lifecycle-ac3", "Auth feature");
+    let (output_dir, session_dir) = temp_dir_with_git_repo("session-lifecycle-ac3");
 
     std::fs::write(
         session_dir.join("PRD.md"),
@@ -119,7 +119,7 @@ async fn green_resumes_from_state_session_id() {
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create");
 
-    let session_dir = session_dir_for_input(&output_dir, "Auth");
+    let session_dir = session_dir_for_new_session();
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
 
     std::fs::write(session_dir.join("PRD.md"), "# Auth").expect("PRD");

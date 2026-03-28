@@ -52,6 +52,13 @@ impl Status {
         }
     }
 
+    pub fn deadline_exceeded(msg: impl Into<String>) -> Self {
+        Self {
+            code: Code::DeadlineExceeded,
+            message: msg.into(),
+        }
+    }
+
     pub fn internal(msg: impl Into<String>) -> Self {
         Self {
             code: Code::Internal,

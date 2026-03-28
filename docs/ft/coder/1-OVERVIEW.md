@@ -2,7 +2,7 @@
 
 **Type**: Technical Product (Developer Tool)
 **Status**: Active
-**Updated**: 2026-03-21
+**Updated**: 2026-03-28
 
 ## Summary
 
@@ -45,13 +45,15 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 
 | Feature | Description |
 |---------|-------------|
+| [Workflow recipes](workflow-recipes.md) | Pluggable `WorkflowRecipe`; `TddRecipe` (default TDD pipeline); `BugfixRecipe` stub; `GoalId` / string states |
 | [Planning Step](planning-step.md) | Plan goal, acceptance-tests goal, plan approval gate, CLI interface, LLM backend abstraction |
 | [Implementation Step](implementation-step.md) | Red, green, demo, evaluate goals; state machine; output artifacts |
 | [gRPC Remote Control](grpc-remote-control.md) | `--grpc` flag, bidirectional streaming, programmatic control for E2E and automation |
 
 ## Integration Points
 
-- **tddy-core**: Workflow engine, graph-flow-compatible tasks, RunnerHooks, CodingBackend trait
+- **tddy-core**: Workflow engine (`WorkflowEngine`), recipe trait (`WorkflowRecipe`), graph execution, `RunnerHooks`, `CodingBackend` trait; goals and states are string IDs, not a fixed enum
+- **tddy-workflow-recipes**: Pluggable workflows (`TddRecipe` default, `BugfixRecipe` stub); graph definitions, hooks, parsers, and backend hints per recipe
 - **tddy-tui**: Ratatui view layer, PresenterView implementation, key mapping
 - **tddy-service**: gRPC service, proto definitions, event conversion (renamed from tddy-grpc; contains EchoServiceImpl, TerminalServiceImpl, DaemonService)
 - **tddy-demo**: Same app with StubBackend for demos and E2E tests

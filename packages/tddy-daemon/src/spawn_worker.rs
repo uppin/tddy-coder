@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::io::FromRawFd;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -74,25 +75,53 @@ pub struct SpawnClient {
     response_rx: Arc<std::sync::Mutex<BufReader<std::fs::File>>>,
 }
 
+fn worker_request_label(req: &WorkerRequest) -> String {
+    match req {
+        WorkerRequest::Spawn(s) => format!(
+            "op=spawn session={} repo={}",
+            s.resume_session_id.as_deref().unwrap_or("new"),
+            s.repo_path
+        ),
+        WorkerRequest::Clone(c) => format!("op=clone dest={} os_user={}", c.destination, c.os_user),
+    }
+}
+
 impl SpawnClient {
     fn send_and_recv(&self, req: WorkerRequest) -> anyhow::Result<WorkerResponse> {
-        let label = match &req {
-            WorkerRequest::Spawn(s) => s.resume_session_id.as_deref().unwrap_or("new"),
-            WorkerRequest::Clone(c) => c.destination.as_str(),
-        };
-        log::debug!("SpawnClient: sending request label={}", label);
+        let label = worker_request_label(&req);
+        let started = Instant::now();
+        log::info!("SpawnClient: sending {}", label);
         let request_json = serde_json::to_string(&req)?;
         let mut tx = self.request_tx.lock().unwrap();
         writeln!(tx, "{}", request_json)?;
         tx.flush()?;
         drop(tx);
 
-        log::debug!("SpawnClient: waiting for response label={}", label);
+        log::info!("SpawnClient: waiting for worker {}", label);
         let mut rx = self.response_rx.lock().unwrap();
         let mut line = String::new();
-        rx.read_line(&mut line)?;
-        log::debug!("SpawnClient: got response label={}", label);
-        let response: WorkerResponse = serde_json::from_str(line.trim())?;
+        let n = rx.read_line(&mut line)?;
+        if n == 0 && line.is_empty() {
+            anyhow::bail!(
+                "spawn worker closed response pipe without a line (EOF) after {:?}",
+                started.elapsed()
+            );
+        }
+        let elapsed = started.elapsed();
+        log::info!(
+            "SpawnClient: received response line ({} bytes) elapsed_ms={} {}",
+            line.len(),
+            elapsed.as_millis(),
+            label
+        );
+        let response: WorkerResponse = serde_json::from_str(line.trim()).map_err(|e| {
+            let preview: String = line.chars().take(256).collect();
+            anyhow::anyhow!(
+                "invalid WorkerResponse JSON from spawn worker: {} (preview: {:?})",
+                e,
+                preview
+            )
+        })?;
         Ok(response)
     }
 
@@ -214,8 +243,9 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                     common_room: req.common_room.clone(),
                 };
                 log::info!(
-                    "spawn_worker: calling spawn_as_user session_id={}",
-                    req.resume_session_id.as_deref().unwrap_or("new")
+                    "spawn_worker: calling spawn_as_user session_id={} repo={}",
+                    req.resume_session_id.as_deref().unwrap_or("new"),
+                    req.repo_path
                 );
                 let result = spawner::spawn_as_user(
                     &req.os_user,
@@ -233,6 +263,14 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                     "spawn_worker: spawn_as_user returned session_id={}",
                     req.resume_session_id.as_deref().unwrap_or("new")
                 );
+                match &result {
+                    Ok(_) => {}
+                    Err(e) => log::warn!(
+                        "spawn_worker: spawn_as_user err session_id={} err={}",
+                        req.resume_session_id.as_deref().unwrap_or("new"),
+                        e
+                    ),
+                }
                 match result {
                     Ok(r) => WorkerResponse::SpawnOk { result: r },
                     Err(e) => WorkerResponse::Error {
@@ -242,7 +280,20 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
             }
             WorkerRequest::Clone(req) => {
                 let dest = Path::new(&req.destination);
+                log::info!(
+                    "spawn_worker: calling clone_as_user os_user={} dest={}",
+                    req.os_user,
+                    req.destination
+                );
                 let result = spawner::clone_as_user(&req.os_user, &req.git_url, dest);
+                match &result {
+                    Ok(()) => log::info!("spawn_worker: clone_as_user ok dest={}", req.destination),
+                    Err(e) => log::warn!(
+                        "spawn_worker: clone_as_user err dest={} err={}",
+                        req.destination,
+                        e
+                    ),
+                }
                 match result {
                     Ok(()) => WorkerResponse::CloneOk,
                     Err(e) => WorkerResponse::Error {
@@ -253,8 +304,12 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
         };
 
         let response_json = serde_json::to_string(&response).unwrap();
-        let _ = writeln!(response_writer, "{}", response_json);
-        let _ = response_writer.flush();
+        if let Err(e) = writeln!(response_writer, "{}", response_json) {
+            log::error!("spawn_worker: failed to write response line: {}", e);
+        }
+        if let Err(e) = response_writer.flush() {
+            log::error!("spawn_worker: failed to flush response pipe: {}", e);
+        }
     }
 }
 

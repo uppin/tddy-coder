@@ -3,6 +3,7 @@
 //! Holds graph, runner, storage, backend. Provides run_goal() and run_full_workflow().
 
 use crate::backend::{CodingBackend, GoalId, WorkflowRecipe};
+use crate::workflow::context::Context;
 use crate::workflow::graph::{ExecutionResult, ExecutionStatus, Graph};
 use crate::workflow::hooks::RunnerHooks;
 use crate::workflow::runner::FlowRunner;
@@ -11,6 +12,17 @@ use crate::SharedBackend;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+/// Workflow runner session id: use `session_id` from context when set (CLI/daemon/tests), else generate.
+fn workflow_session_id_from_context(ctx: &mut Context) -> String {
+    ctx.get_sync::<String>("session_id")
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            let id = uuid::Uuid::new_v4().to_string();
+            ctx.set_sync("session_id", id.clone());
+            id
+        })
+}
 
 /// Central struct owning create-once infrastructure for workflow execution.
 pub struct WorkflowEngine {
@@ -24,7 +36,9 @@ pub struct WorkflowEngine {
 impl WorkflowEngine {
     /// Create a WorkflowEngine for the given recipe (graph + hooks from the recipe).
     ///
-    /// Uses `storage_dir` for session persistence. When `hooks` is `None`, uses `recipe.create_hooks(None)`.
+    /// Uses `storage_dir` for [`crate::workflow::session::FileSessionStorage`] (typically
+    /// [`crate::workflow::session::workflow_engine_storage_dir`] under the artifact session dir).
+    /// When `hooks` is `None`, uses `recipe.create_hooks(None)`.
     pub fn new(
         recipe: Arc<dyn WorkflowRecipe>,
         backend: SharedBackend,
@@ -60,12 +74,11 @@ impl WorkflowEngine {
                 serde_json::json!(self.backend.name()),
             );
         }
-        let session_id = uuid::Uuid::new_v4().to_string();
-        let ctx = crate::workflow::context::Context::new();
+        let mut ctx = Context::new();
         for (k, v) in context_values {
             ctx.set_sync(&k, v);
         }
-        ctx.set_sync("session_id", session_id.clone());
+        let session_id = workflow_session_id_from_context(&mut ctx);
 
         let session = Session {
             id: session_id.clone(),
@@ -90,12 +103,11 @@ impl WorkflowEngine {
                 serde_json::json!(self.backend.name()),
             );
         }
-        let session_id = uuid::Uuid::new_v4().to_string();
-        let ctx = crate::workflow::context::Context::new();
+        let mut ctx = Context::new();
         for (k, v) in context_values {
             ctx.set_sync(&k, v);
         }
-        ctx.set_sync("session_id", session_id.clone());
+        let session_id = workflow_session_id_from_context(&mut ctx);
 
         let session = Session {
             id: session_id.clone(),
@@ -133,11 +145,11 @@ impl WorkflowEngine {
                 serde_json::json!(self.backend.name()),
             );
         }
-        let session_id = uuid::Uuid::new_v4().to_string();
-        let ctx = crate::workflow::context::Context::new();
+        let mut ctx = Context::new();
         for (k, v) in context_values {
             ctx.set_sync(&k, v);
         }
+        let session_id = workflow_session_id_from_context(&mut ctx);
 
         let session = Session {
             id: session_id.clone(),

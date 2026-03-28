@@ -5728,6 +5728,7 @@ dependencies = [
  "tddy-service",
  "tddy-tui",
  "tddy-workflow-recipes",
+ "tempfile",
  "termwright",
  "tokio",
  "tokio-stream",

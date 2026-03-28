@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Directory name for TUI workflow session storage under temp.
-const TUI_SESSION_DIR: &str = "tddy-flowrunner-tui-session";
+/// Fallback when plan has not created `session_dir` yet (rare); prefer [`crate::workflow::session::workflow_engine_storage_dir`].
+const TUI_SESSION_FALLBACK_DIR: &str = "tddy-flowrunner-tui-session";
 use std::sync::mpsc;
 
 use crate::backend::{GoalId, WorkflowRecipe};
@@ -159,7 +159,8 @@ fn handle_elicitation(
                     .map(PathBuf::from)
                     .or_else(|| session_dir.parent().map(|p| p.to_path_buf()))
                     .unwrap_or_else(|| session_dir.to_path_buf());
-                let refine_storage = std::env::temp_dir().join("tddy-flowrunner-refine-session");
+                let refine_storage =
+                    crate::workflow::session::workflow_engine_storage_dir(session_dir);
                 std::fs::create_dir_all(&refine_storage).ok();
                 let refine_hooks = ctx.recipe.create_hooks(Some(ctx.event_tx.clone()));
                 let refine_engine = WorkflowEngine::new(
@@ -240,8 +241,10 @@ fn handle_elicitation(
                         }
                     }
                 }
-                current_prd = std::fs::read_to_string(session_dir.join("PRD.md"))
-                    .unwrap_or_else(|_| "Could not read PRD.md".to_string());
+                current_prd = std::fs::read_to_string(
+                    crate::session_plan_prd::plan_prd_path_for_session_dir(session_dir),
+                )
+                .unwrap_or_else(|_| "Could not read PRD.md".to_string());
             }
         }
         ElicitationEvent::WorktreeConfirmation { .. } => {
@@ -289,10 +292,6 @@ fn run_plan_without_output_dir(
         (output_dir.to_path_buf(), None)
     };
 
-    let storage_dir = std::env::temp_dir().join(TUI_SESSION_DIR);
-    std::fs::create_dir_all(&storage_dir).ok();
-    let hooks = recipe.create_hooks(Some(event_tx.clone()));
-    let engine = WorkflowEngine::new(recipe.clone(), backend.clone(), storage_dir, Some(hooks));
     let repo_path_str = output_dir_for_ctx.display().to_string();
     let mut context_values = std::collections::HashMap::new();
     context_values.insert("feature_input".to_string(), serde_json::json!(input));
@@ -316,6 +315,14 @@ fn run_plan_without_output_dir(
         ),
         _ => None,
     };
+
+    let storage_dir = match session_dir.as_ref() {
+        Some(dir) => crate::workflow::session::workflow_engine_storage_dir(dir),
+        None => std::env::temp_dir().join(TUI_SESSION_FALLBACK_DIR),
+    };
+    std::fs::create_dir_all(&storage_dir).ok();
+    let hooks = recipe.create_hooks(Some(event_tx.clone()));
+    let engine = WorkflowEngine::new(recipe.clone(), backend.clone(), storage_dir, Some(hooks));
     if let Some(ref dir) = session_dir {
         let init_cs = crate::changeset::Changeset {
             initial_prompt: Some(input.to_string()),
@@ -393,12 +400,21 @@ fn run_plan_without_output_dir(
         Err(()) => return None,
     };
 
-    let session_dir = rt
+    let session_dir = match rt
         .block_on(engine.get_session(&result.session_id))
         .ok()
         .flatten()
         .and_then(|s| s.context.get_sync::<PathBuf>("session_dir"))
-        .unwrap_or_else(|| output_dir.join(crate::output::slugify_directory_name(input)));
+    {
+        Some(p) => p,
+        None => match crate::output::new_session_dir() {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
+                return None;
+            }
+        },
+    };
 
     let conversation_output_resolved = crate::resolve_log_defaults(
         conversation_output_path.clone(),
@@ -523,7 +539,8 @@ pub fn run_workflow(
 
     let plan_needs_completion = cs_pre.as_ref().is_some_and(|c| {
         c.state.current.as_str() == "Init"
-            && (!session_dir.join("PRD.md").exists() || get_session_for_tag(c, "plan").is_none())
+            && (!crate::session_plan_prd::plan_prd_path_for_session_dir(&session_dir).exists()
+                || get_session_for_tag(c, "plan").is_none())
     });
     if plan_needs_completion {
         let input = cs_pre
@@ -533,7 +550,8 @@ pub fn run_workflow(
             .trim()
             .to_string();
         if !input.is_empty() {
-            let storage_dir = std::env::temp_dir().join(TUI_SESSION_DIR);
+            let storage_dir = crate::workflow::session::workflow_engine_storage_dir(&session_dir);
+            std::fs::create_dir_all(&storage_dir).ok();
             let hooks = recipe.create_hooks(Some(event_tx.clone()));
             let engine =
                 WorkflowEngine::new(recipe.clone(), backend.clone(), storage_dir, Some(hooks));
@@ -644,7 +662,7 @@ pub fn run_workflow(
             .map(PathBuf::from)
     });
 
-    let storage_dir = std::env::temp_dir().join(TUI_SESSION_DIR);
+    let storage_dir = crate::workflow::session::workflow_engine_storage_dir(&session_dir);
     std::fs::create_dir_all(&storage_dir).ok();
     let hooks = recipe.create_hooks(Some(event_tx.clone()));
     let backend_for_refine = backend.clone();

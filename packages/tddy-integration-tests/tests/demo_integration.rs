@@ -54,7 +54,7 @@ const UPDATE_DOCS_OUTPUT: &str =
 async fn setup_session_dir_with_green_complete(
     label: &str,
 ) -> (std::path::PathBuf, WorkflowEngine, Arc<MockBackend>) {
-    let (output_dir, _) = temp_dir_with_git_repo(&format!("demo-{}", label), "Build auth");
+    let (output_dir, _) = temp_dir_with_git_repo(&format!("demo-{}", label));
 
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_OUTPUT);

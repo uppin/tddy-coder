@@ -21,7 +21,7 @@ tddy-tui = { path = "../tddy-tui" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net"] }
 tokio-stream = "0.1"
 tonic = "0.12"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v7"] }
 
 [build-dependencies]
 prost-build = "0.13"

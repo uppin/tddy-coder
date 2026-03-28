@@ -1,11 +1,16 @@
 //! Daemon configuration — users, tools, LiveKit, GitHub, etc.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use tddy_core::LogConfig;
 
 fn default_spawn_mouse() -> bool {
     true
+}
+
+fn default_spawn_worker_request_timeout_secs() -> u64 {
+    300
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -33,6 +38,10 @@ pub struct DaemonConfig {
     /// When true (default), spawned `tddy-*` processes receive `--mouse` (browser / touch terminals).
     #[serde(default = "default_spawn_mouse")]
     pub spawn_mouse: bool,
+    /// Max seconds for clone/spawn work (`SpawnClient` round-trip or direct `spawn_as_user` /
+    /// `clone_as_user`). Minimum effective value is 1.
+    #[serde(default = "default_spawn_worker_request_timeout_secs")]
+    pub spawn_worker_request_timeout_secs: u64,
 }
 
 impl Default for DaemonConfig {
@@ -48,6 +57,7 @@ impl Default for DaemonConfig {
             allowed_tools: Vec::new(),
             repos_base_path: None,
             spawn_mouse: true,
+            spawn_worker_request_timeout_secs: default_spawn_worker_request_timeout_secs(),
         }
     }
 }
@@ -133,5 +143,32 @@ impl DaemonConfig {
     /// List allowed tools with path and label.
     pub fn allowed_tools(&self) -> &[AllowedTool] {
         &self.allowed_tools
+    }
+
+    /// Wall-clock limit for blocking clone/spawn operations (spawn worker or in-process).
+    pub fn spawn_worker_request_timeout(&self) -> Duration {
+        let secs = self.spawn_worker_request_timeout_secs.max(1);
+        Duration::from_secs(secs)
+    }
+}
+
+#[cfg(test)]
+mod spawn_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn default_spawn_worker_request_timeout_is_300_seconds() {
+        let c = DaemonConfig::default();
+        assert_eq!(c.spawn_worker_request_timeout_secs, 300);
+        assert_eq!(c.spawn_worker_request_timeout().as_secs(), 300);
+    }
+
+    #[test]
+    fn spawn_worker_request_timeout_clamps_zero_to_one_second() {
+        let c = DaemonConfig {
+            spawn_worker_request_timeout_secs: 0,
+            ..Default::default()
+        };
+        assert_eq!(c.spawn_worker_request_timeout().as_secs(), 1);
     }
 }

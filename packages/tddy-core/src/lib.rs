@@ -7,6 +7,7 @@ pub mod log_backend;
 pub mod output;
 pub mod presenter;
 pub mod session_metadata;
+pub mod session_plan_prd;
 pub mod source_path;
 pub mod stream;
 pub mod toolcall;
@@ -43,6 +44,7 @@ pub use presenter::{
 pub use session_metadata::{
     read_session_metadata, write_session_metadata, SessionMetadata, SESSION_METADATA_FILENAME,
 };
+pub use session_plan_prd::plan_prd_path_for_session_dir;
 pub use source_path::{classify_rust_source_path, RustSourcePathKind};
 pub use stream::ProgressEvent;
 pub use workflow::{
@@ -50,6 +52,7 @@ pub use workflow::{
     find_git_root,
     graph::{ElicitationEvent, ExecutionResult, ExecutionStatus},
     ids::WorkflowState,
+    session::{workflow_engine_storage_dir, WORKFLOW_ENGINE_STORAGE_SUBDIR},
     GoalOptions,
 };
 pub use worktree::{

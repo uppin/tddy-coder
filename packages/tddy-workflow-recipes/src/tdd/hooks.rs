@@ -12,9 +12,9 @@ use crate::tdd::{
     acceptance_tests, demo, evaluate, green, red, refactor, update_docs, validate_subagents,
 };
 use crate::writer::{
-    slugify_directory_name, update_acceptance_tests_file, update_progress_file,
-    write_acceptance_tests_file, write_artifacts, write_demo_results_file, write_evaluation_report,
-    write_progress_file, write_red_output_file,
+    update_acceptance_tests_file, update_progress_file, write_acceptance_tests_file,
+    write_artifacts, write_demo_results_file, write_evaluation_report, write_progress_file,
+    write_red_output_file,
 };
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -28,6 +28,8 @@ use tddy_core::changeset::{
     update_state, write_changeset, Changeset, SessionEntry,
 };
 use tddy_core::error::WorkflowError;
+use tddy_core::output::new_session_dir;
+use tddy_core::plan_prd_path_for_session_dir;
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::setup_worktree_for_session;
 use tddy_core::stream::ProgressEvent as StreamProgressEvent;
@@ -107,19 +109,23 @@ fn resolve_agent_session_id(session_dir: &Path) -> Result<String, Box<dyn Error 
 
 fn before_plan(session_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
     use crate::writer::create_session_dir_with_id;
-    // Resolve actual session_dir: session_base+session_id, or output_dir/slug, or fallback.
+    // Resolve session_dir: session_base+session_id, or new dir from feature (under sessions base).
     let dir: PathBuf = if let (Some(base), Some(sid)) = (
         context.get_sync::<PathBuf>("session_base"),
         context.get_sync::<String>("session_id"),
     ) {
         create_session_dir_with_id(&base, &sid).map_err(|e| e.to_string())?
-    } else if let (Some(output_dir), Some(feature_input)) = (
+    } else if context.get_sync::<PathBuf>("session_dir").is_some() {
+        // Entry points (e.g. tddy-coder plain `plan` without --output-dir) already created
+        // `{sessions_base}/sessions/{id}/` and set `session_dir`; do not allocate a second dir.
+        session_dir.to_path_buf()
+    } else if let (Some(_output_dir), Some(feature_input)) = (
         context.get_sync::<PathBuf>("output_dir"),
         context.get_sync::<String>("feature_input"),
     ) {
         let input = feature_input.trim();
         if !input.is_empty() {
-            output_dir.join(slugify_directory_name(input))
+            new_session_dir().map_err(|e| e.to_string())?
         } else {
             session_dir.to_path_buf()
         }
@@ -854,7 +860,7 @@ impl RunnerHooks for TddWorkflowHooks {
         let session_dir: PathBuf = context
             .get_sync("session_dir")
             .or_else(|| context.get_sync("output_dir"))?;
-        let prd_path = session_dir.join("PRD.md");
+        let prd_path = plan_prd_path_for_session_dir(&session_dir);
         if !prd_path.exists() {
             return None;
         }

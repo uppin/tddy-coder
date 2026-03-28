@@ -14,9 +14,10 @@ use std::sync::{Arc, Mutex};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
-    preselected_index_for_agent, read_changeset, AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend,
-    CodingBackend, CursorBackend, GoalId, PendingWorkflowStart, ProgressEvent, SharedBackend,
-    StubBackend, WorkflowEngine, WorkflowRecipe,
+    plan_prd_path_for_session_dir, preselected_index_for_agent, read_changeset,
+    read_session_metadata, AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodingBackend,
+    CursorBackend, GoalId, PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend,
+    WorkflowEngine, WorkflowRecipe,
 };
 use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response, TddRecipe};
 
@@ -898,6 +899,47 @@ fn on_progress(_event: &ProgressEvent) {
     // Plain mode: progress is not displayed (no stdout/stderr per AGENTS.md)
 }
 
+/// Resolves paths for the LiveKit Virtual TUI branch inside [`run_daemon`].
+///
+/// Returns `(agent_working_dir, session_artifact_dir, session_dir_for_presenter)`:
+/// - **agent_working_dir** — repository root for the coding agent (`InvokeRequest::working_dir`).
+/// - **session_artifact_dir** — directory for session files (`PRD.md`, `changeset.yaml`, metadata,
+///   logs).
+/// - **session_dir_for_presenter** — `Some(artifact dir)` when resuming an existing session;
+///   `None` when starting fresh (workflow allocates the session directory).
+fn livekit_daemon_workflow_paths(
+    sessions_base: &Path,
+    resume_from: Option<&str>,
+    session_id: Option<&str>,
+) -> (PathBuf, PathBuf, Option<PathBuf>) {
+    let session_artifact_dir = resume_from
+        .or(session_id)
+        .map(|id| sessions_base.join(id))
+        .unwrap_or_else(|| sessions_base.join("tddy-daemon-session"));
+
+    let agent_working_dir = if resume_from.is_some() {
+        read_session_metadata(&session_artifact_dir)
+            .ok()
+            .and_then(|m| m.repo_path)
+            .filter(|s| !s.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    } else {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    };
+
+    let session_dir_for_presenter = if resume_from.is_some() {
+        Some(session_artifact_dir.clone())
+    } else {
+        None
+    };
+    (
+        agent_working_dir,
+        session_artifact_dir,
+        session_dir_for_presenter,
+    )
+}
+
 /// Run as headless gRPC daemon. Serves GetSession and ListSessions; blocks until shutdown.
 /// When LiveKit args are present, also joins the room as a participant serving RPC over the data channel.
 fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
@@ -937,14 +979,14 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             )
             .with_broadcast(event_tx)
             .with_intent_sender(intent_tx);
-            let output_dir = args
-                .resume_from
-                .as_deref()
-                .or(args.session_id.as_deref())
-                .map(|id| sessions_base.join(id))
-                .unwrap_or_else(|| sessions_base.join("tddy-daemon-session"));
-            let _ = std::fs::create_dir_all(&output_dir);
-            let logs = output_dir.join("logs");
+            let (agent_working_dir, session_artifact_dir, session_dir) =
+                livekit_daemon_workflow_paths(
+                    &sessions_base,
+                    args.resume_from.as_deref(),
+                    args.session_id.as_deref(),
+                );
+            let _ = std::fs::create_dir_all(&session_artifact_dir);
+            let logs = session_artifact_dir.join("logs");
             let _ = std::fs::create_dir_all(&logs);
             tddy_core::toolcall::set_toolcall_log_dir(&logs);
 
@@ -973,19 +1015,15 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 tool: Some("tddy-coder".to_string()),
                 livekit_room: args.livekit_room.clone(),
             };
-            let _ = tddy_core::write_session_metadata(&output_dir, &session_metadata);
+            let _ = tddy_core::write_session_metadata(&session_artifact_dir, &session_metadata);
             // New daemon sessions must not use a placeholder prompt: stdin is /dev/null from the
             // parent spawner, so the workflow must block on `answer_rx` until the user submits
             // feature text via Virtual TUI / LiveKit (SubmitFeatureInput). A placeholder skips
             // that and jumps straight into plan / first clarification.
-            let (session_dir, initial_prompt) = if args.resume_from.is_some() {
-                (Some(output_dir.clone()), None)
-            } else {
-                (None, None)
-            };
+            let initial_prompt = None;
             presenter.start_workflow(
                 backend,
-                output_dir,
+                agent_working_dir,
                 session_dir,
                 initial_prompt,
                 None,
@@ -1347,6 +1385,9 @@ fn build_goal_context(
         serde_json::to_value(args.allowed_tools.clone()).unwrap(),
     );
     ctx.insert("debug".to_string(), serde_json::json!(is_debug_mode(args)));
+    if let Some(ref sid) = args.session_id {
+        ctx.insert("session_id".to_string(), serde_json::json!(sid.clone()));
+    }
     if let Some(p) = session_dir {
         ctx.insert("session_dir".to_string(), serde_json::to_value(p).unwrap());
         // Repo root is stored in changeset.repo_path (set when plan started). Use it for worktree creation.
@@ -1374,7 +1415,11 @@ fn run_goal_plain(
     print_output: bool,
     shutdown: &AtomicBool,
 ) -> anyhow::Result<()> {
-    let storage_dir = std::env::temp_dir().join("tddy-flowrunner-session");
+    let storage_dir = context_values
+        .get("session_dir")
+        .and_then(|v| serde_json::from_value::<PathBuf>(v.clone()).ok())
+        .map(|p| tddy_core::workflow::session::workflow_engine_storage_dir(&p))
+        .unwrap_or_else(|| std::env::temp_dir().join("tddy-flowrunner-session"));
     std::fs::create_dir_all(&storage_dir).context("create session storage dir")?;
     let recipe = tdd_recipe();
     let hooks = recipe.create_hooks(None);
@@ -1459,8 +1504,10 @@ fn run_goal_plain(
                                 break;
                             }
                             run_plan_refinement(args, &backend, &rt, &session_dir, &answer)?;
-                            current_prd = std::fs::read_to_string(session_dir.join("PRD.md"))
-                                .unwrap_or_else(|_| "Could not read PRD.md".to_string());
+                            current_prd = std::fs::read_to_string(plan_prd_path_for_session_dir(
+                                &session_dir,
+                            ))
+                            .unwrap_or_else(|_| "Could not read PRD.md".to_string());
                         }
                     }
                     tddy_core::ElicitationEvent::WorktreeConfirmation { .. } => {
@@ -1881,7 +1928,7 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
     let backend = create_backend(&agent_str, args.cursor_agent_path.as_deref(), None, None);
 
     let mut session_dir = args.session_dir.clone().context("session directory")?;
-    if !session_dir.join("PRD.md").exists() {
+    if !plan_prd_path_for_session_dir(&session_dir).exists() {
         session_dir = run_plan_to_get_dir(args, backend.clone(), &agent_str, &shutdown)?;
     }
 
@@ -1889,7 +1936,8 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
     let cs_pre = read_changeset(&session_dir).ok();
     let plan_needs_completion = cs_pre.as_ref().is_some_and(|c| {
         c.state.current.as_str() == "Init"
-            && (!session_dir.join("PRD.md").exists() || get_session_for_tag(c, "plan").is_none())
+            && (!plan_prd_path_for_session_dir(&session_dir).exists()
+                || get_session_for_tag(c, "plan").is_none())
     });
     if plan_needs_completion {
         let input = cs_pre
@@ -1921,7 +1969,7 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         .unwrap_or_else(|| recipe.start_goal());
     let start_is_full = start_goal == recipe.start_goal();
 
-    let storage_dir = std::env::temp_dir().join("tddy-flowrunner-session");
+    let storage_dir = tddy_core::workflow::session::workflow_engine_storage_dir(&session_dir);
     std::fs::create_dir_all(&storage_dir).context("create session storage dir")?;
     let hooks = recipe.create_hooks(None);
     let backend_for_refine = backend.clone();
@@ -2028,8 +2076,10 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
                                 &session_dir,
                                 &answer,
                             )?;
-                            current_prd = std::fs::read_to_string(session_dir.join("PRD.md"))
-                                .unwrap_or_else(|_| "Could not read PRD.md".to_string());
+                            current_prd = std::fs::read_to_string(plan_prd_path_for_session_dir(
+                                &session_dir,
+                            ))
+                            .unwrap_or_else(|_| "Could not read PRD.md".to_string());
                         }
                     }
                     tddy_core::ElicitationEvent::WorktreeConfirmation { .. } => {
@@ -2128,7 +2178,7 @@ fn run_plan_refinement(
         .ok()
         .and_then(|c| get_session_for_tag(&c, "plan"));
     // output_dir from build_goal_context (repo_path in changeset); session_dir.parent() wrong when under ~/.tddy/sessions/
-    let refine_storage = std::env::temp_dir().join("tddy-flowrunner-refine-session");
+    let refine_storage = tddy_core::workflow::session::workflow_engine_storage_dir(session_dir);
     std::fs::create_dir_all(&refine_storage).context("create refine session dir")?;
     let recipe = tdd_recipe();
     let refine_hooks = recipe.create_hooks(None);
@@ -2447,5 +2497,42 @@ mod changeset_agent_resume_tests {
         assert_eq!(args.agent.as_deref(), Some("cursor"));
 
         let _ = std::fs::remove_dir_all(&session_dir);
+    }
+}
+
+#[cfg(test)]
+mod livekit_daemon_path_contract_tests {
+    use super::livekit_daemon_workflow_paths;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn resume_does_not_alias_agent_working_directory_with_session_directory() {
+        let base =
+            std::env::temp_dir().join(format!("tddy-livekit-path-resume-{}", std::process::id()));
+        let sessions = base.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let sid = "a97addd3-c31b-442b-a6b0-a63abe99e11d";
+        let (working_dir, session_artifact_dir, presenter_dir) =
+            livekit_daemon_workflow_paths(&sessions, Some(sid), None);
+        assert_ne!(working_dir, session_artifact_dir);
+        assert_eq!(presenter_dir, Some(session_artifact_dir));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn new_livekit_session_does_not_use_sessions_subtree_as_agent_working_directory() {
+        let base =
+            std::env::temp_dir().join(format!("tddy-livekit-path-new-{}", std::process::id()));
+        let sessions = base.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let (working_dir, _artifact, presenter_dir) =
+            livekit_daemon_workflow_paths(&sessions, None, None);
+        assert!(presenter_dir.is_none());
+        assert_ne!(
+            working_dir.parent().and_then(|p| p.file_name()),
+            Some(OsStr::new("sessions")),
+            "agent working directory must be the repository root, not under .../sessions/"
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
