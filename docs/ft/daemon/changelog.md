@@ -1,5 +1,11 @@
 # Daemon product area changelog
 
+## 2026-03-28 — ConnectionService: ListSessions workflow enrichment
+
+- **`ListSessions`**: Each **`SessionEntry`** includes **`workflow_goal`**, **`workflow_state`**, **`elapsed_display`**, **`agent`**, and **`model`**. The daemon reads **`.session.yaml`** and **`changeset.yaml`** under each session directory (see **`session_list_enrichment`**). The blocking read and enrichment run on the thread pool via **`spawn_blocking_with_timeout`** (same wall-clock cap as other blocking daemon work). Enrichment failures are logged at **warn**; the RPC still returns base session fields from **`session_reader`**.
+- **Proto / service**: **`connection.proto`** defines the five string fields on **`SessionEntry`**; TypeScript and Rust stubs are generated from the proto.
+- **Feature doc**: [web-terminal.md](../web/web-terminal.md) (session workflow columns); package reference [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md).
+
 ## 2026-03-24 — ConnectionService: DeleteSession
 
 - **`DeleteSession`**: Removes the on-disk session directory under the authenticated user’s sessions base when `.session.yaml` indicates an **inactive** session (no live process for the recorded PID, consistent with `ListSessions`). Rejects active sessions, missing sessions, and invalid session ids with the appropriate gRPC status. Filesystem removal errors return a generic **`INTERNAL`** message to clients; full error detail is logged on the server.

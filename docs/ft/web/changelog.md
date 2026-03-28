@@ -2,6 +2,12 @@
 
 Release note history for the Web product area.
 
+## 2026-03-28 — Connection screen: session workflow status (TUI parity)
+
+- **ConnectionScreen**: Session tables include **Goal**, **Workflow**, **Elapsed**, **Agent**, and **Model** columns. **`SessionWorkflowStatusCells`** renders the extended **`ListSessions`** fields; **`SessionEntry`** carries **`workflow_goal`**, **`workflow_state`**, **`elapsed_display`**, **`agent`**, and **`model`** from the daemon. Tables use horizontal scroll when needed. Session list polling uses a **2** second interval when any session is active (**`isActive`**), and **5** seconds otherwise; projects still refresh every **5** seconds.
+- **Feature doc**: [web-terminal.md](web-terminal.md) (Daemon mode: Connection screen — session workflow status).
+- **Elapsed semantics (QA)**: [web-session-status-elapsed-semantics.md](../../dev/1-WIP/web-session-status-elapsed-semantics.md).
+
 ## 2026-03-24 — Connection screen: delete inactive sessions
 
 - **ConnectionScreen**: Inactive session rows include **Resume** and **Delete** (project session tables and **Other sessions**). **Delete** uses a browser **confirm**, invokes **`DeleteSession`**, refreshes the session list after success, and surfaces RPC errors in the shared connection error area. Active rows show **Connect** and **Signal** only.

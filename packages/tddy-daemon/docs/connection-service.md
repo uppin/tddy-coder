@@ -7,13 +7,27 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | RPC | Purpose |
 |-----|---------|
 | `ListTools` | Allowed `tddy-*` binaries from config |
-| `ListSessions` | Sessions under `~/.tddy/sessions/` with `.session.yaml` (includes `project_id`) |
+| `ListSessions` | Sessions under `~/.tddy/sessions/` with `.session.yaml` (includes `project_id`); each entry includes workflow fields populated from **`changeset.yaml`** when present (see below) |
 | `ListProjects` | Projects from `~/.tddy/projects/projects.yaml` |
 | `CreateProject` | Clone (or adopt existing path) + append registry |
 | `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id` |
 | `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata) |
 | `DeleteSession` | Removes `~/.tddy/sessions/<session_id>/` when the session is inactive (PID in metadata not alive); rejects active sessions, unknown ids, and path-unsafe ids (implementation in `session_deletion`) |
 | `SignalSession` | Send Unix signal to recorded PID for an active session |
+
+## ListSessions workflow fields
+
+For each session directory, the daemon merges **`.session.yaml`** with optional **`changeset.yaml`**:
+
+- **`workflow_goal`**: Session row **tag** for the row whose **id** matches **`.session.yaml`** **`session_id`**.
+- **`workflow_state`**: **`changeset.state.current`** (string form of the workflow state).
+- **`agent`**: Matching session row **agent**.
+- **`model`**: **`changeset.models[tag]`** when the map contains that tag.
+- **`elapsed_display`**: Compact duration from **`tddy_core::format_elapsed_compact`**, using wall time since the last **`state.history`** entry whose state matches **`state.current`**, or **`state.updated_at`** when no matching history entry exists.
+
+If the changeset is missing, unreadable, or has no matching session row, the corresponding fields use **placeholders** (em dash) or partial data as implemented in **`session_list_enrichment`**.
+
+The directory listing and enrichment execute inside **`spawn_blocking_with_timeout`** so the async RPC handler does not block the Tokio runtime on disk I/O.
 
 ## DeleteSession behavior
 

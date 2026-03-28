@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-core.
 
+- **2026-03-28** [Feature] Elapsed format helper — `elapsed_format` module exports `format_elapsed_compact(Duration)` for TUI status bar and daemon session list; shared semantics between terminal and web. (tddy-core, tddy-tui, tddy-daemon)
 - **2026-03-22** [Feature] Workflow abstraction layer — `GoalId` / `WorkflowState` string newtypes; `WorkflowRecipe` trait; `WorkflowEngine` parameterized by `Arc<dyn WorkflowRecipe>`; TDD-specific graph/hooks removed from core (moved to `tddy-workflow-recipes`). Backends use `GoalHints` instead of matching a `Goal` enum. See [docs/ft/coder/workflow-recipes.md](../../../../docs/ft/coder/workflow-recipes.md). (tddy-core)
 - **2026-03-22** [Feature] Toolcall submit immediate wire acknowledgment — `start_toolcall_listener`: `submit` returns `SubmitOk` on the socket right after `store_submit_result`; `try_send` of `SubmitActivity` for activity log only. `ToolCallRequest::SubmitActivity`; ask/approve still use oneshot until `poll_tool_calls`. Tests: `toolcall_relay_presenter_stuck`. (tddy-core, tddy-tools, tddy-coder tests)
 - **2026-03-22** [Feature] Production-only red logging markers — Optional `source_file` on red-phase `markers[]`; `source_path::classify_rust_source_path` (Rust heuristics: `tests` segment, `*_test.rs`); `validate_red_marker_source_paths` inside `parse_red_response`; red system prompt requires markers on production skeleton entry points only. Schemas: `packages/tddy-core/schemas/red.schema.json` aligned with tddy-tools. (tddy-core, tddy-tools)
