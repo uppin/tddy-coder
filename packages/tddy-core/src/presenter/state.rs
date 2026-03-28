@@ -35,9 +35,9 @@ pub enum AppMode {
     FeatureInput,
     /// Workflow is running.
     Running,
-    /// Plan approval gate: View, Approve, or Refine.
-    PlanReview { prd_content: String },
-    /// Full-screen markdown viewer (PRD content).
+    /// Session document approval: View, Approve, or Refine.
+    DocumentReview { content: String },
+    /// Full-screen markdown viewer.
     MarkdownViewer { content: String },
     /// Presenting a single-select clarification question.
     Select {
@@ -59,6 +59,16 @@ pub enum AppMode {
     Done,
     /// Workflow errored — user can Resume or Exit.
     ErrorRecovery { error_message: String },
+}
+
+/// Critical state fields that must survive broadcast overflow.
+/// Shared between Presenter (writer) and TUI views (reader) via `Arc<Mutex<_>>`.
+/// When the broadcast channel lags, the TUI resyncs goal and workflow state from
+/// this shared snapshot instead of relying on lost `GoalStarted`/`StateChanged` events.
+#[derive(Clone, Debug, Default)]
+pub struct CriticalPresenterState {
+    pub current_goal: Option<String>,
+    pub current_state: Option<String>,
 }
 
 /// Top-level application state owned by the Presenter.

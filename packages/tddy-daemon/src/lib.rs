@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod config;
 pub mod connection_service;
+pub mod multi_host;
 pub mod project_storage;
 pub mod server;
 pub mod session_deletion;

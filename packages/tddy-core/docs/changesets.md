@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-core.
 
+- **2026-03-28** [Architecture] Recipe-owned planning artifacts — Removed **`session_plan_prd`**; **`WorkflowRecipe`** gains **`uses_primary_session_document`** / **`read_primary_session_document_utf8`**; presenter, CLI, and service call sites use recipe I/O; no hard-coded **`PRD.md`** default in core. Guard test in **`lib.rs`** prevents re-export of legacy PRD path helpers. See **`tddy-workflow`** **`artifact_paths`**. (tddy-core, tddy-workflow, tddy-workflow-recipes)
 - **2026-03-28** [Feature] Elapsed format helper — `elapsed_format` module exports `format_elapsed_compact(Duration)` for TUI status bar and daemon session list; shared semantics between terminal and web. (tddy-core, tddy-tui, tddy-daemon)
 - **2026-03-28** [Feature] Presenter workflow session id for TUI — `PresenterState::workflow_session_id`; set from `ProgressEvent::SessionStarted` and `start_workflow`; cleared on `WorkflowComplete` (success and error) and before inbox dequeue restart; truncated session id in debug logs. (tddy-core)
 - **2026-03-22** [Feature] Workflow abstraction layer — `GoalId` / `WorkflowState` string newtypes; `WorkflowRecipe` trait; `WorkflowEngine` parameterized by `Arc<dyn WorkflowRecipe>`; TDD-specific graph/hooks removed from core (moved to `tddy-workflow-recipes`). Backends use `GoalHints` instead of matching a `Goal` enum. See [docs/ft/coder/workflow-recipes.md](../../../../docs/ft/coder/workflow-recipes.md). (tddy-core)

@@ -11,7 +11,9 @@ use crate::{ClarificationQuestion, SharedBackend, WorkflowRecipe};
 
 use crate::presenter::intent::UserIntent;
 use crate::presenter::presenter_events::{PresenterEvent, ViewConnection};
-use crate::presenter::state::{ActivityEntry, ActivityKind, AppMode, PresenterState};
+use crate::presenter::state::{
+    ActivityEntry, ActivityKind, AppMode, CriticalPresenterState, PresenterState,
+};
 use crate::presenter::workflow_runner;
 use crate::presenter::{WorkflowCompletePayload, WorkflowEvent};
 
@@ -87,6 +89,9 @@ pub struct Presenter {
     deferred_cli_model: Option<String>,
     /// Active workflow definition (TDD, bug-fix, …).
     workflow_recipe: Arc<dyn WorkflowRecipe>,
+    /// Shared critical state for broadcast lag recovery.
+    /// Updated on every GoalStarted/StateChanged; views read after Lagged.
+    critical_state: Arc<std::sync::Mutex<CriticalPresenterState>>,
 }
 
 fn format_session_id_for_log(id: &str) -> String {
@@ -146,6 +151,7 @@ impl Presenter {
             pending_workflow_start: None,
             deferred_cli_model: None,
             workflow_recipe,
+            critical_state: Arc::new(std::sync::Mutex::new(CriticalPresenterState::default())),
         }
     }
 
@@ -176,6 +182,7 @@ impl Presenter {
             state_snapshot: self.state.clone(),
             event_rx: broadcast_tx.subscribe(),
             intent_tx,
+            critical_state: self.critical_state.clone(),
         })
     }
 
@@ -351,9 +358,9 @@ impl Presenter {
                     self.restart_workflow(prompt);
                 }
             }
-            UserIntent::ApprovePlan => {
-                if matches!(self.state.mode, AppMode::PlanReview { .. }) {
-                    // Existing: approve from PlanReview menu
+            UserIntent::ApproveSessionDocument => {
+                if matches!(self.state.mode, AppMode::DocumentReview { .. }) {
+                    // Existing: approve from document review menu
                     if let Some(ref tx) = self.answer_tx {
                         let _ = tx.send("Approve".to_string());
                     }
@@ -367,19 +374,20 @@ impl Presenter {
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
             }
-            UserIntent::ViewPlan => {
-                if let AppMode::PlanReview { ref prd_content } = self.state.mode {
-                    let content = self
+            UserIntent::ViewSessionDocument => {
+                if let AppMode::DocumentReview { ref content } = self.state.mode {
+                    let viewer_content = self
                         .workflow_session_dir
                         .as_ref()
-                        .map(|d| crate::session_plan_prd::plan_prd_path_for_session_dir(d))
-                        .and_then(|p| std::fs::read_to_string(&p).ok())
-                        .unwrap_or_else(|| prd_content.clone());
-                    self.state.mode = AppMode::MarkdownViewer { content };
+                        .and_then(|d| self.workflow_recipe.read_primary_session_document_utf8(d))
+                        .unwrap_or_else(|| content.clone());
+                    self.state.mode = AppMode::MarkdownViewer {
+                        content: viewer_content,
+                    };
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
             }
-            UserIntent::RefinePlan => {
+            UserIntent::RefineSessionDocument => {
                 self.plan_refinement_pending = true;
                 self.state.mode = AppMode::TextInput {
                     prompt: "Enter refinement feedback:".to_string(),
@@ -388,8 +396,8 @@ impl Presenter {
             }
             UserIntent::DismissViewer => {
                 if let AppMode::MarkdownViewer { ref content } = self.state.mode {
-                    self.state.mode = AppMode::PlanReview {
-                        prd_content: content.clone(),
+                    self.state.mode = AppMode::DocumentReview {
+                        content: content.clone(),
                     };
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
@@ -862,6 +870,9 @@ impl Presenter {
                 }
                 WorkflowEvent::StateChange { from, to } => {
                     self.state.current_state = Some(to.clone());
+                    if let Ok(mut cs) = self.critical_state.lock() {
+                        cs.current_state = Some(to.clone());
+                    }
                     let entry = ActivityEntry {
                         text: format!("State: {} → {}", from, to),
                         kind: ActivityKind::StateChange,
@@ -875,6 +886,9 @@ impl Presenter {
                 }
                 WorkflowEvent::GoalStarted(goal) => {
                     self.state.current_goal = Some(goal.clone());
+                    if let Ok(mut cs) = self.critical_state.lock() {
+                        cs.current_goal = Some(goal.clone());
+                    }
                     self.state.goal_start_time = std::time::Instant::now();
                     if matches!(self.state.mode, AppMode::FeatureInput) {
                         self.state.mode = AppMode::Running;
@@ -893,9 +907,9 @@ impl Presenter {
                     self.state.mode = AppMode::FeatureInput;
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                 }
-                WorkflowEvent::PlanApprovalNeeded { prd_content } => {
+                WorkflowEvent::SessionDocumentApprovalNeeded { content } => {
                     self.flush_agent_output_buffer();
-                    self.state.mode = AppMode::PlanReview { prd_content };
+                    self.state.mode = AppMode::DocumentReview { content };
                     self.broadcast(PresenterEvent::ModeChanged(self.state.mode.clone()));
                     // Resync goal/state in case client missed GoalStarted/StateChanged due to broadcast Lagged
                     if let Some(ref g) = self.state.current_goal {
@@ -1590,26 +1604,26 @@ mod tests {
     }
 
     #[test]
-    fn view_plan_markdown_viewer_shows_prd_on_disk_not_stale_snapshot() {
-        let tmp = std::env::temp_dir().join("tddy-test-view-plan-disk-prd");
+    fn view_session_document_markdown_viewer_shows_disk_not_stale_snapshot() {
+        let tmp = std::env::temp_dir().join("tddy-test-view-doc-disk");
         let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-        let on_disk = "# Plan\n\nPRD_FROM_DISK_UNIQUE_42\n";
-        std::fs::write(tmp.join("PRD.md"), on_disk).unwrap();
+        std::fs::create_dir_all(tmp.join("artifacts")).unwrap();
+        let on_disk = "# Plan\n\nDOC_FROM_DISK_UNIQUE_42\n";
+        std::fs::write(tmp.join("artifacts").join("SessionDoc.md"), on_disk).unwrap();
 
         let mut p = make_presenter();
         p.workflow_session_dir = Some(tmp.clone());
-        p.state.mode = AppMode::PlanReview {
-            prd_content: "STALE_SNAPSHOT_NOT_ON_DISK".to_string(),
+        p.state.mode = AppMode::DocumentReview {
+            content: "STALE_SNAPSHOT_NOT_ON_DISK".to_string(),
         };
 
-        p.handle_intent(UserIntent::ViewPlan);
+        p.handle_intent(UserIntent::ViewSessionDocument);
 
         match &p.state().mode {
             AppMode::MarkdownViewer { content } => {
                 assert!(
-                    content.contains("PRD_FROM_DISK_UNIQUE_42"),
-                    "View Plan must show PRD.md from workflow_session_dir; got: {:?}",
+                    content.contains("DOC_FROM_DISK_UNIQUE_42"),
+                    "View session document must show primary artifact from workflow_session_dir; got: {:?}",
                     content
                 );
                 assert!(
@@ -1625,36 +1639,44 @@ mod tests {
     }
 
     #[test]
-    fn view_plan_markdown_viewer_shows_uuid_root_prd_when_workflow_dir_nested() {
+    fn view_session_document_markdown_viewer_shows_uuid_root_when_workflow_dir_nested() {
         let root =
-            std::env::temp_dir().join(format!("tddy-test-view-plan-nested-{}", std::process::id()));
+            std::env::temp_dir().join(format!("tddy-test-view-doc-nested-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let uuid = root
             .join("sessions")
             .join("a97addd3-c31b-442b-a6b0-a63abe99e11d");
         let nested = uuid.join("2026-03-24-feature-slug");
         std::fs::create_dir_all(&nested).unwrap();
-        std::fs::write(uuid.join("PRD.md"), "# Full\n\nCANONICAL_UUID_BODY\n").unwrap();
-        std::fs::write(nested.join("PRD.md"), "## Related\nlegacy nested only\n").unwrap();
+        std::fs::write(
+            uuid.join("SessionDoc.md"),
+            "# Full\n\nCANONICAL_UUID_BODY\n",
+        )
+        .unwrap();
+        std::fs::write(
+            nested.join("SessionDoc.md"),
+            "## Related\nlegacy nested only\n",
+        )
+        .unwrap();
 
         let mut p = make_presenter();
         p.workflow_session_dir = Some(nested.clone());
-        p.state.mode = AppMode::PlanReview {
-            prd_content: "STALE".to_string(),
+        p.state.mode = AppMode::DocumentReview {
+            content: "STALE".to_string(),
         };
 
-        p.handle_intent(UserIntent::ViewPlan);
+        p.handle_intent(UserIntent::ViewSessionDocument);
 
         match &p.state().mode {
             AppMode::MarkdownViewer { content } => {
                 assert!(
                     content.contains("CANONICAL_UUID_BODY"),
-                    "View Plan must show sessions/<uuid>/PRD.md when nested; got: {:?}",
+                    "View session document must prefer sessions/<uuid>/ primary doc when nested; got: {:?}",
                     content
                 );
                 assert!(
                     !content.contains("legacy nested only"),
-                    "must not show nested duplicate PRD; got: {:?}",
+                    "must not show nested duplicate doc; got: {:?}",
                     content
                 );
             }

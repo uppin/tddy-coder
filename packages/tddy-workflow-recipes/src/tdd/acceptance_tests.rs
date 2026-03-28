@@ -9,13 +9,19 @@ You MUST:
 3. Delete or adjust any tests that pass - passing tests do not verify new behavior
 4. Do NOT ask for permission to write files - you have write access. Create the test files directly.
 5. When done, submit your output by calling:
-  tddy-tools submit --goal acceptance-tests --data '<your JSON output>'
+  tddy-tools submit --goal acceptance-tests --data-stdin << 'EOF'
+<your JSON output>
+EOF
+
+Use --data-stdin and a heredoc. Do NOT use --data with inline JSON for large payloads. Do NOT use Write, cat, or python to build the JSON first — put the JSON directly in the heredoc.
 
 If you need to ask the user clarification questions, call:
   tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
 The call will block until the user answers. The response contains the user's answers.
 
 Run `tddy-tools get-schema acceptance-tests` to see the expected output format. The JSON must be a single object starting with {"goal":"acceptance-tests",...} — no number, array, or numbered list items.
+
+**CRITICAL**: You MUST call tddy-tools submit with your complete structured output (summary, tests array, test_command, etc.). Do NOT return a summary, meta-commentary, or description of what you created without calling submit. The submit call delivers the output to the workflow — if you do not call it, the workflow fails.
 
 The summary must describe what tests exist and confirm all are failing. The tests array must list each acceptance test with name, file, line, and status.
 
@@ -72,8 +78,21 @@ mod tests {
             "system prompt must reference get-schema for acceptance-tests"
         );
         assert!(
-            prompt.contains("tddy-tools submit") && prompt.contains("--goal acceptance-tests"),
-            "system prompt must instruct agent to use tddy-tools submit --goal acceptance-tests"
+            prompt.contains("tddy-tools submit")
+                && prompt.contains("--goal acceptance-tests")
+                && prompt.contains("--data-stdin"),
+            "system prompt must instruct agent to use tddy-tools submit --goal acceptance-tests with --data-stdin (heredoc), like plan"
+        );
+    }
+
+    /// Parity with `planning::system_prompt` and `update_docs::system_prompt`: agents must not
+    /// finish with a prose summary instead of `tddy-tools submit`, or the workflow cannot proceed.
+    #[test]
+    fn system_prompt_mandates_tddy_tools_submit_for_workflow_delivery() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("if you do not call it, the workflow fails"),
+            "acceptance-tests system prompt must state that omitting tddy-tools submit fails the workflow (same contract as plan and update-docs)"
         );
     }
 }

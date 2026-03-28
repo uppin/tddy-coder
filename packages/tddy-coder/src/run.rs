@@ -14,10 +14,10 @@ use std::sync::{Arc, Mutex};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
-    plan_prd_path_for_session_dir, preselected_index_for_agent, read_changeset,
-    read_session_metadata, AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodingBackend,
-    CursorBackend, GoalId, PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend,
-    WorkflowEngine, WorkflowRecipe,
+    preselected_index_for_agent, read_changeset, read_session_metadata, AnyBackend,
+    ClaudeAcpBackend, ClaudeCodeBackend, CodingBackend, CursorBackend, GoalId,
+    PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend, WorkflowEngine,
+    WorkflowRecipe,
 };
 use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response, TddRecipe};
 
@@ -1044,22 +1044,20 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 });
             let shutdown_for_thread = shutdown.clone();
             let presenter_for_thread = presenter.clone();
-            std::thread::spawn(move || {
-                for _ in 0..100_000 {
-                    if shutdown_for_thread.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    while let Ok(intent) = intent_rx.try_recv() {
-                        if let Ok(mut p) = presenter_for_thread.lock() {
-                            p.handle_intent(intent);
-                        }
-                    }
-                    if let Ok(mut p) = presenter_for_thread.lock() {
-                        p.poll_tool_calls();
-                        p.poll_workflow();
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
+            std::thread::spawn(move || loop {
+                if shutdown_for_thread.load(Ordering::Relaxed) {
+                    break;
                 }
+                while let Ok(intent) = intent_rx.try_recv() {
+                    if let Ok(mut p) = presenter_for_thread.lock() {
+                        p.handle_intent(intent);
+                    }
+                }
+                if let Ok(mut p) = presenter_for_thread.lock() {
+                    p.poll_tool_calls();
+                    p.poll_workflow();
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
             });
             Some(factory)
         } else {
@@ -1306,7 +1304,9 @@ fn apply_agent_from_changeset_if_needed(args: &mut Args) -> anyhow::Result<()> {
         Ok(cs) => cs,
         Err(_) => return Ok(()),
     };
-    if let Some(agent) = tddy_core::resolve_agent_from_changeset(&cs) {
+    if let Some(agent) =
+        tddy_core::resolve_agent_from_changeset(&cs, TddRecipe.start_goal().as_str())
+    {
         args.agent = Some(agent);
     }
     Ok(())
@@ -1479,8 +1479,8 @@ fn run_goal_plain(
                             .unwrap_or_else(|| PathBuf::from("."))
                     });
                 match event {
-                    tddy_core::ElicitationEvent::PlanApproval { ref prd_content } => {
-                        let mut current_prd = prd_content.clone();
+                    tddy_core::ElicitationEvent::DocumentApproval { ref content } => {
+                        let mut current_prd = content.clone();
                         loop {
                             let answer = match plain::read_plan_approval_plain(&current_prd) {
                                 Ok(a) => a,
@@ -1504,10 +1504,9 @@ fn run_goal_plain(
                                 break;
                             }
                             run_plan_refinement(args, &backend, &rt, &session_dir, &answer)?;
-                            current_prd = std::fs::read_to_string(plan_prd_path_for_session_dir(
-                                &session_dir,
-                            ))
-                            .unwrap_or_else(|_| "Could not read PRD.md".to_string());
+                            current_prd = recipe
+                                .read_primary_session_document_utf8(&session_dir)
+                                .unwrap_or_else(|| current_prd.clone());
                         }
                     }
                     tddy_core::ElicitationEvent::WorktreeConfirmation { .. } => {
@@ -1846,25 +1845,23 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         .expect("connect_view requires broadcast and intent_tx");
     let shutdown_for_thread = shutdown.clone();
     let presenter_for_thread = presenter.clone();
-    let presenter_handle = std::thread::spawn(move || {
-        for _ in 0..100_000 {
-            if shutdown_for_thread.load(Ordering::Relaxed) {
+    let presenter_handle = std::thread::spawn(move || loop {
+        if shutdown_for_thread.load(Ordering::Relaxed) {
+            break;
+        }
+        while let Ok(intent) = intent_rx.try_recv() {
+            if let Ok(mut p) = presenter_for_thread.lock() {
+                p.handle_intent(intent);
+            }
+        }
+        if let Ok(mut p) = presenter_for_thread.lock() {
+            p.poll_tool_calls();
+            p.poll_workflow();
+            if p.state().should_quit {
                 break;
             }
-            while let Ok(intent) = intent_rx.try_recv() {
-                if let Ok(mut p) = presenter_for_thread.lock() {
-                    p.handle_intent(intent);
-                }
-            }
-            if let Ok(mut p) = presenter_for_thread.lock() {
-                p.poll_tool_calls();
-                p.poll_workflow();
-                if p.state().should_quit {
-                    break;
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
         }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     });
 
     tddy_tui::run_event_loop(
@@ -1927,17 +1924,25 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
     let agent_str = resolve_agent_for_full_workflow_plain(args)?;
     let backend = create_backend(&agent_str, args.cursor_agent_path.as_deref(), None, None);
 
+    let recipe = tdd_recipe();
     let mut session_dir = args.session_dir.clone().context("session directory")?;
-    if !plan_prd_path_for_session_dir(&session_dir).exists() {
+    if recipe.uses_primary_session_document()
+        && recipe
+            .read_primary_session_document_utf8(&session_dir)
+            .is_none()
+    {
         session_dir = run_plan_to_get_dir(args, backend.clone(), &agent_str, &shutdown)?;
     }
 
-    // When the session has Init state and no PRD (or no plan session), run plan to complete it.
+    // When the session has Init state and no primary session document (or no start-goal session), run start goal to complete it.
     let cs_pre = read_changeset(&session_dir).ok();
     let plan_needs_completion = cs_pre.as_ref().is_some_and(|c| {
-        c.state.current.as_str() == "Init"
-            && (!plan_prd_path_for_session_dir(&session_dir).exists()
-                || get_session_for_tag(c, "plan").is_none())
+        recipe.uses_primary_session_document()
+            && c.state.current.as_str() == "Init"
+            && (recipe
+                .read_primary_session_document_utf8(&session_dir)
+                .is_none()
+                || get_session_for_tag(c, recipe.start_goal().as_str()).is_none())
     });
     if plan_needs_completion {
         let input = cs_pre
@@ -1962,7 +1967,6 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         && plain::read_demo_choice_plain().context("read demo choice")?;
 
     let cs = read_changeset(&session_dir).ok();
-    let recipe = tdd_recipe();
     let start_goal = cs
         .as_ref()
         .and_then(|c| recipe.next_goal_for_state(&c.state.current))
@@ -1973,7 +1977,7 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
     std::fs::create_dir_all(&storage_dir).context("create session storage dir")?;
     let hooks = recipe.create_hooks(None);
     let backend_for_refine = backend.clone();
-    let engine = WorkflowEngine::new(recipe, backend, storage_dir, Some(hooks));
+    let engine = WorkflowEngine::new(recipe.clone(), backend, storage_dir, Some(hooks));
 
     let feature_input = cs_pre
         .as_ref()
@@ -2061,8 +2065,8 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
             ExecutionStatus::Error(msg) => anyhow::bail!("Workflow error: {}", msg),
             ExecutionStatus::ElicitationNeeded { ref event } => {
                 match event {
-                    tddy_core::ElicitationEvent::PlanApproval { ref prd_content } => {
-                        let mut current_prd = prd_content.clone();
+                    tddy_core::ElicitationEvent::DocumentApproval { ref content } => {
+                        let mut current_prd = content.clone();
                         loop {
                             let answer = plain::read_plan_approval_plain(&current_prd)
                                 .context("plan approval")?;
@@ -2076,10 +2080,9 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
                                 &session_dir,
                                 &answer,
                             )?;
-                            current_prd = std::fs::read_to_string(plan_prd_path_for_session_dir(
-                                &session_dir,
-                            ))
-                            .unwrap_or_else(|_| "Could not read PRD.md".to_string());
+                            current_prd = recipe
+                                .read_primary_session_document_utf8(&session_dir)
+                                .unwrap_or_else(|| current_prd.clone());
                         }
                     }
                     tddy_core::ElicitationEvent::WorktreeConfirmation { .. } => {

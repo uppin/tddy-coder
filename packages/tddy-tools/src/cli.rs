@@ -1,12 +1,20 @@
-//! CLI subcommands for submit, ask, and get-schema.
+//! CLI subcommands: `submit`, `ask`, `get-schema`, `list-schemas`.
+//!
+//! Workflow goal names and schema filenames are defined in `packages/tddy-workflow-recipes/goals.json`
+//! (see [`tddy_tools::schema`] and [`tddy_tools::schema_manifest`]).
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
 use std::path::PathBuf;
 
 use tddy_tools::schema;
+use tddy_tools::schema_manifest;
+
+/// Maximum bytes read from stdin or accepted inline `--data` for `submit` / `ask` (DoS guard).
+const MAX_CLI_INPUT_BYTES: usize = 16 * 1024 * 1024;
 
 /// Submit structured output. Validates against schema, relays to tddy-coder via TDDY_SOCKET.
 #[derive(Parser)]
@@ -34,6 +42,11 @@ pub struct AskArgs {
     pub data: Option<String>,
 }
 
+/// List registered workflow goals / JSON Schemas (machine-readable JSON).
+#[derive(Parser)]
+#[command(name = "list-schemas")]
+pub struct ListSchemasArgs {}
+
 /// Get JSON schema for a goal.
 #[derive(Parser)]
 #[command(name = "get-schema")]
@@ -41,7 +54,7 @@ pub struct GetSchemaArgs {
     /// Goal name (plan, red, green, acceptance-tests, evaluate-changes, validate, refactor, update-docs, demo).
     pub goal: String,
 
-    /// Write schema to file (creates schemas/ and common/ subdirs).
+    /// Write schema to file (creates common/ subdirs as needed).
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 }
@@ -131,16 +144,23 @@ pub fn run_submit(args: SubmitArgs) -> Result<()> {
 }
 
 fn read_input(data_arg: &Option<String>, data_stdin: bool) -> Result<String> {
-    if data_stdin {
+    let buf = if data_stdin {
         let mut buf = String::new();
         io::stdin().read_to_string(&mut buf)?;
-        return Ok(buf);
+        buf
+    } else if let Some(ref s) = data_arg {
+        s.clone()
+    } else {
+        let mut buf = String::new();
+        io::stdin().read_to_string(&mut buf)?;
+        buf
+    };
+    if buf.len() > MAX_CLI_INPUT_BYTES {
+        anyhow::bail!(
+            "input exceeds {} bytes (CLI limit for submit/ask)",
+            MAX_CLI_INPUT_BYTES
+        );
     }
-    if let Some(ref s) = data_arg {
-        return Ok(s.clone());
-    }
-    let mut buf = String::new();
-    io::stdin().read_to_string(&mut buf)?;
     Ok(buf)
 }
 
@@ -319,6 +339,18 @@ fn relay_ask(socket_path: &std::path::Path, questions: &[AskQuestionItem]) -> Re
         output_error(response.error.as_deref().unwrap_or("ask failed"), 1);
     }
 
+    Ok(())
+}
+
+pub fn run_list_schemas(_args: ListSchemasArgs) -> Result<()> {
+    let goals = schema_manifest::list_registered_goals().context("load schema manifest")?;
+    info!(
+        target: "tddy_tools::cli",
+        "list-schemas ({} goals)",
+        goals.len()
+    );
+    let out = serde_json::json!({ "goals": goals });
+    println!("{}", serde_json::to_string(&out)?);
     Ok(())
 }
 

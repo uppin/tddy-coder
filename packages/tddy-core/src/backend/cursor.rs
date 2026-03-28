@@ -101,7 +101,7 @@ impl super::CodingBackend for CursorBackend {
 /// Builds argv for `cursor agent` (excluding the binary path). Used by [`CursorBackend::invoke_sync`] and tests.
 pub(crate) fn build_cursor_cli_args(request: &InvokeRequest, prompt: &str) -> Vec<String> {
     let mut args = Vec::new();
-    if request.hints.planning_mode_intent {
+    if request.hints.agent_cli_plan_mode {
         args.push("--plan".to_string());
     }
     if let Some(ref session) = request.session {
@@ -437,7 +437,7 @@ mod tests {
             allowed_tools: vec![],
             default_model: None,
             agent_output: false,
-            planning_mode_intent: true,
+            agent_cli_plan_mode: true,
             claude_nonzero_exit_ok_if_structured_response: true,
         }
     }
@@ -450,7 +450,7 @@ mod tests {
             allowed_tools: vec![],
             default_model: None,
             agent_output: true,
-            planning_mode_intent: false,
+            agent_cli_plan_mode: false,
             claude_nonzero_exit_ok_if_structured_response: false,
         }
     }

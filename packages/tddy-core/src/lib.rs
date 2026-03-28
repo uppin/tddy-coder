@@ -8,7 +8,6 @@ pub mod log_backend;
 pub mod output;
 pub mod presenter;
 pub mod session_metadata;
-pub mod session_plan_prd;
 pub mod source_path;
 pub mod stream;
 pub mod toolcall;
@@ -39,16 +38,20 @@ pub use log_backend::{
     LogOutput, LogPolicy, LogRotation, LogSelector, LoggerDefinition, MatchedPolicy,
 };
 pub use presenter::{
-    ActivityEntry, ActivityKind, AppMode, ExitAction, PendingWorkflowStart, Presenter,
-    PresenterEvent, PresenterHandle, PresenterState, PresenterView, UserIntent, ViewConnection,
-    WorkflowCompletePayload, WorkflowEvent,
+    ActivityEntry, ActivityKind, AppMode, CriticalPresenterState, ExitAction, PendingWorkflowStart,
+    Presenter, PresenterEvent, PresenterHandle, PresenterState, PresenterView, UserIntent,
+    ViewConnection, WorkflowCompletePayload, WorkflowEvent,
 };
 pub use session_metadata::{
     read_session_metadata, write_session_metadata, SessionMetadata, SESSION_METADATA_FILENAME,
 };
-pub use session_plan_prd::plan_prd_path_for_session_dir;
 pub use source_path::{classify_rust_source_path, RustSourcePathKind};
 pub use stream::ProgressEvent;
+pub use tddy_workflow::{
+    canonical_artifact_write_path, read_session_artifact_utf8,
+    read_session_artifact_utf8_or_placeholder, resolve_existing_session_artifact,
+    session_artifacts_root, SESSION_ARTIFACT_READ_PLACEHOLDER,
+};
 pub use workflow::{
     engine::WorkflowEngine,
     find_git_root,
@@ -61,3 +64,22 @@ pub use worktree::{
     create_worktree, fetch_origin_master, list_worktrees, remove_worktree,
     setup_worktree_for_session, worktree_dir, WorktreeInfo,
 };
+
+#[cfg(test)]
+mod workflow_decouple_acceptance {
+    /// After decoupling, the legacy session primary-document path helper must not be re-exported from the crate root.
+    #[test]
+    fn core_src_free_of_prd_path_helper() {
+        let lib_rs = include_str!("lib.rs");
+        let forbidden = [
+            "pub ",
+            "use session_plan_prd::",
+            "plan_prd_path_for_session_dir",
+        ]
+        .concat();
+        assert!(
+            !lib_rs.contains(&forbidden),
+            "tddy-core lib.rs must not re-export the legacy session_plan_prd helper; use workflow manifest resolvers"
+        );
+    }
+}

@@ -12,6 +12,7 @@ service ConnectionService {
   rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
   rpc SignalSession(SignalSessionRequest) returns (SignalSessionResponse);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+  rpc ListEligibleDaemons(ListEligibleDaemonsRequest) returns (ListEligibleDaemonsResponse);
 }
 
 message ListToolsRequest {}
@@ -37,13 +38,15 @@ message SessionEntry {
   uint32 pid = 5;
   bool is_active = 6;
   string project_id = 7;
+  // Owning daemon instance for multi-host selection (local id for sessions on this daemon).
+  string daemon_instance_id = 8;
   // Workflow / TUI parity (from .session.yaml + changeset.yaml enrichment).
-  string workflow_goal = 8;
-  string workflow_state = 9;
+  string workflow_goal = 9;
+  string workflow_state = 10;
   // Human-readable elapsed for the active goal/step, or persisted timestamp display.
-  string elapsed_display = 10;
-  string agent = 11;
-  string model = 12;
+  string elapsed_display = 11;
+  string agent = 12;
+  string model = 13;
 }
 
 message ProjectEntry {
@@ -79,6 +82,8 @@ message StartSessionRequest {
   string project_id = 3;
   // Per new session: passed to spawned tddy-coder as --agent (skips interactive backend menu). Not stored on the project.
   string agent = 4;
+  // Target daemon instance to run this session on. Empty or matching local instance = spawn locally.
+  string daemon_instance_id = 5;
 }
 message StartSessionResponse {
   string session_id = 1;
@@ -132,4 +137,16 @@ message DeleteSessionRequest {
 
 message DeleteSessionResponse {
   bool ok = 1;
+}
+
+message ListEligibleDaemonsRequest {
+  string session_token = 1;
+}
+message EligibleDaemonEntry {
+  string instance_id = 1;
+  string label = 2;
+  bool is_local = 3;
+}
+message ListEligibleDaemonsResponse {
+  repeated EligibleDaemonEntry daemons = 1;
 }

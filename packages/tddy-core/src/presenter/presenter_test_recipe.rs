@@ -81,7 +81,7 @@ impl WorkflowRecipe for EmptyPresenterTestRecipe {
                 allowed_tools: presenter_test_plan_allowed_tools(),
                 default_model: None,
                 agent_output: false,
-                planning_mode_intent: true,
+                agent_cli_plan_mode: true,
                 claude_nonzero_exit_ok_if_structured_response: true,
             })
         } else {
@@ -117,12 +117,12 @@ impl WorkflowRecipe for EmptyPresenterTestRecipe {
         BTreeMap::new()
     }
 
-    fn default_artifacts(&self) -> BTreeMap<String, String> {
-        BTreeMap::new()
+    fn uses_primary_session_document(&self) -> bool {
+        true
     }
 
-    fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
-        &[]
+    fn read_primary_session_document_utf8(&self, session_dir: &Path) -> Option<String> {
+        tddy_workflow::read_session_artifact_utf8(session_dir, "SessionDoc.md")
     }
 
     fn goal_requires_session_dir(&self, _goal_id: &GoalId) -> bool {

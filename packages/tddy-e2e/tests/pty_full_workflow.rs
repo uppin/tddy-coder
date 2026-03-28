@@ -13,7 +13,7 @@ use tddy_e2e::{connect_grpc, spawn_presenter_with_grpc_and_tui};
 use tddy_service::gen::app_mode_proto;
 use tddy_service::gen::server_message;
 use tddy_service::gen::{
-    client_message, AnswerSelect, ApprovePlan, ClientMessage, SubmitFeatureInput,
+    client_message, AnswerSelect, ApproveSessionDocument, ClientMessage, SubmitFeatureInput,
 };
 
 /// See `grpc_full_workflow.rs`: transitional state is persisted before `StateChange`, so identity
@@ -130,13 +130,15 @@ async fn pty_full_workflow_asserts_each_state_transition() {
                                     })
                                     .await
                                     .ok();
-                                } else if let Some(app_mode_proto::Variant::PlanReview(_)) =
+                                } else if let Some(app_mode_proto::Variant::DocumentReview(_)) =
                                     &mode.variant
                                 {
                                     tx.send(ClientMessage {
-                                        intent: Some(client_message::Intent::ApprovePlan(
-                                            ApprovePlan {},
-                                        )),
+                                        intent: Some(
+                                            client_message::Intent::ApproveSessionDocument(
+                                                ApproveSessionDocument {},
+                                            ),
+                                        ),
                                     })
                                     .await
                                     .ok();

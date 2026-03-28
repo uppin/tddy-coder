@@ -39,6 +39,9 @@ pub struct SpawnRequest {
     /// When set, spawned tool joins this LiveKit room (shared with browser presence). Omit for legacy clients.
     #[serde(default)]
     pub common_room: Option<String>,
+    /// Multi-host: daemon instance id for LiveKit server identity. Omit for legacy clients.
+    #[serde(default)]
+    pub daemon_instance_id: Option<String>,
 }
 
 /// Request to clone a git repository as an OS user.
@@ -241,6 +244,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                     api_key: req.livekit_api_key.clone(),
                     api_secret: req.livekit_api_secret.clone(),
                     common_room: req.common_room.clone(),
+                    daemon_instance_id: req.daemon_instance_id.clone(),
                 };
                 log::info!(
                     "spawn_worker: calling spawn_as_user session_id={} repo={}",
@@ -333,5 +337,6 @@ pub fn build_spawn_request(
         agent: opts.agent.map(String::from),
         mouse: opts.mouse,
         common_room: livekit.common_room.clone(),
+        daemon_instance_id: livekit.daemon_instance_id.clone(),
     }
 }

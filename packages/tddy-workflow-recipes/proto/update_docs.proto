@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Update-docs goal output. JSON Schema: update-docs.schema.json.
+message UpdateDocsOutput {
+  string goal = 1;
+  string summary = 2;
+}

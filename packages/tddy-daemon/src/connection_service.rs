@@ -9,6 +9,7 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::connection::{
     ConnectSessionRequest, ConnectSessionResponse, ConnectionService as ConnectionServiceTrait,
     CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
+    EligibleDaemonEntry, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
     ListProjectsRequest, ListProjectsResponse, ListSessionsRequest, ListSessionsResponse,
     ListToolsRequest, ListToolsResponse, ProjectEntry as ProtoProjectEntry, ResumeSessionRequest,
     ResumeSessionResponse, SessionEntry as ProtoSessionEntry, Signal, SignalSessionRequest,
@@ -17,6 +18,7 @@ use tddy_service::proto::connection::{
 use uuid::Uuid;
 
 use crate::config::DaemonConfig;
+use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
 use crate::project_storage::{self, ProjectData};
 use crate::session_deletion;
 use crate::session_list_enrichment;
@@ -67,6 +69,7 @@ pub struct ConnectionServiceImpl {
     sessions_base_for_user: SessionsBaseResolver,
     user_resolver: SessionUserResolver,
     spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
+    eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
 }
 
 impl ConnectionServiceImpl {
@@ -75,14 +78,29 @@ impl ConnectionServiceImpl {
         sessions_base_for_user: SessionsBaseResolver,
         user_resolver: SessionUserResolver,
         spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
+        eligible_daemon_source: Option<Arc<dyn EligibleDaemonSource>>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
+        let eligible_daemon_source = eligible_daemon_source
+            .unwrap_or_else(|| Arc::new(StubEligibleDaemonSource) as Arc<dyn EligibleDaemonSource>);
         Self {
             config,
             sessions_base_for_user,
             user_resolver,
             spawn_client,
+            eligible_daemon_source,
         }
+    }
+
+    /// Instance id for this daemon process: config override, else hostname-based default.
+    fn local_daemon_instance_id_string(&self) -> String {
+        self.config
+            .daemon_instance_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| crate::multi_host::local_daemon_instance_id().0)
     }
 }
 
@@ -119,6 +137,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let timeout = self.config.spawn_worker_request_timeout();
         let sessions_base_blocking = sessions_base.clone();
+        let local_daemon_id = self.local_daemon_instance_id_string();
         let entries =
             spawn_blocking_with_timeout(timeout, "ListSessions: read and enrich", move || {
                 let sessions = session_reader::list_sessions_in_dir(&sessions_base_blocking)
@@ -134,6 +153,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         pid: s.pid.unwrap_or(0),
                         is_active: s.is_active,
                         project_id: s.project_id,
+                        daemon_instance_id: local_daemon_id.clone(),
                         workflow_goal: String::new(),
                         workflow_state: String::new(),
                         elapsed_display: String::new(),
@@ -252,6 +272,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             name: name.to_string(),
             git_url: git_url.to_string(),
             main_repo_path,
+            host_repo_paths: std::collections::HashMap::new(),
         };
         let entry = ProtoProjectEntry {
             project_id: project.project_id.clone(),
@@ -278,6 +299,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let requested_daemon = req.daemon_instance_id.trim();
+        if !requested_daemon.is_empty()
+            && requested_daemon != self.local_daemon_instance_id_string().as_str()
+        {
+            return Err(Status::unimplemented(
+                "cross-daemon session routing not yet implemented",
+            ));
+        }
+
         let livekit = spawner::livekit_creds_from_config(&self.config)
             .ok_or_else(|| Status::failed_precondition("LiveKit not configured"))?;
 
@@ -391,7 +422,19 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let livekit_room = metadata
             .livekit_room
             .ok_or_else(|| Status::failed_precondition("session has no LiveKit room"))?;
-        let livekit_server_identity = format!("daemon-{}", req.session_id);
+        let instance = self
+            .config
+            .daemon_instance_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let livekit_server_identity =
+            spawner::livekit_server_identity_for_session(instance, &req.session_id);
+        log::debug!(
+            "ConnectSession: livekit_server_identity={} session_id={}",
+            livekit_server_identity,
+            req.session_id
+        );
         Ok(Response::new(ConnectSessionResponse {
             livekit_room,
             livekit_url,
@@ -589,6 +632,33 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
     }
+
+    async fn list_eligible_daemons(
+        &self,
+        request: Request<ListEligibleDaemonsRequest>,
+    ) -> Result<Response<ListEligibleDaemonsResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let local_id = self.local_daemon_instance_id_string();
+        let daemons: Vec<EligibleDaemonEntry> = self
+            .eligible_daemon_source
+            .list_eligible_daemons()
+            .into_iter()
+            .map(|entry| EligibleDaemonEntry {
+                instance_id: entry.instance_id.0.clone(),
+                label: entry.label,
+                is_local: entry.instance_id.0 == local_id,
+            })
+            .collect();
+
+        Ok(Response::new(ListEligibleDaemonsResponse { daemons }))
+    }
 }
 
 #[cfg(test)]
@@ -615,7 +685,7 @@ mod signal_session_unit_tests {
                 None
             }
         });
-        ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None)
+        ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None)
     }
 
     fn write_unit_session(session_dir: &std::path::Path, pid: u32) {
@@ -723,7 +793,7 @@ mod delete_session_unit_tests {
                 None
             }
         });
-        ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None)
+        ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None)
     }
 
     /// Unit: delete_session rejects an invalid session token before touching the filesystem.

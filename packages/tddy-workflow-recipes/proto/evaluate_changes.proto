@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Evaluate-changes goal output. JSON Schema: evaluate.schema.json.
+message EvaluateChangesOutput {
+  string goal = 1;
+  string summary = 2;
+}

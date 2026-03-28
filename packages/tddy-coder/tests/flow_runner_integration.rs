@@ -52,10 +52,10 @@ fn run_plan_via_flow_runner_produces_session_directory() {
         "session_dir should be a directory: {}",
         session_dir.display()
     );
-    let prd_path = session_dir.join("PRD.md");
+    let prd_path = session_dir.join("artifacts").join("PRD.md");
     assert!(
         prd_path.exists(),
-        "PRD.md should exist in session_dir {}; contents: {:?}",
+        "artifacts/PRD.md should exist in session_dir {}; contents: {:?}",
         session_dir.display(),
         std::fs::read_dir(&session_dir).ok().map(|d| d
             .filter_map(|e| e.ok())

@@ -1,5 +1,6 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tddy:goal/update-docs",
   "title": "Update-Docs Goal Output",
   "description": "Structured output from the update-docs goal.",
   "type": "object",

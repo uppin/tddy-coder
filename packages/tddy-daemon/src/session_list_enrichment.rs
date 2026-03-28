@@ -369,6 +369,7 @@ state:
             pid: 0,
             is_active: false,
             project_id: String::new(),
+            daemon_instance_id: String::new(),
             workflow_goal: String::new(),
             workflow_state: String::new(),
             elapsed_display: String::new(),

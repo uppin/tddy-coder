@@ -155,6 +155,7 @@ fn main() -> anyhow::Result<()> {
             Arc::new(tddy_daemon::user_sessions_path::sessions_base_for_user),
             user_resolver,
             spawn_client,
+            Some(Arc::new(tddy_daemon::multi_host::StubEligibleDaemonSource)),
         );
         let connection_server = tddy_service::ConnectionServiceServer::new(connection_impl);
         rpc_entries.push(tddy_rpc::ServiceEntry {

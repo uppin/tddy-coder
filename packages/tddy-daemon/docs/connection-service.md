@@ -7,10 +7,11 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | RPC | Purpose |
 |-----|---------|
 | `ListTools` | Allowed `tddy-*` binaries from config |
-| `ListSessions` | Sessions under `~/.tddy/sessions/` with `.session.yaml` (includes `project_id`); each entry includes workflow fields populated from **`changeset.yaml`** when present (see below) |
+| `ListSessions` | Sessions under `~/.tddy/sessions/` with `.session.yaml` (includes `project_id` and `daemon_instance_id`); each entry includes workflow fields populated from **`changeset.yaml`** when present (see below) |
 | `ListProjects` | Projects from `~/.tddy/projects/projects.yaml` |
 | `CreateProject` | Clone (or adopt existing path) + append registry |
-| `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id` |
+| `ListEligibleDaemons` | Eligible daemon instances for host selection (`instance_id`, `label`, `is_local`); sourced from `EligibleDaemonSource` |
+| `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists) |
 | `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata) |
 | `DeleteSession` | Removes `~/.tddy/sessions/<session_id>/` when the session is inactive (PID in metadata not alive); rejects active sessions, unknown ids, and path-unsafe ids (implementation in `session_deletion`) |
 | `SignalSession` | Send Unix signal to recorded PID for an active session |

@@ -2,6 +2,18 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-28 — Recipe-owned session artifacts (core decoupling)
+
+- **Behavior**: Primary planning document paths and **`session_dir/artifacts/`** layout are driven by **`WorkflowRecipe`** + **`SessionArtifactManifest`** and **`tddy-workflow`** path helpers, not hard-coded **`PRD.md`** defaults in **`tddy-core`**.
+- **API**: **`WorkflowRecipe::uses_primary_session_document`** / **`read_primary_session_document_utf8`** for approval, CLI, and daemon; TDD recipe behavior unchanged (**`prd` → `PRD.md`** in manifest).
+- **Docs**: [workflow-recipes.md](workflow-recipes.md) (session artifacts section), package architecture notes under **`tddy-core`**, **`tddy-workflow`**, **`tddy-workflow-recipes`**.
+
+## 2026-03-28 — Workflow JSON Schemas (tddy-tools + tddy-workflow-recipes)
+
+- **Registry**: `packages/tddy-workflow-recipes/goals.json` lists each CLI goal with schema filename and proto basename; build output includes `generated/schema-manifest.json` and generated proto basename tables.
+- **tddy-tools**: Embeds schemas from `tddy-workflow-recipes/generated/`; subcommands `get-schema`, `list-schemas`, and validated `submit`; 16 MiB cap on stdin/`--data` for submit and ask.
+- **Documentation**: [workflow-json-schemas.md](workflow-json-schemas.md), package notes under `packages/tddy-tools/docs/json-schema.md` and `packages/tddy-workflow-recipes/docs/workflow-schemas.md`.
+
 ## 2026-03-28 — TUI status bar: spinner and session segment
 
 - **Status line**: The activity spinner lives in the status bar before `Goal:` (not a separate top-right cell). A short segment derived from the workflow engine session id appears between the spinner and `Goal:` when the id matches UUID first-field rules; otherwise a fixed em-dash placeholder keeps the column stable.

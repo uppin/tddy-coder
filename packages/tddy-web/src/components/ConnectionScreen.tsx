@@ -7,6 +7,7 @@ import {
   type ProjectEntry,
   type SessionEntry,
   type ToolInfo,
+  type EligibleDaemonEntry,
 } from "../gen/connection_pb";
 import { GhosttyTerminalLiveKit } from "./GhosttyTerminalLiveKit";
 import { ParticipantList } from "./ParticipantList";
@@ -76,37 +77,59 @@ type ProjectSessionForm = {
   toolPath: string;
   agent: string;
   debugLogging: boolean;
+  daemonInstanceId: string;
 };
 
-function defaultProjectSessionForm(tools: ToolInfo[]): ProjectSessionForm {
+function defaultProjectSessionForm(tools: ToolInfo[], daemons: EligibleDaemonEntry[]): ProjectSessionForm {
+  const localDaemon = daemons.find((d) => d.isLocal);
   return {
     toolPath: tools[0]?.path ?? "",
     agent: "claude",
     debugLogging: false,
+    daemonInstanceId: localDaemon?.instanceId ?? daemons[0]?.instanceId ?? "",
   };
 }
 
-/** Tool, backend, and browser-terminal debug for one project—per session / connection, not stored on the project. */
+/** Tool, backend, host, and browser-terminal debug for one project—per session / connection, not stored on the project. */
 function ProjectSessionOptions({
   projectId,
   tools,
+  daemons,
   form,
   onChange,
 }: {
   projectId: string;
   tools: ToolInfo[];
+  daemons: EligibleDaemonEntry[];
   form: ProjectSessionForm;
   onChange: (patch: Partial<ProjectSessionForm>) => void;
 }) {
   const toolId = `tool-select-${projectId}`;
   const backendId = `backend-select-${projectId}`;
+  const hostId = `host-select-${projectId}`;
   const debugId = `debug-logging-${projectId}`;
   return (
     <>
       <p style={{ fontSize: 12, color: "#666", marginTop: 8, marginBottom: 8 }}>
-        Tool, backend, and debug apply only to <strong>Start New Session</strong> and to{" "}
+        Tool, backend, host, and debug apply only to <strong>Start New Session</strong> and to{" "}
         <strong>Connect / Resume</strong> in this project—not saved on the project.
       </p>
+      <label style={labelStyle} htmlFor={hostId}>
+        Host (this session)
+      </label>
+      <select
+        id={hostId}
+        data-testid={hostId}
+        value={form.daemonInstanceId}
+        onChange={(e) => onChange({ daemonInstanceId: e.target.value })}
+        style={{ ...inputStyle, marginBottom: 12 }}
+      >
+        {daemons.map((d) => (
+          <option key={d.instanceId} value={d.instanceId}>
+            {d.label || d.instanceId}
+          </option>
+        ))}
+      </select>
       <label style={labelStyle} htmlFor={toolId}>
         Tool (this session)
       </label>
@@ -377,6 +400,7 @@ export function ConnectionScreen({
 } = {}) {
   const { user, isAuthenticated, isLoading, login, logout, sessionToken } = useAuth();
   const [tools, setTools] = useState<ToolInfo[]>([]);
+  const [daemons, setDaemons] = useState<EligibleDaemonEntry[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [projectForms, setProjectForms] = useState<Record<string, ProjectSessionForm>>({});
@@ -438,6 +462,11 @@ export function ConnectionScreen({
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to list tools"))
       .finally(() => setLoading(false));
 
+    client
+      .listEligibleDaemons({ sessionToken })
+      .then((res) => setDaemons(res.daemons))
+      .catch(() => setDaemons([]));
+
     const loadProjects = () => {
       client
         .listProjects({ sessionToken })
@@ -462,7 +491,7 @@ export function ConnectionScreen({
   useEffect(() => {
     setProjectForms((prev) => {
       const next = { ...prev };
-      const def = defaultProjectSessionForm(tools);
+      const def = defaultProjectSessionForm(tools, daemons);
       for (const p of projects) {
         const existing = next[p.projectId];
         if (!existing) {
@@ -472,17 +501,20 @@ export function ConnectionScreen({
           if (!toolStillValid && tools[0]) {
             next[p.projectId] = { ...existing, toolPath: tools[0].path };
           }
+          if (!existing.daemonInstanceId && def.daemonInstanceId) {
+            next[p.projectId] = { ...next[p.projectId], daemonInstanceId: def.daemonInstanceId };
+          }
         }
       }
       return next;
     });
-  }, [projects, tools]);
+  }, [projects, tools, daemons]);
 
   const updateProjectForm = (projectId: string, patch: Partial<ProjectSessionForm>) => {
     setProjectForms((prev) => ({
       ...prev,
       [projectId]: {
-        ...(prev[projectId] ?? defaultProjectSessionForm(tools)),
+        ...(prev[projectId] ?? defaultProjectSessionForm(tools, daemons)),
         ...patch,
       },
     }));
@@ -508,7 +540,7 @@ export function ConnectionScreen({
   };
 
   const handleStartSession = async (projectId: string) => {
-    const form = projectForms[projectId] ?? defaultProjectSessionForm(tools);
+    const form = projectForms[projectId] ?? defaultProjectSessionForm(tools, daemons);
     if (!sessionToken || !form.toolPath || !projectId.trim()) return;
     setError(null);
     try {
@@ -517,6 +549,7 @@ export function ConnectionScreen({
         toolPath: form.toolPath,
         projectId: projectId.trim(),
         agent: form.agent,
+        daemonInstanceId: form.daemonInstanceId,
       });
       setConnected({
         livekitUrl: res.livekitUrl,
@@ -757,7 +790,8 @@ export function ConnectionScreen({
               <ProjectSessionOptions
                 projectId={p.projectId}
                 tools={tools}
-                form={projectForms[p.projectId] ?? defaultProjectSessionForm(tools)}
+                daemons={daemons}
+                form={projectForms[p.projectId] ?? defaultProjectSessionForm(tools, daemons)}
                 onChange={(patch) => updateProjectForm(p.projectId, patch)}
               />
               <button
@@ -766,7 +800,7 @@ export function ConnectionScreen({
                 onClick={() => handleStartSession(p.projectId)}
                 disabled={
                   loading ||
-                  !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools)).toolPath
+                  !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, daemons)).toolPath
                 }
                 style={{ marginTop: 8, marginBottom: 8, padding: "8px 16px" }}
               >
@@ -782,6 +816,7 @@ export function ConnectionScreen({
                       <th style={{ padding: 8 }}>ID</th>
                       <th style={{ padding: 8 }}>Date</th>
                       <th style={{ padding: 8 }}>Status</th>
+                      <th style={{ padding: 8 }}>Host</th>
                       <th style={{ padding: 8 }}>Repo</th>
                       <th style={{ padding: 8 }}>PID</th>
                       <th style={{ padding: 8 }}>Goal</th>
@@ -798,6 +833,7 @@ export function ConnectionScreen({
                         <td style={{ padding: 8 }}>{truncateId(s.sessionId)}</td>
                         <td style={{ padding: 8 }}>{s.createdAt}</td>
                         <td style={{ padding: 8 }}>{s.status}</td>
+                        <td style={{ padding: 8 }}>{s.daemonInstanceId || "—"}</td>
                         <td style={{ padding: 8 }}>{s.repoPath}</td>
                         <td style={{ padding: 8 }}>{s.pid}</td>
                         <SessionWorkflowStatusCells session={s} />
@@ -860,6 +896,7 @@ export function ConnectionScreen({
                 <th style={{ padding: 8 }}>ID</th>
                 <th style={{ padding: 8 }}>Date</th>
                 <th style={{ padding: 8 }}>Status</th>
+                <th style={{ padding: 8 }}>Host</th>
                 <th style={{ padding: 8 }}>Repo</th>
                 <th style={{ padding: 8 }}>PID</th>
                 <th style={{ padding: 8 }}>Goal</th>
@@ -876,6 +913,7 @@ export function ConnectionScreen({
                   <td style={{ padding: 8 }}>{truncateId(s.sessionId)}</td>
                   <td style={{ padding: 8 }}>{s.createdAt}</td>
                   <td style={{ padding: 8 }}>{s.status}</td>
+                  <td style={{ padding: 8 }}>{s.daemonInstanceId || "—"}</td>
                   <td style={{ padding: 8 }}>{s.repoPath}</td>
                   <td style={{ padding: 8 }}>{s.pid}</td>
                   <SessionWorkflowStatusCells session={s} />

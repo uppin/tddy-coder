@@ -19,6 +19,8 @@ pub struct LiveKitCreds {
     pub api_secret: String,
     /// When set (non-empty after trim), spawned processes use this room instead of `daemon-{session_id}`.
     pub common_room: Option<String>,
+    /// When set, LiveKit server identity is `daemon-{id}-{session_id}` (multi-host).
+    pub daemon_instance_id: Option<String>,
 }
 
 /// Picks the LiveKit room name for a spawned `tddy-*` process.
@@ -33,6 +35,28 @@ pub(crate) fn resolve_livekit_room_name(common_room: Option<&str>, session_id: &
         }
     }
     format!("daemon-{}", session_id)
+}
+
+/// LiveKit **server identity** string for the spawned `tddy-coder` process (browser / terminal RPC target).
+///
+/// When `daemon_instance_id` is set (multi-host), the identity must incorporate it so clients can
+/// route to the daemon that owns the session. Single-daemon setups use [`None`].
+///
+/// Expected pattern when `Some(instance_id)` is set: `daemon-{instance_id}-{session_id}`.
+pub fn livekit_server_identity_for_session(
+    daemon_instance_id: Option<&str>,
+    session_id: &str,
+) -> String {
+    let instance = daemon_instance_id.map(str::trim).filter(|s| !s.is_empty());
+    log::debug!(
+        "livekit_server_identity_for_session: instance={:?} session_id={}",
+        instance,
+        session_id
+    );
+    match instance {
+        Some(id) => format!("daemon-{}-{}", id, session_id),
+        None => format!("daemon-{}", session_id),
+    }
 }
 
 /// Paths and open files for child `--config`, stderr, stdout, and the shared app log target.
@@ -348,8 +372,12 @@ pub fn spawn_as_user(
         .map(String::from)
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     let livekit_room = resolve_livekit_room_name(livekit.common_room.as_deref(), &session_id);
-    // Each session has distinct server identity for LiveKit participant targeting
-    let identity = format!("daemon-{}", session_id);
+    let instance = livekit
+        .daemon_instance_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let identity = livekit_server_identity_for_session(instance, &session_id);
 
     let home_dir = unsafe { std::ffi::CStr::from_ptr(passwd.pw_dir) }
         .to_string_lossy()
@@ -543,6 +571,7 @@ pub fn livekit_creds_from_config(config: &DaemonConfig) -> Option<LiveKitCreds> 
         api_key,
         api_secret,
         common_room: lk.common_room.clone(),
+        daemon_instance_id: config.daemon_instance_id.clone(),
     })
 }
 
@@ -571,6 +600,28 @@ mod resolve_livekit_room_name_tests {
     fn when_common_room_unset_or_whitespace_only_uses_daemon_prefixed_session_room() {
         assert_eq!(resolve_livekit_room_name(Some(""), "abc"), "daemon-abc");
         assert_eq!(resolve_livekit_room_name(Some("   "), "abc"), "daemon-abc");
+    }
+}
+
+#[cfg(test)]
+mod livekit_server_identity_multi_host_tests {
+    use super::livekit_server_identity_for_session;
+
+    /// When a daemon instance is selected, identity embeds instance id and session id.
+    #[test]
+    fn identity_includes_daemon_instance_when_provided() {
+        assert_eq!(
+            livekit_server_identity_for_session(Some("west-1"), "sid-9"),
+            "daemon-west-1-sid-9"
+        );
+    }
+
+    #[test]
+    fn identity_single_daemon_without_instance_uses_session_only() {
+        assert_eq!(
+            livekit_server_identity_for_session(None, "sid-9"),
+            "daemon-sid-9"
+        );
     }
 }
 

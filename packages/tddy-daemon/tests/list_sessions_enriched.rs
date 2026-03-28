@@ -37,7 +37,7 @@ fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
             None
         }
     });
-    ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None)
+    ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None)
 }
 
 #[tokio::test]

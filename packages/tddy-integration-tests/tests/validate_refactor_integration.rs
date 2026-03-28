@@ -437,6 +437,56 @@ async fn validate_submit_refactoring_plan_field_written_to_refactoring_plan_md()
     let _ = std::fs::remove_dir_all(&session_dir);
 }
 
+/// When the validate agent omits both `refactoring_plan` (inline) and `refactoring_plan_written`
+/// (defaults to false), `after_validate` must still create `refactoring-plan.md` so the refactor
+/// step doesn't crash with "No such file or directory".
+#[tokio::test]
+async fn validate_without_refactoring_plan_still_creates_file_for_refactor() {
+    let session_dir =
+        std::env::temp_dir().join(format!("tddy-vr-no-plan-field-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&session_dir);
+    std::fs::create_dir_all(&session_dir).expect("create plan dir");
+    write_evaluation_report_to_session_dir(&session_dir);
+    write_changeset_with_state(&session_dir, "Evaluated", "sess-vr-no-plan-field");
+
+    let validate_json = r#"{"goal":"validate","summary":"Done.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":false}"#;
+
+    let backend = Arc::new(MockBackend::new());
+    backend.push_ok(validate_json);
+
+    let storage_dir = std::env::temp_dir().join(format!(
+        "tddy-vr-no-plan-field-engine-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&storage_dir);
+    let engine = WorkflowEngine::new(
+        common::tdd_recipe(),
+        SharedBackend::from_arc(backend),
+        storage_dir,
+        Some(common::tdd_recipe().create_hooks(None)),
+    );
+
+    let ctx = ctx_validate(session_dir.clone());
+    let result = engine
+        .run_goal(&GoalId::new("validate"), ctx)
+        .await
+        .unwrap();
+    assert!(
+        matches!(result.status, ExecutionStatus::Paused { .. }),
+        "validate: {:?}",
+        result.status
+    );
+
+    let path = session_dir.join("refactoring-plan.md");
+    assert!(
+        path.exists(),
+        "refactoring-plan.md must exist after validate even when agent omits \
+         refactoring_plan and sets refactoring_plan_written=false"
+    );
+
+    let _ = std::fs::remove_dir_all(&session_dir);
+}
+
 /// validate transitions to ValidateComplete state.
 #[tokio::test]
 async fn validate_transitions_to_validate_complete() {

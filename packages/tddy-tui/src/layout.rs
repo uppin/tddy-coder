@@ -5,16 +5,16 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use tddy_core::AppMode;
 
 /// Compute the height (in lines) for the question display region.
-/// Used when in Select, MultiSelect, TextInput, or PlanReview mode.
+/// Used when in Select, MultiSelect, TextInput, or DocumentReview mode.
 pub fn question_height(mode: &AppMode) -> u16 {
     match mode {
         AppMode::Select { question, .. } | AppMode::MultiSelect { question, .. } => {
             // header(1) + question(1) + options + Other(1) when allow_other
             2 + question.options.len() as u16 + if question.allow_other { 1 } else { 0 }
         }
-        AppMode::TextInput { .. } => 2,     // prompt + blank
-        AppMode::PlanReview { .. } => 4,    // header + 3 options (View, Approve, Refine)
-        AppMode::ErrorRecovery { .. } => 5, // error + blank + 3 options
+        AppMode::TextInput { .. } => 2,      // prompt + blank
+        AppMode::DocumentReview { .. } => 4, // header + 3 options (View, Approve, Refine)
+        AppMode::ErrorRecovery { .. } => 5,  // error + blank + 3 options
         _ => 0,
     }
 }
