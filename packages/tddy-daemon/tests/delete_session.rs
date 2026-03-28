@@ -100,12 +100,12 @@ async fn daemon_delete_removes_inactive_session_directory() {
     let repeat = service.delete_session(second).await;
     assert!(
         repeat.is_err(),
-        "second delete after removal should fail (not-found or equivalent)"
+        "second delete after removal should fail (ownership / routing)"
     );
     assert_eq!(
         repeat.unwrap_err().code,
-        tddy_rpc::Code::NotFound,
-        "missing session id should map to not found"
+        tddy_rpc::Code::FailedPrecondition,
+        "missing session on this daemon maps to failed_precondition (multi-host safe)"
     );
 }
 

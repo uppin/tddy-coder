@@ -131,6 +131,7 @@ fn acceptance_project_storage_roundtrip() {
         name: "my-app".to_string(),
         git_url: "https://github.com/org/repo.git".to_string(),
         main_repo_path: "/home/u/repos/my-app".to_string(),
+        host_repo_paths: std::collections::HashMap::new(),
     };
     tddy_daemon::project_storage::add_project(&projects_dir, p.clone()).unwrap();
     let list = tddy_daemon::project_storage::read_projects(&projects_dir).unwrap();

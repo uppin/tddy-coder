@@ -226,6 +226,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             name: name.to_string(),
             git_url: git_url.to_string(),
             main_repo_path,
+            host_repo_paths: std::collections::HashMap::new(),
         };
         let entry = ProtoProjectEntry {
             project_id: project.project_id.clone(),
@@ -365,7 +366,19 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let livekit_room = metadata
             .livekit_room
             .ok_or_else(|| Status::failed_precondition("session has no LiveKit room"))?;
-        let livekit_server_identity = format!("daemon-{}", req.session_id);
+        let instance = self
+            .config
+            .daemon_instance_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let livekit_server_identity =
+            spawner::livekit_server_identity_for_session(instance, &req.session_id);
+        log::debug!(
+            "ConnectSession: livekit_server_identity={} session_id={}",
+            livekit_server_identity,
+            req.session_id
+        );
         Ok(Response::new(ConnectSessionResponse {
             livekit_room,
             livekit_url,
