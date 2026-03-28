@@ -6,7 +6,7 @@ Release note history for the Coder product area.
 
 - **Contract**: Plan and workflow state use `{sessions_base}/sessions/{session_id}/`; process-bound session id takes precedence over backend-reported ids where they differ (`tddy_core::session_lifecycle`).
 - **Presenter**: The workflow runner resolves `session_dir` from engine context or materializes from `session_base` + `session_id`; missing both yields a clear workflow error (no anonymous fallback directory).
-- **Docs**: [Session directory layout](session-layout.md), migration: [session-layout migration](../../dev/1-WIP/session-layout-migration.md).
+- **Docs**: [Session directory layout](session-layout.md) (including legacy relocation under **Upgrade path**).
 
 ## 2026-03-28 — Bugfix workflow recipe (selectable `tdd` / `bugfix`)
 

@@ -20,11 +20,20 @@ When a backend reports a different agent thread id than the process-bound sessio
 
 ## Headless daemon (`DaemonService`)
 
-`GetSession` and `ListSessions` read only under `{sessions_base}/sessions/`. Each immediate child directory with a `changeset.yaml` is a listed session.
+`GetSession` and `ListSessions` read only under `{sessions_base}/sessions/`. Each immediate child directory that contains `.session.yaml` is a listed session (see daemon session reader).
 
-## Migration from non-unified trees
+## Legacy flat layouts
 
-Deployments that store session data outside `{sessions_base}/sessions/{session_id}/` do not appear in list or get flows that use the unified contract. Manual relocation steps are documented in [session-layout migration](../../dev/1-WIP/session-layout-migration.md).
+Older or manual setups may store session data **directly** under `{sessions_base}/` (or elsewhere) **without** the `sessions/` segment, or use ad hoc directory names. Those directories are **not** discovered by `ListSessions` / `GetSession`, which only scan and resolve paths under `{sessions_base}/sessions/`.
+
+## Upgrade path
+
+1. For each legacy session directory `L` that should remain active, choose the canonical `session_id` (single path segment: alphanumeric, `-`, `_`; no `/`, `\`, or `..`; see `tddy_core::session_lifecycle::validate_session_id_segment`).
+2. Create `{sessions_base}/sessions/{session_id}/`.
+3. Move the contents of `L` into that directory (preserve `changeset.yaml` and relative paths as needed).
+4. Restart clients so they use the same `session_id` string.
+
+Automated migration tooling is not shipped with the product; perform these steps manually or with a one-off script in a controlled maintenance window. Malformed `session_id` values are rejected before path joins, as described under **RPC and daemon validation**.
 
 ## Related documentation
 
