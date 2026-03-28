@@ -12,10 +12,10 @@ use futures_util::StreamExt;
 use livekit::prelude::*;
 use prost::Message;
 use serial_test::serial;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tddy_livekit::{LiveKitParticipant, RpcClient};
+use tddy_livekit::{LiveKitParticipant, RpcClient, TokenGenerator};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Code;
 use tddy_service::proto::test::{EchoRequest, EchoResponse, EchoService};
@@ -822,5 +822,158 @@ async fn rpc_scenarios() -> Result<()> {
 
     log::debug!("rpc_scenarios: all scenarios passed, container will be cleaned up");
     // `livekit` dropped here — ContainerAsync::Drop stops and removes the container
+    Ok(())
+}
+
+/// Bidi stream must survive server-side token refresh (run_with_reconnect).
+///
+/// Reproduces: terminal freezes after 10-40s because `run_with_reconnect` drops
+/// the entire `LiveKitParticipant` (and all active bidi sessions) on token refresh,
+/// then creates a fresh participant with empty `active_bidi_sessions`.
+///
+/// The client's in-flight bidi stream is orphaned — the server no longer recognises
+/// its continuation messages (sent without `call_metadata`), so terminal I/O stops.
+#[tokio::test]
+#[serial]
+async fn bidi_stream_survives_token_refresh() -> Result<()> {
+    let inner = env_logger::Builder::new()
+        .parse_default_env()
+        .is_test(true)
+        .build();
+    let rpc_log_dir = std::env::temp_dir().join("tddy-livekit-test-logs-refresh");
+    let collector = tddy_livekit::rpc_log::RpcTrafficCollector::wrap(&rpc_log_dir, Box::new(inner))
+        .expect("RPC traffic collector init");
+    let _ = collector.install();
+
+    let livekit = LiveKitTestkit::start().await?;
+    let url = livekit.get_ws_url();
+    let room_name = "bidi-token-refresh";
+
+    let handler_count = Arc::new(AtomicUsize::new(0));
+    let handler_count_clone = handler_count.clone();
+
+    // TTL=70s → time_until_refresh = 10s. Enough time for setup + first echo,
+    // then the refresh fires and kills the bidi stream.
+    let token_gen = TokenGenerator::new(
+        "devkey".to_string(),
+        "secret".to_string(),
+        room_name.to_string(),
+        SERVER_IDENTITY.to_string(),
+        Duration::from_secs(70),
+    );
+
+    let service = CountingEchoService {
+        bidi_handler_count: handler_count_clone,
+    };
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_clone = shutdown.clone();
+    let url_for_server = url.clone();
+    let server_handle = tokio::spawn(async move {
+        LiveKitParticipant::run_with_reconnect(
+            &url_for_server,
+            &token_gen,
+            EchoServiceServer::new(service),
+            RoomOptions::default(),
+            shutdown_clone,
+        )
+        .await;
+    });
+
+    // Give the server participant time to join the room.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
+    let (client_room, mut client_events) =
+        Room::connect(&url, &client_token, RoomOptions::default())
+            .await
+            .map_err(|e| anyhow::anyhow!("client connect: {}", e))?;
+    let rpc_events = client_room.subscribe();
+    wait_for_participant(&client_room, &mut client_events, SERVER_IDENTITY).await?;
+    let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
+
+    let (mut sender, mut rx) = rpc_client
+        .start_bidi_stream("test.EchoService", "EchoBidiStream")
+        .map_err(|e| anyhow::anyhow!("start bidi stream: {}", e))?;
+
+    // --- Before token refresh: send first message and receive echo ---
+    sender
+        .send(
+            EchoRequest {
+                message: "before-refresh".to_string(),
+            }
+            .encode_to_vec(),
+            false,
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("send before-refresh: {}", e))?;
+
+    let first_echo = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let chunk = rx
+                .recv()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("receiver closed before first echo"))?;
+            let bytes = chunk.map_err(|e| anyhow::anyhow!("first echo error: {}", e))?;
+            if !bytes.is_empty() {
+                return Ok::<_, anyhow::Error>(bytes);
+            }
+        }
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("timeout waiting for first echo"))??;
+    let first_response = EchoResponse::decode(&first_echo[..])?;
+    assert!(
+        first_response.message.contains("before-refresh"),
+        "first echo should contain 'before-refresh', got: {}",
+        first_response.message
+    );
+    log::info!("first echo OK: {}", first_response.message);
+
+    // --- Wait for token refresh (refresh_delay = 10s, add margin) ---
+    log::info!("waiting for server-side token refresh...");
+    tokio::time::sleep(Duration::from_secs(12)).await;
+
+    // --- After token refresh: send second message and expect echo ---
+    sender
+        .send(
+            EchoRequest {
+                message: "after-refresh".to_string(),
+            }
+            .encode_to_vec(),
+            true,
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("send after-refresh: {}", e))?;
+
+    let second_echo = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let chunk = rx
+                .recv()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("receiver closed before second echo"))?;
+            let bytes = chunk.map_err(|e| anyhow::anyhow!("second echo error: {}", e))?;
+            if !bytes.is_empty() {
+                return Ok::<_, anyhow::Error>(bytes);
+            }
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "timeout waiting for second echo after token refresh (bidi_handler_count={}); \
+             stream died when server reconnected — this is the terminal freeze bug",
+            handler_count.load(Ordering::SeqCst)
+        )
+    })??;
+    let second_response = EchoResponse::decode(&second_echo[..])?;
+    assert!(
+        second_response.message.contains("after-refresh"),
+        "second echo should contain 'after-refresh', got: {}",
+        second_response.message
+    );
+
+    shutdown.store(true, Ordering::Relaxed);
+    server_handle.abort();
+
     Ok(())
 }

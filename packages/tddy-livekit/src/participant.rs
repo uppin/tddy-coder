@@ -34,6 +34,61 @@ struct BidiSession {
     input_tx: mpsc::Sender<RpcMessage>,
 }
 
+/// Shared publisher that survives room reconnection cycles.
+/// Output tasks hold a clone and retry publishing through the latest `LocalParticipant`
+/// when the room reconnects during token refresh.
+#[derive(Clone)]
+pub(crate) struct SharedPublisher {
+    local: Arc<Mutex<Option<LocalParticipant>>>,
+    notify: Arc<tokio::sync::Notify>,
+}
+
+impl SharedPublisher {
+    fn new() -> Self {
+        Self {
+            local: Arc::new(Mutex::new(None)),
+            notify: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    async fn update(&self, lp: LocalParticipant) {
+        *self.local.lock().await = Some(lp);
+        self.notify.notify_waiters();
+    }
+
+    /// Publish data, retrying with the latest LocalParticipant during reconnection gaps.
+    async fn publish_data(
+        &self,
+        payload: Vec<u8>,
+        destination_identities: &[ParticipantIdentity],
+    ) -> Result<(), String> {
+        for attempt in 0..30 {
+            let local = { self.local.lock().await.clone() };
+            if let Some(lp) = local {
+                let packet = DataPacket {
+                    payload: payload.clone(),
+                    topic: Some(RPC_TOPIC.to_string()),
+                    reliable: true,
+                    destination_identities: destination_identities.to_vec(),
+                };
+                if lp.publish_data(packet).await.is_ok() {
+                    return Ok(());
+                }
+                if attempt == 0 {
+                    log::debug!(
+                        "[reconnect] publish_data failed, waiting for new participant"
+                    );
+                }
+            }
+            tokio::select! {
+                _ = self.notify.notified() => {}
+                _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+            }
+        }
+        Err("publish_data failed after 30 retries during reconnection".to_string())
+    }
+}
+
 /// A LiveKit room participant that routes RPC traffic to an RpcBridge.
 pub struct LiveKitParticipant<S: crate::bridge::RpcService> {
     room: Room,
@@ -46,6 +101,9 @@ pub struct LiveKitParticipant<S: crate::bridge::RpcService> {
     active_bidi_sessions: Arc<Mutex<HashMap<i32, BidiSession>>>,
     /// Payloads received with participant=None before any remote joined (race with ParticipantConnected).
     pending_data: Arc<Mutex<VecDeque<Vec<u8>>>>,
+    /// When set, bidi output tasks publish through this instead of a direct LocalParticipant,
+    /// allowing them to survive room reconnection during token refresh.
+    shared_publisher: Option<SharedPublisher>,
 }
 
 impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
@@ -71,31 +129,38 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             active_bidi: Arc::new(Mutex::new(HashMap::new())),
             active_bidi_sessions: Arc::new(Mutex::new(HashMap::new())),
             pending_data: Arc::new(Mutex::new(VecDeque::new())),
+            shared_publisher: None,
         })
     }
 
-    /// Connect to a LiveKit room using a pre-built RpcBridge.
-    /// Used by run_with_reconnect to share the same bridge across reconnection cycles.
-    pub(crate) async fn connect_with_bridge(
+    /// Connect to a LiveKit room, sharing bidi session state and publisher across
+    /// reconnection cycles. The SharedPublisher is updated with the new LocalParticipant
+    /// so that output tasks from previous cycles can publish through the new room.
+    async fn connect_for_reconnect(
         url: &str,
         token: &str,
         bridge: Arc<RpcBridge<S>>,
         room_options: RoomOptions,
+        active_bidi: Arc<Mutex<HashMap<i32, BidiStreamMeta>>>,
+        active_bidi_sessions: Arc<Mutex<HashMap<i32, BidiSession>>>,
+        shared_publisher: SharedPublisher,
     ) -> Result<Self, livekit::RoomError> {
-        log::debug!("LiveKitParticipant::connect_with_bridge url={}", url);
+        log::debug!("LiveKitParticipant::connect_for_reconnect url={}", url);
         let (room, events) = Room::connect(url, token, room_options).await?;
         log::info!(
-            "[echo_server] LiveKitParticipant connected, identity={:?}",
+            "[echo_server] LiveKitParticipant connected (reconnect), identity={:?}",
             room.local_participant().identity()
         );
+        shared_publisher.update(room.local_participant().clone()).await;
         Ok(Self {
             room,
             bridge,
             events,
             active_streams: Arc::new(Mutex::new(HashMap::new())),
-            active_bidi: Arc::new(Mutex::new(HashMap::new())),
-            active_bidi_sessions: Arc::new(Mutex::new(HashMap::new())),
+            active_bidi,
+            active_bidi_sessions,
             pending_data: Arc::new(Mutex::new(VecDeque::new())),
+            shared_publisher: Some(shared_publisher),
         })
     }
 
@@ -110,7 +175,14 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         shutdown: Arc<AtomicBool>,
     ) {
         let bridge = Arc::new(RpcBridge::new(service));
+        let shared_publisher = SharedPublisher::new();
+        let active_bidi: Arc<Mutex<HashMap<i32, BidiStreamMeta>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let active_bidi_sessions: Arc<Mutex<HashMap<i32, BidiSession>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let mut cycle: u64 = 0;
         loop {
+            cycle += 1;
             let token = match token_generator.generate() {
                 Ok(t) => t,
                 Err(e) => {
@@ -118,28 +190,50 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     return;
                 }
             };
-            let participant =
-                match Self::connect_with_bridge(url, &token, bridge.clone(), room_options.clone())
-                    .await
-                {
-                    Ok(p) => {
-                        log::info!("READY");
-                        p
-                    }
-                    Err(e) => {
-                        log::error!("LiveKit connect failed: {}", e);
-                        return;
-                    }
-                };
+            let participant = match Self::connect_for_reconnect(
+                url,
+                &token,
+                bridge.clone(),
+                room_options.clone(),
+                active_bidi.clone(),
+                active_bidi_sessions.clone(),
+                shared_publisher.clone(),
+            )
+            .await
+            {
+                Ok(p) => {
+                    log::info!("READY");
+                    p
+                }
+                Err(e) => {
+                    log::error!("LiveKit connect failed: {}", e);
+                    return;
+                }
+            };
             let refresh_delay = token_generator.time_until_refresh();
+            log::info!(
+                "[reconnect] cycle={} refresh_delay={:?} ttl={:?}",
+                cycle,
+                refresh_delay,
+                token_generator.ttl()
+            );
+            let bidi_sessions_ref = participant.active_bidi_sessions.clone();
+            let active_streams_ref = participant.active_streams.clone();
             let shutdown_clone = shutdown.clone();
             tokio::select! {
                 _ = participant.run() => {
-                    log::info!("LiveKit participant disconnected");
+                    log::info!("[reconnect] cycle={} participant.run() returned (disconnected)", cycle);
                     break;
                 }
                 _ = tokio::time::sleep(refresh_delay) => {
-                    log::info!("Token expiring, reconnecting with fresh token");
+                    let bidi_count = bidi_sessions_ref.lock().await.len();
+                    let stream_count = active_streams_ref.lock().await.len();
+                    log::warn!(
+                        "[reconnect] cycle={} token expiring — reconnecting with {} active bidi session(s), {} active stream(s)",
+                        cycle,
+                        bidi_count,
+                        stream_count,
+                    );
                     continue;
                 }
                 _ = async {
@@ -147,7 +241,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                 } => {
-                    log::info!("LiveKit shutdown requested");
+                    log::info!("[reconnect] cycle={} shutdown requested", cycle);
                     break;
                 }
             }
@@ -205,6 +299,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                                 &self.active_streams,
                                 &self.active_bidi,
                                 &self.active_bidi_sessions,
+                                &self.shared_publisher,
                             )
                             .await
                             {
@@ -273,6 +368,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     let active_streams = self.active_streams.clone();
                     let active_bidi = self.active_bidi.clone();
                     let active_bidi_sessions = self.active_bidi_sessions.clone();
+                    let shared_publisher = self.shared_publisher.clone();
                     let payload = Arc::try_unwrap(payload).unwrap_or_else(|a| (*a).clone());
 
                     tokio::spawn(async move {
@@ -285,6 +381,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                             &active_streams,
                             &active_bidi,
                             &active_bidi_sessions,
+                            &shared_publisher,
                         )
                         .await
                         {
@@ -298,7 +395,13 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                 _ => {}
             }
         }
-        log::debug!("LiveKitParticipant::run event loop ended");
+        let bidi_count = self.active_bidi_sessions.lock().await.len();
+        let stream_count = self.active_streams.lock().await.len();
+        log::debug!(
+            "LiveKitParticipant::run event loop ended (active_bidi_sessions={}, active_streams={})",
+            bidi_count,
+            stream_count,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -311,6 +414,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         active_streams: &Mutex<HashMap<i32, ActiveStream>>,
         active_bidi: &Mutex<HashMap<i32, BidiStreamMeta>>,
         active_bidi_sessions: &Mutex<HashMap<i32, BidiSession>>,
+        shared_publisher: &Option<SharedPublisher>,
     ) -> Result<(), String> {
         let request = decode_request(payload)?;
         let request_id = request.request_id;
@@ -461,6 +565,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
 
                     let bridge = bridge.clone();
                     let local = local.clone();
+                    let shared_publisher = shared_publisher.clone();
                     tokio::spawn(async move {
                         log::trace!(
                             "[BIDI_TRACE] participant: calling bridge.start_bidi_stream request_id={}", request_id
@@ -479,6 +584,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                                     local,
                                     response_identity,
                                     true,
+                                    shared_publisher,
                                 );
                             }
                             Err(e) => {
@@ -695,13 +801,15 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         local: LocalParticipant,
         response_identity: ParticipantIdentity,
         send_empty_end_frame: bool,
+        shared_publisher: Option<SharedPublisher>,
     ) {
         match output {
             ResponseBody::Streaming(mut rx) => {
                 log::info!(
-                    "[echo_server] RPC request_id={} bidi streaming response (spawned task) response_identity={:?}",
+                    "[echo_server] RPC request_id={} bidi streaming response (spawned task) response_identity={:?} reconnectable={}",
                     request_id,
-                    response_identity
+                    response_identity,
+                    shared_publisher.is_some(),
                 );
                 tokio::spawn(async move {
                     let mut chunk_index = 0u64;
@@ -722,18 +830,30 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                             trailers: None,
                         };
                         if let Ok(encoded) = encode_response(response) {
-                            let packet = DataPacket {
-                                payload: encoded,
-                                topic: Some(RPC_TOPIC.to_string()),
-                                reliable: true,
-                                destination_identities: vec![response_identity.clone()],
-                            };
-                            if local.publish_data(packet).await.is_err() {
-                                log::error!(
-                                    "[echo_server] RPC request_id={} publish_data failed",
-                                    request_id
-                                );
-                                break;
+                            let dest = [response_identity.clone()];
+                            if let Some(ref sp) = shared_publisher {
+                                if let Err(e) = sp.publish_data(encoded, &dest).await {
+                                    log::error!(
+                                        "[echo_server] RPC request_id={} reconnectable publish failed: {}",
+                                        request_id,
+                                        e,
+                                    );
+                                    break;
+                                }
+                            } else {
+                                let packet = DataPacket {
+                                    payload: encoded,
+                                    topic: Some(RPC_TOPIC.to_string()),
+                                    reliable: true,
+                                    destination_identities: dest.to_vec(),
+                                };
+                                if local.publish_data(packet).await.is_err() {
+                                    log::error!(
+                                        "[echo_server] RPC request_id={} publish_data failed",
+                                        request_id
+                                    );
+                                    break;
+                                }
                             }
                         }
                         chunk_index += 1;
@@ -748,14 +868,19 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                             trailers: None,
                         };
                         if let Ok(encoded) = encode_response(end_response) {
-                            let _ = local
-                                .publish_data(DataPacket {
-                                    payload: encoded,
-                                    topic: Some(RPC_TOPIC.to_string()),
-                                    reliable: true,
-                                    destination_identities: vec![response_identity],
-                                })
-                                .await;
+                            let dest = [response_identity];
+                            if let Some(ref sp) = shared_publisher {
+                                let _ = sp.publish_data(encoded, &dest).await;
+                            } else {
+                                let _ = local
+                                    .publish_data(DataPacket {
+                                        payload: encoded,
+                                        topic: Some(RPC_TOPIC.to_string()),
+                                        reliable: true,
+                                        destination_identities: dest.to_vec(),
+                                    })
+                                    .await;
+                            }
                         }
                     }
                     log::info!(
