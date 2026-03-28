@@ -573,9 +573,11 @@ impl RunnerHooks for ElicitationHooks {
                 .lock()
                 .unwrap()
                 .push(format!("elicitation:{}", task_id));
-            Some(tddy_core::workflow::graph::ElicitationEvent::PlanApproval {
-                prd_content: "# Test PRD".to_string(),
-            })
+            Some(
+                tddy_core::workflow::graph::ElicitationEvent::DocumentApproval {
+                    content: "# Test PRD".to_string(),
+                },
+            )
         } else {
             None
         }
@@ -830,11 +832,11 @@ async fn flow_runner_returns_elicitation_needed_when_hook_signals() {
 
     if let ExecutionStatus::ElicitationNeeded { ref event } = result.status {
         match event {
-            tddy_core::workflow::graph::ElicitationEvent::PlanApproval { ref prd_content } => {
-                assert_eq!(prd_content, "# Test PRD");
+            tddy_core::workflow::graph::ElicitationEvent::DocumentApproval { ref content } => {
+                assert_eq!(content, "# Test PRD");
             }
             tddy_core::workflow::graph::ElicitationEvent::WorktreeConfirmation { .. } => {
-                panic!("test expects PlanApproval, not WorktreeConfirmation");
+                panic!("test expects DocumentApproval, not WorktreeConfirmation");
             }
         }
     }

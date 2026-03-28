@@ -180,14 +180,14 @@ fn create_mcp_config_temp_file() -> Option<PathBuf> {
     Some(tmp)
 }
 
-/// Maps [`InvokeRequest`] to Claude CLI config. [`GoalHints::planning_mode_intent`] comes from the
+/// Maps [`InvokeRequest`] to Claude CLI config. [`GoalHints::agent_cli_plan_mode`] comes from the
 /// active [`crate::workflow::recipe::WorkflowRecipe`]; Claude sets `--permission-mode plan` only when
 /// that flag is set (not for every read-only goal).
 fn goal_to_claude_config(request: &InvokeRequest) -> ClaudeInvokeConfig {
     let permission_mode = match request.hints.permission {
         PermissionHint::AcceptEdits => PermissionMode::AcceptEdits,
         PermissionHint::ReadOnly => {
-            if request.hints.planning_mode_intent {
+            if request.hints.agent_cli_plan_mode {
                 PermissionMode::Plan
             } else {
                 PermissionMode::Default
@@ -667,7 +667,7 @@ mod claude_config_tests {
             allowed_tools: vec![],
             default_model: None,
             agent_output: false,
-            planning_mode_intent: true,
+            agent_cli_plan_mode: true,
             claude_nonzero_exit_ok_if_structured_response: true,
         };
         let c: ClaudeInvokeConfig = goal_to_claude_config(&minimal_invoke(hints));
@@ -682,7 +682,7 @@ mod claude_config_tests {
             allowed_tools: vec![],
             default_model: None,
             agent_output: false,
-            planning_mode_intent: false,
+            agent_cli_plan_mode: false,
             claude_nonzero_exit_ok_if_structured_response: false,
         };
         let c: ClaudeInvokeConfig = goal_to_claude_config(&minimal_invoke(hints));
@@ -697,7 +697,7 @@ mod claude_config_tests {
             allowed_tools: vec![],
             default_model: None,
             agent_output: false,
-            planning_mode_intent: false,
+            agent_cli_plan_mode: false,
             claude_nonzero_exit_ok_if_structured_response: false,
         };
         let c: ClaudeInvokeConfig = goal_to_claude_config(&minimal_invoke(hints));

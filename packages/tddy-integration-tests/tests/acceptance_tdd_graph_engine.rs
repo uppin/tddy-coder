@@ -258,8 +258,9 @@ async fn workflow_engine_run_goal_plan_completes() {
         "plan should return Paused, Completed, or ElicitationNeeded; got {:?}",
         result.status
     );
-    assert!(session_dir.join("PRD.md").exists());
-    let prd = std::fs::read_to_string(session_dir.join("PRD.md")).unwrap();
+    let prd_path = session_dir.join("artifacts").join("PRD.md");
+    assert!(prd_path.exists(), "expected {:?}", prd_path);
+    let prd = std::fs::read_to_string(&prd_path).unwrap();
     assert!(
         prd.contains("- [ ]") || prd.contains("## TODO"),
         "PRD.md should contain TODO content (merged as last section)"

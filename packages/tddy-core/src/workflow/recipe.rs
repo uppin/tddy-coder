@@ -28,10 +28,8 @@ pub struct GoalHints {
     pub allowed_tools: Vec<String>,
     pub default_model: Option<String>,
     pub agent_output: bool,
-    /// Planning-workflow intent (PRD/plan phase), set by [`WorkflowRecipe::goal_hints`].
-    /// Backends map this without inspecting goal id: Cursor adds `agent --plan`; Claude adds
-    /// `--permission-mode plan` only when this is true (read-only goals without this flag use default mode).
-    pub planning_mode_intent: bool,
+    /// When true, backends enable vendor “plan mode” CLI flags (e.g. Cursor `--plan`, Claude `--permission-mode plan`).
+    pub agent_cli_plan_mode: bool,
     /// Claude CLI: if the process exits non-zero but stdout contains `<structured-response`, treat as success.
     /// Set by the recipe for goals that emit structured JSON despite a non-zero exit code.
     pub claude_nonzero_exit_ok_if_structured_response: bool,
@@ -63,20 +61,18 @@ pub trait WorkflowRecipe: Send + Sync {
 
     fn default_models(&self) -> BTreeMap<GoalId, String>;
 
-    fn default_artifacts(&self) -> BTreeMap<String, String>;
+    fn goal_requires_session_dir(&self, goal_id: &GoalId) -> bool;
 
-    fn known_artifacts(&self) -> &[(&'static str, &'static str)];
-
-    /// Basenames under the session directory to consider when building `<context-reminder>` artifact lines (existing files only).
-    /// Default: filenames from [`Self::known_artifacts`].
-    fn context_header_session_artifact_filenames(&self) -> Vec<&'static str> {
-        self.known_artifacts()
-            .iter()
-            .map(|(_, name)| *name)
-            .collect()
+    /// Whether this workflow expects a primary on-disk session document during the start phase (approval gate, resume checks).
+    fn uses_primary_session_document(&self) -> bool {
+        false
     }
 
-    fn goal_requires_session_dir(&self, goal_id: &GoalId) -> bool;
+    /// UTF-8 content for session document approval / review UI, if the recipe defines one on disk.
+    /// Default: none (workflows without a primary session document).
+    fn read_primary_session_document_utf8(&self, _session_dir: &Path) -> Option<String> {
+        None
+    }
 
     /// Optional structured summary of the last goal's `tddy-tools submit` output (e.g. update-docs vs refactor).
     /// Used by the presenter workflow thread for the completion message; recipes that use JSON outputs implement this.

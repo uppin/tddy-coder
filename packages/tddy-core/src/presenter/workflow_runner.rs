@@ -9,7 +9,7 @@ use std::sync::Arc;
 const TUI_SESSION_FALLBACK_DIR: &str = "tddy-flowrunner-tui-session";
 use std::sync::mpsc;
 
-use crate::backend::{GoalId, WorkflowRecipe};
+use crate::backend::WorkflowRecipe;
 use crate::workflow::graph::{ElicitationEvent, ExecutionResult, ExecutionStatus};
 use crate::{
     get_session_for_tag, read_changeset, ClarificationQuestion, SharedBackend, WorkflowEngine,
@@ -127,13 +127,13 @@ fn handle_elicitation(
     ctx: &ElicitationContext<'_>,
 ) -> bool {
     match event {
-        ElicitationEvent::PlanApproval { ref prd_content } => {
-            let mut current_prd = prd_content.clone();
+        ElicitationEvent::DocumentApproval { ref content } => {
+            let mut current_prd = content.clone();
             loop {
                 if ctx
                     .event_tx
-                    .send(WorkflowEvent::PlanApprovalNeeded {
-                        prd_content: current_prd.clone(),
+                    .send(WorkflowEvent::SessionDocumentApprovalNeeded {
+                        content: current_prd.clone(),
                     })
                     .is_err()
                 {
@@ -152,7 +152,7 @@ fn handle_elicitation(
                     .unwrap_or_else(|| "feature".to_string());
                 let session_id_for_refine = read_changeset(session_dir)
                     .ok()
-                    .and_then(|c| get_session_for_tag(&c, "plan"));
+                    .and_then(|c| get_session_for_tag(&c, ctx.recipe.start_goal().as_str()));
                 let output_dir_refine = read_changeset(session_dir)
                     .ok()
                     .and_then(|c| c.repo_path.clone())
@@ -203,10 +203,10 @@ fn handle_elicitation(
                 if let Some(p) = ctx.socket_path {
                     refine_ctx.insert("socket_path".to_string(), serde_json::to_value(p).unwrap());
                 }
-                let plan_goal = GoalId::new("plan");
+                let start_goal = ctx.recipe.start_goal().clone();
                 let mut refine_result = match ctx
                     .rt
-                    .block_on(refine_engine.run_goal(&plan_goal, refine_ctx))
+                    .block_on(refine_engine.run_goal(&start_goal, refine_ctx))
                 {
                     Ok(r) => r,
                     Err(e) => {
@@ -241,10 +241,10 @@ fn handle_elicitation(
                         }
                     }
                 }
-                current_prd = std::fs::read_to_string(
-                    crate::session_plan_prd::plan_prd_path_for_session_dir(session_dir),
-                )
-                .unwrap_or_else(|_| "Could not read PRD.md".to_string());
+                current_prd = ctx
+                    .recipe
+                    .read_primary_session_document_utf8(session_dir)
+                    .unwrap_or_else(|| current_prd.clone());
             }
         }
         ElicitationEvent::WorktreeConfirmation { .. } => {
@@ -260,7 +260,7 @@ fn handle_elicitation(
 /// Run plan goal when output_dir is omitted (or "."). Creates session under ~/.tddy/sessions.
 /// Returns Some(session_dir) on success, None when the caller should return.
 #[allow(clippy::too_many_arguments)]
-fn run_plan_without_output_dir(
+fn run_start_goal_without_output_dir(
     recipe: Arc<dyn WorkflowRecipe>,
     backend: &SharedBackend,
     event_tx: &mpsc::Sender<WorkflowEvent>,
@@ -506,7 +506,7 @@ pub fn run_workflow(
             } else {
                 output_dir.as_path()
             };
-            match run_plan_without_output_dir(
+            match run_start_goal_without_output_dir(
                 recipe.clone(),
                 &backend,
                 &event_tx,
@@ -537,12 +537,20 @@ pub fn run_workflow(
         .map(PathBuf::from)
         .unwrap_or_else(|| output_dir.clone());
 
-    let plan_needs_completion = cs_pre.as_ref().is_some_and(|c| {
-        c.state.current.as_str() == "Init"
-            && (!crate::session_plan_prd::plan_prd_path_for_session_dir(&session_dir).exists()
-                || get_session_for_tag(c, "plan").is_none())
+    let start_tag = recipe.start_goal().as_str().to_string();
+    let start_goal_needs_completion = cs_pre.as_ref().is_some_and(|c| {
+        recipe.uses_primary_session_document()
+            && c.state.current.as_str() == "Init"
+            && (recipe
+                .read_primary_session_document_utf8(&session_dir)
+                .is_none()
+                || get_session_for_tag(c, start_tag.as_str()).is_none())
     });
-    if plan_needs_completion {
+    log::debug!(
+        "[workflow_runner] start_goal_needs_completion={}",
+        start_goal_needs_completion
+    );
+    if start_goal_needs_completion {
         let input = cs_pre
             .as_ref()
             .and_then(|c| c.initial_prompt.as_deref())
@@ -586,8 +594,8 @@ pub fn run_workflow(
                 .enable_all()
                 .build()
                 .expect("tokio runtime");
-            let plan_gid = GoalId::new("plan");
-            let result = match rt.block_on(engine.run_goal(&plan_gid, ctx)) {
+            let sg = recipe.start_goal().clone();
+            let result = match rt.block_on(engine.run_goal(&sg, ctx)) {
                 Ok(r) => r,
                 Err(e) => {
                     let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
@@ -638,7 +646,7 @@ pub fn run_workflow(
     let start_is_full = start_goal == recipe.start_goal();
 
     // Same as the no-session_dir path: allow TUI FeatureInput when plan requires a description.
-    if start_goal.as_str() == "plan" && feature_input_for_workflow.is_none() {
+    if start_goal == recipe.start_goal() && feature_input_for_workflow.is_none() {
         let _ = event_tx.send(WorkflowEvent::AwaitingFeatureInput);
         match answer_rx.recv() {
             Ok(s) => {

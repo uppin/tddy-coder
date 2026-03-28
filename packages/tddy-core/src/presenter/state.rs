@@ -35,9 +35,9 @@ pub enum AppMode {
     FeatureInput,
     /// Workflow is running.
     Running,
-    /// Plan approval gate: View, Approve, or Refine.
-    PlanReview { prd_content: String },
-    /// Full-screen markdown viewer (PRD content).
+    /// Session document approval: View, Approve, or Refine.
+    DocumentReview { content: String },
+    /// Full-screen markdown viewer.
     MarkdownViewer { content: String },
     /// Presenting a single-select clarification question.
     Select {

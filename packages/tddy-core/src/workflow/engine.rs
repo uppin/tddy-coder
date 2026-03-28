@@ -92,7 +92,7 @@ impl WorkflowEngine {
         self.runner.run(&session_id).await
     }
 
-    /// Run the full workflow: create session at "plan", loop until Completed, Error, or WaitingForInput.
+    /// Run the full workflow: create session at [`WorkflowRecipe::start_goal`], loop until Completed, Error, or WaitingForInput.
     pub async fn run_full_workflow(
         &self,
         mut context_values: HashMap<String, serde_json::Value>,
@@ -133,7 +133,7 @@ impl WorkflowEngine {
     }
 
     /// Run workflow from a given goal: create session at target task, loop until Completed, Error, or WaitingForInput.
-    /// Use when resuming (e.g. from acceptance-tests after plan is done).
+    /// Use when resuming mid-graph (e.g. after the first goal has completed).
     pub async fn run_workflow_from(
         &self,
         goal: &GoalId,

@@ -473,7 +473,7 @@ async fn entering_evaluate_persists_evaluating_in_changeset_for_resume() {
     write_changeset_with_state(&session_dir, "GreenComplete", "sess-resume-eval");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Summary\nTest.").expect("write PRD");
 
-    let hooks = TddWorkflowHooks::new(common::tdd_recipe());
+    let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("backend_name", "claude".to_string());

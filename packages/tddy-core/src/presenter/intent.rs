@@ -5,12 +5,12 @@
 pub enum UserIntent {
     /// User submitted feature description (Enter in FeatureInput mode).
     SubmitFeatureInput(String),
-    /// User approved the plan (PlanReview mode).
-    ApprovePlan,
-    /// User wants to view the PRD (PlanReview mode).
-    ViewPlan,
-    /// User wants to refine the plan (PlanReview mode).
-    RefinePlan,
+    /// User approved the session document (document review mode).
+    ApproveSessionDocument,
+    /// User wants to view the session document (document review mode).
+    ViewSessionDocument,
+    /// User wants to refine the session document (document review mode).
+    RefineSessionDocument,
     /// User dismissed the markdown viewer (MarkdownViewer mode).
     DismissViewer,
     /// User moved the highlight in Select mode (Up/Down / mouse). Keeps presenter state in sync for

@@ -728,3 +728,16 @@ mod daemon_tests {
         let _ = fs::remove_dir_all(&base);
     }
 }
+
+/// Acceptance: daemon service must not hard-code PRD filenames; workflow recipe owns primary artifacts.
+#[cfg(test)]
+mod workflow_artifact_acceptance {
+    #[test]
+    fn daemon_start_session_no_prd_constant() {
+        let src = include_str!("daemon_service.rs");
+        assert!(
+            !src.contains("PRD_FILENAME"),
+            "daemon_service must not reference PRD_FILENAME; resolve primary planning artifact via workflow manifest"
+        );
+    }
+}

@@ -4,12 +4,12 @@ use tddy_core::{ActivityKind, AppMode, PresenterEvent, UserIntent, WorkflowEvent
 
 use crate::gen::{
     app_mode_proto, client_message, server_message, ActivityLogged, AgentOutput, AnswerMultiSelect,
-    AnswerOther, AnswerSelect, AnswerText, AppModeDone, AppModeFeatureInput, AppModeMarkdownViewer,
-    AppModeMultiSelect, AppModePlanReview, AppModeProto, AppModeRunning, AppModeSelect,
-    AppModeTextInput, ApprovePlan, ClarificationQuestionProto, ClientMessage, DeleteInboxItem,
-    DismissViewer, EditInboxItem, GoalStarted, InboxChanged, IntentReceived, ModeChanged,
-    QuestionOptionProto, QueuePrompt, Quit, RefinePlan, Scroll, ServerMessage, StateChanged,
-    SubmitFeatureInput, ViewPlan, WorkflowComplete,
+    AnswerOther, AnswerSelect, AnswerText, AppModeDocumentReview, AppModeDone, AppModeFeatureInput,
+    AppModeMarkdownViewer, AppModeMultiSelect, AppModeProto, AppModeRunning, AppModeSelect,
+    AppModeTextInput, ApproveSessionDocument, ClarificationQuestionProto, ClientMessage,
+    DeleteInboxItem, DismissViewer, EditInboxItem, GoalStarted, InboxChanged, IntentReceived,
+    ModeChanged, QuestionOptionProto, QueuePrompt, Quit, RefineSessionDocument, Scroll,
+    ServerMessage, StateChanged, SubmitFeatureInput, ViewSessionDocument, WorkflowComplete,
 };
 
 /// Convert ClientMessage to UserIntent. Returns None if the message has no intent.
@@ -41,9 +41,15 @@ pub fn client_message_to_intent(msg: ClientMessage) -> Option<UserIntent> {
         }
         Intent::Scroll(Scroll { delta }) => Some(UserIntent::Scroll(delta)),
         Intent::Quit(Quit {}) => Some(UserIntent::Quit),
-        Intent::ApprovePlan(ApprovePlan {}) => Some(UserIntent::ApprovePlan),
-        Intent::ViewPlan(ViewPlan {}) => Some(UserIntent::ViewPlan),
-        Intent::RefinePlan(RefinePlan {}) => Some(UserIntent::RefinePlan),
+        Intent::ApproveSessionDocument(ApproveSessionDocument {}) => {
+            Some(UserIntent::ApproveSessionDocument)
+        }
+        Intent::ViewSessionDocument(ViewSessionDocument {}) => {
+            Some(UserIntent::ViewSessionDocument)
+        }
+        Intent::RefineSessionDocument(RefineSessionDocument {}) => {
+            Some(UserIntent::RefineSessionDocument)
+        }
         Intent::DismissViewer(DismissViewer {}) => Some(UserIntent::DismissViewer),
         Intent::StartSession(_) | Intent::ConfirmWorktree(_) => None, // Daemon-only, not UserIntent
     }
@@ -63,13 +69,15 @@ pub fn workflow_event_to_server_message(event: WorkflowEvent) -> Option<ServerMe
             };
             Event::WorkflowComplete(WorkflowComplete { ok, message })
         }
-        WorkflowEvent::PlanApprovalNeeded { prd_content } => Event::ModeChanged(ModeChanged {
-            mode: Some(AppModeProto {
-                variant: Some(app_mode_proto::Variant::PlanReview(AppModePlanReview {
-                    prd_content,
-                })),
-            }),
-        }),
+        WorkflowEvent::SessionDocumentApprovalNeeded { content } => {
+            Event::ModeChanged(ModeChanged {
+                mode: Some(AppModeProto {
+                    variant: Some(app_mode_proto::Variant::DocumentReview(
+                        AppModeDocumentReview { content },
+                    )),
+                }),
+            })
+        }
         WorkflowEvent::Progress(_)
         | WorkflowEvent::ClarificationNeeded { .. }
         | WorkflowEvent::WorktreeSwitched { .. }
@@ -78,15 +86,15 @@ pub fn workflow_event_to_server_message(event: WorkflowEvent) -> Option<ServerMe
     Some(ServerMessage { event: Some(event) })
 }
 
-/// Build ServerMessage for plan approval elicitation (ModeChanged with PlanReview).
-pub fn plan_approval_to_server_message(prd_content: String) -> ServerMessage {
+/// Build ServerMessage for session-document approval elicitation (ModeChanged with DocumentReview).
+pub fn session_document_approval_to_server_message(content: String) -> ServerMessage {
     use server_message::Event;
     ServerMessage {
         event: Some(Event::ModeChanged(ModeChanged {
             mode: Some(AppModeProto {
-                variant: Some(app_mode_proto::Variant::PlanReview(AppModePlanReview {
-                    prd_content,
-                })),
+                variant: Some(app_mode_proto::Variant::DocumentReview(
+                    AppModeDocumentReview { content },
+                )),
             }),
         })),
     }
@@ -178,9 +186,9 @@ fn app_mode_to_proto(mode: &AppMode) -> AppModeProto {
             prompt: prompt.clone(),
         }),
         AppMode::Done => app_mode_proto::Variant::Done(AppModeDone {}),
-        AppMode::PlanReview { prd_content } => {
-            app_mode_proto::Variant::PlanReview(AppModePlanReview {
-                prd_content: prd_content.clone(),
+        AppMode::DocumentReview { content } => {
+            app_mode_proto::Variant::DocumentReview(AppModeDocumentReview {
+                content: content.clone(),
             })
         }
         AppMode::MarkdownViewer { content } => {
@@ -248,9 +256,13 @@ fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
         }),
         UserIntent::Scroll(delta) => Intent::Scroll(Scroll { delta: *delta }),
         UserIntent::Quit => Intent::Quit(Quit {}),
-        UserIntent::ApprovePlan => Intent::ApprovePlan(ApprovePlan {}),
-        UserIntent::ViewPlan => Intent::ViewPlan(ViewPlan {}),
-        UserIntent::RefinePlan => Intent::RefinePlan(RefinePlan {}),
+        UserIntent::ApproveSessionDocument => {
+            Intent::ApproveSessionDocument(ApproveSessionDocument {})
+        }
+        UserIntent::ViewSessionDocument => Intent::ViewSessionDocument(ViewSessionDocument {}),
+        UserIntent::RefineSessionDocument => {
+            Intent::RefineSessionDocument(RefineSessionDocument {})
+        }
         UserIntent::DismissViewer => Intent::DismissViewer(DismissViewer {}),
         // skeleton: ResumeFromError has no proto message yet
         UserIntent::ResumeFromError => return None,

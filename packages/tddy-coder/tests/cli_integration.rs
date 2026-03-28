@@ -109,9 +109,10 @@ fn cli_plain_mode_plan_approval_approve_proceeds() {
     );
     let last_line = stdout.trim().lines().last().unwrap_or("").trim();
     let session_dir = std::path::Path::new(last_line);
+    let prd = session_dir.join("artifacts").join("PRD.md");
     assert!(
-        session_dir.is_dir() && session_dir.join("PRD.md").exists(),
-        "stdout should end with plan dir path with PRD.md, last_line={} stdout={}",
+        session_dir.is_dir() && prd.exists(),
+        "stdout should end with plan dir path with artifacts/PRD.md, last_line={} stdout={}",
         last_line,
         stdout
     );
@@ -272,9 +273,10 @@ fn cli_accepts_prompt_flag_instead_of_stdin() {
     );
     let last_line = stdout.trim().lines().last().unwrap_or("").trim();
     let session_dir = std::path::Path::new(last_line);
+    let prd = session_dir.join("artifacts").join("PRD.md");
     assert!(
-        session_dir.is_dir() && session_dir.join("PRD.md").exists(),
-        "stdout should end with plan dir path with PRD.md: {}",
+        session_dir.is_dir() && prd.exists(),
+        "stdout should end with plan dir path with artifacts/PRD.md: {}",
         stdout
     );
 
@@ -371,9 +373,10 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
     );
     let last_line = stdout.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("");
     let session_dir = std::path::Path::new(last_line.trim());
+    let prd = session_dir.join("artifacts").join("PRD.md");
     assert!(
-        session_dir.is_dir() && session_dir.join("PRD.md").exists(),
-        "stdout should end with plan dir path with PRD.md: {}",
+        session_dir.is_dir() && prd.exists(),
+        "stdout should end with plan dir path with artifacts/PRD.md: {}",
         stdout
     );
 
@@ -382,10 +385,10 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
         && fs::read_dir(&sessions_dir)
             .unwrap()
             .filter_map(|e| e.ok())
-            .any(|e| e.path().join("PRD.md").exists());
+            .any(|e| e.path().join("artifacts").join("PRD.md").exists());
     assert!(
         has_artifacts,
-        "expected PRD.md under TDDY_SESSIONS_DIR/sessions (TODO is merged into PRD)"
+        "expected artifacts/PRD.md under TDDY_SESSIONS_DIR/sessions (TODO is merged into PRD)"
     );
 
     let _ = std::fs::remove_dir_all(&tmp);
@@ -395,7 +398,12 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
 #[cfg(unix)]
 fn cli_accepts_goal_acceptance_tests_with_session_dir() {
     let (output_dir, session_dir) = common::temp_dir_with_git_repo("at-goal-test");
-    std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    std::fs::create_dir_all(session_dir.join("artifacts")).expect("create artifacts");
+    std::fs::write(
+        session_dir.join("artifacts").join("PRD.md"),
+        "# PRD\n## Testing Plan",
+    )
+    .expect("write PRD");
     common::write_changeset_for_session(&session_dir, "fake-sess", &output_dir);
 
     let mut cmd = tddy_coder_bin();
@@ -441,7 +449,12 @@ fn cli_accepts_goal_red_with_session_dir() {
 
     let session_dir = tmp.join("plan-output");
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
-    std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    std::fs::create_dir_all(session_dir.join("artifacts")).expect("create artifacts");
+    std::fs::write(
+        session_dir.join("artifacts").join("PRD.md"),
+        "# PRD\n## Testing Plan",
+    )
+    .expect("write PRD");
     std::fs::write(
         session_dir.join("acceptance-tests.md"),
         "# Acceptance Tests\n## Tests\n- test_foo",
@@ -487,7 +500,12 @@ fn cli_accepts_goal_green_with_session_dir() {
 
     let session_dir = tmp.join("plan-output");
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
-    std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
+    std::fs::create_dir_all(session_dir.join("artifacts")).expect("create artifacts");
+    std::fs::write(
+        session_dir.join("artifacts").join("PRD.md"),
+        "# PRD\n## Testing Plan",
+    )
+    .expect("write PRD");
     std::fs::write(
         session_dir.join("acceptance-tests.md"),
         "# Acceptance Tests\n## Tests\n### test_foo\n- **File**: src/foo.rs\n- **Line**: 10\n- **Status**: failing\n",
@@ -557,11 +575,12 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
     use tddy_core::{
         GoalId, MockBackend, SharedBackend, WorkflowEngine, WorkflowRecipe, WorkflowState,
     };
-    use tddy_workflow_recipes::{TddRecipe, TddWorkflowHooks};
+    use tddy_workflow_recipes::{SessionArtifactManifest, TddRecipe, TddWorkflowHooks};
 
     let (output_dir, session_dir) = common::temp_dir_with_git_repo("full-wf-validate-refactor");
+    std::fs::create_dir_all(session_dir.join("artifacts")).expect("create artifacts");
     std::fs::write(
-        session_dir.join("PRD.md"),
+        session_dir.join("artifacts").join("PRD.md"),
         "# Feature PRD\n## Summary\nAuth system.",
     )
     .expect("write PRD");
@@ -590,7 +609,8 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
     let storage_dir = std::env::temp_dir().join("tddy-cli-full-wf-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
-    let hooks = Arc::new(TddWorkflowHooks::new(recipe.clone()));
+    let manifest: Arc<dyn SessionArtifactManifest> = Arc::new(TddRecipe);
+    let hooks = Arc::new(TddWorkflowHooks::new(recipe.clone(), manifest));
     let engine = WorkflowEngine::new(
         recipe,
         SharedBackend::from_arc(backend.clone()),

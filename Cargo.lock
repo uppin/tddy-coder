@@ -5661,6 +5661,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
+ "tddy-workflow",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -5765,6 +5766,7 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tddy-core",
+ "tddy-workflow",
  "tddy-workflow-recipes",
  "tokio",
  "tokio-util",
@@ -5829,6 +5831,7 @@ dependencies = [
  "tddy-core",
  "tddy-rpc",
  "tddy-tui",
+ "tddy-workflow",
  "tddy-workflow-recipes",
  "tokio",
  "tokio-stream",
@@ -5875,6 +5878,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-workflow"
+version = "0.1.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "tddy-workflow-recipes"
 version = "0.1.0"
 dependencies = [
@@ -5885,6 +5895,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tddy-core",
+ "tddy-workflow",
  "tokio",
  "uuid",
 ]
