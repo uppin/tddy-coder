@@ -3,6 +3,7 @@
 pub mod bugfix;
 pub mod parser;
 pub mod permissions;
+pub mod recipe_resolve;
 pub mod schema_pipeline;
 pub mod session_artifact_manifest;
 pub mod tdd;
@@ -24,6 +25,10 @@ pub use permissions::{
     acceptance_tests_allowlist, demo_allowlist, evaluate_allowlist, green_allowlist,
     plan_allowlist, red_allowlist, refactor_allowlist, update_docs_allowlist,
     validate_subagents_allowlist,
+};
+pub use recipe_resolve::{
+    resolve_workflow_recipe_from_cli_name, unknown_workflow_recipe_error,
+    workflow_recipe_and_manifest_from_cli_name, WorkflowRecipeAndManifest,
 };
 pub use session_artifact_manifest::SessionArtifactManifest;
 pub use tdd::{PlanTask, TddRecipe, TddWorkflowHooks};

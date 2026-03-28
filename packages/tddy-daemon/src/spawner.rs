@@ -159,6 +159,8 @@ pub struct SpawnOptions<'a> {
     pub project_id: Option<&'a str>,
     pub agent: Option<&'a str>,
     pub mouse: bool,
+    /// Passed to spawned `tddy-coder` as `--recipe` when non-empty (e.g. `bugfix`).
+    pub recipe: Option<&'a str>,
 }
 
 /// Merge the daemon process `PATH` with an optional prefix (from the target user's `~/.tddy/config.yaml`).
@@ -443,6 +445,14 @@ pub fn spawn_as_user(
 
     if opts.mouse {
         cmd.arg("--mouse");
+    }
+
+    if let Some(r) = opts.recipe {
+        let r = r.trim();
+        if !r.is_empty() {
+            log::debug!("spawner: passing --recipe {}", r);
+            cmd.arg("--recipe").arg(r);
+        }
     }
 
     cmd.arg("--config").arg(&logs.config_path);

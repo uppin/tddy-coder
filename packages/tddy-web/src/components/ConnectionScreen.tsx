@@ -69,6 +69,8 @@ function truncateId(id: string, maxLen = 12): string {
 type ProjectSessionForm = {
   toolPath: string;
   agent: string;
+  /** Workflow recipe: `tdd` or `bugfix` (matches `WorkflowRecipe::name()`). */
+  recipe: string;
   debugLogging: boolean;
   daemonInstanceId: string;
 };
@@ -78,6 +80,7 @@ function defaultProjectSessionForm(tools: ToolInfo[], daemons: EligibleDaemonEnt
   return {
     toolPath: tools[0]?.path ?? "",
     agent: "claude",
+    recipe: "tdd",
     debugLogging: false,
     daemonInstanceId: localDaemon?.instanceId ?? daemons[0]?.instanceId ?? "",
   };
@@ -100,11 +103,12 @@ function ProjectSessionOptions({
   const toolId = `tool-select-${projectId}`;
   const backendId = `backend-select-${projectId}`;
   const hostId = `host-select-${projectId}`;
+  const recipeId = `recipe-select-${projectId}`;
   const debugId = `debug-logging-${projectId}`;
   return (
     <>
       <p style={{ fontSize: 12, color: "#666", marginTop: 8, marginBottom: 8 }}>
-        Tool, backend, host, and debug apply only to <strong>Start New Session</strong> and to{" "}
+        Tool, backend, workflow recipe, host, and debug apply only to <strong>Start New Session</strong> and to{" "}
         <strong>Connect / Resume</strong> in this project—not saved on the project.
       </p>
       <label style={labelStyle} htmlFor={hostId}>
@@ -153,6 +157,19 @@ function ProjectSessionOptions({
         <option value="claude-acp">Claude ACP (opus)</option>
         <option value="cursor">Cursor (composer-2)</option>
         <option value="stub">Stub</option>
+      </select>
+      <label style={labelStyle} htmlFor={recipeId}>
+        Workflow recipe (this session)
+      </label>
+      <select
+        id={recipeId}
+        data-testid={recipeId}
+        value={form.recipe}
+        onChange={(e) => onChange({ recipe: e.target.value })}
+        style={{ ...inputStyle, marginBottom: 12 }}
+      >
+        <option value="tdd">TDD (plan → implement)</option>
+        <option value="bugfix">Bugfix (reproduce → fix)</option>
       </select>
       <label
         style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}
@@ -530,6 +547,7 @@ export function ConnectionScreen({
         projectId: projectId.trim(),
         agent: form.agent,
         daemonInstanceId: form.daemonInstanceId,
+        recipe: form.recipe,
       });
       setConnected({
         livekitUrl: res.livekitUrl,

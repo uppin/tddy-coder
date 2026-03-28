@@ -42,6 +42,9 @@ pub struct SpawnRequest {
     /// Multi-host: daemon instance id for LiveKit server identity. Omit for legacy clients.
     #[serde(default)]
     pub daemon_instance_id: Option<String>,
+    /// Passed to spawned `tddy-coder` as `--recipe` when set (e.g. `bugfix`).
+    #[serde(default)]
+    pub recipe: Option<String>,
 }
 
 /// Request to clone a git repository as an OS user.
@@ -55,8 +58,9 @@ pub struct CloneRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", content = "payload")]
 pub enum WorkerRequest {
+    /// `SpawnRequest` is boxed to keep the enum variant small (clippy::large_enum_variant).
     #[serde(rename = "spawn")]
-    Spawn(SpawnRequest),
+    Spawn(Box<SpawnRequest>),
     #[serde(rename = "clone")]
     Clone(CloneRequest),
 }
@@ -129,7 +133,7 @@ impl SpawnClient {
     }
 
     pub fn spawn(&self, req: SpawnRequest) -> anyhow::Result<SpawnResult> {
-        match self.send_and_recv(WorkerRequest::Spawn(req))? {
+        match self.send_and_recv(WorkerRequest::Spawn(Box::new(req)))? {
             WorkerResponse::SpawnOk { result } => Ok(result),
             WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
             WorkerResponse::CloneOk => Err(anyhow::anyhow!("unexpected clone_ok for spawn")),
@@ -261,6 +265,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                         project_id: req.project_id.as_deref(),
                         agent: req.agent.as_deref(),
                         mouse: req.mouse,
+                        recipe: req.recipe.as_deref(),
                     },
                 );
                 log::info!(
@@ -338,5 +343,6 @@ pub fn build_spawn_request(
         mouse: opts.mouse,
         common_room: livekit.common_room.clone(),
         daemon_instance_id: livekit.daemon_instance_id.clone(),
+        recipe: opts.recipe.map(String::from),
     }
 }
