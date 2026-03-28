@@ -18,6 +18,7 @@ import { UserAvatar } from "./UserAvatar";
 import { BUILD_ID } from "../buildId";
 import { useVisualViewport } from "../hooks/useVisualViewport";
 import { TokenService } from "../gen/token_pb";
+import { sortSessionsForDisplay } from "../utils/sessionSort";
 
 const formStyle = {
   padding: 24,
@@ -147,8 +148,8 @@ function ProjectSessionOptions({
   );
 }
 
-function sessionsForProject(sessions: SessionEntry[], projectId: string): SessionEntry[] {
-  return sessions.filter((s) => s.projectId === projectId);
+function sortedSessionsForProject(sessions: SessionEntry[], projectId: string): SessionEntry[] {
+  return sortSessionsForDisplay(sessions.filter((s) => s.projectId === projectId));
 }
 
 function SignalDropdown({
@@ -472,7 +473,8 @@ export function ConnectionScreen({
     [projects]
   );
   const orphanSessions = useMemo(
-    () => sessions.filter((s) => !knownProjectIds.has(s.projectId)),
+    () =>
+      sortSessionsForDisplay(sessions.filter((s) => !knownProjectIds.has(s.projectId))),
     [sessions, knownProjectIds]
   );
 
@@ -718,89 +720,92 @@ export function ConnectionScreen({
       {projects.length === 0 ? (
         <p style={{ fontSize: 14, color: "#666" }}>No projects yet. Create one above.</p>
       ) : (
-        projects.map((p) => (
-          <details
-            key={p.projectId}
-            data-testid={`project-accordion-${p.projectId}`}
-            style={{ marginBottom: 12, border: "1px solid #ddd", borderRadius: 4, padding: 8 }}
-            open
-          >
-            <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-              {p.name}{" "}
-              <span style={{ fontWeight: 400, fontSize: 12, color: "#666" }}> {p.gitUrl}</span>
-            </summary>
-            <p style={{ fontSize: 12, color: "#555", marginTop: 8 }}>{p.mainRepoPath}</p>
-            <ProjectSessionOptions
-              projectId={p.projectId}
-              tools={tools}
-              form={projectForms[p.projectId] ?? defaultProjectSessionForm(tools)}
-              onChange={(patch) => updateProjectForm(p.projectId, patch)}
-            />
-            <button
-              type="button"
-              data-testid={`start-session-${p.projectId}`}
-              onClick={() => handleStartSession(p.projectId)}
-              disabled={
-                loading ||
-                !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools)).toolPath
-              }
-              style={{ marginTop: 8, marginBottom: 8, padding: "8px 16px" }}
+        projects.map((p) => {
+          const projectSessions = sortedSessionsForProject(sessions, p.projectId);
+          return (
+            <details
+              key={p.projectId}
+              data-testid={`project-accordion-${p.projectId}`}
+              style={{ marginBottom: 12, border: "1px solid #ddd", borderRadius: 4, padding: 8 }}
+              open
             >
-              Start New Session
-            </button>
-            {sessionsForProject(sessions, p.projectId).length === 0 ? (
-              <p style={{ fontSize: 14, color: "#666" }}>No sessions for this project.</p>
-            ) : (
-              <table style={tableStyle} data-testid={`sessions-table-${p.projectId}`}>
-                <thead>
-                  <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>
-                    <th style={{ padding: 8 }}>ID</th>
-                    <th style={{ padding: 8 }}>Date</th>
-                    <th style={{ padding: 8 }}>Status</th>
-                    <th style={{ padding: 8 }}>Repo</th>
-                    <th style={{ padding: 8 }}>PID</th>
-                    <th style={{ padding: 8 }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessionsForProject(sessions, p.projectId).map((s) => (
-                    <tr key={s.sessionId} style={{ borderBottom: "1px solid #eee" }}>
-                      <td style={{ padding: 8 }}>{truncateId(s.sessionId)}</td>
-                      <td style={{ padding: 8 }}>{s.createdAt}</td>
-                      <td style={{ padding: 8 }}>{s.status}</td>
-                      <td style={{ padding: 8 }}>{s.repoPath}</td>
-                      <td style={{ padding: 8 }}>{s.pid}</td>
-                      <td style={{ padding: 8 }}>
-                        {s.isActive ? (
-                          <>
-                            <button
-                              type="button"
-                              data-testid={`connect-${s.sessionId}`}
-                              onClick={() => handleConnectSession(s.sessionId)}
-                              style={{ marginRight: 4, padding: "4px 8px" }}
-                            >
-                              Connect
-                            </button>
-                            <SignalDropdown
-                              sessionId={s.sessionId}
-                              onSignal={handleSignalSession}
-                            />
-                          </>
-                        ) : (
-                          <InactiveSessionActions
-                            sessionId={s.sessionId}
-                            onResume={handleResumeSession}
-                            onDelete={handleDeleteSession}
-                          />
-                        )}
-                      </td>
+              <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                {p.name}{" "}
+                <span style={{ fontWeight: 400, fontSize: 12, color: "#666" }}> {p.gitUrl}</span>
+              </summary>
+              <p style={{ fontSize: 12, color: "#555", marginTop: 8 }}>{p.mainRepoPath}</p>
+              <ProjectSessionOptions
+                projectId={p.projectId}
+                tools={tools}
+                form={projectForms[p.projectId] ?? defaultProjectSessionForm(tools)}
+                onChange={(patch) => updateProjectForm(p.projectId, patch)}
+              />
+              <button
+                type="button"
+                data-testid={`start-session-${p.projectId}`}
+                onClick={() => handleStartSession(p.projectId)}
+                disabled={
+                  loading ||
+                  !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools)).toolPath
+                }
+                style={{ marginTop: 8, marginBottom: 8, padding: "8px 16px" }}
+              >
+                Start New Session
+              </button>
+              {projectSessions.length === 0 ? (
+                <p style={{ fontSize: 14, color: "#666" }}>No sessions for this project.</p>
+              ) : (
+                <table style={tableStyle} data-testid={`sessions-table-${p.projectId}`}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>
+                      <th style={{ padding: 8 }}>ID</th>
+                      <th style={{ padding: 8 }}>Date</th>
+                      <th style={{ padding: 8 }}>Status</th>
+                      <th style={{ padding: 8 }}>Repo</th>
+                      <th style={{ padding: 8 }}>PID</th>
+                      <th style={{ padding: 8 }}>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </details>
-        ))
+                  </thead>
+                  <tbody>
+                    {projectSessions.map((s) => (
+                      <tr key={s.sessionId} style={{ borderBottom: "1px solid #eee" }}>
+                        <td style={{ padding: 8 }}>{truncateId(s.sessionId)}</td>
+                        <td style={{ padding: 8 }}>{s.createdAt}</td>
+                        <td style={{ padding: 8 }}>{s.status}</td>
+                        <td style={{ padding: 8 }}>{s.repoPath}</td>
+                        <td style={{ padding: 8 }}>{s.pid}</td>
+                        <td style={{ padding: 8 }}>
+                          {s.isActive ? (
+                            <>
+                              <button
+                                type="button"
+                                data-testid={`connect-${s.sessionId}`}
+                                onClick={() => handleConnectSession(s.sessionId)}
+                                style={{ marginRight: 4, padding: "4px 8px" }}
+                              >
+                                Connect
+                              </button>
+                              <SignalDropdown
+                                sessionId={s.sessionId}
+                                onSignal={handleSignalSession}
+                              />
+                            </>
+                          ) : (
+                            <InactiveSessionActions
+                              sessionId={s.sessionId}
+                              onResume={handleResumeSession}
+                              onDelete={handleDeleteSession}
+                            />
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </details>
+          );
+        })
       )}
 
       {orphanSessions.length > 0 && (
