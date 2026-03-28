@@ -73,6 +73,10 @@ pub struct Changeset {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub repo_path: Option<String>,
+    /// Active workflow recipe name (e.g. "tdd", "bugfix"). Omitted in legacy changesets → default tdd at read time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub recipe: Option<String>,
 }
 
 /// A single session entry (plan, acceptance-tests, or impl).
@@ -161,6 +165,7 @@ impl Default for Changeset {
             worktree_suggestion: None,
             remote_pushed: false,
             repo_path: None,
+            recipe: None,
         }
     }
 }

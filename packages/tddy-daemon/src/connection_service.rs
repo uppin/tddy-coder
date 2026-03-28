@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::{Request, Response, Status};
@@ -22,6 +23,7 @@ use crate::config::DaemonConfig;
 use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
 use crate::project_storage::{self, ProjectData};
 use crate::session_deletion;
+use crate::session_list_enrichment;
 use crate::session_reader;
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
@@ -135,22 +137,49 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
         let sessions_base = (self.sessions_base_for_user)(os_user)
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        let sessions = session_reader::list_sessions_in_dir(&sessions_base)
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let timeout = self.config.spawn_worker_request_timeout();
+        let sessions_base_blocking = sessions_base.clone();
         let local_daemon_id = self.local_daemon_instance_id_string();
-        let entries: Vec<ProtoSessionEntry> = sessions
-            .into_iter()
-            .map(|s| ProtoSessionEntry {
-                session_id: s.session_id,
-                created_at: s.created_at,
-                status: s.status,
-                repo_path: s.repo_path,
-                pid: s.pid.unwrap_or(0),
-                is_active: s.is_active,
-                project_id: s.project_id,
-                daemon_instance_id: local_daemon_id.clone(),
+        let entries =
+            spawn_blocking_with_timeout(timeout, "ListSessions: read and enrich", move || {
+                let sessions = session_reader::list_sessions_in_dir(&sessions_base_blocking)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                let mut out = Vec::with_capacity(sessions.len());
+                for s in sessions {
+                    let session_dir = sessions_base_blocking
+                        .join(SESSIONS_SUBDIR)
+                        .join(&s.session_id);
+                    let mut entry = ProtoSessionEntry {
+                        session_id: s.session_id,
+                        created_at: s.created_at,
+                        status: s.status,
+                        repo_path: s.repo_path,
+                        pid: s.pid.unwrap_or(0),
+                        is_active: s.is_active,
+                        project_id: s.project_id,
+                        daemon_instance_id: local_daemon_id.clone(),
+                        workflow_goal: String::new(),
+                        workflow_state: String::new(),
+                        elapsed_display: String::new(),
+                        agent: String::new(),
+                        model: String::new(),
+                    };
+                    if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
+                        &session_dir,
+                        &mut entry,
+                    ) {
+                        log::warn!(
+                            target: "tddy_daemon::connection_service",
+                            "ListSessions: enrichment failed for {}: {}",
+                            session_dir.display(),
+                            e
+                        );
+                    }
+                    out.push(entry);
+                }
+                Ok(out)
             })
-            .collect();
+            .await?;
         Ok(Response::new(ListSessionsResponse { sessions: entries }))
     }
 
@@ -321,6 +350,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 Some(t.to_string())
             }
         };
+        let recipe_for_spawn: Option<String> = {
+            let t = req.recipe.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
         let timeout = self.config.spawn_worker_request_timeout();
         let result = spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
             log::debug!(
@@ -329,6 +366,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             );
             let pid = Some(pid_for_spawn.as_str());
             let agent = agent_for_spawn.as_deref();
+            let recipe = recipe_for_spawn.as_deref();
             if let Some(ref client) = spawn_client {
                 let spawn_req = spawn_worker::build_spawn_request(
                     &os_user,
@@ -340,6 +378,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         project_id: pid,
                         agent,
                         mouse: spawn_mouse,
+                        recipe,
                     },
                 );
                 client.spawn(spawn_req)
@@ -354,6 +393,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         project_id: pid,
                         agent,
                         mouse: spawn_mouse,
+                        recipe,
                     },
                 )
             }
@@ -474,6 +514,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         project_id: pid,
                         agent: None,
                         mouse: spawn_mouse,
+                        recipe: None,
                     },
                 );
                 client.spawn(spawn_req)
@@ -488,6 +529,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         project_id: pid,
                         agent: None,
                         mouse: spawn_mouse,
+                        recipe: None,
                     },
                 )
             }

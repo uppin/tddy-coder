@@ -1,3 +1,4 @@
+import "./index.css";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@connectrpc/connect";
@@ -41,6 +42,7 @@ import { useVisualViewport } from "./hooks/useVisualViewport";
 import { GitHubLoginButton } from "./components/GitHubLoginButton";
 import { AuthCallback } from "./components/AuthCallback";
 import { UserAvatar } from "./components/UserAvatar";
+import { Button } from "./components/ui/button";
 import { ConnectionScreen } from "./components/ConnectionScreen";
 
 function getParamsFromUrl(): { url: string; identity: string; roomName: string; debugLogging: boolean } {
@@ -295,9 +297,9 @@ function ConnectionForm() {
           />
           Debug logging (mouse events, data flow)
         </label>
-        <button type="submit" disabled={!url || !identity}>
+        <Button type="submit" disabled={!url || !identity}>
           Connect
-        </button>
+        </Button>
       </form>
       <p style={{ marginTop: 16, fontSize: 13, color: "#666" }}>
         Token is fetched from the server via Connect-RPC. Ensure tddy-coder is running with

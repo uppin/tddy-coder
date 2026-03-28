@@ -570,6 +570,7 @@ mod daemon_tests {
     use crate::test_util::spawn_server_and_connect;
     use crate::DaemonService;
     use tddy_core::output::SESSIONS_SUBDIR;
+    use tddy_core::read_changeset;
     use tddy_core::write_changeset;
     use tddy_core::WorkflowState;
 
@@ -760,6 +761,7 @@ mod daemon_tests {
                 intent: Some(client_message::Intent::StartSession(crate::gen::StartSession {
                     prompt: "add auth feature".to_string(),
                     repo_root: repo.to_string_lossy().to_string(),
+                    recipe: String::new(),
                 })),
             };
         };
@@ -802,6 +804,65 @@ mod daemon_tests {
         assert_eq!(
             daemon_style, cli_style,
             "daemon/RPC session directory must match CLI: use sessions/{{id}} under the sessions base"
+        );
+    }
+
+    /// Acceptance (bugfix recipe PRD): StartSession.recipe is persisted on the session changeset so
+    /// the spawned workflow and UI can resolve `tdd` vs `bugfix`.
+    #[tokio::test]
+    async fn daemon_start_session_passes_recipe_to_workflow() {
+        let base = temp_sessions_dir("start-session-recipe");
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        let backend = tddy_core::SharedBackend::from_any(tddy_core::AnyBackend::Stub(
+            tddy_core::StubBackend::new(),
+        ));
+        let service = DaemonService::new(base.clone(), backend);
+        let router = Server::builder().add_service(TddyRemoteServer::new(service));
+        let mut client = spawn_server_and_connect(router).await;
+
+        use crate::gen::client_message;
+        use crate::gen::ClientMessage;
+        use async_stream::stream;
+
+        let request = stream! {
+            yield ClientMessage {
+                intent: Some(client_message::Intent::StartSession(crate::gen::StartSession {
+                    prompt: "repro the crash".to_string(),
+                    repo_root: repo.to_string_lossy().to_string(),
+                    recipe: "bugfix".to_string(),
+                })),
+            };
+        };
+
+        let mut stream = client
+            .stream(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let mut session_dir: Option<std::path::PathBuf> = None;
+        for _ in 0..40 {
+            let msg = stream.message().await.ok().flatten();
+            let Some(m) = msg else { break };
+            if let Some(crate::gen::server_message::Event::SessionCreated(ev)) = m.event {
+                session_dir = Some(base.join(SESSIONS_SUBDIR).join(&ev.session_id));
+                break;
+            }
+        }
+
+        let session_dir = session_dir.expect("expected SessionCreated with session_id");
+        let cs = read_changeset(&session_dir).expect("changeset.yaml must exist after start");
+        assert_eq!(
+            cs.recipe.as_deref(),
+            Some("bugfix"),
+            "changeset must record StartSession.recipe for resume and session list"
         );
 
         let _ = fs::remove_dir_all(&base);

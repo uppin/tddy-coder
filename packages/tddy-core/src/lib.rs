@@ -2,6 +2,7 @@
 
 pub mod backend;
 pub mod changeset;
+pub mod elapsed_format;
 pub mod error;
 pub mod log_backend;
 pub mod output;
@@ -29,6 +30,7 @@ pub use changeset::{
     ChangesetState, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
     QuestionOptionForQa, SessionEntry, StateTransition,
 };
+pub use elapsed_format::format_elapsed_compact;
 pub use error::{BackendError, ParseError, WorkflowError};
 pub use log_backend::{
     config_has_file_output, default_log_config, find_matching_policy, get_buffered_logs,

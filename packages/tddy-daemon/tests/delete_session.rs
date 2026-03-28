@@ -24,7 +24,8 @@ users:
   - github_user: "testuser"
     os_user: "testdev"
 "#;
-    let path = std::env::temp_dir().join("tddy-delete-session-test-config.yaml");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
     DaemonConfig::load(&path).unwrap()
 }

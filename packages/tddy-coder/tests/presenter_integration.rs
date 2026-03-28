@@ -464,13 +464,10 @@ fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
-        } else if matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
-            && presenter.state().plan_refinement_pending
+        } else if (matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
+            && presenter.state().plan_refinement_pending)
+            || matches!(presenter.state().mode, AppMode::TextInput { .. })
         {
-            presenter.handle_intent(UserIntent::AnswerText(
-                "Add OAuth support to the plan".to_string(),
-            ));
-        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
             presenter.handle_intent(UserIntent::AnswerText(
                 "Add OAuth support to the plan".to_string(),
             ));
@@ -862,13 +859,10 @@ fn plan_approval_refine_re_shows_approval() {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
-        } else if matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
-            && presenter.state().plan_refinement_pending
+        } else if (matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
+            && presenter.state().plan_refinement_pending)
+            || matches!(presenter.state().mode, AppMode::TextInput { .. })
         {
-            presenter.handle_intent(UserIntent::AnswerText(
-                "Add OAuth support to the plan".to_string(),
-            ));
-        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
             presenter.handle_intent(UserIntent::AnswerText(
                 "Add OAuth support to the plan".to_string(),
             ));

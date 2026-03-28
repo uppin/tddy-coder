@@ -8,13 +8,18 @@
 #        ./web-dev --github-stub         # e.g. extra CLI overrides
 #
 # Environment variables:
-#   WEB_HOST        — Host to bind Vite (default: 127.0.0.1)
+#   WEB_HOST        — Address Vite listens on (default: 127.0.0.1). Use 0.0.0.0 for LAN. Separate from
+#                     the URL you open in the browser — set VITE_URL for that.
 #   VITE_PORT       — Port for Vite dev server (default: 5173)
+#   VITE_URL        — **Only env you need for “where is the app?”** Browser-facing origin (OAuth,
+#                     import.meta.env.VITE_URL). Default: http://127.0.0.1:<VITE_PORT>. LAN example:
+#                     VITE_URL=http://192.168.1.10:5173 (host must match how you open the page).
+#                     web-dev exports WEB_PUBLIC_URL=$VITE_URL for tddy-daemon (do not set WEB_PUBLIC_URL
+#                     for web-dev; a stale value in .env is overridden).
 #   DAEMON_CONFIG   — YAML for tddy-daemon (default: dev.daemon.yaml at repo root).
 #                     CONFIG from .env is not used for the daemon backend; use DAEMON_CONFIG.
 #   LIVEKIT_PUBLIC_URL — Override LiveKit URL (tddy-daemon); e.g. ws://192.168.1.10:7880
 #   LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET — LiveKit overrides (tddy-daemon)
-#   WEB_PUBLIC_URL — Public URL for auth callback (tddy-daemon)
 #   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_REDIRECT_URI — GitHub OAuth (tddy-daemon)
 #
 # Press Ctrl+C to stop both servers.
@@ -76,7 +81,18 @@ daemon_args+=("$@")
 DAEMON_PORT=$(grep -E 'port:\s*[0-9]+' "$CONFIG" 2>/dev/null | head -1 | awk '{print $2}')
 DAEMON_PORT="${DAEMON_PORT:-8899}"
 
+# Public origin for OAuth / SPA: VITE_URL only (not WEB_HOST — that is bind-only).
+# Default matches local dev; override VITE_URL for LAN. Do not read WEB_PUBLIC_URL here — .env often
+# points it at the daemon port by mistake; we always set WEB_PUBLIC_URL from VITE_URL for the daemon.
+if [ -z "${VITE_URL:-}" ]; then
+  VITE_URL="http://127.0.0.1:${VITE_PORT}"
+fi
+VITE_URL="${VITE_URL%/}"
+export VITE_URL
+export WEB_PUBLIC_URL="${VITE_URL}"
+
 echo "=== Starting tddy-daemon on :${DAEMON_PORT} (config: ${CONFIG}) ==="
+echo "=== VITE_URL=${VITE_URL} (open this in the browser; OAuth redirect base for daemon) ==="
 
 # Clean up stale processes from previous runs. SIGKILLs listeners on these ports; on a shared
 # machine, ensure ports are free or avoid conflicts before running ./web-dev.
@@ -111,21 +127,18 @@ fi
 
 echo ""
 echo "=== Starting Vite dev server on ${WEB_HOST}:${VITE_PORT} ==="
-if [ -n "${WEB_PUBLIC_URL:-}" ]; then
-  # Extract host from WEB_PUBLIC_URL (e.g. http://192.168.1.10:8899 -> 192.168.1.10)
-  PUBLIC_HOST=$(echo "$WEB_PUBLIC_URL" | sed -n 's|.*://\([^:/]*\).*|\1|p')
-  if [ -n "$PUBLIC_HOST" ]; then
-    echo "=== Open http://${PUBLIC_HOST}:${VITE_PORT} (app) or http://${PUBLIC_HOST}:${DAEMON_PORT} (backend) ==="
-  else
-    echo "=== Open http://${WEB_HOST}:${VITE_PORT} ==="
-  fi
-else
-  echo "=== Open http://${WEB_HOST}:${VITE_PORT} ==="
-fi
+echo ""
+echo "  --- Hot reload (HMR) ---"
+echo "  Use the Vite dev URL below. Edits under packages/tddy-web/ apply live."
+echo "  Do NOT use the daemon port for frontend dev: it serves packages/tddy-web/dist"
+echo "  (last production build) and has no Vite / HMR."
+echo ""
+echo "  App (HMR):     ${VITE_URL}"
+echo "  Daemon (RPC):  http://127.0.0.1:${DAEMON_PORT}  — static dist; /rpc and /api proxied by Vite"
 echo ""
 
 # Start Vite dev server with DAEMON_PORT for proxy config (run via ./dev for nix env)
-./dev bash -c "cd packages/tddy-web && DAEMON_PORT='$DAEMON_PORT' npx vite --port '$VITE_PORT' --host '$WEB_HOST'" &
+./dev bash -c "cd packages/tddy-web && DAEMON_PORT='$DAEMON_PORT' WEB_PUBLIC_URL='$WEB_PUBLIC_URL' VITE_URL='$VITE_URL' npx vite --port '$VITE_PORT' --host '$WEB_HOST'" &
 vite_pid=$!
 
 # Cleanup and exit. Kill by port (most reliable) since process groups may not

@@ -47,6 +47,9 @@ pub struct Config {
     pub web: Option<WebConfig>,
     #[serde(default)]
     pub github: Option<GitHubConfig>,
+    /// Workflow recipe: `tdd` (default) or `bugfix`.
+    #[serde(default)]
+    pub recipe: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -210,6 +213,10 @@ pub fn merge_config_into_args(args: &mut Args, config: Config) {
             args.github_stub_codes = gh.stub_codes;
         }
     }
+
+    if args.recipe.is_none() {
+        args.recipe = config.recipe;
+    }
 }
 
 #[cfg(test)]
@@ -256,6 +263,97 @@ github:
 
         let gh = config.github.as_ref().unwrap();
         assert_eq!(gh.client_id.as_deref(), Some("my-id"));
+    }
+
+    #[test]
+    fn parse_config_recipe() {
+        let yaml = "recipe: bugfix\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.recipe.as_deref(), Some("bugfix"));
+    }
+
+    #[test]
+    fn merge_config_recipe_cli_precedence() {
+        let config: Config = serde_yaml::from_str("recipe: bugfix\n").unwrap();
+        let mut args = Args {
+            goal: None,
+            session_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: None,
+            prompt: None,
+            grpc: None,
+            session_id: None,
+            resume_from: None,
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+            recipe: Some("tdd".to_string()),
+        };
+        merge_config_into_args(&mut args, config);
+        assert_eq!(args.recipe.as_deref(), Some("tdd"));
+    }
+
+    #[test]
+    fn merge_config_applies_recipe_when_cli_unset() {
+        let config: Config = serde_yaml::from_str("recipe: bugfix\n").unwrap();
+        let mut args = Args {
+            goal: None,
+            session_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: None,
+            prompt: None,
+            grpc: None,
+            session_id: None,
+            resume_from: None,
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+            recipe: None,
+        };
+        merge_config_into_args(&mut args, config);
+        assert_eq!(args.recipe.as_deref(), Some("bugfix"));
     }
 
     #[test]
@@ -357,6 +455,7 @@ log:
             mouse: false,
             project_id: None,
             cursor_agent_path: None,
+            recipe: None,
         };
         merge_config_into_args(&mut args, config);
         // CLI set model=opus, config has model=sonnet → opus wins

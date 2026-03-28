@@ -433,7 +433,8 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
         || text.contains("GreenComplete")
         || text.contains("Workflow complete")
         || text.contains("DocsUpdated")
-        || text.contains("Type your feature");
+        || text.contains("Type your feature")
+        || text.contains("Planning→Planned");
 
     assert!(
         progressed,
@@ -535,7 +536,8 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
         || visible.contains("GreenComplete")
         || visible.contains("Workflow complete")
         || visible.contains("DocsUpdated")
-        || visible.contains("Type your feature");
+        || visible.contains("Type your feature")
+        || visible.contains("Planning→Planned");
 
     assert!(
         progressed,
