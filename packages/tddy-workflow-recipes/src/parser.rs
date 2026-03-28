@@ -64,6 +64,16 @@ pub fn parse_planning_response_with_base(
     parse_planning_response_impl(s, Some(_base_path))
 }
 
+/// Heuristic: `prd` is a relative markdown file reference, not inline PRD body (which has newlines).
+fn prd_value_looks_like_md_file_path(prd: &str) -> bool {
+    const MAX_PRD_FILE_PATH_REF_LEN: usize = 260;
+    let t = prd.trim();
+    t.len() <= MAX_PRD_FILE_PATH_REF_LEN
+        && !t.contains('\n')
+        && !t.contains('\r')
+        && t.ends_with(".md")
+}
+
 fn parse_planning_response_impl(
     s: &str,
     _base_path: Option<&std::path::Path>,
@@ -84,6 +94,12 @@ fn parse_planning_response_impl(
             prd = std::fs::read_to_string(&path).map_err(|e| {
                 ParseError::Malformed(format!("failed to read prd file {}: {}", path.display(), e))
             })?;
+        } else if prd_value_looks_like_md_file_path(&prd) {
+            return Err(ParseError::Malformed(format!(
+                "prd references markdown file {:?} but no such file was found under {}",
+                prd.trim(),
+                base.display()
+            )));
         }
     }
     Ok(PlanningOutput {

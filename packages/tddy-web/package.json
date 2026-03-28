@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "generate": "bunx buf generate ../tddy-service/proto",
-    "prebuild": "node scripts/gen-build-id.mjs",
+    "prebuild": "bun run --cwd ../tddy-livekit-web build && node scripts/gen-build-id.mjs",
     "build": "bun build ./index.html --outdir dist",
     "test": "bun run cypress:component && bun run cypress:e2e",
     "storybook": "storybook dev -p 6006 --host 0.0.0.0",

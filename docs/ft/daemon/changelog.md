@@ -1,5 +1,12 @@
 # Daemon product area changelog
 
+## 2026-03-28 — ConnectionService: ListEligibleDaemons and host fields
+
+- **`ListEligibleDaemons`**: Returns eligible daemon entries from **`EligibleDaemonSource`** (local instance; LiveKit peer discovery deferred).
+- **`ListSessions`**: Each **`SessionEntry`** includes **`daemon_instance_id`** for the owning daemon.
+- **`StartSession`**: Accepts optional **`daemon_instance_id`**; local spawn when empty or matching the local instance; non-local targets return **unimplemented** until cross-daemon spawn routing exists.
+- **Package doc**: [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md). Web UX: [web-terminal.md](../web/web-terminal.md).
+
 ## 2026-03-24 — ConnectionService: DeleteSession
 
 - **`DeleteSession`**: Removes the on-disk session directory under the authenticated user’s sessions base when `.session.yaml` indicates an **inactive** session (no live process for the recorded PID, consistent with `ListSessions`). Rejects active sessions, missing sessions, and invalid session ids with the appropriate gRPC status. Filesystem removal errors return a generic **`INTERNAL`** message to clients; full error detail is logged on the server.

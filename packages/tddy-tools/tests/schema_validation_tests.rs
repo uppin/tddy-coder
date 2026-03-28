@@ -192,18 +192,12 @@ fn invalid_validate_subagents_wrong_goal_fails() {
     assert!(!err.is_empty());
 }
 
-/// `red.schema.json` must stay identical between tddy-workflow-recipes and tddy-tools, and document
-/// `source_file` on markers for placement validation (PRD acceptance).
 #[test]
-fn red_schema_parity_recipes_and_tools() {
-    const RECIPES: &str = include_str!("../../tddy-workflow-recipes/schemas/red.schema.json");
-    const TOOLS: &str = include_str!("../schemas/red.schema.json");
-    assert_eq!(
-        RECIPES, TOOLS,
-        "packages/tddy-workflow-recipes/schemas/red.schema.json must match packages/tddy-tools/schemas/red.schema.json"
-    );
+fn red_schema_includes_source_file_field() {
+    const RED_SCHEMA: &str =
+        include_str!("../../tddy-workflow-recipes/generated/tdd/red.schema.json");
     assert!(
-        RECIPES.contains("\"source_file\""),
+        RED_SCHEMA.contains("\"source_file\""),
         "red.schema.json markers items must include source_file for production-only validation"
     );
 }

@@ -5847,8 +5847,10 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "env_logger",
  "include_dir",
  "jsonschema",
+ "log",
  "predicates",
  "rmcp",
  "schemars 1.2.1",
@@ -5856,6 +5858,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "tddy-core",
+ "tddy-workflow-recipes",
  "tempfile",
  "tokio",
 ]

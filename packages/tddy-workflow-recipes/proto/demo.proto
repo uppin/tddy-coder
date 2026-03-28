@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Demo goal output. JSON Schema: demo.schema.json.
+message DemoOutput {
+  string goal = 1;
+  string summary = 2;
+}

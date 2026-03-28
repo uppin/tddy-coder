@@ -673,11 +673,14 @@ fn after_validate(session_dir: &Path, output: &str) -> Result<(), Box<dyn Error 
                 format!("write refactoring-plan.md: {}", e).into()
             },
         )?;
-    } else if parsed.refactoring_plan_written && !refactoring_plan_path.exists() {
-        let _ = std::fs::write(
+    } else if !refactoring_plan_path.exists() {
+        std::fs::write(
             &refactoring_plan_path,
             "# Refactoring Plan\n## Tasks\n1. No-op refactoring task\n",
-        );
+        )
+        .map_err(|e| -> Box<dyn Error + Send + Sync> {
+            format!("write refactoring-plan.md fallback: {}", e).into()
+        })?;
     }
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("ValidateComplete"));

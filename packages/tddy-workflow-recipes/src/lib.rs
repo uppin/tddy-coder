@@ -3,6 +3,7 @@
 pub mod bugfix;
 pub mod parser;
 pub mod permissions;
+pub mod schema_pipeline;
 pub mod session_artifact_manifest;
 pub mod tdd;
 pub mod writer;

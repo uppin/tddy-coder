@@ -16,7 +16,7 @@ Use --data-stdin and a heredoc. Do NOT use --data with inline JSON. Do NOT use W
 
 Run `tddy-tools get-schema plan` to see the expected output format. The JSON must include: goal, prd, and optionally name, discovery, demo_plan.
 
-**PRD structure** — The prd value is either (1) the full markdown string, or (2) a path to an MD file (e.g. "PRD.md") relative to the plan directory. If you write the PRD to a file first, you may pass the path instead of the entire content. The PRD must include these sections in order:
+**PRD structure** — The prd value must be the full PRD markdown string (inline in the JSON). Do NOT write the PRD to a file — put the entire content directly in the prd field. The PRD must include these sections in order:
 
 1. **Summary** — Brief overview of the feature
 2. **Background** — Context and motivation
@@ -110,6 +110,21 @@ mod tests {
     /// a human-readable changeset `name` instead.
     ///
     /// Fails until `plan_dir_suggestion` is removed from the prompt and `name` guidance is added.
+    #[test]
+    fn system_prompt_requires_inline_prd_not_file_path() {
+        let prompt = system_prompt();
+        assert!(
+            !prompt.contains("path to an MD file")
+                && !prompt.contains("write the PRD to a file first"),
+            "system prompt must NOT offer file-path references for prd — \
+             the agent's CWD is the repo root, not session_dir, so file paths break"
+        );
+        assert!(
+            prompt.contains("Do NOT write the PRD to a file"),
+            "system prompt must explicitly forbid writing PRD to a file"
+        );
+    }
+
     #[test]
     fn test_planning_prompt_mentions_name_not_plan_dir_suggestion() {
         let prompt = system_prompt();
