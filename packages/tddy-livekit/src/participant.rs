@@ -17,6 +17,9 @@ use crate::token::TokenGenerator;
 
 const RPC_TOPIC: &str = "tddy-rpc";
 
+/// Composite key for multiplexing RPC streams per remote client (request_id alone is not unique across tabs).
+type SessionKey = (String, i32);
+
 /// Accumulated stream state: sender identity and messages.
 struct ActiveStream {
     sender_identity: ParticipantIdentity,
@@ -92,11 +95,11 @@ pub struct LiveKitParticipant<S: crate::bridge::RpcService> {
     room: Room,
     bridge: Arc<RpcBridge<S>>,
     events: mpsc::UnboundedReceiver<RoomEvent>,
-    active_streams: Arc<Mutex<HashMap<i32, ActiveStream>>>,
+    active_streams: Arc<Mutex<HashMap<SessionKey, ActiveStream>>>,
     /// Bidi stream request_ids and their service/method (continuation messages omit call_metadata).
-    active_bidi: Arc<Mutex<HashMap<i32, BidiStreamMeta>>>,
-    /// Live bidi sessions: request_id → input channel for an already-started handler.
-    active_bidi_sessions: Arc<Mutex<HashMap<i32, BidiSession>>>,
+    active_bidi: Arc<Mutex<HashMap<SessionKey, BidiStreamMeta>>>,
+    /// Live bidi sessions: (sender_identity, request_id) → input channel for an already-started handler.
+    active_bidi_sessions: Arc<Mutex<HashMap<SessionKey, BidiSession>>>,
     /// Payloads received with participant=None before any remote joined (race with ParticipantConnected).
     pending_data: Arc<Mutex<VecDeque<Vec<u8>>>>,
     /// When set, bidi output tasks publish through this instead of a direct LocalParticipant,
@@ -139,8 +142,8 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         token: &str,
         bridge: Arc<RpcBridge<S>>,
         room_options: RoomOptions,
-        active_bidi: Arc<Mutex<HashMap<i32, BidiStreamMeta>>>,
-        active_bidi_sessions: Arc<Mutex<HashMap<i32, BidiSession>>>,
+        active_bidi: Arc<Mutex<HashMap<SessionKey, BidiStreamMeta>>>,
+        active_bidi_sessions: Arc<Mutex<HashMap<SessionKey, BidiSession>>>,
         shared_publisher: SharedPublisher,
     ) -> Result<Self, livekit::RoomError> {
         log::debug!("LiveKitParticipant::connect_for_reconnect url={}", url);
@@ -176,9 +179,9 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
     ) {
         let bridge = Arc::new(RpcBridge::new(service));
         let shared_publisher = SharedPublisher::new();
-        let active_bidi: Arc<Mutex<HashMap<i32, BidiStreamMeta>>> =
+        let active_bidi: Arc<Mutex<HashMap<SessionKey, BidiStreamMeta>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let active_bidi_sessions: Arc<Mutex<HashMap<i32, BidiSession>>> =
+        let active_bidi_sessions: Arc<Mutex<HashMap<SessionKey, BidiSession>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let mut cycle: u64 = 0;
         loop {
@@ -345,11 +348,11 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                                 self.pending_data.lock().await.push_back(bytes);
                                 continue;
                             } else {
-                                log::warn!(
-                                    "DataReceived without participant identity (remotes={}), ignoring",
+                                log::debug!(
+                                    "[echo_server] DataReceived without participant (remotes={}), proceeding with sender_identity from request",
                                     remotes.len()
                                 );
-                                continue;
+                                (None, remotes)
                             }
                         }
                     };
@@ -411,13 +414,15 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         remote_identities: &[ParticipantIdentity],
         bridge: &Arc<RpcBridge<S>>,
         local: &LocalParticipant,
-        active_streams: &Mutex<HashMap<i32, ActiveStream>>,
-        active_bidi: &Mutex<HashMap<i32, BidiStreamMeta>>,
-        active_bidi_sessions: &Mutex<HashMap<i32, BidiSession>>,
+        active_streams: &Mutex<HashMap<SessionKey, ActiveStream>>,
+        active_bidi: &Mutex<HashMap<SessionKey, BidiStreamMeta>>,
+        active_bidi_sessions: &Mutex<HashMap<SessionKey, BidiSession>>,
         shared_publisher: &Option<SharedPublisher>,
     ) -> Result<(), String> {
         let request = decode_request(payload)?;
         let request_id = request.request_id;
+        let sender_id = request.sender_identity.clone().unwrap_or_default();
+        let session_key = (sender_id, request_id);
         let meta = request.call_metadata.as_ref();
         let end_of_stream = request.end_of_stream;
         rpc_trace!(
@@ -432,7 +437,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         // Check if this message belongs to an existing bidi session.
         {
             let mut sessions = active_bidi_sessions.lock().await;
-            if let Some(session) = sessions.get(&request_id) {
+            if let Some(session) = sessions.get(&session_key) {
                 let payload_len = request.request_message.len();
                 let rpc_msg = RpcMessage {
                     payload: request.request_message.clone(),
@@ -459,9 +464,9 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     log::trace!(
                         "[BIDI_TRACE] participant: removing bidi session request_id={} (end_of_stream)", request_id
                     );
-                    sessions.remove(&request_id);
+                    sessions.remove(&session_key);
                     let mut bidi = active_bidi.lock().await;
-                    bidi.remove(&request_id);
+                    bidi.remove(&session_key);
                 }
                 return Ok(());
             }
@@ -471,7 +476,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             let mut streams = active_streams.lock().await;
             let mut bidi = active_bidi.lock().await;
             if end_of_stream {
-                if let Some(mut stream) = streams.remove(&request_id) {
+                if let Some(mut stream) = streams.remove(&session_key) {
                     stream.messages.push(request);
                     Some((stream.messages, stream.sender_identity))
                 } else {
@@ -485,7 +490,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                             .to_string()
                     })?;
                     let request_for_bridge = if request.call_metadata.is_none() {
-                        if let Some(meta) = bidi.remove(&request_id) {
+                        if let Some(meta) = bidi.remove(&session_key) {
                             let mut req = request.clone();
                             req.call_metadata = Some(CallMetadata {
                                 service: meta.service,
@@ -514,7 +519,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                 let is_bidi = if request.call_metadata.is_some() {
                     bridge.is_bidi_stream(service, method)
                 } else {
-                    bidi.contains_key(&request_id)
+                    bidi.contains_key(&session_key)
                 };
                 if is_bidi {
                     let response_identity = resolve_response_identity(
@@ -528,7 +533,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     })?;
                     if let Some(meta) = request.call_metadata.as_ref() {
                         bidi.insert(
-                            request_id,
+                            session_key.clone(),
                             BidiStreamMeta {
                                 service: meta.service.clone(),
                                 method: meta.method.clone(),
@@ -536,11 +541,11 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                         );
                     }
                     let service_name = bidi
-                        .get(&request_id)
+                        .get(&session_key)
                         .map(|m| m.service.clone())
                         .unwrap_or_default();
                     let method_name = bidi
-                        .get(&request_id)
+                        .get(&session_key)
                         .map(|m| m.method.clone())
                         .unwrap_or_default();
 
@@ -560,7 +565,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
 
                     {
                         let mut sessions = active_bidi_sessions.lock().await;
-                        sessions.insert(request_id, BidiSession { input_tx });
+                        sessions.insert(session_key.clone(), BidiSession { input_tx });
                     }
 
                     let bridge = bridge.clone();
@@ -608,14 +613,14 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                             .to_string()
                     })?;
                     streams.insert(
-                        request_id,
+                        session_key.clone(),
                         ActiveStream {
                             sender_identity,
                             messages: vec![request],
                         },
                     );
                     None
-                } else if let Some(stream) = streams.get_mut(&request_id) {
+                } else if let Some(stream) = streams.get_mut(&session_key) {
                     stream.messages.push(request);
                     None
                 } else {
