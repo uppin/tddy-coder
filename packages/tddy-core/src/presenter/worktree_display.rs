@@ -9,7 +9,7 @@ const MAX_WORKTREE_DISPLAY_CHARS: usize = 48;
 /// Uses the final path component (directory name) when available; otherwise falls back to the
 /// last non-empty component. Very long labels are truncated on a UTF-8 boundary so the status row
 /// stays usable on 80-column terminals.
-pub(crate) fn format_worktree_for_status_bar(path: &Path) -> String {
+pub fn format_worktree_for_status_bar(path: &Path) -> String {
     let path_len = path.as_os_str().len();
     log::debug!(
         "format_worktree_for_status_bar: path_len={} components={}",

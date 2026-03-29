@@ -21,3 +21,4 @@ pub use state::{
     ActivityEntry, ActivityKind, AppMode, CriticalPresenterState, ExitAction, PresenterState,
 };
 pub use view::PresenterView;
+pub use worktree_display::format_worktree_for_status_bar;

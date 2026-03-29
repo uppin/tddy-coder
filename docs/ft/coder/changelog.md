@@ -25,7 +25,7 @@ Release note history for the Coder product area.
 - **CLI**: `--agent codex`; `--codex-cli-path` and `TDDY_CODEX_CLI`; YAML `codex_cli_path` in coder config; `tddy-tools` availability required for codex like claude and cursor.
 - **Selection**: Interactive menu order Claude → Claude ACP → Cursor → Codex → Stub; default model label `gpt-5` for agent key `codex`.
 - **Tests**: Unit tests in `tddy-core`; stub-based integration tests in `tddy-integration-tests` (`codex_backend`); CLI acceptance for `--agent codex`.
-- **Docs**: Feature overview and planning/implementation references; cross-package index `docs/dev/changesets.md`; technical reference `docs/dev/1-WIP/2026-03-29-codex-cli-backend.md` for package documentation wrap workflow.
+- **Docs**: [Coder overview](1-OVERVIEW.md), [planning step](planning-step.md), [implementation step](implementation-step.md); cross-package index `docs/dev/changesets.md`; `packages/tddy-core/docs/architecture.md` and package `changesets.md` files (`tddy-core`, `tddy-coder`).
 
 ## 2026-03-29 — Web daemon: stub OAuth when stub codes are set
 

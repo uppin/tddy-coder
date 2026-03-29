@@ -606,6 +606,13 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
             }
         }
         PresenterEvent::ActivityLogged(entry) => {
+            if let Some(rest) = entry.text.strip_prefix("Worktree: ") {
+                let path = std::path::Path::new(rest.trim());
+                let formatted = tddy_core::format_worktree_for_status_bar(path);
+                if !formatted.is_empty() {
+                    state.active_worktree_display = Some(formatted);
+                }
+            }
             state.activity_log.push(entry.clone());
             view.on_activity_logged(&entry, state.activity_log.len());
         }
