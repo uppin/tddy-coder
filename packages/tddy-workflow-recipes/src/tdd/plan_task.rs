@@ -10,10 +10,9 @@ use tddy_core::toolcall::take_submit_result_for_goal;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::task::{NextAction, Task, TaskResult};
 
+use super::session_dir_resolve::resolve_existing_session_dir_for_plan;
 use crate::parser::parse_planning_response_with_base;
 use crate::tdd::planning;
-use crate::writer::{create_session_dir_in, create_session_dir_with_id};
-use tddy_core::output::new_session_dir;
 use tddy_core::session_lifecycle::resolve_effective_session_id;
 
 /// Plan step Task: invokes backend, parses response, writes PRD.md (with TODO section).
@@ -52,22 +51,11 @@ impl Task for PlanTask {
             return Err("empty feature description".into());
         }
 
-        let session_dir: PathBuf = if let Some(p) = context.get_sync::<PathBuf>("session_dir") {
-            p
-        } else if let (Some(base), Some(sid)) = (
-            context.get_sync::<PathBuf>("session_base"),
-            context.get_sync::<String>("session_id"),
-        ) {
-            create_session_dir_with_id(&base, &sid)
-                .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?
-        } else if let Some(base) = context.get_sync::<PathBuf>("session_base") {
-            create_session_dir_in(&base).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?
-        } else {
-            new_session_dir()
-                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?
-        };
-        std::fs::create_dir_all(&session_dir)
-            .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+        let session_dir: PathBuf = resolve_existing_session_dir_for_plan(&context).map_err(
+            |msg| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(WorkflowError::WriteFailed(msg))
+            },
+        )?;
         context.set_sync("session_dir", session_dir.clone());
 
         let refinement_feedback: Option<String> = context.get_sync("refinement_feedback");

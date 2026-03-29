@@ -106,29 +106,29 @@ pub(crate) fn resolve_start_session_repo(repo_root: &str) -> Result<PathBuf, Str
 
 /// Daemon gRPC service. Reads session state from disk; runs workflow on Stream.
 pub struct DaemonService {
-    sessions_base: PathBuf,
+    tddy_data_dir: PathBuf,
     backend: SharedBackend,
     workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
     artifact_manifest: std::sync::Arc<dyn SessionArtifactManifest>,
 }
 
 impl DaemonService {
-    pub fn new(sessions_base: PathBuf, backend: SharedBackend) -> Self {
+    pub fn new(tddy_data_dir: PathBuf, backend: SharedBackend) -> Self {
         let (workflow_recipe, artifact_manifest) =
             workflow_recipe_and_manifest_from_cli_name("tdd").expect("tdd always resolves");
-        Self::with_workflow_recipe(sessions_base, backend, workflow_recipe, artifact_manifest)
+        Self::with_workflow_recipe(tddy_data_dir, backend, workflow_recipe, artifact_manifest)
     }
 
     /// Use a specific workflow recipe (e.g. TDD, bug-fix) and matching session-artifact manifest.
     /// Default [`new`] uses [`workflow_recipe_and_manifest_from_cli_name`] with `"tdd"`.
     pub fn with_workflow_recipe(
-        sessions_base: PathBuf,
+        tddy_data_dir: PathBuf,
         backend: SharedBackend,
         workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
         artifact_manifest: std::sync::Arc<dyn SessionArtifactManifest>,
     ) -> Self {
         Self {
-            sessions_base,
+            tddy_data_dir,
             backend,
             workflow_recipe,
             artifact_manifest,
@@ -146,7 +146,7 @@ impl TddyRemote for DaemonService {
     ) -> Result<Response<Self::StreamStream>, Status> {
         let (tx, rx) = tokio_mpsc::channel(STREAM_CHANNEL_CAPACITY);
         let handler = DaemonStreamHandler::new(
-            self.sessions_base.clone(),
+            self.tddy_data_dir.clone(),
             self.backend.clone(),
             self.workflow_recipe.clone(),
             self.artifact_manifest.clone(),
@@ -167,7 +167,7 @@ impl TddyRemote for DaemonService {
         validate_session_id_segment(&session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
 
-        let session_dir = self.sessions_base.join(SESSIONS_SUBDIR).join(&session_id);
+        let session_dir = self.tddy_data_dir.join(SESSIONS_SUBDIR).join(&session_id);
         let changeset = read_changeset(&session_dir)
             .map_err(|e| Status::not_found(format!("session not found: {} — {}", session_id, e)))?;
 
@@ -195,7 +195,7 @@ impl TddyRemote for DaemonService {
     ) -> Result<Response<ListSessionsResponse>, Status> {
         let mut sessions = Vec::new();
 
-        let sessions_root = self.sessions_base.join(SESSIONS_SUBDIR);
+        let sessions_root = self.tddy_data_dir.join(SESSIONS_SUBDIR);
         if !sessions_root.exists() {
             return Ok(Response::new(ListSessionsResponse { sessions }));
         }
@@ -243,7 +243,7 @@ enum DaemonStreamState {
 
 /// Handles the bidirectional stream: receives ClientMessage, runs workflow, sends ServerMessage.
 struct DaemonStreamHandler {
-    sessions_base: PathBuf,
+    tddy_data_dir: PathBuf,
     backend: SharedBackend,
     workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
     artifact_manifest: std::sync::Arc<dyn SessionArtifactManifest>,
@@ -258,7 +258,7 @@ struct DaemonStreamHandler {
 
 impl DaemonStreamHandler {
     fn new(
-        sessions_base: PathBuf,
+        tddy_data_dir: PathBuf,
         backend: SharedBackend,
         workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
         artifact_manifest: std::sync::Arc<dyn SessionArtifactManifest>,
@@ -266,7 +266,7 @@ impl DaemonStreamHandler {
         tx: tokio_mpsc::Sender<Result<ServerMessage, Status>>,
     ) -> Self {
         Self {
-            sessions_base,
+            tddy_data_dir,
             backend,
             workflow_recipe,
             artifact_manifest,
@@ -351,13 +351,13 @@ impl DaemonStreamHandler {
             }
         };
 
-        if let Err(e) = std::fs::create_dir_all(&self.sessions_base) {
+        if let Err(e) = std::fs::create_dir_all(&self.tddy_data_dir) {
             send_workflow_complete(&self.tx, false, format!("create sessions base: {}", e)).await;
             return true;
         }
 
         let sid = uuid::Uuid::now_v7().to_string();
-        let plan = create_session_dir_under(&self.sessions_base, &sid)
+        let plan = create_session_dir_under(&self.tddy_data_dir, &sid)
             .map_err(|e| Status::internal(format!("create session dir: {}", e)))
             .unwrap();
 
@@ -371,6 +371,20 @@ impl DaemonStreamHandler {
             "handle_start_session: wrote changeset.yaml with recipe={}",
             recipe_key
         );
+
+        if let Err(e) = tddy_core::write_initial_tool_session_metadata(
+            &plan,
+            tddy_core::InitialToolSessionMetadataOpts {
+                project_id: String::new(),
+                repo_path: Some(repo.display().to_string()),
+                pid: Some(std::process::id()),
+                tool: Some("tddy-coder".to_string()),
+                livekit_room: None,
+            },
+        ) {
+            send_workflow_complete(&self.tx, false, format!("write session metadata: {}", e)).await;
+            return true;
+        }
 
         self.session_id = Some(sid.clone());
         self.session_dir = Some(plan.clone());
@@ -403,7 +417,7 @@ impl DaemonStreamHandler {
         );
         ctx.insert(
             CTX_SESSION_BASE.to_string(),
-            serde_json::to_value(self.sessions_base.clone()).unwrap(),
+            serde_json::to_value(self.tddy_data_dir.clone()).unwrap(),
         );
         ctx.insert(CTX_SESSION_ID.to_string(), serde_json::json!(sid.clone()));
         ctx.insert(

@@ -282,7 +282,7 @@ fn run_start_goal_without_output_dir(
 ) -> Option<PathBuf> {
     let inherit_stdin = false;
     let (output_dir_for_ctx, session_base_opt) = if output_dir == Path::new(".") {
-        match crate::output::sessions_base_path() {
+        match crate::output::tddy_data_dir_path() {
             Ok(base) => {
                 let agent_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                 (agent_cwd, Some(base))
@@ -314,13 +314,56 @@ fn run_start_goal_without_output_dir(
     if let Some(sid) = session_id {
         context_values.insert("session_id".to_string(), serde_json::json!(sid));
     }
-    let session_dir = match (&session_base_opt, session_id) {
+    let mut session_dir: Option<PathBuf> = match (&session_base_opt, session_id) {
         (Some(base), Some(sid)) => Some(
             crate::output::create_session_dir_with_id(base, sid)
                 .unwrap_or_else(|_| base.join(crate::output::SESSIONS_SUBDIR).join(sid)),
         ),
         _ => None,
     };
+
+    // Recipes whose first task does not run TDD `before_plan` (e.g. bugfix `reproduce` echo) never
+    // call `new_session_dir()`; the engine session would then lack `session_dir`. Allocate under
+    // `session_base_opt` or `tddy_data_dir_path()` so context and disk layout match TDD entry.
+    if session_dir.is_none() {
+        let base = match session_base_opt.clone() {
+            Some(b) => b,
+            None => match crate::output::tddy_data_dir_path() {
+                Ok(b) => b,
+                Err(e) => {
+                    let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(format!("{}", e))));
+                    return None;
+                }
+            },
+        };
+        if !context_values.contains_key("session_base") {
+            context_values.insert(
+                "session_base".to_string(),
+                serde_json::to_value(&base).unwrap(),
+            );
+        }
+        match crate::output::create_session_dir_in(&base) {
+            Ok(dir) => {
+                let Some(sid) = dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                else {
+                    let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(
+                        "allocated session directory has no basename".into(),
+                    )));
+                    return None;
+                };
+                context_values.insert("session_id".to_string(), serde_json::json!(sid));
+                session_dir = Some(dir);
+            }
+            Err(e) => {
+                let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(e.to_string())));
+                return None;
+            }
+        }
+    }
 
     let storage_dir = match session_dir.as_ref() {
         Some(dir) => crate::workflow::session::workflow_engine_storage_dir(dir),
@@ -332,10 +375,22 @@ fn run_start_goal_without_output_dir(
     if let Some(ref dir) = session_dir {
         let init_cs = crate::changeset::Changeset {
             initial_prompt: Some(input.to_string()),
-            repo_path: Some(repo_path_str),
+            repo_path: Some(repo_path_str.clone()),
             ..crate::changeset::Changeset::default()
         };
         let _ = crate::changeset::write_changeset(dir, &init_cs);
+        if let Err(e) = crate::session_metadata::write_initial_tool_session_metadata(
+            dir,
+            crate::session_metadata::InitialToolSessionMetadataOpts {
+                project_id: String::new(),
+                repo_path: Some(repo_path_str),
+                pid: Some(std::process::id()),
+                tool: Some("tddy-coder".to_string()),
+                livekit_room: None,
+            },
+        ) {
+            log::warn!("write_initial_tool_session_metadata: {}", e);
+        }
         context_values.insert(
             "session_dir".to_string(),
             serde_json::to_value(dir).unwrap(),
@@ -655,10 +710,10 @@ pub fn run_workflow(
             .and_then(|c| c.initial_prompt.clone())
             .filter(|s| !s.trim().is_empty())
     });
-    let start_goal = cs
-        .as_ref()
-        .and_then(|c| recipe.next_goal_for_state(&c.state.current))
-        .unwrap_or_else(|| recipe.start_goal());
+    let start_goal = match cs.as_ref() {
+        Some(c) => crate::changeset::start_goal_for_session_continue(recipe.as_ref(), c),
+        None => recipe.start_goal(),
+    };
     let start_is_full = start_goal == recipe.start_goal();
 
     // Same as the no-session_dir path: allow TUI FeatureInput when plan requires a description.

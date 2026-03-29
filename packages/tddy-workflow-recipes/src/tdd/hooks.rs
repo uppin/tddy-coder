@@ -28,7 +28,6 @@ use tddy_core::changeset::{
     update_state, write_changeset, Changeset, SessionEntry,
 };
 use tddy_core::error::WorkflowError;
-use tddy_core::output::new_session_dir;
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::setup_worktree_for_session;
 use tddy_core::stream::ProgressEvent as StreamProgressEvent;
@@ -148,36 +147,15 @@ fn resolve_agent_session_id(session_dir: &Path) -> Result<String, Box<dyn Error 
         })
 }
 
-fn before_plan(session_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
-    use crate::writer::create_session_dir_with_id;
-    // Resolve session_dir: session_base+session_id, or new dir from feature (under sessions base).
-    let dir: PathBuf = if let (Some(base), Some(sid)) = (
-        context.get_sync::<PathBuf>("session_base"),
-        context.get_sync::<String>("session_id"),
-    ) {
-        create_session_dir_with_id(&base, &sid).map_err(|e| e.to_string())?
-    } else if context.get_sync::<PathBuf>("session_dir").is_some() {
-        // Entry points (e.g. tddy-coder plain `plan` without --output-dir) already created
-        // `{sessions_base}/sessions/{id}/` and set `session_dir`; do not allocate a second dir.
-        session_dir.to_path_buf()
-    } else if let (Some(_output_dir), Some(feature_input)) = (
-        context.get_sync::<PathBuf>("output_dir"),
-        context.get_sync::<String>("feature_input"),
-    ) {
-        let input = feature_input.trim();
-        // Process-bound session_id: never allocate a second anonymous dir under TDDY_SESSIONS_DIR.
-        if !input.is_empty() && context.get_sync::<String>("session_id").is_none() {
-            log::info!("[tdd hooks] before_plan: allocating new session dir (no bound session_id)");
-            new_session_dir().map_err(|e| e.to_string())?
-        } else {
-            session_dir.to_path_buf()
-        }
-    } else {
-        session_dir.to_path_buf()
-    };
-    // Create changeset if missing (session_base path or tests that bypass entry paths).
+fn before_plan(context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+    use super::session_dir_resolve::resolve_existing_session_dir_for_plan;
+    let dir: PathBuf = resolve_existing_session_dir_for_plan(context).map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn Error + Send + Sync>
+    })?;
+    context.set_sync("session_dir", dir.clone());
+    // Create changeset if missing (directory must already exist; entry layer creates the tree).
     if read_changeset(&dir).is_err() {
-        let _ = std::fs::create_dir_all(&dir);
         let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
         let repo_path = context
             .get_sync::<PathBuf>("output_dir")
@@ -285,7 +263,7 @@ fn before_acceptance_tests(
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", acceptance_tests::system_prompt());
     // Plan-mode sessions cannot be resumed with acceptEdits; create fresh session.
-    let session_id = uuid::Uuid::new_v4().to_string();
+    let session_id = uuid::Uuid::now_v7().to_string();
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", false);
     context.set_sync("session_dir", session_dir.to_path_buf());
@@ -333,7 +311,7 @@ fn before_red(
     context.set_sync("system_prompt", red::system_prompt());
     context.set_sync("session_dir", session_dir.to_path_buf());
     context.set_sync("model", model);
-    let session_id = uuid::Uuid::new_v4().to_string();
+    let session_id = uuid::Uuid::now_v7().to_string();
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", false);
     if let Ok(mut cs) = read_changeset(session_dir) {
@@ -555,7 +533,7 @@ fn after_plan(
     write_artifacts(session_dir, &planning, &prd_bn)?;
     let session_id: String = context
         .get_sync("session_id")
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     let backend_name: String = context
         .get_sync("backend_name")
         .unwrap_or_else(|| "claude".to_string());
@@ -593,7 +571,7 @@ fn after_acceptance_tests(
     write_acceptance_tests_file(session_dir, &parsed)?;
     let session_id: String = context
         .get_sync("session_id")
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     let backend_name: String = context
         .get_sync("backend_name")
         .unwrap_or_else(|| "claude".to_string());
@@ -625,7 +603,7 @@ fn after_red(
     let _ = write_progress_file(session_dir, &parsed);
     let session_id: String = context
         .get_sync("session_id")
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     let backend_name: String = context
         .get_sync("backend_name")
         .unwrap_or_else(|| "claude".to_string());
@@ -786,60 +764,67 @@ impl RunnerHooks for TddWorkflowHooks {
         if let Some(ref tx) = self.event_tx {
             let _ = tx.send(WorkflowEvent::GoalStarted(task_id.to_string()));
         }
-        let session_dir: Option<PathBuf> = context
-            .get_sync("session_dir")
-            .or_else(|| context.get_sync("output_dir"));
-        let session_dir = match session_dir {
-            Some(p) => p,
-            None => return Ok(()),
-        };
+        if task_id == "plan" {
+            before_plan(context)?;
+        } else {
+            let session_dir: Option<PathBuf> = context
+                .get_sync("session_dir")
+                .or_else(|| context.get_sync("output_dir"));
+            let session_dir = match session_dir {
+                Some(p) => p,
+                None => return Ok(()),
+            };
 
-        match task_id {
-            "plan" => before_plan(&session_dir, context)?,
-            "acceptance-tests" => {
-                ensure_worktree_for_acceptance_tests(
-                    &session_dir,
-                    context,
-                    self.event_tx.as_ref(),
-                )?;
-                before_acceptance_tests(
+            match task_id {
+                "acceptance-tests" => {
+                    ensure_worktree_for_acceptance_tests(
+                        &session_dir,
+                        context,
+                        self.event_tx.as_ref(),
+                    )?;
+                    before_acceptance_tests(
+                        &session_dir,
+                        context,
+                        self.recipe.as_ref(),
+                        self.manifest.as_ref(),
+                    )?;
+                }
+                "red" => before_red(
                     &session_dir,
                     context,
                     self.recipe.as_ref(),
                     self.manifest.as_ref(),
-                )?;
+                )?,
+                "green" => before_green(
+                    &session_dir,
+                    context,
+                    self.recipe.as_ref(),
+                    self.manifest.as_ref(),
+                )?,
+                "demo" => before_demo(&session_dir, context)?,
+                "evaluate" => before_evaluate(
+                    &session_dir,
+                    context,
+                    self.recipe.as_ref(),
+                    self.manifest.as_ref(),
+                )?,
+                "validate" => before_validate(&session_dir, context)?,
+                "refactor" => before_refactor(&session_dir, context)?,
+                "update-docs" => before_update_docs(self.manifest.as_ref(), &session_dir, context)?,
+                _ => {}
             }
-            "red" => before_red(
-                &session_dir,
-                context,
-                self.recipe.as_ref(),
-                self.manifest.as_ref(),
-            )?,
-            "green" => before_green(
-                &session_dir,
-                context,
-                self.recipe.as_ref(),
-                self.manifest.as_ref(),
-            )?,
-            "demo" => before_demo(&session_dir, context)?,
-            "evaluate" => before_evaluate(
-                &session_dir,
-                context,
-                self.recipe.as_ref(),
-                self.manifest.as_ref(),
-            )?,
-            "validate" => before_validate(&session_dir, context)?,
-            "refactor" => before_refactor(&session_dir, context)?,
-            "update-docs" => before_update_docs(self.manifest.as_ref(), &session_dir, context)?,
-            _ => {}
         }
         // Emit transitional state (e.g. RedTesting, GreenImplementing) when starting a goal.
         // Skip when resuming from clarification (answers in context) to avoid duplicate emissions.
         let is_resuming = context.get_sync::<String>("answers").is_some();
         if !is_resuming {
             if let Some(ref tx) = self.event_tx {
-                let from = read_changeset(&session_dir)
-                    .ok()
+                let session_dir_for_state: Option<PathBuf> = context
+                    .get_sync("session_dir")
+                    .or_else(|| context.get_sync("output_dir"));
+                let from = session_dir_for_state
+                    .as_ref()
+                    .and_then(|sd| read_changeset(sd).ok())
                     .map(|c| c.state.current)
                     .unwrap_or_else(|| WorkflowState::new("Init"));
                 let to_transitional = match task_id {

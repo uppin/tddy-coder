@@ -4,7 +4,8 @@
 
 use crate::backend::ClarificationQuestion;
 use crate::error::WorkflowError;
-use crate::workflow::ids::WorkflowState;
+use crate::workflow::ids::{GoalId, WorkflowState};
+use crate::workflow::recipe::WorkflowRecipe;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -193,6 +194,49 @@ pub fn write_changeset(session_dir: &Path, changeset: &Changeset) -> Result<(), 
         serde_yaml::to_string(changeset).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     fs::write(&path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     Ok(())
+}
+
+/// Which workflow goal to run when continuing from an on-disk session (CLI resume, presenter).
+///
+/// For a normal persisted state, this is [`WorkflowRecipe::next_goal_for_state`]. When the session
+/// should be treated as **failed resume** ([`ChangesetState::current`] is `Failed`, or the last
+/// history entry is `Failed`), `next_goal_for_state(Failed)` is `None`; in that case we walk
+/// [`ChangesetState::history`] from newest to oldest, skipping `Failed`, and use the first
+/// transition whose [`WorkflowRecipe::next_goal_for_state`] is `Some` and **not** equal to
+/// [`WorkflowRecipe::start_goal`].
+///
+/// Skipping `start_goal` avoids a common bad ordering: a full workflow restart writes `Planning`
+/// immediately before `Failed`, while an earlier transition (e.g. `GreenImplementing`) still
+/// reflects the real phase to retry. If every candidate maps to `start_goal` or to `None`, falls
+/// back to [`WorkflowRecipe::start_goal`].
+///
+/// When the **last** history entry is `Failed`, the same walk is used even if [`ChangesetState::current`]
+/// was left stale (e.g. still `Planning` after a manual `changeset.yaml` edit that fixed `history`
+/// but not `current`). Otherwise `next_goal_for_state(current)` would incorrectly return `plan`.
+pub fn start_goal_for_session_continue(recipe: &dyn WorkflowRecipe, cs: &Changeset) -> GoalId {
+    let start = recipe.start_goal();
+    let history_ends_in_failed = cs
+        .state
+        .history
+        .last()
+        .is_some_and(|t| t.state.as_str() == "Failed");
+    let use_failed_resume_walk = cs.state.current.as_str() == "Failed" || history_ends_in_failed;
+    if !use_failed_resume_walk {
+        return recipe
+            .next_goal_for_state(&cs.state.current)
+            .unwrap_or_else(|| start.clone());
+    }
+    for transition in cs.state.history.iter().rev() {
+        if transition.state.as_str() == "Failed" {
+            continue;
+        }
+        match recipe.next_goal_for_state(&transition.state) {
+            None => continue,
+            Some(g) if g == start => continue,
+            Some(g) => return g,
+        }
+    }
+    start
 }
 
 /// Resolve model for a goal: CLI override > changeset `models` > optional recipe defaults.

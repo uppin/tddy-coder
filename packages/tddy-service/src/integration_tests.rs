@@ -791,8 +791,8 @@ mod daemon_tests {
     }
 
     /// **daemon_or_rpc_start_session_matches_single_dir_contract**: RPC `StartSession` must resolve
-    /// `session_dir` the same way as CLI: `{sessions_base}/sessions/<session_id>/`, not a bare
-    /// `{sessions_base}/<session_id>/` path.
+    /// `session_dir` the same way as CLI: `{tddy_data_dir}/sessions/<session_id>/`, not a bare
+    /// `{tddy_data_dir}/<session_id>/` path.
     #[test]
     fn daemon_or_rpc_start_session_matches_single_dir_contract() {
         let base = temp_sessions_dir("single-dir-contract");
@@ -831,11 +831,13 @@ mod daemon_tests {
         use crate::gen::ClientMessage;
         use async_stream::stream;
 
+        let repo_root_str = repo.to_string_lossy().to_string();
+        let repo_root_for_stream = repo_root_str.clone();
         let request = stream! {
             yield ClientMessage {
                 intent: Some(client_message::Intent::StartSession(crate::gen::StartSession {
                     prompt: "repro the crash".to_string(),
-                    repo_root: repo.to_string_lossy().to_string(),
+                    repo_root: repo_root_for_stream,
                     recipe: "bugfix".to_string(),
                 })),
             };
@@ -863,6 +865,21 @@ mod daemon_tests {
             cs.recipe.as_deref(),
             Some("bugfix"),
             "changeset must record StartSession.recipe for resume and session list"
+        );
+
+        let meta = tddy_core::read_session_metadata(&session_dir)
+            .expect(".session.yaml must exist and parse after StartSession");
+        let sid = session_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("session dir basename");
+        assert_eq!(meta.session_id, sid);
+        assert_eq!(meta.status, "active");
+        assert_eq!(meta.tool.as_deref(), Some("tddy-coder"));
+        assert_eq!(
+            meta.repo_path.as_deref(),
+            Some(repo_root_str.as_str()),
+            "session metadata should record repo root"
         );
 
         let _ = fs::remove_dir_all(&base);

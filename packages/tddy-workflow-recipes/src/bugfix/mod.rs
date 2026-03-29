@@ -40,8 +40,8 @@ impl WorkflowRecipe for BugfixRecipe {
             .build()
     }
 
-    fn create_hooks(&self, _event_tx: Option<WorkflowEventSender>) -> Arc<dyn RunnerHooks> {
-        Arc::new(BugfixWorkflowHooks)
+    fn create_hooks(&self, event_tx: Option<WorkflowEventSender>) -> Arc<dyn RunnerHooks> {
+        Arc::new(BugfixWorkflowHooks::new(event_tx))
     }
 
     fn goal_hints(&self, goal_id: &GoalId) -> Option<GoalHints> {

@@ -20,6 +20,9 @@ pub struct Config {
     pub goal: Option<String>,
     #[serde(default)]
     pub session_dir: Option<PathBuf>,
+    /// Tddy data directory root (optional). Default is `$HOME/.tddy` unless `TDDY_SESSIONS_DIR` is set.
+    #[serde(default)]
+    pub tddy_data_dir: Option<PathBuf>,
     #[serde(default)]
     pub conversation_output: Option<PathBuf>,
     #[serde(default)]
@@ -123,6 +126,9 @@ pub fn merge_config_into_args(args: &mut Args, config: Config) {
     }
     if args.session_dir.is_none() {
         args.session_dir = config.session_dir;
+    }
+    if args.tddy_data_dir.is_none() {
+        args.tddy_data_dir = config.tddy_data_dir;
     }
     if args.conversation_output.is_none() {
         args.conversation_output = config.conversation_output;
@@ -279,6 +285,110 @@ github:
     }
 
     #[test]
+    fn parse_config_tddy_data_dir() {
+        let yaml = "tddy_data_dir: \"/tmp/tddy-sessions-root\"\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            config.tddy_data_dir.as_ref(),
+            Some(&std::path::PathBuf::from("/tmp/tddy-sessions-root"))
+        );
+    }
+
+    #[test]
+    fn merge_config_tddy_data_dir_cli_precedence() {
+        let cli_base = std::path::PathBuf::from("/cli/sessions-root");
+        let yaml = "tddy_data_dir: /config/sessions-root\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let mut args = Args {
+            goal: None,
+            session_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: None,
+            prompt: None,
+            grpc: None,
+            session_id: None,
+            resume_from: None,
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+            codex_cli_path: None,
+            recipe: None,
+            tddy_data_dir: Some(cli_base.clone()),
+        };
+        merge_config_into_args(&mut args, config);
+        assert_eq!(args.tddy_data_dir.as_ref(), Some(&cli_base));
+    }
+
+    #[test]
+    fn merge_config_applies_tddy_data_dir_when_cli_unset() {
+        let yaml = "tddy_data_dir: /from/config\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let mut args = Args {
+            goal: None,
+            session_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: None,
+            prompt: None,
+            grpc: None,
+            session_id: None,
+            resume_from: None,
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+            codex_cli_path: None,
+            recipe: None,
+            tddy_data_dir: None,
+        };
+        merge_config_into_args(&mut args, config);
+        assert_eq!(
+            args.tddy_data_dir.as_ref(),
+            Some(&std::path::PathBuf::from("/from/config"))
+        );
+    }
+
+    #[test]
     fn merge_config_recipe_cli_precedence() {
         let config: Config = serde_yaml::from_str("recipe: bugfix\n").unwrap();
         let mut args = Args {
@@ -316,6 +426,7 @@ github:
             cursor_agent_path: None,
             codex_cli_path: None,
             recipe: Some("tdd".to_string()),
+            tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
         assert_eq!(args.recipe.as_deref(), Some("tdd"));
@@ -359,6 +470,7 @@ github:
             cursor_agent_path: None,
             codex_cli_path: None,
             recipe: None,
+            tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
         assert_eq!(args.recipe.as_deref(), Some("bugfix"));
@@ -465,6 +577,7 @@ log:
             cursor_agent_path: None,
             codex_cli_path: None,
             recipe: None,
+            tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
         // CLI set model=opus, config has model=sonnet → opus wins

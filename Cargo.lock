@@ -5762,6 +5762,7 @@ dependencies = [
  "agent-client-protocol",
  "async-trait",
  "chrono",
+ "ctor",
  "log",
  "serde_json",
  "serde_yaml",

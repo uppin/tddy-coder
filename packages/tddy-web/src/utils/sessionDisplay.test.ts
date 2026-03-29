@@ -6,8 +6,12 @@ import {
 } from "./sessionDisplay";
 
 describe("sessionIdFirstSegment", () => {
-  it("returns first UUID segment (8 hex chars)", () => {
-    expect(sessionIdFirstSegment("550e8400-e29b-41d4-a716-446655440000")).toBe("550e8400");
+  it("returns first two UUID fields (8 hex, hyphen, 4 hex) lowercased", () => {
+    expect(sessionIdFirstSegment("550e8400-e29b-41d4-a716-446655440000")).toBe("550e8400-e29b");
+  });
+
+  it("returns 019d390c-ac3e style prefix for UUID v7 ids", () => {
+    expect(sessionIdFirstSegment("019d390c-ac3e-74b1-97fb-86ea64b8ca8d")).toBe("019d390c-ac3e");
   });
 
   it("returns substring before first hyphen for non-UUID ids", () => {

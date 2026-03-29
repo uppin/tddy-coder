@@ -137,13 +137,21 @@ fn resolve_agent_for_full_workflow_plain(args: &Args) -> anyhow::Result<String> 
 /// Use from both tddy-coder and tddy-demo binaries.
 pub fn run_main(mut args: Args) {
     assign_default_session_id(&mut args);
+    tddy_core::output::set_tddy_data_dir_override(args.tddy_data_dir.clone());
 
     if let Err(e) = merge_session_coder_config_for_resume(&mut args) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
 
+    tddy_core::output::set_tddy_data_dir_override(args.tddy_data_dir.clone());
+
     if let Err(e) = sync_session_dir_from_args(&mut args) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+
+    if let Err(e) = align_session_id_with_explicit_session_dir(&mut args) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
@@ -152,6 +160,8 @@ pub fn run_main(mut args: Args) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
+
+    clear_goal_when_not_in_recipe_goal_ids(&mut args);
 
     if let Err(e) = apply_agent_from_changeset_if_needed(&mut args) {
         eprintln!("Error: {}", e);
@@ -170,7 +180,7 @@ pub fn run_main(mut args: Args) {
     let log_config = effective_log_config(&args);
     let has_file_output = tddy_core::config_has_file_output(&log_config);
     tddy_core::init_tddy_logger(log_config);
-    if let Some(session_dir) = session_dir_path(&args) {
+    if let Some(session_dir) = session_artifact_dir_for_args(&args) {
         let logs = session_dir.join("logs");
         let _ = std::fs::create_dir_all(&logs);
         if !has_file_output {
@@ -225,7 +235,7 @@ pub fn run_main(mut args: Args) {
         Err(e) => {
             // Print session info on error (e.g. SIGINT) so user knows where to find the session.
             if let Some(sid) = args.session_id.as_ref() {
-                if let Some(dir) = session_dir_path(&args) {
+                if let Some(dir) = session_artifact_dir_for_args(&args) {
                     print_session_id_on_exit(sid, &dir);
                 }
             }
@@ -247,6 +257,8 @@ pub struct Args {
     pub goal: Option<String>,
     /// `{TDDY_SESSIONS_DIR}/sessions/<session_id>/` — set in [`sync_session_dir_from_args`] unless `--session-dir` overrides.
     pub session_dir: Option<PathBuf>,
+    /// Tddy data root (`{this}/sessions/<session_id>/`) from `--tddy-data-dir`, `-c` / session `coder-config.yaml`. Applied in [`run_main`] before path resolution.
+    pub tddy_data_dir: Option<PathBuf>,
     pub conversation_output: Option<PathBuf>,
     pub model: Option<String>,
     pub allowed_tools: Option<Vec<String>>,
@@ -326,6 +338,10 @@ pub struct CoderArgs {
     /// Session directory for plan artifacts (default: `{TDDY_SESSIONS_DIR}/sessions/<session_id>/`). Optional override (e.g. tests).
     #[arg(long = "session-dir")]
     pub session_dir: Option<PathBuf>,
+
+    /// Tddy data directory root (default: `$HOME/.tddy` unless `TDDY_SESSIONS_DIR` is set). Also `tddy_data_dir` in YAML.
+    #[arg(long = "tddy-data-dir", value_name = "DIR")]
+    pub tddy_data_dir: Option<PathBuf>,
 
     /// Write entire agent conversation (raw bytes) to file
     #[arg(long)]
@@ -468,6 +484,10 @@ pub struct DemoArgs {
     /// Session directory for plan artifacts (default: `{TDDY_SESSIONS_DIR}/sessions/<session_id>/`). Optional override (e.g. tests).
     #[arg(long = "session-dir")]
     pub session_dir: Option<PathBuf>,
+
+    /// Tddy data directory root (default: `$HOME/.tddy` unless `TDDY_SESSIONS_DIR` is set). Also `tddy_data_dir` in YAML.
+    #[arg(long = "tddy-data-dir", value_name = "DIR")]
+    pub tddy_data_dir: Option<PathBuf>,
 
     /// Write entire agent conversation (raw bytes) to file
     #[arg(long)]
@@ -628,6 +648,7 @@ impl From<CoderArgs> for Args {
         Args {
             goal: a.goal,
             session_dir: a.session_dir,
+            tddy_data_dir: a.tddy_data_dir,
             conversation_output: a.conversation_output,
             model: a.model,
             allowed_tools: a.allowed_tools,
@@ -669,6 +690,7 @@ impl From<DemoArgs> for Args {
         Args {
             goal: a.goal,
             session_dir: a.session_dir,
+            tddy_data_dir: a.tddy_data_dir,
             conversation_output: a.conversation_output,
             model: a.model,
             allowed_tools: a.allowed_tools,
@@ -941,7 +963,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         anyhow::bail!("empty feature description");
     }
 
-    let base = tddy_core::output::sessions_base_path().map_err(|e| anyhow::anyhow!("{}", e))?;
+    let base = tddy_core::output::tddy_data_dir_path().map_err(|e| anyhow::anyhow!("{}", e))?;
     let session_dir = if let Some(ref sid) = args.session_id {
         tddy_core::output::create_session_dir_with_id(&base, sid)
     } else {
@@ -958,6 +980,17 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         ..tddy_core::changeset::Changeset::default()
     };
     let _ = tddy_core::changeset::write_changeset(&session_dir, &init_cs);
+    tddy_core::write_initial_tool_session_metadata(
+        &session_dir,
+        tddy_core::InitialToolSessionMetadataOpts {
+            project_id: args.project_id.clone().unwrap_or_default(),
+            repo_path: Some(output_dir_for_ctx.display().to_string()),
+            pid: Some(std::process::id()),
+            tool: Some("tddy-coder".to_string()),
+            livekit_room: None,
+        },
+    )
+    .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
 
     let conv = resolve_log_defaults(args, &session_dir);
     let ctx = build_goal_context(args, None, &conv, &resolved_agent, |c| {
@@ -980,6 +1013,10 @@ fn on_progress(_event: &ProgressEvent) {
 
 /// Resolves paths for the LiveKit Virtual TUI branch inside [`run_daemon`].
 ///
+/// `tddy_data_dir` is the same root as [`tddy_core::output::tddy_data_dir_path`]
+/// (`$HOME/.tddy` or `TDDY_SESSIONS_DIR`): session artifacts live under
+/// `{tddy_data_dir}/sessions/<id>/`.
+///
 /// Returns `(agent_working_dir, session_artifact_dir, session_dir_for_presenter)`:
 /// - **agent_working_dir** — repository root for the coding agent (`InvokeRequest::working_dir`).
 /// - **session_artifact_dir** — directory for session files (`PRD.md`, `changeset.yaml`, metadata,
@@ -987,15 +1024,15 @@ fn on_progress(_event: &ProgressEvent) {
 /// - **session_dir_for_presenter** — `Some(artifact dir)` when resuming an existing session;
 ///   `None` when starting fresh (workflow allocates the session directory).
 fn livekit_daemon_workflow_paths(
-    sessions_base: &Path,
+    tddy_data_dir: &Path,
     resume_from: Option<&str>,
     session_id: Option<&str>,
 ) -> (PathBuf, PathBuf, Option<PathBuf>) {
     let session_artifact_dir = resume_from
         .or(session_id)
-        .map(|id| sessions_base.join(SESSIONS_SUBDIR).join(id))
+        .map(|id| tddy_data_dir.join(SESSIONS_SUBDIR).join(id))
         .unwrap_or_else(|| {
-            sessions_base
+            tddy_data_dir
                 .join(SESSIONS_SUBDIR)
                 .join("tddy-daemon-session")
         });
@@ -1030,10 +1067,10 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     // Do not call `init_tddy_logger` again: `log::set_logger` only succeeds once; a second
     // init would skip `set_max_level` and can leave FILE_OUTPUTS / routing inconsistent.
 
-    let sessions_base = tddy_core::output::sessions_base_path()
-        .map_err(|e| anyhow::anyhow!("{}", e))?
-        .join(tddy_core::output::SESSIONS_SUBDIR);
-    std::fs::create_dir_all(&sessions_base).context("create sessions base dir")?;
+    let tddy_data_dir =
+        tddy_core::output::tddy_data_dir_path().map_err(|e| anyhow::anyhow!("{}", e))?;
+    let sessions_root = tddy_data_dir.join(tddy_core::output::SESSIONS_SUBDIR);
+    std::fs::create_dir_all(&sessions_root).context("create sessions base dir")?;
 
     let port = args.grpc.unwrap_or(50051);
     let agent_str = args.agent.as_deref().unwrap_or("claude");
@@ -1054,7 +1091,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         && args.livekit_room.is_some()
         && args.livekit_identity.is_some();
 
-    let service = tddy_service::DaemonService::new(sessions_base.clone(), backend.clone());
+    let service = tddy_service::DaemonService::new(tddy_data_dir.clone(), backend.clone());
     let view_factory: Option<Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>> =
         if livekit_enabled {
             let (event_tx, _) = tokio::sync::broadcast::channel(256);
@@ -1070,7 +1107,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             .with_intent_sender(intent_tx);
             let (agent_working_dir, session_artifact_dir, session_dir) =
                 livekit_daemon_workflow_paths(
-                    &sessions_base,
+                    &tddy_data_dir,
                     args.resume_from.as_deref(),
                     args.session_id.as_deref(),
                 );
@@ -1085,26 +1122,19 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     Err(_) => (None, None),
                 };
 
-            let now = chrono::Utc::now().to_rfc3339();
-            let session_id = args
-                .resume_from
-                .as_deref()
-                .or(args.session_id.as_deref())
-                .unwrap_or("tddy-daemon-session");
-            let session_metadata = tddy_core::SessionMetadata {
-                session_id: session_id.to_string(),
-                project_id: args.project_id.clone().unwrap_or_default(),
-                created_at: now.clone(),
-                updated_at: now,
-                status: "active".to_string(),
-                repo_path: std::env::current_dir()
-                    .ok()
-                    .map(|p| p.display().to_string()),
-                pid: Some(std::process::id()),
-                tool: Some("tddy-coder".to_string()),
-                livekit_room: args.livekit_room.clone(),
-            };
-            let _ = tddy_core::write_session_metadata(&session_artifact_dir, &session_metadata);
+            tddy_core::write_initial_tool_session_metadata(
+                &session_artifact_dir,
+                tddy_core::InitialToolSessionMetadataOpts {
+                    project_id: args.project_id.clone().unwrap_or_default(),
+                    repo_path: std::env::current_dir()
+                        .ok()
+                        .map(|p| p.display().to_string()),
+                    pid: Some(std::process::id()),
+                    tool: Some("tddy-coder".to_string()),
+                    livekit_room: args.livekit_room.clone(),
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
             // New daemon sessions must not use a placeholder prompt: stdin is /dev/null from the
             // parent spawner, so the workflow must block on `answer_rx` until the user submits
             // feature text via Virtual TUI / LiveKit (SubmitFeatureInput). A placeholder skips
@@ -1322,30 +1352,98 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
 
 /// Print session id and plan dir to stderr on program exit.
 fn print_session_info_on_exit(session_dir: &Path) {
-    let session_id = session_dir
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| session_dir.display().to_string());
-    eprintln!("Session: {}", session_id);
-    eprintln!("Session dir: {}", session_dir.display());
-    let _ = std::io::stderr().flush();
+    let mut err = io::stderr().lock();
+    let _ = write_session_hint_from_dir(&mut err, session_dir);
+    let _ = err.flush();
 }
 
 /// Print session id and session dir path (uses startup session_id when only the id is known).
 fn print_session_id_on_exit(session_id: &str, session_dir: &Path) {
-    eprintln!("Session: {}", session_id);
-    eprintln!("Session dir: {}", session_dir.display());
-    let _ = std::io::stderr().flush();
+    let mut err = io::stderr().lock();
+    let _ = write_session_hint_stderr(&mut err, session_id, session_dir);
+    let _ = err.flush();
+}
+
+fn write_session_hint_from_dir<W: Write>(w: &mut W, session_dir: &Path) -> io::Result<()> {
+    let session_id = session_dir
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| session_dir.display().to_string());
+    write_session_hint_stderr(w, &session_id, session_dir)
+}
+
+fn write_session_hint_stderr<W: Write>(
+    w: &mut W,
+    session_id: &str,
+    session_dir: &Path,
+) -> io::Result<()> {
+    writeln!(w, "Session: {}", session_id)?;
+    writeln!(w, "Session dir: {}", session_dir.display())?;
+    Ok(())
+}
+
+/// After the TUI exits, print workflow outcome and (when known) session directory on stderr.
+fn write_post_tui_workflow_exit<Wo: Write, We: Write>(
+    workflow_result: Option<Result<tddy_core::WorkflowCompletePayload, String>>,
+    args: &Args,
+    stdout: &mut Wo,
+    stderr: &mut We,
+) -> io::Result<()> {
+    if let Some(result) = workflow_result {
+        match &result {
+            Ok(payload) => {
+                writeln!(stdout, "{}", payload.summary)?;
+                if let Some(ref session_dir) = payload.session_dir {
+                    write_session_hint_from_dir(stderr, session_dir)?;
+                }
+            }
+            Err(e) => {
+                writeln!(stderr, "Workflow error: {}", e)?;
+                if let Some(sid) = args.session_id.as_ref() {
+                    let dir = session_artifact_dir_for_args(args)
+                        .unwrap_or_else(|| PathBuf::from("(session dir not created)"));
+                    write_session_hint_stderr(stderr, sid, &dir)?;
+                }
+            }
+        }
+    } else if let Some(sid) = args.session_id.as_ref() {
+        let dir = session_artifact_dir_for_args(args)
+            .unwrap_or_else(|| PathBuf::from("(session dir not created)"));
+        write_session_hint_stderr(stderr, sid, &dir)?;
+    }
+    stdout.flush()?;
+    stderr.flush()?;
+    Ok(())
 }
 
 /// Compute session dir path from args (base/sessions/{session_id}/).
 fn session_dir_path(args: &Args) -> Option<PathBuf> {
     let sid = args.session_id.as_deref()?;
-    let base = tddy_core::output::sessions_base_path().ok()?;
+    let base = tddy_core::output::tddy_data_dir_path().ok()?;
     Some(base.join(tddy_core::output::SESSIONS_SUBDIR).join(sid))
 }
 
-/// Sets [`Args::session_dir`] to `{TDDY_SESSIONS_DIR}/sessions/<session_id>/` when not overridden by `--session-dir` or config.
+/// Session artifact root: explicit [`Args::session_dir`] if set, else [`session_dir_path`].
+fn session_artifact_dir_for_args(args: &Args) -> Option<PathBuf> {
+    args.session_dir.clone().or_else(|| session_dir_path(args))
+}
+
+/// When `--session-dir` is set, set [`Args::session_id`] to its final path segment when valid, so
+/// logging, exit messages, and `sessions/<id>/` layout stay consistent (no extra UUID directory).
+fn align_session_id_with_explicit_session_dir(args: &mut Args) -> anyhow::Result<()> {
+    let Some(ref dir) = args.session_dir else {
+        return Ok(());
+    };
+    let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+        return Ok(());
+    };
+    if tddy_core::validate_session_id_segment(name).is_ok() {
+        args.session_id = Some(name.to_string());
+    }
+    Ok(())
+}
+
+/// Sets [`Args::session_dir`] to `{tddy_data_dir}/sessions/<session_id>/` when not overridden by `--session-dir` or config.
 fn sync_session_dir_from_args(args: &mut Args) -> anyhow::Result<()> {
     if args.session_dir.is_some() {
         return Ok(());
@@ -1354,7 +1452,7 @@ fn sync_session_dir_from_args(args: &mut Args) -> anyhow::Result<()> {
         .session_id
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("internal: session_id missing"))?;
-    let base = tddy_core::output::sessions_base_path().map_err(|e| anyhow::anyhow!("{}", e))?;
+    let base = tddy_core::output::tddy_data_dir_path().map_err(|e| anyhow::anyhow!("{}", e))?;
     args.session_dir = Some(base.join(tddy_core::output::SESSIONS_SUBDIR).join(sid));
     Ok(())
 }
@@ -1365,7 +1463,7 @@ pub fn merge_session_coder_config_for_resume(args: &mut Args) -> anyhow::Result<
     let Some(ref sid) = args.resume_from else {
         return Ok(());
     };
-    let base = tddy_core::output::sessions_base_path().map_err(|e| anyhow::anyhow!("{}", e))?;
+    let base = tddy_core::output::tddy_data_dir_path().map_err(|e| anyhow::anyhow!("{}", e))?;
     let dir = base.join(tddy_core::output::SESSIONS_SUBDIR).join(sid);
     merge_session_coder_config_from_dir(args, &dir)
 }
@@ -1378,6 +1476,36 @@ fn merge_session_coder_config_from_dir(args: &mut Args, session_dir: &Path) -> a
     let config = crate::config::load_config(&path)?;
     crate::config::merge_config_into_args(args, config);
     Ok(())
+}
+
+/// Session or global `coder-config.yaml` may set `goal: plan` from a TDD-oriented template.
+/// When the selected recipe uses another start goal (e.g. bugfix → `reproduce`), that stale `goal`
+/// forces single-goal routing and fails before any task runs (`unsupported goal`).
+///
+/// Clears [`Args::goal`] when it is neither the recipe start goal nor one of [`WorkflowRecipe::goal_ids`].
+fn clear_goal_when_not_in_recipe_goal_ids(args: &mut Args) {
+    let recipe_name = args.recipe.as_deref().unwrap_or("tdd");
+    let Ok(recipe) = crate::resolve_workflow_recipe_from_cli_name(recipe_name.trim()) else {
+        return;
+    };
+    let Some(ref g) = args.goal else {
+        return;
+    };
+    if recipe.start_goal().as_str() == g.as_str() {
+        return;
+    }
+    let known = recipe
+        .goal_ids()
+        .iter()
+        .any(|gid| gid.as_str() == g.as_str());
+    if !known {
+        log::info!(
+            "clearing config goal {:?}: not a goal id for recipe {:?}",
+            g,
+            recipe.name()
+        );
+        args.goal = None;
+    }
 }
 
 /// When the session dir has `changeset.yaml` with session entries, sets `agent` from
@@ -1598,9 +1726,10 @@ fn run_goal_plain(
                                         && shutdown.load(Ordering::Relaxed)
                                     {
                                         if let Some(sid) = args.session_id.as_ref() {
-                                            let dir = session_dir_path(args).unwrap_or_else(|| {
-                                                PathBuf::from("(session dir not created)")
-                                            });
+                                            let dir = session_artifact_dir_for_args(args)
+                                                .unwrap_or_else(|| {
+                                                    PathBuf::from("(session dir not created)")
+                                                });
                                             print_session_id_on_exit(sid, &dir);
                                         }
                                         return Ok(());
@@ -1674,7 +1803,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     std::env::set_var("TDDY_QUIET", "1");
     log::set_max_level(log::LevelFilter::Debug);
 
-    if let Some(session_dir) = session_dir_path(args) {
+    if let Some(session_dir) = session_artifact_dir_for_args(args) {
         let logs = session_dir.join("logs");
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
     }
@@ -2006,27 +2135,13 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         }
     }
 
-    if let Some(result) = presenter.lock().unwrap().take_workflow_result() {
-        match &result {
-            Ok(payload) => {
-                println!("{}", payload.summary);
-                let _ = std::io::stdout().flush();
-                if let Some(ref session_dir) = payload.session_dir {
-                    print_session_info_on_exit(session_dir);
-                }
-            }
-            Err(e) => {
-                eprintln!("Workflow error: {}", e);
-                let _ = std::io::stderr().flush();
-            }
-        }
-    } else {
-        if let Some(sid) = args.session_id.as_ref() {
-            let dir = session_dir_path(args)
-                .unwrap_or_else(|| PathBuf::from("(session dir not created)"));
-            print_session_id_on_exit(sid, &dir);
-        }
-    }
+    let workflow_result = presenter.lock().unwrap().take_workflow_result();
+    write_post_tui_workflow_exit(
+        workflow_result,
+        args,
+        &mut io::stdout().lock(),
+        &mut io::stderr().lock(),
+    )?;
 
     Ok(())
 }
@@ -2048,7 +2163,14 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
             .read_primary_session_document_utf8(&session_dir)
             .is_none()
     {
-        session_dir = run_plan_to_get_dir(args, backend.clone(), &agent_str, &shutdown)?;
+        std::fs::create_dir_all(&session_dir).context("create session dir")?;
+        run_plan_bootstrap_in_session_dir(
+            args,
+            session_dir.as_path(),
+            backend.clone(),
+            &agent_str,
+            &shutdown,
+        )?;
     }
 
     // When the session has Init state and no primary session document (or no start-goal session), run start goal to complete it.
@@ -2086,10 +2208,10 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         && plain::read_demo_choice_plain().context("read demo choice")?;
 
     let cs = read_changeset(&session_dir).ok();
-    let start_goal = cs
-        .as_ref()
-        .and_then(|c| recipe.next_goal_for_state(&c.state.current))
-        .unwrap_or_else(|| recipe.start_goal());
+    let start_goal = match cs.as_ref() {
+        Some(c) => tddy_core::start_goal_for_session_continue(recipe.as_ref(), c),
+        None => recipe.start_goal(),
+    };
     let start_is_full = start_goal == recipe.start_goal();
 
     let storage_dir = tddy_core::workflow::session::workflow_engine_storage_dir(&session_dir);
@@ -2221,24 +2343,23 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
     }
 }
 
-fn run_plan_to_get_dir(
+/// Writes initial changeset and `.session.yaml`, then runs the recipe start goal in `session_dir`.
+///
+/// Used when the primary session document (e.g. `fix-plan.md`) is missing so the plan step must
+/// run before the full workflow. The directory is the resolved CLI session path (including
+/// explicit `--session-dir`), not a newly allocated UUID folder.
+fn run_plan_bootstrap_in_session_dir(
     args: &Args,
+    session_dir: &Path,
     backend: SharedBackend,
     resolved_agent_for_model: &str,
     shutdown: &AtomicBool,
-) -> anyhow::Result<PathBuf> {
+) -> anyhow::Result<()> {
     let input = read_feature_input(args).context("read feature description")?;
     let input = input.trim().to_string();
     if input.is_empty() {
         anyhow::bail!("empty feature description");
     }
-    let base = tddy_core::output::sessions_base_path().map_err(|e| anyhow::anyhow!("{}", e))?;
-    let session_dir = if let Some(ref sid) = args.session_id {
-        tddy_core::output::create_session_dir_with_id(&base, sid)
-    } else {
-        tddy_core::output::create_session_dir_in(&base)
-    }
-    .context("create session dir")?;
     let output_dir_for_ctx =
         std::env::current_dir().context("current dir for agent working_dir")?;
     let recipe = recipe_arc_for_args(args)?;
@@ -2250,22 +2371,32 @@ fn run_plan_to_get_dir(
         recipe: Some(args.recipe.as_deref().unwrap_or("tdd").to_string()),
         ..tddy_core::changeset::Changeset::default()
     };
-    let _ = tddy_core::changeset::write_changeset(&session_dir, &init_cs);
+    let _ = tddy_core::changeset::write_changeset(session_dir, &init_cs);
+    tddy_core::write_initial_tool_session_metadata(
+        session_dir,
+        tddy_core::InitialToolSessionMetadataOpts {
+            project_id: args.project_id.clone().unwrap_or_default(),
+            repo_path: Some(output_dir_for_ctx.display().to_string()),
+            pid: Some(std::process::id()),
+            tool: Some("tddy-coder".to_string()),
+            livekit_room: None,
+        },
+    )
+    .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
 
-    let conv = resolve_log_defaults(args, &session_dir);
-    let ctx = build_goal_context(args, None, &conv, resolved_agent_for_model, |c| {
-        c.insert("feature_input".to_string(), serde_json::json!(input));
-        c.insert(
-            "output_dir".to_string(),
-            serde_json::to_value(output_dir_for_ctx).unwrap(),
-        );
-        c.insert(
-            "session_dir".to_string(),
-            serde_json::to_value(session_dir.clone()).unwrap(),
-        );
-    });
+    let session_dir_buf = session_dir.to_path_buf();
+    let conv = resolve_log_defaults(args, &session_dir_buf);
+    let ctx = build_goal_context(
+        args,
+        Some(&session_dir_buf),
+        &conv,
+        resolved_agent_for_model,
+        |c| {
+            c.insert("feature_input".to_string(), serde_json::json!(input));
+        },
+    );
     run_goal_plain(args, backend, start_g, ctx, false, shutdown)?;
-    Ok(session_dir)
+    Ok(())
 }
 
 fn run_plan_to_complete(
@@ -2410,6 +2541,7 @@ mod resume_session_config_tests {
         let mut args = Args {
             goal: None,
             session_dir: None,
+            tddy_data_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,
@@ -2468,6 +2600,7 @@ mod resume_session_identity_tests {
         let mut args = Args {
             goal: None,
             session_dir: None,
+            tddy_data_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,
@@ -2529,6 +2662,7 @@ mod session_dir_sync_tests {
         let mut args = Args {
             goal: None,
             session_dir: None,
+            tddy_data_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,
@@ -2604,6 +2738,7 @@ mod changeset_agent_resume_tests {
         let mut args = Args {
             goal: None,
             session_dir: Some(session_dir.clone()),
+            tddy_data_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,
@@ -2655,11 +2790,16 @@ mod livekit_daemon_path_contract_tests {
     fn resume_does_not_alias_agent_working_directory_with_session_directory() {
         let base =
             std::env::temp_dir().join(format!("tddy-livekit-path-resume-{}", std::process::id()));
-        let sessions = base.join("sessions");
-        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::create_dir_all(base.join("sessions")).unwrap();
         let sid = "a97addd3-c31b-442b-a6b0-a63abe99e11d";
         let (working_dir, session_artifact_dir, presenter_dir) =
-            livekit_daemon_workflow_paths(&sessions, Some(sid), None);
+            livekit_daemon_workflow_paths(&base, Some(sid), None);
+        assert_eq!(
+            session_artifact_dir,
+            base.join("sessions").join(sid),
+            "artifact dir must be {}/sessions/<id>/ (same contract as gRPC daemon)",
+            base.display()
+        );
         assert_ne!(working_dir, session_artifact_dir);
         assert_eq!(presenter_dir, Some(session_artifact_dir));
         let _ = std::fs::remove_dir_all(&base);
@@ -2669,10 +2809,9 @@ mod livekit_daemon_path_contract_tests {
     fn new_livekit_session_does_not_use_sessions_subtree_as_agent_working_directory() {
         let base =
             std::env::temp_dir().join(format!("tddy-livekit-path-new-{}", std::process::id()));
-        let sessions = base.join("sessions");
-        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::create_dir_all(base.join("sessions")).unwrap();
         let (working_dir, _artifact, presenter_dir) =
-            livekit_daemon_workflow_paths(&sessions, None, None);
+            livekit_daemon_workflow_paths(&base, None, None);
         assert!(presenter_dir.is_none());
         assert_ne!(
             working_dir.parent().and_then(|p| p.file_name()),
@@ -2680,5 +2819,291 @@ mod livekit_daemon_path_contract_tests {
             "agent working directory must be the repository root, not under .../sessions/"
         );
         let _ = std::fs::remove_dir_all(&base);
+    }
+}
+
+#[cfg(test)]
+mod post_tui_workflow_exit_tests {
+    use super::{sync_session_dir_from_args, write_post_tui_workflow_exit, Args};
+    use serial_test::serial;
+
+    fn minimal_args(session_id: &str) -> Args {
+        Args {
+            goal: None,
+            session_dir: None,
+            tddy_data_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: None,
+            prompt: None,
+            grpc: None,
+            session_id: Some(session_id.to_string()),
+            resume_from: None,
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+            codex_cli_path: None,
+            recipe: None,
+        }
+    }
+
+    /// When the TUI path finishes with `WorkflowComplete(Err(..))` (e.g. green output parse failure),
+    /// stderr must still print session id and session dir so the user can open `changeset.yaml`
+    /// and inspect the worktree path.
+    #[test]
+    #[serial]
+    fn workflow_error_after_tui_includes_session_hint_on_stderr() {
+        let tmp = std::env::temp_dir().join(format!("tddy-post-tui-exit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::env::set_var(tddy_core::output::TDDY_SESSIONS_DIR_ENV, &tmp);
+
+        let sid = "019d105b-ac0f-78d3-9a89-409731145a36";
+        let mut args = minimal_args(sid);
+        sync_session_dir_from_args(&mut args).unwrap();
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        write_post_tui_workflow_exit(
+            Some(Err(
+                "output parsing failed: malformed output: Agent finished without calling tddy-tools submit for goal 'green'"
+                    .into(),
+            )),
+            &args,
+            &mut out,
+            &mut err,
+        )
+        .unwrap();
+
+        std::env::remove_var(tddy_core::output::TDDY_SESSIONS_DIR_ENV);
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let err_s = String::from_utf8(err).expect("utf8 stderr");
+        assert!(
+            err_s.contains("Workflow error:"),
+            "expected workflow error line, got: {:?}",
+            err_s
+        );
+        assert!(
+            err_s.contains("Session:") && err_s.contains("Session dir:"),
+            "stderr must include Session and Session dir when workflow returns Err; got: {:?}",
+            err_s
+        );
+        assert!(
+            err_s.contains(sid),
+            "stderr should mention session id {}; got {:?}",
+            sid,
+            err_s
+        );
+    }
+}
+
+#[cfg(test)]
+mod start_goal_for_session_continue_contract_tests {
+    use std::sync::Arc;
+    use tddy_core::changeset::{Changeset, StateTransition};
+    use tddy_core::start_goal_for_session_continue;
+    use tddy_core::workflow::ids::WorkflowState;
+    use tddy_core::{GoalId, WorkflowRecipe};
+    use tddy_workflow_recipes::{BugfixRecipe, TddRecipe};
+
+    fn failed_after_green_implementing_tdd() -> Changeset {
+        let mut cs = Changeset::default();
+        cs.state.current = WorkflowState::new("Failed");
+        cs.state.history = vec![
+            StateTransition {
+                state: WorkflowState::new("RedTestsReady"),
+                at: "t1".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("GreenImplementing"),
+                at: "t2".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("Failed"),
+                at: "t3".into(),
+            },
+        ];
+        cs
+    }
+
+    #[test]
+    fn tdd_failed_after_green_implementing_resumes_green() {
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
+        let g = start_goal_for_session_continue(
+            recipe.as_ref(),
+            &failed_after_green_implementing_tdd(),
+        );
+        assert_eq!(g, GoalId::new("green"));
+    }
+
+    #[test]
+    fn tdd_failed_empty_history_falls_back_to_start_goal() {
+        let mut cs = Changeset::default();
+        cs.state.current = WorkflowState::new("Failed");
+        cs.state.history.clear();
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
+        let g = start_goal_for_session_continue(recipe.as_ref(), &cs);
+        assert_eq!(g, GoalId::new("plan"));
+    }
+
+    /// `Planning` immediately before `Failed` (e.g. full workflow restarted plan) must not hide
+    /// an earlier `GreenImplementing` when choosing the resume goal.
+    #[test]
+    fn tdd_failed_skips_trailing_planning_for_earlier_green_implementing() {
+        let mut cs = Changeset::default();
+        cs.state.current = WorkflowState::new("Failed");
+        cs.state.history = vec![
+            StateTransition {
+                state: WorkflowState::new("RedTestsReady"),
+                at: "t1".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("GreenImplementing"),
+                at: "t2".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("Planning"),
+                at: "t3".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("Failed"),
+                at: "t4".into(),
+            },
+        ];
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
+        let g = start_goal_for_session_continue(recipe.as_ref(), &cs);
+        assert_eq!(g, GoalId::new("green"));
+    }
+
+    #[test]
+    fn tdd_failed_skips_trailing_planning_for_earlier_planned() {
+        let mut cs = Changeset::default();
+        cs.state.current = WorkflowState::new("Failed");
+        cs.state.history = vec![
+            StateTransition {
+                state: WorkflowState::new("Planned"),
+                at: "t1".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("Planning"),
+                at: "t2".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("Failed"),
+                at: "t3".into(),
+            },
+        ];
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
+        let g = start_goal_for_session_continue(recipe.as_ref(), &cs);
+        assert_eq!(g, GoalId::new("acceptance-tests"));
+    }
+
+    /// Manual `changeset.yaml` edits often append the right `history` tail but leave `current`
+    /// stale (e.g. still `Planning`). Resume must not use `next_goal_for_state(current)` in that case.
+    #[test]
+    fn tdd_history_tail_failed_resumes_green_even_when_current_stale_planning() {
+        let mut cs = Changeset::default();
+        cs.state.current = WorkflowState::new("Planning");
+        cs.state.history = vec![
+            StateTransition {
+                state: WorkflowState::new("RedTestsReady"),
+                at: "t1".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("GreenImplementing"),
+                at: "t2".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("Failed"),
+                at: "t3".into(),
+            },
+        ];
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
+        let g = start_goal_for_session_continue(recipe.as_ref(), &cs);
+        assert_eq!(g, GoalId::new("green"));
+    }
+
+    #[test]
+    fn tdd_green_implementing_not_failed_uses_next_goal() {
+        let mut cs = Changeset::default();
+        cs.state.current = WorkflowState::new("GreenImplementing");
+        cs.state.history.push(StateTransition {
+            state: WorkflowState::new("GreenImplementing"),
+            at: "t".into(),
+        });
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
+        let g = start_goal_for_session_continue(recipe.as_ref(), &cs);
+        assert_eq!(g, GoalId::new("green"));
+    }
+
+    #[test]
+    fn bugfix_failed_after_greening_resumes_green() {
+        let mut cs = Changeset::default();
+        cs.state.current = WorkflowState::new("Failed");
+        cs.state.history = vec![
+            StateTransition {
+                state: WorkflowState::new("Reproducing"),
+                at: "t1".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("Greening"),
+                at: "t2".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("Failed"),
+                at: "t3".into(),
+            },
+        ];
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(BugfixRecipe);
+        let g = start_goal_for_session_continue(recipe.as_ref(), &cs);
+        assert_eq!(g, GoalId::new("green"));
+    }
+
+    #[test]
+    fn bugfix_failed_skips_trailing_reproducing_for_earlier_greening() {
+        let mut cs = Changeset::default();
+        cs.state.current = WorkflowState::new("Failed");
+        cs.state.history = vec![
+            StateTransition {
+                state: WorkflowState::new("Reproduced"),
+                at: "t1".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("Greening"),
+                at: "t2".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("Reproducing"),
+                at: "t3".into(),
+            },
+            StateTransition {
+                state: WorkflowState::new("Failed"),
+                at: "t4".into(),
+            },
+        ];
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(BugfixRecipe);
+        let g = start_goal_for_session_continue(recipe.as_ref(), &cs);
+        assert_eq!(g, GoalId::new("green"));
     }
 }
