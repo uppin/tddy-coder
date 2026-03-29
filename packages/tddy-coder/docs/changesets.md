@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-03-29** [Feature] Presenter recipe resolver for slash **`/recipe`** — **`run.rs`**: **`with_recipe_resolver`** on daemon and full TUI **`Presenter`** builds, delegating to **`resolve_workflow_recipe_from_cli_name`**. Integration tests **`prompt_slash_skills_acceptance`**, **`prompt_slash_skills_lower`**. Feature doc: [feature-prompt-agent-skills.md](../../../docs/ft/coder/feature-prompt-agent-skills.md). (tddy-coder)
 - **2026-03-28** [Feature] Daemon and CLI session paths — **`run.rs`** aligns daemon-spawned and local flows with **`{sessions_base}/sessions/{session_id}/`** and lifecycle helpers from **`tddy_core`**. [docs/ft/coder/session-layout.md](../../../docs/ft/coder/session-layout.md). (tddy-coder)
 - **2026-03-28** [Feature] Selectable workflow recipes — **`--recipe tdd`** (default) and **`--recipe bugfix`**; optional config **`recipe:`**; **`changeset.yaml`** optional **`recipe:`** for resume; **`SpawnRequest.recipe`** and daemon spawn pass **`--recipe`** to **`tddy-coder`**. See [docs/ft/coder/workflow-recipes.md](../../../docs/ft/coder/workflow-recipes.md). (tddy-coder)
 - **2026-03-22** [Feature] Workflow abstraction layer — CLI `--goal` and recipe wiring use `TddRecipe` (default); dynamic goal list from recipe. See [docs/ft/coder/workflow-recipes.md](../../../docs/ft/coder/workflow-recipes.md). (tddy-coder)

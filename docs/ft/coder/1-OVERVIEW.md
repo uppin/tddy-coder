@@ -2,7 +2,7 @@
 
 **Type**: Technical Product (Developer Tool)
 **Status**: Active
-**Updated**: 2026-03-28
+**Updated**: 2026-03-29
 
 ## Summary
 
@@ -33,6 +33,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 | **Web Bundle** | `--web-port` and `--web-bundle-path` serve pre-built tddy-web static assets over HTTP (TUI and daemon modes) |
 | **Backend selection** | With `--agent` omitted, users pick the coding backend (Claude, Claude ACP, Cursor, Stub) via TUI `AppMode::Select` or a plain numbered menu. With `--agent` set, selection is skipped. Per-backend default models apply; `--model` overrides. Cursor receives `--model` on `cursor agent` when configured. |
 | **Workflow recipe** | **`--recipe tdd`** (default) runs **`TddRecipe`**; **`--recipe bugfix`** runs **`BugfixRecipe`** (reproduce-first, fix-plan approval before green). Optional YAML **`recipe:`**; **`changeset.yaml`** stores **`recipe`** for resume. |
+| **Project agent skills** | Skills under **`.agents/skills/<name>/SKILL.md`** with matching frontmatter **`name`**; **`tddy_core::agent_skills`** supplies discovery, slash menu items, and composed prompts; built-in **`/recipe`** in the presenter selects TDD vs Bugfix when wired with **`with_recipe_resolver`**. Slash completion in the ratatui feature input is outside this surface. |
 
 ## Backend selection at session start
 
@@ -52,6 +53,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 | [Implementation Step](implementation-step.md) | Red, green, demo, evaluate goals; state machine; output artifacts |
 | [gRPC Remote Control](grpc-remote-control.md) | `--grpc` flag, bidirectional streaming, programmatic control for E2E and automation |
 | [TUI status bar](tui-status-bar.md) | Spinner and session segment on the status line; parity with Virtual TUI / streamed frames |
+| [Feature prompt: agent skills](feature-prompt-agent-skills.md) | **`.agents/skills`** discovery, composed skill prompts, presenter **`/recipe`** selection |
 
 ## Integration Points
 

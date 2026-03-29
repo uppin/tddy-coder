@@ -27,6 +27,9 @@ enum PendingToolCallResponse {
 const QUEUED_INSTRUCTION_PREFIX: &str =
     "[QUEUED] The following prompt was queued while you were busy. Please address it:\n\n";
 
+/// Resolves CLI workflow recipe name (`tdd`, `bugfix`) after `/recipe` slash selection.
+type RecipeResolverFn = dyn Fn(&str) -> Result<Arc<dyn WorkflowRecipe>, String> + Send + Sync;
+
 /// Creates the coding backend after the user picks an agent (tddy-coder); returns `Err` for e.g. missing tddy-tools.
 pub type DeferredBackendFactory = Box<dyn FnOnce(&str) -> Result<SharedBackend, String> + Send>;
 
@@ -87,6 +90,10 @@ pub struct Presenter {
     deferred_cli_model: Option<String>,
     /// Active workflow definition (TDD, bug-fix, …).
     workflow_recipe: Arc<dyn WorkflowRecipe>,
+    /// After `/recipe` from the feature slash menu: user is picking TDD vs bugfix.
+    recipe_slash_selection_pending: bool,
+    /// Resolves CLI recipe name to a new [`WorkflowRecipe`] (wired from `tddy-coder`).
+    recipe_resolver: Option<Arc<RecipeResolverFn>>,
     /// Shared critical state for broadcast lag recovery.
     /// Updated on every GoalStarted/StateChanged; views read after Lagged.
     critical_state: Arc<std::sync::Mutex<CriticalPresenterState>>,
@@ -149,6 +156,8 @@ impl Presenter {
             pending_workflow_start: None,
             deferred_cli_model: None,
             workflow_recipe,
+            recipe_slash_selection_pending: false,
+            recipe_resolver: None,
             critical_state: Arc::new(std::sync::Mutex::new(CriticalPresenterState::default())),
         }
     }
@@ -162,6 +171,12 @@ impl Presenter {
     /// Enable connect_view() by providing an intent sender for external views.
     pub fn with_intent_sender(mut self, tx: mpsc::Sender<UserIntent>) -> Self {
         self.intent_tx = Some(tx);
+        self
+    }
+
+    /// Resolve workflow recipe CLI names when the user picks `/recipe` → TDD or Bugfix.
+    pub fn with_recipe_resolver(mut self, resolver: Arc<RecipeResolverFn>) -> Self {
+        self.recipe_resolver = Some(resolver);
         self
     }
 
@@ -318,6 +333,43 @@ impl Presenter {
         self.apply_deferred_backend_factory(factory, agent_str.as_str());
     }
 
+    fn handle_recipe_slash_selection_answer(&mut self, idx: usize) {
+        let Some(q) = self.pending_questions.first() else {
+            self.recipe_slash_selection_pending = false;
+            return;
+        };
+        if idx >= q.options.len() {
+            return;
+        }
+        let label = q.options[idx].label.clone();
+        self.recipe_slash_selection_pending = false;
+        self.pending_questions.clear();
+        self.current_question_index = 0;
+        self.collected_answers.clear();
+
+        let Some(cli_name) = crate::backend::recipe_cli_name_from_selection_label(&label) else {
+            log::warn!("recipe slash: unknown option label {:?}", label);
+            self.state.mode = AppMode::FeatureInput;
+            self.broadcast_mode_changed();
+            return;
+        };
+        if let Some(ref resolve) = self.recipe_resolver {
+            match resolve(cli_name) {
+                Ok(new_recipe) => {
+                    log::info!("recipe slash: active workflow recipe set to `{cli_name}`");
+                    self.workflow_recipe = new_recipe;
+                }
+                Err(e) => {
+                    log::warn!("recipe slash: could not resolve `{cli_name}`: {e}");
+                }
+            }
+        } else {
+            log::debug!("recipe slash: no recipe_resolver; recipe unchanged after UI pick");
+        }
+        self.state.mode = AppMode::FeatureInput;
+        self.broadcast_mode_changed();
+    }
+
     fn select_highlight_matches(&self, idx: usize) -> bool {
         matches!(
             &self.state.mode,
@@ -448,6 +500,10 @@ impl Presenter {
             UserIntent::AnswerSelect(idx) => {
                 if self.backend_selection_pending {
                     self.handle_backend_selection_answer(idx);
+                    return;
+                }
+                if self.recipe_slash_selection_pending {
+                    self.handle_recipe_slash_selection_answer(idx);
                     return;
                 }
                 if let Some(q) = self.pending_questions.get(self.current_question_index) {
@@ -1207,6 +1263,31 @@ impl Presenter {
     /// Take the workflow result (if any) for printing on TUI exit.
     pub fn take_workflow_result(&mut self) -> Option<Result<WorkflowCompletePayload, String>> {
         self.workflow_result.take()
+    }
+
+    /// User accepted the `/recipe` built-in from the feature slash menu (PRD).
+    pub fn apply_feature_slash_builtin_recipe(&mut self) {
+        if !matches!(self.state.mode, AppMode::FeatureInput) {
+            log::debug!(
+                "apply_feature_slash_builtin_recipe: no-op (mode={:?})",
+                self.state.mode
+            );
+            return;
+        }
+        log::info!("apply_feature_slash_builtin_recipe: showing workflow recipe selection");
+        self.recipe_slash_selection_pending = true;
+        self.pending_questions = vec![crate::backend::workflow_recipe_selection_question()];
+        self.current_question_index = 0;
+        self.collected_answers.clear();
+        self.advance_to_next_question();
+    }
+
+    /// Whether the presenter is in recipe selection after `/recipe` from slash menu.
+    pub fn recipe_slash_selection_active(&self) -> bool {
+        let active = self.recipe_slash_selection_pending
+            && matches!(self.state.mode, AppMode::Select { .. });
+        log::debug!("recipe_slash_selection_active: {active}");
+        active
     }
 }
 
