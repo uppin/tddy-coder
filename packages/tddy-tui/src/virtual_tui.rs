@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -30,6 +30,51 @@ use crate::mouse_map::{handle_mouse_event, LayoutAreas};
 use crate::render::draw;
 use crate::status_bar_activity::virtual_tui_periodic_render_interval;
 use crate::tui_view::TuiView;
+
+/// Minimum spacing between cursor-only virtual frames to avoid flooding the client stream (PRD).
+pub fn virtual_tui_cursor_only_frame_min_interval() -> Duration {
+    let d = Duration::from_millis(80);
+    log::debug!(
+        "virtual_tui_cursor_only_frame_min_interval: {:?} between cursor-only full frames",
+        d
+    );
+    d
+}
+
+/// Strips CSI sequences that only move or toggle cursor visibility, for cursor-vs-content diffs.
+fn strip_cursor_csi_sequences(input: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(input.len());
+    let mut i = 0usize;
+    while i < input.len() {
+        if i + 1 < input.len() && input[i] == 0x1b && input[i + 1] == b'[' {
+            let start = i;
+            let mut j = i + 2;
+            while j < input.len() {
+                let b = input[j];
+                if (0x40..=0x7e).contains(&b) {
+                    let seq = &input[start..=j];
+                    let strip = b == b'H'
+                        || b == b'f'
+                        || seq.windows(4).any(|w| w == b"?25h" || w == b"?25l");
+                    if !strip {
+                        out.extend_from_slice(seq);
+                    }
+                    i = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+            if j >= input.len() {
+                out.push(input[i]);
+                i += 1;
+            }
+        } else {
+            out.push(input[i]);
+            i += 1;
+        }
+    }
+    out
+}
 
 /// Runs a VirtualTui in a dedicated thread. Renders on events, streams ANSI bytes.
 /// Stops when shutdown is set or output_tx is dropped.
@@ -73,61 +118,88 @@ pub fn run_virtual_tui(
         };
 
         let mut prev_frame: Vec<u8> = Vec::new();
+        let mut last_cursor_only_frame_at: Option<Instant> = None;
 
         log::debug!("VirtualTui: started (mouse={})", mouse);
 
         // Render a frame: draw into the buffer, compare with the previous frame,
         // and only send bytes to the output channel if content actually changed.
-        // This avoids sending cursor-only control sequences from ratatui's draw()
-        // on identical frames, which would flood the network stream.
+        // Cursor-only updates (same cell content, different CUP/show/hide) are rate-limited via
+        // [`virtual_tui_cursor_only_frame_min_interval`] so streaming clients are not flooded.
         let mut layout_areas = LayoutAreas {
             activity_log: Rect::default(),
             dynamic_area: Rect::default(),
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
         };
-        let render_and_send = |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
-                               state: &PresenterState,
-                               view: &mut TuiView,
-                               frame_buf: &Arc<Mutex<Vec<u8>>>,
-                               prev_frame: &mut Vec<u8>,
-                               output_tx: &mpsc::Sender<Vec<u8>>,
-                               layout_areas: &mut LayoutAreas| {
-            {
-                let mut b = frame_buf.lock().unwrap();
-                b.clear();
-            }
-            if let Err(e) =
-                term.draw(|f| draw(f, state, view.view_state_mut(), false, Some(layout_areas)))
-            {
-                log::debug!("VirtualTui: draw error: {}", e);
-                return;
-            }
-            let current_frame = {
-                let b = frame_buf.lock().unwrap();
-                b.clone()
-            };
-            if current_frame != *prev_frame {
-                log::debug!(
-                    "VirtualTui: frame changed {} bytes -> client",
-                    current_frame.len()
-                );
-                // When prev_frame is empty (initial render or post-resize), prepend clear
-                // so the remote vt100 parser starts with a clean slate. Otherwise shrink→grow
-                // leaves old content visible and the final screen shows duplicated status bars.
-                let to_send: Vec<u8> = if prev_frame.is_empty() {
-                    const CLEAR_AND_HOME: &[u8] = b"\x1b[2J\x1b[H";
-                    let mut out = Vec::with_capacity(CLEAR_AND_HOME.len() + current_frame.len());
-                    out.extend_from_slice(CLEAR_AND_HOME);
-                    out.extend_from_slice(&current_frame);
-                    out
-                } else {
-                    current_frame.clone()
+        let render_and_send =
+            |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
+             state: &PresenterState,
+             view: &mut TuiView,
+             frame_buf: &Arc<Mutex<Vec<u8>>>,
+             prev_frame: &mut Vec<u8>,
+             output_tx: &mpsc::Sender<Vec<u8>>,
+             layout_areas: &mut LayoutAreas,
+             last_cursor_only_at: &mut Option<Instant>| {
+                {
+                    let mut b = frame_buf.lock().unwrap();
+                    b.clear();
+                }
+                if let Err(e) =
+                    term.draw(|f| draw(f, state, view.view_state_mut(), false, Some(layout_areas)))
+                {
+                    log::debug!("VirtualTui: draw error: {}", e);
+                    return;
+                }
+                let current_frame = {
+                    let b = frame_buf.lock().unwrap();
+                    b.clone()
                 };
-                let _ = output_tx.blocking_send(to_send);
-                *prev_frame = current_frame;
-            }
-        };
+                if current_frame != *prev_frame {
+                    let min_iv = virtual_tui_cursor_only_frame_min_interval();
+                    let stripped_cur = strip_cursor_csi_sequences(&current_frame);
+                    let stripped_prev = strip_cursor_csi_sequences(prev_frame);
+                    let cursor_only = !prev_frame.is_empty() && stripped_cur == stripped_prev;
+                    if cursor_only {
+                        let now = Instant::now();
+                        let allow = match *last_cursor_only_at {
+                            Some(t) => now.duration_since(t) >= min_iv,
+                            None => true,
+                        };
+                        if !allow {
+                            log::trace!(
+                                "VirtualTui: cursor-only frame suppressed (min_interval={:?})",
+                                min_iv
+                            );
+                            return;
+                        }
+                        *last_cursor_only_at = Some(now);
+                        log::debug!("VirtualTui: emitting cursor-only frame after throttle gate");
+                    } else {
+                        *last_cursor_only_at = None;
+                    }
+                    log::debug!(
+                        "VirtualTui: frame changed {} bytes -> client (cursor_only={})",
+                        current_frame.len(),
+                        cursor_only
+                    );
+                    // When prev_frame is empty (initial render or post-resize), prepend clear
+                    // so the remote vt100 parser starts with a clean slate. Otherwise shrink→grow
+                    // leaves old content visible and the final screen shows duplicated status bars.
+                    let to_send: Vec<u8> = if prev_frame.is_empty() {
+                        const CLEAR_AND_HOME: &[u8] = b"\x1b[2J\x1b[H";
+                        let mut out =
+                            Vec::with_capacity(CLEAR_AND_HOME.len() + current_frame.len());
+                        out.extend_from_slice(CLEAR_AND_HOME);
+                        out.extend_from_slice(&current_frame);
+                        out
+                    } else {
+                        current_frame.clone()
+                    };
+                    let _ = output_tx.blocking_send(to_send);
+                    *prev_frame = current_frame;
+                }
+            };
 
         render_and_send(
             &mut terminal,
@@ -137,6 +209,7 @@ pub fn run_virtual_tui(
             &mut prev_frame,
             &output_tx,
             &mut layout_areas,
+            &mut last_cursor_only_frame_at,
         );
 
         if mouse {
@@ -246,6 +319,7 @@ pub fn run_virtual_tui(
                     &mut prev_frame,
                     &output_tx,
                     &mut layout_areas,
+                    &mut last_cursor_only_frame_at,
                 );
                 last_render = std::time::Instant::now();
             }
@@ -298,6 +372,7 @@ pub fn run_virtual_tui(
                         &mut prev_frame,
                         &output_tx,
                         &mut layout_areas,
+                        &mut last_cursor_only_frame_at,
                     );
                 }
                 log::debug!(
@@ -791,6 +866,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn virtual_tui_cursor_only_frame_min_interval_avoids_flood() {
+        assert!(
+            virtual_tui_cursor_only_frame_min_interval() >= Duration::from_millis(50),
+            "PRD: cursor-only frames must be throttled for Virtual Tui streams"
+        );
+    }
+
+    #[test]
     fn parse_enter() {
         let mut buf = vec![b'\r'];
         let (key, n) = parse_key_from_buf(&mut buf).unwrap();
@@ -1013,6 +1096,7 @@ mod tests {
             exit_action: None,
             plan_refinement_pending: false,
             skills_project_root: None,
+            active_worktree_display: None,
         };
         let mut vs = ViewState::new();
         vs.feature_edit.set_plain_text(&input);
@@ -1106,6 +1190,7 @@ mod tests {
             exit_action: None,
             plan_refinement_pending: false,
             skills_project_root: None,
+            active_worktree_display: None,
         };
         let mut view = TuiView::new();
 
@@ -1155,6 +1240,7 @@ mod tests {
             exit_action: None,
             plan_refinement_pending: false,
             skills_project_root: None,
+            active_worktree_display: None,
         };
         let mut view = TuiView::new();
 

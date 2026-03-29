@@ -1,79 +1,82 @@
-# Production Readiness
+# Validate: production readiness (TUI / presenter worktree changeset)
 
-Read-only review of the terminal fullscreen / terminate-confirm worktree, aligned with [evaluation-report.md](./evaluation-report.md) and focused on the listed `tddy-web` and `tddy-coder` surfaces.
+Scope: `packages/tddy-core` presenter worktree + state, and `packages/tddy-tui` ratatui integration (heartbeat, Virtual TUI, markdown plan tail, status bar). This report supersedes the prior web-focused draft at this path for the current subagent task.
+
+## Executive summary
+
+The changeset improves status UX (spinner vs idle heartbeat, worktree segment, markdown plan tail, Virtual TUI cadence) and is generally defensive about I/O errors. **One architectural gap blocks the worktree status segment in the live app:** `PresenterState::active_worktree_display` is updated only inside the presenter’s `poll_workflow`, while the interactive TUI keeps a **clone** of state synchronized exclusively via `PresenterEvent`. No event carries `active_worktree_display`, and `apply_event` does not set it—so the status-bar injection path in `render.rs` will not see worktree switches after attach. Secondary concerns: **hot-path logging at `info`** (`event_loop`, `markdown_plan_action_layout_for_view`), **CSI stripping heuristics** for cursor-only frame detection, **`ratatui` unstable feature flag** coupling, and **repo hygiene** for `.red-tddy-test-output.txt`. Markdown viewer pays **two wrapped line-count passes** (and `Text` clones) per frame while in `MarkdownViewer`, which can matter for very large PRDs.
 
 ## Checklist
 
-| Area | Status | Notes |
-|------|--------|--------|
-| User-visible auth errors | Partial | `auth-flow-error` in standalone `ConnectionForm` (`index.tsx`); daemon `ConnectionScreen` relies on `useAuth` without the same test id |
-| User-visible LiveKit / token errors | Good | `data-testid="livekit-error"` in `ConnectedTerminal` (both entry points) and in `GhosttyTerminalLiveKit` when `status === "error"` |
-| RPC / session errors | Good | `data-testid="connection-error"` on `ConnectionScreen` for list/start/connect failures |
-| Post-connect stream failures | Gap | RPC output errors logged only; UI may stay “connected” without a clear banner |
-| Token refresh failures | Gap | `console.warn` only; no `setStatus("error")` or user message |
-| Console logging in prod paths | Risk | Unconditional `[LiveKit]`, `[terminal→server]`, markers, and chrome `console.info`/`debug` |
-| Rust logging | N/A here | `tddy-coder` daemon uses `log::` / `RUST_LOG`; not changed in reviewed UI slice beyond auth entry |
-| Cypress / env | OK for CI | `LIVEKIT_TESTKIT_WS_URL`, `CYPRESS_BASE_URL`, fixed ports 8889/8890, dev LiveKit JWT secrets |
-| Destructive confirmations | OK pattern | `window.confirm` for Terminate (via `remoteTerminateConfirm`) and session delete (`ConnectionScreen`) |
-| Stub OAuth / auth surface | Risk | `build_auth_service_entry` enables stub mode when `--github-stub-codes` is non-empty even without `--github-stub` |
-| fuser port cleanup | Risk | `fuser -k` on 8889/8890 can terminate unrelated listeners (evaluation report) |
-| Ship artifacts | Block | Screenshots, tesseract data, stray logs called out in evaluation — exclude from release |
+| Area | Verdict | Summary |
+|------|---------|---------|
+| Error handling / panics (TUI paths) | **Pass** | `event::poll` uses `unwrap_or(false)`; Virtual TUI handles terminal creation failure; resize/draw errors logged without panic. `frame_buf.lock().unwrap()` can panic only on mutex poison (abnormal). |
+| `active_worktree_display` vs broadcast sync | **Fail** | Field updated in presenter only; TUI `apply_event` never copies it—status worktree segment ineffective for `run_event_loop` + `connect_view` architecture. |
+| Logging levels / hot paths | **Concern** | `log::info!` on every frame when editing caret active (`event_loop.rs`); `log::info!` every `MarkdownViewer` draw via `markdown_plan_action_layout_for_view`; `worktree_display` uses `info` with path data. |
+| `ratatui` `unstable-rendered-line-info` | **Concern** | Required for `Paragraph::line_count`; ties release stability to ratatui unstable API—plan upgrades carefully and document the dependency. |
+| Security / paths / secrets | **Concern** | Activity log and logs emit full `path.display()` on worktree switch; formatted segment is basename/truncated (good for UI). No tokens in reviewed paths. |
+| Performance: heartbeat / Virtual TUI throttle | **Pass** | Idle clarification ~1 Hz periodic render; Running ~200 ms; cursor-only frames throttled (80 ms). |
+| Performance: markdown `line_count` | **Concern** | Up to two `markdown_paragraph_wrapped_line_count` calls + `text_md.clone()` per frame in `MarkdownViewer`. |
+| CSI heuristic (`strip_cursor_csi_sequences`) | **Concern** | Byte scan for `ESC [` … final byte; strips CUP (`H`/`f`) and `?25h`/`?25l`. Risk of misclassification (cursor-only vs content) if sequences diverge in edge terminals; incomplete vs full CSI taxonomy. |
+| `.red-tddy-test-output.txt` hygiene | **Concern** | Untracked artifact at repo root; add to `.gitignore` or remove—avoid accidental commit. |
 
-## Findings by area
+## Detailed findings
 
-### Error handling and user-visible errors
+### 1. Worktree display not replicated to the view (`Fail`)
 
-- **`index.tsx` — auth-flow-error:** When `useAuth` reports `authError`, it is rendered with `data-testid="auth-flow-error"` on the pre-login standalone form. Helpful for e2e and users.
-- **`index.tsx` / `ConnectionScreen.tsx` — livekit-error:** Token generation failures set local `error` and render `data-testid="livekit-error"` with daemon-specific vs standalone copy (daemon mentions `tddy-daemon` / LiveKit; standalone mentions `tddy-coder` and API key flags).
-- **`GhosttyTerminalLiveKit.tsx`:** Initial connect / setup failures set `errorMsg` and `status === "error"` → visible `livekit-error`. Server participant disconnect drives a dedicated overlay (`terminal-coder-unavailable`) with clear copy.
-- **Gaps:** (1) Async RPC consumer on stream failure calls `console.error` but does not transition `status` or surface an in-UI error. (2) Token refresh in the refresh timer catches failures with `console.warn` only; long-lived sessions could degrade silently. (3) Auto-reconnect on `RoomEvent.Disconnected` swallows failures to `console.warn` without user feedback.
+- **Presenter:** `WorkflowEvent::WorktreeSwitched` sets `state.active_worktree_display` from `format_worktree_for_status_bar` and broadcasts `PresenterEvent::ActivityLogged` with `Worktree: {}` (`presenter_impl.rs`).
+- **TUI:** `inject_worktree_into_status_line` reads `state.active_worktree_display` (`render.rs`).
+- **Gap:** `apply_event` in `virtual_tui.rs` handles `ActivityLogged` by appending to `activity_log` only; it does **not** set `active_worktree_display`. `PresenterEvent` has no dedicated variant, and `CriticalPresenterState` does not include this field—so lag recovery cannot restore it either.
+- **Integration:** `tddy-coder` runs the presenter in a worker thread and the TUI with `connect_view()`’s snapshot + broadcast (`run.rs`). The TUI never reads the presenter mutex for render state—so the new status segment will remain absent unless an event or shared snapshot is added.
 
-### Logging: `console` vs `log::`
+### 2. Error handling and panic risk (`Pass` with notes)
 
-- **Rust (`run.rs`):** `build_auth_service_entry` has no direct logging; auth wiring is structural only. Daemon processes spawned from Cypress use `RUST_LOG` (e.g. `info` / `debug` for demos).
-- **TypeScript — intentional opt-in:** `debugLogging` gates the `log` closure in `GhosttyTerminalLiveKit` (verbose lifecycle/dataflow).
-- **TypeScript — always on (prod concern):**
-  - `GhosttyTerminalLiveKit`: `console.log("[LiveKit]", …)` on several room events regardless of `debugLogging`.
-  - `enqueueTerminalInput`: unconditional `console.log("[terminal→server]", …, Array.from(encoded))` on every input path (keyboard, resize, Stop) — high volume and may leak keystroke patterns in devtools.
-  - `ConnectionTerminalChrome`: `console.debug` / `console.info` on fullscreen sync, Terminate, and fullscreen button — not gated.
-  - `browserFullscreen.ts`, `liveKitStatusPresentation.ts`, `remoteTerminateConfirm.ts`: `console.debug` / `console.info` helpers.
-  - **`tddyMarker.ts`:** Every marker emits `console.debug`, `console.info`, and **`console.error(JSON.stringify(payload))`**. Call sites include fullscreen enter/exit, terminate confirm, and **`shouldShowVisibleLiveKitStatusStrip` on every invocation** (called from `GhosttyTerminalLiveKit` render), so markers can fire very often and flood stderr-style diagnostics in the browser console.
+- `run_event_loop`: `Terminal::new`, `draw`, and terminal teardown use `?` or `let _ =` appropriately; panic hook restores terminal on unwind.
+- `virtual_tui`: `Terminal::with_options` failure returns early with `log::error!`.
+- `strip_cursor_csi_sequences` / parsers: bounded scans; incomplete sequences fall through without panic.
+- **Note:** `frame_buf.lock().unwrap()` in `render_and_send` will panic if the mutex is poisoned after a panicking writer callback—unlikely in production if `draw` does not panic.
 
-### Configuration / env: Cypress, ports, `GITHUB_*`, LiveKit
+### 3. Logging (`Concern`)
 
-- **`cypress.config.ts`:** `LIVEKIT_TESTKIT_WS_URL` required for tasks that start LiveKit-backed binaries; `DEV_API_KEY` / `DEV_API_SECRET` match testkit-style local tokens (acceptable for automated tests, not production secrets). `baseUrl` defaults to Storybook (`6006`) unless `CYPRESS_BASE_URL` is set.
-- **Fixed web ports:** `startTddyCoderForConnectFlow` uses **8889**, `startTddyCoderForAuthFlow` uses **8890**, with `fuser -k PORT/tcp` on POSIX before bind.
-- **GitHub / stub:** Cypress spawns `tddy-coder` with `--github-stub` and `--github-stub-codes=test-code:testuser` (single argv for `:` safety). No production `GITHUB_*` env vars in these files; real OAuth path remains in `run.rs` when client id/secret are provided and stub mode is off.
+- **`event_loop.rs` (~20 Hz draw loop):** `log::info!("local_tui: editing caret active — crossterm Show")` runs whenever `editing_prompt_cursor_position` is `Some`—i.e. every frame while the user edits a prompt. Should be `trace` or `debug`, or logged only on transition.
+- **`render.rs`:** `markdown_plan_action_layout_for_view` logs at **`info`** including `markdown_at_end` on **every** `MarkdownViewer` draw—high volume during plan review.
+- **`worktree_display.rs`:** `log::info!` for “using” / “truncated” / empty path includes `Debug` of paths or labels—acceptable for rare events but “empty path” logs full `Path` at info; prefer `debug` for routine formatting outcomes.
+- **`presenter_impl.rs`:** `log::info!` on `WorktreeSwitched` when display is set—low frequency; OK relative to event loop noise.
 
-### Security
+### 4. `ratatui` unstable feature (`Concern`)
 
-- **`window.confirm`:** `remoteTerminateConfirm.ts` uses native `confirm`; if `window.confirm` is missing (non-browser), it **refuses** termination (safe default). Same UX pattern as `ConnectionScreen` session delete confirm.
-- **Stub OAuth:** `build_auth_service_entry` treats **`stub_mode = github_stub || non-empty github_stub_codes`**, so a mis-typed or leftover `--github-stub-codes` on a production-like invocation could enable stub auth without an explicit `--github-stub` flag (evaluation report issue).
-- **fuser:** Killing whatever holds 8889/8890 can affect unrelated services on a developer machine during Cypress runs (local CI hazard, not shipped to end users).
+- `packages/tddy-tui/Cargo.toml`: `features = ["unstable-rendered-line-info"]` enables `Paragraph::line_count` used by `markdown_paragraph_wrapped_line_count`.
+- **Risk:** Semver-stable ratatui may still change or gate unstable APIs—CI and release notes should treat this as a conscious dependency on unstable surface area.
 
-### Performance
+### 5. Security and path handling (`Concern`)
 
-- **Fullscreen listeners:** `ConnectionTerminalChrome` registers `fullscreenchange` + `webkitfullscreenchange` on `document` and syncs state; cleanup on unmount. Effect depends on `resolvedFullscreenTargetRef` (ref object identity is stable). Reasonable cost.
-- **Re-renders / markers:** `shouldShowVisibleLiveKitStatusStrip` runs during **every** `GhosttyTerminalLiveKit` render and calls `emitTddyMarker` + `logDebug` each time — couples presentation logic to high-frequency diagnostic emission; any parent-driven re-render amplifies work.
-- **`enqueueTerminalInput`:** Per-keystroke `console.log` with full byte arrays is a measurable overhead in hot paths and noisy for performance profiling.
-- **Cypress stdio:** `tddy-coder` daemon for connect/auth uses `stdio: ["ignore", "ignore", "ignore"]` to avoid pipe backpressure — correct for reliability; `tddy-demo` / `echo_terminal` still pipe to log files or memory buffers for readiness detection.
+- **UI:** `format_worktree_for_status_bar` avoids dumping full filesystem paths in the status string; truncation on UTF-8 char boundaries is sound.
+- **Activity log:** `Worktree: {}` uses `path.display()`—full path visible in-scroll and in any log aggregation of activity text—may be sensitive in shared logs or screenshots.
+- **Secrets:** No API keys or tokens observed in the reviewed files.
 
-## Risks
+### 6. Performance (`Pass` / `Concern`)
 
-1. **Silent degradation:** Token refresh and RPC stream errors may leave the UI looking healthy while the session is broken or stale.
-2. **Console noise and data exposure:** Unconditional LiveKit logs, per-input `[terminal→server]` logs, and marker `console.error` JSON in production builds increase noise and may aid shoulder-surfing in shared devtools sessions.
-3. **Stub auth activation:** Non-empty `--github-stub-codes` alone enables stub `AuthService` — configuration foot-gun for operators.
-4. **Local machine safety:** `fuser -k` on fixed ports during e2e.
-5. **Fullscreen errors:** `requestFullscreenForConnectedTerminal` can throw; `handleFullscreenClick` uses `void requestFullscreen…` without `.catch`, risking unhandled promise rejection in strict monitoring environments.
-6. **Ship hygiene:** Untracked artifacts listed in the evaluation report must not reach release artifacts or commits.
+- **Heartbeat / Virtual TUI:** `virtual_tui_periodic_render_interval` uses 1 s in clarification wait and 200 ms otherwise; `virtual_tui_cursor_only_frame_min_interval` is 80 ms—aligned with PRD-style throttling.
+- **Markdown viewer:** Each frame may call `markdown_paragraph_wrapped_line_count` twice (body-only then body + tail) and clone `Text` for the extended document—O(document) work per frame. For typical PRDs this is fine; for multi-megabyte markdown, consider caching line counts keyed by `(content_hash, width)` or debouncing scroll-only updates (larger change).
+
+### 7. CSI heuristic (`Concern`)
+
+- **`virtual_tui.rs` `strip_cursor_csi_sequences`:** Removes sequences ending with `H`/`f` or containing `?25h` / `?25l`. Legitimate content-changing sequences could theoretically overlap rare patterns; more likely, **false “cursor-only”** classification could suppress needed frames or **false “content”** could emit extra traffic—monitor with real clients (Ghostty, xterm, web PTY).
+- Truncated CSI at buffer end copies a single byte and advances—safe but may desync until more bytes arrive (normal for streaming PTY).
+
+### 8. Repository hygiene (`Concern`)
+
+- **`.red-tddy-test-output.txt`:** Appears as an untracked local artifact (agent/test output). `.gitignore` already lists `.verify-result.txt` but not this file—recommend aligning ignore rules or deleting the file after use to avoid accidental commits.
 
 ## Recommendations
 
-1. **User-visible failure paths:** On RPC stream error (and optionally repeated reconnect failure), set terminal `status` to `"error"` or show a non-blocking banner so users know the stream ended.
-2. **Token refresh:** After refresh failure, surface a message or force a controlled disconnect / reconnect prompt instead of only `console.warn`.
-3. **Logging policy:** Gate `[LiveKit]` room-event logs and `[terminal→server]` behind `debugLogging` (or a single `import.meta.env.DEV` policy if the project agrees — without test-only branches in production behavior per workspace rules, prefer user-toggle or build-time strip).
-4. **Markers:** Move `emitTddyMarker` off the hot render path for `shouldShowVisibleLiveKitStatusStrip`, or emit only on status transitions / user actions; avoid `console.error` for non-errors if markers are retained in production.
-5. **Fullscreen:** Wrap `requestFullscreenForConnectedTerminal` in try/catch in the click handler (or `.catch`) and optionally show a short inline toast or status hint if the API rejects (user gesture, permissions).
-6. **Rust auth CLI:** Require both explicit `--github-stub` and codes for stub mode in production-facing documentation; consider tightening `build_auth_service_entry` so non-empty codes alone do not enable stub (breaking change — coordinate with tests that rely on combined argv).
-7. **Cypress:** Prefer port 0 / ephemeral allocation with discovery, or document that 8889/8890 must be free; avoid `fuser -k` where possible or scope to known PIDs.
-8. **Release checklist:** Exclude screenshots, OCR training data, and `.cypress-red-output.txt` from shipping (per evaluation report).
+1. **Fix worktree status sync (blocking):** Add a `PresenterEvent` (e.g. `ActiveWorktreeDisplayChanged(Option<String>)`) or extend `CriticalPresenterState` + broadcast whenever `active_worktree_display` changes, and handle it in `apply_event`. Alternatively, derive the display string idempotently from the last `ActivityLogged` worktree entry (fragile—prefer explicit event).
+2. **Demote hot-path logs:** Change `event_loop` caret message and `markdown_plan_action_layout_for_view` to `trace`/`debug`. Keep `info` for rare lifecycle events.
+3. **Ratatui:** Document the unstable feature in package changelog or `AGENTS.md` toolchain notes; pin ratatui version deliberately and run tests on upgrade.
+4. **Privacy:** Use `log::debug` for full paths in worktree formatting; keep user-visible activity line as product requires.
+5. **Markdown perf (optional):** If large PRDs are expected, cache wrapped line counts when `content` and `width` are unchanged between frames.
+6. **Hygiene:** Add `.red-tddy-test-output.txt` to root `.gitignore` (or remove file) consistent with `.verify-result.txt`.
+
+---
+
+**Path written:** `docs/dev/1-WIP/terminal-fullscreen-validate/validate-prod-ready-report.md`

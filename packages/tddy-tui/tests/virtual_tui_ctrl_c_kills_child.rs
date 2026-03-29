@@ -41,6 +41,7 @@ fn running_presenter_state() -> PresenterState {
         exit_action: None,
         plan_refinement_pending: false,
         skills_project_root: None,
+        active_worktree_display: None,
     }
 }
 

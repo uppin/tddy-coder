@@ -1,48 +1,69 @@
-# Validate Tests Report
+# Validate tests report — TUI PRD branch
 
-## Commands Run
+**Date:** 2026-03-29  
 
-1. `./dev cargo test -p tddy-coder -- --list` — enumerate tests (completed after initial compile; exit 0).
-2. `./dev cargo test -p tddy-coder` — full package test suite.
-3. `./dev bash -c 'cd packages/tddy-web && bun test src/lib/browserFullscreen.test.ts src/lib/liveKitStatusPresentation.test.ts src/lib/remoteTerminateConfirm.test.ts && bun run test:unit'`.
-4. `./dev bash -c 'cd packages/tddy-web && bunx cypress run --component --spec cypress/component/ConnectionTerminalChrome.cy.tsx,cypress/component/GhosttyTerminalLiveKit.cy.tsx,cypress/component/ConnectionScreen.cy.tsx'`.
+## Commands run
 
-**Not run (this pass):** Full Cypress e2e (`bun run cypress:e2e`), including `app-connect-flow` and other LiveKit-heavy specs; broader component suite beyond the three files above; `cargo test` for workspace packages other than `tddy-coder`.
+| Command | Working directory | Exit status |
+|--------|-------------------|-------------|
+| `/var/tddy/Code/tddy-coder/.worktrees/feature-tui-heartbeat-worktree-cursor-plan-tail/./dev cargo test -p tddy-core -p tddy-tui` | repo root | **0** |
+| `/var/tddy/Code/tddy-coder/.worktrees/feature-tui-heartbeat-worktree-cursor-plan-tail/./dev cargo test -p tddy-coder` | repo root | **0** (optional dependency check) |
 
-## Results
+## Summary
 
-| Suite | Passed | Failed | Skipped | Notes |
-|--------|--------|--------|---------|--------|
-| `cargo test -p tddy-coder` | 65 | 0 | 0 | 20 lib + 9 `cli_args` + 15 `cli_integration` + 2 `cli_recipe` + 1 `daemon_toolcall_poll_regression` + 1 `flow_runner` + 12 `presenter_integration` + 1 `sigint_session_output` + 4 `web_bundle_acceptance`; 0 doc tests |
-| Bun focused (`browserFullscreen`, `liveKitStatusPresentation`, `remoteTerminateConfirm`) | 4 | 0 | — | Single run across 3 files |
-| `bun run test:unit` (tddy-web) | 7 | 0 | — | Includes overlapping lib tests + `connectionChromeStatus.test.ts` |
-| Cypress component (3 specs) | 35 | 1 | 0 | Overall run exit code 1 |
+### Primary scope (`tddy-core` + `tddy-tui`)
 
-**Aggregate (executed):** 65 Rust passes; Bun: 4 in the focused trio, then `test:unit` reported 7 passes (includes the same lib tests plus `connectionChromeStatus`); Cypress **35** of **36** cases passed. **1** Cypress failure overall.
+| Crate / target | Passed | Failed | Ignored | Notes |
+|----------------|--------|--------|---------|--------|
+| `tddy-core` (lib unit tests) | 99 | 0 | 0 | — |
+| `tddy-tui` (lib unit tests) | 99 | 0 | 0 | — |
+| `tddy-tui` integration `tests/error_recovery_apply_event.rs` | 6 | 0 | 0 | — |
+| `tddy-tui` integration `tests/virtual_tui_ctrl_c_kills_child.rs` | 1 | 0 | 0 | — |
+| Doc-tests (`tddy-core`, `tddy-tui`) | 0 each | 0 | 0 | No doc-tests executed |
 
-## Failures
+**Totals (primary):** **205** tests passed, **0** failed, **0** ignored (unit + integration; excludes empty doc-test runs).
 
-| Location | Test / symptom |
-|----------|----------------|
-| `packages/tddy-web/cypress/component/ConnectionScreen.cy.tsx:439` | **ConnectionScreen terminal chrome — status dot menu › cancelling Terminate confirmation does not call SignalSession** — timed out after 10s: expected `[data-testid='connection-menu-disconnect']` to become visible after clicking the status dot. (Failure line is the assertion waiting for the disconnect menu item; root cause is likely menu not opening or timing/stub ordering in this scenario.) |
+### Optional (`tddy-coder`)
 
-No Rust or Bun failures in the commands above.
+| Target | Passed | Failed | Ignored |
+|--------|--------|--------|---------|
+| `tddy-coder` (all test binaries + lib) | **66** | **0** | **0** |
 
-## Coverage Gaps
+Approximate wall time: ~11s for core+tui (after incremental compile); ~104s for `tddy-coder` (cold compile of dependencies including `ratatui`, `livekit`, etc.).
 
-Relative to [evaluation-report.md](./evaluation-report.md) (fullscreen, terminate confirm, LiveKit status visibility, app-connect harness):
+## Failing tests
 
-| Area | Automated coverage this run | Gap |
-|------|----------------------------|-----|
-| **Fullscreen** | `browserFullscreen.test.ts`; CT: `ConnectionTerminalChrome` (control placement); `GhosttyTerminalLiveKit` (requestFullscreen stub enter path) | No CT/e2e asserting vendor-prefixed fullscreen or exit fullscreen in `ConnectionScreen` chrome path |
-| **Terminate confirm** | `remoteTerminateConfirm.test.ts`; `GhosttyTerminalLiveKit` CT (confirm + cancel paths **pass**); `ConnectionScreen` CT cancel path | **ConnectionScreen** integration test for cancel **failed** — end-to-end confidence on that screen is currently broken in CI terms |
-| **LiveKit status strip visibility** | `liveKitStatusPresentation.test.ts`; `GhosttyTerminalLiveKit` CT (“hides visible livekit status text…”) | `ConnectionScreen` flow asserts `livekit-status` not visible when overlay on (passes in other tests); no dedicated e2e here |
-| **`run.rs` / stub auth (`--github-stub-codes`)** | No targeted test in `tddy-coder` asserts non-empty `github_stub_codes` enables stub auth | Evaluation calls out this Rust behavior; **no direct unit/integration test** was observed for that flag parsing path |
-| **App-connect e2e** | Not executed | Evaluation mentions Cypress harness fixes for app-connect; **full e2e suite not run** (may need daemon/LiveKit/storybook serve as per project scripts) |
+None. No failures or ignored tests were reported in the captured output.
 
-## Recommendations
+## Coverage gaps / recommended follow-up tests
 
-1. **Fix or stabilize** `ConnectionScreen.cy.tsx` “cancelling Terminate confirmation…” — align with the passing pattern in the preceding test (e.g. wait for LiveKit/chrome readiness before opening the dot menu, or ensure `confirm` stub is installed before mount if order matters).
-2. **Add a small Rust test** (or extend existing CLI/config tests) that documents and guards “non-empty `--github-stub-codes` implies stub auth mode” if that contract must stay stable.
-3. **Run `bun run cypress:e2e`** (or at least `app-connect-flow.cy.ts`) in CI or before merge when validating the app-connect harness changes.
-4. Keep **GhosttyTerminalLiveKit** CT cases as regression guards for fullscreen + terminate confirm; once ConnectionScreen cancel passes, coverage for terminate-cancel is consistent across chrome variants.
+The following PRD-aligned areas have **some** unit/integration coverage today, but gaps remain for stronger regression safety:
+
+### Heartbeat (idle / activity in status bar)
+
+- **Covered (examples):** `status_bar_activity` heartbeat phase cycling; render checks that idle uses the heartbeat dot (not the running spinner); `prd_virtual_tui_periodic_interval_is_at_least_one_second_in_select_wait`.
+- **Gaps:** End-to-end behavior under a real tick source over multiple wall-clock seconds; interaction between heartbeat redraws and other periodic virtual-TUI output; visual/ordering guarantees if activity flips idle ↔ running rapidly.
+
+### Worktree display (status bar)
+
+- **Covered:** `tddy-core` `worktree_display::format_worktree_for_status_bar_includes_path_marker_segment`; `tddy-tui` `inject_worktree_into_status_line_inserts_display_token`, `status_bar_includes_worktree_path_when_present`.
+- **Gaps:** Very long paths (truncation / ellipsis policy); unusual path segments (spaces, Unicode, symlinks); absence of worktree metadata vs present (ensure no stray separators); consistency between core formatting and TUI injection when both evolve.
+
+### Cursor position (prompt / editing)
+
+- **Covered:** `editing_prompt_cursor_policy_is_visible_for_text_edits`; `editing_prompt_cursor_position_some_for_text_edits`; `prompt_cursor_position_matches_utf8_feature_input`.
+- **Gaps:** Markdown viewer refinement buffer cursor vs feature-input parity; multi-width Unicode (e.g. wide East Asian characters) if the layout uses column counts; edge cases at buffer boundaries after paste-sized inserts.
+
+### Markdown viewer tail / plan approval layout
+
+- **Covered:** Tail layout when scrolled to end; avoiding fixed footer mid-scroll; draw marks at end when at bottom; show/hide approve–reject relative to document tail; refinement hint when reject or focused.
+- **Gaps:** Terminal resize while scrolled near (but not exactly at) the tail; rapid scroll-to-end then immediate refine typing; very small terminal heights with the dynamic menu strip.
+
+### Virtual TUI cursor / frame throttle
+
+- **Covered:** `virtual_tui_cursor_only_frame_min_interval_avoids_flood`; related parse/resize tests; `virtual_tui_still_emits_bytes_while_idle` in render tests.
+- **Gaps:** Burst of interleaved resize + key events vs throttle; ensuring throttling does not drop required final cursor position after input; RPC/virtual path equivalence with local TUI for cursor-heavy sequences (beyond existing Ctrl+C child test).
+
+---
+
+*Generated by validate-tests subagent; output parsed from local `cargo test` runs.*
