@@ -19,8 +19,8 @@ pub use backend::{
     backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,
     default_model_for_agent, get_child_pid, kill_child_process, preselected_index_for_agent,
     set_child_pid, AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend,
-    ClaudeCodeBackend, ClaudeInvokeConfig, CodingBackend, CursorBackend, GoalHints, GoalId,
-    InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionHint,
+    ClaudeCodeBackend, ClaudeInvokeConfig, CodexBackend, CodingBackend, CursorBackend, GoalHints,
+    GoalId, InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionHint,
     PermissionMode, ProcessToolExecutor, QuestionOption, SessionMode, SharedBackend, StubBackend,
     ToolExecutor, WorkflowRecipe,
 };

@@ -2,11 +2,11 @@
 
 **Type**: Technical Product (Developer Tool)
 **Status**: Active
-**Updated**: 2026-03-28
+**Updated**: 2026-03-29
 
 ## Summary
 
-tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Claude Code or Cursor) through a strict workflow: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor → update-docs. It produces structured artifacts (PRD.md, TODO.md, acceptance-tests.md, progress.md, etc.) in a plan directory and maintains workflow state in changeset.yaml. The tool supports both TUI mode (interactive ratatui interface) and plain mode (linear output for piping and scripting).
+tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backend (Claude Code CLI, Claude ACP, Cursor agent, OpenAI Codex CLI, or Stub) through a strict workflow: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor → update-docs. It produces structured artifacts (PRD.md, TODO.md, acceptance-tests.md, progress.md, etc.) in a plan directory and maintains workflow state in changeset.yaml. The tool supports both TUI mode (interactive ratatui interface) and plain mode (linear output for piping and scripting).
 
 ## Target Users
 
@@ -31,7 +31,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 | **gRPC** | `--grpc` exposes bidirectional streaming for programmatic control (E2E tests, automation); `StreamTerminal` streams raw TUI bytes for remote viewing |
 | **LiveKit** | `--livekit-url`, `--livekit-room`, `--livekit-identity` with either `--livekit-token` or `--livekit-api-key`/`--livekit-api-secret`. Key/secret generate tokens locally and auto-refresh before expiry. |
 | **Web Bundle** | `--web-port` and `--web-bundle-path` serve pre-built tddy-web static assets over HTTP (TUI and daemon modes) |
-| **Backend selection** | With `--agent` omitted, users pick the coding backend (Claude, Claude ACP, Cursor, Stub) via TUI `AppMode::Select` or a plain numbered menu. With `--agent` set, selection is skipped. Per-backend default models apply; `--model` overrides. Cursor receives `--model` on `cursor agent` when configured. |
+| **Backend selection** | With `--agent` omitted, users pick the coding backend (Claude, Claude ACP, Cursor, Codex, Stub) via TUI `AppMode::Select` or a plain numbered menu. With `--agent` set, selection is skipped. Per-backend default models apply; `--model` overrides. Cursor receives `--model` on `cursor agent` when configured; Codex receives `-m` on `codex exec` when configured. |
 | **Workflow recipe** | **`--recipe tdd`** (default) runs **`TddRecipe`**; **`--recipe bugfix`** runs **`BugfixRecipe`** (reproduce-first, fix-plan approval before green). Optional YAML **`recipe:`**; **`changeset.yaml`** stores **`recipe`** for resume. |
 
 ## Backend selection at session start
@@ -40,7 +40,8 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 - **TUI**: Synthetic clarification `Select` over backend options; `AppMode::Select` includes `initial_selected` for highlight consistency.
 - **Plain**: Numbered menu on stderr; stdin line picks the backend when `--agent` is omitted.
 - **Daemon / web**: `StartSession` includes `agent`; the daemon passes `--agent` into the spawned `tddy-coder`. The web Connection Screen offers backend per **new session** only (`StartSessionRequest.agent`). The choice is **per session**, not stored on the project record.
-- **Models**: Defaults per backend (e.g. Cursor `composer-2`); global `--model` overrides when provided.
+- **Models**: Defaults per backend (e.g. Cursor `composer-2`, Codex `gpt-5`); global `--model` overrides when provided.
+- **Codex binary**: `--codex-cli-path` or environment variable `TDDY_CODEX_CLI` selects the `codex` executable; otherwise the `codex` name on `PATH` is used.
 
 ## Feature Documents
 
@@ -61,7 +62,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM backend (Cla
 - **tddy-service**: gRPC service, proto definitions, event conversion (renamed from tddy-grpc; contains EchoServiceImpl, TerminalServiceImpl, DaemonService)
 - **tddy-demo**: Same app with StubBackend for demos and E2E tests
 - **tddy-livekit-web**: ConnectRPC Transport over LiveKit data channels for browser clients calling Rust RPC services
-- **Claude Code CLI / Cursor**: LLM backends invoked via subprocess/API
+- **Claude Code CLI / Cursor / Codex**: LLM backends invoked via subprocess; Codex uses `codex exec` JSONL (`--json`)
 
 ## Change History
 

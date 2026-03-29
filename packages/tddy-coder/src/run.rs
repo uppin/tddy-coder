@@ -15,8 +15,8 @@ use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
     output::SESSIONS_SUBDIR, preselected_index_for_agent, read_changeset, read_session_metadata,
-    AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodingBackend, CursorBackend, GoalId,
-    PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend, WorkflowEngine,
+    AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexBackend, CodingBackend, CursorBackend,
+    GoalId, PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend, WorkflowEngine,
     WorkflowRecipe,
 };
 use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response};
@@ -74,7 +74,7 @@ impl tddy_service::TokenProvider for LiveKitTokenProvider {
     }
 }
 
-/// Verify tddy-tools binary is available. Required for claude/cursor agents.
+/// Verify tddy-tools binary is available. Required for claude, cursor, and codex agents.
 /// Skips when agent is stub (uses InMemoryToolExecutor).
 fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
     if agent == "stub" || agent == "claude-acp" {
@@ -304,6 +304,8 @@ pub struct Args {
 
     /// Path to the Cursor `agent` CLI. When set, overrides `TDDY_CURSOR_AGENT` and the default `agent` on `PATH`.
     pub cursor_agent_path: Option<PathBuf>,
+    /// Path to the Codex CLI. When set, overrides `TDDY_CODEX_CLI` and the default `codex` on `PATH`.
+    pub codex_cli_path: Option<PathBuf>,
     /// Workflow recipe name (`tdd` or `bugfix`). `None` means default `tdd` or recipe from changeset on resume.
     pub recipe: Option<String>,
 }
@@ -341,8 +343,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "LEVEL", value_parser = ["off", "error", "warn", "info", "debug", "trace"])]
     pub log_level: Option<String>,
 
-    /// Agent backend: claude, claude-acp, cursor, or stub. Omit to choose interactively at startup.
-    #[arg(long, value_parser = ["claude", "claude-acp", "cursor", "stub"])]
+    /// Agent backend: claude, claude-acp, cursor, codex, or stub. Omit to choose interactively at startup.
+    #[arg(long, value_parser = ["claude", "claude-acp", "cursor", "codex", "stub"])]
     pub agent: Option<String>,
 
     /// Feature description (alternative to stdin). When set, skips interactive/piped input.
@@ -444,6 +446,10 @@ pub struct CoderArgs {
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
     #[arg(long, value_name = "PATH")]
     pub cursor_agent_path: Option<PathBuf>,
+
+    /// Path to the Codex CLI (defaults to `codex` on `PATH`, or `TDDY_CODEX_CLI` if set).
+    #[arg(long, value_name = "PATH", env = "TDDY_CODEX_CLI")]
+    pub codex_cli_path: Option<PathBuf>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -652,6 +658,7 @@ impl From<CoderArgs> for Args {
             mouse: a.mouse,
             project_id: a.project_id,
             cursor_agent_path: a.cursor_agent_path,
+            codex_cli_path: a.codex_cli_path,
             recipe: a.recipe,
         }
     }
@@ -692,6 +699,7 @@ impl From<DemoArgs> for Args {
             mouse: a.mouse,
             project_id: a.project_id,
             cursor_agent_path: None,
+            codex_cli_path: None,
             recipe: a.recipe,
         }
     }
@@ -845,6 +853,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
     let backend = create_backend(
         &resolved_agent,
         args.cursor_agent_path.as_deref(),
+        args.codex_cli_path.as_deref(),
         None,
         None,
     );
@@ -1024,7 +1033,13 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     if args.agent.is_none() {
         verify_tddy_tools_available(agent_str)?;
     }
-    let backend = create_backend(agent_str, args.cursor_agent_path.as_deref(), None, None);
+    let backend = create_backend(
+        agent_str,
+        args.cursor_agent_path.as_deref(),
+        args.codex_cli_path.as_deref(),
+        None,
+        None,
+    );
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
     let livekit_enabled = args.livekit_url.is_some()
@@ -1389,13 +1404,22 @@ fn resolve_cursor_agent_binary(cursor_agent_path: Option<&Path>) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(CursorBackend::DEFAULT_CLI_BINARY))
 }
 
+/// Resolve Codex CLI: `--codex-cli-path` / config, then `TDDY_CODEX_CLI`, then `codex` on `PATH`.
+fn resolve_codex_binary(codex_cli_path: Option<&Path>) -> PathBuf {
+    codex_cli_path
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("TDDY_CODEX_CLI").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from(CodexBackend::DEFAULT_CLI_BINARY))
+}
+
 /// Create backend once at startup (plain mode, no progress events).
 /// StubBackend always uses InMemoryToolExecutor (no tddy-tools): stub simulates the agent,
-/// so it stores results directly. ProcessToolExecutor is for real agents (Claude/Cursor)
+/// so it stores results directly. ProcessToolExecutor is for real agents (Claude/Cursor/Codex)
 /// that run tddy-tools submit.
 fn create_backend(
     agent: &str,
     cursor_agent_path: Option<&Path>,
+    codex_cli_path: Option<&Path>,
     _socket_path: Option<&Path>,
     _working_dir: Option<&Path>,
 ) -> SharedBackend {
@@ -1410,6 +1434,14 @@ fn create_backend(
             AnyBackend::Cursor(CursorBackend::with_path(path).with_progress(on_progress))
         }
         "claude-acp" => AnyBackend::ClaudeAcp(ClaudeAcpBackend::new()),
+        "codex" => {
+            let path = resolve_codex_binary(codex_cli_path);
+            log::info!(
+                "[tddy-coder] Codex backend: CLI binary `{}`",
+                path.display()
+            );
+            AnyBackend::Codex(CodexBackend::with_path(path))
+        }
         "stub" => AnyBackend::Stub(StubBackend::new()),
         _ => AnyBackend::Claude(ClaudeCodeBackend::new().with_progress(on_progress)),
     };
@@ -1671,6 +1703,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         let idx = preselected_index_for_agent("claude");
         let socket_path_for_factory = socket_path.clone();
         let cursor_path_for_factory = args.cursor_agent_path.clone();
+        let codex_path_for_factory = args.codex_cli_path.clone();
         let mut p = presenter.lock().unwrap();
         p.configure_deferred_workflow_start(
             Box::new(move |agent: &str| {
@@ -1678,6 +1711,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 Ok(create_backend(
                     agent,
                     cursor_path_for_factory.as_deref(),
+                    codex_path_for_factory.as_deref(),
                     socket_path_for_factory.as_deref(),
                     None,
                 ))
@@ -1701,6 +1735,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         let backend = create_backend(
             agent,
             args.cursor_agent_path.as_deref(),
+            args.codex_cli_path.as_deref(),
             socket_path.as_deref(),
             None,
         );
@@ -1991,7 +2026,13 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
 
 fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     let agent_str = resolve_agent_for_full_workflow_plain(args)?;
-    let backend = create_backend(&agent_str, args.cursor_agent_path.as_deref(), None, None);
+    let backend = create_backend(
+        &agent_str,
+        args.cursor_agent_path.as_deref(),
+        args.codex_cli_path.as_deref(),
+        None,
+        None,
+    );
 
     let recipe = recipe_arc_for_args(args)?;
     let mut session_dir = args.session_dir.clone().context("session directory")?;
@@ -2392,6 +2433,7 @@ mod resume_session_config_tests {
             mouse: false,
             project_id: None,
             cursor_agent_path: None,
+            codex_cli_path: None,
             recipe: None,
         };
 
@@ -2449,6 +2491,7 @@ mod resume_session_identity_tests {
             mouse: false,
             project_id: None,
             cursor_agent_path: None,
+            codex_cli_path: None,
             recipe: None,
         };
 
@@ -2509,6 +2552,7 @@ mod session_dir_sync_tests {
             mouse: false,
             project_id: None,
             cursor_agent_path: None,
+            codex_cli_path: None,
             recipe: None,
         };
 
@@ -2583,6 +2627,7 @@ mod changeset_agent_resume_tests {
             mouse: false,
             project_id: None,
             cursor_agent_path: None,
+            codex_cli_path: None,
             recipe: None,
         };
 

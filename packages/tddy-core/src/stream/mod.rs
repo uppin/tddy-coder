@@ -1,6 +1,7 @@
 //! NDJSON stream parsing for agent CLIs (Claude, Cursor) --output-format=stream-json.
 
 pub mod claude;
+pub mod codex;
 pub mod cursor;
 
 pub use claude::process_ndjson_stream;
