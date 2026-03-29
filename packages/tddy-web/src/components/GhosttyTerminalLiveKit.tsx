@@ -7,6 +7,7 @@ import {
   TerminalInputSchema,
 } from "tddy-livekit-web";
 import { create } from "@bufbuild/protobuf";
+import { shouldShowVisibleLiveKitStatusStrip } from "../lib/liveKitStatusPresentation";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 
@@ -72,6 +73,8 @@ export interface GhosttyTerminalLiveKitProps {
   showMobileKeyboard?: boolean;
   /** LiveKit identity of the server participant to target for RPC. Required when connecting to daemon sessions. */
   serverIdentity?: string;
+  /** When set, fullscreen targets this node (e.g. fixed `connected-terminal-container`); otherwise the terminal flex root inside this component. */
+  fullscreenTargetRef?: React.RefObject<HTMLElement | null>;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -89,11 +92,14 @@ export function GhosttyTerminalLiveKit({
   showMobileKeyboard = false,
   serverIdentity = "server",
   connectionOverlay,
+  fullscreenTargetRef: fullscreenTargetRefProp,
 }: GhosttyTerminalLiveKitProps) {
   const log = debugLogging
     ? (...args: unknown[]) => console.log("[GhosttyLiveKit]", ...args)
     : () => {};
   const termRef = useRef<GhosttyTerminalHandle>(null);
+  const internalFullscreenTargetRef = useRef<HTMLDivElement>(null);
+  const fullscreenTargetRef = fullscreenTargetRefProp ?? internalFullscreenTargetRef;
   const inputQueueRef = useRef<Uint8Array[]>([]);
   const outputBufferRef = useRef<Uint8Array[]>([]);
   const streamedTextRef = useRef("");
@@ -438,13 +444,24 @@ export function GhosttyTerminalLiveKit({
     input.value = "";
   };
 
+  const showLiveKitStatusStrip = shouldShowVisibleLiveKitStatusStrip({
+    connectionOverlayEnabled: !!connectionOverlay,
+    status,
+  });
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div data-testid="livekit-status">{status}</div>
+      {connectionOverlay && !showLiveKitStatusStrip ? (
+        <div data-testid="livekit-status" hidden aria-hidden="true">
+          {status}
+        </div>
+      ) : (
+        <div data-testid="livekit-status">{status}</div>
+      )}
       {status === "error" && (
         <div data-testid="livekit-error">{errorMsg}</div>
       )}
-      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+      <div ref={internalFullscreenTargetRef} style={{ flex: 1, minHeight: 0, position: "relative" }}>
         {!coderSessionActive && (
           <div
             data-testid="terminal-coder-unavailable"
@@ -511,6 +528,7 @@ export function GhosttyTerminalLiveKit({
             buildId={connectionOverlay.buildId}
             onDisconnect={connectionOverlay.onDisconnect}
             onTerminate={connectionOverlay.onTerminate}
+            fullscreenTargetRef={fullscreenTargetRef}
             onStopInterrupt={() => {
               enqueueTerminalInput(new Uint8Array([0x03]));
             }}

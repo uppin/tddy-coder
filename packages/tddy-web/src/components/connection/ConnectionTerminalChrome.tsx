@@ -1,5 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
+import {
+  exitDocumentFullscreen,
+  isTargetInActiveFullscreen,
+  requestFullscreenForConnectedTerminal,
+} from "../../lib/browserFullscreen";
+import { confirmRemoteSessionTermination } from "../../lib/remoteTerminateConfirm";
 import { dataConnectionStatusValue } from "./connectionChromeStatus";
+
+const TERMINATE_CONFIRM_COPY =
+  "This will stop the remote session and end the process on the host. Continue?";
 
 const CHROME_BTN: React.CSSProperties = {
   position: "absolute",
@@ -40,6 +49,8 @@ export interface ConnectionTerminalChromeProps {
   onTerminate?: () => void;
   /** Same path as legacy Ctrl+C — parent binds enqueue of 0x03. */
   onStopInterrupt: () => void;
+  /** Element to pass to the Fullscreen API (connected terminal subtree). */
+  fullscreenTargetRef?: React.RefObject<HTMLElement | null>;
 }
 
 /**
@@ -51,10 +62,30 @@ export function ConnectionTerminalChrome({
   onDisconnect,
   onTerminate,
   onStopInterrupt,
+  fullscreenTargetRef,
 }: ConnectionTerminalChromeProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [fullscreenActive, setFullscreenActive] = useState(false);
+  const internalFullscreenTargetRef = useRef<HTMLDivElement>(null);
+  const resolvedFullscreenTargetRef = fullscreenTargetRef ?? internalFullscreenTargetRef;
   const dotRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const sync = () => {
+      const target = resolvedFullscreenTargetRef.current ?? null;
+      const active = isTargetInActiveFullscreen(target);
+      console.debug("[tddy][ConnectionTerminalChrome] fullscreenchange", { active, hasTarget: target !== null });
+      setFullscreenActive(active);
+    };
+    sync();
+    document.addEventListener("fullscreenchange", sync);
+    document.addEventListener("webkitfullscreenchange", sync as EventListener);
+    return () => {
+      document.removeEventListener("fullscreenchange", sync);
+      document.removeEventListener("webkitfullscreenchange", sync as EventListener);
+    };
+  }, [resolvedFullscreenTargetRef]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -88,7 +119,29 @@ export function ConnectionTerminalChrome({
 
   const handleTerminateClick = () => {
     setMenuOpen(false);
-    onTerminate?.();
+    if (!onTerminate) return;
+    console.debug("[tddy][ConnectionTerminalChrome] Terminate menu action");
+    if (!confirmRemoteSessionTermination(TERMINATE_CONFIRM_COPY)) {
+      console.info("[tddy][ConnectionTerminalChrome] Terminate cancelled by user");
+      return;
+    }
+    console.info("[tddy][ConnectionTerminalChrome] Terminate confirmed, invoking onTerminate");
+    onTerminate();
+  };
+
+  const handleFullscreenClick = (ev: React.MouseEvent) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const target = resolvedFullscreenTargetRef.current ?? null;
+    console.info("[tddy][ConnectionTerminalChrome] fullscreen button", {
+      fullscreenActive,
+      hasTarget: target !== null,
+    });
+    if (fullscreenActive) {
+      void exitDocumentFullscreen();
+      return;
+    }
+    void requestFullscreenForConnectedTerminal(target);
   };
 
   const handleStopClick = (ev: React.MouseEvent) => {
@@ -101,6 +154,19 @@ export function ConnectionTerminalChrome({
 
   return (
     <>
+      {!fullscreenTargetRef ? (
+        <div
+          ref={internalFullscreenTargetRef}
+          data-testid="connection-chrome-fullscreen-fallback-target"
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 0,
+            pointerEvents: "none",
+          }}
+          aria-hidden
+        />
+      ) : null}
       <style>
         {`
           @keyframes tddy-dot-pulse {
@@ -157,7 +223,7 @@ export function ConnectionTerminalChrome({
         aria-expanded={menuOpen}
         aria-haspopup="menu"
         aria-controls="connection-terminal-chrome-menu"
-        style={{ ...CHROME_BTN, top: 8, right: 8, left: "auto", minWidth: 44, minHeight: 44 }}
+        style={{ ...CHROME_BTN, top: 8, right: 60, left: "auto", minWidth: 44, minHeight: 44 }}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -165,6 +231,15 @@ export function ConnectionTerminalChrome({
         }}
       >
         <span className={dotClassForStatus(overlayStatus)} aria-hidden />
+      </button>
+      <button
+        type="button"
+        data-testid="terminal-fullscreen-button"
+        aria-label={fullscreenActive ? "Exit fullscreen" : "Enter fullscreen"}
+        style={{ ...CHROME_BTN, top: 8, right: 8, left: "auto", minWidth: 44, minHeight: 44 }}
+        onClick={handleFullscreenClick}
+      >
+        <span aria-hidden>⛶</span>
       </button>
       {menuOpen && (
         <div

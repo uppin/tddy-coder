@@ -62,9 +62,10 @@ describe("Ghostty Selection Persistence", () => {
     cy.visit(storyUrl);
 
     // Wait for LiveKit connection
-    cy.get("[data-testid='livekit-status']", { timeout: 15000 })
-      .should("exist")
-      .and("have.text", "connected");
+    cy.get("[data-testid='connection-status-dot']", { timeout: 15000 })
+      .should("be.visible")
+      .and("have.attr", "data-connection-status", "connected");
+    cy.get("[data-testid='livekit-status']").should("not.be.visible");
 
     cy.get("[data-testid='ghostty-terminal']", { timeout: 5000 }).should(
       "exist"

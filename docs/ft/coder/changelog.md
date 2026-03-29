@@ -11,6 +11,12 @@ Release note history for the Coder product area.
 - **Tests**: Unit tests in `tddy-core`; stub-based integration tests in `tddy-integration-tests` (`codex_backend`); CLI acceptance for `--agent codex`.
 - **Docs**: Feature overview and planning/implementation references; cross-package index `docs/dev/changesets.md`; technical reference `docs/dev/1-WIP/2026-03-29-codex-cli-backend.md` for package documentation wrap workflow.
 
+## 2026-03-29 — Web daemon: stub OAuth when stub codes are set
+
+- **`tddy-coder`**: **`build_auth_service_entry`** treats non-empty **`--github-stub-codes`** (after trim) as stub auth mode alongside **`--github-stub`**, wiring **`StubGitHubProvider`** and optional code→user mappings for automated browser sign-in (e.g. Cypress **`app-connect`** flows).
+- **Operational note**: Production-style launches must omit stray **`--github-stub-codes`** values unless stub authentication is deliberate.
+- **Feature / cross-package**: [web-terminal.md](../web/web-terminal.md) (connection flows); [web changelog](../web/changelog.md) **2026-03-29**.
+
 ## 2026-03-28 — Workflow goal conditions and session context
 
 - **Engine**: Workflow transitions evaluate declarative **`goal_conditions`** against **`Context`**. **`Context::merge_json_object_sync`** applies session JSON so predicates see the same keys as the persisted session file.

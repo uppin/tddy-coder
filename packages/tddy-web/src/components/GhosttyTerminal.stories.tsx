@@ -79,6 +79,9 @@ function LiveKitConnectedStory(args: {
       showBufferTextForTest={showBufferTextForTest}
       debugMode={debugMode}
       debugLogging={debugLogging}
+      connectionOverlay={{
+        onDisconnect: () => {},
+      }}
     />
   );
 }

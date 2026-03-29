@@ -50,9 +50,10 @@ describe("Ghostty Resize No Duplicate", () => {
     const storyUrl = `/iframe.html?id=components-ghosttyterminal--live-kit-connected&url=${encodeURIComponent(serverUrl)}&token=${encodeURIComponent(clientToken)}&roomName=${encodeURIComponent(roomName)}`;
     cy.visit(storyUrl);
 
-    cy.get("[data-testid='livekit-status']", { timeout: 15000 })
-      .should("exist")
-      .and("have.text", "connected");
+    cy.get("[data-testid='connection-status-dot']", { timeout: 15000 })
+      .should("be.visible")
+      .and("have.attr", "data-connection-status", "connected");
+    cy.get("[data-testid='livekit-status']").should("not.be.visible");
 
     cy.get("[data-testid='ghostty-terminal']", { timeout: 5000 }).should("exist");
 

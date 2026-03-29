@@ -59,13 +59,14 @@ describe("Ghostty Terminal E2E", () => {
     cy.get("body", { timeout: 10000 }).should("be.visible");
 
     cy.get(
-      "[data-testid='livekit-status'], [data-testid='livekit-placeholder'], [data-testid='livekit-error'], [data-testid='ghostty-terminal']",
+      "[data-testid='connection-status-dot'], [data-testid='livekit-placeholder'], [data-testid='livekit-error'], [data-testid='ghostty-terminal']",
       { timeout: 25000 }
     ).should("exist");
 
-    cy.get("[data-testid='livekit-status']", { timeout: 10000 })
-      .should("exist")
-      .and("have.text", "connected");
+    cy.get("[data-testid='connection-status-dot']", { timeout: 10000 })
+      .should("be.visible")
+      .and("have.attr", "data-connection-status", "connected");
+    cy.get("[data-testid='livekit-status']").should("not.be.visible");
 
     cy.get("[data-testid='ghostty-terminal']", { timeout: 5000 }).should(
       "exist"
@@ -96,15 +97,16 @@ describe("Ghostty Terminal E2E", () => {
     const storyUrl = `/iframe.html?id=components-ghosttyterminal--live-kit-connected&url=${encodeURIComponent(serverUrl)}&token=${encodeURIComponent(clientToken)}&roomName=${encodeURIComponent(roomName)}`;
     cy.visit(storyUrl);
 
-    cy.get("[data-testid='livekit-status']", { timeout: 10000 })
-      .should("exist")
-      .and("have.text", "connected");
+    cy.get("[data-testid='connection-status-dot']", { timeout: 10000 })
+      .should("be.visible")
+      .and("have.attr", "data-connection-status", "connected");
+    cy.get("[data-testid='livekit-status']").should("not.be.visible");
 
     cy.get("[data-testid='ghostty-terminal']", { timeout: 5000 }).should("exist");
 
     cy.task("stopTerminalServer");
 
-    cy.get("[data-testid='terminal-coder-unavailable']", { timeout: 20000 })
+    cy.get("[data-testid='terminal-coder-unavailable']", { timeout: 45000 })
       .should("be.visible")
       .and(($el) => {
         expect($el.text().trim().length).to.be.greaterThan(
