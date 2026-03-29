@@ -1,30 +1,31 @@
 # Workflow recipes (pluggable workflows)
 
 **Product area:** Coder  
-**Updated:** 2026-03-28
+**Updated:** 2026-03-29
 
 ## Summary
 
 Workflow behavior is defined by **recipes** in the **`tddy-workflow-recipes`** crate. **`tddy-core`** implements a recipe-agnostic engine (`WorkflowRecipe`, `WorkflowEngine`, graph execution, `CodingBackend`). Goals, states, transitions, hooks, backend hints, and permissions are **recipe-provided strings and metadata**, not a fixed enum in core.
 
-The shipped recipes are **`TddRecipe`** (default) and **`BugfixRecipe`**. Recipe selection uses a single resolution path in **`tddy-workflow-recipes::recipe_resolve`**: `workflow_recipe_and_manifest_from_cli_name` and `resolve_workflow_recipe_from_cli_name` return the active `WorkflowRecipe` (and, where needed, the paired **`SessionArtifactManifest`** on the same concrete type).
+The shipped recipes are **`TddRecipe`** (default), **`BugfixRecipe`**, and **`FreePromptingRecipe`**. Recipe selection uses a single resolution path in **`tddy-workflow-recipes::recipe_resolve`**: `workflow_recipe_and_manifest_from_cli_name` and `resolve_workflow_recipe_from_cli_name` return the active `WorkflowRecipe` (and, where needed, the paired **`SessionArtifactManifest`** on the same concrete type).
 
 ## Selecting a recipe
 
 | Surface | Mechanism |
 |---------|-----------|
-| **tddy-coder** | `--recipe tdd` or `--recipe bugfix`; optional YAML `recipe:` (CLI overrides). |
-| **changeset.yaml** | Optional `recipe:` records the workflow for resume and session lists; empty or absent values behave like **`tdd`**. |
+| **tddy-coder** | `--recipe tdd`, `--recipe bugfix`, or `--recipe free-prompting`; optional YAML `recipe:` (CLI overrides). |
+| **changeset.yaml** | Optional `recipe:` records the workflow for resume and session lists; empty or absent values behave like **`tdd`**. Initial session creation (presenter bootstrap and matching CLI paths) persists **`recipe`** on the written **`changeset.yaml`** so resume and tooling read the same recipe name as **`StartSession`**. |
 | **tddy-daemon** | Spawns **`tddy-coder`** with `--recipe` when set; **`ConnectionService` `StartSessionRequest`** and **`TddyRemote` `StartSession`** carry a **`recipe`** string. |
-| **tddy-web** | **ConnectionScreen** exposes a **Workflow recipe** control (TDD vs Bugfix) per **Start New Session**; the value is sent on **`StartSession`**. |
+| **tddy-web** | **ConnectionScreen** exposes a **Workflow recipe** control (**TDD**, **Bugfix**, **Free prompting**) per **Start New Session**; the value is sent on **`StartSession`**. |
 
-Allowed names are **`tdd`** and **`bugfix`** (aligned with **`WorkflowRecipe::name()`**). Invalid names fail on the CLI with a clear error; daemon streams report failure via **`WorkflowComplete`** with a descriptive message.
+Allowed names are **`tdd`**, **`bugfix`**, and **`free-prompting`** (aligned with **`WorkflowRecipe::name()`**). Invalid names fail on the CLI with a clear error; daemon streams report failure via **`WorkflowComplete`** with a descriptive message that lists supported names.
 
 ## TddRecipe
 
 - **Start goal:** **`plan`**
 - **Pipeline:** plan → acceptance-tests → red → green → demo → evaluate → validate → refactor → update-docs (full TDD graph).
 - **Primary session document:** **`prd`** → **`PRD.md`** under the session artifact layout (see **`SessionArtifactManifest`**).
+- **Session document approval:** Hook-driven **`ElicitationEvent::DocumentApproval`** after the plan task when **`WorkflowRecipe::uses_primary_session_document`** is **`true`** and the primary document is readable; the presenter and plain CLI use the same recipe-driven gate.
 
 ## BugfixRecipe
 
@@ -32,6 +33,14 @@ Allowed names are **`tdd`** and **`bugfix`** (aligned with **`WorkflowRecipe::na
 - **Pipeline:** reproduce → green (focused bugfix graph); human approval gates the session document before implementation work that matches **green** / fix semantics.
 - **Primary session document:** fix-plan style content (e.g. **`fix-plan.md`**); **`BugfixRecipe::uses_primary_session_document`** is **`true`** so preview / approve / reject / refine flows apply before **green**.
 - **Product alignment:** The workflow follows the same discipline as **reproduce-then-fix** and **focused test repair** workflows (deterministic reproduction, small verification loops).
+
+## FreePromptingRecipe
+
+- **CLI / recipe name:** **`free-prompting`** (**`WorkflowRecipe::name()`**).
+- **Start goal:** **`prompting`**; **initial workflow state string:** **`Prompting`**.
+- **Pipeline:** A single primary loop (**`prompting`** echo task → end); no multi-goal TDD pipeline unless extended later.
+- **Primary session document:** None in the manifest sense used for PRD-style approval; **`FreePromptingRecipe::uses_primary_session_document`** is **`false`**, so the primary-document approval gate for plan/fix-plan style review does not apply for this recipe.
+- **Policy helpers:** **`tddy_workflow_recipes::approval_policy`** exposes **`supported_workflow_recipe_cli_names`** and **`recipe_should_skip_session_document_approval`** for tests and tooling that document which CLI names participate in resolver errors and which recipes skip session-document approval in policy tables.
 
 ## Key types
 
@@ -41,19 +50,21 @@ Allowed names are **`tdd`** and **`bugfix`** (aligned with **`WorkflowRecipe::na
 | **`WorkflowRecipe`** | Trait: graph, hooks, state machine helpers, permissions, artifacts, backend hints (`GoalHints` / `PermissionHint`). |
 | **`TddRecipe`** | Full TDD workflow graph, `TddWorkflowHooks`, parsers, plan task wiring. |
 | **`BugfixRecipe`** | Bugfix workflow graph, hooks, and artifact manifest for reproduce / fix-plan / green. |
+| **`FreePromptingRecipe`** | Minimal graph and hooks for the **Prompting** loop without TDD gates. |
+| **`approval_policy`** | Supported CLI name list and skip rules aligned with **`recipe_resolve`** and acceptance tests. |
 | **`recipe_resolve`** | **`workflow_recipe_and_manifest_from_cli_name`**, **`resolve_workflow_recipe_from_cli_name`**, **`unknown_workflow_recipe_error`**, **`WorkflowRecipeAndManifest`**. |
 
 ## CLI and services
 
 - **`--goal`** accepted values come from the active recipe’s declared goals (no hard-coded enum in the CLI).
-- **gRPC / daemon** use string goals and states; **`DaemonService`** loads **`TddRecipe`** or **`BugfixRecipe`** via **`workflow_recipe_and_manifest_from_cli_name`** when handling **`StartSession`**.
+- **gRPC / daemon** use string goals and states; **`DaemonService`** loads the selected recipe via **`workflow_recipe_and_manifest_from_cli_name`** when handling **`StartSession`** (including **`free-prompting`** when requested).
 
 ## Packages
 
 | Package | Responsibility |
 |---------|----------------|
 | **`tddy-core`** | `WorkflowRecipe` trait, `WorkflowEngine` parameterized by `Arc<dyn WorkflowRecipe>`, session storage, backends, presenter integration. |
-| **`tddy-workflow-recipes`** | Concrete recipes, **`recipe_resolve`**, hooks, parsers, and backend hints per recipe. |
+| **`tddy-workflow-recipes`** | Concrete recipes, **`recipe_resolve`**, **`approval_policy`**, hooks, parsers, and backend hints per recipe. |
 | **`tddy-coder`**, **`tddy-service`**, **`tddy-daemon`**, **`tddy-demo`** | Resolve the active recipe from CLI, config, changeset, or RPC; default **`tdd`** when unspecified. |
 
 ## Structured output contracts
@@ -62,15 +73,15 @@ JSON Schemas for workflow goals (`plan`, `red`, `green`, etc.) live in **`tddy-w
 
 ## Session artifacts and primary planning documents
 
-**Goal IDs** (e.g. `"plan"`, `"reproduce"`) stay stable as wire/API identifiers. **Filenames and on-disk layout** for the primary planning document and related artifacts are defined by each recipe’s manifest (**`SessionArtifactManifest`**, `default_artifacts` / `known_artifacts`), not by fixed defaults inside **`tddy-core`**.
+**Goal IDs** (e.g. `"plan"`, `"reproduce"`, `"prompting"`) stay stable as wire/API identifiers. **Filenames and on-disk layout** for the primary planning document and related artifacts are defined by each recipe’s manifest (**`SessionArtifactManifest`**, `default_artifacts` / `known_artifacts`), not by fixed defaults inside **`tddy-core`**.
 
 - **`tddy-core`** exposes **`WorkflowRecipe::uses_primary_session_document`** and **`read_primary_session_document_utf8`** for approval gates, plain CLI, and daemon flows.
 - **`tddy-workflow`** provides **`artifact_paths`** helpers (`session_dir/artifacts/`, legacy `sessions/<uuid>/` layouts, resolution order).
-- **TDD** uses **`prd` → `PRD.md`** in its manifest; **Bugfix** uses **`fix_plan` / `fix-plan.md`** for the primary session document.
+- **TDD** uses **`prd` → `PRD.md`** in its manifest; **Bugfix** uses **`fix_plan` / `fix-plan.md`** for the primary session document; **Free prompting** does not define a primary planning basename for that approval path.
 
 Custom recipes **declare** artifact keys in manifest; there is no silent core fallback string for the primary planning basename.
 
-## Developer reference (TDD vs Bugfix)
+## Developer reference (shipped recipes)
 
 This section records how the shipped recipes map to the same product philosophy as the repo’s Cursor-oriented commands.
 
@@ -86,6 +97,12 @@ This section records how the shipped recipes map to the same product philosophy 
 - **Artifacts:** Primary session document is a **fix plan** (e.g. **`fix-plan.md`** under the session artifact layout), not only PRD semantics.
 - **Spirit:** Maps to the ideas behind **`.cursor/commands/reproduce.md`** (reproduction discipline) and **`.cursor/commands/fix-tests.md`** (focused diagnosis and fix, small verification loops).
 - **Gate:** After reproduce, the user **previews** the session document and **approves or rejects** before **green** / fix implementation runs (same approval machinery as plan review where applicable).
+
+### Free prompting (`free-prompting`)
+
+- **Start goal:** **`prompting`** — open-ended agent turns without the TDD multi-goal pipeline.
+- **Artifacts:** No PRD-style primary session document on the approval path; session document approval for that mechanism is skipped via **`uses_primary_session_document`** **`false`**.
+- **Spirit:** Unconstrained iteration when the product does not require plan/PRD or fix-plan gates.
 
 ### Tests
 
