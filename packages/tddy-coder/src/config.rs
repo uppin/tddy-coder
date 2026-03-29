@@ -33,6 +33,9 @@ pub struct Config {
     /// Path to the Cursor `agent` CLI (overrides `TDDY_CURSOR_AGENT` and default `agent` on `PATH`).
     #[serde(default)]
     pub cursor_agent_path: Option<PathBuf>,
+    /// Path to the Codex CLI (overrides `TDDY_CODEX_CLI` and default `codex` on `PATH`).
+    #[serde(default)]
+    pub codex_cli_path: Option<PathBuf>,
     #[serde(default)]
     pub prompt: Option<String>,
     #[serde(default)]
@@ -140,6 +143,9 @@ pub fn merge_config_into_args(args: &mut Args, config: Config) {
     }
     if args.cursor_agent_path.is_none() {
         args.cursor_agent_path = config.cursor_agent_path;
+    }
+    if args.codex_cli_path.is_none() {
+        args.codex_cli_path = config.codex_cli_path;
     }
     if args.prompt.is_none() {
         args.prompt = config.prompt;
@@ -308,6 +314,7 @@ github:
             mouse: false,
             project_id: None,
             cursor_agent_path: None,
+            codex_cli_path: None,
             recipe: Some("tdd".to_string()),
         };
         merge_config_into_args(&mut args, config);
@@ -350,6 +357,7 @@ github:
             mouse: false,
             project_id: None,
             cursor_agent_path: None,
+            codex_cli_path: None,
             recipe: None,
         };
         merge_config_into_args(&mut args, config);
@@ -455,6 +463,7 @@ log:
             mouse: false,
             project_id: None,
             cursor_agent_path: None,
+            codex_cli_path: None,
             recipe: None,
         };
         merge_config_into_args(&mut args, config);

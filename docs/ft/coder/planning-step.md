@@ -2,11 +2,11 @@
 
 **Product Area**: Coder
 **Status**: Draft
-**Updated**: 2026-03-07
+**Updated**: 2026-03-29
 
 ## Summary
 
-The Planning Step is the first phase of the tddy-coder workflow. When `--goal` is omitted, tddy-coder runs the full workflow (plan → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs) in a single invocation, with auto-resume from `changeset.yaml` state. When a specific goal is given, it executes that step only. The **plan** goal accepts a user's goal description via stdin or `--prompt`, invokes an LLM backend (Claude or Cursor per `--agent`) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, creates a fresh session (no plan resume), creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
+The Planning Step is the first phase of the tddy-coder workflow. When `--goal` is omitted, tddy-coder runs the full workflow (plan → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs) in a single invocation, with auto-resume from `changeset.yaml` state. When a specific goal is given, it executes that step only. The **plan** goal accepts a user's goal description via stdin or `--prompt`, invokes the selected LLM backend (`--agent`: claude, claude-acp, cursor, codex, or stub) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, creates a fresh session (no plan resume), creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
 
 ## Background
 
@@ -29,7 +29,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 9. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
 10. Accepts `--conversation-output <path>` to log the entire agent conversation in raw bytes to a file (Updated: 2026-03-07)
 11. Accepts `--log-level <level>` to override default log level (e.g. `--log-level debug`)
-12. Accepts `--agent <name>` to select backend: `claude` (default) or `cursor`
+12. Accepts `--agent <name>` to select backend: `claude` (default), `claude-acp`, `cursor`, `codex`, or `stub`
 13. Reads the feature description from stdin (supports piped input and interactive prompt), or from `--prompt <text>` when provided
 14. **TUI mode**: When both stdin and stderr are TTY, runs full TUI (activity log, inbox when Running, status bar, prompt bar). Agent output is always visible. During Running mode, users can queue prompts in the inbox; queued items are displayed, navigable (Up/Down), editable (E), and deletable (D); on workflow completion with non-empty inbox the first item is auto-dequeued and sent; when inbox is empty, mode transitions to FeatureInput so the user can start a new workflow without restarting. Piped/non-TTY uses plain linear output.
 15. *Deferred*: `--list-models` to list available models (not needed for current scope)
@@ -37,7 +37,7 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 ### Planning Workflow (Updated: 2026-03-07)
 
 1. Read feature description from `--prompt` (if set) or stdin (piped or interactive)
-2. Invoke the selected backend (Claude or Cursor) in plan mode to analyze the feature description
+2. Invoke the selected backend in plan mode to analyze the feature description
 3. **Q&A phase**: The agent may ask clarifying questions; the user is expected to answer them. The system must support this interactive exchange (Claude asks → user answers → Claude continues analysis).
 4. Create output directory: `$HOME/.tddy/sessions/{uuid}/`
 5. Structured output is received via `tddy-tools submit` (Unix socket IPC). Parser deserializes JSON into PRD, TODO, discovery, and demo plan artifacts.
@@ -78,7 +78,7 @@ The approval gate applies to both the initial plan and plan resume/completion sc
 ### LLM Backend Abstraction (Updated: 2026-03-07)
 
 1. The system defines a Rust trait (`CodingBackend`) for LLM interactions
-2. Supported backends: Claude Code CLI and Cursor agent. Use `--agent claude` (default) or `--agent cursor` to select
+2. Supported backends: Claude Code CLI, Claude ACP, Cursor agent, OpenAI Codex CLI (`codex exec --json`), and Stub. Use `--agent` with `claude` (default), `claude-acp`, `cursor`, `codex`, or `stub` to select
 3. The trait supports: invoking the LLM, passing prompts, receiving structured output
 4. Backends support **model selection** (pass model name to the underlying CLI/API)
 5. Tests use a mock implementation that allows test-controlled responses and behavior
