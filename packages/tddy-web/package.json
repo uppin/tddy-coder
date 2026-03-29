@@ -17,7 +17,8 @@
     "cypress:e2e:spec": "bun run build-storybook && start-server-and-test 'npx http-server storybook-static -p 9786 -c-1 --cors' http://localhost:9786/iframe.html 'ELECTRON_EXTRA_LAUNCH_ARGS=\"--disable-gpu --no-sandbox\" CYPRESS_BASE_URL=http://localhost:9786 cypress run --e2e --spec \"${CYPRESS_SPEC:-cypress/e2e/ghostty-terminal.cy.ts}\"'",
     "cypress:e2e:connect": "bun run build && cypress run --e2e --spec cypress/e2e/app-connect-flow.cy.ts",
     "cypress:e2e:auth": "bun run build && node cypress/scripts/run-auth-e2e.mjs",
-    "cypress:serve": "bun run build-storybook && ./run-cypress-serve.sh"
+    "cypress:serve": "bun run build-storybook && ./run-cypress-serve.sh",
+    "playwright:concurrent": "npx playwright test --config playwright.config.ts"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.2.0",
@@ -39,6 +40,7 @@
   "devDependencies": {
     "@bufbuild/buf": "^1.50.0",
     "@bufbuild/protoc-gen-es": "^2.2.0",
+    "@playwright/test": "^1.58.2",
     "@storybook/addon-docs": "^9.0.0",
     "@storybook/react": "^9.0.0",
     "@storybook/react-vite": "^9.0.0",
