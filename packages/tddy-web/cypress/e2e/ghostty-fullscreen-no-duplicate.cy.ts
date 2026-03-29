@@ -12,7 +12,7 @@
  * 1. Connects to tddy-demo via LiveKit (same as ghostty-selection-persistence)
  * 2. Waits for the scope Select question to appear
  * 3. Waits for periodic re-renders to stream multiple frames
- * 4. Asserts the status bar ("Goal: plan") appears only once in the buffer
+ * 4. Asserts the status bar (`Goal:`) appears only once in the buffer (no duplicate panes)
  *
  * Requires: LIVEKIT_TESTKIT_WS_URL, tddy-demo built
  */
@@ -46,9 +46,10 @@ describe("Ghostty Fullscreen No Duplicate", () => {
     const storyUrl = `/iframe.html?id=components-ghosttyterminal--live-kit-connected&url=${encodeURIComponent(serverUrl)}&token=${encodeURIComponent(clientToken)}&roomName=${encodeURIComponent(roomName)}`;
     cy.visit(storyUrl);
 
-    cy.get("[data-testid='livekit-status']", { timeout: 15000 })
-      .should("exist")
-      .and("have.text", "connected");
+    cy.get("[data-testid='connection-status-dot']", { timeout: 15000 })
+      .should("be.visible")
+      .and("have.attr", "data-connection-status", "connected");
+    cy.get("[data-testid='livekit-status']").should("not.be.visible");
 
     cy.get("[data-testid='ghostty-terminal']", { timeout: 5000 }).should("exist");
 
@@ -65,7 +66,9 @@ describe("Ghostty Fullscreen No Duplicate", () => {
 
     cy.get("[data-testid='terminal-buffer-text']").should(($el) => {
       const text = $el.text();
-      const matches = text.match(/Goal: plan\s*\|/g);
+      // TUI status line always contains `Goal:` (see tddy-tui format_status_bar). Duplicate panes
+      // duplicate the whole bar, so counting `Goal:` catches the regression.
+      const matches = text.match(/Goal:/g);
       expect(
         matches?.length ?? 0,
         "status bar should appear only once (no duplicate panes from scrollback)"

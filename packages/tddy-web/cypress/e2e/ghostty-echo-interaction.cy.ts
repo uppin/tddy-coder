@@ -69,13 +69,14 @@ describe("Ghostty Echo Interaction", () => {
     cy.get("body", { timeout: 10000 }).should("be.visible");
 
     cy.get(
-      "[data-testid='livekit-status'], [data-testid='livekit-placeholder'], [data-testid='livekit-error'], [data-testid='ghostty-terminal']",
+      "[data-testid='connection-status-dot'], [data-testid='livekit-placeholder'], [data-testid='livekit-error'], [data-testid='ghostty-terminal']",
       { timeout: 25000 }
     ).should("exist");
 
-    cy.get("[data-testid='livekit-status']", { timeout: 10000 })
-      .should("exist")
-      .and("have.text", "connected");
+    cy.get("[data-testid='connection-status-dot']", { timeout: 10000 })
+      .should("be.visible")
+      .and("have.attr", "data-connection-status", "connected");
+    cy.get("[data-testid='livekit-status']").should("not.be.visible");
 
     cy.then(() => {
       if (debugLogs.length > 0) {

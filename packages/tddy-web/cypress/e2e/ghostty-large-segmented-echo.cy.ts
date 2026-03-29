@@ -107,9 +107,10 @@ describe("Ghostty large segmented echo (LiveKit + echo_terminal)", () => {
 
     cy.get("body", { timeout: 10000 }).should("be.visible");
 
-    cy.get("[data-testid='livekit-status']", { timeout: 25000 })
-      .should("exist")
-      .and("have.text", "connected");
+    cy.get("[data-testid='connection-status-dot']", { timeout: 25000 })
+      .should("be.visible")
+      .and("have.attr", "data-connection-status", "connected");
+    cy.get("[data-testid='livekit-status']").should("not.be.visible");
 
     cy.get("[data-testid='first-output-received']", { timeout: 15000 }).should(
       "exist"

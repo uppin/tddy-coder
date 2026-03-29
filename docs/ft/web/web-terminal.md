@@ -40,10 +40,12 @@ When **`GhosttyTerminalLiveKit`** is mounted with **`connectionOverlay`**, the s
 
 - **Build ID**: Shown top-left when provided (`data-testid="build-id"`).
 - **Status dot**: Fixed top-right (`data-testid="connection-status-dot"`). Attribute **`data-connection-status`** reads **`connecting`**, **`connected`**, or **`error`** for the LiveKit / token phase. While **`connecting`**, the dot uses a pulse animation; steady colors distinguish **`connected`** and **`error`**. Users who prefer reduced motion receive a non-animated connecting state via **`prefers-reduced-motion`**.
-- **Menu**: Activating the dot opens a menu with **Disconnect** (room leave / existing disconnect callback) and **Terminate** when the host passes **`onTerminate`** (daemon flows with session context). The standalone GitHub connect flow omits **Terminate** when no session-backed handler exists. The menu closes on **Escape** or an outside pointer press.
+- **LiveKit status strip**: With the overlay enabled, the plain **`livekit-status`** row does not occupy layout during **`connecting`** or **`connected`**; the dot carries those phases. Token, room, and stream failures surface through **`data-testid="livekit-error"`** and related error UI.
+- **Fullscreen**: A dedicated control (`data-testid="terminal-fullscreen-button"`, top-right beside the dot) enters or exits document fullscreen on the connected terminal subtree. The implementation uses the standard Fullscreen API with vendor-prefixed fallbacks (`packages/tddy-web/src/lib/browserFullscreen.ts`). The parent passes **`fullscreenTargetRef`** to select the element; when absent, chrome supplies an internal fullscreen target wrapper (`data-testid="connection-chrome-fullscreen-fallback-target"`). **`fullscreenchange`** and **`webkitfullscreenchange`** on **`document`** keep the control label in sync with the active element.
+- **Menu**: Activating the dot opens a menu with **Disconnect** (`data-testid="connection-menu-disconnect"`) and **Terminate** (`data-testid="connection-menu-terminate"`) when the host passes **`onTerminate`** (daemon flows with session context). The standalone GitHub connect flow omits **Terminate** when no session-backed handler exists. **Terminate** runs a native **`window.confirm`** dialog; **`onTerminate`** runs only after the user confirms. The menu closes on **Escape** or an outside pointer press.
 - **Stop**: A **Stop** control (`data-testid="terminal-stop-button"`, bottom-right, touch-friendly minimum size) sends byte **0x03** through the same **`enqueueTerminalInput`** path as keyboard **Ctrl+C**.
 
-**ConnectedTerminal** wrappers (**App** after connect and **ConnectionScreen** after session connect) render the fullscreen **`connected-terminal-container`** with this chrome during JWT acquisition so the status dot carries the loading phase instead of a text-only **`livekit-status`** screen alone.
+**ConnectedTerminal** wrappers (**App** after connect and **ConnectionScreen** after session connect) render the fullscreen **`connected-terminal-container`** with this chrome during JWT acquisition so the status dot reflects the loading phase while **`livekit-status`** text stays suppressed for normal overlay states.
 
 ### Mobile UX
 
@@ -108,7 +110,7 @@ Spawned **`tddy-*`** sessions use the same configured room for **`--livekit-room
 
 ### Fullscreen terminal session chrome
 
-The fullscreen **GhosttyTerminalLiveKit** view opened from **Connect / Resume** uses the **connection chrome** described under [Connection chrome (LiveKit overlay)](#connection-chrome-livekit-overlay). **Terminate** in the dot menu calls **`SignalSession`** with SIGTERM when the UI holds an active **session id** (same semantics as **Terminate (SIGTERM)** in the per-session **Signal** dropdown).
+The fullscreen **GhosttyTerminalLiveKit** view opened from **Connect / Resume** uses the **connection chrome** described under [Connection chrome (LiveKit overlay)](#connection-chrome-livekit-overlay). **Terminate** in the dot menu, after confirmation, calls **`SignalSession`** with SIGTERM when the UI holds an active **session id** (same semantics as **Terminate (SIGTERM)** in the per-session **Signal** dropdown).
 
 ### Eligible daemons and host selection
 

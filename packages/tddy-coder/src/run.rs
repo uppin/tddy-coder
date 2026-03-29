@@ -748,7 +748,14 @@ fn validate_web_args(args: &Args) -> anyhow::Result<()> {
 
 /// Build an optional AuthService RPC entry based on CLI args.
 fn build_auth_service_entry(args: &Args) -> Option<tddy_rpc::ServiceEntry> {
-    if args.github_stub {
+    // `--github-stub-codes` only makes sense with the stub provider; treat non-empty codes as stub
+    // mode so test harnesses still get AuthService if the boolean flag is omitted or dropped.
+    let stub_mode = args.github_stub
+        || args
+            .github_stub_codes
+            .as_ref()
+            .is_some_and(|s| !s.trim().is_empty());
+    if stub_mode {
         let client_id = args.github_client_id.as_deref().unwrap_or("stub-client-id");
         // In stub mode with a web server, return a callback URL on the same origin
         // so the browser stays on the same domain (no cross-origin redirect to github.com).

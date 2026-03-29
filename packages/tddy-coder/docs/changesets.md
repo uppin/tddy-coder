@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-03-29** [Feature] GitHub stub auth from stub codes — **`build_auth_service_entry`** in **`run.rs`** enables stub **`AuthService`** when **`--github-stub`** is true **or** **`--github-stub-codes`** contains non-whitespace after trim, so test harnesses receive stub OAuth without requiring both flags. Operators avoid passing **`--github-stub-codes`** on production-like invocations unless stub mode is intended. [docs/ft/coder/changelog.md](../../../docs/ft/coder/changelog.md). (tddy-coder)
 - **2026-03-28** [Feature] Daemon and CLI session paths — **`run.rs`** aligns daemon-spawned and local flows with **`{sessions_base}/sessions/{session_id}/`** and lifecycle helpers from **`tddy_core`**. [docs/ft/coder/session-layout.md](../../../docs/ft/coder/session-layout.md). (tddy-coder)
 - **2026-03-28** [Feature] Selectable workflow recipes — **`--recipe tdd`** (default) and **`--recipe bugfix`**; optional config **`recipe:`**; **`changeset.yaml`** optional **`recipe:`** for resume; **`SpawnRequest.recipe`** and daemon spawn pass **`--recipe`** to **`tddy-coder`**. See [docs/ft/coder/workflow-recipes.md](../../../docs/ft/coder/workflow-recipes.md). (tddy-coder)
 - **2026-03-22** [Feature] Workflow abstraction layer — CLI `--goal` and recipe wiring use `TddRecipe` (default); dynamic goal list from recipe. See [docs/ft/coder/workflow-recipes.md](../../../docs/ft/coder/workflow-recipes.md). (tddy-coder)

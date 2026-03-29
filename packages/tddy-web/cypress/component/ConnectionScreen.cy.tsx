@@ -391,16 +391,57 @@ describe("ConnectionScreen terminal chrome — status dot menu", () => {
     interceptConnectSessionSuccess();
     interceptTokenForPresence();
     interceptSignalSessionSuccess();
+    cy.window().then((win) => {
+      cy.stub(win, "confirm").returns(true).as("confirmTerminate");
+    });
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
     cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
     cy.wait("@connectSession");
     cy.get("[data-testid='connected-terminal-container']", { timeout: 5000 }).should("exist");
     // Token fetch uses standalone chrome; after the JWT arrives Ghostty mounts and replaces the tree — wait for LiveKit UI before clicking the dot (avoids detached DOM).
-    cy.get("[data-testid='livekit-status']", { timeout: 20000 }).should("exist");
+    cy.get("[data-testid='connection-status-dot']", { timeout: 20000 })
+      .should("be.visible")
+      .and("have.attr", "data-connection-status");
+    cy.get("[data-testid='livekit-status']").should("not.be.visible");
     cy.get("[data-testid='connection-status-dot']", { timeout: 5000 }).should("be.visible").click();
-    cy.get("[data-testid='connection-menu-terminate']", { timeout: 3000 }).should("be.visible").click();
+    cy.get("[data-testid='connection-menu-disconnect']", { timeout: 10000 }).should("be.visible");
+    cy.get("[data-testid='connection-menu-terminate']", { timeout: 10000 }).should("be.visible");
+    cy.get("[data-testid='connection-menu-terminate']").click({ force: true });
+    cy.get("@confirmTerminate").should("have.been.calledOnce");
     cy.wait("@signalSession").its("request.url").should("include", "SignalSession");
+  });
+
+  it("cancelling Terminate confirmation does not call SignalSession", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION]);
+    interceptConnectSessionSuccess();
+    interceptTokenForPresence();
+    let signalSessionRequests = 0;
+    const okResponse = new Uint8Array([0x08, 0x01]);
+    cy.intercept("POST", "**/rpc/connection.ConnectionService/SignalSession", (req) => {
+      signalSessionRequests += 1;
+      req.reply({
+        statusCode: 200,
+        headers: { "Content-Type": "application/proto" },
+        body: toArrayBuffer(okResponse),
+      });
+    }).as("signalSessionTerminateCancel");
+    cy.window().then((win) => {
+      cy.stub(win, "confirm").returns(false);
+    });
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
+    cy.wait("@connectSession");
+    cy.get("[data-testid='connected-terminal-container']", { timeout: 5000 }).should("exist");
+    cy.get("[data-testid='connection-status-dot']", { timeout: 20000 }).should("be.visible").click();
+    cy.get("[data-testid='connection-menu-disconnect']", { timeout: 10000 }).should("be.visible");
+    cy.get("[data-testid='connection-menu-terminate']", { timeout: 10000 }).should("be.visible");
+    cy.get("[data-testid='connection-menu-terminate']").click({ force: true });
+    cy.then(() => {
+      expect(signalSessionRequests, "Terminate cancel must not hit SignalSession").to.equal(0);
+    });
   });
 });
 

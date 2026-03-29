@@ -29,6 +29,11 @@ describe("App Connect Flow E2E", () => {
     });
   });
 
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
   after(() => {
     cy.task("stopTddyCoderForConnectFlow");
   });
@@ -37,14 +42,17 @@ describe("App Connect Flow E2E", () => {
     const wsUrl = Cypress.env("LIVEKIT_TESTKIT_WS_URL") as string;
     cy.visit(baseUrl);
 
-    cy.get("#livekit-url", { timeout: 10000 }).should("exist").clear().type(wsUrl);
+    cy.get("[data-testid='github-login-button']", { timeout: 10000 }).should("exist").click();
+    // Stub OAuth round-trips through /auth/callback; wait for the post-auth connection form.
+    cy.get("#livekit-url", { timeout: 20000 }).should("exist").clear().type(wsUrl);
     cy.get("[data-testid='livekit-identity']").clear().type("client");
     cy.get("#livekit-room").clear().type("terminal-e2e");
     cy.get("button[type='submit']").click();
 
-    cy.get("[data-testid='livekit-status']", { timeout: 15000 })
-      .should("exist")
-      .and("have.text", "connected");
+    cy.get("[data-testid='connection-status-dot']", { timeout: 15000 })
+      .should("be.visible")
+      .and("have.attr", "data-connection-status", "connected");
+    cy.get("[data-testid='livekit-status']").should("not.be.visible");
 
     cy.get("[data-testid='livekit-error']").should("not.exist");
     cy.contains("buffer underflow").should("not.exist");
