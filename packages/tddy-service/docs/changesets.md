@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-service.
 
+- **2026-03-29** [Feature] **`RemoteSandboxService`** — **`remote_sandbox.proto`**, **`RemoteSandboxServiceImpl`**, **`sandbox_path`** module shared with daemon/client; generated **`RemoteSandboxServiceServer`**. Feature: [docs/ft/daemon/remote-sandbox.md](../../../docs/ft/daemon/remote-sandbox.md). [remote-sandbox.md](./remote-sandbox.md). (tddy-service, tddy-daemon, tddy-remote)
 - **2026-03-28** [Feature] DaemonService GetSession validation — **`get_session`** rejects malformed **`session_id`** via **`validate_session_id_segment`** before joining **`sessions_base`** and **`SESSIONS_SUBDIR`**. Integration tests cover invalid ids and **`list_sessions`** visibility under the unified tree. [session-layout.md](../../../docs/ft/coder/session-layout.md). (tddy-service)
 - **2026-03-28** [Feature] Multi-host + SessionEntry workflow — `connection.proto`: `ListEligibleDaemons` RPC; `EligibleDaemonEntry`; `daemon_instance_id` on `StartSessionRequest` (field 5) and `SessionEntry` (field 8); `workflow_goal`, `workflow_state`, `elapsed_display`, `agent`, `model` on `SessionEntry` (fields 9–13); `recipe` on `StartSessionRequest` where applicable. (tddy-service, tddy-web codegen)
 - **2026-03-21** [Feature] StartSessionRequest `agent` — `connection.proto`: optional `agent` on `StartSessionRequest`; convert layer maps to daemon spawn. (tddy-service)

@@ -4,6 +4,7 @@ members = [
     "packages/tddy-acp-stub",
     "packages/tddy-core",
     "packages/tddy-rpc",
+    "packages/tddy-remote",
     "packages/tddy-coder",
     "packages/tddy-tui",
     "packages/tddy-demo",

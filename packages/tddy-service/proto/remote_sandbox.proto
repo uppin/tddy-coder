@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package remote_sandbox.v1;
+
+// Remote per-connection sandbox: exec, VFS, and checksum helper for LiveKit smoke tests.
+service RemoteSandboxService {
+  rpc ExecNonInteractive(ExecNonInteractiveRequest) returns (ExecNonInteractiveResponse);
+  rpc PutObject(PutObjectRequest) returns (PutObjectResponse);
+  rpc StatObject(StatObjectRequest) returns (StatObjectResponse);
+  rpc ExecChecksum(ExecChecksumRequest) returns (ExecChecksumResponse);
+  // Opens a one-shot TCP port on loopback; client connects and bytes are bridged to `rsync --server`
+  // with stdio attached to that socket (duplex). Used by `tddy-remote` as RSYNC_RSH.
+  rpc OpenRsyncSession(OpenRsyncSessionRequest) returns (OpenRsyncSessionResponse);
+}
+
+message ExecNonInteractiveRequest {
+  string argv_json = 1;
+  // Sandbox session id (same as PutObject/OpenRsyncSession). Empty uses the default session.
+  string session = 2;
+}
+
+message ExecNonInteractiveResponse {
+  int32 exit_code = 1;
+  bytes stdout = 2;
+}
+
+message PutObjectRequest {
+  string session = 1;
+  string path = 2;
+  bytes content = 3;
+}
+
+message PutObjectResponse {}
+
+message StatObjectRequest {
+  string session = 1;
+  string path = 2;
+}
+
+message StatObjectResponse {
+  uint64 size = 1;
+}
+
+message ExecChecksumRequest {}
+
+message ExecChecksumResponse {
+  bytes stdout_sha256 = 1;
+  int32 exit_code = 2;
+}
+
+message OpenRsyncSessionRequest {
+  string session = 1;
+  string argv_json = 2;
+}
+
+message OpenRsyncSessionResponse {
+  string host = 1;
+  uint32 port = 2;
+}

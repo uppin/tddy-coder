@@ -7,6 +7,8 @@
 pub mod convert;
 pub mod daemon_service;
 pub mod echo_service;
+pub mod remote_sandbox_service;
+pub mod sandbox_path;
 pub mod service;
 pub mod terminal_service;
 pub mod token_service;
@@ -19,6 +21,7 @@ pub use proto::connection::ConnectionServiceServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
+pub use remote_sandbox_service::RemoteSandboxServiceImpl;
 pub use service::TddyRemoteService;
 pub use tddy_rpc::Status;
 pub use terminal_service::{
@@ -49,7 +52,14 @@ pub mod proto {
     pub mod connection {
         include!(concat!(env!("OUT_DIR"), "/connection.rs"));
     }
+    /// Generated messages + `RemoteSandboxService` trait + `RemoteSandboxServiceServer` (prost + tddy-codegen).
+    #[allow(unused_imports, unused_variables)]
+    pub mod remote_sandbox_v1 {
+        include!(concat!(env!("OUT_DIR"), "/remote_sandbox.v1.rs"));
+    }
 }
+
+pub use proto::remote_sandbox_v1::RemoteSandboxServiceServer;
 
 /// Tonic-generated gRPC server/client for terminal.proto.
 /// Uses the same message types as `proto::terminal` (via extern_path).

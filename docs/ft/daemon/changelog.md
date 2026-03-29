@@ -1,5 +1,12 @@
 # Daemon product area changelog
 
+## 2026-03-29 — Remote sandbox (Connect + LiveKit RPC)
+
+- **Service:** **`remote_sandbox.v1.RemoteSandboxService`** — exec (non-interactive + capped stdout), put/stat objects under a per-session temp root, checksum smoke RPC, **`OpenRsyncSession`** loopback TCP bridge to **`rsync --server`**.
+- **Daemon:** Registers **`RemoteSandboxServiceServer`** with the multi-RPC stack; VFS path rules live in **`tddy_service::sandbox_path`** (shared with the client).
+- **CLI:** **`tddy-remote`** — authorities YAML, **`default_authority`**, exec, shell, **`rsync --rsh`**.
+- **Feature doc:** [remote-sandbox.md](remote-sandbox.md). Package docs: [tddy-daemon remote-sandbox.md](../../../packages/tddy-daemon/docs/remote-sandbox.md), [tddy-service remote-sandbox.md](../../../packages/tddy-service/docs/remote-sandbox.md), [tddy-remote client](../../../packages/tddy-remote/docs/remote-sandbox-client.md).
+
 ## 2026-03-29 — ConnectionService: `ListAgents` and `allowed_agents`
 
 - **Config**: Daemon YAML includes **`allowed_agents`**, a list of **`id`** (required) and optional **`label`** entries (same shape as tool allowlist entries; unknown keys on each entry are rejected when using **`deny_unknown_fields`**).

@@ -149,6 +149,13 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    let remote_sandbox_impl = tddy_service::RemoteSandboxServiceImpl::default();
+    let remote_sandbox_server = tddy_service::RemoteSandboxServiceServer::new(remote_sandbox_impl);
+    rpc_entries.push(tddy_rpc::ServiceEntry {
+        name: tddy_service::RemoteSandboxServiceServer::<tddy_service::RemoteSandboxServiceImpl>::NAME,
+        service: Arc::new(remote_sandbox_server) as Arc<dyn tddy_rpc::RpcService>,
+    });
+
     if let Some(user_resolver) = auth_result.user_resolver {
         let connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
             config.clone(),
