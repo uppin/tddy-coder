@@ -9,7 +9,7 @@ This command orchestrates comprehensive PR preparation by invoking specialized s
 
 ## Prerequisites
 
-- Current changes committed (use `--no-verify` since we fix linting at the end)
+- Branch contains the work you intend to PR (prefer committing **after** step 6 so fmt/clippy/test and hooks stay green — **do not** use `--no-verify` on commit or push)
 - Changeset document in context (if applicable): `docs/dev/1-WIP/YYYY-MM-DD-*.md`
 - PRD document in context (if applicable): `docs/ft/*/1-WIP/PRD-YYYY-MM-DD-*.md`
 
@@ -61,10 +61,10 @@ Execute these steps in order, using the specified subagent for each:
 
 ### 6. Linting & Type Checking
 
-Run directly (no subagent needed):
+Run directly (no subagent needed), from repo root (use `./dev` / `./test` if your toolchain is nix-wrapped):
 ```bash
 cargo fmt
-cargo clippy
+cargo clippy -- -D warnings
 cargo test
 ```
 
@@ -170,6 +170,7 @@ Next step: Use `/pr` command to create pull request
 - Don't wrap incomplete changesets
 - Don't proceed with failing tests
 - Don't ignore subagent recommendations
+- Don't use `--no-verify` when committing or pushing
 
 ## Related
 

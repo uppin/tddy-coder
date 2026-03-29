@@ -2,6 +2,7 @@
 //! PresenterHandle — bridge between Presenter and gRPC service.
 //! ViewConnection — snapshot + event subscription for per-connection virtual TUIs.
 
+use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 
 use tokio::sync::broadcast;
@@ -15,6 +16,8 @@ pub struct ModeChangedDetails {
     pub mode: AppMode,
     /// When true, the user is entering plan refinement text via the prompt bar while the PRD stays visible.
     pub plan_refinement_pending: bool,
+    /// Workflow output directory for `.agents/skills` resolution in the feature prompt slash menu.
+    pub skills_project_root: Option<PathBuf>,
 }
 
 /// Events the Presenter broadcasts to subscribers (e.g. gRPC clients).

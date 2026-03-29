@@ -1104,7 +1104,10 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 recipe_arc_for_args(args)?,
             )
             .with_broadcast(event_tx)
-            .with_intent_sender(intent_tx);
+            .with_intent_sender(intent_tx)
+            .with_recipe_resolver(Arc::new(|name: &str| {
+                crate::resolve_workflow_recipe_from_cli_name(name.trim())
+            }));
             let (agent_working_dir, session_artifact_dir, session_dir) =
                 livekit_daemon_workflow_paths(
                     &tddy_data_dir,
@@ -1831,7 +1834,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         }
     }
     .with_broadcast(event_tx.clone())
-    .with_intent_sender(intent_tx.clone());
+    .with_intent_sender(intent_tx.clone())
+    .with_recipe_resolver(Arc::new(|name: &str| {
+        crate::resolve_workflow_recipe_from_cli_name(name.trim())
+    }));
     let presenter = Arc::new(Mutex::new(presenter));
 
     if args.agent.is_none() {

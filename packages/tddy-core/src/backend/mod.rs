@@ -374,6 +374,37 @@ pub fn backend_selection_question() -> ClarificationQuestion {
     }
 }
 
+/// Single-select question for switching workflow recipe after `/recipe` from the feature slash menu.
+#[must_use]
+pub fn workflow_recipe_selection_question() -> ClarificationQuestion {
+    ClarificationQuestion {
+        header: "Workflow recipe".to_string(),
+        question: "Select the workflow recipe for this session".to_string(),
+        options: vec![
+            QuestionOption {
+                label: "TDD".to_string(),
+                description: "Plan → red → green → refactor cycle".to_string(),
+            },
+            QuestionOption {
+                label: "Bugfix".to_string(),
+                description: "Reproduce → fix workflow".to_string(),
+            },
+        ],
+        multi_select: false,
+        allow_other: false,
+    }
+}
+
+/// Map a [`workflow_recipe_selection_question`] option label to CLI recipe name (`tdd` / `bugfix`).
+#[must_use]
+pub fn recipe_cli_name_from_selection_label(label: &str) -> Option<&'static str> {
+    match label {
+        "TDD" => Some("tdd"),
+        "Bugfix" => Some("bugfix"),
+        _ => None,
+    }
+}
+
 /// Map a display label from [`backend_selection_question`] to `(agent_name, default_model)`.
 #[must_use]
 pub fn backend_from_label(label: &str) -> (&'static str, &'static str) {

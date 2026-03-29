@@ -6,6 +6,7 @@
 pub mod capturing_writer;
 pub mod ctrl_interrupt;
 pub mod event_loop;
+pub mod feature_input_buffer;
 pub mod key_map;
 pub mod layout;
 pub mod mouse_map;

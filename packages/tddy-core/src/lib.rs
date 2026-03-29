@@ -1,5 +1,6 @@
 //! Core library for tddy-coder.
 
+pub mod agent_skills;
 pub mod backend;
 pub mod changeset;
 pub mod elapsed_format;
@@ -15,12 +16,21 @@ pub mod toolcall;
 pub mod workflow;
 pub mod worktree;
 
+pub use agent_skills::{
+    agents_skills_scan_cache_token, compose_prompt_skill_reference,
+    compose_prompt_with_selected_skill, folder_name_matches_frontmatter_name,
+    parse_skill_frontmatter, read_skill_markdown_body_for_compose, scan_skills_at_project_root,
+    slash_menu_entries, slash_menu_items, DiscoveredSkill, InvalidSkillEntry,
+    ParsedSkillFrontmatter, SkillMdParseError, SkillScanReport, SlashMenuEntry, SlashMenuItem,
+    AGENTS_SKILLS_DIR,
+};
 pub use backend::{
     backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,
     default_model_for_agent, get_child_pid, kill_child_process, preselected_index_for_agent,
-    set_child_pid, AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend,
-    ClaudeCodeBackend, ClaudeInvokeConfig, CodexBackend, CodingBackend, CursorBackend, GoalHints,
-    GoalId, InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionHint,
+    recipe_cli_name_from_selection_label, set_child_pid, workflow_recipe_selection_question,
+    AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend, ClaudeCodeBackend,
+    ClaudeInvokeConfig, CodexBackend, CodingBackend, CursorBackend, GoalHints, GoalId,
+    InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionHint,
     PermissionMode, ProcessToolExecutor, QuestionOption, SessionMode, SharedBackend, StubBackend,
     ToolExecutor, WorkflowRecipe,
 };

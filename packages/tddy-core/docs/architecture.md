@@ -9,6 +9,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 ### Presenter (`presenter/`)
 
 - **Presenter**: Orchestrates workflow and owns application state. Receives abstract `UserIntent` (no KeyEvents). Spawns workflow thread; polls `WorkflowEvent`; forwards to `PresenterView` callbacks.
+- **Recipe slash (feature prompt)**: `apply_feature_slash_builtin_recipe` runs only in `AppMode::FeatureInput`; sets `recipe_slash_selection_pending`, fills `pending_questions` from `workflow_recipe_selection_question`, and calls `advance_to_next_question` for `AppMode::Select`. `AnswerSelect` while `recipe_slash_selection_pending` runs `handle_recipe_slash_selection_answer`, maps labels via `recipe_cli_name_from_selection_label`, and replaces `workflow_recipe` when `recipe_resolver` (`Arc<RecipeResolverFn>`) returns `Ok`. `with_recipe_resolver` is optional; `recipe_slash_selection_active` is true when pending and in `Select`. Wired from `tddy-coder` `run.rs` for daemon and TUI presenters.
 - **UserIntent**: SubmitFeatureInput, AnswerSelect, AnswerMultiSelect, AnswerText, QueuePrompt, etc.
 - **PresenterState**: agent, model, mode (AppMode), activity_log, inbox, should_quit.
 - **PresenterView**: Trait with callbacks: on_mode_changed, on_activity_logged, on_goal_started, on_state_changed, on_workflow_complete, on_agent_output, on_inbox_changed.
@@ -22,6 +23,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **ToolExecutor**: Trait for submitting structured results. `InMemoryToolExecutor` stores via `store_submit_result` (tests and tddy-demo StubBackend). `ProcessToolExecutor` runs `tddy-tools submit` for real agents. `BackendInvokeTask` prefers `take_submit_result_for_goal` over stream parsing.
 - **InvokeRequest/InvokeResponse**: Request and response types. InvokeRequest: prompt, system_prompt, goal (Plan/AcceptanceTests/Red/Green/Demo/Evaluate/Validate/Refactor/UpdateDocs), model, session (Option<SessionMode>), working_dir, debug, agent_output, inherit_stdin, extra_allowed_tools, conversation_output_path. SessionMode: Fresh(id) or Resume(id) — single type for session_id + mode. InvokeResponse: output, exit_code, session_id (Option), questions. CursorBackend rejects Goal::Validate and Goal::Refactor (require Agent tool, Claude-only).
 - **ClarificationQuestion**: Structured question type from AskUserQuestion tool events or `<clarification-questions>` text block (header, question, options, multi_select).
+- **workflow_recipe_selection_question / recipe_cli_name_from_selection_label**: Single-select labels `TDD` → `tdd`, `Bugfix` → `bugfix` for presenter recipe switching after `/recipe` from the feature slash flow.
 - **ClaudeInvokeConfig**: Claude-specific config (permission_mode, allowed_tools, permission_prompt_tool, mcp_config_path) derived from goal internally.
 
 ### Worktree (`worktree.rs`)
@@ -90,6 +92,14 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **validate** (subagents): Orchestrates validate-tests, validate-prod-ready, and analyze-clean-code subagents via the Agent tool. Requires evaluation-report.md in plan_dir (from prior evaluate run). Claude-only (CursorBackend rejects). ValidateOptions: model, agent_output, conversation_output_path, inherit_stdin, allowed_tools_extras, debug. State: Validating → ValidateComplete.
 - **refactor**: Executes refactoring tasks from refactoring-plan.md. Requires refactoring-plan.md in plan_dir (from prior validate run). Claude-only (CursorBackend rejects). RefactorOptions: model, agent_output, conversation_output_path, inherit_stdin, allowed_tools_extras, debug. State: Refactoring → RefactorComplete.
 - **update_docs**: Reads planning artifacts (PRD.md, progress.md, changeset.yaml, acceptance-tests.md, evaluation-report.md) and updates docs in the target repo. Requires plan_dir. CursorBackend supports UpdateDocs. UpdateDocsOptions: model, agent_output, conversation_output_path, inherit_stdin, allowed_tools_extras, debug. State: UpdatingDocs → DocsUpdated.
+
+### Agent skills (`agent_skills.rs`)
+
+- **Purpose**: Discover Cursor-style project skills under **`.agents/skills/<folder>/SKILL.md`**, validate YAML frontmatter (**`name`**, **`description`**) against the folder name, build slash-menu entries (**`SlashMenuItem::BuiltinRecipe`** plus skills), and compose the outbound user prompt after skill selection (**`compose_prompt_with_selected_skill`**).
+- **Scan**: `scan_skills_at_project_root` walks immediate subdirectories of **`.agents/skills`**, reads **`SKILL.md`**, classifies into **`DiscoveredSkill`** or **`InvalidSkillEntry`**.
+- **Cache hint**: `agents_skills_scan_cache_token` exposes directory mtime for callers that cache scan results.
+- **Exports**: Module is public; key symbols are re-exported from **`lib.rs`** for **`tddy-coder`** and tests.
+- **Feature doc**: [feature-prompt-agent-skills.md](../../../docs/ft/coder/feature-prompt-agent-skills.md).
 
 ### Schema (tddy-tools)
 

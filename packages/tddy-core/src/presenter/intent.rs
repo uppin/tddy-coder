@@ -5,6 +5,8 @@
 pub enum UserIntent {
     /// User submitted feature description (Enter in FeatureInput mode).
     SubmitFeatureInput(String),
+    /// User chose the `/recipe` built-in from the feature-prompt slash menu.
+    FeatureSlashBuiltinRecipe,
     /// User approved the session document (document review mode).
     ApproveSessionDocument,
     /// User wants to view the session document (document review mode).

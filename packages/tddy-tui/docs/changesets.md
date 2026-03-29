@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-tui.
 
+- **2026-03-29** [Feature] Feature prompt skill tokens — `FeatureInputBuffer` stores compact `/skill-name` in the TUI; `SubmitFeatureInput` expands via `compose_prompt_skill_reference`. Atomic Backspace and Left/Right across tokens. `ViewState.feature_edit` replaces flat `feature_input` string. Skill token drawn with dark-navy background in `render`. (tddy-tui)
 - **2026-03-28** [Feature] Idle-aware status bar — Agent-active (`Running`) keeps fast spinner and live goal elapsed; clarification waits (`Select`/`MultiSelect`/`TextInput`) freeze displayed elapsed and use ·/• pulse at 1 Hz; `status_bar_activity` module; `ViewState` freeze anchors; `virtual_tui_periodic_render_interval`; spinner_tick gated to agent-active. Feature doc `docs/ft/coder/tui-status-bar.md`, architecture updated. (tddy-tui)
 - **2026-03-28** [Refactor] Status bar elapsed — `format_elapsed` delegates to `tddy_core::format_elapsed_compact` for parity with the web session list formatter. (tddy-tui)
 - **2026-03-28** [Feature] Status bar activity — Spinner and workflow session segment (UUID first-field or em-dash placeholder) lead the status line before `Goal:`; `format_status_bar_idle`, `prepend_activity_to_status_line`, `first_hyphen_segment_of_workflow_session_id`; corner spinner removed; per-frame logs at `trace` on hot path. `packages/tddy-tui/docs/architecture.md`. (tddy-tui)

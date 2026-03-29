@@ -121,9 +121,9 @@ fn done_key(key: KeyEvent) -> Option<UserIntent> {
 
 fn feature_input_key(key: KeyEvent, vs: &ViewState) -> Option<UserIntent> {
     match key.code {
-        KeyCode::Enter if !vs.feature_input.is_empty() => {
-            Some(UserIntent::SubmitFeatureInput(vs.feature_input.clone()))
-        }
+        KeyCode::Enter if !vs.feature_edit.is_submit_empty() => Some(
+            UserIntent::SubmitFeatureInput(vs.feature_edit.submit_expanded()),
+        ),
         _ => None,
     }
 }
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn feature_input_enter_with_text_returns_submit() {
         let mut vs = ViewState::new();
-        vs.feature_input = "Build auth".to_string();
+        vs.feature_edit.set_plain_text("Build auth");
         let intent = key_event_to_intent(enter_key(), &AppMode::FeatureInput, &vs, false);
         assert!(matches!(
             intent,

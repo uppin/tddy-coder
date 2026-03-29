@@ -104,29 +104,38 @@ pub fn run_event_loop(
                     let inbox_len = state.inbox.len();
                     let plan_pending = state.plan_refinement_pending;
                     let mode = state.mode.clone();
+                    let skills_root = state.skills_project_root.as_deref();
                     let cursor = view.view_state().inbox_cursor;
                     let edit_item = state.inbox.get(cursor).cloned();
 
                     let vs = view.view_state_mut();
                     let was_list = matches!(vs.inbox_focus, crate::view_state::InboxFocus::List);
-                    let consumed = vs.handle_key_view_local(key, &mode, inbox_len, plan_pending);
+                    let consumed =
+                        vs.handle_key_view_local(key, &mode, inbox_len, plan_pending, skills_root);
                     if was_list
                         && matches!(vs.inbox_focus, crate::view_state::InboxFocus::Editing)
                         && vs.inbox_edit_buffer.is_empty()
                     {
                         vs.inbox_edit_buffer = edit_item.unwrap_or_default();
                     }
-                    if consumed {
-                        if matches!(&mode, AppMode::Select { .. })
-                            && matches!(key.code, KeyCode::Up | KeyCode::Down)
-                        {
-                            let idx = view.view_state().select_selected;
-                            let _ = intent_tx.send(UserIntent::SelectHighlightChanged(idx));
-                        }
-                    } else if let Some(intent) =
-                        key_event_to_intent(key, &mode, view.view_state(), plan_pending)
+                    if consumed
+                        && matches!(&mode, AppMode::Select { .. })
+                        && matches!(key.code, KeyCode::Up | KeyCode::Down)
                     {
-                        let _ = intent_tx.send(intent);
+                        let idx = view.view_state().select_selected;
+                        let _ = intent_tx.send(UserIntent::SelectHighlightChanged(idx));
+                    }
+                    if view
+                        .view_state_mut()
+                        .take_pending_feature_slash_builtin_recipe_intent()
+                    {
+                        let _ = intent_tx.send(UserIntent::FeatureSlashBuiltinRecipe);
+                    } else if !consumed {
+                        if let Some(intent) =
+                            key_event_to_intent(key, &mode, view.view_state(), plan_pending)
+                        {
+                            let _ = intent_tx.send(intent);
+                        }
                     }
                 }
                 Ok(Event::Mouse(mouse_ev)) if mouse => {
