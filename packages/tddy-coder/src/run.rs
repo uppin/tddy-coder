@@ -1151,7 +1151,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 None,
                 None,
                 false,
-                None,
+                args.session_id.clone(),
                 toolcall_socket_path,
                 tool_call_rx,
             );
