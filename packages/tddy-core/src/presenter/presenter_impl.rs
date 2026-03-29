@@ -15,6 +15,7 @@ use crate::presenter::state::{
     ActivityEntry, ActivityKind, AppMode, CriticalPresenterState, PresenterState,
 };
 use crate::presenter::workflow_runner;
+use crate::presenter::worktree_display::format_worktree_for_status_bar;
 use crate::presenter::{WorkflowCompletePayload, WorkflowEvent};
 
 /// Pending tool call response: Ask sends answers string, Approve sends allow/deny.
@@ -129,6 +130,7 @@ impl Presenter {
             exit_action: None,
             plan_refinement_pending: false,
             skills_project_root: None,
+            active_worktree_display: None,
         };
         Presenter {
             state,
@@ -1047,6 +1049,16 @@ impl Presenter {
                     };
                     self.state.activity_log.push(entry.clone());
                     self.broadcast(PresenterEvent::ActivityLogged(entry));
+                    let wtd = format_worktree_for_status_bar(path.as_path());
+                    if !wtd.is_empty() {
+                        log::info!("WorktreeSwitched: active_worktree_display set to {:?}", wtd);
+                        self.state.active_worktree_display = Some(wtd);
+                    } else {
+                        log::debug!(
+                            "WorktreeSwitched: format_worktree_for_status_bar returned empty for {:?}",
+                            path
+                        );
+                    }
                 }
                 WorkflowEvent::WorkflowComplete(result) => {
                     self.flush_agent_output_buffer();

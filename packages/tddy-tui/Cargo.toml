@@ -10,7 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 tddy-core = { path = "../tddy-core" }
-ratatui = "0.30"
+ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 crossterm = "0.29"
 tui-markdown = "0.3"
 log = "0.4"
