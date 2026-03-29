@@ -332,12 +332,22 @@ fn before_green(
     let prd = read_primary_session_document_optional(session_dir, manifest);
     let at = std::fs::read_to_string(session_dir.join("acceptance-tests.md")).ok();
     let changeset = read_changeset(session_dir).ok();
-    let session_id = resolve_agent_session_id(session_dir).map_err(|e| {
-        format!(
-            "green requires changeset with state.session_id, impl session, or .impl-session file: {}",
-            e
-        )
-    })?;
+    let new_agent_session = context
+        .get_sync::<bool>("new_agent_session")
+        .unwrap_or(false);
+    if new_agent_session {
+        context.remove_sync("session_id");
+        context.set_sync("is_resume", false);
+    } else {
+        let session_id = resolve_agent_session_id(session_dir).map_err(|e| {
+            format!(
+                "green requires changeset with state.session_id, impl session, or .impl-session file: {}",
+                e
+            )
+        })?;
+        context.set_sync("session_id", session_id);
+        context.set_sync("is_resume", true);
+    }
     let defaults = recipe_default_models_str(recipe);
     let model = resolve_model(
         changeset.as_ref(),
@@ -350,8 +360,8 @@ fn before_green(
         .unwrap_or(false);
     log::debug!(
         target: "tddy_workflow_recipes::tdd::hooks",
-        "before_green: run_optional_step_x={}",
-        run_optional_step_x
+        "before_green: run_optional_step_x={} new_agent_session={}",
+        run_optional_step_x, new_agent_session
     );
     let answers: Option<String> = context.get_sync("answers");
     let prompt = match &answers {
@@ -361,8 +371,6 @@ fn before_green(
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", green::system_prompt(run_optional_step_x));
     context.set_sync("session_dir", session_dir.to_path_buf());
-    context.set_sync("session_id", session_id);
-    context.set_sync("is_resume", true);
     context.set_sync("model", model);
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("GreenImplementing"));
