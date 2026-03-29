@@ -55,6 +55,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 | [gRPC Remote Control](grpc-remote-control.md) | `--grpc` flag, bidirectional streaming, programmatic control for E2E and automation |
 | [TUI status bar](tui-status-bar.md) | Spinner and session segment on the status line; parity with Virtual TUI / streamed frames |
 | [Feature prompt: agent skills](feature-prompt-agent-skills.md) | **`.agents/skills`** discovery, composed skill prompts, presenter **`/recipe`** selection |
+| [Activity log streaming](activity-log-streaming.md) | User **`User:`** / **`Queued:`** lines in the activity log; incremental agent tail; **`AgentOutput`** as the streaming channel for workflow chunks |
 
 ## Integration Points
 
