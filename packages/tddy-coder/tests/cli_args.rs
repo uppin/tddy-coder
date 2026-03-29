@@ -77,6 +77,23 @@ fn cli_accepts_recipe_flag() {
     );
 }
 
+/// Codex agent is accepted on the CLI (`--agent codex`) once wired in clap + create_backend.
+#[test]
+fn cli_accepts_agent_codex() {
+    let mut cmd = tddy_coder_bin();
+    cmd.args(["--agent", "codex", "--goal", "plan"]);
+
+    let output = cmd.output().expect("run tddy-coder");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !stderr.contains("invalid value 'codex'")
+            && !stderr.contains("'codex' isn't a valid value"),
+        "--agent codex should be accepted by the CLI parser, stderr: {}",
+        stderr
+    );
+}
+
 /// Acceptance: --mouse flag is accepted by CLI for enabling mouse/touch mode in TUI.
 #[test]
 fn cli_accepts_mouse_flag() {

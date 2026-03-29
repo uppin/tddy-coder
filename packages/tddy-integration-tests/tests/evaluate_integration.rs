@@ -394,7 +394,11 @@ async fn evaluate_workflow_fails_when_agent_finished_without_submit() {
     write_changeset_with_state(&session_dir, "GreenComplete", "sess-eval-no-submit");
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok_without_submit("Agent finished; submit never relayed.");
+    // One mock response per backend invoke; remediation retries up to
+    // BACKEND_INVOKE_MAX_ATTEMPTS_WITHOUT_SUBMIT in tddy-core `workflow/task.rs` (currently 8).
+    for _ in 0..8 {
+        backend.push_ok_without_submit("Agent finished; submit never relayed.");
+    }
 
     let storage_dir = std::env::temp_dir().join("tddy-evaluate-no-submit-engine");
     let _ = std::fs::remove_dir_all(&storage_dir);

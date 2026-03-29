@@ -1,12 +1,13 @@
 /**
- * First segment of a session id: for standard UUIDs, the 8 hex chars before the first hyphen;
- * otherwise the substring before the first hyphen, or the whole id if there is no hyphen.
+ * Short session id label: for standard UUIDs (`8hex-4hex-…`), the first two hyphen-separated
+ * groups lowercased; otherwise the substring before the first hyphen, or the whole id if there is
+ * no hyphen.
  */
 export function sessionIdFirstSegment(id: string): string {
   const t = id.trim();
   if (!t) return "—";
-  const uuidHead = t.match(/^([0-9a-fA-F]{8})-/);
-  if (uuidHead) return uuidHead[1];
+  const uuidTwo = t.match(/^([0-9a-fA-F]{8})-([0-9a-fA-F]{4})(?:-|$)/);
+  if (uuidTwo) return `${uuidTwo[1].toLowerCase()}-${uuidTwo[2].toLowerCase()}`;
   const dash = t.indexOf("-");
   return dash === -1 ? t : t.slice(0, dash);
 }

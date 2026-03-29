@@ -29,16 +29,16 @@ pub use backend::{
     default_model_for_agent, get_child_pid, kill_child_process, preselected_index_for_agent,
     recipe_cli_name_from_selection_label, set_child_pid, workflow_recipe_selection_question,
     AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend, ClaudeCodeBackend,
-    ClaudeInvokeConfig, CodingBackend, CursorBackend, GoalHints, GoalId, InMemoryToolExecutor,
-    InvokeRequest, InvokeResponse, MockBackend, PermissionHint, PermissionMode,
-    ProcessToolExecutor, QuestionOption, SessionMode, SharedBackend, StubBackend, ToolExecutor,
-    WorkflowRecipe,
+    ClaudeInvokeConfig, CodexBackend, CodingBackend, CursorBackend, GoalHints, GoalId,
+    InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionHint,
+    PermissionMode, ProcessToolExecutor, QuestionOption, SessionMode, SharedBackend, StubBackend,
+    ToolExecutor, WorkflowRecipe,
 };
 pub use changeset::{
     append_session_and_update_state, get_session_for_tag, read_changeset,
-    resolve_agent_from_changeset, resolve_model, update_state, write_changeset, Changeset,
-    ChangesetState, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
-    QuestionOptionForQa, SessionEntry, StateTransition,
+    resolve_agent_from_changeset, resolve_model, start_goal_for_session_continue, update_state,
+    write_changeset, Changeset, ChangesetState, ClarificationQa, ClarificationQuestionForQa,
+    DiscoveryData, QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use elapsed_format::format_elapsed_compact;
 pub use error::{BackendError, ParseError, WorkflowError};
@@ -59,7 +59,8 @@ pub use session_lifecycle::{
     UnifiedSessionTreeBootstrap,
 };
 pub use session_metadata::{
-    read_session_metadata, write_session_metadata, SessionMetadata, SESSION_METADATA_FILENAME,
+    read_session_metadata, write_initial_tool_session_metadata, write_session_metadata,
+    InitialToolSessionMetadataOpts, SessionMetadata, SESSION_METADATA_FILENAME,
 };
 pub use source_path::{classify_rust_source_path, RustSourcePathKind};
 pub use stream::ProgressEvent;

@@ -184,6 +184,17 @@ impl BackendInvokeTask {
     }
 }
 
+/// How many backend invokes to allow for a goal when each turn finishes without a relayed
+/// `tddy-tools submit` before failing the workflow. Keeps remediation bounded.
+const BACKEND_INVOKE_MAX_ATTEMPTS_WITHOUT_SUBMIT: usize = 8;
+
+fn missing_submit_remediation_line(submit_key: &str) -> String {
+    format!(
+        "Agent finished without calling tddy-tools submit for goal '{}'. Ensure tddy-tools is on PATH and the agent follows the system prompt.",
+        submit_key
+    )
+}
+
 #[async_trait]
 impl Task for BackendInvokeTask {
     fn id(&self) -> &str {
@@ -218,79 +229,90 @@ impl Task for BackendInvokeTask {
             }
         });
 
-        let request = InvokeRequest {
-            prompt: prompt.clone(),
-            system_prompt: context.get_sync("system_prompt"),
-            system_prompt_path: None,
-            goal_id: self.goal_id.clone(),
-            submit_key: self.submit_key.clone(),
-            hints: self.hints.clone(),
-            model: context.get_sync("model"),
-            session,
-            working_dir,
-            debug: context.get_sync::<bool>("debug").unwrap_or(false),
-            agent_output: context.get_sync::<bool>("agent_output").unwrap_or(false),
-            agent_output_sink: crate::workflow::agent_output::get_agent_sink(),
-            progress_sink: crate::workflow::agent_output::get_progress_sink(),
-            conversation_output_path: context.get_sync("conversation_output_path"),
-            inherit_stdin: context.get_sync::<bool>("inherit_stdin").unwrap_or(false),
-            extra_allowed_tools: context.get_sync("allowed_tools"),
-            socket_path: context.get_sync("socket_path"),
-            session_dir: context.get_sync("session_dir"),
-        };
-
-        let response = self
-            .backend
-            .invoke(request)
-            .await
-            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
-
         let key = self.submit_key.as_str();
-        let submit_output = self
-            .backend
-            .submit_channel()
-            .and_then(|ch| ch.take_for_goal(key))
-            .or_else(|| take_submit_result_for_goal(key));
+        let mut prompt_for_invoke = prompt;
 
-        if let Some(output) = submit_output {
-            context.set_sync("output", output.clone());
-            let prior = context.get_sync::<String>("session_id");
-            if let Some(eff) = crate::session_lifecycle::resolve_effective_session_id(
-                prior.as_deref(),
-                response.session_id.as_deref(),
-            ) {
-                log::debug!(
-                    "BackendInvokeTask {}: session_id {:?} -> {} (backend reported {:?})",
-                    self.id,
-                    prior,
-                    eff,
-                    response.session_id
-                );
-                context.set_sync("session_id", eff);
+        for attempt in 0..BACKEND_INVOKE_MAX_ATTEMPTS_WITHOUT_SUBMIT {
+            let request = InvokeRequest {
+                prompt: prompt_for_invoke.clone(),
+                system_prompt: context.get_sync("system_prompt"),
+                system_prompt_path: None,
+                goal_id: self.goal_id.clone(),
+                submit_key: self.submit_key.clone(),
+                hints: self.hints.clone(),
+                model: context.get_sync("model"),
+                session: session.clone(),
+                working_dir: working_dir.clone(),
+                debug: context.get_sync::<bool>("debug").unwrap_or(false),
+                agent_output: context.get_sync::<bool>("agent_output").unwrap_or(false),
+                agent_output_sink: crate::workflow::agent_output::get_agent_sink(),
+                progress_sink: crate::workflow::agent_output::get_progress_sink(),
+                conversation_output_path: context.get_sync("conversation_output_path"),
+                inherit_stdin: context.get_sync::<bool>("inherit_stdin").unwrap_or(false),
+                extra_allowed_tools: context.get_sync("allowed_tools"),
+                socket_path: context.get_sync("socket_path"),
+                session_dir: session_dir.clone(),
+            };
+
+            let response = self
+                .backend
+                .invoke(request)
+                .await
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+
+            let submit_output = self
+                .backend
+                .submit_channel()
+                .and_then(|ch| ch.take_for_goal(key))
+                .or_else(|| take_submit_result_for_goal(key));
+
+            if let Some(output) = submit_output {
+                context.set_sync("output", output.clone());
+                let prior = context.get_sync::<String>("session_id");
+                if let Some(eff) = crate::session_lifecycle::resolve_effective_session_id(
+                    prior.as_deref(),
+                    response.session_id.as_deref(),
+                ) {
+                    log::debug!(
+                        "BackendInvokeTask {}: session_id {:?} -> {} (backend reported {:?})",
+                        self.id,
+                        prior,
+                        eff,
+                        response.session_id
+                    );
+                    context.set_sync("session_id", eff);
+                }
+                return Ok(TaskResult {
+                    response: output,
+                    next_action: NextAction::Continue,
+                    task_id: self.id.clone(),
+                    status_message: Some(format!("{} step complete", self.id)),
+                });
             }
-            return Ok(TaskResult {
-                response: output,
-                next_action: NextAction::Continue,
-                task_id: self.id.clone(),
-                status_message: Some(format!("{} step complete", self.id)),
-            });
-        }
 
-        if !response.questions.is_empty() {
-            context.set_sync("pending_questions", response.questions.clone());
-            return Ok(TaskResult {
-                response: response.output,
-                next_action: NextAction::WaitForInput,
-                task_id: self.id.clone(),
-                status_message: Some("Clarification needed".to_string()),
-            });
+            if !response.questions.is_empty() {
+                context.set_sync("pending_questions", response.questions.clone());
+                return Ok(TaskResult {
+                    response: response.output,
+                    next_action: NextAction::WaitForInput,
+                    task_id: self.id.clone(),
+                    status_message: Some("Clarification needed".to_string()),
+                });
+            }
+
+            if attempt + 1 >= BACKEND_INVOKE_MAX_ATTEMPTS_WITHOUT_SUBMIT {
+                return Err(Box::new(crate::WorkflowError::ParseError(
+                    crate::ParseError::Malformed(missing_submit_remediation_line(key)),
+                )));
+            }
+
+            prompt_for_invoke.push_str("\n\n---\n");
+            prompt_for_invoke.push_str(&missing_submit_remediation_line(key));
+            prompt_for_invoke.push('\n');
         }
 
         Err(Box::new(crate::WorkflowError::ParseError(
-            crate::ParseError::Malformed(format!(
-                "Agent finished without calling tddy-tools submit for goal '{}'. Ensure tddy-tools is on PATH and the agent follows the system prompt.",
-                key
-            )),
+            crate::ParseError::Malformed(missing_submit_remediation_line(key)),
         )))
     }
 }

@@ -5,7 +5,7 @@ mod common;
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use std::fs;
-use tddy_core::output::TDDY_SESSIONS_DIR_ENV;
+use tddy_core::output::{SESSIONS_SUBDIR, TDDY_SESSIONS_DIR_ENV};
 
 fn tddy_coder_bin() -> Command {
     cargo_bin_cmd!("tddy-coder")
@@ -744,5 +744,143 @@ fn test_plan_goal_cli_creates_session_under_home_tddy() {
         session_dir.display()
     );
 
+    assert!(
+        session_dir
+            .join(tddy_core::SESSION_METADATA_FILENAME)
+            .exists(),
+        ".session.yaml should be in session dir: {}",
+        session_dir.display()
+    );
+    let md = tddy_core::read_session_metadata(&session_dir).expect("parse .session.yaml");
+    assert_eq!(md.session_id, uuid_part);
+    assert_eq!(md.status, "active");
+    assert_eq!(md.tool.as_deref(), Some("tddy-coder"));
+    assert!(md.repo_path.is_some());
+
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Bugfix plain workflow must run inside `--session-dir` when `fix-plan.md` is absent.
+/// `BugfixRecipe::uses_primary_session_document` is true; `run_full_workflow_plain` must not call
+/// `run_plan_to_get_dir` in that situation or it allocates a different UUID directory and the
+/// explicit session folder stays empty (failed start for layouts like
+/// `019d38f3-94e8-7472-bcd8-bf7cd7352248`).
+#[test]
+#[cfg(unix)]
+fn cli_bugfix_plain_keeps_explicit_session_dir_when_fix_plan_missing() {
+    let (repo_dir, _) = common::temp_dir_with_git_repo("cli-bugfix-explicit-sid");
+
+    let sessions_root =
+        std::env::temp_dir().join(format!("tddy-cli-bugfix-sessions-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&sessions_root);
+    std::fs::create_dir_all(&sessions_root).expect("sessions root");
+
+    let sid = "019d38f3-94e8-7472-bcd8-bf7cd7352248";
+    let session_path = sessions_root.join(SESSIONS_SUBDIR).join(sid);
+    std::fs::create_dir_all(session_path.join("logs")).expect("session logs");
+
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .current_dir(&repo_dir)
+        .env(TDDY_SESSIONS_DIR_ENV, sessions_root.to_str().unwrap())
+        .args([
+            "--agent",
+            "stub",
+            "--recipe",
+            "bugfix",
+            "--prompt",
+            "SKIP_QUESTIONS repro",
+            "--session-dir",
+            session_path.to_str().expect("utf8 session path"),
+        ]);
+
+    let output = cmd.output().expect("run tddy-coder bugfix plain");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "bugfix plain with explicit session-dir should exit 0; stderr={}",
+        stderr
+    );
+
+    assert!(
+        session_path.join(".workflow").is_dir(),
+        "engine storage must be created under explicit --session-dir {}, not only under another UUID",
+        session_path.display()
+    );
+
+    let session_children: Vec<_> = std::fs::read_dir(sessions_root.join(SESSIONS_SUBDIR))
+        .expect("read sessions/")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .collect();
+    assert_eq!(
+        session_children.len(),
+        1,
+        "must not allocate a second session directory under TDDY_SESSIONS_DIR/sessions/; got {:?}",
+        session_children
+            .iter()
+            .map(|e| e.path())
+            .collect::<Vec<_>>()
+    );
+
+    let _ = std::fs::remove_dir_all(&sessions_root);
+}
+
+/// Resume merges `sessions/<id>/coder-config.yaml`. A stale `goal: plan` from a TDD-style config
+/// must not prevent `--recipe bugfix` from running the full workflow (start goal `reproduce`).
+#[test]
+#[cfg(unix)]
+fn cli_bugfix_resume_clears_stale_session_config_goal_plan() {
+    let (repo_dir, _) = common::temp_dir_with_git_repo("cli-bugfix-resume-stale-goal");
+
+    let sessions_root = std::env::temp_dir().join(format!(
+        "tddy-cli-bugfix-resume-goal-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&sessions_root);
+    std::fs::create_dir_all(&sessions_root).expect("sessions root");
+
+    let sid = "019d396f-96fa-7001-8002-900300040005";
+    let session_path = sessions_root.join(SESSIONS_SUBDIR).join(sid);
+    std::fs::create_dir_all(session_path.join("logs")).expect("session logs");
+    fs::write(
+        session_path.join(tddy_coder::config::SESSION_CODER_CONFIG_FILE),
+        "goal: plan\n",
+    )
+    .expect("write session coder-config");
+
+    let mut cmd = tddy_coder_bin();
+    cmd.env_clear()
+        .current_dir(&repo_dir)
+        .env(TDDY_SESSIONS_DIR_ENV, sessions_root.to_str().unwrap())
+        .args([
+            "--agent",
+            "stub",
+            "--recipe",
+            "bugfix",
+            "--prompt",
+            "SKIP_QUESTIONS repro",
+            "--resume-from",
+            sid,
+        ]);
+
+    let output = cmd.output().expect("run tddy-coder bugfix resume");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "bugfix resume with stale goal: plan in session coder-config should still start; stderr={}",
+        stderr
+    );
+    assert!(
+        !stderr.contains("unsupported goal"),
+        "should not fail single-goal routing; stderr={}",
+        stderr
+    );
+    assert!(
+        session_path.join(".workflow").is_dir(),
+        "engine storage should exist under resumed session {}",
+        session_path.display()
+    );
+
+    let _ = std::fs::remove_dir_all(&sessions_root);
 }

@@ -8,6 +8,7 @@ mod common;
 
 use std::sync::Arc;
 
+use tddy_core::output::create_session_dir_in;
 use tddy_core::workflow::build_context_header;
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{GoalId, MockBackend, SharedBackend, WorkflowEngine};
@@ -42,6 +43,12 @@ async fn artifacts_subdir_used_for_new_sessions() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+    let session_dir = create_session_dir_in(&base).expect("pre-create session dir");
+    let session_id = session_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .expect("session dirname")
+        .to_string();
     let mut ctx = std::collections::HashMap::new();
     ctx.insert("feature_input".to_string(), serde_json::json!("Build auth"));
     ctx.insert(
@@ -51,6 +58,11 @@ async fn artifacts_subdir_used_for_new_sessions() {
     ctx.insert(
         "session_base".to_string(),
         serde_json::to_value(base.clone()).unwrap(),
+    );
+    ctx.insert("session_id".to_string(), serde_json::json!(session_id));
+    ctx.insert(
+        "session_dir".to_string(),
+        serde_json::to_value(&session_dir).unwrap(),
     );
 
     let result = engine

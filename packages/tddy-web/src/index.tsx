@@ -1,5 +1,5 @@
 import "./index.css";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
@@ -113,6 +113,7 @@ function ConnectedTerminal({
   onTerminate?: () => void;
 }) {
   const client = useMemo(() => createTokenClient(), []);
+  const fullscreenTargetRef = useRef<HTMLDivElement>(null);
   const [initialToken, setInitialToken] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -166,13 +167,14 @@ function ConnectedTerminal({
 
   if (!initialToken || ttlSeconds === null) {
     return (
-      <div data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
+      <div ref={fullscreenTargetRef} data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
         <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
           <ConnectionTerminalChrome
             overlayStatus="connecting"
             buildId={BUILD_ID}
             onDisconnect={onDisconnect}
             onTerminate={onTerminate}
+            fullscreenTargetRef={fullscreenTargetRef}
             onStopInterrupt={() => {}}
           />
         </div>
@@ -181,7 +183,7 @@ function ConnectedTerminal({
   }
 
   return (
-    <div data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
+    <div ref={fullscreenTargetRef} data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
       <GhosttyTerminalLiveKit
         url={url}
         token={initialToken}
@@ -194,13 +196,14 @@ function ConnectedTerminal({
         preventFocusOnTap={isMobile && !isKeyboardOpen}
         showMobileKeyboard={isMobile}
         connectionOverlay={{ onDisconnect, buildId: BUILD_ID, onTerminate }}
+        fullscreenTargetRef={fullscreenTargetRef}
       />
     </div>
   );
 }
 
 function ConnectionForm() {
-  const { user, isAuthenticated, login, logout } = useAuth();
+  const { user, isAuthenticated, login, logout, error: authError } = useAuth();
   const [url, setUrl] = useState("");
   const [identity, setIdentity] = useState("");
   const [roomName, setRoomName] = useState("terminal-e2e");
@@ -246,6 +249,11 @@ function ConnectionForm() {
         <p style={{ marginBottom: 16, fontSize: 14, color: "#444" }}>
           Sign in with GitHub to access the terminal.
         </p>
+        {authError ? (
+          <p data-testid="auth-flow-error" style={{ marginBottom: 12, fontSize: 14, color: "#c00" }}>
+            {authError}
+          </p>
+        ) : null}
         <GitHubLoginButton onClick={login} />
       </div>
     );

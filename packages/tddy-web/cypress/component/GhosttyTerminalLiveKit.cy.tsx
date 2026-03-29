@@ -128,4 +128,99 @@ describe("GhosttyTerminalLiveKit", () => {
       expect(has03, "enqueue path logs raw byte 0x03 like Ctrl+C").to.be.true;
     });
   });
+
+  it("hides visible livekit status text when connection overlay is enabled", () => {
+    const onDisconnect = cy.stub();
+    cy.mount(
+      <div data-testid="terminal-chrome-host" style={{ height: 400, position: "relative" }}>
+        <GhosttyTerminalLiveKit
+          url="ws://localhost:9999"
+          token="fake-token"
+          getToken={getToken}
+          ttlSeconds={BigInt(600)}
+          connectionOverlay={{ onDisconnect, buildId: "acceptance-build" }}
+        />
+      </div>
+    );
+    cy.get("[data-testid='connection-status-dot']", { timeout: 10000 }).should("exist");
+    cy.get("[data-testid='livekit-status']").should("not.be.visible");
+    cy.get("[data-testid='connection-status-dot']").should("have.attr", "data-connection-status");
+  });
+
+  it("fullscreen toggle invokes requestFullscreen when stubbed (enter path)", () => {
+    const onDisconnect = cy.stub();
+    cy.mount(
+      <div style={{ height: 400, position: "relative" }}>
+        <GhosttyTerminalLiveKit
+          url="ws://localhost:9999"
+          token="fake-token"
+          getToken={getToken}
+          ttlSeconds={BigInt(600)}
+          connectionOverlay={{ onDisconnect }}
+        />
+      </div>
+    );
+    cy.window().then((win) => {
+      cy.stub(win.Element.prototype, "requestFullscreen").as("requestFullscreenStub").resolves();
+    });
+    cy.get("[data-testid='connection-status-dot']", { timeout: 10000 }).should("exist");
+    cy.get("[data-testid='terminal-fullscreen-button']", { timeout: 5000 }).should("be.visible").click();
+    cy.get("@requestFullscreenStub").should("have.been.calledOnce");
+  });
+
+  it("Terminate does not call onTerminate when confirmation is cancelled", () => {
+    const onDisconnect = cy.stub();
+    const onTerminate = cy.stub().as("onTerminate");
+    cy.window().then((win) => {
+      cy.stub(win, "confirm").returns(false);
+    });
+    cy.mount(
+      <div style={{ height: 400, position: "relative" }}>
+        <GhosttyTerminalLiveKit
+          url="ws://localhost:9999"
+          token="fake-token"
+          getToken={getToken}
+          ttlSeconds={BigInt(600)}
+          connectionOverlay={{ onDisconnect, onTerminate }}
+        />
+      </div>
+    );
+    cy.get("[data-testid='connection-status-dot']", { timeout: 10000 }).should("exist").click();
+    cy.get("[data-testid='connection-menu-terminate']", { timeout: 3000 }).should("be.visible").click();
+    cy.get("@onTerminate").should("not.have.been.called");
+  });
+
+  it("Terminate calls onTerminate once after user confirms", () => {
+    const onDisconnect = cy.stub();
+    const onTerminate = cy.stub().as("onTerminate");
+    cy.window().then((win) => {
+      cy.stub(win, "confirm").returns(true).as("confirmTerminate");
+    });
+    cy.mount(
+      <div style={{ height: 400, position: "relative" }}>
+        <GhosttyTerminalLiveKit
+          url="ws://localhost:9999"
+          token="fake-token"
+          getToken={getToken}
+          ttlSeconds={BigInt(600)}
+          connectionOverlay={{ onDisconnect, onTerminate }}
+        />
+      </div>
+    );
+    cy.get("[data-testid='connection-status-dot']", { timeout: 10000 }).should("exist").click();
+    cy.get("[data-testid='connection-menu-terminate']", { timeout: 3000 }).should("be.visible").click();
+    cy.get("@onTerminate").should("have.been.calledOnce");
+    cy.get("@confirmTerminate").should("have.been.calledOnce");
+    cy.get("@confirmTerminate").then((stub: unknown) => {
+      const s = stub as { getCall: (n: number) => { args: string[] } };
+      const msg = String(s.getCall(0).args[0] ?? "");
+      expect(
+        msg.toLowerCase().includes("stop") ||
+          msg.toLowerCase().includes("terminat") ||
+          msg.toLowerCase().includes("session") ||
+          msg.toLowerCase().includes("process"),
+        "confirmation copy should mention stopping the session or process",
+      ).to.be.true;
+    });
+  });
 });

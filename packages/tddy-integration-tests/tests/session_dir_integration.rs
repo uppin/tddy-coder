@@ -96,9 +96,13 @@ async fn test_plan_goal_uses_session_dir() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
-    // Provide session_base (new context key) but NOT session_dir.
-    // PlanTask should call create_session_dir_in(session_base) and set session_dir to the UUID path.
-    // output_dir is still provided as working_dir for agent file discovery.
+    // Entry layer creates `{session_base}/sessions/{uuid}/` before plan; workflow must not allocate.
+    let session_dir = create_session_dir_in(&base).expect("pre-create session dir");
+    let session_id = session_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .expect("session dirname")
+        .to_string();
     let mut ctx = std::collections::HashMap::new();
     ctx.insert("feature_input".to_string(), serde_json::json!("Build auth"));
     ctx.insert(
@@ -108,6 +112,11 @@ async fn test_plan_goal_uses_session_dir() {
     ctx.insert(
         "session_base".to_string(),
         serde_json::to_value(base.clone()).unwrap(),
+    );
+    ctx.insert("session_id".to_string(), serde_json::json!(session_id));
+    ctx.insert(
+        "session_dir".to_string(),
+        serde_json::to_value(&session_dir).unwrap(),
     );
 
     let result = engine
@@ -127,10 +136,15 @@ async fn test_plan_goal_uses_session_dir() {
         .await
         .expect("get_session should work")
         .expect("session should exist");
-    let session_dir: std::path::PathBuf = session
+    let ctx_session_dir: std::path::PathBuf = session
         .context
         .get_sync("session_dir")
         .expect("session_dir should be set in session context after plan goal");
+    assert_eq!(
+        ctx_session_dir, session_dir,
+        "plan should keep the pre-created session_dir"
+    );
+    let session_dir = ctx_session_dir;
 
     // session_dir must be under base/sessions/{uuid}/
     let sessions_dir = base.join("sessions");

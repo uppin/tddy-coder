@@ -1,20 +1,50 @@
-//! Shared test setup. Ensures TDDY_SESSIONS_DIR is set so tests never write to ~/.tddy.
+//! Shared test setup. Writes a minimal YAML config under [`std::env::temp_dir`] (Unix: `TMPDIR`)
+//! with `tddy_data_dir` pointing at a process-specific directory, and applies the same path via
+//! [`tddy_core::output::set_tddy_data_dir_override`] so in-process code matches the production
+//! opt-in YAML shape without writing session trees to `~/.tddy`.
 //! Include via `mod common;` in each integration test file.
 
 #![allow(dead_code)]
 
 use ctor::ctor;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Same path the ctor assigns to `tddy_data_dir` / the runtime override.
+pub fn test_tddy_data_dir_path() -> PathBuf {
+    std::env::temp_dir().join(format!("tddy-coder-test-sessions-{}", std::process::id()))
+}
+
+static ISOLATED_SESSION_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// `{base}/sessions/<uuid-v7>/` under a fresh temp prefix — for `Presenter::start_workflow` when
+/// tests would otherwise pass `session_dir: None` and allocate via global session base.
+pub fn isolated_presenter_session_dir(label: &str) -> PathBuf {
+    let n = ISOLATED_SESSION_SEQ.fetch_add(1, Ordering::SeqCst);
+    let base = std::env::temp_dir().join(format!(
+        "tddy-coder-presenter-{}-{}-{}",
+        label,
+        std::process::id(),
+        n
+    ));
+    std::fs::create_dir_all(&base).expect("create isolated sessions base");
+    tddy_core::output::create_session_dir_in(&base).expect("create_session_dir_in")
+}
 
 #[ctor]
-fn set_tddy_sessions_dir_for_tests() {
-    if std::env::var(tddy_core::output::TDDY_SESSIONS_DIR_ENV).is_err() {
-        let dir = std::env::temp_dir().join("tddy-test-sessions");
-        std::env::set_var(
-            tddy_core::output::TDDY_SESSIONS_DIR_ENV,
-            dir.to_str().unwrap_or("/tmp/tddy-test-sessions"),
-        );
-    }
+fn apply_test_tddy_data_dir_config() {
+    let dir = test_tddy_data_dir_path();
+    let _ = std::fs::create_dir_all(&dir);
+    let cfg_path = dir.join("coder-test-harness-config.yaml");
+    let path_for_yaml = dir
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let yaml = format!(
+        "# Test harness — same field as production coder-config.yaml (`tddy_data_dir` under TMPDIR).\ntddy_data_dir: \"{path_for_yaml}\"\n"
+    );
+    std::fs::write(&cfg_path, yaml).expect("write test harness coder config");
+    tddy_core::output::set_tddy_data_dir_override(Some(dir));
 }
 
 /// Create a temp directory with a git repo (init, commit, origin/master).

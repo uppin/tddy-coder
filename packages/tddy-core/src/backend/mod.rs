@@ -2,6 +2,7 @@
 
 mod acp;
 mod claude;
+mod codex;
 mod cursor;
 mod mock;
 mod stub;
@@ -9,6 +10,7 @@ mod tool_executor;
 
 pub use acp::ClaudeAcpBackend;
 pub use claude::{build_claude_args, ClaudeCodeBackend, ClaudeInvokeConfig, PermissionMode};
+pub use codex::CodexBackend;
 pub use cursor::CursorBackend;
 pub use mock::MockBackend;
 pub use stub::StubBackend;
@@ -21,6 +23,8 @@ pub enum AnyBackend {
     Claude(ClaudeCodeBackend),
     ClaudeAcp(ClaudeAcpBackend),
     Cursor(CursorBackend),
+    /// OpenAI Codex CLI (`codex exec`, `codex exec resume`, `--json`).
+    Codex(CodexBackend),
     Stub(StubBackend),
 }
 
@@ -74,6 +78,7 @@ impl CodingBackend for AnyBackend {
             AnyBackend::Claude(b) => b.invoke(request).await,
             AnyBackend::ClaudeAcp(b) => b.invoke(request).await,
             AnyBackend::Cursor(b) => b.invoke(request).await,
+            AnyBackend::Codex(b) => b.invoke(request).await,
             AnyBackend::Stub(b) => b.invoke(request).await,
         }
     }
@@ -83,6 +88,7 @@ impl CodingBackend for AnyBackend {
             AnyBackend::Claude(b) => b.name(),
             AnyBackend::ClaudeAcp(b) => b.name(),
             AnyBackend::Cursor(b) => b.name(),
+            AnyBackend::Codex(b) => b.name(),
             AnyBackend::Stub(b) => b.name(),
         }
     }
@@ -92,6 +98,7 @@ impl CodingBackend for AnyBackend {
             AnyBackend::Claude(b) => b.submit_channel(),
             AnyBackend::ClaudeAcp(b) => b.submit_channel(),
             AnyBackend::Cursor(b) => b.submit_channel(),
+            AnyBackend::Codex(b) => b.submit_channel(),
             AnyBackend::Stub(b) => b.submit_channel(),
         }
     }
@@ -354,6 +361,10 @@ pub fn backend_selection_question() -> ClarificationQuestion {
                 description: "Cursor agent CLI (default model: composer-2)".to_string(),
             },
             QuestionOption {
+                label: "Codex".to_string(),
+                description: "OpenAI Codex CLI (default model: gpt-5)".to_string(),
+            },
+            QuestionOption {
                 label: "Stub".to_string(),
                 description: "Test backend with simulated responses".to_string(),
             },
@@ -401,6 +412,7 @@ pub fn backend_from_label(label: &str) -> (&'static str, &'static str) {
         "Claude" => ("claude", "opus"),
         "Claude ACP" => ("claude-acp", "opus"),
         "Cursor" => ("cursor", "composer-2"),
+        "Codex" => ("codex", "gpt-5"),
         "Stub" => ("stub", "stub"),
         _ => ("claude", "opus"),
     }
@@ -411,6 +423,7 @@ pub fn backend_from_label(label: &str) -> (&'static str, &'static str) {
 pub fn default_model_for_agent(agent: &str) -> &'static str {
     match agent {
         "cursor" => "composer-2",
+        "codex" => "gpt-5",
         "stub" => "stub",
         _ => "opus",
     }
@@ -423,7 +436,8 @@ pub fn preselected_index_for_agent(agent: &str) -> usize {
         "claude" => 0,
         "claude-acp" => 1,
         "cursor" => 2,
-        "stub" => 3,
+        "codex" => 3,
+        "stub" => 4,
         _ => 0,
     }
 }
@@ -511,18 +525,36 @@ mod tests {
     }
 
     #[test]
-    fn backend_selection_question_returns_four_options() {
+    fn backend_selection_question_returns_five_options_including_codex() {
         let q = backend_selection_question();
-        assert_eq!(q.options.len(), 4);
+        assert_eq!(q.options.len(), 5);
         assert!(!q.multi_select);
         assert!(!q.allow_other);
     }
 
     #[test]
-    fn backend_selection_question_labels() {
+    fn codex_backend_selection_question_labels_order() {
         let q = backend_selection_question();
         let labels: Vec<&str> = q.options.iter().map(|o| o.label.as_str()).collect();
-        assert_eq!(labels, vec!["Claude", "Claude ACP", "Cursor", "Stub"]);
+        assert_eq!(
+            labels,
+            vec!["Claude", "Claude ACP", "Cursor", "Codex", "Stub"]
+        );
+    }
+
+    #[test]
+    fn backend_selection_includes_codex_option() {
+        let q = backend_selection_question();
+        let codex = q
+            .options
+            .iter()
+            .find(|o| o.label == "Codex")
+            .expect("Codex option must be present for codex agent support");
+        assert!(
+            codex.description.to_lowercase().contains("codex"),
+            "Codex option should describe Codex CLI, got {:?}",
+            codex.description
+        );
     }
 
     #[test]
@@ -546,6 +578,11 @@ mod tests {
     }
 
     #[test]
+    fn backend_from_label_codex() {
+        assert_eq!(backend_from_label("Codex"), ("codex", "gpt-5"));
+    }
+
+    #[test]
     fn backend_from_label_unknown_defaults_to_claude() {
         assert_eq!(backend_from_label("Unknown"), ("claude", "opus"));
     }
@@ -556,16 +593,22 @@ mod tests {
     }
 
     #[test]
+    fn default_model_for_agent_codex() {
+        assert_eq!(default_model_for_agent("codex"), "gpt-5");
+    }
+
+    #[test]
     fn default_model_for_agent_claude() {
         assert_eq!(default_model_for_agent("claude"), "opus");
     }
 
     #[test]
-    fn preselected_index_for_agent_returns_correct_index() {
+    fn codex_preselected_index_for_agent_order() {
         assert_eq!(preselected_index_for_agent("claude"), 0);
         assert_eq!(preselected_index_for_agent("claude-acp"), 1);
         assert_eq!(preselected_index_for_agent("cursor"), 2);
-        assert_eq!(preselected_index_for_agent("stub"), 3);
+        assert_eq!(preselected_index_for_agent("codex"), 3);
+        assert_eq!(preselected_index_for_agent("stub"), 4);
         assert_eq!(preselected_index_for_agent("unknown"), 0);
     }
 }

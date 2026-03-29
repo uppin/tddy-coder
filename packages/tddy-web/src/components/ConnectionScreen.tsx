@@ -346,6 +346,7 @@ function ConnectedTerminal({
   onTerminate?: () => void | Promise<void>;
 }) {
   const tokenClient = useMemo(() => createTokenClient(), []);
+  const fullscreenTargetRef = useRef<HTMLDivElement>(null);
   const [initialToken, setInitialToken] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -399,13 +400,14 @@ function ConnectedTerminal({
   }
   if (!initialToken || ttlSeconds === null) {
     return (
-      <div data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
+      <div ref={fullscreenTargetRef} data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
         <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
           <ConnectionTerminalChrome
             overlayStatus="connecting"
             buildId={BUILD_ID}
             onDisconnect={onDisconnect}
             onTerminate={onTerminate}
+            fullscreenTargetRef={fullscreenTargetRef}
             onStopInterrupt={() => {}}
           />
         </div>
@@ -414,7 +416,7 @@ function ConnectedTerminal({
   }
 
   return (
-    <div data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
+    <div ref={fullscreenTargetRef} data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
       <GhosttyTerminalLiveKit
         url={livekitUrl}
         token={initialToken}
@@ -428,6 +430,7 @@ function ConnectedTerminal({
         preventFocusOnTap={isMobile && !isKeyboardOpen}
         showMobileKeyboard={isMobile}
         connectionOverlay={{ onDisconnect, buildId: BUILD_ID, onTerminate }}
+        fullscreenTargetRef={fullscreenTargetRef}
       />
     </div>
   );

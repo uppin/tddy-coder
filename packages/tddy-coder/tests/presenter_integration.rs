@@ -5,7 +5,7 @@
 mod common;
 
 use serial_test::serial;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,7 +16,7 @@ use tddy_core::{
     output::{SESSIONS_SUBDIR, TDDY_SESSIONS_DIR_ENV},
     BackendError, PresenterEvent, SharedBackend, StubBackend, WorkflowCompletePayload,
 };
-use tddy_workflow_recipes::TddRecipe;
+use tddy_workflow_recipes::{BugfixRecipe, TddRecipe};
 use tokio::sync::broadcast;
 
 /// Events collected from broadcast for assertions.
@@ -77,6 +77,14 @@ impl EventCollector {
 fn presenter_with_events() -> (Presenter, EventCollector) {
     let (event_tx, event_rx) = broadcast::channel(256);
     let presenter = Presenter::new("stub", "default", Arc::new(TddRecipe)).with_broadcast(event_tx);
+    let collector = EventCollector::new(event_rx);
+    (presenter, collector)
+}
+
+fn bugfix_presenter_with_events() -> (Presenter, EventCollector) {
+    let (event_tx, event_rx) = broadcast::channel(256);
+    let presenter =
+        Presenter::new("stub", "default", Arc::new(BugfixRecipe)).with_broadcast(event_tx);
     let collector = EventCollector::new(event_rx);
     (presenter, collector)
 }
@@ -217,6 +225,309 @@ fn full_workflow_completes_with_stub_backend() {
     );
 }
 
+/// Baseline: TDD recipe reaches `plan` after the user submits feature text with no initial prompt.
+#[test]
+#[serial]
+fn tdd_workflow_starts_plan_after_feature_submit() {
+    let sessions_base = std::env::temp_dir().join("tddy-presenter-tdd-feature-submit");
+    let _ = std::fs::remove_dir_all(&sessions_base);
+    std::fs::create_dir_all(&sessions_base).expect("sessions base");
+    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
+
+    let (mut presenter, mut events) = presenter_with_events();
+    let backend = create_stub_backend();
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-tdd-start");
+
+    presenter.start_workflow(
+        backend, output_dir, None, None, None, None, false, None, None, None,
+    );
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
+
+    let mut iterations = 0;
+    const MAX: usize = 4000;
+    let mut saw_plan = false;
+    while iterations < MAX {
+        presenter.poll_workflow();
+        events.drain();
+        for e in events.events() {
+            if let TestEvent::WorkflowComplete(Err(msg)) = e {
+                std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+                panic!("tdd workflow failed before plan: {}", msg);
+            }
+        }
+        if events
+            .events()
+            .iter()
+            .any(|e| matches!(e, TestEvent::GoalStarted(g) if g.as_str() == "plan"))
+        {
+            saw_plan = true;
+            break;
+        }
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+    assert!(
+        saw_plan,
+        "expected GoalStarted(plan) within {} polls; last mode {:?}, events: {:?}",
+        MAX,
+        presenter.state().mode,
+        events.events()
+    );
+}
+
+/// Bugfix recipe: after the user submits feature text (same as pressing Enter in the TUI), the
+/// workflow must emit [`GoalStarted`] for `reproduce` instead of failing during session bootstrap.
+#[test]
+#[serial]
+fn bugfix_workflow_starts_reproduce_after_feature_submit() {
+    let sessions_base = std::env::temp_dir().join("tddy-presenter-bugfix-feature-submit");
+    let _ = std::fs::remove_dir_all(&sessions_base);
+    std::fs::create_dir_all(&sessions_base).expect("sessions base");
+    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
+
+    let (mut presenter, mut events) = bugfix_presenter_with_events();
+    let backend = create_stub_backend();
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-bugfix-start");
+
+    presenter.start_workflow(
+        backend, output_dir, None, None, None, None, false, None, None, None,
+    );
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput(
+        "repro the crash".to_string(),
+    ));
+
+    let mut iterations = 0;
+    const MAX: usize = 4000;
+    let mut saw_reproduce = false;
+    while iterations < MAX {
+        presenter.poll_workflow();
+        events.drain();
+        for e in events.events() {
+            if let TestEvent::WorkflowComplete(Err(msg)) = e {
+                std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+                panic!("bugfix workflow failed before reproduce goal: {}", msg);
+            }
+        }
+        if events
+            .events()
+            .iter()
+            .any(|e| matches!(e, TestEvent::GoalStarted(g) if g.as_str() == "reproduce"))
+        {
+            saw_reproduce = true;
+            break;
+        }
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+    assert!(
+        saw_reproduce,
+        "expected GoalStarted(reproduce) within {} polls; last mode {:?}, events: {:?}",
+        MAX,
+        presenter.state().mode,
+        events.events()
+    );
+}
+
+/// Simulates UI lag where `WorkflowComplete` is not polled before the user sends their first typed
+/// feature: a preloaded `--prompt` lets the worker thread finish and drop `answer_rx` while
+/// `workflow_result` is still unset. The next `SubmitFeatureInput` gets `SendError` on `answer_tx`
+/// and is misrouted through `restart_workflow` (must reuse `workflow_session_dir` so no extra folder).
+#[test]
+#[serial]
+fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_dir() {
+    let sessions_base =
+        std::env::temp_dir().join("tddy-presenter-bugfix-preload-first-submit-race");
+    let _ = std::fs::remove_dir_all(&sessions_base);
+    std::fs::create_dir_all(&sessions_base).expect("sessions base");
+    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
+
+    let fixed_sid = "019d38cf-b74f-7d40-93ae-dcc2bf3f6936";
+    let session_path = sessions_base.join(SESSIONS_SUBDIR).join(fixed_sid);
+    std::fs::create_dir_all(&session_path).expect("pre-created session dir");
+
+    let (mut presenter, mut events) = bugfix_presenter_with_events();
+    let backend = create_stub_backend();
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-bugfix-preload-race");
+
+    presenter.start_workflow(
+        backend,
+        output_dir,
+        Some(session_path.clone()),
+        Some("preloaded SKIP_QUESTIONS".to_string()),
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+    );
+
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(
+        !presenter.is_done(),
+        "precondition: WorkflowComplete must not be processed yet (no poll_workflow)"
+    );
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput(
+        "user first typed feature".to_string(),
+    ));
+
+    let mut iterations = 0;
+    const MAX: usize = 12000;
+    while iterations < MAX {
+        presenter.poll_workflow();
+        events.drain();
+        if presenter.is_done() {
+            break;
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        presenter.is_done(),
+        "expected workflow to settle; mode {:?}, iterations {}",
+        presenter.state().mode,
+        iterations
+    );
+
+    let sessions_subdir = sessions_base.join(SESSIONS_SUBDIR);
+    let dir_count = std::fs::read_dir(&sessions_subdir)
+        .expect("read sessions subdir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .count();
+
+    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+    assert_eq!(
+        dir_count, 1,
+        "only the bound session directory may exist under sessions/; extra directories indicate \
+         the first typed submit was misrouted after a fast preloaded run (disconnected answer_tx). \
+         count={}",
+        dir_count
+    );
+    let _ = std::fs::remove_dir_all(&sessions_base);
+}
+
+/// After a bugfix run completes, the user often submits another feature from the same web or CLI
+/// session folder. `restart_workflow` must pass that session directory into `run_workflow` so the
+/// second run does not silently allocate a new UUID directory under `TDDY_SESSIONS_DIR` (which makes
+/// the original path look abandoned and resembles a failed start).
+#[test]
+#[serial]
+fn bugfix_second_run_reuses_presenter_session_dir_after_workflow_complete() {
+    let sessions_base = std::env::temp_dir().join("tddy-presenter-bugfix-reuse-fixed-session-dir");
+    let _ = std::fs::remove_dir_all(&sessions_base);
+    std::fs::create_dir_all(&sessions_base).expect("sessions base");
+    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
+
+    let fixed_sid = "019d38cf-b74f-7d40-93ae-dcc2bf3f6936";
+    let session_path = sessions_base.join(SESSIONS_SUBDIR).join(fixed_sid);
+    std::fs::create_dir_all(&session_path).expect("pre-created session dir");
+
+    let (mut presenter, mut events) = bugfix_presenter_with_events();
+    let backend = create_stub_backend();
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-bugfix-reuse");
+
+    presenter.start_workflow(
+        backend.clone(),
+        output_dir,
+        Some(session_path.clone()),
+        Some("first run SKIP_QUESTIONS".to_string()),
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+    );
+
+    let mut iterations = 0;
+    const MAX: usize = 8000;
+    while !presenter.is_done() && iterations < MAX {
+        presenter.poll_workflow();
+        events.drain();
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        presenter.is_done(),
+        "first bugfix run should complete; mode {:?}",
+        presenter.state().mode
+    );
+    events.drain();
+    let first_ok_count = events
+        .events()
+        .iter()
+        .filter(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_))))
+        .count();
+    assert_eq!(first_ok_count, 1, "expected one WorkflowComplete(Ok)");
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput(
+        "second run SKIP_QUESTIONS".to_string(),
+    ));
+
+    iterations = 0;
+    while !presenter.is_done() && iterations < MAX {
+        presenter.poll_workflow();
+        events.drain();
+        for e in events.events() {
+            if let TestEvent::WorkflowComplete(Err(msg)) = e {
+                std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+                panic!("second bugfix workflow failed: {}", msg);
+            }
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        presenter.is_done(),
+        "second bugfix run should complete; mode {:?}",
+        presenter.state().mode
+    );
+
+    events.drain();
+    let last_session_dir: Option<PathBuf> = events.events().iter().rev().find_map(|e| {
+        if let TestEvent::WorkflowComplete(Ok(p)) = e {
+            p.session_dir.clone()
+        } else {
+            None
+        }
+    });
+
+    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+    assert_eq!(
+        last_session_dir,
+        Some(session_path.clone()),
+        "second workflow must reuse the same session_dir as the first run; got {:?}. \
+         Otherwise the folder the user opened (daemon/web session path) never receives the new run.",
+        last_session_dir
+    );
+}
+
 /// Acceptance: SubmitFeatureInput after completion spawns new workflow.
 /// Workflow completes -> FeatureInput -> user submits new feature -> new workflow runs to completion.
 #[test]
@@ -318,7 +629,7 @@ fn submit_feature_input_after_completion_restarts_workflow() {
     );
 }
 
-/// When output_dir is "." (TUI default), session_dir must be under sessions_base_path (~/.tddy/sessions),
+/// When output_dir is "." (TUI default), session_dir must be under tddy_data_dir_path (~/.tddy/sessions),
 /// not under the resolved current_dir. MDs (PRD.md, progress.md, etc.) go to session_dir.
 #[test]
 #[serial]
@@ -397,7 +708,7 @@ fn session_dir_under_sessions_base_when_output_dir_is_dot() {
     let expected_plan_parent = expected_sessions_base.join(SESSIONS_SUBDIR);
     assert!(
         session_dir.starts_with(&expected_plan_parent),
-        "session_dir {:?} must be under {}/sessions/ (sessions_base_path), not under repo {:?}",
+        "session_dir {:?} must be under {}/sessions/ (tddy_data_dir_path), not under repo {:?}",
         session_dir,
         sessions_base_str,
         repo_dir

@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { spawn } from "child_process";
+import { execSync, spawn } from "child_process";
 import { AccessToken } from "livekit-server-sdk";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,12 +29,16 @@ function getTddyCoderPath(): string {
   const repoRoot = path.resolve(__dirname, "../..");
   const release = path.join(repoRoot, "target", "release", "tddy-coder");
   const debug = path.join(repoRoot, "target", "debug", "tddy-coder");
-  return fs.existsSync(release) ? release : debug;
+  // Prefer debug: it is what `cargo build -p tddy-coder` updates; stale release can miss RPC
+  // services (e.g. auth.AuthService) and break Connect e2e.
+  if (fs.existsSync(debug)) return debug;
+  if (fs.existsSync(release)) return release;
+  return debug;
 }
 
 function getWebBundlePath(): string {
-  const pkgDir = path.resolve(__dirname, "..");
-  return path.join(pkgDir, "dist");
+  // cypress.config.ts lives in packages/tddy-web; production bundle is tddy-web/dist.
+  return path.join(__dirname, "dist");
 }
 
 export default defineConfig({
@@ -59,9 +63,28 @@ export default defineConfig({
       let echoTerminalProcess: ReturnType<typeof spawn> | null = null;
       let authFlowProcess: ReturnType<typeof spawn> | null = null;
 
+      /** On POSIX, `script` + shell leaves a child process group; signal the whole group so LiveKit sees the server leave. */
+      const stopSpawnedProcessTree = (child: ReturnType<typeof spawn>) => {
+        const pid = child.pid;
+        if (pid == null) return;
+        if (process.platform === "win32") {
+          child.kill("SIGTERM");
+          return;
+        }
+        try {
+          process.kill(-pid, "SIGTERM");
+        } catch {
+          try {
+            child.kill("SIGTERM");
+          } catch {
+            /* ignore */
+          }
+        }
+      };
+
       const stopTerminalServer = () => {
         if (terminalServerProcess) {
-          terminalServerProcess.kill("SIGTERM");
+          stopSpawnedProcessTree(terminalServerProcess);
           terminalServerProcess = null;
         }
       };
@@ -155,6 +178,7 @@ export default defineConfig({
             terminalServerProcess = spawn(scriptCmd, args, {
               stdio: ["ignore", "pipe", "pipe"],
               cwd: repoRoot,
+              detached: process.platform !== "win32",
               env: { ...process.env, RUST_LOG: "debug" },
             });
 
@@ -406,6 +430,15 @@ export default defineConfig({
           const webPort = 8889;
           const baseUrl = `http://127.0.0.1:${webPort}`;
 
+          stopTddyCoder();
+          if (process.platform !== "win32") {
+            try {
+              execSync(`fuser -k ${webPort}/tcp`, { stdio: "ignore" });
+            } catch {
+              /* port free or fuser unavailable */
+            }
+          }
+
           return new Promise<{ baseUrl: string }>((resolve, reject) => {
             const repoRoot = path.resolve(__dirname, "../..");
             tddyCoderProcess = spawn(
@@ -428,9 +461,14 @@ export default defineConfig({
                 "127.0.0.1",
                 "--web-bundle-path",
                 webBundlePath,
+                "--github-stub",
+                // Single argv so the ':' in test-code:testuser is never split by a shell layer.
+                "--github-stub-codes=test-code:testuser",
               ],
               {
-                stdio: ["ignore", "pipe", "pipe"],
+                // Drain is required if piping: a full stderr buffer can block the daemon before
+                // the web server finishes starting.
+                stdio: ["ignore", "ignore", "ignore"],
                 cwd: repoRoot,
                 env: { ...process.env, RUST_LOG: "info" },
               }
@@ -491,6 +529,15 @@ export default defineConfig({
           const webPort = 8890;
           const baseUrl = `http://127.0.0.1:${webPort}`;
 
+          stopAuthFlow();
+          if (process.platform !== "win32") {
+            try {
+              execSync(`fuser -k ${webPort}/tcp`, { stdio: "ignore" });
+            } catch {
+              /* port free or fuser unavailable */
+            }
+          }
+
           return new Promise<{ baseUrl: string }>((resolve, reject) => {
             const repoRoot = path.resolve(__dirname, "../..");
             authFlowProcess = spawn(
@@ -514,11 +561,10 @@ export default defineConfig({
                 "--web-bundle-path",
                 webBundlePath,
                 "--github-stub",
-                "--github-stub-codes",
-                "test-code:testuser",
+                "--github-stub-codes=test-code:testuser",
               ],
               {
-                stdio: ["ignore", "pipe", "pipe"],
+                stdio: ["ignore", "ignore", "ignore"],
                 cwd: repoRoot,
                 env: { ...process.env, RUST_LOG: "info" },
               }
