@@ -36,6 +36,17 @@ users:
 # When true (default), pass --mouse to spawned tddy-* (browser / touch terminals).
 spawn_mouse: true
 
+# Backends shown in tddy-web (ConnectionScreen); ids are passed to StartSession / `tddy-coder --agent`.
+allowed_agents:
+  - id: claude
+    label: "Claude (opus)"
+  - id: claude-acp
+    label: "Claude ACP (opus)"
+  - id: cursor
+    label: "Cursor (composer-2)"
+  - id: stub
+    label: "Stub"
+
 allowed_tools:
   - path: "target/debug/tddy-coder"
     label: "tddy-coder (debug)"

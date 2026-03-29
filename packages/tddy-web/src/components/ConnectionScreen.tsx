@@ -5,11 +5,16 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import {
   ConnectionService,
   Signal,
+  type AgentInfo,
   type ProjectEntry,
   type SessionEntry,
   type ToolInfo,
   type EligibleDaemonEntry,
 } from "../gen/connection_pb";
+import {
+  buildAgentSelectOptionsFromRpc,
+  coalesceBackendAgentSelection,
+} from "./connection/agentOptions";
 import { GhosttyTerminalLiveKit } from "./GhosttyTerminalLiveKit";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 import { ParticipantList } from "./ParticipantList";
@@ -78,11 +83,18 @@ type ProjectSessionForm = {
   daemonInstanceId: string;
 };
 
-function defaultProjectSessionForm(tools: ToolInfo[], daemons: EligibleDaemonEntry[]): ProjectSessionForm {
+function defaultProjectSessionForm(
+  tools: ToolInfo[],
+  agents: AgentInfo[],
+  daemons: EligibleDaemonEntry[],
+): ProjectSessionForm {
   const localDaemon = daemons.find((d) => d.isLocal);
+  const agentOptions = buildAgentSelectOptionsFromRpc(
+    agents.map((a) => ({ id: a.id, label: a.label })),
+  );
   return {
     toolPath: tools[0]?.path ?? "",
-    agent: "claude",
+    agent: coalesceBackendAgentSelection(agentOptions, undefined),
     recipe: "tdd",
     debugLogging: false,
     daemonInstanceId: localDaemon?.instanceId ?? daemons[0]?.instanceId ?? "",
@@ -96,6 +108,7 @@ const sessionControlSelectClassName =
 function ProjectSessionOptions({
   projectId,
   tools,
+  agents,
   daemons,
   form,
   onChange,
@@ -103,6 +116,7 @@ function ProjectSessionOptions({
 }: {
   projectId: string;
   tools: ToolInfo[];
+  agents: AgentInfo[];
   daemons: EligibleDaemonEntry[];
   form: ProjectSessionForm;
   onChange: (patch: Partial<ProjectSessionForm>) => void;
@@ -113,6 +127,10 @@ function ProjectSessionOptions({
   const hostId = `host-select-${projectId}`;
   const recipeId = `recipe-select-${projectId}`;
   const debugId = `debug-logging-${projectId}`;
+  const backendOptions = useMemo(
+    () => buildAgentSelectOptionsFromRpc(agents.map((a) => ({ id: a.id, label: a.label }))),
+    [agents],
+  );
   return (
     <>
       <p className="mb-2 mt-2 text-xs text-muted-foreground">
@@ -167,10 +185,11 @@ function ProjectSessionOptions({
             onChange={(e) => onChange({ agent: e.target.value })}
             className={sessionControlSelectClassName}
           >
-            <option value="claude">Claude (opus)</option>
-            <option value="claude-acp">Claude ACP (opus)</option>
-            <option value="cursor">Cursor (composer-2)</option>
-            <option value="stub">Stub</option>
+            {backendOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </select>
         </div>
         <div className="flex min-w-[10rem] shrink-0 flex-col gap-1">
@@ -445,6 +464,7 @@ export function ConnectionScreen({
 } = {}) {
   const { user, isAuthenticated, isLoading, login, logout, sessionToken } = useAuth();
   const [tools, setTools] = useState<ToolInfo[]>([]);
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [daemons, setDaemons] = useState<EligibleDaemonEntry[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
@@ -500,12 +520,20 @@ export function ConnectionScreen({
       setLoading(false);
       return;
     }
-    client
-      .listTools({})
-      .then((res) => {
-        setTools(res.tools);
+    Promise.all([client.listTools({}), client.listAgents({})])
+      .then(([toolsRes, agentsRes]) => {
+        setTools(toolsRes.tools);
+        setAgents(agentsRes.agents);
+        console.debug("[ConnectionScreen] ListTools + ListAgents loaded", {
+          tools: toolsRes.tools.length,
+          agents: agentsRes.agents.length,
+        });
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to list tools"))
+      .catch((e) => {
+        setTools([]);
+        setAgents([]);
+        setError(e instanceof Error ? e.message : "Failed to list tools or agents");
+      })
       .finally(() => setLoading(false));
 
     client
@@ -537,7 +565,10 @@ export function ConnectionScreen({
   useEffect(() => {
     setProjectForms((prev) => {
       const next = { ...prev };
-      const def = defaultProjectSessionForm(tools, daemons);
+      const def = defaultProjectSessionForm(tools, agents, daemons);
+      const agentOptions = buildAgentSelectOptionsFromRpc(
+        agents.map((a) => ({ id: a.id, label: a.label })),
+      );
       for (const p of projects) {
         const existing = next[p.projectId];
         if (!existing) {
@@ -546,6 +577,13 @@ export function ConnectionScreen({
           const toolStillValid = tools.some((t) => t.path === existing.toolPath);
           if (!toolStillValid && tools[0]) {
             next[p.projectId] = { ...existing, toolPath: tools[0].path };
+          }
+          const agentStillValid = agents.some((a) => a.id === existing.agent);
+          if (!agentStillValid) {
+            next[p.projectId] = {
+              ...next[p.projectId],
+              agent: coalesceBackendAgentSelection(agentOptions, existing.agent),
+            };
           }
           if (!existing.daemonInstanceId && def.daemonInstanceId) {
             next[p.projectId] = { ...next[p.projectId], daemonInstanceId: def.daemonInstanceId };
@@ -557,13 +595,13 @@ export function ConnectionScreen({
       }
       return next;
     });
-  }, [projects, tools, daemons]);
+  }, [projects, tools, agents, daemons]);
 
   const updateProjectForm = (projectId: string, patch: Partial<ProjectSessionForm>) => {
     setProjectForms((prev) => ({
       ...prev,
       [projectId]: {
-        ...(prev[projectId] ?? defaultProjectSessionForm(tools, daemons)),
+        ...(prev[projectId] ?? defaultProjectSessionForm(tools, agents, daemons)),
         ...patch,
       },
     }));
@@ -589,8 +627,8 @@ export function ConnectionScreen({
   };
 
   const handleStartSession = async (projectId: string) => {
-    const form = projectForms[projectId] ?? defaultProjectSessionForm(tools, daemons);
-    if (!sessionToken || !form.toolPath || !projectId.trim()) return;
+    const form = projectForms[projectId] ?? defaultProjectSessionForm(tools, agents, daemons);
+    if (!sessionToken || !form.toolPath || !projectId.trim() || !form.agent) return;
     setError(null);
     try {
       const res = await client.startSession({
@@ -843,8 +881,11 @@ export function ConnectionScreen({
               <ProjectSessionOptions
                 projectId={p.projectId}
                 tools={tools}
+                agents={agents}
                 daemons={daemons}
-                form={projectForms[p.projectId] ?? defaultProjectSessionForm(tools, daemons)}
+                form={
+                  projectForms[p.projectId] ?? defaultProjectSessionForm(tools, agents, daemons)
+                }
                 onChange={(patch) => updateProjectForm(p.projectId, patch)}
                 startSessionButton={
                   <Button
@@ -853,7 +894,10 @@ export function ConnectionScreen({
                     onClick={() => handleStartSession(p.projectId)}
                     disabled={
                       loading ||
-                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, daemons)).toolPath
+                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, agents, daemons))
+                        .toolPath ||
+                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, agents, daemons))
+                        .agent
                     }
                   >
                     Start New Session

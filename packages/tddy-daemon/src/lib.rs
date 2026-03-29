@@ -1,5 +1,6 @@
 //! tddy-daemon library — shared by binary and tests.
 
+pub mod agent_list_mapping;
 pub mod auth;
 pub mod config;
 pub mod connection_service;

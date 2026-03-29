@@ -6,12 +6,13 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 
 | RPC | Purpose |
 |-----|---------|
-| `ListTools` | Allowed `tddy-*` binaries from config |
+| `ListTools` | Allowed `tddy-*` binaries from config (`allowed_tools`) |
+| `ListAgents` | Allowed coding backends from config (`allowed_agents`): each entry has `id` (value for `StartSession.agent` / `tddy-coder --agent`) and `label` (display string; optional YAML `label` trimmed; blank or whitespace-only falls back to `id`) |
 | `ListSessions` | Lists directories under `{sessions_base}/sessions/` that contain `.session.yaml` (includes `project_id` and `daemon_instance_id` for the owning daemon); each entry includes workflow fields populated from **`changeset.yaml`** when present (see below) |
 | `ListProjects` | Projects from `~/.tddy/projects/projects.yaml` |
 | `CreateProject` | Clone (or adopt existing path) + append registry |
 | `ListEligibleDaemons` | Eligible daemon instances for host selection (`instance_id`, `label`, `is_local`); sourced from `EligibleDaemonSource` |
-| `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists) |
+| `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. |
 | `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata); `session_id` is validated as a single path segment before resolving `{sessions_base}/sessions/{session_id}/` |
 | `DeleteSession` | Removes `~/.tddy/sessions/<session_id>/` when the session is inactive (PID in metadata not alive); rejects active sessions, unknown ids, and path-unsafe ids (implementation in `session_deletion`) |
 | `SignalSession` | Send Unix signal to recorded PID for an active session; `session_id` validated before path resolution |

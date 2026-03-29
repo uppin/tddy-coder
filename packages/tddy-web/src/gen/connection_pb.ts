@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file connection.proto.
  */
 export const file_connection: GenFile = /*@__PURE__*/
-  fileDesc("ChBjb25uZWN0aW9uLnByb3RvEgpjb25uZWN0aW9uIhIKEExpc3RUb29sc1JlcXVlc3QiOAoRTGlzdFRvb2xzUmVzcG9uc2USIwoFdG9vbHMYASADKAsyFC5jb25uZWN0aW9uLlRvb2xJbmZvIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkiLAoTTGlzdFNlc3Npb25zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIkIKFExpc3RTZXNzaW9uc1Jlc3BvbnNlEioKCHNlc3Npb25zGAEgAygLMhguY29ubmVjdGlvbi5TZXNzaW9uRW50cnkijwIKDFNlc3Npb25FbnRyeRISCgpzZXNzaW9uX2lkGAEgASgJEhIKCmNyZWF0ZWRfYXQYAiABKAkSDgoGc3RhdHVzGAMgASgJEhEKCXJlcG9fcGF0aBgEIAEoCRILCgNwaWQYBSABKA0SEQoJaXNfYWN0aXZlGAYgASgIEhIKCnByb2plY3RfaWQYByABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAggASgJEhUKDXdvcmtmbG93X2dvYWwYCSABKAkSFgoOd29ya2Zsb3dfc3RhdGUYCiABKAkSFwoPZWxhcHNlZF9kaXNwbGF5GAsgASgJEg0KBWFnZW50GAwgASgJEg0KBW1vZGVsGA0gASgJIlkKDFByb2plY3RFbnRyeRISCgpwcm9qZWN0X2lkGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHZ2l0X3VybBgDIAEoCRIWCg5tYWluX3JlcG9fcGF0aBgEIAEoCSIsChNMaXN0UHJvamVjdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiQgoUTGlzdFByb2plY3RzUmVzcG9uc2USKgoIcHJvamVjdHMYASADKAsyGC5jb25uZWN0aW9uLlByb2plY3RFbnRyeSJoChRDcmVhdGVQcm9qZWN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHZ2l0X3VybBgDIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYBCABKAkiQgoVQ3JlYXRlUHJvamVjdFJlc3BvbnNlEikKB3Byb2plY3QYASABKAsyGC5jb25uZWN0aW9uLlByb2plY3RFbnRyeSKOAQoTU3RhcnRTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhEKCXRvb2xfcGF0aBgCIAEoCRISCgpwcm9qZWN0X2lkGAMgASgJEg0KBWFnZW50GAQgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgFIAEoCRIOCgZyZWNpcGUYBiABKAkidgoUU3RhcnRTZXNzaW9uUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIUCgxsaXZla2l0X3Jvb20YAiABKAkSEwoLbGl2ZWtpdF91cmwYAyABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYBCABKAkiQgoVQ29ubmVjdFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJkChZDb25uZWN0U2Vzc2lvblJlc3BvbnNlEhQKDGxpdmVraXRfcm9vbRgBIAEoCRITCgtsaXZla2l0X3VybBgCIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgDIAEoCSJBChRSZXN1bWVTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkidwoVUmVzdW1lU2Vzc2lvblJlc3BvbnNlEhIKCnNlc3Npb25faWQYASABKAkSFAoMbGl2ZWtpdF9yb29tGAIgASgJEhMKC2xpdmVraXRfdXJsGAMgASgJEh8KF2xpdmVraXRfc2VydmVyX2lkZW50aXR5GAQgASgJIlEKFFNpZ25hbFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIOCgZzaWduYWwYAyABKAUiNAoVU2lnbmFsU2Vzc2lvblJlc3BvbnNlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiQQoURGVsZXRlU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIiMKFURlbGV0ZVNlc3Npb25SZXNwb25zZRIKCgJvaxgBIAEoCCIzChpMaXN0RWxpZ2libGVEYWVtb25zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIksKE0VsaWdpYmxlRGFlbW9uRW50cnkSEwoLaW5zdGFuY2VfaWQYASABKAkSDQoFbGFiZWwYAiABKAkSEAoIaXNfbG9jYWwYAyABKAgiTwobTGlzdEVsaWdpYmxlRGFlbW9uc1Jlc3BvbnNlEjAKB2RhZW1vbnMYASADKAsyHy5jb25uZWN0aW9uLkVsaWdpYmxlRGFlbW9uRW50cnkqQwoGU2lnbmFsEhEKDVNJR05BTF9TSUdJTlQQABISCg5TSUdOQUxfU0lHVEVSTRABEhIKDlNJR05BTF9TSUdLSUxMEAIy7wYKEUNvbm5lY3Rpb25TZXJ2aWNlEkgKCUxpc3RUb29scxIcLmNvbm5lY3Rpb24uTGlzdFRvb2xzUmVxdWVzdBodLmNvbm5lY3Rpb24uTGlzdFRvb2xzUmVzcG9uc2USUQoMTGlzdFNlc3Npb25zEh8uY29ubmVjdGlvbi5MaXN0U2Vzc2lvbnNSZXF1ZXN0GiAuY29ubmVjdGlvbi5MaXN0U2Vzc2lvbnNSZXNwb25zZRJRCgxMaXN0UHJvamVjdHMSHy5jb25uZWN0aW9uLkxpc3RQcm9qZWN0c1JlcXVlc3QaIC5jb25uZWN0aW9uLkxpc3RQcm9qZWN0c1Jlc3BvbnNlElQKDUNyZWF0ZVByb2plY3QSIC5jb25uZWN0aW9uLkNyZWF0ZVByb2plY3RSZXF1ZXN0GiEuY29ubmVjdGlvbi5DcmVhdGVQcm9qZWN0UmVzcG9uc2USUQoMU3RhcnRTZXNzaW9uEh8uY29ubmVjdGlvbi5TdGFydFNlc3Npb25SZXF1ZXN0GiAuY29ubmVjdGlvbi5TdGFydFNlc3Npb25SZXNwb25zZRJXCg5Db25uZWN0U2Vzc2lvbhIhLmNvbm5lY3Rpb24uQ29ubmVjdFNlc3Npb25SZXF1ZXN0GiIuY29ubmVjdGlvbi5Db25uZWN0U2Vzc2lvblJlc3BvbnNlElQKDVJlc3VtZVNlc3Npb24SIC5jb25uZWN0aW9uLlJlc3VtZVNlc3Npb25SZXF1ZXN0GiEuY29ubmVjdGlvbi5SZXN1bWVTZXNzaW9uUmVzcG9uc2USVAoNU2lnbmFsU2Vzc2lvbhIgLmNvbm5lY3Rpb24uU2lnbmFsU2Vzc2lvblJlcXVlc3QaIS5jb25uZWN0aW9uLlNpZ25hbFNlc3Npb25SZXNwb25zZRJUCg1EZWxldGVTZXNzaW9uEiAuY29ubmVjdGlvbi5EZWxldGVTZXNzaW9uUmVxdWVzdBohLmNvbm5lY3Rpb24uRGVsZXRlU2Vzc2lvblJlc3BvbnNlEmYKE0xpc3RFbGlnaWJsZURhZW1vbnMSJi5jb25uZWN0aW9uLkxpc3RFbGlnaWJsZURhZW1vbnNSZXF1ZXN0GicuY29ubmVjdGlvbi5MaXN0RWxpZ2libGVEYWVtb25zUmVzcG9uc2ViBnByb3RvMw");
+  fileDesc("ChBjb25uZWN0aW9uLnByb3RvEgpjb25uZWN0aW9uIhIKEExpc3RUb29sc1JlcXVlc3QiOAoRTGlzdFRvb2xzUmVzcG9uc2USIwoFdG9vbHMYASADKAsyFC5jb25uZWN0aW9uLlRvb2xJbmZvIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkiEwoRTGlzdEFnZW50c1JlcXVlc3QiOwoSTGlzdEFnZW50c1Jlc3BvbnNlEiUKBmFnZW50cxgBIAMoCzIVLmNvbm5lY3Rpb24uQWdlbnRJbmZvIiYKCUFnZW50SW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSIsChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiQgoUTGlzdFNlc3Npb25zUmVzcG9uc2USKgoIc2Vzc2lvbnMYASADKAsyGC5jb25uZWN0aW9uLlNlc3Npb25FbnRyeSKPAgoMU2Vzc2lvbkVudHJ5EhIKCnNlc3Npb25faWQYASABKAkSEgoKY3JlYXRlZF9hdBgCIAEoCRIOCgZzdGF0dXMYAyABKAkSEQoJcmVwb19wYXRoGAQgASgJEgsKA3BpZBgFIAEoDRIRCglpc19hY3RpdmUYBiABKAgSEgoKcHJvamVjdF9pZBgHIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYCCABKAkSFQoNd29ya2Zsb3dfZ29hbBgJIAEoCRIWCg53b3JrZmxvd19zdGF0ZRgKIAEoCRIXCg9lbGFwc2VkX2Rpc3BsYXkYCyABKAkSDQoFYWdlbnQYDCABKAkSDQoFbW9kZWwYDSABKAkiWQoMUHJvamVjdEVudHJ5EhIKCnByb2plY3RfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhYKDm1haW5fcmVwb19wYXRoGAQgASgJIiwKE0xpc3RQcm9qZWN0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJCChRMaXN0UHJvamVjdHNSZXNwb25zZRIqCghwcm9qZWN0cxgBIAMoCzIYLmNvbm5lY3Rpb24uUHJvamVjdEVudHJ5ImgKFENyZWF0ZVByb2plY3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhoKEnVzZXJfcmVsYXRpdmVfcGF0aBgEIAEoCSJCChVDcmVhdGVQcm9qZWN0UmVzcG9uc2USKQoHcHJvamVjdBgBIAEoCzIYLmNvbm5lY3Rpb24uUHJvamVjdEVudHJ5Io4BChNTdGFydFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEQoJdG9vbF9wYXRoGAIgASgJEhIKCnByb2plY3RfaWQYAyABKAkSDQoFYWdlbnQYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEg4KBnJlY2lwZRgGIAEoCSJ2ChRTdGFydFNlc3Npb25SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGxpdmVraXRfcm9vbRgCIAEoCRITCgtsaXZla2l0X3VybBgDIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgEIAEoCSJCChVDb25uZWN0U2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJImQKFkNvbm5lY3RTZXNzaW9uUmVzcG9uc2USFAoMbGl2ZWtpdF9yb29tGAEgASgJEhMKC2xpdmVraXRfdXJsGAIgASgJEh8KF2xpdmVraXRfc2VydmVyX2lkZW50aXR5GAMgASgJIkEKFFJlc3VtZVNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJ3ChVSZXN1bWVTZXNzaW9uUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIUCgxsaXZla2l0X3Jvb20YAiABKAkSEwoLbGl2ZWtpdF91cmwYAyABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYBCABKAkiUQoUU2lnbmFsU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBnNpZ25hbBgDIAEoBSI0ChVTaWduYWxTZXNzaW9uUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJBChREZWxldGVTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiIwoVRGVsZXRlU2Vzc2lvblJlc3BvbnNlEgoKAm9rGAEgASgIIjMKGkxpc3RFbGlnaWJsZURhZW1vbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiSwoTRWxpZ2libGVEYWVtb25FbnRyeRITCgtpbnN0YW5jZV9pZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIQCghpc19sb2NhbBgDIAEoCCJPChtMaXN0RWxpZ2libGVEYWVtb25zUmVzcG9uc2USMAoHZGFlbW9ucxgBIAMoCzIfLmNvbm5lY3Rpb24uRWxpZ2libGVEYWVtb25FbnRyeSpDCgZTaWduYWwSEQoNU0lHTkFMX1NJR0lOVBAAEhIKDlNJR05BTF9TSUdURVJNEAESEgoOU0lHTkFMX1NJR0tJTEwQAjK8BwoRQ29ubmVjdGlvblNlcnZpY2USSAoJTGlzdFRvb2xzEhwuY29ubmVjdGlvbi5MaXN0VG9vbHNSZXF1ZXN0Gh0uY29ubmVjdGlvbi5MaXN0VG9vbHNSZXNwb25zZRJLCgpMaXN0QWdlbnRzEh0uY29ubmVjdGlvbi5MaXN0QWdlbnRzUmVxdWVzdBoeLmNvbm5lY3Rpb24uTGlzdEFnZW50c1Jlc3BvbnNlElEKDExpc3RTZXNzaW9ucxIfLmNvbm5lY3Rpb24uTGlzdFNlc3Npb25zUmVxdWVzdBogLmNvbm5lY3Rpb24uTGlzdFNlc3Npb25zUmVzcG9uc2USUQoMTGlzdFByb2plY3RzEh8uY29ubmVjdGlvbi5MaXN0UHJvamVjdHNSZXF1ZXN0GiAuY29ubmVjdGlvbi5MaXN0UHJvamVjdHNSZXNwb25zZRJUCg1DcmVhdGVQcm9qZWN0EiAuY29ubmVjdGlvbi5DcmVhdGVQcm9qZWN0UmVxdWVzdBohLmNvbm5lY3Rpb24uQ3JlYXRlUHJvamVjdFJlc3BvbnNlElEKDFN0YXJ0U2Vzc2lvbhIfLmNvbm5lY3Rpb24uU3RhcnRTZXNzaW9uUmVxdWVzdBogLmNvbm5lY3Rpb24uU3RhcnRTZXNzaW9uUmVzcG9uc2USVwoOQ29ubmVjdFNlc3Npb24SIS5jb25uZWN0aW9uLkNvbm5lY3RTZXNzaW9uUmVxdWVzdBoiLmNvbm5lY3Rpb24uQ29ubmVjdFNlc3Npb25SZXNwb25zZRJUCg1SZXN1bWVTZXNzaW9uEiAuY29ubmVjdGlvbi5SZXN1bWVTZXNzaW9uUmVxdWVzdBohLmNvbm5lY3Rpb24uUmVzdW1lU2Vzc2lvblJlc3BvbnNlElQKDVNpZ25hbFNlc3Npb24SIC5jb25uZWN0aW9uLlNpZ25hbFNlc3Npb25SZXF1ZXN0GiEuY29ubmVjdGlvbi5TaWduYWxTZXNzaW9uUmVzcG9uc2USVAoNRGVsZXRlU2Vzc2lvbhIgLmNvbm5lY3Rpb24uRGVsZXRlU2Vzc2lvblJlcXVlc3QaIS5jb25uZWN0aW9uLkRlbGV0ZVNlc3Npb25SZXNwb25zZRJmChNMaXN0RWxpZ2libGVEYWVtb25zEiYuY29ubmVjdGlvbi5MaXN0RWxpZ2libGVEYWVtb25zUmVxdWVzdBonLmNvbm5lY3Rpb24uTGlzdEVsaWdpYmxlRGFlbW9uc1Jlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message connection.ListToolsRequest
@@ -65,6 +65,58 @@ export const ToolInfoSchema: GenMessage<ToolInfo> = /*@__PURE__*/
   messageDesc(file_connection, 2);
 
 /**
+ * @generated from message connection.ListAgentsRequest
+ */
+export type ListAgentsRequest = Message<"connection.ListAgentsRequest"> & {
+};
+
+/**
+ * Describes the message connection.ListAgentsRequest.
+ * Use `create(ListAgentsRequestSchema)` to create a new message.
+ */
+export const ListAgentsRequestSchema: GenMessage<ListAgentsRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 3);
+
+/**
+ * @generated from message connection.ListAgentsResponse
+ */
+export type ListAgentsResponse = Message<"connection.ListAgentsResponse"> & {
+  /**
+   * @generated from field: repeated connection.AgentInfo agents = 1;
+   */
+  agents: AgentInfo[];
+};
+
+/**
+ * Describes the message connection.ListAgentsResponse.
+ * Use `create(ListAgentsResponseSchema)` to create a new message.
+ */
+export const ListAgentsResponseSchema: GenMessage<ListAgentsResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 4);
+
+/**
+ * @generated from message connection.AgentInfo
+ */
+export type AgentInfo = Message<"connection.AgentInfo"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string label = 2;
+   */
+  label: string;
+};
+
+/**
+ * Describes the message connection.AgentInfo.
+ * Use `create(AgentInfoSchema)` to create a new message.
+ */
+export const AgentInfoSchema: GenMessage<AgentInfo> = /*@__PURE__*/
+  messageDesc(file_connection, 5);
+
+/**
  * @generated from message connection.ListSessionsRequest
  */
 export type ListSessionsRequest = Message<"connection.ListSessionsRequest"> & {
@@ -79,7 +131,7 @@ export type ListSessionsRequest = Message<"connection.ListSessionsRequest"> & {
  * Use `create(ListSessionsRequestSchema)` to create a new message.
  */
 export const ListSessionsRequestSchema: GenMessage<ListSessionsRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 3);
+  messageDesc(file_connection, 6);
 
 /**
  * @generated from message connection.ListSessionsResponse
@@ -96,7 +148,7 @@ export type ListSessionsResponse = Message<"connection.ListSessionsResponse"> & 
  * Use `create(ListSessionsResponseSchema)` to create a new message.
  */
 export const ListSessionsResponseSchema: GenMessage<ListSessionsResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 4);
+  messageDesc(file_connection, 7);
 
 /**
  * @generated from message connection.SessionEntry
@@ -179,7 +231,7 @@ export type SessionEntry = Message<"connection.SessionEntry"> & {
  * Use `create(SessionEntrySchema)` to create a new message.
  */
 export const SessionEntrySchema: GenMessage<SessionEntry> = /*@__PURE__*/
-  messageDesc(file_connection, 5);
+  messageDesc(file_connection, 8);
 
 /**
  * @generated from message connection.ProjectEntry
@@ -211,7 +263,7 @@ export type ProjectEntry = Message<"connection.ProjectEntry"> & {
  * Use `create(ProjectEntrySchema)` to create a new message.
  */
 export const ProjectEntrySchema: GenMessage<ProjectEntry> = /*@__PURE__*/
-  messageDesc(file_connection, 6);
+  messageDesc(file_connection, 9);
 
 /**
  * @generated from message connection.ListProjectsRequest
@@ -228,7 +280,7 @@ export type ListProjectsRequest = Message<"connection.ListProjectsRequest"> & {
  * Use `create(ListProjectsRequestSchema)` to create a new message.
  */
 export const ListProjectsRequestSchema: GenMessage<ListProjectsRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 7);
+  messageDesc(file_connection, 10);
 
 /**
  * @generated from message connection.ListProjectsResponse
@@ -245,7 +297,7 @@ export type ListProjectsResponse = Message<"connection.ListProjectsResponse"> & 
  * Use `create(ListProjectsResponseSchema)` to create a new message.
  */
 export const ListProjectsResponseSchema: GenMessage<ListProjectsResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 8);
+  messageDesc(file_connection, 11);
 
 /**
  * @generated from message connection.CreateProjectRequest
@@ -280,7 +332,7 @@ export type CreateProjectRequest = Message<"connection.CreateProjectRequest"> & 
  * Use `create(CreateProjectRequestSchema)` to create a new message.
  */
 export const CreateProjectRequestSchema: GenMessage<CreateProjectRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 9);
+  messageDesc(file_connection, 12);
 
 /**
  * @generated from message connection.CreateProjectResponse
@@ -297,7 +349,7 @@ export type CreateProjectResponse = Message<"connection.CreateProjectResponse"> 
  * Use `create(CreateProjectResponseSchema)` to create a new message.
  */
 export const CreateProjectResponseSchema: GenMessage<CreateProjectResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 10);
+  messageDesc(file_connection, 13);
 
 /**
  * @generated from message connection.StartSessionRequest
@@ -347,7 +399,7 @@ export type StartSessionRequest = Message<"connection.StartSessionRequest"> & {
  * Use `create(StartSessionRequestSchema)` to create a new message.
  */
 export const StartSessionRequestSchema: GenMessage<StartSessionRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 11);
+  messageDesc(file_connection, 14);
 
 /**
  * @generated from message connection.StartSessionResponse
@@ -379,7 +431,7 @@ export type StartSessionResponse = Message<"connection.StartSessionResponse"> & 
  * Use `create(StartSessionResponseSchema)` to create a new message.
  */
 export const StartSessionResponseSchema: GenMessage<StartSessionResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 12);
+  messageDesc(file_connection, 15);
 
 /**
  * @generated from message connection.ConnectSessionRequest
@@ -401,7 +453,7 @@ export type ConnectSessionRequest = Message<"connection.ConnectSessionRequest"> 
  * Use `create(ConnectSessionRequestSchema)` to create a new message.
  */
 export const ConnectSessionRequestSchema: GenMessage<ConnectSessionRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 13);
+  messageDesc(file_connection, 16);
 
 /**
  * @generated from message connection.ConnectSessionResponse
@@ -428,7 +480,7 @@ export type ConnectSessionResponse = Message<"connection.ConnectSessionResponse"
  * Use `create(ConnectSessionResponseSchema)` to create a new message.
  */
 export const ConnectSessionResponseSchema: GenMessage<ConnectSessionResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 14);
+  messageDesc(file_connection, 17);
 
 /**
  * @generated from message connection.ResumeSessionRequest
@@ -450,7 +502,7 @@ export type ResumeSessionRequest = Message<"connection.ResumeSessionRequest"> & 
  * Use `create(ResumeSessionRequestSchema)` to create a new message.
  */
 export const ResumeSessionRequestSchema: GenMessage<ResumeSessionRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 15);
+  messageDesc(file_connection, 18);
 
 /**
  * @generated from message connection.ResumeSessionResponse
@@ -482,7 +534,7 @@ export type ResumeSessionResponse = Message<"connection.ResumeSessionResponse"> 
  * Use `create(ResumeSessionResponseSchema)` to create a new message.
  */
 export const ResumeSessionResponseSchema: GenMessage<ResumeSessionResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 16);
+  messageDesc(file_connection, 19);
 
 /**
  * @generated from message connection.SignalSessionRequest
@@ -509,7 +561,7 @@ export type SignalSessionRequest = Message<"connection.SignalSessionRequest"> & 
  * Use `create(SignalSessionRequestSchema)` to create a new message.
  */
 export const SignalSessionRequestSchema: GenMessage<SignalSessionRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 17);
+  messageDesc(file_connection, 20);
 
 /**
  * @generated from message connection.SignalSessionResponse
@@ -531,7 +583,7 @@ export type SignalSessionResponse = Message<"connection.SignalSessionResponse"> 
  * Use `create(SignalSessionResponseSchema)` to create a new message.
  */
 export const SignalSessionResponseSchema: GenMessage<SignalSessionResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 18);
+  messageDesc(file_connection, 21);
 
 /**
  * @generated from message connection.DeleteSessionRequest
@@ -553,7 +605,7 @@ export type DeleteSessionRequest = Message<"connection.DeleteSessionRequest"> & 
  * Use `create(DeleteSessionRequestSchema)` to create a new message.
  */
 export const DeleteSessionRequestSchema: GenMessage<DeleteSessionRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 19);
+  messageDesc(file_connection, 22);
 
 /**
  * @generated from message connection.DeleteSessionResponse
@@ -570,7 +622,7 @@ export type DeleteSessionResponse = Message<"connection.DeleteSessionResponse"> 
  * Use `create(DeleteSessionResponseSchema)` to create a new message.
  */
 export const DeleteSessionResponseSchema: GenMessage<DeleteSessionResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 20);
+  messageDesc(file_connection, 23);
 
 /**
  * @generated from message connection.ListEligibleDaemonsRequest
@@ -587,7 +639,7 @@ export type ListEligibleDaemonsRequest = Message<"connection.ListEligibleDaemons
  * Use `create(ListEligibleDaemonsRequestSchema)` to create a new message.
  */
 export const ListEligibleDaemonsRequestSchema: GenMessage<ListEligibleDaemonsRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 21);
+  messageDesc(file_connection, 24);
 
 /**
  * @generated from message connection.EligibleDaemonEntry
@@ -614,7 +666,7 @@ export type EligibleDaemonEntry = Message<"connection.EligibleDaemonEntry"> & {
  * Use `create(EligibleDaemonEntrySchema)` to create a new message.
  */
 export const EligibleDaemonEntrySchema: GenMessage<EligibleDaemonEntry> = /*@__PURE__*/
-  messageDesc(file_connection, 22);
+  messageDesc(file_connection, 25);
 
 /**
  * @generated from message connection.ListEligibleDaemonsResponse
@@ -631,7 +683,7 @@ export type ListEligibleDaemonsResponse = Message<"connection.ListEligibleDaemon
  * Use `create(ListEligibleDaemonsResponseSchema)` to create a new message.
  */
 export const ListEligibleDaemonsResponseSchema: GenMessage<ListEligibleDaemonsResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 23);
+  messageDesc(file_connection, 26);
 
 /**
  * @generated from enum connection.Signal
@@ -670,6 +722,14 @@ export const ConnectionService: GenService<{
     methodKind: "unary";
     input: typeof ListToolsRequestSchema;
     output: typeof ListToolsResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.ListAgents
+   */
+  listAgents: {
+    methodKind: "unary";
+    input: typeof ListAgentsRequestSchema;
+    output: typeof ListAgentsResponseSchema;
   },
   /**
    * @generated from rpc connection.ConnectionService.ListSessions

@@ -9,9 +9,10 @@ use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::connection::{
-    ConnectSessionRequest, ConnectSessionResponse, ConnectionService as ConnectionServiceTrait,
-    CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
-    EligibleDaemonEntry, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    AgentInfo, ConnectSessionRequest, ConnectSessionResponse,
+    ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
+    DeleteSessionRequest, DeleteSessionResponse, EligibleDaemonEntry, ListAgentsRequest,
+    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
     ListProjectsRequest, ListProjectsResponse, ListSessionsRequest, ListSessionsResponse,
     ListToolsRequest, ListToolsResponse, ProjectEntry as ProtoProjectEntry, ResumeSessionRequest,
     ResumeSessionResponse, SessionEntry as ProtoSessionEntry, Signal, SignalSessionRequest,
@@ -19,6 +20,7 @@ use tddy_service::proto::connection::{
 };
 use uuid::Uuid;
 
+use crate::agent_list_mapping::agent_allowlist_rows;
 use crate::config::DaemonConfig;
 use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
 use crate::project_storage::{self, ProjectData};
@@ -116,12 +118,37 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .config
             .allowed_tools()
             .iter()
-            .map(|t| ToolInfo {
-                path: t.path.clone(),
-                label: t.label.clone().unwrap_or_else(|| t.path.clone()),
+            .map(|t| {
+                let label = t
+                    .label
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| t.path.clone());
+                ToolInfo {
+                    path: t.path.clone(),
+                    label,
+                }
             })
             .collect();
         Ok(Response::new(ListToolsResponse { tools }))
+    }
+
+    async fn list_agents(
+        &self,
+        _request: Request<ListAgentsRequest>,
+    ) -> Result<Response<ListAgentsResponse>, Status> {
+        log::debug!("list_agents RPC: mapping config allowlist to AgentInfo");
+        let agents: Vec<AgentInfo> = agent_allowlist_rows(&self.config)
+            .into_iter()
+            .map(|row| AgentInfo {
+                id: row.id,
+                label: row.display_label,
+            })
+            .collect();
+        log::info!("list_agents RPC: returning {} agent(s)", agents.len());
+        Ok(Response::new(ListAgentsResponse { agents }))
     }
 
     async fn list_sessions(
@@ -303,6 +330,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let agent_trim = req.agent.trim();
+        if !agent_trim.is_empty() {
+            let allowed = self.config.allowed_agents();
+            if !allowed.is_empty() && !allowed.iter().any(|a| a.id == agent_trim) {
+                return Err(Status::invalid_argument(format!(
+                    "agent id {:?} is not listed in allowed_agents (configure daemon YAML)",
+                    agent_trim
+                )));
+            }
+        }
 
         let requested_daemon = req.daemon_instance_id.trim();
         if !requested_daemon.is_empty()

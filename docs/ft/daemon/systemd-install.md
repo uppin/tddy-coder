@@ -22,7 +22,7 @@ sudo ./install --systemd --build # run ./release first, then install
 | Unit file | `$INSTALL_SYSTEMD_DIR/tddy-daemon.service` | `INSTALL_SYSTEMD_DIR` |
 | Web static files | `$INSTALL_PREFIX/share/tddy/web` | `INSTALL_WEB_BUNDLE_DIR` |
 
-Production config is installed from **`daemon.yaml.production`** only when **`daemon.yaml`** is absent (existing config is never overwritten).
+Production config is installed from **`daemon.yaml.production`** only when **`daemon.yaml`** is absent (existing config is never overwritten). An operator **`daemon.yaml`** lists **`allowed_tools`** and **`allowed_agents`** so the web connection screen receives tool and backend options from the daemon over RPC (see **`ListTools`** / **`ListAgents`** in [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md)).
 
 The generated unit uses **`ExecStart`** pointing at the resolved **`tddy-daemon`** binary and config path. For a commented manual template, see **[docs/dev/tddy-daemon.service.example](../../../dev/tddy-daemon.service.example)**.
 
