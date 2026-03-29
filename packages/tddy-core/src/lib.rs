@@ -17,10 +17,12 @@ pub mod workflow;
 pub mod worktree;
 
 pub use agent_skills::{
-    agents_skills_scan_cache_token, compose_prompt_with_selected_skill,
-    folder_name_matches_frontmatter_name, parse_skill_frontmatter, scan_skills_at_project_root,
-    slash_menu_items, DiscoveredSkill, InvalidSkillEntry, ParsedSkillFrontmatter,
-    SkillMdParseError, SkillScanReport, SlashMenuItem, AGENTS_SKILLS_DIR,
+    agents_skills_scan_cache_token, compose_prompt_skill_reference,
+    compose_prompt_with_selected_skill, folder_name_matches_frontmatter_name,
+    parse_skill_frontmatter, read_skill_markdown_body_for_compose, scan_skills_at_project_root,
+    slash_menu_entries, slash_menu_items, DiscoveredSkill, InvalidSkillEntry,
+    ParsedSkillFrontmatter, SkillMdParseError, SkillScanReport, SlashMenuEntry, SlashMenuItem,
+    AGENTS_SKILLS_DIR,
 };
 pub use backend::{
     backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,

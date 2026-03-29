@@ -1,11 +1,11 @@
 # Feature prompt: project agent skills and `/recipe`
 
 **Product area**: Coder (tddy-coder, tddy-core)  
-**Status**: Library and presenter support; the ratatui feature input omits slash completion wiring.
+**Status**: Library, presenter, and TUI slash menu; default compose is **reference-only** (no inlined `SKILL.md` body).
 
 ## Summary
 
-The workflow discovers **project skills** under **`.agents/skills/<skill-folder>/SKILL.md`** (YAML frontmatter with **`name`** and **`description`**). Valid skills appear in a logical slash menu model beside a built-in **`/recipe`** entry. Selecting a skill yields a **composed feature string** that includes the skill name, the relative path to **`SKILL.md`**, and the markdown body so downstream agents can follow the skill without opening the file separately. Selecting **`/recipe`** drives **workflow recipe selection** (TDD vs Bugfix) through the presenter when the user confirms an option.
+The workflow discovers **project skills** under **`.agents/skills/<skill-folder>/SKILL.md`** (YAML frontmatter with **`name`** and **`description`**). Valid skills appear in the feature-prompt slash menu beside a built-in **`/recipe`** entry. In the **TUI feature field**, choosing a skill inserts a compact **`/<skill-name>`** token (one logical unit for navigation and Backspace), drawn with a **dark-navy** background fill and **white** label text on the token. On **Enter** / submit, that token is expanded to the **agent-facing reference string** (fully-qualified **`@.agents/skills/<skill-name>`** tag, path to **`SKILL.md`**, “not inlined” instruction, and **`User request:`** with surrounding free text) via **`compose_prompt_skill_reference`** — the markdown body is **not** inlined (avoids prompt bloat). Selecting **`/recipe`** drives **workflow recipe selection** (TDD vs Bugfix) through the presenter when the user confirms an option.
 
 ## On-disk layout
 
@@ -21,19 +21,21 @@ Re-exported from **`tddy_core`**:
 |------|------|
 | **`scan_skills_at_project_root`** | Returns **`SkillScanReport`** (**`valid`**, **`invalid`**) for a project root path. |
 | **`slash_menu_items`** | Returns **`SlashMenuItem`** values: **`BuiltinRecipe`** plus **`Skill { name }`** for each valid discovery. |
-| **`compose_prompt_with_selected_skill`** | Builds the outbound prompt block (header, path line, fenced body, **`User request:`** tail). |
+| **`compose_prompt_skill_reference`** | Default outbound prompt: **`@.agents/skills/<name>`** tag, path to **`SKILL.md`**, explicit “not inlined” instruction, **`User request:`** tail. |
+| **`compose_prompt_with_selected_skill`** | Optional **full inline** compose (fenced `SKILL.md` body) for backends that cannot read the repo. |
 | **`parse_skill_frontmatter`**, **`folder_name_matches_frontmatter_name`** | Parsing and folder/name checks for tests and tooling. |
 | **`agents_skills_scan_cache_token`** | Directory metadata token for **`.agents/skills`** (callers use it to bound repeated scans). |
 
-## Composed prompt shape
+## Composed prompt shape (default)
 
-The composed string includes:
+The reference string includes:
 
-1. A line starting with **`[Skill: <name> — explicit invocation]`**.  
-2. A sentence naming the selected skill and the path to **`SKILL.md`**.  
-3. Instructions to follow the skill for the turn.  
-4. A fenced block containing the **markdown body** (content after frontmatter).  
-5. A **`User request:`** section followed by the user’s free text.
+1. A line starting with **`[Skill: @.agents/skills/<name> — explicit selection]`** (fully-qualified, agent-agnostic).  
+2. A sentence naming the relative **`SKILL.md`** path under the project root.  
+3. An explicit note that the skill body is **not** inlined.  
+4. A **`User request:`** section followed by the user’s free text.
+
+**Inline variant** ([**`compose_prompt_with_selected_skill`**](#public-api-tddy-core)): same header style as before, plus a fenced block with the full markdown body after frontmatter.
 
 ## Built-in `/recipe`
 

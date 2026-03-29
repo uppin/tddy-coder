@@ -1,6 +1,7 @@
 //! Application state owned by the Presenter.
 
 use crate::ClarificationQuestion;
+use std::path::PathBuf;
 use std::time::Instant;
 
 /// Kind of entry in the activity log.
@@ -89,6 +90,8 @@ pub struct PresenterState {
     pub exit_action: Option<ExitAction>,
     /// Plan refinement is being collected in the prompt bar while [`AppMode::MarkdownViewer`] stays active.
     pub plan_refinement_pending: bool,
+    /// Repository root used to resolve `.agents/skills` for the feature-prompt slash menu.
+    pub skills_project_root: Option<PathBuf>,
 }
 
 #[cfg(test)]
@@ -140,6 +143,7 @@ mod tests {
             should_quit: false,
             exit_action: None,
             plan_refinement_pending: false,
+            skills_project_root: None,
         };
         assert!(state.exit_action.is_none());
     }

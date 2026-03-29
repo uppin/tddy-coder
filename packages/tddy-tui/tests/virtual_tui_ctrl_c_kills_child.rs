@@ -40,6 +40,7 @@ fn running_presenter_state() -> PresenterState {
         should_quit: false,
         exit_action: None,
         plan_refinement_pending: false,
+        skills_project_root: None,
     }
 }
 

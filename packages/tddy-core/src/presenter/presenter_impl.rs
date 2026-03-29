@@ -128,6 +128,7 @@ impl Presenter {
             should_quit: false,
             exit_action: None,
             plan_refinement_pending: false,
+            skills_project_root: None,
         };
         Presenter {
             state,
@@ -214,6 +215,7 @@ impl Presenter {
         self.broadcast(PresenterEvent::ModeChanged(ModeChangedDetails {
             mode: self.state.mode.clone(),
             plan_refinement_pending: self.state.plan_refinement_pending,
+            skills_project_root: self.state.skills_project_root.clone(),
         }));
     }
 
@@ -259,6 +261,7 @@ impl Presenter {
         pending: PendingWorkflowStart,
         cli_model_override: Option<String>,
     ) {
+        self.state.skills_project_root = Some(pending.output_dir.clone());
         self.deferred_backend_factory = Some(factory);
         self.pending_workflow_start = Some(pending);
         self.deferred_cli_model = cli_model_override;
@@ -435,6 +438,9 @@ impl Presenter {
                 if let Some(prompt) = text_for_restart {
                     self.restart_workflow(prompt);
                 }
+            }
+            UserIntent::FeatureSlashBuiltinRecipe => {
+                self.apply_feature_slash_builtin_recipe();
             }
             UserIntent::ApproveSessionDocument => {
                 self.state.plan_refinement_pending = false;
@@ -1145,6 +1151,7 @@ impl Presenter {
     ) {
         self.workflow_backend = Some(backend.clone());
         self.workflow_output_dir = Some(output_dir.clone());
+        self.state.skills_project_root = Some(output_dir.clone());
         self.workflow_session_dir = session_dir.clone();
         self.workflow_conversation_output = conversation_output_path.clone();
         self.workflow_debug_output = debug_output_path.clone();

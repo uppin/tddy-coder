@@ -270,6 +270,8 @@ fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
         UserIntent::ContinueWithAgent => return None,
         // Local-only (VirtualTui / TUI): sync Select highlight for reconnect snapshots
         UserIntent::SelectHighlightChanged(_) => return None,
+        // Local-only: feature-prompt slash menu `/recipe` (no wire proto yet)
+        UserIntent::FeatureSlashBuiltinRecipe => return None,
     };
     Some(ClientMessage {
         intent: Some(intent),
@@ -298,6 +300,7 @@ mod acceptance_plan_approval_rpc {
                     content: prd.clone(),
                 },
                 plan_refinement_pending: false,
+                skills_project_root: None,
             }));
         assert_eq!(
             from_workflow.encode_to_vec(),

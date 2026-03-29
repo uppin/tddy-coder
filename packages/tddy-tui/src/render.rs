@@ -1,13 +1,14 @@
 //! Frame rendering: draw activity log, status bar, prompt bar.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use tddy_core::{ActivityEntry, AppMode, PresenterState};
 
+use crate::feature_input_buffer::FeaturePromptSegment;
 use crate::layout::{
     debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_height, question_height,
 };
@@ -66,10 +67,16 @@ fn prompt_text(state: &PresenterState, view_state: &ViewState) -> String {
     match &state.mode {
         AppMode::FeatureInput => {
             let prefix = "> ";
-            if view_state.feature_input.is_empty() {
+            if view_state.feature_slash_open {
+                format!(
+                    "{}Slash menu  Up/Down  Enter apply  Esc cancel — {}",
+                    prefix,
+                    view_state.feature_edit.display()
+                )
+            } else if view_state.feature_edit.display().is_empty() {
                 format!("{}Type your feature description and press Enter...", prefix)
             } else {
-                format!("{}{}", prefix, view_state.feature_input)
+                format!("{}{}", prefix, view_state.feature_edit.display())
             }
         }
         AppMode::Running => {
@@ -115,6 +122,48 @@ fn prompt_text(state: &PresenterState, view_state: &ViewState) -> String {
         }
         AppMode::ErrorRecovery { .. } => "Up/Down navigate  Enter select".to_string(),
     }
+}
+
+/// Dark navy fill behind `/skill-name` tokens in the feature prompt; label text is white.
+fn feature_skill_token_style() -> Style {
+    Style::default().bg(Color::Rgb(18, 36, 68)).fg(Color::White)
+}
+
+/// Character-wrap prompt spans while preserving per-character styles (matches `prompt_height`).
+fn wrap_spans_to_prompt_lines(spans: Vec<Span<'static>>, width: usize) -> Vec<Line<'static>> {
+    if width == 0 {
+        return vec![Line::from(spans)];
+    }
+    let mut flat: Vec<(Style, char)> = Vec::new();
+    for sp in spans {
+        let st = sp.style;
+        for ch in sp.content.chars() {
+            flat.push((st, ch));
+        }
+    }
+    if flat.is_empty() {
+        return vec![Line::default()];
+    }
+    let mut lines = Vec::new();
+    for row in flat.chunks(width) {
+        let mut line_spans: Vec<Span> = Vec::new();
+        let mut cur_st = row[0].0;
+        let mut buf = String::new();
+        for (st, ch) in row {
+            if *st != cur_st {
+                if !buf.is_empty() {
+                    line_spans.push(Span::styled(std::mem::take(&mut buf), cur_st));
+                }
+                cur_st = *st;
+            }
+            buf.push(*ch);
+        }
+        if !buf.is_empty() {
+            line_spans.push(Span::styled(buf, cur_st));
+        }
+        lines.push(Line::from(line_spans));
+    }
+    lines
 }
 
 /// Draw the TUI layout: activity log, status bar, prompt bar.
@@ -182,7 +231,12 @@ pub fn draw(
     let is_running = matches!(state.mode, AppMode::Running);
     let inbox_h = inbox_height(state.inbox.len(), is_running);
     let question_h = question_height(&state.mode);
-    let dynamic_h = question_h.max(inbox_h);
+    let slash_h = if matches!(state.mode, AppMode::FeatureInput) {
+        view_state.feature_slash_dynamic_height()
+    } else {
+        0
+    };
+    let dynamic_h = question_h.max(inbox_h).max(slash_h);
     let debug_logs = if debug {
         tddy_core::get_buffered_logs()
     } else {
@@ -355,6 +409,9 @@ pub fn draw(
 
     if dynamic_area.height > 0 {
         match &state.mode {
+            AppMode::FeatureInput if view_state.feature_slash_open => {
+                render_feature_slash_menu(frame, view_state, dynamic_area);
+            }
             AppMode::Select { .. } | AppMode::MultiSelect { .. } | AppMode::TextInput { .. } => {
                 render_question(frame, state, view_state, dynamic_area);
             }
@@ -395,14 +452,37 @@ pub fn draw(
         // followed by a long single-word payload, causing the last partial row to overflow the
         // allocated height and be clipped.
         let w = prompt_bar.width as usize;
-        let lines: Vec<ratatui::text::Line> = if w == 0 {
-            vec![ratatui::text::Line::raw(prompt_text_str.as_str())]
+        let lines: Vec<Line> = if matches!(state.mode, AppMode::FeatureInput) {
+            let skill_style = feature_skill_token_style();
+            let mut spans: Vec<Span<'static>> = vec![Span::raw("> ")];
+            if view_state.feature_slash_open {
+                spans.push(Span::raw(format!(
+                    "Slash menu  Up/Down  Enter apply  Esc cancel — {}",
+                    view_state.feature_edit.display()
+                )));
+            } else if view_state.feature_edit.display().is_empty() {
+                spans.push(Span::raw(
+                    "Type your feature description and press Enter...",
+                ));
+            } else {
+                for seg in view_state.feature_edit.prompt_segments() {
+                    match seg {
+                        FeaturePromptSegment::Plain(t) => spans.push(Span::raw(t)),
+                        FeaturePromptSegment::SkillName(name) => {
+                            spans.push(Span::styled(format!("/{name}"), skill_style));
+                        }
+                    }
+                }
+            }
+            wrap_spans_to_prompt_lines(spans, w)
+        } else if w == 0 {
+            vec![Line::raw(prompt_text_str.as_str())]
         } else {
             prompt_text_str
                 .chars()
                 .collect::<Vec<_>>()
                 .chunks(w)
-                .map(|chunk| ratatui::text::Line::raw(chunk.iter().collect::<String>()))
+                .map(|chunk| Line::raw(chunk.iter().collect::<String>()))
                 .collect()
         };
         let widget = Paragraph::new(lines);
@@ -414,6 +494,58 @@ pub fn draw(
     if area.width >= 2 && area.height >= 1 && status_activity_is_agent_active(&state.mode) {
         view_state.spinner_tick = view_state.spinner_tick.wrapping_add(1);
     }
+}
+
+/// Feature-prompt slash menu: `/recipe` plus discovered `.agents/skills` entries.
+fn render_feature_slash_menu(frame: &mut Frame, view_state: &ViewState, area: Rect) {
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use tddy_core::SlashMenuEntry;
+
+    if area.height == 0 {
+        return;
+    }
+    let mut lines = vec![Line::from(Span::styled(
+        "Commands & skills (.agents/skills/)",
+        Style::default().add_modifier(Modifier::BOLD),
+    ))];
+    let max_rows = (area.height.saturating_sub(2)) as usize;
+    let cap = max_rows.max(1);
+    for (i, entry) in view_state
+        .feature_slash_entries
+        .iter()
+        .take(cap)
+        .enumerate()
+    {
+        let prefix = if i == view_state.feature_slash_selected {
+            "> "
+        } else {
+            "  "
+        };
+        let (label, desc) = match entry {
+            SlashMenuEntry::BuiltinRecipe => (
+                "/recipe".to_string(),
+                "Switch workflow recipe (TDD / bugfix)".to_string(),
+            ),
+            SlashMenuEntry::Skill { name, description } => {
+                (format!("/{name}"), description.clone())
+            }
+        };
+        let text = if desc.is_empty() {
+            format!("{prefix}{label}")
+        } else {
+            format!("{prefix}{label} — {desc}")
+        };
+        let style = if i == view_state.feature_slash_selected {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(Span::styled(text, style)));
+    }
+    lines.push(Line::from(Span::raw("Enter select  Up/Down  Esc cancel")));
+    let widget = Paragraph::new(lines);
+    frame.render_widget(widget, area);
 }
 
 /// Render clarification question (Select, MultiSelect, or TextInput mode).
@@ -751,6 +883,7 @@ mod tests {
             should_quit: false,
             exit_action: None,
             plan_refinement_pending: false,
+            skills_project_root: None,
         };
         let mut vs = ViewState::new();
         let mut areas = LayoutAreas {
@@ -800,6 +933,7 @@ mod tests {
             should_quit: false,
             exit_action: None,
             plan_refinement_pending: false,
+            skills_project_root: None,
         }
     }
 

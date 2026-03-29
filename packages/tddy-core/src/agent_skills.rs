@@ -39,6 +39,13 @@ pub enum SlashMenuItem {
     Skill { name: String },
 }
 
+/// One row in the feature-prompt slash menu (labels + skill descriptions for the TUI).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlashMenuEntry {
+    BuiltinRecipe,
+    Skill { name: String, description: String },
+}
+
 /// Minimal `name` / `description` from SKILL.md YAML frontmatter (between `---` lines).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedSkillFrontmatter {
@@ -273,21 +280,81 @@ pub fn scan_skills_at_project_root(project_root: &Path) -> SkillScanReport {
 }
 
 /// Entries shown when the user types `/` in the feature prompt: built-ins plus valid skills.
-pub fn slash_menu_items(project_root: &Path) -> Vec<SlashMenuItem> {
-    log::debug!("slash_menu_items: project_root={}", project_root.display());
+pub fn slash_menu_entries(project_root: &Path) -> Vec<SlashMenuEntry> {
+    log::debug!(
+        "slash_menu_entries: project_root={}",
+        project_root.display()
+    );
     let scan = scan_skills_at_project_root(project_root);
     let mut items = Vec::with_capacity(1 + scan.valid.len());
-    items.push(SlashMenuItem::BuiltinRecipe);
+    items.push(SlashMenuEntry::BuiltinRecipe);
     for s in scan.valid {
-        items.push(SlashMenuItem::Skill { name: s.name });
+        items.push(SlashMenuEntry::Skill {
+            name: s.name,
+            description: s.description,
+        });
     }
-    log::info!("slash_menu_items: total entries={}", items.len());
+    log::info!("slash_menu_entries: total entries={}", items.len());
     items
 }
 
-/// Build the outbound feature string after the user picks a skill (PRD “recommended prompt shape”).
+/// Same ordering as [`slash_menu_entries`], as [`SlashMenuItem`] (for tests and callers that only need ids).
+pub fn slash_menu_items(project_root: &Path) -> Vec<SlashMenuItem> {
+    slash_menu_entries(project_root)
+        .into_iter()
+        .map(|e| match e {
+            SlashMenuEntry::BuiltinRecipe => SlashMenuItem::BuiltinRecipe,
+            SlashMenuEntry::Skill { name, .. } => SlashMenuItem::Skill { name },
+        })
+        .collect()
+}
+
+/// Read `.agents/skills/<skill_name>/SKILL.md` and return the markdown body after YAML frontmatter.
+pub fn read_skill_markdown_body_for_compose(
+    project_root: &Path,
+    skill_name: &str,
+) -> Result<String, String> {
+    let path = project_root
+        .join(AGENTS_SKILLS_DIR)
+        .join(skill_name)
+        .join("SKILL.md");
+    let raw = fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let (_yaml, body) = split_skill_frontmatter_blocks(&raw).map_err(|e| format!("{e:?}"))?;
+    Ok(body.to_string())
+}
+
+/// Short outbound prompt after the user picks a skill: **fully-qualified `@` tag + file path**, no body.
 ///
-/// Includes `[Skill: …`, the skill path, and substantive `SKILL.md` body content.
+/// Uses **`@.agents/skills/<skill-name>`** so any agent can treat it as a stable, repo-root-relative skill
+/// pointer (compare `@path` context pulls in IDEs) without inlining `SKILL.md`.
+///
+/// `skill_md_relative_path` must be the concrete file path (typically **`.agents/skills/<name>/SKILL.md`**).
+pub fn compose_prompt_skill_reference(
+    skill_name: &str,
+    skill_md_relative_path: &str,
+    user_request: &str,
+) -> String {
+    log::debug!(
+        "compose_prompt_skill_reference: skill={skill_name} path={skill_md_relative_path} user_len={}",
+        user_request.len()
+    );
+    let at_skill_ref = format!("@{AGENTS_SKILLS_DIR}/{skill_name}");
+    let out = format!(
+        "[Skill: {at_skill_ref} — explicit selection]\n\
+         The user selected this fully-qualified skill reference. Read `{skill_md_relative_path}` under the workflow project root and follow it. The skill body is **not** inlined in this prompt.\n\
+         \n\
+         User request:\n\
+         \n\
+         {}",
+        user_request.trim_end()
+    );
+    log::info!("compose_prompt_skill_reference: composed_len={}", out.len());
+    out
+}
+
+/// Build the outbound feature string with the full `SKILL.md` body inlined (large prompts).
+///
+/// Prefer [`compose_prompt_skill_reference`] when the agent can read files under the project root.
 pub fn compose_prompt_with_selected_skill(
     skill_name: &str,
     skill_md_relative_path: &str,
@@ -351,6 +418,22 @@ mod agent_skills_unit_red {
             folder_name_matches_frontmatter_name("foo", "bar"),
             Some(false),
             "folder foo with name bar must not match"
+        );
+    }
+
+    #[test]
+    fn compose_prompt_skill_reference_uses_at_qualified_skill_path() {
+        let out = compose_prompt_skill_reference(
+            "my-skill",
+            ".agents/skills/my-skill/SKILL.md",
+            "Ship the feature.",
+        );
+        assert!(out.contains("[Skill: @.agents/skills/my-skill"));
+        assert!(out.contains(".agents/skills/my-skill/SKILL.md"));
+        assert!(out.contains("Ship the feature."));
+        assert!(
+            !out.contains("---\n"),
+            "reference compose must not use fenced skill body blocks"
         );
     }
 

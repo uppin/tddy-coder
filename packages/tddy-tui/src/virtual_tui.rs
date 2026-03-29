@@ -386,13 +386,18 @@ fn process_virtual_tui_input_chunk(
         }
         let inbox_len = state.inbox.len();
         let plan_pending = state.plan_refinement_pending;
-        let view_consumed =
-            view.view_state_mut()
-                .handle_key_view_local(key, &state.mode, inbox_len, plan_pending);
+        let skills_root = state.skills_project_root.as_deref();
+        let view_consumed = view.view_state_mut().handle_key_view_local(
+            key,
+            &state.mode,
+            inbox_len,
+            plan_pending,
+            skills_root,
+        );
         if view_consumed {
             log::trace!("VirtualTui: key {:?} consumed by view", key.code);
             if matches!(state.mode, AppMode::FeatureInput) {
-                let flen = view.view_state().feature_input.len();
+                let flen = view.view_state().feature_edit.display().len();
                 if flen.is_multiple_of(250) || flen <= 8 {
                     log::debug!(
                         "VirtualTui: FeatureInput progress feature_input_len={} total_input_bytes={} total_keys_parsed={}",
@@ -409,12 +414,22 @@ fn process_virtual_tui_input_chunk(
                 let _ = intent_tx.send(UserIntent::SelectHighlightChanged(idx));
             }
             *updated = true;
-        } else if let Some(intent) =
-            key_event_to_intent(key, &state.mode, view.view_state(), plan_pending)
+        }
+        if view
+            .view_state_mut()
+            .take_pending_feature_slash_builtin_recipe_intent()
         {
-            log::debug!("VirtualTui: intent {:?} -> presenter", intent);
-            let _ = intent_tx.send(intent);
+            log::debug!("VirtualTui: intent FeatureSlashBuiltinRecipe -> presenter");
+            let _ = intent_tx.send(UserIntent::FeatureSlashBuiltinRecipe);
             *updated = true;
+        } else if !view_consumed {
+            if let Some(intent) =
+                key_event_to_intent(key, &state.mode, view.view_state(), plan_pending)
+            {
+                log::debug!("VirtualTui: intent {:?} -> presenter", intent);
+                let _ = intent_tx.send(intent);
+                *updated = true;
+            }
         }
         input_buf.drain(..consumed);
     }
@@ -498,6 +513,7 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
             let prev_pending = state.plan_refinement_pending;
             state.mode = details.mode.clone();
             state.plan_refinement_pending = details.plan_refinement_pending;
+            state.skills_project_root = details.skills_project_root.clone();
             log::info!(
                 "apply_event ModeChanged: mode_changed={} pending={}",
                 prev_mode != details.mode,
@@ -996,9 +1012,10 @@ mod tests {
             should_quit: false,
             exit_action: None,
             plan_refinement_pending: false,
+            skills_project_root: None,
         };
         let mut vs = ViewState::new();
-        vs.feature_input = input.clone();
+        vs.feature_edit.set_plain_text(&input);
 
         terminal
             .draw(|frame| draw(frame, &state, &mut vs, false, None))
@@ -1088,6 +1105,7 @@ mod tests {
             should_quit: false,
             exit_action: None,
             plan_refinement_pending: false,
+            skills_project_root: None,
         };
         let mut view = TuiView::new();
 
@@ -1136,6 +1154,7 @@ mod tests {
             should_quit: false,
             exit_action: None,
             plan_refinement_pending: false,
+            skills_project_root: None,
         };
         let mut view = TuiView::new();
 

@@ -5,12 +5,15 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use tddy_core::AppMode;
 use tddy_core::ClarificationQuestion;
 use tddy_core::PresenterState;
+
+use crate::feature_input_buffer::FeatureInputBuffer;
 
 /// Which sub-element has focus when the inbox is visible during Running mode.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -29,10 +32,8 @@ pub enum InboxFocus {
 pub struct ViewState {
     /// Manual scroll offset (lines from top). Used when auto_scroll is false.
     pub scroll_offset: usize,
-    /// Feature input buffer (FeatureInput mode).
-    pub feature_input: String,
-    /// Cursor position in feature_input.
-    pub feature_cursor: usize,
+    /// Feature input buffer (FeatureInput mode): compact `/skill` in the UI; submit expands for agents.
+    pub feature_edit: FeatureInputBuffer,
     /// Text the user is typing in the prompt bar during Running mode.
     pub running_input: String,
     /// Cursor position within running_input.
@@ -85,6 +86,15 @@ pub struct ViewState {
     pub(crate) frozen_goal_elapsed_for_status_bar: Option<Duration>,
     /// Wall-clock anchor for 1 Hz idle dot (· ↔ •) in user-wait modes.
     pub(crate) idle_dot_animation_anchor: Option<Instant>,
+    /// Feature-prompt slash menu (skills + `/recipe`) is visible.
+    pub feature_slash_open: bool,
+    /// Menu rows from [`tddy_core::slash_menu_entries`].
+    pub feature_slash_entries: Vec<tddy_core::SlashMenuEntry>,
+    pub feature_slash_selected: usize,
+    /// Byte index of the `/` that opened [`Self::feature_slash_open`].
+    pub feature_slash_trigger_byte: usize,
+    /// After accepting `/recipe` in the slash menu, event loop sends [`tddy_core::UserIntent::FeatureSlashBuiltinRecipe`].
+    pending_feature_slash_builtin_recipe_intent: bool,
 }
 
 /// Byte index of the start of the character immediately before `idx`.
@@ -110,6 +120,23 @@ fn advance_cursor_by_char(s: &str, idx: usize) -> usize {
         .next()
         .map(|c| idx + c.len_utf8())
         .unwrap_or(idx)
+}
+
+/// True when `/` at `slash_byte_idx` starts a slash command (line start or after whitespace).
+fn slash_starts_command(s: &str, slash_byte_idx: usize) -> bool {
+    if slash_byte_idx >= s.len() || !s.is_char_boundary(slash_byte_idx) {
+        return false;
+    }
+    if s.as_bytes().get(slash_byte_idx) != Some(&b'/') {
+        return false;
+    }
+    if slash_byte_idx == 0 {
+        return true;
+    }
+    s[..slash_byte_idx]
+        .chars()
+        .next_back()
+        .is_some_and(|c| c.is_whitespace())
 }
 
 /// Hash [`AppMode`] so distinct clarification questions get distinct status-bar animation state.
@@ -187,8 +214,9 @@ impl ViewState {
         }
         match mode {
             AppMode::FeatureInput => {
-                self.feature_input.clear();
-                self.feature_cursor = 0;
+                self.feature_edit.clear();
+                self.close_feature_slash_menu_clear();
+                self.pending_feature_slash_builtin_recipe_intent = false;
             }
             AppMode::Select {
                 question,
@@ -247,13 +275,14 @@ impl ViewState {
         mode: &AppMode,
         inbox_len: usize,
         plan_refinement_pending: bool,
+        skills_project_root: Option<&Path>,
     ) -> bool {
         if key.kind != KeyEventKind::Press {
             return false;
         }
 
         match mode {
-            AppMode::FeatureInput => self.handle_feature_input_key(key),
+            AppMode::FeatureInput => self.handle_feature_input_key(key, skills_project_root),
             AppMode::Running => self.handle_running_key_view_local(key, inbox_len),
             AppMode::DocumentReview { .. } => self.handle_document_review_key_view_local(key),
             AppMode::MarkdownViewer { .. } => {
@@ -415,30 +444,157 @@ impl ViewState {
         }
     }
 
-    fn handle_feature_input_key(&mut self, key: KeyEvent) -> bool {
+    /// Screen lines reserved below the activity log for the slash menu (header + rows + hint).
+    pub fn feature_slash_dynamic_height(&self) -> u16 {
+        if !self.feature_slash_open || self.feature_slash_entries.is_empty() {
+            return 0;
+        }
+        let n = (self.feature_slash_entries.len() as u16).min(12);
+        1u16.saturating_add(n).saturating_add(1)
+    }
+
+    pub fn take_pending_feature_slash_builtin_recipe_intent(&mut self) -> bool {
+        std::mem::take(&mut self.pending_feature_slash_builtin_recipe_intent)
+    }
+
+    fn close_feature_slash_menu_clear(&mut self) {
+        self.feature_slash_open = false;
+        self.feature_slash_entries.clear();
+        self.feature_slash_selected = 0;
+    }
+
+    fn open_feature_slash_menu(&mut self, trigger_byte: usize, skills_project_root: Option<&Path>) {
+        let root = skills_project_root.unwrap_or_else(|| Path::new("."));
+        self.feature_slash_trigger_byte = trigger_byte;
+        self.feature_slash_entries = tddy_core::slash_menu_entries(root);
+        self.feature_slash_selected = 0;
+        self.feature_slash_open = true;
+    }
+
+    fn strip_slash_suffix_after_trigger(&mut self) {
+        let t = self
+            .feature_slash_trigger_byte
+            .min(self.feature_edit.display().len());
+        self.feature_edit.truncate_at_slash_trigger(t);
+        self.feature_edit.cursor = self.feature_edit.cursor.min(t);
+    }
+
+    fn accept_feature_slash_skill(&mut self, skill_name: &str, project_root: &Path) {
+        let skill_md = project_root
+            .join(tddy_core::AGENTS_SKILLS_DIR)
+            .join(skill_name)
+            .join("SKILL.md");
+        if skill_md.is_file() {
+            let trigger = self.feature_slash_trigger_byte;
+            self.feature_edit.accept_skill_token(skill_name, trigger);
+            self.close_feature_slash_menu_clear();
+        } else {
+            log::warn!("feature slash: missing skill file {}", skill_md.display());
+            self.strip_slash_suffix_after_trigger();
+            self.close_feature_slash_menu_clear();
+        }
+    }
+
+    fn handle_feature_slash_menu_key(
+        &mut self,
+        key: KeyEvent,
+        skills_project_root: Option<&Path>,
+    ) -> bool {
+        let root = skills_project_root.unwrap_or_else(|| Path::new("."));
+        match key.code {
+            KeyCode::Esc => {
+                self.strip_slash_suffix_after_trigger();
+                self.close_feature_slash_menu_clear();
+                true
+            }
+            KeyCode::Up => {
+                if self.feature_slash_selected > 0 {
+                    self.feature_slash_selected -= 1;
+                } else {
+                    self.feature_slash_selected =
+                        self.feature_slash_entries.len().saturating_sub(1);
+                }
+                true
+            }
+            KeyCode::Down => {
+                let n = self.feature_slash_entries.len();
+                if n > 0 {
+                    self.feature_slash_selected = (self.feature_slash_selected + 1) % n;
+                }
+                true
+            }
+            KeyCode::Enter => {
+                if self.feature_slash_entries.is_empty() {
+                    return true;
+                }
+                match &self.feature_slash_entries[self.feature_slash_selected] {
+                    tddy_core::SlashMenuEntry::BuiltinRecipe => {
+                        self.strip_slash_suffix_after_trigger();
+                        self.close_feature_slash_menu_clear();
+                        self.pending_feature_slash_builtin_recipe_intent = true;
+                    }
+                    tddy_core::SlashMenuEntry::Skill { name, .. } => {
+                        let name = name.clone();
+                        self.accept_feature_slash_skill(&name, root);
+                    }
+                }
+                true
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Backspace => {
+                self.close_feature_slash_menu_clear();
+                false
+            }
+            KeyCode::Char(c)
+                if !c.is_control() && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.close_feature_slash_menu_clear();
+                let insert_at = self.feature_edit.cursor;
+                self.feature_edit.insert_char(c);
+                if c == '/' && slash_starts_command(&self.feature_edit.display(), insert_at) {
+                    self.open_feature_slash_menu(insert_at, skills_project_root);
+                }
+                true
+            }
+            _ => {
+                self.close_feature_slash_menu_clear();
+                false
+            }
+        }
+    }
+
+    fn handle_feature_input_key(
+        &mut self,
+        key: KeyEvent,
+        skills_project_root: Option<&Path>,
+    ) -> bool {
+        if self.feature_slash_open {
+            return self.handle_feature_slash_menu_key(key, skills_project_root);
+        }
         match key.code {
             // Ctrl+letter must not be inserted as text (e.g. Ctrl+C = Quit). Real TUI skips
             // handle_key_view_local for Ctrl+C; VirtualTui relies on this guard + key_map.
             KeyCode::Char(c)
                 if !c.is_control() && !key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                self.feature_input.insert(self.feature_cursor, c);
-                self.feature_cursor += c.len_utf8();
+                let insert_at = self.feature_edit.cursor;
+                self.feature_edit.insert_char(c);
+                if c == '/' && slash_starts_command(&self.feature_edit.display(), insert_at) {
+                    self.open_feature_slash_menu(insert_at, skills_project_root);
+                }
                 true
             }
-            KeyCode::Backspace if self.feature_cursor > 0 => {
-                let prev = prev_char_boundary(&self.feature_input, self.feature_cursor);
-                self.feature_cursor = prev;
-                self.feature_input.remove(self.feature_cursor);
-                true
+            KeyCode::Backspace => {
+                if self.feature_edit.backspace() {
+                    return true;
+                }
+                false
             }
             KeyCode::Left => {
-                self.feature_cursor = prev_char_boundary(&self.feature_input, self.feature_cursor);
+                self.feature_edit.move_left();
                 true
             }
             KeyCode::Right => {
-                self.feature_cursor =
-                    advance_cursor_by_char(&self.feature_input, self.feature_cursor);
+                self.feature_edit.move_right();
                 true
             }
             KeyCode::PageUp => {
@@ -770,27 +926,27 @@ mod tests {
             KeyEventKind::Press,
         );
         assert!(
-            !vs.handle_key_view_local(ctrl_c, &AppMode::FeatureInput, 0, false),
+            !vs.handle_key_view_local(ctrl_c, &AppMode::FeatureInput, 0, false, None),
             "Ctrl+C must not be consumed as text; key_map handles Quit"
         );
-        assert!(vs.feature_input.is_empty());
+        assert!(vs.feature_edit.display().is_empty());
     }
 
     #[test]
     fn view_state_default() {
         let vs = ViewState::new();
         assert_eq!(vs.scroll_offset, 0);
-        assert!(vs.feature_input.is_empty());
-        assert_eq!(vs.feature_cursor, 0);
+        assert!(vs.feature_edit.display().is_empty());
+        assert_eq!(vs.feature_edit.cursor, 0);
     }
 
     #[test]
     fn view_state_on_mode_changed_feature_input() {
         let mut vs = ViewState::new();
-        vs.feature_input = "old".to_string();
+        vs.feature_edit.set_plain_text("old");
         vs.on_mode_changed(&AppMode::FeatureInput);
-        assert!(vs.feature_input.is_empty());
-        assert_eq!(vs.feature_cursor, 0);
+        assert!(vs.feature_edit.display().is_empty());
+        assert_eq!(vs.feature_edit.cursor, 0);
     }
 
     #[test]
@@ -800,18 +956,18 @@ mod tests {
         // Emoji is 4 bytes in UTF-8; cursor was incremented by 1 before fix, causing panic on next insert
         let emoji = KeyEvent::new(KeyCode::Char('😀'), KeyModifiers::empty());
         let a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty());
-        assert!(vs.handle_key_view_local(emoji, &AppMode::FeatureInput, 0, false));
-        assert_eq!(vs.feature_input, "😀");
-        assert_eq!(vs.feature_cursor, 4); // byte index
-        assert!(vs.handle_key_view_local(a, &AppMode::FeatureInput, 0, false));
-        assert_eq!(vs.feature_input, "😀a");
+        assert!(vs.handle_key_view_local(emoji, &AppMode::FeatureInput, 0, false, None));
+        assert_eq!(vs.feature_edit.display(), "😀");
+        assert_eq!(vs.feature_edit.cursor, 4); // byte index
+        assert!(vs.handle_key_view_local(a, &AppMode::FeatureInput, 0, false, None));
+        assert_eq!(vs.feature_edit.display(), "😀a");
         // Backspace removes 'a', Left moves to start of emoji
         let backspace = KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty());
-        assert!(vs.handle_key_view_local(backspace, &AppMode::FeatureInput, 0, false));
-        assert_eq!(vs.feature_input, "😀");
+        assert!(vs.handle_key_view_local(backspace, &AppMode::FeatureInput, 0, false, None));
+        assert_eq!(vs.feature_edit.display(), "😀");
         let left = KeyEvent::new(KeyCode::Left, KeyModifiers::empty());
-        assert!(vs.handle_key_view_local(left, &AppMode::FeatureInput, 0, false));
-        assert_eq!(vs.feature_cursor, 0);
+        assert!(vs.handle_key_view_local(left, &AppMode::FeatureInput, 0, false, None));
+        assert_eq!(vs.feature_edit.cursor, 0);
     }
 
     #[test]
@@ -821,7 +977,7 @@ mod tests {
             content: "test content".to_string(),
         };
         let pg = KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty());
-        vs.handle_key_view_local(pg, &mode, 0, false);
+        vs.handle_key_view_local(pg, &mode, 0, false, None);
         assert_eq!(vs.markdown_scroll_offset, 10);
     }
 
@@ -836,7 +992,7 @@ mod tests {
             KeyModifiers::empty(),
             KeyEventKind::Press,
         );
-        assert!(vs.handle_key_view_local(key, &mode, 0, false));
+        assert!(vs.handle_key_view_local(key, &mode, 0, false, None));
         assert_eq!(vs.plan_refinement_input, "a");
     }
 
@@ -851,7 +1007,7 @@ mod tests {
             KeyModifiers::empty(),
             KeyEventKind::Press,
         );
-        assert!(vs.handle_key_view_local(key, &mode, 0, false));
+        assert!(vs.handle_key_view_local(key, &mode, 0, false, None));
         assert_eq!(vs.plan_refinement_input, "r");
     }
 
@@ -867,7 +1023,7 @@ mod tests {
             KeyEventKind::Press,
         );
         assert!(
-            vs.handle_key_view_local(key, &mode, 0, false),
+            vs.handle_key_view_local(key, &mode, 0, false, None),
             "printable keys should update the refinement buffer while the PRD remains visible"
         );
         assert_eq!(vs.plan_refinement_input, "f");
@@ -886,7 +1042,7 @@ mod tests {
             KeyModifiers::empty(),
             KeyEventKind::Press,
         );
-        assert!(vs.handle_key_view_local(bs, &mode, 0, false));
+        assert!(vs.handle_key_view_local(bs, &mode, 0, false, None));
         assert_eq!(vs.plan_refinement_input, "h");
         assert_eq!(vs.plan_refinement_cursor, 1);
     }
@@ -904,7 +1060,7 @@ mod tests {
             KeyModifiers::empty(),
             KeyEventKind::Press,
         );
-        assert!(vs.handle_key_view_local(sp, &mode, 0, false));
+        assert!(vs.handle_key_view_local(sp, &mode, 0, false, None));
         assert_eq!(vs.plan_refinement_input, "a ");
         assert_eq!(vs.plan_refinement_cursor, 2);
         assert_eq!(vs.markdown_scroll_offset, 0);
@@ -923,7 +1079,7 @@ mod tests {
             KeyModifiers::empty(),
             KeyEventKind::Press,
         );
-        assert!(vs.handle_key_view_local(space, &mode, 0, false));
+        assert!(vs.handle_key_view_local(space, &mode, 0, false, None));
         assert_eq!(
             vs.markdown_scroll_offset, 100,
             "space must not scroll the plan body"
@@ -931,14 +1087,14 @@ mod tests {
         vs.plan_refinement_input.clear();
         vs.plan_refinement_cursor = 0;
         let up = KeyEvent::new_with_kind(KeyCode::Up, KeyModifiers::empty(), KeyEventKind::Press);
-        vs.handle_key_view_local(up, &mode, 0, false);
+        vs.handle_key_view_local(up, &mode, 0, false, None);
         assert_eq!(
             vs.markdown_scroll_offset, 100,
             "Up must not line-scroll; use PgUp/PgDown only"
         );
         let down =
             KeyEvent::new_with_kind(KeyCode::Down, KeyModifiers::empty(), KeyEventKind::Press);
-        vs.handle_key_view_local(down, &mode, 0, false);
+        vs.handle_key_view_local(down, &mode, 0, false, None);
         assert_eq!(
             vs.markdown_scroll_offset, 100,
             "Down must not line-scroll; use PgUp/PgDown only"
@@ -953,7 +1109,7 @@ mod tests {
             content: "test content".to_string(),
         };
         let down = KeyEvent::new(KeyCode::Down, KeyModifiers::empty());
-        vs.handle_key_view_local(down, &mode, 0, false);
+        vs.handle_key_view_local(down, &mode, 0, false, None);
         assert_eq!(vs.markdown_end_button_selected, 1);
     }
 
@@ -966,7 +1122,7 @@ mod tests {
             content: "test content".to_string(),
         };
         let up = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
-        vs.handle_key_view_local(up, &mode, 0, false);
+        vs.handle_key_view_local(up, &mode, 0, false, None);
         assert_eq!(vs.markdown_end_button_selected, 0);
     }
 
@@ -991,27 +1147,75 @@ mod tests {
         let up = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
 
         // Start at 0 (Resume), Down → 1 (Continue with agent)
-        vs.handle_key_view_local(down, &mode, 0, false);
+        vs.handle_key_view_local(down, &mode, 0, false, None);
         assert_eq!(vs.error_recovery_selected, 1);
 
         // Down → 2 (Exit)
-        vs.handle_key_view_local(down, &mode, 0, false);
+        vs.handle_key_view_local(down, &mode, 0, false, None);
         assert_eq!(vs.error_recovery_selected, 2);
 
         // Down → wraps to 0
-        vs.handle_key_view_local(down, &mode, 0, false);
+        vs.handle_key_view_local(down, &mode, 0, false, None);
         assert_eq!(vs.error_recovery_selected, 0);
 
         // Up from 0 → wraps to 2
-        vs.handle_key_view_local(up, &mode, 0, false);
+        vs.handle_key_view_local(up, &mode, 0, false, None);
         assert_eq!(vs.error_recovery_selected, 2);
 
         // Up from 2 → 1
-        vs.handle_key_view_local(up, &mode, 0, false);
+        vs.handle_key_view_local(up, &mode, 0, false, None);
         assert_eq!(vs.error_recovery_selected, 1);
 
         // Up from 1 → 0
-        vs.handle_key_view_local(up, &mode, 0, false);
+        vs.handle_key_view_local(up, &mode, 0, false, None);
         assert_eq!(vs.error_recovery_selected, 0);
+    }
+
+    #[test]
+    fn feature_slash_opens_at_line_start_lists_recipe() {
+        use std::fs;
+        let mut vs = ViewState::new();
+        let root = std::env::temp_dir().join(format!("tddy-slash-ui-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".agents/skills")).expect("mkdir");
+        vs.on_mode_changed(&AppMode::FeatureInput);
+        let slash = KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty());
+        assert!(vs.handle_key_view_local(
+            slash,
+            &AppMode::FeatureInput,
+            0,
+            false,
+            Some(root.as_path())
+        ));
+        assert!(vs.feature_slash_open);
+        assert!(
+            vs.feature_slash_entries
+                .iter()
+                .any(|e| matches!(e, tddy_core::SlashMenuEntry::BuiltinRecipe)),
+            "expected /recipe builtin, got {:?}",
+            vs.feature_slash_entries
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn feature_slash_mid_word_does_not_open() {
+        let mut vs = ViewState::new();
+        vs.on_mode_changed(&AppMode::FeatureInput);
+        vs.handle_key_view_local(
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty()),
+            &AppMode::FeatureInput,
+            0,
+            false,
+            None,
+        );
+        vs.handle_key_view_local(
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty()),
+            &AppMode::FeatureInput,
+            0,
+            false,
+            None,
+        );
+        assert!(!vs.feature_slash_open);
     }
 }

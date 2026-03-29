@@ -13,7 +13,8 @@ use std::sync::Arc;
 use tddy_coder::{AppMode, Presenter};
 use tddy_core::{
     agent_skills::{self, SlashMenuItem},
-    compose_prompt_with_selected_skill, scan_skills_at_project_root, slash_menu_items,
+    compose_prompt_skill_reference, compose_prompt_with_selected_skill,
+    scan_skills_at_project_root, slash_menu_items,
 };
 use tddy_workflow_recipes::TddRecipe;
 
@@ -133,33 +134,49 @@ fn slash_menu_lists_builtin_recipe_and_skills() {
     );
 }
 
-/// **composed_prompt_includes_skill_block_with_skill_md_body**
+/// **composed_prompt_tags_skill_and_path_without_inlining_body** (default feature-prompt behavior)
 #[test]
 #[serial]
-fn composed_prompt_includes_skill_block_with_skill_md_body() {
-    let body = "## UniqueSkillBodyMarker\nDo the thing.\n";
-    let out = compose_prompt_with_selected_skill(
-        "foo",
-        ".agents/skills/foo/SKILL.md",
-        body,
-        "User request:\nAdd login.",
-    );
+fn composed_prompt_tags_skill_and_path_without_inlining_body() {
+    let out = compose_prompt_skill_reference("foo", ".agents/skills/foo/SKILL.md", "Add login.");
     assert!(
-        out.contains("[Skill: foo"),
-        "composed prompt must contain PRD skill header; got:\n{out}"
+        out.contains("[Skill: @.agents/skills/foo"),
+        "composed prompt must use fully-qualified @.agents/skills/<name>; got:\n{out}"
     );
     assert!(
         out.contains(".agents/skills/foo/SKILL.md"),
-        "composed prompt must contain skill path; got:\n{out}"
+        "composed prompt must name skill path for the agent to read; got:\n{out}"
     );
     assert!(
-        out.contains("UniqueSkillBodyMarker"),
-        "composed prompt must include substantive SKILL.md body, not metadata only; got:\n{out}"
+        out.contains("The skill body is **not** inlined"),
+        "composed prompt must state skill body is not inlined; got:\n{out}"
+    );
+    assert!(
+        !out.contains("UniqueSkillBodyMarker"),
+        "composed prompt must not paste SKILL.md body; got:\n{out}"
     );
     assert!(
         out.contains("Add login."),
         "composed prompt must retain user request; got:\n{out}"
     );
+}
+
+/// Full inline compose remains available for backends that cannot read the repo.
+#[test]
+#[serial]
+fn compose_prompt_with_selected_skill_still_inlines_body_when_requested() {
+    let body = "## UniqueSkillBodyMarker\nDo the thing.\n";
+    let out = compose_prompt_with_selected_skill(
+        "foo",
+        ".agents/skills/foo/SKILL.md",
+        body,
+        "Add login.",
+    );
+    assert!(
+        out.contains("UniqueSkillBodyMarker"),
+        "inline mode pastes body"
+    );
+    assert!(out.contains("Add login."));
 }
 
 /// **recipe_slash_triggers_recipe_selection_intent_or_mode**
