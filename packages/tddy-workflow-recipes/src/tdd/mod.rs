@@ -4,6 +4,7 @@
 pub mod graph;
 pub mod hooks;
 pub mod plan_task;
+mod session_dir_resolve;
 
 pub use hooks::TddWorkflowHooks;
 pub use plan_task::PlanTask;

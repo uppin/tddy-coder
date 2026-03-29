@@ -12,6 +12,7 @@ use tddy_core::backend::{
     ClarificationQuestion, CodingBackend, MockBackend, QuestionOption, StubBackend,
 };
 use tddy_core::changeset::{write_changeset, Changeset};
+use tddy_core::output::create_session_dir_in;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::{ExecutionStatus, GraphBuilder};
 use tddy_core::workflow::hooks::RunnerHooks;
@@ -394,6 +395,7 @@ async fn plan_task_run_writes_parsed_planning_to_context() {
     let output_dir = std::env::temp_dir().join("tddy-plan-task-test");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
+    let session_dir = create_session_dir_in(&output_dir).expect("pre-create session dir");
 
     let backend = Arc::new(StubBackend::new());
     let task = PlanTask::new(backend, common::tdd_recipe());
@@ -401,6 +403,7 @@ async fn plan_task_run_writes_parsed_planning_to_context() {
     let ctx = Context::new();
     ctx.set_sync("feature_input", "Add user auth SKIP_QUESTIONS");
     ctx.set_sync("output_dir", output_dir.clone());
+    ctx.set_sync("session_dir", session_dir.clone());
 
     let result = task
         .run(ctx.clone())
@@ -429,8 +432,10 @@ async fn flow_runner_tdd_full_sequence_completes() {
     let backend = Arc::new(StubBackend::new());
     let graph = Arc::new(build_tdd_workflow_graph(backend, common::tdd_recipe()));
 
-    let session_dir = dir.join("plan");
-    std::fs::create_dir_all(&session_dir).expect("create plan dir");
+    let repo = dir.join("repo");
+    std::fs::create_dir_all(&repo).expect("create repo root");
+    let session_base = dir.join("session_base");
+    let session_dir = create_session_dir_in(&session_base).expect("pre-create session dir");
     let init_cs = Changeset {
         initial_prompt: Some("Add a feature SKIP_QUESTIONS".to_string()),
         ..Changeset::default()
@@ -444,7 +449,8 @@ async fn flow_runner_tdd_full_sequence_completes() {
     session
         .context
         .set_sync("feature_input", "Add a feature SKIP_QUESTIONS");
-    session.context.set_sync("output_dir", session_dir);
+    session.context.set_sync("output_dir", repo);
+    session.context.set_sync("session_dir", session_dir.clone());
     storage.save(&session).await.unwrap();
 
     let runner = FlowRunner::new(graph, storage.clone());

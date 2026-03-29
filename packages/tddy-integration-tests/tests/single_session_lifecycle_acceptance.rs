@@ -143,7 +143,7 @@ async fn plan_task_reuses_session_dir_when_present() {
 
 /// **before_plan_does_not_allocate_second_dir_when_session_id_bound**: hooks + PlanTask when
 /// `session_id` and `session_base` are set must not lose the startup id when the backend returns a
-/// different agent thread id. Context omits `session_dir` so `before_plan` and `PlanTask` resolve it.
+/// different agent thread id. `{session_base}/sessions/{session_id}/` must exist before plan (entry layer).
 #[tokio::test]
 #[serial]
 async fn before_plan_does_not_allocate_second_dir_when_session_id_bound() {
@@ -164,6 +164,7 @@ async fn before_plan_does_not_allocate_second_dir_when_session_id_bound() {
 
     let base = isolated_home.join("workflow-base");
     std::fs::create_dir_all(&base).unwrap();
+    let _ = create_session_dir_with_id(&base, STARTUP_SESSION_ID).expect("pre-create session dir");
 
     let storage_dir =
         std::env::temp_dir().join(format!("tddy-hooks-engine-{}", std::process::id()));
@@ -256,6 +257,12 @@ async fn workflow_runner_avoids_new_session_dir_fallback_after_successful_plan()
     let base = std::env::temp_dir().join(format!("tddy-wf-runner-fallback-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(&base).unwrap();
+    let session_path = create_session_dir_with_id(&base, STARTUP_SESSION_ID).expect("pre-create");
+    let init_cs = tddy_core::changeset::Changeset {
+        initial_prompt: Some("SKIP_QUESTIONS full workflow session contract".to_string()),
+        ..Default::default()
+    };
+    tddy_core::changeset::write_changeset(&session_path, &init_cs).expect("write changeset");
 
     let mut ctx = HashMap::new();
     ctx.insert(
@@ -288,6 +295,10 @@ async fn workflow_runner_avoids_new_session_dir_fallback_after_successful_plan()
     );
 
     let before = count_dir_children(&base.join("sessions"));
+    assert_eq!(
+        before, 1,
+        "precondition: one pre-created session directory under session_base/sessions/"
+    );
     let result = engine
         .run_full_workflow(ctx)
         .await
@@ -301,15 +312,10 @@ async fn workflow_runner_avoids_new_session_dir_fallback_after_successful_plan()
     );
 
     assert_eq!(
-        after,
-        before + 1,
-        "full workflow must create exactly one new directory under session_base/sessions/ \
-         (not an extra fallback directory)"
+        after, before,
+        "full workflow must not allocate extra directories under session_base/sessions/"
     );
-    assert_eq!(
-        after, 1,
-        "there must be exactly one session subdirectory for this run (no duplicate UUID dirs)"
-    );
+    assert_eq!(after, 1, "exactly one session subdirectory for this run");
 
     let session = engine.get_session(&result.session_id).await.ok().flatten();
     let has_dir = session

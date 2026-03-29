@@ -154,7 +154,7 @@ impl CodexBackend {
 
         let reader = std::io::BufReader::new(stdout_handle);
         let mut raw_lines: Vec<String> = Vec::new();
-        for line in reader.lines().filter_map(Result::ok) {
+        for line in reader.lines().map_while(Result::ok) {
             log::debug!("[tddy-codex] stdout line ({} bytes)", line.len());
             if let Some(ref mut f) = conv_file {
                 let _ = writeln!(f, "{}", line);

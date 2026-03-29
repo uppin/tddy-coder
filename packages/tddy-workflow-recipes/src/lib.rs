@@ -34,7 +34,7 @@ pub use session_artifact_manifest::SessionArtifactManifest;
 pub use tdd::{PlanTask, TddRecipe, TddWorkflowHooks};
 pub use writer::{
     create_session_dir_in, create_session_dir_under, create_session_dir_with_id,
-    read_impl_session_file, read_session_file, sessions_base_path, slugify_directory_name,
+    read_impl_session_file, read_session_file, slugify_directory_name, tddy_data_dir_path,
     update_acceptance_tests_file, update_progress_file, write_acceptance_tests_file,
     write_artifacts, write_demo_plan_file, write_demo_results_file, write_evaluation_report,
     write_impl_session_file, write_progress_file, write_red_output_file, write_session_file,

@@ -1118,6 +1118,9 @@ impl Presenter {
         );
     }
 
+    /// Starts another workflow run with `prompt`. Reuses [`Self::workflow_session_dir`] when set so
+    /// web/daemon/CLI-bound session folders keep receiving runs; only passes `None` when the first
+    /// run also had no session dir (fresh allocation under `TDDY_SESSIONS_DIR`).
     fn restart_workflow(&mut self, prompt: String) {
         if let (Some(backend), Some(output_dir)) = (
             self.workflow_backend.clone(),
@@ -1132,7 +1135,7 @@ impl Presenter {
             self.spawn_workflow(
                 backend,
                 output_dir,
-                None,
+                self.workflow_session_dir.clone(),
                 Some(prompt),
                 self.workflow_conversation_output.clone(),
                 self.workflow_debug_output.clone(),

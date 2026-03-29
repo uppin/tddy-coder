@@ -16,7 +16,7 @@ use common::{
 };
 use std::sync::Arc;
 use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
-use tddy_core::output::{create_session_dir_in, sessions_base_path};
+use tddy_core::output::{create_session_dir_in, tddy_data_dir_path};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::{GoalId, MockBackend, SharedBackend, WorkflowEngine};
@@ -48,7 +48,7 @@ fn changeset_state_has_session_id_field() {
 /// AC2: Changeset exists on disk before any agent invocation (early creation).
 #[tokio::test]
 async fn changeset_exists_before_workflow_starts() {
-    let base = sessions_base_path().expect("sessions base");
+    let base = tddy_data_dir_path().expect("tddy data dir");
     let session_dir = create_session_dir_in(&base).expect("create session dir");
 
     let init_cs = Changeset {

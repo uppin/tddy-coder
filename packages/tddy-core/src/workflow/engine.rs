@@ -18,7 +18,7 @@ fn workflow_session_id_from_context(ctx: &mut Context) -> String {
     ctx.get_sync::<String>("session_id")
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| {
-            let id = uuid::Uuid::new_v4().to_string();
+            let id = uuid::Uuid::now_v7().to_string();
             ctx.set_sync("session_id", id.clone());
             id
         })

@@ -89,25 +89,6 @@ impl Context {
     }
 }
 
-#[cfg(test)]
-mod merge_json_tests {
-    use super::Context;
-    use serde_json::json;
-
-    #[test]
-    fn merge_json_object_sync_inserts_keys() {
-        let ctx = Context::new();
-        let mut map = serde_json::Map::new();
-        map.insert("run_optional_step_x".to_string(), json!(true));
-        ctx.merge_json_object_sync(&map);
-        assert_eq!(
-            ctx.get_sync::<bool>("run_optional_step_x"),
-            Some(true),
-            "merge_json_object_sync must persist keys into context"
-        );
-    }
-}
-
 impl Serialize for Context {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -134,5 +115,24 @@ impl<'de> Deserialize<'de> for Context {
             inner.insert(k, v);
         }
         Ok(Self { inner })
+    }
+}
+
+#[cfg(test)]
+mod merge_json_tests {
+    use super::Context;
+    use serde_json::json;
+
+    #[test]
+    fn merge_json_object_sync_inserts_keys() {
+        let ctx = Context::new();
+        let mut map = serde_json::Map::new();
+        map.insert("run_optional_step_x".to_string(), json!(true));
+        ctx.merge_json_object_sync(&map);
+        assert_eq!(
+            ctx.get_sync::<bool>("run_optional_step_x"),
+            Some(true),
+            "merge_json_object_sync must persist keys into context"
+        );
     }
 }
