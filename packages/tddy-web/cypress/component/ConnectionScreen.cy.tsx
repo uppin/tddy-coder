@@ -4,6 +4,8 @@ import { ConnectionScreen } from "../../src/components/ConnectionScreen";
 import {
   ListToolsResponseSchema,
   ToolInfoSchema,
+  ListAgentsResponseSchema,
+  AgentInfoSchema,
   ListSessionsResponseSchema,
   SessionEntrySchema,
   ListProjectsResponseSchema,
@@ -178,6 +180,23 @@ function mockListToolsResponse() {
   );
 }
 
+/** Matches prior hardcoded backend options / default dev.daemon.yaml `allowed_agents`. */
+const MOCK_DEFAULT_LIST_AGENTS = [
+  { id: "claude", label: "Claude (opus)" },
+  { id: "claude-acp", label: "Claude ACP (opus)" },
+  { id: "cursor", label: "Cursor (composer-2)" },
+  { id: "stub", label: "Stub" },
+];
+
+function mockListAgentsResponse(agents: Array<{ id: string; label: string }>) {
+  return toBinary(
+    ListAgentsResponseSchema,
+    create(ListAgentsResponseSchema, {
+      agents: agents.map((a) => create(AgentInfoSchema, { id: a.id, label: a.label })),
+    }),
+  );
+}
+
 type MockSessionRow = {
   sessionId: string;
   createdAt: string;
@@ -262,6 +281,15 @@ function interceptAllRpcs(
       body: toArrayBuffer(toolsBody),
     });
   }).as("listTools");
+
+  const agentsBody = mockListAgentsResponse(MOCK_DEFAULT_LIST_AGENTS);
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(agentsBody),
+    });
+  }).as("listAgents");
 
   const daemonsBody =
     daemonsOverride === undefined
@@ -435,7 +463,12 @@ describe("ConnectionScreen terminal chrome — status dot menu", () => {
     cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
     cy.wait("@connectSession");
     cy.get("[data-testid='connected-terminal-container']", { timeout: 5000 }).should("exist");
-    cy.get("[data-testid='connection-status-dot']", { timeout: 20000 }).should("be.visible").click();
+    // Match the stable LiveKit chrome wait from the Terminate test — avoids detached DOM during async remount.
+    cy.get("[data-testid='connection-status-dot']", { timeout: 20000 })
+      .should("be.visible")
+      .and("have.attr", "data-connection-status");
+    cy.get("[data-testid='livekit-status']").should("not.be.visible");
+    cy.get("[data-testid='connection-status-dot']").should("be.visible").click();
     cy.get("[data-testid='connection-menu-disconnect']", { timeout: 10000 }).should("be.visible");
     cy.get("[data-testid='connection-menu-terminate']", { timeout: 10000 }).should("be.visible");
     cy.get("[data-testid='connection-menu-terminate']").click({ force: true });
@@ -749,6 +782,15 @@ function interceptAllRpcsWithListSessionsFactory(getSessions: () => MockSessionR
     });
   }).as("listTools");
 
+  const agentsBody = mockListAgentsResponse(MOCK_DEFAULT_LIST_AGENTS);
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(agentsBody),
+    });
+  }).as("listAgents");
+
   const daemonsBody = mockListEligibleDaemonsDefaultResponse();
   cy.intercept("POST", "**/rpc/connection.ConnectionService/ListEligibleDaemons", (req) => {
     req.reply({
@@ -842,6 +884,109 @@ describe("ConnectionScreen session status (TUI parity)", () => {
     cy.wait("@listSessions");
     cy.get(`[data-testid="session-row-workflow-state-${sid}"]`).should("contain.text", "Green");
     cy.get(`[data-testid="session-row-elapsed-${sid}"]`).should("contain.text", "3m 0s");
+  });
+});
+
+/** Same as `interceptAllRpcs` but overrides the `ListAgents` mock payload (acceptance: dynamic backend options). */
+function interceptAllRpcsWithListAgents(
+  sessions: MockSessionRow[],
+  listAgents: Array<{ id: string; label: string }>,
+  daemonsOverride?: Array<{
+    instanceId: string;
+    label: string;
+    isLocal: boolean;
+  }>,
+) {
+  const authBody = mockAuthAuthenticated();
+  cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(authBody),
+    });
+  }).as("getAuthStatus");
+
+  const toolsBody = mockListToolsResponse();
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(toolsBody),
+    });
+  }).as("listTools");
+
+  const agentsBody = mockListAgentsResponse(listAgents);
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(agentsBody),
+    });
+  }).as("listAgents");
+
+  const daemonsBody =
+    daemonsOverride === undefined
+      ? mockListEligibleDaemonsDefaultResponse()
+      : mockListEligibleDaemonsResponse(daemonsOverride);
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListEligibleDaemons", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(daemonsBody),
+    });
+  }).as("listEligibleDaemons");
+
+  const sessionsBody = mockListSessionsResponse(sessions);
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(sessionsBody),
+    });
+  }).as("listSessions");
+
+  const projectsBody = mockListProjectsResponse();
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(projectsBody),
+    });
+  }).as("listProjects");
+}
+
+describe("ConnectionScreen ListAgents backend select (acceptance)", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("connection_screen_backend_select_uses_list_agents", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcsWithListAgents(
+      [],
+      [
+        { id: "agent-one", label: "Agent One" },
+        { id: "agent-two", label: "Agent Two" },
+      ],
+    );
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.wait("@listAgents");
+    const backendSel = `[data-testid="backend-select-${PROJECT.projectId}"]`;
+    cy.get(backendSel, { timeout: 8000 }).should("exist");
+    cy.get(`${backendSel} option`).should("have.length", 2);
+    cy.get(`${backendSel} option`).eq(0).should("have.value", "agent-one");
+    cy.get(`${backendSel} option`).eq(1).should("have.value", "agent-two");
+    cy.get(`${backendSel} option[value="claude"]`).should("not.exist");
+    cy.get(`${backendSel} option[value="cursor"]`).should("not.exist");
+
+    interceptAllRpcsWithListAgents([], [{ id: "gamma-only", label: "Gamma" }]);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@listAgents");
+    cy.get(`[data-testid="backend-select-${PROJECT.projectId}"] option`).should("have.length", 1);
+    cy.get(`[data-testid="backend-select-${PROJECT.projectId}"]`)
+      .should("have.value", "gamma-only");
   });
 });
 

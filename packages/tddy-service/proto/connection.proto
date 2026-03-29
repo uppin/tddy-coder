@@ -4,6 +4,7 @@ package connection;
 
 service ConnectionService {
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
   rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
@@ -21,6 +22,15 @@ message ListToolsResponse {
 }
 message ToolInfo {
   string path = 1;
+  string label = 2;
+}
+
+message ListAgentsRequest {}
+message ListAgentsResponse {
+  repeated AgentInfo agents = 1;
+}
+message AgentInfo {
+  string id = 1;
   string label = 2;
 }
 
