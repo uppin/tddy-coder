@@ -1321,3 +1321,86 @@ fn workflow_error_propagates() {
         activity_texts
     );
 }
+
+// --- Activity prompts in log / streaming PRD (prefixes are the stable acceptance contract) ---
+
+/// User-submitted feature prompts must appear as activity lines with this prefix (PRD).
+const USER_PROMPT_ACTIVITY_PREFIX: &str = "User: ";
+/// Queued inbox prompts must appear as activity lines with this prefix (PRD).
+const QUEUED_PROMPT_ACTIVITY_PREFIX: &str = "Queued: ";
+
+#[test]
+#[serial]
+fn submit_feature_input_appends_user_prompt_activity() {
+    let sessions_base = std::env::temp_dir().join("tddy-presenter-user-prompt-activity");
+    let _ = std::fs::remove_dir_all(&sessions_base);
+    std::fs::create_dir_all(&sessions_base).expect("sessions base");
+    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
+
+    let (mut presenter, mut events) = presenter_with_events();
+    let backend = create_stub_backend();
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-user-prompt-activity");
+
+    presenter.start_workflow(
+        backend, output_dir, None, None, None, None, false, None, None, None,
+    );
+
+    let prompt = "Build auth for acceptance test";
+    presenter.handle_intent(UserIntent::SubmitFeatureInput(prompt.to_string()));
+    events.drain();
+
+    assert!(
+        presenter.state().activity_log.iter().any(|e| {
+            e.text.starts_with(USER_PROMPT_ACTIVITY_PREFIX) && e.text.contains(prompt)
+        }),
+        "expected activity log to record submitted feature prompt with prefix {:?} (PRD); got {:?}",
+        USER_PROMPT_ACTIVITY_PREFIX,
+        presenter.state().activity_log
+    );
+
+    let logged = events.events().iter().any(|e| {
+        if let TestEvent::ActivityLogged(entry) = e {
+            entry.text.starts_with(USER_PROMPT_ACTIVITY_PREFIX) && entry.text.contains(prompt)
+        } else {
+            false
+        }
+    });
+    assert!(
+        logged,
+        "expected ActivityLogged broadcast for user prompt (remote sessions); events: {:?}",
+        events.events()
+    );
+
+    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+}
+
+#[test]
+#[serial]
+fn queue_prompt_appends_queued_prompt_activity() {
+    let (mut presenter, mut events) = presenter_with_events();
+    let text = "follow-up prompt for activity log";
+    presenter.handle_intent(UserIntent::QueuePrompt(text.to_string()));
+    events.drain();
+
+    assert!(
+        presenter.state().activity_log.iter().any(|e| {
+            e.text.starts_with(QUEUED_PROMPT_ACTIVITY_PREFIX) && e.text.contains(text)
+        }),
+        "expected activity log to record queued prompt with prefix {:?} (PRD); got {:?}",
+        QUEUED_PROMPT_ACTIVITY_PREFIX,
+        presenter.state().activity_log
+    );
+
+    let logged = events.events().iter().any(|e| {
+        if let TestEvent::ActivityLogged(entry) = e {
+            entry.text.starts_with(QUEUED_PROMPT_ACTIVITY_PREFIX) && entry.text.contains(text)
+        } else {
+            false
+        }
+    });
+    assert!(
+        logged,
+        "expected ActivityLogged broadcast for queued prompt; events: {:?}",
+        events.events()
+    );
+}

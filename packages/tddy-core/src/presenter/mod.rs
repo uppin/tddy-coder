@@ -1,5 +1,7 @@
 //! Presenter module: application state and workflow orchestration (MVP pattern).
 
+mod activity_prompt_log;
+mod agent_activity;
 mod events;
 mod intent;
 mod presenter_events;
