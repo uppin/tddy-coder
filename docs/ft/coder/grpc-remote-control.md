@@ -108,6 +108,10 @@ The `--daemon` flag starts a headless gRPC server (no TUI) suitable for systemd 
 - Add `buf` to the Nix flake devShell
 - Proto files live in `packages/tddy-service/proto/` (and LiveKit envelope protos under `packages/tddy-livekit/proto/` as needed)
 
+### 8. Remote sandbox (daemon)
+
+**tddy-daemon** registers **`remote_sandbox.v1.RemoteSandboxService`** on the shared Connect / LiveKit **`RpcService`** stack. The service provides per-session temp sandboxes, non-interactive exec, small-file VFS RPCs, and an **`OpenRsyncSession`** bridge for **`rsync --server`**. The **`tddy-remote`** CLI drives these RPCs (including **`rsync --rsh`**). Product and security context: [Remote sandbox](../daemon/remote-sandbox.md).
+
 ## Success Criteria
 
 1. `tddy-demo --grpc` starts both TUI and gRPC server

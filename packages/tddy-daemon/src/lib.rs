@@ -6,6 +6,7 @@ pub mod config;
 pub mod connection_service;
 pub mod multi_host;
 pub mod project_storage;
+pub mod remote_sandbox;
 pub mod server;
 pub mod session_deletion;
 pub mod session_list_enrichment;

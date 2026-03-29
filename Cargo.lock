@@ -5679,11 +5679,13 @@ dependencies = [
  "clap",
  "libc",
  "log",
+ "prost 0.13.5",
  "reqwest 0.12.28",
  "scopeguard",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "tddy-coder",
  "tddy-connectrpc",
  "tddy-core",
@@ -5760,14 +5762,20 @@ name = "tddy-integration-tests"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "anyhow",
  "async-trait",
  "chrono",
  "ctor",
+ "livekit",
  "log",
  "serde_json",
  "serde_yaml",
  "serial_test",
  "tddy-core",
+ "tddy-livekit",
+ "tddy-livekit-testkit",
+ "tddy-rpc",
+ "tddy-service",
  "tddy-workflow",
  "tddy-workflow-recipes",
  "tokio",
@@ -5810,6 +5818,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-remote"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap",
+ "env_logger",
+ "libc",
+ "log",
+ "predicates",
+ "prost 0.13.5",
+ "reqwest 0.12.28",
+ "scopeguard",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tddy-connectrpc",
+ "tddy-rpc",
+ "tddy-service",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-rpc"
 version = "0.1.0"
 dependencies = [
@@ -5826,10 +5859,12 @@ dependencies = [
  "async-stream",
  "async-trait",
  "futures-util",
+ "libc",
  "log",
  "prost 0.13.5",
  "prost-build 0.13.5",
  "serde_json",
+ "sha2",
  "tddy-codegen",
  "tddy-core",
  "tddy-rpc",
