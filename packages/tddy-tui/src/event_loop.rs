@@ -86,6 +86,8 @@ pub fn run_event_loop(
             dynamic_area: ratatui::layout::Rect::default(),
             status_bar: ratatui::layout::Rect::default(),
             prompt_bar: ratatui::layout::Rect::default(),
+            footer_bar: ratatui::layout::Rect::default(),
+            enter_pane: ratatui::layout::Rect::default(),
         };
         terminal.draw(|f| {
             draw(
@@ -100,7 +102,7 @@ pub fn run_event_loop(
         if editing_prompt_cursor_position(&state, view.view_state(), layout_areas.prompt_bar)
             .is_some()
         {
-            log::info!("local_tui: editing caret active — crossterm Show");
+            log::trace!("local_tui: editing caret active — crossterm Show");
             let _ = execute!(terminal.backend_mut(), Show);
         }
 

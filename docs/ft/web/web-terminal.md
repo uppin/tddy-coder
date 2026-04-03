@@ -32,7 +32,7 @@ When the terminal connects and renders, it supports:
 - **Fullscreen**: Fills 100% of the viewport (width and height). **Connection chrome** overlays sit above the terminal canvas (high `z-index`, pointer events on controls only).
 - **Auto-focus**: Keyboard focus is set on the terminal when ready. User can type immediately. (On mobile, auto-focus is disabled; see Mobile UX.)
 - **Adaptive size**: FitAddon auto-sizes the terminal to its container. Resize events are sent to the virtual TUI via `\x1b]resize;{cols};{rows}\x07`.
-- **Touch/mouse mode**: When `--mouse` is set on tddy-coder, the TUI sends EnableMouseCapture. GhosttyTerminal encodes SGR mouse sequences `\x1b[<Pb;Px;PyM/m` (press/release) and forwards them via onData. Click-to-select and scroll work. Touch events (touchstart/touchend) are forwarded for tap-to-click on mobile. The TUI draws a fixed **3×2** Enter affordance (ASCII `+--` on the line above the first prompt, `|` + U+23CE on the first prompt line); see [Mouse mode: Enter control](../coder/tui-status-bar.md#mouse-mode-enter-control).
+- **Touch/mouse mode**: When `--mouse` is set on tddy-coder, the TUI sends EnableMouseCapture. GhosttyTerminal encodes SGR mouse sequences `\x1b[<Pb;Px;PyM/m` (press/release) and forwards them via onData. Click-to-select and scroll work. Touch events (touchstart/touchend) are forwarded for tap-to-click on mobile. The TUI draws an Enter affordance in the **trailing three columns** to the right of the prompt (light box-drawing frame, **U+23CE** on the first prompt text row; strip starts below the status bar); see [Mouse mode: Enter control](../coder/tui-status-bar.md#mouse-mode-enter-control).
 
 ### Connection chrome (LiveKit overlay)
 

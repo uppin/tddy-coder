@@ -17,11 +17,13 @@ Release note history for the Coder product area.
 - **CLI / TUI / web**: **`--recipe free-prompting`**; **`workflow_recipe_selection_question`** includes **Free prompting**; **`recipe_cli_name_from_selection_label`** maps the label to **`free-prompting`**.
 - **Tests**: **`workflow_recipe_acceptance`**, **`recipe_policy_red`**, **`presenter_integration`** acceptance cases for TDD document approval, bugfix **`reproduce`**, and free-prompting without **DocumentReview**; **`grpc_terminal_rpc`** UTF-8-safe assertion previews.
 - **Docs**: [workflow-recipes.md](workflow-recipes.md).
-## 2026-04-03 — TUI mouse mode: Enter affordance (3×2)
+## 2026-04-03 — TUI bottom chrome: user prompt strip, footer row, Enter affordance
 
-- **TUI**: **`mouse_map::enter_button_rect`** and **`render::paint_enter_affordance`** draw a fixed **3×2** region at the bottom-right: ASCII **`+--`** on the line above the first prompt (typically the status row), **`|`**, U+23CE, and padding on the first prompt line; the full rectangle is hit-tested and maps to **Enter** via **`key_event_to_intent`**. **`ViewState::last_select_click_option`** supports double-click to confirm in **Select** mode.
-- **Tests**: **`packages/tddy-tui`** (`mouse_map`, `render` affordance tests); **`cargo test -p tddy-tui`**.
-- **Docs**: [tui-status-bar.md](tui-status-bar.md#mouse-mode-enter-control); **`packages/tddy-tui/docs/changesets.md`**.
+- **Layout**: **`layout_chunks_with_inbox`** allocates a **footer** row below the prompt block, a **separator row** below the status bar, and **`LayoutAreas`** includes **`footer_bar`** and **`enter_pane`**.
+- **Activity (Running)**: The last line of the activity log shows **`> {running_input}`** with **white** foreground on **dark grey** background when follow-up text is non-empty.
+- **Mouse**: **`enter_button_rect`** is **three** columns wide to the right of the prompt text (with margin); height spans from the first row **below the status bar** through prompt **text** lines and the **footer** (the bottom prompt **rule** row is excluded when present). **`paint_enter_affordance`** draws a light box frame with **U+23CE** on the first prompt text row. **`TDDY_E2E_NO_ENTER_AFFORDANCE`** skips overlay paint for stable byte-level tests. **`ViewState::last_select_click_option`** supports double-click to confirm in **Select** mode.
+- **Tests**: **`packages/tddy-tui`** layout, rect geometry, strip styling, and env-gate tests; **`tddy-e2e`** **`grpc_terminal_rpc`** where terminal streaming uses the env gate.
+- **Docs**: [tui-status-bar.md](tui-status-bar.md); [web-terminal.md](../web/web-terminal.md#connected-terminal-ux); **`packages/tddy-tui/docs/changesets.md`**.
 
 ## 2026-03-29 — Feature prompt: project agent skills and `/recipe`
 

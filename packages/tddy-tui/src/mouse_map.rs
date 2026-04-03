@@ -20,23 +20,66 @@ pub struct LayoutAreas {
     pub dynamic_area: Rect,
     pub status_bar: Rect,
     pub prompt_bar: Rect,
+    /// Single-row footer directly below the prompt text block (PRD: +1 bottom chrome row).
+    pub footer_bar: Rect,
+    /// Dedicated terminal region for the pointer Enter affordance (must not overlap [`prompt_bar`]).
+    pub enter_pane: Rect,
 }
 
-/// Width and height in terminal cells of the pointer Enter affordance (see `enter_button_rect`).
+/// Width in terminal cells of the pointer Enter affordance (see `enter_button_rect`). Height is
+/// computed from layout (see `enter_button_rect`): rows from below the status bar through prompt
+/// text and footer (excludes the prompt rule row when present).
 pub const ENTER_BUTTON_COLS: u16 = 3;
+/// Empty columns between the prompt text block and the Enter strip (to the right of prompt text).
+pub const ENTER_STRIP_MARGIN_COLS: u16 = 1;
+/// Legacy export: pre-footer overlay used two content rows for the ASCII frame. Actual hit target
+/// height is [`enter_button_rect`].`height` (prompt text + footer; status bar is excluded).
 pub const ENTER_BUTTON_ROWS: u16 = 2;
 
-/// Bottom-right **3×2** region: top row on the line **above** the first prompt line (typically the
-/// status bar — “borrowed” chrome so a one-line `prompt_bar` still fits the frame), bottom row on
-/// the first prompt line with U+23CE. [`LayoutAreas::prompt_bar`] may be a single line tall.
+/// **3 columns** wide: starts at the first row **below the status bar** (the separator band: empty
+/// row plus any debug rows above [`LayoutAreas::prompt_bar`]), then spans **prompt text** + **footer**.
+/// Placed to the right of the prompt text block with [`ENTER_STRIP_MARGIN_COLS`] gap. Does not cover
+/// the status bar itself. When the prompt chunk has more than one row, the bottom row is the
+/// horizontal rule (`U+2500`) and is **not** included in height. Matches
+/// [`crate::render::paint_enter_affordance`].
 pub fn enter_button_rect(areas: &LayoutAreas) -> Rect {
+    crate::red_phase::tddy_marker("M002", "mouse_map::enter_button_rect");
+    let sb = areas.status_bar;
     let pb = areas.prompt_bar;
-    if pb.width < ENTER_BUTTON_COLS || pb.y == 0 {
+    let fb = areas.footer_bar;
+    if pb.width < ENTER_BUTTON_COLS {
+        log::debug!("enter_button_rect: degenerate layout pb={pb:?} fb={fb:?} -> empty");
         return Rect::new(0, 0, 0, 0);
     }
-    let x = pb.x + pb.width - ENTER_BUTTON_COLS;
-    let y = pb.y - 1;
-    Rect::new(x, y, ENTER_BUTTON_COLS, ENTER_BUTTON_ROWS)
+    let prompt_rows = if pb.height > 1 {
+        pb.height.saturating_sub(1)
+    } else {
+        pb.height
+    };
+    if prompt_rows == 0 && fb.height == 0 {
+        log::debug!("enter_button_rect: zero-height prompt+footer pb={pb:?} fb={fb:?} -> empty");
+        return Rect::new(0, 0, 0, 0);
+    }
+    let x = pb.x + pb.width + ENTER_STRIP_MARGIN_COLS;
+    let (y, h) = if sb.height > 0 {
+        let strip_top = sb.y.saturating_add(sb.height);
+        let above_prompt = pb.y.saturating_sub(strip_top);
+        let h = above_prompt
+            .saturating_add(prompt_rows)
+            .saturating_add(fb.height);
+        (strip_top, h)
+    } else {
+        let h = prompt_rows.saturating_add(fb.height);
+        (pb.y, h)
+    };
+    if h == 0 {
+        return Rect::new(0, 0, 0, 0);
+    }
+    log::trace!(
+        "enter_button_rect: x={x} y={y} w={} h={h} (from below status through prompt text+footer, excluding prompt rule row)",
+        ENTER_BUTTON_COLS
+    );
+    Rect::new(x, y, ENTER_BUTTON_COLS, h)
 }
 
 /// Normalize mouse coordinates for local terminal (crossterm).
@@ -308,6 +351,8 @@ mod tests {
             dynamic_area: dynamic,
             status_bar: status,
             prompt_bar: prompt,
+            footer_bar: Rect::new(0, 24, 80, 0),
+            enter_pane: Rect::default(),
         }
     }
 
@@ -321,13 +366,15 @@ mod tests {
         let dynamic_h = question_height(&mode);
         let debug_h = 0u16;
         let prompt_h = 1u16;
-        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+        let (activity_log, _spacer, dynamic_area, status_bar, _gap, _debug, prompt_bar, footer_bar) =
             layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
         LayoutAreas {
             activity_log,
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
+            enter_pane: Rect::default(),
         }
     }
 
@@ -347,13 +394,15 @@ mod tests {
         let area_width = area.width;
         let max_height = (area.height / 3).max(1);
         let prompt_h = prompt_height(text_len, area_width, max_height);
-        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+        let (activity_log, _spacer, dynamic_area, status_bar, _gap, _debug, prompt_bar, footer_bar) =
             layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
         LayoutAreas {
             activity_log,
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
+            enter_pane: Rect::default(),
         }
     }
 
@@ -534,13 +583,15 @@ mod tests {
         };
         let area = Rect::new(0, 0, 80, 24);
         let dynamic_h = question_height(&mode);
-        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+        let (activity_log, _spacer, dynamic_area, status_bar, _gap, _debug, prompt_bar, footer_bar) =
             layout_chunks_with_inbox(area, dynamic_h, 0, prompt_h);
         let areas = LayoutAreas {
             activity_log,
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
+            enter_pane: Rect::default(),
         };
         (mode, areas)
     }
@@ -623,28 +674,58 @@ mod tests {
         );
     }
 
+    fn rects_overlap(a: Rect, b: Rect) -> bool {
+        a.x < b.x.saturating_add(b.width)
+            && a.x.saturating_add(a.width) > b.x
+            && a.y < b.y.saturating_add(b.height)
+            && a.y.saturating_add(a.height) > b.y
+    }
+
+    /// Enter strip is three columns wide from the row below the status bar through prompt + footer,
+    /// separated from the prompt text block by [`super::ENTER_STRIP_MARGIN_COLS`] and must not overlap
+    /// `prompt_bar` cells.
     #[test]
-    fn enter_button_rect_is_three_by_two_straddling_status_and_first_prompt_line() {
-        let (_, areas) = select_mode_fixture_80x24();
+    fn enter_button_rect_is_right_of_prompt_with_margin_and_disjoint_from_prompt_and_footer() {
+        let sb = Rect::new(0, 20, 80, 1);
+        // One-row gap below status (y=21); debug height 0 so prompt starts at 22.
+        let pb = Rect::new(0, 22, 76, 1);
+        let fb = Rect::new(0, 23, 76, 1);
+        let areas = LayoutAreas {
+            activity_log: Rect::new(0, 0, 80, 20),
+            dynamic_area: Rect::new(0, 20, 80, 0),
+            status_bar: sb,
+            prompt_bar: pb,
+            footer_bar: fb,
+            enter_pane: Rect::default(),
+        };
         let r = super::enter_button_rect(&areas);
-        let pb = areas.prompt_bar;
-        let sb = areas.status_bar;
-        let expected = Rect::new(pb.x + pb.width - 3, pb.y - 1, 3, 2);
-        assert_eq!(r, expected);
-        assert_eq!(r.width, 3);
-        assert_eq!(r.height, 2);
-        assert_eq!(r.x + r.width, pb.x + pb.width);
-        assert!(
-            rect_contains(&sb, r.x, r.y)
-                && rect_contains(&sb, r.x + 1, r.y)
-                && rect_contains(&sb, r.x + 2, r.y),
-            "top row (+--) must sit on the status line; sb={sb:?} r={r:?}"
+        let prompt_rows = if pb.height > 1 {
+            pb.height - 1
+        } else {
+            pb.height
+        };
+        let strip_top = sb.y.saturating_add(sb.height);
+        let above_prompt = pb.y.saturating_sub(strip_top);
+        let expected_h = above_prompt
+            .saturating_add(prompt_rows)
+            .saturating_add(fb.height);
+        assert_eq!(r.width, super::ENTER_BUTTON_COLS);
+        assert_eq!(r.x, pb.x + pb.width + super::ENTER_STRIP_MARGIN_COLS);
+        assert_eq!(
+            r.y, strip_top,
+            "Enter strip must start below status (separator band)"
+        );
+        assert_eq!(
+            r.height, expected_h,
+            "Enter height = rows below status through prompt text + footer (exclude prompt rule row); sb={sb:?} pb={pb:?} fb={fb:?} r={r:?}"
         );
         assert!(
-            rect_contains(&pb, r.x, r.y + 1)
-                && rect_contains(&pb, r.x + 1, r.y + 1)
-                && rect_contains(&pb, r.x + 2, r.y + 1),
-            "bottom row (|⏎) must sit on the first prompt line; pb={pb:?} r={r:?}"
+            !rects_overlap(r, pb),
+            "Enter hit target must not overlap prompt_bar; r={r:?} pb={pb:?}"
+        );
+        assert!(
+            !rects_overlap(r, fb),
+            "Enter hit target must not overlap footer_bar; r={r:?} fb={fb:?}"
         );
     }
 
@@ -694,10 +775,23 @@ mod tests {
         let (mode, areas) = select_mode_fixture_80x24();
         vs.select_selected = 0;
         let r = super::enter_button_rect(&areas);
+        let above = areas
+            .prompt_bar
+            .y
+            .saturating_sub(areas.status_bar.y.saturating_add(areas.status_bar.height));
+        let return_row = if r.height <= 1 {
+            r.y
+        } else if above >= 1 {
+            r.y.saturating_add(above)
+        } else if r.height >= 3 {
+            r.y + 1
+        } else {
+            r.y
+        };
         let ev = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: r.x + 1,
-            row: r.y + 1,
+            row: return_row,
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
@@ -716,13 +810,15 @@ mod tests {
         let area = Rect::new(0, 0, 80, 24);
         let dynamic_h = 0u16;
         let prompt_h = 1u16;
-        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+        let (activity_log, _spacer, dynamic_area, status_bar, _gap, _debug, prompt_bar, footer_bar) =
             layout_chunks_with_inbox(area, dynamic_h, 0, prompt_h);
         let areas = LayoutAreas {
             activity_log,
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
+            enter_pane: Rect::default(),
         };
         let mode = AppMode::MarkdownViewer {
             content: "# Plan".to_string(),

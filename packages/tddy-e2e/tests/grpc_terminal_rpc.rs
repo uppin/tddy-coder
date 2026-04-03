@@ -80,10 +80,12 @@ fn vt100_compact_screen(all_output: &[u8], rows: u16, cols: u16) -> String {
 }
 
 /// Normalize the flattened VT100 string before echo substring checks:
+///
 /// - Idle pulse glyphs (`·` / `•` / `●`) on the status line.
-/// - Mouse **Enter** affordance (`paint_enter_affordance`): ASCII `+--` on the status row, `|`,
-///   U+23CE (⏎) on the first prompt row (`render` / `tddy-tui` changeset 2026-04-03).
-/// Those overlay the last columns of wrapped prompt lines and break naive contiguous-prefix checks.
+/// - Mouse **Enter** affordance (`paint_enter_affordance`): light box-drawing border (`┌─` … `│` …)
+///   and U+23CE on the first prompt text row; legacy ASCII `+--` / `|` may still appear in old logs.
+///
+/// These glyphs overlay the last columns of wrapped prompt lines and break naive contiguous-prefix checks.
 fn compact_screen_for_echo_assertions(compact: &str) -> String {
     let mut s: String = compact
         .chars()
@@ -93,7 +95,13 @@ fn compact_screen_for_echo_assertions(compact: &str) -> String {
         s = s.replace("+--", "");
     }
     s.chars()
-        .filter(|&c| !matches!(c, '|' | '\u{23CE}'))
+        .filter(|&c| {
+            !matches!(c, '|' | '\u{23CE}')
+                && !matches!(
+                    c,
+                    '\u{2500}' | '\u{2502}' | '\u{250C}' | '\u{2510}' | '\u{2514}' | '\u{2518}'
+                )
+        })
         .collect()
 }
 
@@ -553,11 +561,12 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
     }
     let initial_text = ansi_to_text(&initial_output);
 
+    let preview_300: String = initial_text.chars().take(300).collect();
     assert!(
         initial_text.contains("State:") || initial_text.contains("Scope"),
         "Initial TUI should render before any keyboard input; got (len {}): {:?}",
         initial_text.len(),
-        &initial_text[..initial_text.len().min(300)]
+        preview_300
     );
 
     // Phase 2: send keyboard inputs, collect output after each.
@@ -640,10 +649,11 @@ async fn grpc_virtual_tui_refreshes_autonomously_without_input() -> anyhow::Resu
         "Should receive initial TUI render, got {} bytes",
         initial.len()
     );
+    let preview: String = initial_text.chars().take(200).collect();
     eprintln!(
         "[TEST] initial burst: {} bytes, text preview: {:?}",
         initial.len(),
-        &initial_text[..initial_text.len().min(200)]
+        preview
     );
 
     // Now: presenter is in Select mode, waiting for user input.
@@ -698,10 +708,11 @@ async fn grpc_virtual_tui_idle_animation_cadence() -> anyhow::Result<()> {
         "Should receive initial TUI render, got {} bytes",
         initial.len()
     );
+    let preview_300: String = initial_text.chars().take(300).collect();
     assert!(
         initial_text.contains("Email/password") || initial_text.contains("Scope"),
         "Should reach Select mode; got: {:?}",
-        &initial_text[..initial_text.len().min(300)]
+        preview_300
     );
 
     let chunks =
@@ -751,10 +762,11 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
     input_tx.send(TerminalInput { data: vec![] }).await?;
     let initial = drain_output(&mut stream, Duration::from_millis(500), "init").await?;
     let initial_text = ansi_to_text(&initial);
+    let preview_300: String = initial_text.chars().take(300).collect();
     assert!(
         initial_text.contains("Email/password") || initial_text.contains("Scope"),
         "Should reach Select mode with authentication question; got: {:?}",
-        &initial_text[..initial_text.len().min(300)]
+        preview_300
     );
 
     // Feed initial output into vt100 parser to verify initial state:

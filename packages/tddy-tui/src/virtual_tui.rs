@@ -131,6 +131,8 @@ pub fn run_virtual_tui(
             dynamic_area: Rect::default(),
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
+            enter_pane: Rect::default(),
         };
         let render_and_send =
             |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
@@ -1058,7 +1060,7 @@ mod tests {
         use ratatui::{TerminalOptions, Viewport};
         use tddy_core::{AppMode, PresenterState};
 
-        use crate::layout::{layout_chunks_with_inbox, prompt_height};
+        use crate::layout::{layout_chunks_with_inbox, prompt_chunk_height_including_rule};
         use crate::render::draw;
         use crate::view_state::ViewState;
 
@@ -1118,16 +1120,15 @@ mod tests {
         let area = ratatui::layout::Rect::new(0, 0, COLS, ROWS);
         let prompt_text = format!("> {}", input);
         let text_len = prompt_text.chars().count().min(u16::MAX as usize) as u16;
-        let max_height = (ROWS / 3).max(1);
-        let prompt_h = prompt_height(text_len, COLS, max_height);
-        let (_, _, _, status_bar, _, _) = layout_chunks_with_inbox(area, 0, 0, prompt_h);
-        let prompt_start_row = status_bar.y + status_bar.height;
+        let prompt_h = prompt_chunk_height_including_rule(text_len, COLS, ROWS);
+        let (_, _, _, _, _, _, prompt_bar, _) = layout_chunks_with_inbox(area, 0, 0, prompt_h);
 
-        // Collect prompt bar content without whitespace for substring search.
-        let prompt_compact: String = (prompt_start_row..ROWS)
+        // Collect prompt text rows (exclude bottom horizontal-rule row) without whitespace.
+        let prompt_compact: String = (prompt_bar.y
+            ..prompt_bar.y + prompt_bar.height.saturating_sub(1))
             .flat_map(|row| {
                 let buf = &buf;
-                (0..COLS).filter_map(move |col| {
+                (prompt_bar.x..prompt_bar.x + prompt_bar.width).filter_map(move |col| {
                     buf.cell(ratatui::layout::Position::new(col, row))
                         .map(|c| c.symbol().chars().next().unwrap_or(' '))
                 })
