@@ -6,7 +6,7 @@
 
 ## Layout and bottom chrome
 
-`layout::layout_chunks_with_inbox` splits the terminal into seven vertical regions: activity, spacer, dynamic (inbox / questions / slash menu), status, optional debug log, prompt, and **footer** (single row). `mouse_map::LayoutAreas` carries `activity_log`, `dynamic_area`, `status_bar`, `prompt_bar`, and `footer_bar`. In `AppMode::Running` with non-empty `running_input`, `render::paint_user_prompt_activity_strip` paints the last activity line as a white-on-dark-grey `> …` strip. `mouse_map::enter_button_rect` and `render::paint_enter_affordance` share the same three-column-wide rectangle covering the full height of status, prompt, and footer; when `TDDY_E2E_NO_ENTER_AFFORDANCE` is set, overlay paint is skipped.
+`layout::layout_chunks_with_inbox` splits the terminal into **eight** vertical regions: activity, spacer, dynamic (inbox / questions / slash menu), status, **one empty row** (separator between status and the block below), optional debug log, prompt, and **footer** (single row). `mouse_map::LayoutAreas` carries `activity_log`, `dynamic_area`, `status_bar`, `prompt_bar`, `footer_bar`, and `enter_pane`. In `AppMode::Running` with non-empty `running_input`, `render::paint_user_prompt_activity_strip` paints the last activity line as a white-on-dark-grey `> …` strip. `mouse_map::enter_button_rect` and `render::paint_enter_affordance` use the same three-column-wide rectangle to the right of the prompt text (margin `ENTER_STRIP_MARGIN_COLS`): it starts on the **first row below the status bar** (empty row plus any debug rows above the prompt chunk), spans prompt **text** lines and the footer, and excludes the bottom prompt rule row when the prompt chunk is multi-line. Light box-drawing characters and **U+23CE** on the first prompt text row; when `TDDY_E2E_NO_ENTER_AFFORDANCE` is set, overlay paint is skipped.
 
 ## Status bar
 
@@ -33,7 +33,7 @@ The status bar is a single `Paragraph` line. Text is built by `render::status_ba
 
 | Module | Responsibility |
 |--------|----------------|
-| `layout` | Vertical splits including activity, dynamic, status, debug, prompt, footer |
+| `layout` | Vertical splits including activity, dynamic, status, gap, debug, prompt, footer |
 | `mouse_map` | `LayoutAreas`, `enter_button_rect`, pointer hit-testing |
 | `status_bar_activity` | Agent-active vs idle rules, displayed elapsed, activity glyph, VirtualTui periodic interval |
 | `ui` | Elapsed formatting, status line strings, session segment rules, activity prefix |

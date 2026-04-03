@@ -10,7 +10,8 @@ use tddy_core::{ActivityEntry, AppMode, PresenterState};
 
 use crate::feature_input_buffer::FeaturePromptSegment;
 use crate::layout::{
-    debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_height, question_height,
+    debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_chunk_height_including_rule,
+    question_height,
 };
 use crate::mouse_map::{enter_button_rect, LayoutAreas, ENTER_BUTTON_COLS};
 use crate::status_bar_activity::{
@@ -413,6 +414,22 @@ fn status_bar_text_for_draw(state: &PresenterState, view_state: &mut ViewState) 
 
 /// Truncate long session ids in trace logs (correlation id, not a secret, but avoid full dumps).
 /// PRD FR1: last line of the activity pane shows the user-submitted prompt (white on dark grey).
+/// Bottom border of the prompt pane: full-width `U+2500` light horizontal rule.
+fn paint_prompt_bottom_horizontal_rule(frame: &mut Frame, prompt_bar: Rect) {
+    if prompt_bar.height < 2 {
+        return;
+    }
+    let y = prompt_bar.y + prompt_bar.height - 1;
+    let buf = frame.buffer_mut();
+    const H: &str = "\u{2500}";
+    for dx in 0..prompt_bar.width {
+        let x = prompt_bar.x.saturating_add(dx);
+        if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+            cell.set_symbol(H);
+        }
+    }
+}
+
 fn paint_user_prompt_activity_strip(frame: &mut Frame, activity_log: Rect, running_input: &str) {
     crate::red_phase::tddy_marker("M004", "render::paint_user_prompt_activity_strip");
     log::debug!(
@@ -452,9 +469,10 @@ fn truncate_session_id_for_log(id: &str) -> String {
     }
 }
 
-/// Paints the Enter affordance on the trailing 3 columns across **status + prompt + footer**:
-/// top/bottom borders `+--`, vertical `|`, U+23CE on the first prompt row of the stack (see
-/// [`enter_button_rect`]). Runs after status, prompt, and footer widgets so glyphs align with layout.
+/// Paints the Enter affordance on the trailing 3 columns from the first row **below the status bar**
+/// through prompt text and footer (see [`enter_button_rect`]). Top row draws `┌─┐` on the separator
+/// band; U+23CE sits on the first prompt text row, not on that top border. The bottom prompt row is
+/// the horizontal rule and is excluded from height.
 fn paint_enter_affordance(frame: &mut Frame, areas: &LayoutAreas) {
     crate::red_phase::tddy_marker("M003", "render::paint_enter_affordance");
     // Long echo / vt100 substring tests (`tddy-e2e` grpc_terminal_rpc) need a stable flattened
@@ -478,27 +496,84 @@ fn paint_enter_affordance(frame: &mut Frame, areas: &LayoutAreas) {
         log::debug!("paint_enter_affordance: rect outside frame, skip");
         return;
     }
-    let sb_h = areas.status_bar.height;
     let buf = frame.buffer_mut();
     const RETURN_SYMBOL: &str = "\u{23CE}";
+    // Unicode box drawing (light); 3 columns wide: corners + horizontal + verticals.
+    const BOX_H: &str = "\u{2500}"; // ─
+    const BOX_V: &str = "\u{2502}"; // │
+    const BOX_TL: &str = "\u{250C}"; // ┌
+    const BOX_TR: &str = "\u{2510}"; // ┐
+    const BOX_BL: &str = "\u{2514}"; // └
+    const BOX_BR: &str = "\u{2518}"; // ┘
+    let sb = areas.status_bar;
+    let pb = areas.prompt_bar;
+    let above_prompt = if sb.height > 0 {
+        pb.y.saturating_sub(sb.y.saturating_add(sb.height))
+    } else {
+        0
+    };
+    let use_separator_top = above_prompt >= 1;
     let h = r.height;
     for dy in 0..h {
         for dx in 0..ENTER_BUTTON_COLS {
-            let sym = if dy == 0 {
+            let sym: &str = if h == 1 {
                 match dx {
-                    0 => "+",
-                    1 | 2 => "-",
+                    0 => BOX_TL,
+                    1 => RETURN_SYMBOL,
+                    2 => BOX_TR,
+                    _ => " ",
+                }
+            } else if use_separator_top {
+                if dy == 0 {
+                    match dx {
+                        0 => BOX_TL,
+                        1 => BOX_H,
+                        2 => BOX_TR,
+                        _ => " ",
+                    }
+                } else if dy == h - 1 {
+                    match dx {
+                        0 => BOX_BL,
+                        1 => {
+                            if h == 2 {
+                                RETURN_SYMBOL
+                            } else {
+                                BOX_H
+                            }
+                        }
+                        2 => BOX_BR,
+                        _ => " ",
+                    }
+                } else if dx == 0 || dx == 2 {
+                    BOX_V
+                } else if dy == above_prompt {
+                    RETURN_SYMBOL
+                } else {
+                    " "
+                }
+            } else if dy == 0 {
+                match dx {
+                    0 => BOX_TL,
+                    1 => {
+                        if h == 2 {
+                            RETURN_SYMBOL
+                        } else {
+                            BOX_H
+                        }
+                    }
+                    2 => BOX_TR,
                     _ => " ",
                 }
             } else if dy == h - 1 {
                 match dx {
-                    0 => "+",
-                    1 | 2 => "-",
+                    0 => BOX_BL,
+                    1 => BOX_H,
+                    2 => BOX_BR,
                     _ => " ",
                 }
-            } else if dx == 0 {
-                "|"
-            } else if dy == sb_h && dx == 1 {
+            } else if dx == 0 || dx == 2 {
+                BOX_V
+            } else if dy == 1 && h >= 3 {
                 RETURN_SYMBOL
             } else {
                 " "
@@ -545,14 +620,29 @@ pub fn draw(
     let area = frame.area();
     let prompt_text_str = prompt_text(state, view_state);
     let text_len = prompt_text_str.chars().count().min(u16::MAX as usize) as u16;
-    let area_width = area.width;
-    let max_height = (area.height / 3).max(1);
-    let prompt_h = prompt_height(text_len, area_width, max_height);
+    let prompt_h = prompt_chunk_height_including_rule(text_len, area.width, area.height);
 
-    let (activity_log, _status_spacer, dynamic_area, status_bar, debug_log, prompt_bar, footer_bar) =
-        layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
+    let (
+        activity_log,
+        _status_spacer,
+        dynamic_area,
+        status_bar,
+        _status_prompt_gap,
+        debug_log,
+        prompt_bar,
+        footer_bar,
+    ) = layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
 
     log::debug!("draw: layout status={status_bar:?} prompt={prompt_bar:?} footer={footer_bar:?}");
+
+    let enter_hit = enter_button_rect(&LayoutAreas {
+        activity_log,
+        dynamic_area,
+        status_bar,
+        prompt_bar,
+        footer_bar,
+        enter_pane: ratatui::layout::Rect::default(),
+    });
 
     if let Some(areas) = layout_areas {
         *areas = LayoutAreas {
@@ -561,6 +651,7 @@ pub fn draw(
             status_bar,
             prompt_bar,
             footer_bar,
+            enter_pane: enter_hit,
         };
     }
 
@@ -716,11 +807,21 @@ pub fn draw(
     }
 
     if prompt_bar.height > 0 {
-        // Split by characters (not words) so the height matches prompt_height's div_ceil
-        // calculation. Word-wrapping puts a short prefix like "> " alone on its own line when
-        // followed by a long single-word payload, causing the last partial row to overflow the
-        // allocated height and be clipped.
-        let w = prompt_bar.width as usize;
+        let text_area = if prompt_bar.height > 1 {
+            Rect::new(
+                prompt_bar.x,
+                prompt_bar.y,
+                prompt_bar.width,
+                prompt_bar.height.saturating_sub(1),
+            )
+        } else {
+            prompt_bar
+        };
+        // Split by characters (not words) so wrapping matches [`crate::layout::prompt_height`]
+        // over the **content** width (prompt chunk minus rule row). Word-wrapping puts a short
+        // prefix like "> " alone on its own line when followed by a long single-word payload,
+        // causing the last partial row to overflow the allocated height and be clipped.
+        let w = text_area.width as usize;
         let lines: Vec<Line> = if matches!(state.mode, AppMode::FeatureInput) {
             let skill_style = feature_skill_token_style();
             let mut spans: Vec<Span<'static>> = vec![Span::raw("> ")];
@@ -755,8 +856,11 @@ pub fn draw(
                 .collect()
         };
         let widget = Paragraph::new(lines);
-        frame.render_widget(widget, prompt_bar);
-        if let Some(pos) = editing_prompt_cursor_position(state, view_state, prompt_bar) {
+        frame.render_widget(widget, text_area);
+        if prompt_bar.height > 1 {
+            paint_prompt_bottom_horizontal_rule(frame, prompt_bar);
+        }
+        if let Some(pos) = editing_prompt_cursor_position(state, view_state, text_area) {
             frame.set_cursor_position(pos);
         }
     }
@@ -775,6 +879,7 @@ pub fn draw(
             status_bar,
             prompt_bar,
             footer_bar,
+            enter_pane: enter_hit,
         },
     );
 
@@ -1188,6 +1293,7 @@ mod tests {
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
+            enter_pane: Rect::default(),
         };
         terminal
             .draw(|f| {
@@ -1291,6 +1397,7 @@ mod tests {
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
+            enter_pane: Rect::default(),
         };
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1342,6 +1449,7 @@ mod tests {
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
+            enter_pane: Rect::default(),
         };
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1376,6 +1484,81 @@ mod tests {
                     "Enter overlay symbols must not be written when TDDY_E2E_NO_ENTER_AFFORDANCE is set; got {sym:?} at ({x},{y})"
                 );
             }
+        }
+    }
+
+    /// After `draw`, `LayoutAreas.enter_pane` matches the pointer Enter hit target (dedicated strip).
+    #[test]
+    fn layout_enter_pane_matches_enter_button_rect_after_draw() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut state = make_state(select_mode_with_goal());
+        state.current_goal = Some("plan".to_string());
+        state.current_state = Some("Running".to_string());
+        let mut vs = ViewState::new();
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
+            enter_pane: Rect::default(),
+        };
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+
+        let hit = enter_button_rect(&areas);
+        assert_eq!(
+            areas.enter_pane, hit,
+            "enter_pane must equal enter_button_rect for hit-test and paint alignment"
+        );
+        assert!(areas.enter_pane.width > 0, "enter_pane must be allocated");
+    }
+
+    /// Bottom row of the prompt pane is filled with U+2500 light horizontal box-drawing characters.
+    #[test]
+    fn prompt_pane_bottom_row_is_horizontal_rule_line() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut state = make_state(select_mode_with_goal());
+        state.current_goal = Some("plan".to_string());
+        state.current_state = Some("Running".to_string());
+        let mut vs = ViewState::new();
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
+            enter_pane: Rect::default(),
+        };
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let y = areas.prompt_bar.y + areas.prompt_bar.height - 1;
+        let rule = '\u{2500}';
+        for x in areas.prompt_bar.x..areas.prompt_bar.x + areas.prompt_bar.width {
+            let sym = buf
+                .cell(Position::new(x, y))
+                .map(|c| c.symbol().chars().next().unwrap_or(' '))
+                .unwrap_or(' ');
+            assert_eq!(
+                sym, rule,
+                "expected horizontal rule at bottom of prompt pane at x={x} y={y}"
+            );
         }
     }
 
@@ -1556,6 +1739,7 @@ mod tests {
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
+            enter_pane: Rect::default(),
         };
 
         vs.feature_edit.set_plain_text("abcdef");
@@ -1695,6 +1879,7 @@ mod tests {
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
+            enter_pane: Rect::default(),
         };
         terminal
             .draw(|f| {
@@ -1736,6 +1921,7 @@ mod tests {
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
+            enter_pane: Rect::default(),
         };
         terminal
             .draw(|f| {
@@ -1786,6 +1972,7 @@ mod tests {
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
+            enter_pane: Rect::default(),
         };
         terminal
             .draw(|f| {
@@ -1823,6 +2010,7 @@ mod tests {
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
+            enter_pane: Rect::default(),
         };
         terminal
             .draw(|f| {

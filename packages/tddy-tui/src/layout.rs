@@ -52,6 +52,22 @@ pub fn debug_log_height(log_count: usize) -> u16 {
     }
 }
 
+/// Vertical size of the prompt **chunk** in the layout: wrapped text lines (at the content width
+/// that excludes the Enter strip and margin) plus one row for the bottom horizontal rule (`U+2500`).
+pub fn prompt_chunk_height_including_rule(
+    text_len: u16,
+    terminal_width: u16,
+    terminal_height: u16,
+) -> u16 {
+    let content_width = terminal_width
+        .saturating_sub(crate::mouse_map::ENTER_STRIP_MARGIN_COLS)
+        .saturating_sub(crate::mouse_map::ENTER_BUTTON_COLS)
+        .max(1);
+    let max_height = (terminal_height / 3).max(1);
+    let text_lines = prompt_height(text_len, content_width, max_height.saturating_sub(1).max(1));
+    text_lines.saturating_add(1)
+}
+
 /// Compute the number of terminal lines needed to display `text_len` characters
 /// at `area_width` columns wide, capped at `max_height`.
 ///
@@ -70,14 +86,15 @@ pub fn prompt_height(text_len: u16, area_width: u16, max_height: u16) -> u16 {
     result
 }
 
-/// Split the terminal area into seven regions: activity, spacer, dynamic (inbox), status, debug log,
-/// prompt, and **footer** (PRD: exactly one footer row below the prompt block).
+/// Split the terminal area into **eight** regions: activity, spacer, dynamic (inbox), status,
+/// **empty row** (gap between status and prompt), debug log, prompt, and **footer** (PRD: exactly one
+/// footer row below the prompt block).
 pub fn layout_chunks_with_inbox(
     area: Rect,
     inbox_h: u16,
     debug_log_h: u16,
     prompt_h: u16,
-) -> (Rect, Rect, Rect, Rect, Rect, Rect, Rect) {
+) -> (Rect, Rect, Rect, Rect, Rect, Rect, Rect, Rect) {
     crate::red_phase::tddy_marker("M001", "layout::layout_chunks_with_inbox");
     log::debug!(
         "layout_chunks_with_inbox: area={area:?} inbox_h={inbox_h} debug_log_h={debug_log_h} prompt_h={prompt_h} footer_h=1"
@@ -90,19 +107,25 @@ pub fn layout_chunks_with_inbox(
             Constraint::Length(1),
             Constraint::Length(inbox_h),
             Constraint::Length(1),
+            Constraint::Length(1),
             Constraint::Length(debug_log_h),
             Constraint::Length(prompt_h),
             Constraint::Length(1),
         ])
         .split(area);
-    let footer_bar = chunks[6];
+    let reserve = crate::mouse_map::ENTER_STRIP_MARGIN_COLS + crate::mouse_map::ENTER_BUTTON_COLS;
+    let inner_w = area.width.saturating_sub(reserve);
+    let mut prompt_bar = chunks[6];
+    let mut footer_bar = chunks[7];
+    prompt_bar.width = inner_w.min(prompt_bar.width);
+    footer_bar.width = inner_w.min(footer_bar.width);
     log::trace!(
         "layout_chunks_with_inbox: activity={:?} footer_bar={:?}",
         chunks[0],
         footer_bar
     );
     (
-        chunks[0], chunks[1], chunks[2], chunks[3], chunks[4], chunks[5], footer_bar,
+        chunks[0], chunks[1], chunks[2], chunks[3], chunks[4], chunks[5], prompt_bar, footer_bar,
     )
 }
 
@@ -225,7 +248,7 @@ mod tests {
     fn test_layout_prompt_bar_height_matches_param() {
         let area = Rect::new(0, 0, 80, 24);
         let prompt_h: u16 = 3;
-        let (_activity, _spacer, _status, _inbox, _debug, prompt, _footer) =
+        let (_activity, _spacer, _dynamic, _status, _gap, _debug, prompt, _footer) =
             layout_chunks_with_inbox(area, 0, 0, prompt_h);
         assert_eq!(prompt.height, prompt_h);
     }
@@ -244,7 +267,7 @@ mod tests {
         );
         let area = Rect::new(0, 0, 80, 24);
         let dynamic_h = question_height(&mode).max(inbox_height(0, false));
-        let (activity, spacer, dynamic, status, _debug, prompt, _footer) =
+        let (activity, spacer, dynamic, status, _gap, _debug, prompt, _footer) =
             layout_chunks_with_inbox(area, dynamic_h, 0, 1);
         assert_eq!(spacer.height, 1, "status spacer row");
         assert_eq!(
@@ -261,8 +284,8 @@ mod tests {
         );
         assert_eq!(
             prompt.y,
-            status.y + status.height,
-            "prompt must be below status"
+            status.y + status.height + 1,
+            "prompt must be below status and the one-row gap"
         );
         assert!(activity.height > 0, "non-zero activity on 24×80");
     }
@@ -271,7 +294,7 @@ mod tests {
     #[test]
     fn layout_footer_adds_exactly_one_row_to_bottom_chrome() {
         let area = Rect::new(0, 0, 80, 24);
-        let (_, _, _, status, _, prompt, footer) = layout_chunks_with_inbox(area, 0, 0, 1);
+        let (_, _, _, status, _, _, prompt, footer) = layout_chunks_with_inbox(area, 0, 0, 1);
         assert_eq!(
             footer.height,
             1,
@@ -282,5 +305,18 @@ mod tests {
             status.height + prompt.height + 1,
             "bottom chrome row count must include the single footer row"
         );
+    }
+
+    /// Prompt row width leaves one column margin plus the Enter strip; prompt text must not share cells with Enter.
+    #[test]
+    fn prompt_bar_width_reserves_margin_and_enter_columns() {
+        use crate::mouse_map::{ENTER_BUTTON_COLS, ENTER_STRIP_MARGIN_COLS};
+        let area = Rect::new(0, 0, 80, 24);
+        let (_, _, _, _, _, _, prompt_bar, _) = layout_chunks_with_inbox(area, 0, 0, 1);
+        let expected = area
+            .width
+            .saturating_sub(ENTER_STRIP_MARGIN_COLS)
+            .saturating_sub(ENTER_BUTTON_COLS);
+        assert_eq!(prompt_bar.width, expected);
     }
 }

@@ -87,6 +87,7 @@ pub fn run_event_loop(
             status_bar: ratatui::layout::Rect::default(),
             prompt_bar: ratatui::layout::Rect::default(),
             footer_bar: ratatui::layout::Rect::default(),
+            enter_pane: ratatui::layout::Rect::default(),
         };
         terminal.draw(|f| {
             draw(

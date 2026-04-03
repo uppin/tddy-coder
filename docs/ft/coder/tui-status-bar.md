@@ -53,13 +53,14 @@ Vertical layout reserves **one** terminal row immediately below the prompt text 
 
 ## Mouse mode: Enter control
 
-When pointer reporting is active (`EnableMouseCapture`), the TUI draws an **Enter** affordance on the **trailing three columns** of the bottom chrome. The rectangle spans the **status bar**, the **prompt block**, and the **footer** row as a single stack:
+When pointer reporting is active (`EnableMouseCapture`), the TUI draws an **Enter** affordance in the **trailing three columns** to the right of the prompt text, separated by a one-column margin (`ENTER_STRIP_MARGIN_COLS`). The layout narrows `prompt_bar` and `footer_bar` so the strip does not overlap prompt text cells.
 
-- **Geometry**: Width **three** columns. Height equals `status_bar.height + prompt_bar.height + footer_bar.height`. The top edge aligns with `status_bar.y`; horizontal extent is the rightmost three columns of the prompt row (`x = prompt_bar.x + prompt_bar.width - 3`). When `--debug` adds a debug log strip between status and prompt, those rows sit inside the same vertical stack; the frame covers the full height from the status row through the footer.
-- **Label**: ASCII frame: the **first** and **last** rows of the affordance use `+--`; interior rows use `|` in the left column; U+23CE (`⏎`) appears on the **first line of the prompt region** within the stack (for a single-line status bar, the row at offset one inside the affordance). Status, debug, prompt, and footer cells under the frame may be overwritten after the corresponding widgets render.
+- **Layout**: `layout_chunks_with_inbox` splits the terminal into **eight** vertical regions: activity, spacer, dynamic (inbox / questions / slash menu), status bar, **one empty row**, optional debug log, prompt block, and footer. The Enter strip’s **top** aligns with the **first row below the status bar** (the separator band: that empty row plus any debug rows allocated above the prompt chunk). Its **height** spans that band through the **prompt text** lines and the **footer** row. When the prompt chunk has more than one row, the **bottom** row is a horizontal rule (`U+2500`); that rule row is excluded from prompt line count and from Enter height so the rule stays visually separate from the frame.
+- **Geometry**: Width **three** columns. Horizontal origin: `prompt_bar.x + prompt_bar.width + ENTER_STRIP_MARGIN_COLS`. When the status bar has height zero, the strip starts at `prompt_bar.y` and spans prompt text lines plus footer only.
+- **Label**: Light box-drawing characters (`U+250C`–`U+2518`, `U+2500`, `U+2502`). **U+23CE** (`⏎`) sits on the **first prompt text row** inside the strip (below the top border when a separator band exists). Widgets for status, debug, prompt, and footer render first; the overlay paints afterward in the reserved columns.
 - **Hit-testing**: `packages/tddy-tui/src/mouse_map.rs` defines `enter_button_rect` to match `render::paint_enter_affordance`; left-clicks inside the rectangle map to the same intents as **Enter** (`key_event_to_intent`).
-- **E2E / stable screens**: When the environment variable `TDDY_E2E_NO_ENTER_AFFORDANCE` is set, `paint_enter_affordance` returns without writing overlay symbols (byte-level terminal tests and gRPC terminal streams avoid frame noise).
-- **Narrow terminals**: If `status_bar` height is zero or the prompt region is narrower than three columns, painting and hit-testing omit the affordance.
+- **E2E / stable screens**: When the environment variable `TDDY_E2E_NO_ENTER_AFFORDANCE` is set to any value, `paint_enter_affordance` returns without writing overlay symbols (byte-level terminal tests and gRPC terminal streams avoid frame noise).
+- **Narrow terminals**: If the prompt region is too narrow for the margin plus three columns, painting and hit-testing omit the affordance.
 
 ## Operational notes
 
