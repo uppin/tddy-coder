@@ -45,8 +45,6 @@ In `MarkdownViewer`, **Approve** and **Reject** do not occupy a fixed footer ban
 
 ## Mouse mode: Enter control
 
-**Updated: 2026-04-03**
-
 When pointer reporting is active (`EnableMouseCapture`), the TUI exposes a fixed **3×2** cell **Enter** affordance at the **bottom-right** of the terminal, aligned with the prompt strip:
 
 - **Geometry**: Three columns by two rows. The **top** row sits on the line **immediately above** the first prompt line—usually the **status bar** row, so a **one-line** `prompt_bar` still fits the frame without growing the prompt height. The **bottom** row sits on the **first line of the prompt bar**; U+23CE appears only there. If `--debug` adds a debug log strip between status and prompt, the top row of the frame uses the **last line above the prompt** (e.g. bottom of the debug region). Status / debug / prompt text in those six cells may be overwritten after the corresponding `Paragraph` widgets render.
