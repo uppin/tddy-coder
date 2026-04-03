@@ -2,12 +2,12 @@
 
 Release note history for the Web product area.
 
-## 2026-04-03 — Session workflow files: RPC contract and preview components
+## 2026-04-03 — Session workflow files, project/worktree matching, delete hardening
 
-- **`connection.proto`**: **`ListSessionWorkflowFiles`** and **`ReadSessionWorkflowFile`** messages; **`ConnectionService`** exposes both RPCs for read-only workflow artifacts under the daemon-resolved session directory.
-- **tddy-daemon**: Allowlisted listing and UTF-8 reads with canonical path checks (**`session_workflow_files`**); integration tests **`session_workflow_files_rpc`**.
-- **tddy-web**: **`SessionFilesPanel`**, **`SessionMoreActionsMenu`**, **`sessionWorkflowPreview`** (preview routing); Cypress **`SessionWorkflowFiles.cy.tsx`** and Bun tests for **`workflowPreviewKind`**. TypeScript types for **`connection.proto`** come from **`bun run generate`** in **`packages/tddy-web`**. **ConnectionScreen** does not embed the session-files menu or panel on session rows in the shipped bundle.
-- **Feature docs**: [web-terminal.md](web-terminal.md) (Connection screen — session workflow files); [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md).
+- **`connection.proto`**: **`ListSessionWorkflowFiles`** and **`ReadSessionWorkflowFile`** on **`ConnectionService`** for allowlisted workflow artifacts under the daemon-resolved session directory.
+- **tddy-daemon**: Allowlisted listing and UTF-8 reads (**`session_workflow_files`**, tests **`session_workflow_files_rpc`**). **`sessions_base`** for mapped users is the Tddy data root (**`~/.tddy`**), aligning RPC paths with **`tddy-coder`** session directories. **`DeleteSession`** stops a live tool process when needed, then removes the session directory; directories without readable **`.session.yaml`** can still be removed when the path is valid.
+- **tddy-web**: **`SessionWorkflowFilesModal`** loads list/read RPCs; **`SessionMoreActionsMenu`** → **Show files**; **`SessionFilesPanel`** + **`sessionWorkflowPreview`**. Cypress **`SessionWorkflowFiles.cy.tsx`**; Bun tests for preview and **`sessionProjectTable`** (unscoped sessions match a project when **`repoPath`** equals **`mainRepoPath`** or sits under it—longest-prefix wins). **Delete** (trash) is available for **active** and **inactive** rows; confirmation copy describes stop-then-delete.
+- **Feature docs**: [web-terminal.md](web-terminal.md); [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md).
 
 ## 2026-03-29 — Connection screen: backend options from `ListAgents`
 
