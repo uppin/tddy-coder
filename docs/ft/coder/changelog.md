@@ -2,6 +2,21 @@
 
 Release note history for the Coder product area.
 
+## 2026-03-29 — Free prompting: invoke loop, optional submit, and activity pane
+
+- **Core**: **`WorkflowRecipe::goal_requires_tddy_tools_submit`** (default **`true`**); **`BackendInvokeTask`** completes a turn from agent **`InvokeResponse::output`** when the recipe opts out for that goal; **`FlowRunner`** maps **`Continue`** with no next graph task to **`WaitingForInput`** so a single-node graph can take another user line without **`EndTask`**.
+- **Recipes**: **`FreePromptingRecipe`** graph is one **`BackendInvokeTask`** for **`prompting`**; **`goal_requires_tddy_tools_submit`** is **`false`** for **`prompting`**; **`FreePromptingWorkflowHooks::agent_output_sink`** emits **`WorkflowEvent::AgentOutput`** for streaming assistant text to the TUI activity pane.
+- **Stub**: **`StubBackend`** **`response_for_goal`** includes a **`prompting`** arm for deterministic tests.
+- **Docs**: [workflow-recipes.md](workflow-recipes.md).
+
+## 2026-03-29 — Workflow recipes: free-prompting and recipe-driven session document policy
+
+- **Recipes**: **`FreePromptingRecipe`** (**`free-prompting`**): **Prompting** loop with start goal **`prompting`**; **`uses_primary_session_document`** **`false`** (no PRD-style primary-document approval gate on that path).
+- **Registry**: **`tddy-workflow-recipes::approval_policy`** (**`supported_workflow_recipe_cli_names`**, **`recipe_should_skip_session_document_approval`**); **`recipe_resolve`** resolves **`free-prompting`**; **`unknown_workflow_recipe_error`** enumerates supported CLI names.
+- **Bootstrap**: Presenter **`workflow_runner`** **`run_start_goal_without_output_dir`** writes **`recipe`** into **`changeset.yaml`** when creating the session directory (same field as daemon **`StartSession`** and CLI session bootstrap).
+- **CLI / TUI / web**: **`--recipe free-prompting`**; **`workflow_recipe_selection_question`** includes **Free prompting**; **`recipe_cli_name_from_selection_label`** maps the label to **`free-prompting`**.
+- **Tests**: **`workflow_recipe_acceptance`**, **`recipe_policy_red`**, **`presenter_integration`** acceptance cases for TDD document approval, bugfix **`reproduce`**, and free-prompting without **DocumentReview**; **`grpc_terminal_rpc`** UTF-8-safe assertion previews.
+- **Docs**: [workflow-recipes.md](workflow-recipes.md).
 ## 2026-04-03 — TUI mouse mode: Enter affordance (3×2)
 
 - **TUI**: **`mouse_map::enter_button_rect`** and **`render::paint_enter_affordance`** draw a fixed **3×2** region at the bottom-right: ASCII **`+--`** on the line above the first prompt (typically the status row), **`|`**, U+23CE, and padding on the first prompt line; the full rectangle is hit-tested and maps to **Enter** via **`key_event_to_intent`**. **`ViewState::last_select_click_option`** supports double-click to confirm in **Select** mode.

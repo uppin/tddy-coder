@@ -1,4 +1,4 @@
-//! Hooks for the bug-fix workflow (demo: reproduce with agent output + questions).
+//! Hooks for [`super::FreePromptingRecipe`].
 
 use std::error::Error;
 use std::sync::mpsc;
@@ -9,19 +9,23 @@ use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::task::TaskResult;
 
-/// Hooks for [`super::BugfixRecipe`]. Emits goal/state events and provides an agent output sink.
+/// Hooks for the free-prompting loop.
 #[derive(Debug)]
-pub struct BugfixWorkflowHooks {
+pub struct FreePromptingWorkflowHooks {
     event_tx: Option<mpsc::Sender<WorkflowEvent>>,
 }
 
-impl BugfixWorkflowHooks {
+impl FreePromptingWorkflowHooks {
     pub fn new(event_tx: Option<mpsc::Sender<WorkflowEvent>>) -> Self {
+        log::debug!(
+            "FreePromptingWorkflowHooks::new event_tx={}",
+            event_tx.is_some()
+        );
         Self { event_tx }
     }
 }
 
-impl RunnerHooks for BugfixWorkflowHooks {
+impl RunnerHooks for FreePromptingWorkflowHooks {
     fn agent_output_sink(&self) -> Option<AgentOutputSink> {
         self.event_tx.as_ref().map(|tx| {
             let tx = tx.clone();
@@ -36,18 +40,14 @@ impl RunnerHooks for BugfixWorkflowHooks {
         task_id: &str,
         context: &Context,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        log::debug!("[bugfix hooks] before_task: {}", task_id);
+        log::debug!("[free-prompting hooks] before_task: {}", task_id);
         if let Some(answers) = context.get_sync::<String>("answers") {
             if !answers.trim().is_empty() {
                 log::debug!(
-                    "[bugfix hooks] transferring answers to prompt (len={})",
+                    "[free-prompting hooks] transferring answers to prompt (len={})",
                     answers.len()
                 );
-                let prompt_with_answers = format!(
-                    "Here are the user's answers to clarification questions:\n{}",
-                    answers
-                );
-                context.set_sync("prompt", &prompt_with_answers);
+                context.set_sync("prompt", &answers);
                 context.remove_sync("answers");
             }
         }
@@ -55,7 +55,7 @@ impl RunnerHooks for BugfixWorkflowHooks {
             let _ = tx.send(WorkflowEvent::GoalStarted(task_id.to_string()));
             let _ = tx.send(WorkflowEvent::StateChange {
                 from: String::new(),
-                to: task_id.to_string(),
+                to: "prompting".to_string(),
             });
         }
         Ok(())
