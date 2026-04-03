@@ -3,7 +3,7 @@
 //! Hit-tests against layout areas to determine which UI element was clicked.
 //! Scroll events adjust scroll offsets; clicks in dynamic_area map to option selection.
 
-use crossterm::event::{MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use tddy_core::{AppMode, UserIntent};
 
@@ -20,6 +20,23 @@ pub struct LayoutAreas {
     pub dynamic_area: Rect,
     pub status_bar: Rect,
     pub prompt_bar: Rect,
+}
+
+/// Width and height in terminal cells of the pointer Enter affordance (see `enter_button_rect`).
+pub const ENTER_BUTTON_COLS: u16 = 3;
+pub const ENTER_BUTTON_ROWS: u16 = 2;
+
+/// Bottom-right **3×2** region: top row on the line **above** the first prompt line (typically the
+/// status bar — “borrowed” chrome so a one-line `prompt_bar` still fits the frame), bottom row on
+/// the first prompt line with U+23CE. [`LayoutAreas::prompt_bar`] may be a single line tall.
+pub fn enter_button_rect(areas: &LayoutAreas) -> Rect {
+    let pb = areas.prompt_bar;
+    if pb.width < ENTER_BUTTON_COLS || pb.y == 0 {
+        return Rect::new(0, 0, 0, 0);
+    }
+    let x = pb.x + pb.width - ENTER_BUTTON_COLS;
+    let y = pb.y - 1;
+    Rect::new(x, y, ENTER_BUTTON_COLS, ENTER_BUTTON_ROWS)
 }
 
 /// Normalize mouse coordinates for local terminal (crossterm).
@@ -93,6 +110,9 @@ pub fn handle_mouse_event(
             }
             if rect_contains(&areas.dynamic_area, col, row) {
                 return click_dynamic_area(mode, view_state, areas, row);
+            }
+            if rect_contains(&enter_button_rect(areas), col, row) {
+                return click_enter_affordance(mode, view_state);
             }
         }
         _ => {}
@@ -170,8 +190,14 @@ fn click_dynamic_area(
             if option_idx >= max {
                 return None;
             }
+            let is_double_click = view_state.last_select_click_option == Some(option_idx);
             view_state.select_selected = option_idx;
-            None
+            view_state.last_select_click_option = Some(option_idx);
+            if is_double_click && option_idx < question.options.len() {
+                Some(UserIntent::AnswerSelect(option_idx))
+            } else {
+                None
+            }
         }
         AppMode::DocumentReview { .. } => {
             let header_lines = 1;
@@ -211,6 +237,11 @@ fn click_dynamic_area(
         }
         _ => None,
     }
+}
+
+fn click_enter_affordance(mode: &AppMode, view_state: &ViewState) -> Option<UserIntent> {
+    let enter = KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::empty(), KeyEventKind::Press);
+    crate::key_map::key_event_to_intent(enter, mode, view_state, false)
 }
 
 /// Plan approval footer: two stacked lines (Approve then Reject) like Select options, or one row
@@ -486,6 +517,194 @@ mod tests {
             "click Continue row after normalize must produce ContinueWithAgent; got {:?} (selection={})",
             intent,
             vs.error_recovery_selected
+        );
+    }
+
+    fn select_mode_fixture_80x24() -> (AppMode, LayoutAreas) {
+        select_mode_fixture_with_prompt_h(1u16)
+    }
+
+    fn select_mode_fixture_with_prompt_h(prompt_h: u16) -> (AppMode, LayoutAreas) {
+        let question = tddy_core::backend_selection_question();
+        let mode = AppMode::Select {
+            question,
+            question_index: 0,
+            total_questions: 1,
+            initial_selected: 0,
+        };
+        let area = Rect::new(0, 0, 80, 24);
+        let dynamic_h = question_height(&mode);
+        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+            layout_chunks_with_inbox(area, dynamic_h, 0, prompt_h);
+        let areas = LayoutAreas {
+            activity_log,
+            dynamic_area,
+            status_bar,
+            prompt_bar,
+        };
+        (mode, areas)
+    }
+
+    #[test]
+    fn single_click_in_select_mode_highlights_without_confirming() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        let option_row = areas.dynamic_area.y + 2;
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: option_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+        assert_eq!(
+            vs.select_selected, 0,
+            "single click must highlight option 0"
+        );
+        assert!(
+            intent.is_none(),
+            "single click must not confirm selection (no AnswerSelect)"
+        );
+    }
+
+    #[test]
+    fn double_click_in_select_mode_confirms_selection() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        let option_row = areas.dynamic_area.y + 2;
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: option_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let _ = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+        assert_eq!(vs.select_selected, 0);
+
+        let ev2 = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: option_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev2, &mode, &mut vs, &areas, 0);
+        assert_eq!(
+            intent,
+            Some(UserIntent::AnswerSelect(0)),
+            "double-click (two rapid clicks at same row) must confirm selection"
+        );
+    }
+
+    #[test]
+    fn double_click_on_different_rows_does_not_confirm() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        let first_option_row = areas.dynamic_area.y + 2;
+        let second_option_row = areas.dynamic_area.y + 3;
+        let ev1 = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: first_option_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let _ = handle_mouse_event(ev1, &mode, &mut vs, &areas, 0);
+
+        let ev2 = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: second_option_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev2, &mode, &mut vs, &areas, 0);
+        assert_eq!(vs.select_selected, 1);
+        assert!(
+            intent.is_none(),
+            "clicking a different row must not confirm — it should only highlight"
+        );
+    }
+
+    #[test]
+    fn enter_button_rect_is_three_by_two_straddling_status_and_first_prompt_line() {
+        let (_, areas) = select_mode_fixture_80x24();
+        let r = super::enter_button_rect(&areas);
+        let pb = areas.prompt_bar;
+        let sb = areas.status_bar;
+        let expected = Rect::new(pb.x + pb.width - 3, pb.y - 1, 3, 2);
+        assert_eq!(r, expected);
+        assert_eq!(r.width, 3);
+        assert_eq!(r.height, 2);
+        assert_eq!(r.x + r.width, pb.x + pb.width);
+        assert!(
+            rect_contains(&sb, r.x, r.y)
+                && rect_contains(&sb, r.x + 1, r.y)
+                && rect_contains(&sb, r.x + 2, r.y),
+            "top row (+--) must sit on the status line; sb={sb:?} r={r:?}"
+        );
+        assert!(
+            rect_contains(&pb, r.x, r.y + 1)
+                && rect_contains(&pb, r.x + 1, r.y + 1)
+                && rect_contains(&pb, r.x + 2, r.y + 1),
+            "bottom row (|⏎) must sit on the first prompt line; pb={pb:?} r={r:?}"
+        );
+    }
+
+    #[test]
+    fn click_enter_affordance_left_border_confirms_select() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        vs.select_selected = 0;
+        let r = super::enter_button_rect(&areas);
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: r.x,
+            row: r.y + 1,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+        assert_eq!(
+            intent,
+            Some(UserIntent::AnswerSelect(0)),
+            "click on vertical border left of the key must act like Enter"
+        );
+    }
+
+    #[test]
+    fn click_enter_affordance_corner_cell_confirms_select() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        vs.select_selected = 0;
+        let r = super::enter_button_rect(&areas);
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: r.x,
+            row: r.y,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+        assert_eq!(
+            intent,
+            Some(UserIntent::AnswerSelect(0)),
+            "click on top-left corner of the ASCII frame must act like Enter"
+        );
+    }
+
+    #[test]
+    fn click_enter_affordance_return_symbol_cell_confirms_select() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        vs.select_selected = 0;
+        let r = super::enter_button_rect(&areas);
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: r.x + 1,
+            row: r.y + 1,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+        assert_eq!(
+            intent,
+            Some(UserIntent::AnswerSelect(0)),
+            "click on the U+23CE key cell must confirm the selected option"
         );
     }
 

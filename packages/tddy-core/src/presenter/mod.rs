@@ -9,6 +9,7 @@ mod presenter_test_recipe;
 mod state;
 mod view;
 pub mod workflow_runner;
+mod worktree_display;
 
 pub use events::WorkflowCompletePayload;
 pub use events::WorkflowEvent;
@@ -20,3 +21,4 @@ pub use state::{
     ActivityEntry, ActivityKind, AppMode, CriticalPresenterState, ExitAction, PresenterState,
 };
 pub use view::PresenterView;
+pub use worktree_display::format_worktree_for_status_bar;

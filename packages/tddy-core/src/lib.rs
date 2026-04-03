@@ -49,9 +49,10 @@ pub use log_backend::{
     LogOutput, LogPolicy, LogRotation, LogSelector, LoggerDefinition, MatchedPolicy,
 };
 pub use presenter::{
-    ActivityEntry, ActivityKind, AppMode, CriticalPresenterState, ExitAction, ModeChangedDetails,
-    PendingWorkflowStart, Presenter, PresenterEvent, PresenterHandle, PresenterState,
-    PresenterView, UserIntent, ViewConnection, WorkflowCompletePayload, WorkflowEvent,
+    format_worktree_for_status_bar, ActivityEntry, ActivityKind, AppMode, CriticalPresenterState,
+    ExitAction, ModeChangedDetails, PendingWorkflowStart, Presenter, PresenterEvent,
+    PresenterHandle, PresenterState, PresenterView, UserIntent, ViewConnection,
+    WorkflowCompletePayload, WorkflowEvent,
 };
 pub use session_lifecycle::{
     materialize_unified_session_directory, resolve_effective_session_id, unified_session_dir_path,

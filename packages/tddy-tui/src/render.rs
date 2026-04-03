@@ -1,9 +1,9 @@
 //! Frame rendering: draw activity log, status bar, prompt bar.
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use tddy_core::{ActivityEntry, AppMode, PresenterState};
@@ -12,7 +12,7 @@ use crate::feature_input_buffer::FeaturePromptSegment;
 use crate::layout::{
     debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_height, question_height,
 };
-use crate::mouse_map::LayoutAreas;
+use crate::mouse_map::{enter_button_rect, LayoutAreas};
 use crate::status_bar_activity::{
     activity_prefix_char_for_draw, display_elapsed_for_goal_row, status_activity_is_agent_active,
 };
@@ -23,18 +23,50 @@ use crate::ui::{
 };
 use crate::view_state::{InboxFocus, ViewState};
 
-/// Wrapped line count for markdown [`Text`] at a given width (used for scroll bounds and end-of-doc).
-fn markdown_wrapped_line_count(text: &Text, width: u16) -> usize {
-    let w = width as usize;
-    if w == 0 {
-        return text.lines.len().max(1);
+/// Line count for a [`Paragraph`] with the same wrap settings as the Markdown viewer (must match draw).
+fn markdown_paragraph_wrapped_line_count(text: &Text<'_>, width: u16) -> usize {
+    if width < 1 {
+        return 1;
     }
-    let mut total = 0usize;
-    for line in &text.lines {
-        let lw = line.width();
-        total += lw.div_ceil(w).max(1);
-    }
-    total.max(1)
+    let n = Paragraph::new(text.clone())
+        .wrap(Wrap { trim: true })
+        .line_count(width);
+    n.max(1)
+}
+
+/// Trailing Approve/Reject appended to plan markdown once the user reaches the document end.
+///
+/// Uses a single wrapped row (plus spacer line) so both labels stay in the last viewport together on
+/// typical widths; this matches the prior one-line footer layout while living inside scroll content.
+fn markdown_plan_action_tail_lines(markdown_end_button_selected: usize) -> Vec<Line<'static>> {
+    let approve_prefix = if markdown_end_button_selected == 0 {
+        "> "
+    } else {
+        "  "
+    };
+    let reject_prefix = if markdown_end_button_selected == 1 {
+        "> "
+    } else {
+        "  "
+    };
+    let approve_style = if markdown_end_button_selected == 0 {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    };
+    let reject_style = if markdown_end_button_selected == 1 {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    };
+    vec![
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(format!("{}Approve", approve_prefix), approve_style),
+            Span::raw("     "),
+            Span::styled(format!("{}Reject", reject_prefix), reject_style),
+        ]),
+    ]
 }
 
 fn markdown_viewer_prompt_for_plan_approval(
@@ -57,8 +89,10 @@ fn markdown_viewer_prompt_for_plan_approval(
     } else if view_state.markdown_at_end && view_state.markdown_end_button_selected == 1 {
         "Type refinement feedback in the prompt below, then press Enter  |  Q/Esc to close"
             .to_string()
-    } else {
+    } else if view_state.markdown_at_end {
         "Q or Esc to close  |  Alt+A=Approve  Alt+R=Reject/refine  |  PgUp/PgDn scroll".to_string()
+    } else {
+        "Q or Esc to close  |  PgUp/PgDn scroll (read to the end for Approve / Reject)".to_string()
     }
 }
 
@@ -166,6 +200,172 @@ fn wrap_spans_to_prompt_lines(spans: Vec<Span<'static>>, width: usize) -> Vec<Li
     lines
 }
 
+/// Absolute terminal cell for the text insert cursor after [`draw`]'s char-chunked prompt `Paragraph`.
+///
+/// `byte_cursor` is a UTF-8 index into the same string passed to the prompt widget; must fall on a
+/// character boundary.
+pub(crate) fn terminal_position_for_byte_cursor_in_char_wrapped_prompt(
+    prompt_text: &str,
+    byte_cursor: usize,
+    area: Rect,
+) -> Option<ratatui::layout::Position> {
+    if byte_cursor > prompt_text.len() || !prompt_text.is_char_boundary(byte_cursor) {
+        return None;
+    }
+    let w = area.width as usize;
+    if w == 0 {
+        return None;
+    }
+    let n = prompt_text[..byte_cursor].chars().count();
+    let row = n / w;
+    let col = n % w;
+    let y = area.y.checked_add(row as u16)?;
+    let x = area.x.checked_add(col as u16)?;
+    Some(ratatui::layout::Position::new(x, y))
+}
+
+/// Where Approve/Reject live relative to the markdown scroll region (PRD plan tail).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MarkdownPlanActionLayout {
+    /// Pre-PRD: always reserve footer lines under the body (kept for layout tests; not used in draw).
+    #[allow(dead_code)]
+    FixedFooterAlways,
+    /// PRD: embed actions as trailing scroll content once `markdown_at_end`.
+    TailWithDocumentWhenAtEnd,
+}
+
+/// Plan actions follow the markdown tail once the user has scrolled to the document end.
+pub(crate) fn markdown_plan_action_layout_for_view(
+    markdown_at_end: bool,
+) -> MarkdownPlanActionLayout {
+    let layout = MarkdownPlanActionLayout::TailWithDocumentWhenAtEnd;
+    log::info!(
+        "markdown_plan_action_layout_for_view: markdown_at_end={} -> {:?} (fixed footer retired)",
+        markdown_at_end,
+        layout
+    );
+    layout
+}
+
+/// Injects [`PresenterState::active_worktree_display`] into the built status line (PRD).
+///
+/// Inserts the segment before the `Goal:` token when present so spinner and session ordering stay intact.
+pub(crate) fn inject_worktree_into_status_line(line: String, worktree: Option<&str>) -> String {
+    let Some(w) = worktree.map(str::trim).filter(|s| !s.is_empty()) else {
+        log::trace!("inject_worktree_into_status_line: no worktree (unchanged line)");
+        return line;
+    };
+    log::debug!(
+        "inject_worktree_into_status_line: weaving display {:?} into status row",
+        w
+    );
+    if let Some(idx) = line.find("Goal:") {
+        let head = line[..idx].trim_end();
+        format!("{head} │ {w} │ {}", &line[idx..])
+    } else {
+        format!("{line} │ {w}")
+    }
+}
+
+fn snap_utf8_byte_index(s: &str, i: usize) -> usize {
+    let mut i = i.min(s.len());
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Hardware cursor position after drawing the char-wrapped prompt, when the user is editing text.
+pub(crate) fn editing_prompt_cursor_position(
+    state: &PresenterState,
+    view_state: &ViewState,
+    prompt_bar: Rect,
+) -> Option<ratatui::layout::Position> {
+    const PFX: &str = "> ";
+    let (prompt_text, byte_cursor) = match &state.mode {
+        AppMode::FeatureInput => {
+            if view_state.feature_slash_open {
+                log::trace!("editing_prompt_cursor_position: slash menu open — no caret");
+                return None;
+            }
+            let d = view_state.feature_edit.display();
+            if d.is_empty() {
+                let t = format!("{PFX}Type your feature description and press Enter...");
+                (t, PFX.len())
+            } else {
+                let t = format!("{PFX}{d}");
+                let inner = snap_utf8_byte_index(&d, view_state.feature_edit.cursor);
+                (t, PFX.len() + inner)
+            }
+        }
+        AppMode::Running => {
+            if view_state.running_input.is_empty() {
+                let t = format!("{PFX}Queue a follow-up prompt...");
+                (t, PFX.len())
+            } else {
+                let t = format!("{PFX}{}", view_state.running_input);
+                let inner =
+                    snap_utf8_byte_index(&view_state.running_input, view_state.running_cursor);
+                (t, PFX.len() + inner)
+            }
+        }
+        AppMode::Select { .. } if view_state.select_typing_other => {
+            if view_state.select_other_text.is_empty() {
+                let t = format!("{PFX}Type your answer and press Enter...");
+                (t, PFX.len())
+            } else {
+                let t = format!("{PFX}{}", view_state.select_other_text);
+                (t, PFX.len() + view_state.select_other_text.len())
+            }
+        }
+        AppMode::MultiSelect { .. } if view_state.multiselect_typing_other => {
+            if view_state.multiselect_other_text.is_empty() {
+                let t = format!("{PFX}Type your answer and press Enter...");
+                (t, PFX.len())
+            } else {
+                let t = format!("{PFX}{}", view_state.multiselect_other_text);
+                (t, PFX.len() + view_state.multiselect_other_text.len())
+            }
+        }
+        AppMode::TextInput { .. } => {
+            if view_state.text_input.is_empty() {
+                let t = format!("{PFX}Type your answer and press Enter...");
+                (t, PFX.len())
+            } else {
+                let t = format!("{PFX}{}", view_state.text_input);
+                let inner =
+                    snap_utf8_byte_index(&view_state.text_input, view_state.text_input_cursor);
+                (t, PFX.len() + inner)
+            }
+        }
+        AppMode::MarkdownViewer { .. } if state.plan_refinement_pending => {
+            let inp = &view_state.plan_refinement_input;
+            if inp.is_empty() {
+                let t = format!("{PFX}Type refinement feedback and press Enter...");
+                (t, PFX.len())
+            } else {
+                let t = format!("{PFX}{inp}");
+                let inner = snap_utf8_byte_index(inp, view_state.plan_refinement_cursor);
+                (t, PFX.len() + inner)
+            }
+        }
+        _ => {
+            log::trace!(
+                "editing_prompt_cursor_position: mode {:?} — no hardware caret",
+                state.mode
+            );
+            return None;
+        }
+    };
+    log::debug!(
+        "editing_prompt_cursor_position: prompt_h={} byte_cursor={} (chars={})",
+        prompt_bar.height,
+        byte_cursor,
+        prompt_text.chars().count()
+    );
+    terminal_position_for_byte_cursor_in_char_wrapped_prompt(&prompt_text, byte_cursor, prompt_bar)
+}
+
 /// Draw the TUI layout: activity log, status bar, prompt bar.
 /// When `debug` is true, the debug log area is shown; otherwise it is hidden.
 const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
@@ -190,7 +390,7 @@ fn status_bar_text_for_draw(state: &PresenterState, view_state: &mut ViewState) 
     );
     let segment = first_hyphen_segment_of_workflow_session_id(state.workflow_session_id.as_deref());
     let segment_str = segment.as_ref();
-    match (&state.current_goal, &state.current_state) {
+    let line = match (&state.current_goal, &state.current_state) {
         (Some(goal), Some(s)) => {
             let elapsed = display_elapsed_for_goal_row(state, view_state);
             format_status_bar_with_activity_prefix(
@@ -207,7 +407,8 @@ fn status_bar_text_for_draw(state: &PresenterState, view_state: &mut ViewState) 
             let idle_tail = format_status_bar_idle(&state.agent, &state.model);
             prepend_activity_to_status_line(spinner_char, segment_str, &idle_tail)
         }
-    }
+    };
+    inject_worktree_into_status_line(line, state.active_worktree_display.as_deref())
 }
 
 /// Truncate long session ids in trace logs (correlation id, not a secret, but avoid full dumps).
@@ -217,6 +418,39 @@ fn truncate_session_id_for_log(id: &str) -> String {
         id.to_string()
     } else {
         format!("{}…", &id[..MAX])
+    }
+}
+
+/// Paints the Enter affordance: `+--` on the row above the first prompt line (usually the status
+/// row), then `|`, U+23CE, and a space on the first prompt line. Runs after status and prompt
+/// `Paragraph`s so pixels match [`enter_button_rect`].
+fn paint_enter_affordance(frame: &mut Frame, areas: &LayoutAreas) {
+    let r = enter_button_rect(areas);
+    if r.width == 0 || r.height == 0 {
+        return;
+    }
+    let frame_area = frame.area();
+    if r.x.saturating_add(r.width) > frame_area.width
+        || r.y.saturating_add(r.height) > frame_area.height
+    {
+        return;
+    }
+    let buf = frame.buffer_mut();
+    const RETURN_SYMBOL: &str = "\u{23CE}";
+    let cells = [
+        (0u16, 0u16, "+"),
+        (1u16, 0u16, "-"),
+        (2u16, 0u16, "-"),
+        (0u16, 1u16, "|"),
+        (1u16, 1u16, RETURN_SYMBOL),
+        (2u16, 1u16, " "),
+    ];
+    for (dx, dy, sym) in cells {
+        let x = r.x + dx;
+        let y = r.y + dy;
+        if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+            cell.set_symbol(sym);
+        }
     }
 }
 
@@ -283,107 +517,68 @@ pub fn draw(
                 }
             }
             AppMode::MarkdownViewer { content } => {
-                let footer_h: u16 = if activity_log.height == 0 {
-                    0
-                } else if activity_log.height == 1 {
-                    1
-                } else {
-                    2
-                };
-                let body_h = activity_log.height.saturating_sub(footer_h);
-                let body_area =
-                    Rect::new(activity_log.x, activity_log.y, activity_log.width, body_h);
-                let text = tui_markdown::from_str(content);
-                let total_lines = markdown_wrapped_line_count(&text, body_area.width);
+                let body_area = activity_log;
+                let body_h = body_area.height;
+                let w = body_area.width;
+                let text_md = tui_markdown::from_str(content);
+                let lines_md = markdown_paragraph_wrapped_line_count(&text_md, w);
                 let visible = body_h as usize;
+                let max_scroll_md = if visible == 0 {
+                    0
+                } else {
+                    lines_md.saturating_sub(visible)
+                };
+                let scroll_raw = view_state.markdown_scroll_offset;
+                let scrolled_to_md_bottom = visible == 0
+                    || lines_md <= visible
+                    || (max_scroll_md > 0 && scroll_raw >= max_scroll_md);
+                view_state.markdown_at_end = scrolled_to_md_bottom;
+                let _plan_layout = markdown_plan_action_layout_for_view(view_state.markdown_at_end);
+                log::debug!(
+                    "render: MarkdownViewer lines_md={} visible={} max_scroll_md={} scroll_raw={} at_end={}",
+                    lines_md,
+                    visible,
+                    max_scroll_md,
+                    scroll_raw,
+                    view_state.markdown_at_end
+                );
+
+                let display_text = if scrolled_to_md_bottom && body_h > 0 {
+                    let mut lines = text_md.lines.clone();
+                    lines.extend(markdown_plan_action_tail_lines(
+                        view_state.markdown_end_button_selected,
+                    ));
+                    Text::from(lines)
+                } else {
+                    text_md.clone()
+                };
+
+                let total_lines = markdown_paragraph_wrapped_line_count(&display_text, w);
                 let max_scroll = if visible == 0 {
                     0
                 } else {
                     total_lines.saturating_sub(visible)
                 };
-                view_state.markdown_scroll_offset =
-                    view_state.markdown_scroll_offset.min(max_scroll);
-                view_state.markdown_at_end = visible == 0
-                    || max_scroll == 0
-                    || view_state.markdown_scroll_offset >= max_scroll;
-                if body_h > 0 {
-                    let widget =
-                        Paragraph::new(text).scroll((view_state.markdown_scroll_offset as u16, 0));
-                    frame.render_widget(widget, body_area);
-                }
-                if footer_h > 0 {
-                    let footer_area = Rect::new(
-                        activity_log.x,
-                        activity_log.y.saturating_add(body_h),
-                        activity_log.width,
-                        footer_h,
-                    );
-                    log::debug!(
-                        "render: plan approval footer ({} lines × {} cols)",
-                        footer_h,
-                        activity_log.width
-                    );
-                    if footer_h >= 2 {
-                        let approve_prefix = if view_state.markdown_end_button_selected == 0 {
-                            "> "
-                        } else {
-                            "  "
-                        };
-                        let reject_prefix = if view_state.markdown_end_button_selected == 1 {
-                            "> "
-                        } else {
-                            "  "
-                        };
-                        let approve_line = format!("{}Approve", approve_prefix);
-                        let reject_line = format!("{}Reject", reject_prefix);
-                        let approve_style = if view_state.markdown_end_button_selected == 0 {
-                            Style::default().add_modifier(Modifier::REVERSED)
-                        } else {
-                            Style::default()
-                        };
-                        let reject_style = if view_state.markdown_end_button_selected == 1 {
-                            Style::default().add_modifier(Modifier::REVERSED)
-                        } else {
-                            Style::default()
-                        };
-                        let lines = vec![
-                            Line::from(Span::styled(approve_line, approve_style)),
-                            Line::from(Span::styled(reject_line, reject_style)),
-                        ];
-                        frame.render_widget(Paragraph::new(lines), footer_area);
-                    } else {
-                        let w = activity_log.width as usize;
-                        let half = w / 2;
-                        let approve_prefix = if view_state.markdown_end_button_selected == 0 {
-                            "> "
-                        } else {
-                            "  "
-                        };
-                        let reject_prefix = if view_state.markdown_end_button_selected == 1 {
-                            "> "
-                        } else {
-                            "  "
-                        };
-                        let left =
-                            format!("{:<w1$}", format!("{}Approve", approve_prefix), w1 = half);
-                        let right =
-                            format!("{:>w2$}", format!("{}Reject", reject_prefix), w2 = w - half);
-                        let left_style = if view_state.markdown_end_button_selected == 0 {
-                            Style::default().add_modifier(Modifier::REVERSED)
-                        } else {
-                            Style::default()
-                        };
-                        let right_style = if view_state.markdown_end_button_selected == 1 {
-                            Style::default().add_modifier(Modifier::REVERSED)
-                        } else {
-                            Style::default()
-                        };
-                        let footer_line = Line::from(vec![
-                            Span::styled(left, left_style),
-                            Span::styled(right, right_style),
-                        ]);
-                        frame.render_widget(Paragraph::new(footer_line), footer_area);
+
+                let mut scroll = scroll_raw;
+                if !scrolled_to_md_bottom {
+                    scroll = scroll.min(max_scroll_md);
+                } else {
+                    scroll = scroll.min(max_scroll);
+                    if max_scroll > max_scroll_md && scroll_raw >= max_scroll_md {
+                        scroll = max_scroll;
                     }
+                    if max_scroll_md == 0 && max_scroll > 0 {
+                        scroll = max_scroll;
+                    }
+                }
+                view_state.markdown_scroll_offset = scroll;
+
+                if body_h > 0 {
+                    let widget = Paragraph::new(display_text)
+                        .wrap(Wrap { trim: true })
+                        .scroll((view_state.markdown_scroll_offset as u16, 0));
+                    frame.render_widget(widget, body_area);
                 }
             }
             _ => {
@@ -487,7 +682,20 @@ pub fn draw(
         };
         let widget = Paragraph::new(lines);
         frame.render_widget(widget, prompt_bar);
+        if let Some(pos) = editing_prompt_cursor_position(state, view_state, prompt_bar) {
+            frame.set_cursor_position(pos);
+        }
     }
+
+    paint_enter_affordance(
+        frame,
+        &LayoutAreas {
+            activity_log,
+            dynamic_area,
+            status_bar,
+            prompt_bar,
+        },
+    );
 
     // Advance fast spinner phase only while agent-active (Running). Clarification wait uses a 1 Hz
     // idle dot driven by wall time, not `spinner_tick`.
@@ -842,7 +1050,7 @@ mod tests {
     use std::time::Instant;
     use tddy_core::{AppMode, ClarificationQuestion, PresenterState, QuestionOption};
 
-    use crate::mouse_map::LayoutAreas;
+    use crate::mouse_map::{enter_button_rect, LayoutAreas};
     use ratatui::buffer::Buffer;
     use ratatui::layout::{Position, Rect};
 
@@ -884,6 +1092,7 @@ mod tests {
             exit_action: None,
             plan_refinement_pending: false,
             skills_project_root: None,
+            active_worktree_display: None,
         };
         let mut vs = ViewState::new();
         let mut areas = LayoutAreas {
@@ -934,6 +1143,7 @@ mod tests {
             exit_action: None,
             plan_refinement_pending: false,
             skills_project_root: None,
+            active_worktree_display: None,
         }
     }
 
@@ -951,8 +1161,8 @@ mod tests {
         line.chars().next()
     }
 
-    /// PRD: idle clarification wait uses middle-dot / bullet pulse (not `SPINNER_FRAMES`).
-    const IDLE_DOT_PULSE_CHARS: &[char] = &['·', '•'];
+    /// PRD: idle clarification wait uses heartbeat glyphs (not `SPINNER_FRAMES`).
+    const IDLE_DOT_PULSE_CHARS: &[char] = &['·', '•', '●'];
 
     fn select_mode_with_goal() -> AppMode {
         AppMode::Select {
@@ -970,6 +1180,78 @@ mod tests {
             total_questions: 1,
             initial_selected: 0,
         }
+    }
+
+    #[test]
+    fn enter_affordance_paints_ascii_border_straddling_status_and_prompt() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut state = make_state(select_mode_with_goal());
+        state.current_goal = Some("plan".to_string());
+        state.current_state = Some("Running".to_string());
+        let mut vs = ViewState::new();
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+        };
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let pb = areas.prompt_bar;
+        let sb = areas.status_bar;
+        let expected = Rect::new(
+            pb.x + pb.width.saturating_sub(3),
+            pb.y.saturating_sub(1),
+            3,
+            2,
+        );
+        let r = enter_button_rect(&areas);
+        assert_eq!(
+            r, expected,
+            "enter_button_rect must be 3×2 with top row above first prompt line; prompt_bar={pb:?}"
+        );
+        assert!(
+            pb.height >= 1 && pb.y > 0,
+            "expected a single-line prompt strip; prompt_bar={pb:?}"
+        );
+        for dx in 0..r.width {
+            let x = r.x + dx;
+            assert!(
+                x >= sb.x && x < sb.x + sb.width && r.y >= sb.y && r.y < sb.y + sb.height,
+                "top row of affordance must lie on status bar; sb={sb:?} r={r:?}"
+            );
+            assert!(
+                x >= pb.x && x < pb.x + pb.width && r.y + 1 >= pb.y && r.y + 1 < pb.y + pb.height,
+                "bottom row must lie on first prompt line; pb={pb:?} r={r:?}"
+            );
+        }
+
+        let cell_sym = |x: u16, y: u16| {
+            buf.cell(Position::new(x, y))
+                .map(|c| c.symbol().to_string())
+                .unwrap_or_default()
+        };
+
+        assert_eq!(cell_sym(r.x, r.y), "+");
+        assert_eq!(cell_sym(r.x + 1, r.y), "-");
+        assert_eq!(cell_sym(r.x + 2, r.y), "-");
+        assert_eq!(cell_sym(r.x, r.y + 1), "|");
+        let key = cell_sym(r.x + 1, r.y + 1);
+        assert!(
+            key.contains('\u{23CE}'),
+            "expected U+23CE on key cell, got {:?}",
+            key
+        );
+        assert_eq!(cell_sym(r.x + 2, r.y + 1), " ");
     }
 
     /// Acceptance (PRD): `status_bar_frozen_elapsed_in_select_mode` — in Select with an active goal,
@@ -1069,6 +1351,125 @@ mod tests {
         assert_eq!(
             s0, s4,
             "Select idle prefix should not advance on fast ticks (1 Hz pulse); s0={s0:?} s4={s4:?}"
+        );
+    }
+
+    /// Lower-level (PRD): worktree display token is woven into the status line string.
+    #[test]
+    fn inject_worktree_into_status_line_inserts_display_token() {
+        let out = super::inject_worktree_into_status_line(
+            "│ prefix │ Goal: x".to_string(),
+            Some("wt-acceptance-marker"),
+        );
+        assert!(
+            out.contains("wt-acceptance-marker"),
+            "expected worktree token in status line; out={out:?}"
+        );
+    }
+
+    /// Lower-level (PRD): editing FeatureInput must yield a terminal cursor anchor for the insert index.
+    #[test]
+    fn editing_prompt_cursor_position_some_for_feature_input() {
+        let state = make_state(AppMode::FeatureInput);
+        let mut vs = ViewState::new();
+        vs.feature_edit.set_plain_text("hello");
+        let pos = super::editing_prompt_cursor_position(&state, &vs, Rect::new(0, 20, 80, 2));
+        assert!(
+            pos.is_some(),
+            "expected hardware cursor position for FeatureInput editing"
+        );
+    }
+
+    /// Lower-level (PRD): at end-of-scroll the layout strategy must embed Approve/Reject in the document tail.
+    #[test]
+    fn markdown_plan_action_layout_uses_tail_when_at_end() {
+        assert_eq!(
+            super::markdown_plan_action_layout_for_view(true),
+            super::MarkdownPlanActionLayout::TailWithDocumentWhenAtEnd,
+        );
+    }
+
+    /// Lower-level (PRD): mid-scroll must not keep the permanent fixed Approve/Reject footer mode.
+    #[test]
+    fn markdown_plan_action_layout_avoids_fixed_footer_mid_scroll() {
+        assert_ne!(
+            super::markdown_plan_action_layout_for_view(false),
+            super::MarkdownPlanActionLayout::FixedFooterAlways,
+        );
+    }
+
+    /// Acceptance (PRD): status line includes the active worktree display segment when
+    /// [`PresenterState::active_worktree_display`] is set.
+    #[test]
+    fn status_bar_includes_worktree_path_when_present() {
+        let mut state = make_state(select_mode_with_goal());
+        state.current_goal = Some("plan".to_string());
+        state.current_state = Some("Running".to_string());
+        state.goal_start_time = Instant::now();
+        state.active_worktree_display = Some("wt-acceptance-marker/path".to_string());
+        let mut vs = ViewState::new();
+        let line = status_bar_text_for_draw(&state, &mut vs);
+        assert!(
+            line.contains("wt-acceptance-marker"),
+            "status bar must include presenter worktree display when set; line={line:?}"
+        );
+    }
+
+    /// Acceptance (PRD): hardware cursor sits at the UTF-8 insert index for FeatureInput prompts.
+    #[test]
+    fn prompt_cursor_position_matches_utf8_feature_input() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let state = make_state(AppMode::FeatureInput);
+        let mut vs = ViewState::new();
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+        };
+
+        vs.feature_edit.set_plain_text("abcdef");
+        vs.feature_edit.cursor = 3;
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+        let prompt_ascii = format!("> {}", vs.feature_edit.display());
+        let expected_ascii = super::terminal_position_for_byte_cursor_in_char_wrapped_prompt(
+            &prompt_ascii,
+            "> ".len() + vs.feature_edit.cursor,
+            areas.prompt_bar,
+        )
+        .expect("ascii cursor");
+        assert_eq!(
+            terminal.get_cursor_position().expect("cursor ascii"),
+            expected_ascii,
+            "ASCII insert position"
+        );
+
+        vs.feature_edit.set_plain_text("a🙂b");
+        vs.feature_edit.cursor = 1 + '🙂'.len_utf8();
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+        let prompt_utf8 = format!("> {}", vs.feature_edit.display());
+        let expected_utf8 = super::terminal_position_for_byte_cursor_in_char_wrapped_prompt(
+            &prompt_utf8,
+            "> ".len() + vs.feature_edit.cursor,
+            areas.prompt_bar,
+        )
+        .expect("utf8 cursor");
+        assert_eq!(
+            terminal.get_cursor_position().expect("cursor utf8"),
+            expected_utf8,
+            "multi-byte insert position"
         );
     }
 
@@ -1219,36 +1620,38 @@ mod tests {
         );
     }
 
-    fn count_reversed_on_footer_line(
-        buffer: &Buffer,
-        activity: Rect,
-        line_index_in_footer: u16,
-    ) -> usize {
-        let footer_h = if activity.height >= 2 { 2 } else { 1 }.min(activity.height);
-        let footer_top = activity.y + activity.height - footer_h;
-        let y = footer_top + line_index_in_footer;
-        (activity.x..activity.x + activity.width)
-            .filter(|&x| {
-                buffer
+    /// Markdown viewer body rect: full activity region (plan actions scroll as document tail).
+    fn markdown_viewer_body_rect(activity: Rect) -> Rect {
+        activity
+    }
+
+    fn rect_plaintext(buffer: &Buffer, area: Rect) -> String {
+        let mut s = String::new();
+        for y in area.y..area.y.saturating_add(area.height) {
+            for x in area.x..area.x.saturating_add(area.width) {
+                let ch = buffer
                     .cell(Position::new(x, y))
-                    .is_some_and(|c| c.style().add_modifier.contains(Modifier::REVERSED))
-            })
-            .count()
+                    .map(|c| c.symbol().chars().next().unwrap_or(' '))
+                    .unwrap_or(' ');
+                s.push(ch);
+            }
+        }
+        s
     }
 
+    /// Acceptance (PRD): before end-of-scroll, the plan viewer must not show Approve and Reject together.
     #[test]
-    fn markdown_viewer_footer_reverses_approve_line_when_approve_selected() {
+    fn markdown_viewer_hides_approve_reject_until_scrolled_to_end() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let state = make_state(AppMode::MarkdownViewer {
-            content: "# p".to_string(),
+            content: "# Tall plan\n\n".to_string() + &"paragraph line\n".repeat(120),
         });
         let mut vs = ViewState::new();
-        vs.markdown_at_end = true;
-        vs.markdown_end_button_selected = 0;
+        vs.markdown_scroll_offset = 0;
         let mut areas = LayoutAreas {
             activity_log: Rect::default(),
             dynamic_area: Rect::default(),
@@ -1261,31 +1664,30 @@ mod tests {
             })
             .unwrap();
         assert!(
-            areas.activity_log.height >= 2,
-            "fixture expects a two-line plan footer (stacked Approve / Reject)"
+            !vs.markdown_at_end,
+            "fixture expects mid-document scroll (not at end)"
         );
         let buffer = terminal.backend().buffer();
-        let approve_line = count_reversed_on_footer_line(buffer, areas.activity_log, 0);
-        let reject_line = count_reversed_on_footer_line(buffer, areas.activity_log, 1);
+        let activity = rect_plaintext(buffer, areas.activity_log);
         assert!(
-            approve_line > 0 && reject_line == 0,
-            "only the Approve line must use REVERSED when Approve is focused; approve_line={approve_line} reject_line={reject_line}"
+            !(activity.contains("Approve") && activity.contains("Reject")),
+            "mid-scroll plan view must not show both Approve and Reject; activity={activity:?}"
         );
     }
 
+    /// Acceptance (PRD): at max scroll, Approve and Reject appear as trailing scroll content (inside the markdown body), not only a reserved footer band.
     #[test]
-    fn markdown_viewer_footer_reverses_reject_line_when_reject_selected() {
+    fn markdown_viewer_shows_approve_reject_at_document_tail_after_end() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let state = make_state(AppMode::MarkdownViewer {
-            content: "# p".to_string(),
+            content: "# Tall plan\n\n".to_string() + &"paragraph line\n".repeat(120),
         });
         let mut vs = ViewState::new();
-        vs.markdown_at_end = true;
-        vs.markdown_end_button_selected = 1;
+        vs.markdown_scroll_offset = usize::MAX;
         let mut areas = LayoutAreas {
             activity_log: Rect::default(),
             dynamic_area: Rect::default(),
@@ -1297,85 +1699,13 @@ mod tests {
                 draw(f, &state, &mut vs, false, Some(&mut areas));
             })
             .unwrap();
-        assert!(
-            areas.activity_log.height >= 2,
-            "fixture expects a two-line plan footer (stacked Approve / Reject)"
-        );
+        assert!(vs.markdown_at_end, "fixture expects end-of-document scroll");
         let buffer = terminal.backend().buffer();
-        let approve_line = count_reversed_on_footer_line(buffer, areas.activity_log, 0);
-        let reject_line = count_reversed_on_footer_line(buffer, areas.activity_log, 1);
+        let body = markdown_viewer_body_rect(areas.activity_log);
+        let body_text = rect_plaintext(buffer, body);
         assert!(
-            approve_line == 0 && reject_line > 0,
-            "only the Reject line must use REVERSED when Reject is focused; approve_line={approve_line} reject_line={reject_line}"
-        );
-    }
-
-    #[test]
-    fn markdown_viewer_footer_shows_approve_and_reject_options() {
-        use ratatui::backend::TestBackend;
-        use ratatui::Terminal;
-
-        let backend = TestBackend::new(80, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let state = make_state(AppMode::MarkdownViewer {
-            content: "# p".to_string(),
-        });
-        let mut vs = ViewState::new();
-        vs.markdown_at_end = true;
-        let mut areas = LayoutAreas {
-            activity_log: Rect::default(),
-            dynamic_area: Rect::default(),
-            status_bar: Rect::default(),
-            prompt_bar: Rect::default(),
-        };
-        terminal
-            .draw(|f| {
-                draw(f, &state, &mut vs, false, Some(&mut areas));
-            })
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let content: String = buffer
-            .content
-            .iter()
-            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
-            .collect();
-        assert!(
-            content.contains("Approve") && content.contains("Reject"),
-            "activity footer must label the two actions Approve and Reject when the plan end is reached"
-        );
-    }
-
-    #[test]
-    fn markdown_viewer_reject_button_visible_in_short_terminal() {
-        use ratatui::backend::TestBackend;
-        use ratatui::Terminal;
-
-        let backend = TestBackend::new(80, 4);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let state = make_state(AppMode::MarkdownViewer {
-            content: "# Plan".to_string(),
-        });
-        let mut vs = ViewState::new();
-        let mut areas = LayoutAreas {
-            activity_log: Rect::default(),
-            dynamic_area: Rect::default(),
-            status_bar: Rect::default(),
-            prompt_bar: Rect::default(),
-        };
-        terminal
-            .draw(|f| {
-                draw(f, &state, &mut vs, false, Some(&mut areas));
-            })
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let flat: String = buffer
-            .content
-            .iter()
-            .map(|cell| cell.symbol().chars().next().unwrap_or(' '))
-            .collect();
-        assert!(
-            flat.contains("Reject"),
-            "Reject must stay visible in the plan viewer footer"
+            body_text.contains("Approve") && body_text.contains("Reject"),
+            "Approve and Reject must render inside the scrollable markdown region at end-of-doc; body={body_text:?}"
         );
     }
 }

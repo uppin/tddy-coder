@@ -1,11 +1,11 @@
-# TUI status bar — activity and session segment
+# TUI status bar — activity, session segment, and worktree
 
 **Status:** Stable  
 **Product area:** Coder (TUI)
 
 ## Summary
 
-The interactive and virtual TUI status line shows a single cohesive row: an activity indicator, a short workflow session identifier, then goal/state/elapsed/agent content. Remote terminal streams (`VirtualTui`, gRPC `StreamTerminal`) use the same `draw()` path as the local TUI, so clients see identical layout and timing semantics.
+The interactive and virtual TUI status line shows a single cohesive row: an activity indicator, a short workflow session identifier, an optional worktree display segment when the presenter has one, then goal/state/elapsed/agent content. Remote terminal streams (`VirtualTui`, gRPC `StreamTerminal`) use the same `draw()` path as the local TUI, so clients see identical layout and timing semantics.
 
 ## Layout
 
@@ -13,10 +13,11 @@ Left to right on the status bar:
 
 1. **Activity indicator** — Behavior depends on workflow mode:
    - **Agent-active** (`AppMode::Running`): One character from the spinner frame sequence (`|`, `/`, `-`, `\`), driven by `ViewState::spinner_tick` at the historical fast cadence (four ticks per frame advance).
-   - **User-question wait** (`Select`, `MultiSelect`, `TextInput`): A single-column pulse using middle dot U+00B7 (`·`) and bullet U+2022 (`•`) on a one-second phase, alternating small and large appearance. The fast spinner sequence does not run in these modes.
-   - **Other modes** (for example `FeatureInput`, `DocumentReview`, `MarkdownViewer`, `ErrorRecovery`): When a goal row is shown, the same idle pulse and frozen elapsed rules apply as for user-question waits unless product classification treats the mode as agent-active in a future revision.
+   - **User-question wait** (`Select`, `MultiSelect`, `TextInput`) and other non-running modes that use idle treatment: A repeating heartbeat on the leading glyph: middle dot U+00B7 (`·`), bullet U+2022 (`•`), black circle U+25CF (`●`), then bullet again, on a short sub-second phase cycle so the pulse reads as small→large→small over a few seconds on an 80×24 terminal. The fast spinner sequence does not run in these modes.
+   - **Other modes** (for example `FeatureInput`, `DocumentReview`, `MarkdownViewer`, `ErrorRecovery`): When a goal row is shown, the same idle heartbeat and frozen elapsed rules apply as for user-question waits unless product classification treats the mode as agent-active in a future revision.
 2. **Session segment** — The first 8-character hexadecimal field when the engine session id matches UUID-shaped input (first hyphen-separated field). When the id is missing, empty, or not UUID-shaped at that position, a fixed em-dash placeholder (`U+2014`) keeps the column width predictable.
-3. **Goal:** … **State:** … **elapsed** … **agent** **model** … scroll hint — Segment order after `Goal:` matches the historical layout.
+3. **Worktree segment** (optional) — When `PresenterState::active_worktree_display` carries a non-empty string (derived from the filesystem path at `WorkflowEvent::WorktreeSwitched`), the status line includes that label before the `Goal:` token, separated by `│`, without altering spinner or session order.
+4. **Goal:** … **State:** … **elapsed** … **agent** **model** … scroll hint — Segment order after `Goal:` matches the historical layout.
 
 ## Elapsed time on the goal row
 
@@ -27,14 +28,34 @@ Left to right on the status bar:
 
 `PresenterState::workflow_session_id` holds the optional engine session string. It is set when `ProgressEvent::SessionStarted` arrives and when `start_workflow` receives an initial session id; it is cleared on workflow completion (success or error) and before an inbox-driven workflow restart, until a new `SessionStarted` supplies a value.
 
+`PresenterState::active_worktree_display` holds an optional short label for the active git worktree directory (basename with length cap). It is set when `WorkflowEvent::WorktreeSwitched` fires, using `presenter::worktree_display::format_worktree_for_status_bar`. The field stays empty until that event supplies a path the formatter turns into a non-empty display string.
+
+## Prompt caret (local TUI)
+
+Text-editing prompt modes (`FeatureInput`, running follow-up input, `TextInput`, Select/MultiSelect “other” typing, plan refinement while `plan_refinement_pending`) position the hardware cursor after `draw()` at the UTF-8-safe insert index for the char-wrapped prompt `Paragraph`. The local event loop issues crossterm `Show` when a caret position applies so the insert point remains visible.
+
+## Plan markdown viewer (Approve / Reject)
+
+In `MarkdownViewer`, **Approve** and **Reject** do not occupy a fixed footer band before the user reaches the end of the markdown scroll range. After the scroll position reaches the bottom of the markdown body, both actions appear as trailing lines inside the same scrollable `Paragraph` as the plan content (wrapped with the same rules as the body). The prompt bar text lists Alt+A / Alt+R only when the viewer reports end-of-scroll (`markdown_at_end`).
+
 ## Virtual TUI and streaming
 
-- **Periodic render**: Headless `VirtualTui` wakes on a short interval for agent-active modes so the spinner animates smoothly; in clarification waits the interval is about one second so the idle dot pulse and frozen clock align with visible updates without high-frequency full-frame traffic when only the idle phase advances.
-- **Frame diffing**: Bytes go to the client when the rendered frame differs from the previous frame (existing behavior).
+- **Periodic render**: Headless `VirtualTui` wakes on a short interval for agent-active modes so the spinner animates smoothly; in clarification waits the interval is about one second so the idle heartbeat and frozen clock align with visible updates without high-frequency full-frame traffic when only the idle phase advances.
+- **Frame diffing**: Bytes go to the client when the rendered frame differs from the previous frame. Cursor-position-only updates (same cell paint, different CUP or cursor show/hide CSI sequences) are rate-limited by a minimum interval so the stream does not flood on caret motion alone.
+
+## Mouse mode: Enter control
+
+When pointer reporting is active (`EnableMouseCapture`), the TUI exposes a fixed **3×2** cell **Enter** affordance at the **bottom-right** of the terminal, aligned with the prompt strip:
+
+- **Geometry**: Three columns by two rows. The **top** row sits on the line **immediately above** the first prompt line—usually the **status bar** row, so a **one-line** `prompt_bar` still fits the frame without growing the prompt height. The **bottom** row sits on the **first line of the prompt bar**; U+23CE appears only there. If `--debug` adds a debug log strip between status and prompt, the top row of the frame uses the **last line above the prompt** (e.g. bottom of the debug region). Status / debug / prompt text in those six cells may be overwritten after the corresponding `Paragraph` widgets render.
+- **Label**: ASCII `+--` on the upper row; `|`, U+23CE (`⏎`), and a space on the lower row.
+- **Hit-testing**: `packages/tddy-tui/src/mouse_map.rs` defines `enter_button_rect` and routes left-clicks anywhere in that 3×2—including `+`, `-`, `|`, and `⏎`—to the same intents as **Enter** (`key_event_to_intent`).
+- **Narrow terminals**: If there is no row above the prompt (`prompt_bar.y == 0`) or the row is narrower than three columns, painting and hit-testing skip the affordance.
 
 ## Operational notes
 
 - Status-bar policy helpers live in `packages/tddy-tui/src/status_bar_activity.rs`; formatting helpers in `packages/tddy-tui/src/ui.rs`; frame composition in `packages/tddy-tui/src/render.rs`.
+- Markdown scroll bounds for the plan viewer use `Paragraph::line_count` with the same wrap settings as `draw()`, behind the ratatui `unstable-rendered-line-info` feature, so line counts match what the widget paints.
 - Per-frame diagnostic detail uses `log::trace!` on the hot path; presenter lifecycle messages truncate long ids in debug logs.
 - Direct `println!` / `eprintln!` are not used on TUI draw paths (ratatui display integrity).
 

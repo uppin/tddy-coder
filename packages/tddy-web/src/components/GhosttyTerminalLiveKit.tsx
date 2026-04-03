@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Room, RoomEvent } from "livekit-client";
+import { DisconnectReason, Room, RoomEvent } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
 import {
   createLiveKitTransport,
@@ -174,13 +174,25 @@ export function GhosttyTerminalLiveKit({
         room.on(RoomEvent.Disconnected, async (reason) => {
           log("lifecycle: RoomEvent.Disconnected", reason);
           console.log("[LiveKit] RoomEvent.Disconnected", reason);
-          if (!cancelled && getToken && latestTokenRef.current) {
+          if (cancelled) return;
+          if (getToken && latestTokenRef.current) {
             try {
               await room!.connect(url, latestTokenRef.current);
             } catch (e) {
               console.warn("[GhosttyTerminalLiveKit] Reconnect failed:", e);
             }
+            return;
           }
+          const r = reason ?? DisconnectReason.UNKNOWN_REASON;
+          if (r === DisconnectReason.CLIENT_INITIATED) {
+            return;
+          }
+          const msg =
+            r === DisconnectReason.DUPLICATE_IDENTITY
+              ? "Disconnected: another client joined with the same identity."
+              : `LiveKit disconnected (reason=${r}).`;
+          setErrorMsg(msg);
+          setStatus("error");
         });
         room.on(RoomEvent.ConnectionStateChanged, (state) =>
           console.log("[LiveKit] ConnectionStateChanged", state)

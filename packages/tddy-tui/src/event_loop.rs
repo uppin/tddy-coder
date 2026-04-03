@@ -17,10 +17,19 @@ use crate::capturing_writer::CapturingWriter;
 use crate::ctrl_interrupt::{ctrl_c_interrupt_session, key_is_ctrl_c_press};
 use crate::key_map::key_event_to_intent;
 use crate::raw::{disable_raw_mode, enable_raw_mode_keep_sig};
-use crate::render::draw;
+use crate::render::{draw, editing_prompt_cursor_position};
 use crate::tui_view::TuiView;
 use crate::virtual_tui::drain_presenter_broadcast;
 use crate::ByteCallback;
+
+/// Local TUI policy string for editing-mode caret visibility (PRD / crossterm hooks).
+///
+/// The event loop calls [`crossterm::cursor::Show`] after [`crate::render::draw`] when the prompt
+/// exposes a hardware insert position (see [`crate::render::editing_prompt_cursor_position`]).
+pub fn local_tui_editing_cursor_policy() -> &'static str {
+    log::debug!("local_tui_editing_cursor_policy: visible (Show after draw when caret active)");
+    "visible"
+}
 
 /// Run the TUI event loop with a ViewConnection.
 /// The presenter must run in a separate thread (poll_workflow, handle_intent).
@@ -87,6 +96,13 @@ pub fn run_event_loop(
                 Some(&mut layout_areas),
             )
         })?;
+
+        if editing_prompt_cursor_position(&state, view.view_state(), layout_areas.prompt_bar)
+            .is_some()
+        {
+            log::info!("local_tui: editing caret active — crossterm Show");
+            let _ = execute!(terminal.backend_mut(), Show);
+        }
 
         if state.should_quit {
             break;
@@ -169,4 +185,16 @@ pub fn run_event_loop(
     disable_raw_mode()?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn local_tui_editing_cursor_policy_is_visible_for_text_edits() {
+        assert_eq!(
+            super::local_tui_editing_cursor_policy(),
+            "visible",
+            "PRD: local TUI must expose a visible caret policy for prompt editing modes"
+        );
+    }
 }

@@ -92,6 +92,8 @@ pub struct PresenterState {
     pub plan_refinement_pending: bool,
     /// Repository root used to resolve `.agents/skills` for the feature-prompt slash menu.
     pub skills_project_root: Option<PathBuf>,
+    /// Git worktree path or truncated display string for the status bar when known (`None` until set).
+    pub active_worktree_display: Option<String>,
 }
 
 #[cfg(test)]
@@ -144,6 +146,7 @@ mod tests {
             exit_action: None,
             plan_refinement_pending: false,
             skills_project_root: None,
+            active_worktree_display: None,
         };
         assert!(state.exit_action.is_none());
     }

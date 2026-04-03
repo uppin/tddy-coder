@@ -44,7 +44,31 @@ pub fn display_elapsed_for_goal_row(state: &PresenterState, view_state: &ViewSta
     live
 }
 
-/// Leading activity glyph: fast spinner (`SPINNER_FRAMES`) when agent-active; 1 Hz · / • in user-wait.
+/// Phases for the idle status prefix: small dot → bullet → larger circle → bullet (symmetric pulse).
+/// Sub-200ms phases keep the red-phase unit test samples (0 / 120 / 240ms) on distinct glyphs.
+const IDLE_HEARTBEAT_PHASE_MS: u64 = 80;
+const IDLE_HEARTBEAT_CYCLE_MS: u64 = IDLE_HEARTBEAT_PHASE_MS * 4;
+
+/// Idle heartbeat glyph from wall-clock elapsed since the animation anchor (PRD: small→large→small).
+pub fn idle_heartbeat_glyph_for_elapsed(elapsed: Duration) -> char {
+    let ms = elapsed.as_millis() as u64 % IDLE_HEARTBEAT_CYCLE_MS;
+    let phase = ms / IDLE_HEARTBEAT_PHASE_MS;
+    let c = match phase {
+        0 => '·', // U+00B7 MIDDLE DOT
+        1 => '•', // U+2022 BULLET
+        2 => '●', // U+25CF BLACK CIRCLE (large)
+        _ => '•',
+    };
+    log::trace!(
+        "idle_heartbeat_glyph_for_elapsed: elapsed={:?} phase_ms={} glyph={:?}",
+        elapsed,
+        ms,
+        c
+    );
+    c
+}
+
+/// Leading activity glyph: fast spinner (`SPINNER_FRAMES`) when agent-active; idle heartbeat in user-wait.
 pub fn activity_prefix_char_for_draw(
     mode: &AppMode,
     view_state: &ViewState,
@@ -55,12 +79,16 @@ pub fn activity_prefix_char_for_draw(
         log::trace!("status_bar_activity: spinner frame {:?}", c);
         return c;
     }
-    let secs = view_state
+    let elapsed = view_state
         .idle_dot_animation_anchor
-        .map(|a| a.elapsed().as_secs())
-        .unwrap_or(0);
-    let c = if secs.is_multiple_of(2) { '·' } else { '•' };
-    log::trace!("status_bar_activity: idle dot secs={} glyph={:?}", secs, c);
+        .map(|a| a.elapsed())
+        .unwrap_or(Duration::ZERO);
+    let c = idle_heartbeat_glyph_for_elapsed(elapsed);
+    log::trace!(
+        "status_bar_activity: idle heartbeat elapsed={:?} glyph={:?}",
+        elapsed,
+        c
+    );
     c
 }
 
@@ -84,6 +112,10 @@ pub fn virtual_tui_periodic_render_interval(mode: &AppMode) -> Duration {
 mod tests {
     use super::*;
 
+    use std::collections::BTreeSet;
+    use std::time::{Duration, Instant};
+
+    use crate::view_state::ViewState;
     use tddy_core::{AppMode, ClarificationQuestion, QuestionOption};
 
     fn select_mode() -> AppMode {
@@ -117,6 +149,48 @@ mod tests {
         assert!(
             virtual_tui_periodic_render_interval(&select_mode()) >= Duration::from_millis(900),
             "idle clarification wait should use ~1s periodic tick"
+        );
+    }
+
+    /// Lower-level (PRD): idle heartbeat must vary across sub-second phase samples (≥2 distinct glyphs).
+    #[test]
+    fn idle_heartbeat_glyph_varies_across_subsecond_phases() {
+        let a = idle_heartbeat_glyph_for_elapsed(Duration::ZERO);
+        let b = idle_heartbeat_glyph_for_elapsed(Duration::from_millis(120));
+        let c = idle_heartbeat_glyph_for_elapsed(Duration::from_millis(240));
+        let set: BTreeSet<char> = [a, b, c].into_iter().collect();
+        assert!(
+            set.len() >= 2,
+            "expected idle heartbeat to vary across phases; glyphs=({a:?},{b:?},{c:?})"
+        );
+    }
+
+    /// Acceptance (PRD / Testing Plan): idle prefix runs a multi-step small→large→small heartbeat
+    /// (≥3 distinct glyphs) and repeats over a few seconds of wall time.
+    #[test]
+    fn status_bar_idle_heartbeat_cycles_small_big_small() {
+        let mode = select_mode();
+        let dummy_spinner = ['|'];
+        let mut samples = Vec::new();
+        for ms in (0..4000_u64).step_by(120) {
+            let mut vs = ViewState::new();
+            vs.idle_dot_animation_anchor = Some(Instant::now() - Duration::from_millis(ms));
+            samples.push(activity_prefix_char_for_draw(&mode, &vs, &dummy_spinner));
+        }
+        let unique: BTreeSet<char> = samples.iter().copied().collect();
+        assert!(
+            unique.len() >= 3,
+            "expected at least three distinct idle heartbeat glyphs over ~4s sampled timeline; \
+             unique={unique:?} samples={samples:?}"
+        );
+        let first = samples[0];
+        assert!(
+            samples
+                .iter()
+                .enumerate()
+                .skip(3)
+                .any(|(_, &c)| c == first),
+            "expected idle heartbeat pattern to repeat after a multi-step cycle; samples={samples:?}"
         );
     }
 }

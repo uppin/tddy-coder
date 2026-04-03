@@ -2,6 +2,10 @@
 
 Release note history for the Web product area.
 
+## 2026-04-03 — Web terminal: mouse Enter affordance (TUI parity)
+
+- **Docs**: [web-terminal.md](web-terminal.md) documents the streamed **3×2** Enter affordance (status row + first prompt line) for **`--mouse`** / SGR mouse, with a cross-link to [Mouse mode: Enter control](../coder/tui-status-bar.md#mouse-mode-enter-control) in the Coder feature docs.
+
 ## 2026-03-29 — Connection screen: backend options from `ListAgents`
 
 - **ConnectionScreen**: **Backend** (per project) is populated from **`ListAgents`**; option values are agent **`id`** strings from daemon **`allowed_agents`**, with labels from the RPC (blank optional labels resolve to **`id`** on the server). **Start New Session** requires a selected backend when the list is non-empty. The default selection is the first RPC entry unless a stored choice for that project still exists in the list.
