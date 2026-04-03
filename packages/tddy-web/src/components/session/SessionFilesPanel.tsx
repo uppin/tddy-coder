@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { workflowPreviewKind } from "./sessionWorkflowPreview";
 
@@ -9,6 +9,9 @@ export type SessionFilesPanelProps = {
   files: WorkflowFileRow[];
   fileContents: Record<string, string>;
   initialSelection?: string;
+  /** When set with `onSelectBasename`, selection is controlled by the parent. */
+  selectedBasename?: string;
+  onSelectBasename?: (basename: string) => void;
 };
 
 /**
@@ -84,8 +87,31 @@ export function SessionFilesPanel({
   files,
   fileContents,
   initialSelection,
+  selectedBasename: controlledSelected,
+  onSelectBasename,
 }: SessionFilesPanelProps) {
-  const [selected, setSelected] = useState(initialSelection ?? files[0]?.basename ?? "");
+  const [internalSelected, setInternalSelected] = useState(
+    initialSelection ?? files[0]?.basename ?? "",
+  );
+  const controlled = controlledSelected !== undefined;
+  const selected = controlled ? controlledSelected! : internalSelected;
+
+  useEffect(() => {
+    if (controlled || files.length === 0) return;
+    const next =
+      initialSelection && files.some((f) => f.basename === initialSelection)
+        ? initialSelection
+        : (files[0]?.basename ?? "");
+    setInternalSelected((prev) => (prev === next ? prev : next));
+  }, [controlled, files, initialSelection]);
+
+  const setSelected = (basename: string) => {
+    if (controlled) {
+      onSelectBasename?.(basename);
+    } else {
+      setInternalSelected(basename);
+    }
+  };
 
   const content = fileContents[selected] ?? "";
   const previewKind = workflowPreviewKind(selected);
@@ -101,7 +127,7 @@ export function SessionFilesPanel({
               <button
                 type="button"
                 onClick={() => setSelected(f.basename)}
-                data-selected={selected === f.basename}
+                data-selected={selected === f.basename ? true : undefined}
               >
                 {f.basename}
               </button>

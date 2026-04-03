@@ -425,6 +425,11 @@ fn truncate_session_id_for_log(id: &str) -> String {
 /// row), then `|`, U+23CE, and a space on the first prompt line. Runs after status and prompt
 /// `Paragraph`s so pixels match [`enter_button_rect`].
 fn paint_enter_affordance(frame: &mut Frame, areas: &LayoutAreas) {
+    // Long echo / vt100 substring tests (`tddy-e2e` grpc_terminal_rpc) need a stable flattened
+    // screen; the 3×2 overlay is opt-out via env for those tests only.
+    if std::env::var_os("TDDY_E2E_NO_ENTER_AFFORDANCE").is_some() {
+        return;
+    }
     let r = enter_button_rect(areas);
     if r.width == 0 || r.height == 0 {
         return;

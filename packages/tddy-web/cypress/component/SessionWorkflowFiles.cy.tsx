@@ -50,7 +50,7 @@ describe("SessionFilesPanel", () => {
 describe("SessionMoreActionsMenu", () => {
   /** Acceptance: overflow exposes Show files with stable test id for automation. */
   it("MoreActionsMenu_includes_show_files", () => {
-    cy.mount(<SessionMoreActionsMenu sessionId="acceptance-sess-1" />);
+    cy.mount(<SessionMoreActionsMenu sessionId="acceptance-sess-1" onShowFiles={() => {}} />);
     cy.get('[data-testid="session-more-actions-acceptance-sess-1"]').click();
     cy.get('[data-testid="session-more-actions-show-files"]').should("be.visible");
     cy.contains("Show files").should("be.visible");

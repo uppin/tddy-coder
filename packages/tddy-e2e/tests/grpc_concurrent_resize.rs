@@ -11,6 +11,17 @@ use tddy_e2e::{connect_terminal_grpc, spawn_presenter_with_terminal_service};
 use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
 use vt100::Parser;
 
+/// Idle status-bar pulse cycles `·` / `•` / `●` (see `IDLE_DOT_PULSE_CHARS` in tddy-tui). Two snapshots
+/// taken a second apart may differ only by that glyph; normalize so we still detect blanking regressions.
+fn normalize_idle_pulse(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '•' | '●' => '·',
+            c => c,
+        })
+        .collect()
+}
+
 async fn collect_output_window(
     stream: &mut tonic::Streaming<TerminalOutput>,
     window: Duration,
@@ -102,7 +113,8 @@ async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::R
     );
 
     assert_eq!(
-        screen1_before, screen1_after,
+        normalize_idle_pulse(&screen1_before),
+        normalize_idle_pulse(&screen1_after),
         "Client 1 screen content must not change when client 2 connects with different dimensions.\n\
          Before:\n{}\n\nAfter:\n{}",
         screen1_before, screen1_after

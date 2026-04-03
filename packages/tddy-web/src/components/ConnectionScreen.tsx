@@ -33,6 +33,8 @@ import {
 } from "../utils/sessionDisplay";
 import { sortSessionsForDisplay } from "../utils/sessionSort";
 import { SessionWorkflowStatusCells } from "./SessionWorkflowStatusCells";
+import { SessionMoreActionsMenu } from "./session/SessionMoreActionsMenu";
+import { SessionWorkflowFilesModal } from "./session/SessionWorkflowFilesModal";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -470,6 +472,7 @@ export function ConnectionScreen({
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [projectForms, setProjectForms] = useState<Record<string, ProjectSessionForm>>({});
   const [orphanSessionDebug, setOrphanSessionDebug] = useState(false);
+  const [workflowFilesSessionId, setWorkflowFilesSessionId] = useState<string | null>(null);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectGitUrl, setNewProjectGitUrl] = useState("");
@@ -933,29 +936,34 @@ export function ConnectionScreen({
                         <TableCell>{sessionPidDisplay(s.isActive, s.pid)}</TableCell>
                         <SessionWorkflowStatusCells session={s} />
                         <TableCell>
-                          {s.isActive ? (
-                            <>
-                              <Button
-                                type="button"
-                                size="sm"
-                                data-testid={`connect-${s.sessionId}`}
-                                className="mr-1"
-                                onClick={() => handleConnectSession(s.sessionId)}
-                              >
-                                Connect
-                              </Button>
-                              <SignalDropdown
+                          <span className="inline-flex flex-wrap items-center gap-2">
+                            {s.isActive ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  data-testid={`connect-${s.sessionId}`}
+                                  onClick={() => handleConnectSession(s.sessionId)}
+                                >
+                                  Connect
+                                </Button>
+                                <SignalDropdown
+                                  sessionId={s.sessionId}
+                                  onSignal={handleSignalSession}
+                                />
+                              </>
+                            ) : (
+                              <InactiveSessionActions
                                 sessionId={s.sessionId}
-                                onSignal={handleSignalSession}
+                                onResume={handleResumeSession}
+                                onDelete={handleDeleteSession}
                               />
-                            </>
-                          ) : (
-                            <InactiveSessionActions
+                            )}
+                            <SessionMoreActionsMenu
                               sessionId={s.sessionId}
-                              onResume={handleResumeSession}
-                              onDelete={handleDeleteSession}
+                              onShowFiles={() => setWorkflowFilesSessionId(s.sessionId)}
                             />
-                          )}
+                          </span>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1010,29 +1018,34 @@ export function ConnectionScreen({
                   <TableCell>{sessionPidDisplay(s.isActive, s.pid)}</TableCell>
                   <SessionWorkflowStatusCells session={s} />
                   <TableCell>
-                    {s.isActive ? (
-                      <>
-                        <Button
-                          type="button"
-                          size="sm"
-                          data-testid={`connect-${s.sessionId}`}
-                          className="mr-1"
-                          onClick={() => handleConnectSession(s.sessionId)}
-                        >
-                          Connect
-                        </Button>
-                        <SignalDropdown
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {s.isActive ? (
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            data-testid={`connect-${s.sessionId}`}
+                            onClick={() => handleConnectSession(s.sessionId)}
+                          >
+                            Connect
+                          </Button>
+                          <SignalDropdown
+                            sessionId={s.sessionId}
+                            onSignal={handleSignalSession}
+                          />
+                        </>
+                      ) : (
+                        <InactiveSessionActions
                           sessionId={s.sessionId}
-                          onSignal={handleSignalSession}
+                          onResume={handleResumeSession}
+                          onDelete={handleDeleteSession}
                         />
-                      </>
-                    ) : (
-                      <InactiveSessionActions
+                      )}
+                      <SessionMoreActionsMenu
                         sessionId={s.sessionId}
-                        onResume={handleResumeSession}
-                        onDelete={handleDeleteSession}
+                        onShowFiles={() => setWorkflowFilesSessionId(s.sessionId)}
                       />
-                    )}
+                    </span>
                   </TableCell>
                 </TableRow>
               ))}
@@ -1040,6 +1053,16 @@ export function ConnectionScreen({
           </Table>
         </>
       )}
+
+      {sessionToken && workflowFilesSessionId ? (
+        <SessionWorkflowFilesModal
+          open
+          onClose={() => setWorkflowFilesSessionId(null)}
+          sessionId={workflowFilesSessionId}
+          sessionToken={sessionToken}
+          client={client}
+        />
+      ) : null}
     </div>
   );
 }

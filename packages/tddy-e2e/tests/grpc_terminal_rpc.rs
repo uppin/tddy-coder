@@ -74,12 +74,31 @@ fn vt100_compact_screen(all_output: &[u8], rows: u16, cols: u16) -> String {
     screen.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
+/// Normalize the flattened VT100 string before echo substring checks:
+/// - Idle pulse glyphs (`·` / `•` / `●`) on the status line.
+/// - Mouse **Enter** affordance (`paint_enter_affordance`): ASCII `+--` on the status row, `|`,
+///   U+23CE (⏎) on the first prompt row (`render` / `tddy-tui` changeset 2026-04-03).
+/// Those overlay the last columns of wrapped prompt lines and break naive contiguous-prefix checks.
+fn compact_screen_for_echo_assertions(compact: &str) -> String {
+    let mut s: String = compact
+        .chars()
+        .filter(|&c| !matches!(c, '·' | '•' | '●'))
+        .collect();
+    while s.contains("+--") {
+        s = s.replace("+--", "");
+    }
+    s.chars()
+        .filter(|&c| !matches!(c, '|' | '\u{23CE}'))
+        .collect()
+}
+
 fn longest_echo_prefix_len_in_compact(compact: &str, expected_no_ws: &str) -> usize {
+    let normalized = compact_screen_for_echo_assertions(compact);
     let mut lo = 0usize;
     let mut hi = expected_no_ws.len();
     while lo < hi {
         let mid = (lo + hi).div_ceil(2);
-        if compact.contains(&expected_no_ws[..mid]) {
+        if normalized.contains(&expected_no_ws[..mid]) {
             lo = mid;
         } else {
             hi = mid - 1;
@@ -145,7 +164,8 @@ fn assert_segmented_echo_in_vt100(
     rows: u16,
     cols: u16,
 ) {
-    let compact = vt100_compact_screen(all_output, rows, cols);
+    let compact_raw = vt100_compact_screen(all_output, rows, cols);
+    let compact = compact_screen_for_echo_assertions(&compact_raw);
     let expected_no_ws: String = expected_full
         .chars()
         .filter(|c| !c.is_whitespace())
@@ -888,6 +908,7 @@ async fn grpc_resize_shrink_grow_shows_pgup_pgdn_scroll_exactly_once() -> anyhow
 #[allow(clippy::await_holding_lock)]
 async fn grpc_virtual_tui_rpc_large_echo_char_by_char() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
+    std::env::set_var("TDDY_E2E_NO_ENTER_AFFORDANCE", "1");
 
     const COLS: u16 = 80;
     const ROWS: u16 = 10000;
@@ -961,6 +982,8 @@ async fn grpc_virtual_tui_rpc_large_echo_char_by_char() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[allow(clippy::await_holding_lock)]
 async fn virtual_tui_large_echo_char_by_char_direct_vt100() -> anyhow::Result<()> {
+    std::env::set_var("TDDY_E2E_NO_ENTER_AFFORDANCE", "1");
+
     const COLS: u16 = 80;
     const ROWS: u16 = 10000;
     let max_height = (ROWS as usize / 3).max(1);
