@@ -7,16 +7,28 @@ use std::sync::Arc;
 
 use tddy_core::WorkflowRecipe;
 
-use crate::{BugfixRecipe, SessionArtifactManifest, TddRecipe};
+use crate::{
+    approval_policy, BugfixRecipe, FreePromptingRecipe, SessionArtifactManifest, TddRecipe,
+};
 
 /// Resolved workflow recipe plus its session-artifact manifest (same concrete type implements both).
 pub type WorkflowRecipeAndManifest = (Arc<dyn WorkflowRecipe>, Arc<dyn SessionArtifactManifest>);
 
 /// Error message for an unknown recipe name (CLI, YAML, daemon).
 pub fn unknown_workflow_recipe_error(name: &str) -> String {
+    let expected = approval_policy::supported_workflow_recipe_cli_names()
+        .iter()
+        .map(|n| format!("\"{}\"", n))
+        .collect::<Vec<_>>()
+        .join(", ");
+    log::debug!(
+        "unknown_workflow_recipe_error: name={:?} expected_one_of=[{}]",
+        name,
+        expected
+    );
     format!(
-        r#"unknown workflow recipe {:?} (expected "tdd" or "bugfix")"#,
-        name
+        r#"unknown workflow recipe {:?} (expected one of: {})"#,
+        name, expected
     )
 }
 
@@ -49,6 +61,14 @@ pub fn workflow_recipe_and_manifest_from_cli_name(
         "bugfix" => {
             log::info!("workflow recipe resolved: bugfix (BugfixRecipe)");
             let r: Arc<BugfixRecipe> = Arc::new(BugfixRecipe);
+            Ok((
+                r.clone() as Arc<dyn WorkflowRecipe>,
+                r as Arc<dyn SessionArtifactManifest>,
+            ))
+        }
+        "free-prompting" => {
+            log::info!("workflow recipe resolved: free-prompting (FreePromptingRecipe)");
+            let r: Arc<FreePromptingRecipe> = Arc::new(FreePromptingRecipe);
             Ok((
                 r.clone() as Arc<dyn WorkflowRecipe>,
                 r as Arc<dyn SessionArtifactManifest>,
@@ -87,5 +107,12 @@ mod tests {
         let (recipe, manifest) = workflow_recipe_and_manifest_from_cli_name("tdd").expect("tdd");
         assert_eq!(recipe.name(), "tdd");
         assert!(!manifest.known_artifacts().is_empty());
+    }
+
+    #[test]
+    fn resolver_resolves_free_prompting() {
+        let (r, _) = workflow_recipe_and_manifest_from_cli_name("free-prompting").expect("resolve");
+        assert_eq!(r.name(), "free-prompting");
+        assert_eq!(r.start_goal().as_str(), "prompting");
     }
 }

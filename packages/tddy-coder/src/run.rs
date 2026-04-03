@@ -455,8 +455,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default) or `bugfix` (reproduce-then-fix). Must match [`WorkflowRecipe::name`].
-    #[arg(long, value_parser = ["tdd", "bugfix"])]
+    /// Workflow recipe: `tdd` (default), `bugfix`, or `free-prompting`. Must match [`WorkflowRecipe::name`].
+    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting"])]
     pub recipe: Option<String>,
 
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
@@ -601,8 +601,8 @@ pub struct DemoArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default) or `bugfix`.
-    #[arg(long, value_parser = ["tdd", "bugfix"])]
+    /// Workflow recipe: `tdd` (default), `bugfix`, or `free-prompting`.
+    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting"])]
     pub recipe: Option<String>,
 }
 

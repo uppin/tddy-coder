@@ -373,11 +373,17 @@ fn run_start_goal_without_output_dir(
     let hooks = recipe.create_hooks(Some(event_tx.clone()));
     let engine = WorkflowEngine::new(recipe.clone(), backend.clone(), storage_dir, Some(hooks));
     if let Some(ref dir) = session_dir {
+        let recipe_name = recipe.name().to_string();
         let init_cs = crate::changeset::Changeset {
             initial_prompt: Some(input.to_string()),
             repo_path: Some(repo_path_str.clone()),
+            recipe: Some(recipe_name.clone()),
             ..crate::changeset::Changeset::default()
         };
+        log::info!(
+            "[workflow_runner] run_start_goal_without_output_dir: wrote changeset.yaml recipe={}",
+            recipe_name
+        );
         let _ = crate::changeset::write_changeset(dir, &init_cs);
         if let Err(e) = crate::session_metadata::write_initial_tool_session_metadata(
             dir,

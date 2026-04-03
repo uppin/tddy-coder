@@ -189,6 +189,11 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
         self.submit_and_respond("update-docs", json, None)
     }
 
+    fn prompting_response(&self) -> InvokeResponse {
+        let json = r#"{"goal":"prompting","summary":"Stub prompting turn complete.","reply":"Ready for follow-up."}"#;
+        self.submit_and_respond("prompting", json, None)
+    }
+
     fn response_for_goal(&self, goal_id: &GoalId) -> InvokeResponse {
         match goal_id.as_str() {
             "plan" => self.plan_response(),
@@ -200,6 +205,7 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
             "validate" => self.validate_response(),
             "refactor" => self.refactor_response(),
             "update-docs" => self.update_docs_response(),
+            "prompting" => self.prompting_response(),
             _ => self.plan_response(),
         }
     }

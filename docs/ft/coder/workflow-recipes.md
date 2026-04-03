@@ -38,7 +38,9 @@ Allowed names are **`tdd`**, **`bugfix`**, and **`free-prompting`** (aligned wit
 
 - **CLI / recipe name:** **`free-prompting`** (**`WorkflowRecipe::name()`**).
 - **Start goal:** **`prompting`**; **initial workflow state string:** **`Prompting`**.
-- **Pipeline:** A single primary loop (**`prompting`** echo task → end); no multi-goal TDD pipeline unless extended later.
+- **Pipeline:** A single graph node (**`prompting`**) implemented with **`BackendInvokeTask`**: each turn invokes the active **`CodingBackend`** (stub, Cursor, Claude, …). There is no separate **`EndTask`** edge; after a successful turn the engine pauses for the next user line (**`FlowRunner`** treats **`Continue`** with no successor task like **`WaitingForInput`** so the session stays on **`prompting`**). No multi-goal TDD pipeline unless the recipe is extended later.
+- **Structured submit:** **`WorkflowRecipe::goal_requires_tddy_tools_submit`** defaults to **`true`** for TDD-style goals; **`FreePromptingRecipe`** returns **`false`** for **`prompting`** so a turn can complete from normal agent output without **`tddy-tools submit`** (open-ended chat with backends that do not relay the tool).
+- **Activity pane:** **`FreePromptingWorkflowHooks::agent_output_sink`** forwards streaming assistant text to **`WorkflowEvent::AgentOutput`**, same pattern as **`TddWorkflowHooks`**, so the TUI activity log shows assistant output during the run.
 - **Primary session document:** None in the manifest sense used for PRD-style approval; **`FreePromptingRecipe::uses_primary_session_document`** is **`false`**, so the primary-document approval gate for plan/fix-plan style review does not apply for this recipe.
 - **Policy helpers:** **`tddy_workflow_recipes::approval_policy`** exposes **`supported_workflow_recipe_cli_names`** and **`recipe_should_skip_session_document_approval`** for tests and tooling that document which CLI names participate in resolver errors and which recipes skip session-document approval in policy tables.
 

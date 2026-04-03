@@ -13,10 +13,11 @@ use async_trait::async_trait;
 use tddy_coder::{ActivityEntry, AppMode, Presenter, UserIntent};
 use tddy_core::{
     backend::{CodingBackend, InvokeRequest, InvokeResponse},
+    changeset::read_changeset,
     output::{SESSIONS_SUBDIR, TDDY_SESSIONS_DIR_ENV},
     BackendError, PresenterEvent, SharedBackend, StubBackend, WorkflowCompletePayload,
 };
-use tddy_workflow_recipes::{BugfixRecipe, TddRecipe};
+use tddy_workflow_recipes::{resolve_workflow_recipe_from_cli_name, BugfixRecipe, TddRecipe};
 use tokio::sync::broadcast;
 
 /// Events collected from broadcast for assertions.
@@ -29,6 +30,20 @@ pub enum TestEvent {
     WorkflowComplete(Result<WorkflowCompletePayload, String>),
     AgentOutput(String),
     InboxChanged(Vec<String>),
+}
+
+fn first_session_dir_under(sessions_path: &Path) -> Option<PathBuf> {
+    std::fs::read_dir(sessions_path)
+        .ok()?
+        .flatten()
+        .find_map(|e| {
+            let p = e.path();
+            if p.is_dir() {
+                Some(p)
+            } else {
+                None
+            }
+        })
 }
 
 fn presenter_event_to_test_event(ev: PresenterEvent) -> Option<TestEvent> {
@@ -287,19 +302,19 @@ fn tdd_workflow_starts_plan_after_feature_submit() {
     );
 }
 
-/// Bugfix recipe: after the user submits feature text (same as pressing Enter in the TUI), the
-/// workflow must emit [`GoalStarted`] for `reproduce` instead of failing during session bootstrap.
+/// PRD acceptance: bugfix session bootstrap completes and `changeset.yaml` records the recipe so
+/// resume/daemon tooling stay consistent with recipe-driven policy.
 #[test]
 #[serial]
-fn bugfix_workflow_starts_reproduce_after_feature_submit() {
-    let sessions_base = std::env::temp_dir().join("tddy-presenter-bugfix-feature-submit");
+fn bugfix_start_session_reaches_reproduce_goal_after_bootstrap_fix() {
+    let sessions_base = std::env::temp_dir().join("tddy-presenter-bugfix-bootstrap-recipe");
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
     std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
 
     let (mut presenter, mut events) = bugfix_presenter_with_events();
     let backend = create_stub_backend();
-    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-bugfix-start");
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-bugfix-bootstrap");
 
     presenter.start_workflow(
         backend, output_dir, None, None, None, None, false, None, None, None,
@@ -312,6 +327,7 @@ fn bugfix_workflow_starts_reproduce_after_feature_submit() {
     let mut iterations = 0;
     const MAX: usize = 4000;
     let mut saw_reproduce = false;
+    let sessions_path = sessions_base.join(SESSIONS_SUBDIR);
     while iterations < MAX {
         presenter.poll_workflow();
         events.drain();
@@ -347,6 +363,237 @@ fn bugfix_workflow_starts_reproduce_after_feature_submit() {
         saw_reproduce,
         "expected GoalStarted(reproduce) within {} polls; last mode {:?}, events: {:?}",
         MAX,
+        presenter.state().mode,
+        events.events()
+    );
+    let session_dir =
+        first_session_dir_under(&sessions_path).expect("session directory under TDDY_SESSIONS_DIR");
+    let cs = read_changeset(&session_dir).expect("changeset.yaml after bugfix bootstrap");
+    assert_eq!(
+        cs.recipe.as_deref(),
+        Some("bugfix"),
+        "changeset.yaml must record recipe \"bugfix\" for presenter/daemon parity (recipe policy / F3)"
+    );
+}
+
+fn free_prompting_presenter_with_events() -> (Presenter, EventCollector) {
+    let (event_tx, event_rx) = broadcast::channel(256);
+    let recipe = resolve_workflow_recipe_from_cli_name("free-prompting")
+        .expect("free-prompting must resolve for presenter smoke");
+    let presenter = Presenter::new("stub", "default", recipe).with_broadcast(event_tx);
+    let collector = EventCollector::new(event_rx);
+    (presenter, collector)
+}
+
+/// PRD acceptance: TDD still pauses for session document approval after planning, and the on-disk
+/// changeset records the active recipe (same contract as daemon `StartSession`).
+#[test]
+#[serial]
+fn tdd_plan_still_triggers_session_document_approval_via_recipe_policy() {
+    let sessions_base = std::env::temp_dir().join("tddy-presenter-tdd-recipe-policy");
+    let _ = std::fs::remove_dir_all(&sessions_base);
+    std::fs::create_dir_all(&sessions_base).expect("sessions base");
+    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
+
+    let (mut presenter, mut events) = presenter_with_events();
+    let backend = create_stub_backend();
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-tdd-recipe-policy");
+
+    presenter.start_workflow(
+        backend, output_dir, None, None, None, None, false, None, None, None,
+    );
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
+
+    let mut iterations = 0;
+    const MAX: usize = 4000;
+    let mut saw_document_review = false;
+    let sessions_path = sessions_base.join(SESSIONS_SUBDIR);
+    while iterations < MAX {
+        presenter.poll_workflow();
+        events.drain();
+        for e in events.events() {
+            if let TestEvent::WorkflowComplete(Err(msg)) = e {
+                std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+                panic!("tdd workflow failed before document approval: {}", msg);
+            }
+        }
+        if events
+            .events()
+            .iter()
+            .any(|e| matches!(e, TestEvent::ModeChanged(AppMode::DocumentReview { .. })))
+        {
+            saw_document_review = true;
+        }
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+    assert!(
+        saw_document_review,
+        "expected session document approval (DocumentReview) after plan per TDD recipe policy; last mode {:?}, events: {:?}",
+        presenter.state().mode,
+        events.events()
+    );
+    let session_dir =
+        first_session_dir_under(&sessions_path).expect("session directory under TDDY_SESSIONS_DIR");
+    let cs = read_changeset(&session_dir).expect("changeset.yaml when document approval ran");
+    assert_eq!(
+        cs.recipe.as_deref(),
+        Some("tdd"),
+        "changeset.yaml must record recipe \"tdd\" so approval/resume paths use recipe policy (F2/F3)"
+    );
+}
+
+/// PRD acceptance: free-prompting disables primary session document approval — no DocumentReview gate
+/// when the recipe policy says approval is skipped.
+#[test]
+#[serial]
+fn free_prompting_session_has_no_document_approval_when_disabled_by_recipe() {
+    let sessions_base = std::env::temp_dir().join("tddy-presenter-free-prompting-no-approval");
+    let _ = std::fs::remove_dir_all(&sessions_base);
+    std::fs::create_dir_all(&sessions_base).expect("sessions base");
+    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
+
+    let recipe = resolve_workflow_recipe_from_cli_name("free-prompting").expect("resolve");
+    assert!(
+        !recipe.uses_primary_session_document(),
+        "free-prompting must not use a primary session document when approval is disabled by recipe policy"
+    );
+
+    let (mut presenter, mut events) = free_prompting_presenter_with_events();
+    let backend = create_stub_backend();
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-free-prompting");
+
+    presenter.start_workflow(
+        backend, output_dir, None, None, None, None, false, None, None, None,
+    );
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput(
+        "open-ended task".to_string(),
+    ));
+
+    let start_goal = recipe.start_goal().as_str().to_string();
+    let mut iterations = 0;
+    const MAX: usize = 4000;
+    let mut saw_start_goal = false;
+    while iterations < MAX {
+        presenter.poll_workflow();
+        events.drain();
+        assert!(
+            !events.events().iter().any(|e| {
+                matches!(
+                    e,
+                    TestEvent::ModeChanged(AppMode::DocumentReview { .. })
+                )
+            }),
+            "free-prompting must not enter DocumentReview when recipe disables session document approval; events: {:?}",
+            events.events()
+        );
+        for e in events.events() {
+            if let TestEvent::WorkflowComplete(Err(msg)) = e {
+                std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+                panic!("free-prompting workflow failed: {}", msg);
+            }
+        }
+        if events
+            .events()
+            .iter()
+            .any(|e| matches!(e, TestEvent::GoalStarted(g) if g.as_str() == start_goal.as_str()))
+        {
+            saw_start_goal = true;
+            break;
+        }
+        if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+    assert!(
+        saw_start_goal,
+        "expected GoalStarted({}) for free-prompting; last mode {:?}, events: {:?}",
+        start_goal,
+        presenter.state().mode,
+        events.events()
+    );
+}
+
+/// `tddy-demo --recipe free-prompting`: after the user submits the initial feature line, the TUI must
+/// stay in [`AppMode::Running`] with the `prompting` goal active so Enter routes input to the stub agent.
+/// If the workflow completes immediately (e.g. echo task advances to end), [`WorkflowEvent::WorkflowComplete`]
+/// returns the UI to [`AppMode::FeatureInput`] and Enter submits another feature instead of agent input.
+#[test]
+#[serial]
+fn free_prompting_stub_keeps_running_for_agent_input_after_feature_submit() {
+    let sessions_base = std::env::temp_dir().join("tddy-presenter-free-prompting-running-mode");
+    let _ = std::fs::remove_dir_all(&sessions_base);
+    std::fs::create_dir_all(&sessions_base).expect("sessions base");
+    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
+
+    let (mut presenter, mut events) = free_prompting_presenter_with_events();
+    let backend = create_stub_backend();
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-free-prompting-running");
+
+    presenter.start_workflow(
+        backend, output_dir, None, None, None, None, false, None, None, None,
+    );
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput(
+        "first user line to stub".to_string(),
+    ));
+
+    let mut iterations = 0;
+    const MAX: usize = 500;
+    while iterations < MAX {
+        presenter.poll_workflow();
+        events.drain();
+        for e in events.events() {
+            if let TestEvent::WorkflowComplete(Err(msg)) = e {
+                std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+                panic!("free-prompting workflow failed: {}", msg);
+            }
+        }
+        if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+    assert!(
+        !events
+            .events()
+            .iter()
+            .any(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_)))),
+        "free-prompting must not finish with WorkflowComplete(Ok) while the prompting goal should still accept agent input; events: {:?}",
+        events.events()
+    );
+    assert_eq!(
+        presenter.state().mode,
+        AppMode::Running,
+        "expected AppMode::Running so the prompt bar talks to the agent; got {:?}, events: {:?}",
         presenter.state().mode,
         events.events()
     );
