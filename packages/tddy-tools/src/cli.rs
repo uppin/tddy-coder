@@ -4,7 +4,7 @@
 //! (see [`tddy_tools::schema`] and [`tddy_tools::schema_manifest`]).
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use tddy_tools::schema;
 use tddy_tools::schema_manifest;
+use tddy_tools::session_actions;
 use tddy_tools::session_context;
 
 /// Maximum bytes read from stdin or accepted inline `--data` for `submit` / `ask` (DoS guard).
@@ -55,6 +56,35 @@ pub struct SetSessionContextArgs {
     /// JSON object to merge into session context (same size limits as submit).
     #[arg(long)]
     pub data: Option<String>,
+}
+
+/// Discover and run session actions (`session_dir/actions/*.yaml`).
+#[derive(Parser)]
+pub struct ActionsCli {
+    #[command(subcommand)]
+    pub cmd: ActionsCmd,
+}
+
+#[derive(Subcommand)]
+pub enum ActionsCmd {
+    /// List action ids (and schema summaries) as JSON on stdout.
+    List {
+        /// Directory whose `actions/` subdirectory holds `*.yaml` definitions.
+        #[arg(long)]
+        session_dir: PathBuf,
+    },
+    /// Run one action with structured JSON input; stdout is JSON matching `output_schema` or an error object.
+    Run {
+        #[arg(long)]
+        session_dir: PathBuf,
+        /// Action `id` field from the YAML definition.
+        #[arg(long)]
+        action: String,
+        #[arg(long)]
+        data: Option<String>,
+        #[arg(long)]
+        data_stdin: bool,
+    },
 }
 
 /// Get JSON schema for a goal.
@@ -390,6 +420,42 @@ pub fn run_set_session_context(args: SetSessionContextArgs) -> Result<()> {
     })?;
     let workflow_dir = PathBuf::from(session_dir).join(".workflow");
     session_context::apply_session_context_merge(&workflow_dir, &session_id, &patch)
+}
+
+pub fn run_actions(cli: ActionsCli) -> Result<()> {
+    let marker = serde_json::json!({
+        "tddy": {
+            "marker_id": "M000",
+            "scope": "tddy_tools::cli::run_actions",
+            "data": {}
+        }
+    });
+    eprintln!("{}", marker);
+    match cli.cmd {
+        ActionsCmd::List { session_dir } => {
+            let ids = session_actions::list_session_action_ids(&session_dir)?;
+            let actions: Vec<serde_json::Value> = ids
+                .iter()
+                .map(|id| serde_json::json!({ "id": id }))
+                .collect();
+            let out = serde_json::json!({ "actions": actions });
+            println!("{}", serde_json::to_string(&out)?);
+            Ok(())
+        }
+        ActionsCmd::Run {
+            session_dir,
+            action,
+            data,
+            data_stdin,
+        } => {
+            let json_str = read_input(&data, data_stdin)?;
+            let input: serde_json::Value = serde_json::from_str(&json_str)
+                .map_err(|e| anyhow::anyhow!("invalid JSON for action input: {}", e))?;
+            let output = session_actions::run_session_action_json(&session_dir, &action, &input)?;
+            println!("{}", serde_json::to_string(&output)?);
+            Ok(())
+        }
+    }
 }
 
 pub fn run_get_schema(args: GetSchemaArgs) -> Result<()> {
