@@ -1,6 +1,6 @@
 //! Frame rendering: draw activity log, status bar, prompt bar.
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
@@ -12,7 +12,7 @@ use crate::feature_input_buffer::FeaturePromptSegment;
 use crate::layout::{
     debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_height, question_height,
 };
-use crate::mouse_map::LayoutAreas;
+use crate::mouse_map::{enter_button_rect, LayoutAreas};
 use crate::status_bar_activity::{
     activity_prefix_char_for_draw, display_elapsed_for_goal_row, status_activity_is_agent_active,
 };
@@ -421,6 +421,39 @@ fn truncate_session_id_for_log(id: &str) -> String {
     }
 }
 
+/// Paints the Enter affordance: `+--` on the row above the first prompt line (usually the status
+/// row), then `|`, U+23CE, and a space on the first prompt line. Runs after status and prompt
+/// `Paragraph`s so pixels match [`enter_button_rect`].
+fn paint_enter_affordance(frame: &mut Frame, areas: &LayoutAreas) {
+    let r = enter_button_rect(areas);
+    if r.width == 0 || r.height == 0 {
+        return;
+    }
+    let frame_area = frame.area();
+    if r.x.saturating_add(r.width) > frame_area.width
+        || r.y.saturating_add(r.height) > frame_area.height
+    {
+        return;
+    }
+    let buf = frame.buffer_mut();
+    const RETURN_SYMBOL: &str = "\u{23CE}";
+    let cells = [
+        (0u16, 0u16, "+"),
+        (1u16, 0u16, "-"),
+        (2u16, 0u16, "-"),
+        (0u16, 1u16, "|"),
+        (1u16, 1u16, RETURN_SYMBOL),
+        (2u16, 1u16, " "),
+    ];
+    for (dx, dy, sym) in cells {
+        let x = r.x + dx;
+        let y = r.y + dy;
+        if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+            cell.set_symbol(sym);
+        }
+    }
+}
+
 /// Draw the TUI. When `layout_areas` is Some, stores the layout rects for mouse hit-testing.
 pub fn draw(
     frame: &mut Frame,
@@ -653,6 +686,16 @@ pub fn draw(
             frame.set_cursor_position(pos);
         }
     }
+
+    paint_enter_affordance(
+        frame,
+        &LayoutAreas {
+            activity_log,
+            dynamic_area,
+            status_bar,
+            prompt_bar,
+        },
+    );
 
     // Advance fast spinner phase only while agent-active (Running). Clarification wait uses a 1 Hz
     // idle dot driven by wall time, not `spinner_tick`.
@@ -1007,7 +1050,7 @@ mod tests {
     use std::time::Instant;
     use tddy_core::{AppMode, ClarificationQuestion, PresenterState, QuestionOption};
 
-    use crate::mouse_map::LayoutAreas;
+    use crate::mouse_map::{enter_button_rect, LayoutAreas};
     use ratatui::buffer::Buffer;
     use ratatui::layout::{Position, Rect};
 
@@ -1137,6 +1180,78 @@ mod tests {
             total_questions: 1,
             initial_selected: 0,
         }
+    }
+
+    #[test]
+    fn enter_affordance_paints_ascii_border_straddling_status_and_prompt() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut state = make_state(select_mode_with_goal());
+        state.current_goal = Some("plan".to_string());
+        state.current_state = Some("Running".to_string());
+        let mut vs = ViewState::new();
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+        };
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let pb = areas.prompt_bar;
+        let sb = areas.status_bar;
+        let expected = Rect::new(
+            pb.x + pb.width.saturating_sub(3),
+            pb.y.saturating_sub(1),
+            3,
+            2,
+        );
+        let r = enter_button_rect(&areas);
+        assert_eq!(
+            r, expected,
+            "enter_button_rect must be 3×2 with top row above first prompt line; prompt_bar={pb:?}"
+        );
+        assert!(
+            pb.height >= 1 && pb.y > 0,
+            "expected a single-line prompt strip; prompt_bar={pb:?}"
+        );
+        for dx in 0..r.width {
+            let x = r.x + dx;
+            assert!(
+                x >= sb.x && x < sb.x + sb.width && r.y >= sb.y && r.y < sb.y + sb.height,
+                "top row of affordance must lie on status bar; sb={sb:?} r={r:?}"
+            );
+            assert!(
+                x >= pb.x && x < pb.x + pb.width && r.y + 1 >= pb.y && r.y + 1 < pb.y + pb.height,
+                "bottom row must lie on first prompt line; pb={pb:?} r={r:?}"
+            );
+        }
+
+        let cell_sym = |x: u16, y: u16| {
+            buf.cell(Position::new(x, y))
+                .map(|c| c.symbol().to_string())
+                .unwrap_or_default()
+        };
+
+        assert_eq!(cell_sym(r.x, r.y), "+");
+        assert_eq!(cell_sym(r.x + 1, r.y), "-");
+        assert_eq!(cell_sym(r.x + 2, r.y), "-");
+        assert_eq!(cell_sym(r.x, r.y + 1), "|");
+        let key = cell_sym(r.x + 1, r.y + 1);
+        assert!(
+            key.contains('\u{23CE}'),
+            "expected U+23CE on key cell, got {:?}",
+            key
+        );
+        assert_eq!(cell_sym(r.x + 2, r.y + 1), " ");
     }
 
     /// Acceptance (PRD): `status_bar_frozen_elapsed_in_select_mode` — in Select with an active goal,

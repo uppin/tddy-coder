@@ -2,6 +2,12 @@
 
 Release note history for the Coder product area.
 
+## 2026-04-03 — TUI mouse mode: Enter affordance (3×2)
+
+- **TUI**: **`mouse_map::enter_button_rect`** and **`render::paint_enter_affordance`** draw a fixed **3×2** region at the bottom-right: ASCII **`+--`** on the line above the first prompt (typically the status row), **`|`**, U+23CE, and padding on the first prompt line; the full rectangle is hit-tested and maps to **Enter** via **`key_event_to_intent`**. **`ViewState::last_select_click_option`** supports double-click to confirm in **Select** mode.
+- **Tests**: **`packages/tddy-tui`** (`mouse_map`, `render` affordance tests); **`cargo test -p tddy-tui`**.
+- **Docs**: [tui-status-bar.md](tui-status-bar.md#mouse-mode-enter-control); **`packages/tddy-tui/docs/changesets.md`**.
+
 ## 2026-03-29 — Feature prompt: project agent skills and `/recipe`
 
 - **Core**: **`tddy_core::agent_skills`** scans **`.agents/skills/<folder>/SKILL.md`**, parses YAML frontmatter (**`name`**, **`description`**), rejects folder/name mismatches with **`InvalidSkillEntry`**, exposes **`slash_menu_items`** (**`BuiltinRecipe`** plus valid skills), **`compose_prompt_with_selected_skill`** (PRD-shaped block with path and body), and **`agents_skills_scan_cache_token`** for scan invalidation hints.
