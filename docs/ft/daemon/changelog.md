@@ -1,5 +1,11 @@
 # Daemon product area changelog
 
+## 2026-04-03 — ConnectionService: session workflow file listing and read
+
+- **`ListSessionWorkflowFiles`**: Returns present allowlisted basenames (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`) under `{sessions_base}/sessions/{session_id}/`, with canonical-path filtering for symlink-safe listing.
+- **`ReadSessionWorkflowFile`**: Returns UTF-8 file contents for an allowlisted basename; rejects traversal segments and paths that resolve outside the session directory.
+- **Implementation**: **`session_workflow_files`** module; integration tests **`session_workflow_files_rpc`**. Package reference: [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md). Web surface: [web-terminal.md](../web/web-terminal.md).
+
 ## 2026-03-29 — ConnectionService: `ListAgents` and `allowed_agents`
 
 - **Config**: Daemon YAML includes **`allowed_agents`**, a list of **`id`** (required) and optional **`label`** entries (same shape as tool allowlist entries; unknown keys on each entry are rejected when using **`deny_unknown_fields`**).

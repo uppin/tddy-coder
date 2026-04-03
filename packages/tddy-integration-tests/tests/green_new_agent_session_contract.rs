@@ -60,10 +60,7 @@ async fn green_with_new_agent_session_does_not_resume_old_session() {
     );
 
     let mut ctx = common::ctx_green(session_dir.clone(), None, false);
-    ctx.insert(
-        "new_agent_session".to_string(),
-        serde_json::json!(true),
-    );
+    ctx.insert("new_agent_session".to_string(), serde_json::json!(true));
 
     let outcome = engine
         .run_goal(&GoalId::new("green"), ctx)
@@ -95,10 +92,8 @@ async fn green_with_new_agent_session_does_not_resume_old_session() {
 
 #[tokio::test]
 async fn green_without_new_agent_session_resumes_existing_session() {
-    let session_dir = std::env::temp_dir().join(format!(
-        "tddy-green-resume-existing-{}",
-        std::process::id()
-    ));
+    let session_dir =
+        std::env::temp_dir().join(format!("tddy-green-resume-existing-{}", std::process::id()));
     setup_session_ready_for_green(&session_dir);
 
     let backend = Arc::new(MockBackend::new());
@@ -178,10 +173,7 @@ async fn green_new_agent_session_remediation_retries_also_start_fresh() {
     );
 
     let mut ctx = common::ctx_green(session_dir.clone(), None, false);
-    ctx.insert(
-        "new_agent_session".to_string(),
-        serde_json::json!(true),
-    );
+    ctx.insert("new_agent_session".to_string(), serde_json::json!(true));
 
     let outcome = engine
         .run_goal(&GoalId::new("green"), ctx)

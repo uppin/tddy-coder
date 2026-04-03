@@ -2,6 +2,13 @@
 
 Release note history for the Web product area.
 
+## 2026-04-03 — Session workflow files: RPC contract and preview components
+
+- **`connection.proto`**: **`ListSessionWorkflowFiles`** and **`ReadSessionWorkflowFile`** messages; **`ConnectionService`** exposes both RPCs for read-only workflow artifacts under the daemon-resolved session directory.
+- **tddy-daemon**: Allowlisted listing and UTF-8 reads with canonical path checks (**`session_workflow_files`**); integration tests **`session_workflow_files_rpc`**.
+- **tddy-web**: **`SessionFilesPanel`**, **`SessionMoreActionsMenu`**, **`sessionWorkflowPreview`** (preview routing); Cypress **`SessionWorkflowFiles.cy.tsx`** and Bun tests for **`workflowPreviewKind`**. TypeScript types for **`connection.proto`** come from **`bun run generate`** in **`packages/tddy-web`**. **ConnectionScreen** does not embed the session-files menu or panel on session rows in the shipped bundle.
+- **Feature docs**: [web-terminal.md](web-terminal.md) (Connection screen — session workflow files); [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md).
+
 ## 2026-03-29 — Connection screen: backend options from `ListAgents`
 
 - **ConnectionScreen**: **Backend** (per project) is populated from **`ListAgents`**; option values are agent **`id`** strings from daemon **`allowed_agents`**, with labels from the RPC (blank optional labels resolve to **`id`** on the server). **Start New Session** requires a selected backend when the list is non-empty. The default selection is the first RPC entry unless a stored choice for that project still exists in the list.

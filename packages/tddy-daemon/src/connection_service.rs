@@ -13,10 +13,12 @@ use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, EligibleDaemonEntry, ListAgentsRequest,
     ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
-    ListProjectsRequest, ListProjectsResponse, ListSessionsRequest, ListSessionsResponse,
-    ListToolsRequest, ListToolsResponse, ProjectEntry as ProtoProjectEntry, ResumeSessionRequest,
-    ResumeSessionResponse, SessionEntry as ProtoSessionEntry, Signal, SignalSessionRequest,
-    SignalSessionResponse, StartSessionRequest, StartSessionResponse, ToolInfo,
+    ListProjectsRequest, ListProjectsResponse, ListSessionWorkflowFilesRequest,
+    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse, ListToolsRequest,
+    ListToolsResponse, ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
+    ReadSessionWorkflowFileResponse, ResumeSessionRequest, ResumeSessionResponse,
+    SessionEntry as ProtoSessionEntry, Signal, SignalSessionRequest, SignalSessionResponse,
+    StartSessionRequest, StartSessionResponse, ToolInfo, WorkflowFileEntry,
 };
 use uuid::Uuid;
 
@@ -719,6 +721,81 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .collect();
 
         Ok(Response::new(ListEligibleDaemonsResponse { daemons }))
+    }
+
+    async fn list_session_workflow_files(
+        &self,
+        request: Request<ListSessionWorkflowFilesRequest>,
+    ) -> Result<Response<ListSessionWorkflowFilesResponse>, Status> {
+        let req = request.into_inner();
+        log::debug!(
+            "ListSessionWorkflowFiles: session_id={}",
+            req.session_id.trim()
+        );
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let sessions_base = (self.sessions_base_for_user)(os_user)
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+        log::debug!(
+            "ListSessionWorkflowFiles: resolved session_dir={:?}",
+            session_dir
+        );
+        let basenames =
+            crate::session_workflow_files::list_allowlisted_workflow_basenames(&session_dir)?;
+        let n = basenames.len();
+        let files: Vec<WorkflowFileEntry> = basenames
+            .into_iter()
+            .map(|basename| WorkflowFileEntry { basename })
+            .collect();
+        log::info!(
+            "ListSessionWorkflowFiles: returning {} file(s) for session_id={}",
+            n,
+            req.session_id.trim()
+        );
+        Ok(Response::new(ListSessionWorkflowFilesResponse { files }))
+    }
+
+    async fn read_session_workflow_file(
+        &self,
+        request: Request<ReadSessionWorkflowFileRequest>,
+    ) -> Result<Response<ReadSessionWorkflowFileResponse>, Status> {
+        let req = request.into_inner();
+        log::debug!(
+            "ReadSessionWorkflowFile: session_id={} basename={:?}",
+            req.session_id.trim(),
+            req.basename
+        );
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let sessions_base = (self.sessions_base_for_user)(os_user)
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+        let content_utf8 = crate::session_workflow_files::read_allowlisted_workflow_file_utf8(
+            &session_dir,
+            &req.basename,
+        )?;
+        log::info!(
+            "ReadSessionWorkflowFile: success session_id={} basename={:?} bytes={}",
+            req.session_id.trim(),
+            req.basename,
+            content_utf8.len()
+        );
+        Ok(Response::new(ReadSessionWorkflowFileResponse {
+            content_utf8,
+        }))
     }
 }
 

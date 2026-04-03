@@ -1,61 +1,75 @@
-# Validate Production Readiness Report
+# Validate Production Readiness Report — Session Workflow Files
 
 ## Summary
 
-The ListAgents / `allowed_agents` feature is **functionally sound** for production: YAML-backed allowlist, a single mapping path for labels (`agent_list_mapping`), server-side enforcement on `StartSession` when the list is non-empty, and web UI driven by RPC with tests at unit, integration, and component levels. **Gaps** are mainly operational: coupled `Promise.all` for ListTools + ListAgents (version skew and partial-failure UX), verbose **info-level** daemon logging per allowlist row, **browser `console.debug`** left in place, **empty `allowed_agents` disables** StartSession agent checks (open allowlist), and **operator documentation** is still expected via the docs changeset workflow rather than being present in-repo here.
+Server-side **listing and reading** of session workflow artifacts is **appropriately locked down**: a fixed basename allowlist, `session_id` validation via `validate_session_id_segment`, resolution under `unified_session_dir_path`, and **canonical path checks** so symlink-based escapes are skipped or rejected. The web **preview layer** (`SessionFilesPanel`) avoids `dangerouslySetInnerHTML` and uses a minimal Markdown renderer with React text nodes, which is a sound baseline for XSS.
+
+**Not production-complete end-to-end:** `packages/tddy-web/src/gen/connection_pb.ts` is **not regenerated** from `connection.proto` (no `ListSessionWorkflowFiles` / `ReadSessionWorkflowFile` in the Connect client), **`ConnectionScreen` does not call** these RPCs or mount the session files UI, and **`SessionMoreActionsMenu`’s “Show files”** is a stub (closes the menu only). Daemon handlers run **synchronous filesystem work** on the async RPC path, and reads have **no size bound** (memory/DoS consideration). Repo hygiene: **`.tddy-red-cargo-test.log`** remains untracked noise.
 
 ---
 
-## Strengths
+## Security
 
-- **Security (server-side allowlist):** When `allowed_agents` is non-empty, `StartSession` rejects unknown agent ids with `invalid_argument` and a clear configuration hint, so the UI cannot bypass policy by crafting requests.
+| Area | Assessment |
+|------|------------|
+| **Session directory** | `validate_session_id_segment` rejects empty, long, multi-segment, and non `[a-zA-Z0-9_-]` ids (`tddy-core`); consistent with other session RPCs. |
+| **Basename / traversal** | `validate_workflow_basename` rejects `..`, `/`, `\`, and any non-allowlisted name; only `changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`. |
+| **Symlinks & escapes** | `canonicalize()` + `starts_with(&session_root)` on both list and read; outside paths log `warn` and skip (list) or `permission_denied` (read). |
+| **Sensitive files** | `.env` is not allowlisted; list test asserts it never appears. |
+| **AuthZ** | Same pattern as peers: valid `session_token` → GitHub user → mapped OS user → that user’s `sessions_base`; users cannot target another user’s tree without their token. |
+| **Web rendering** | Preview does not parse arbitrary HTML; content is shown as text or simple blocks—low XSS risk for workflow files. |
 
-- **Configuration / schema:** `DaemonConfig` and `AllowedAgent` use `#[serde(deny_unknown_fields)]`, reducing silent misconfiguration. `allowed_agents` defaults to an empty vec; optional `label` mirrors `allowed_tools` patterns. `dev.daemon.yaml` documents intent and lists four backends with human-readable labels.
-
-- **Consistency:** `list_agents` and label rules are centralized in `agent_list_mapping::agent_allowlist_rows`, with unit tests for label trim and blank-label fallback—aligned with `list_tools` label behavior.
-
-- **Error handling (daemon):** `list_agents` is a simple in-memory map; no panics on expected paths. `StartSession` agent validation runs after auth/OS-user resolution and before spawn work.
-
-- **Performance (N small):** Two short RPCs from the web client and O(n) scans over a small allowlist on the daemon are appropriate; no unnecessary blocking or fan-out.
-
-- **Test coverage:** Rust unit tests on mapping; acceptance tests for config, ListAgents echo, ListTools regression, and unknown agent on StartSession; Bun tests for `agentOptions`; Cypress stubs for ListAgents.
-
----
-
-## Gaps / Risks
-
-- **Deployment / version coupling (high operational impact):** `ConnectionScreen` loads tools and agents via `Promise.all([listTools, listAgents])`. A daemon or proxy that does not implement `ListAgents` causes **both** lists to clear and a single generic error—stricter than prior ListTools-only behavior. **Mitigation in ops:** ship daemon + web together; document minimum compatible versions.
-
-- **Security semantics when allowlist is empty:** If `allowed_agents` is empty, `StartSession` does **not** restrict `agent` (only non-empty agent strings are checked against the list). Operators who omit the key get “any agent id accepted,” which may be surprising for a feature marketed as an allowlist.
-
-- **Observability / logging:** `agent_allowlist_rows` logs **`log::info!` per row** (id + display label). At default info levels and moderate N, this is noisy and may leak deployment choices into logs. `list_agents` also logs an info line with agent count (reasonable).
-
-- **Client logging:** `ConnectionScreen` and `agentOptions.ts` use **`console.debug`** for load counts and coalescing—acceptable for dev but worth removing or gating before treating the bundle as production-polished.
-
-- **UI error state:** On combined load failure, both `tools` and `agents` are cleared and `error` is set; there is **no dedicated retry** for that initial fetch (user must refresh or re-auth). The error message does not distinguish ListTools vs ListAgents failure.
-
-- **Configuration validation:** No daemon-side check for **duplicate `id`** values in `allowed_agents`; duplicates would still enforce membership but could confuse operators and UIs.
-
-- **Hygiene / docs:** Untracked `.tddy-red-*` artifacts and Cypress `MOCK_DEFAULT_LIST_AGENTS` vs `dev.daemon.yaml` drift risk were noted in the evaluation report; operator-facing `allowed_agents` documentation belongs in the docs workflow before release.
+**Residual risks:** Unbounded `read_to_string` for allowlisted files (very large files → memory pressure). `log::info!` in `read_allowlisted_workflow_file_utf8` records **byte length** but labels it as “UTF-8 chars” (misleading, not a security issue).
 
 ---
 
-## Recommendations (prioritized)
+## Error Handling & Logging
 
-1. **Release / ops:** Document **co-deploy** requirements for tddy-web and tddy-daemon (or minimum daemon version) whenever `ListAgents` is required; optionally add a **changelog or compatibility matrix** entry for Connection API consumers.
-
-2. **Observability:** Downgrade per-row mapping logs in `agent_list_mapping.rs` from **`info` to `debug`** (keep a single summary at info or debug only). Align with production log level expectations.
-
-3. **Client polish:** Remove or feature-gate **`console.debug`** in `ConnectionScreen.tsx` and `agentOptions.ts` for production builds if the team wants a clean console.
-
-4. **Resilience (optional product decision):** If backward compatibility with older daemons matters, consider **independent** ListTools / ListAgents requests (or graceful fallback when `ListAgents` returns unimplemented) instead of `Promise.all`—only if product accepts the added complexity.
-
-5. **Operator clarity:** In operator docs, state explicitly that **empty `allowed_agents` means no agent id restriction** on `StartSession`; recommend non-empty allowlists for locked-down deployments.
-
-6. **Schema hardening (optional):** Add startup or load-time validation for **duplicate agent ids**; reject or warn in logs with a clear message.
-
-7. **Hygiene:** Delete or **gitignore** `.tddy-red-capture.txt` / `.tddy-red-submit.json` before merge; add a one-line comment or doc link tying Cypress default ListAgents stubs to `dev.daemon.yaml` to reduce drift.
+- **gRPC mapping:** Invalid basename → `invalid_argument`; missing/inaccessible session dir → `failed_precondition`; missing file after canonicalize → `not_found`; escape → `permission_denied`; read failure → `internal` with error string (appropriate for server-side I/O failure).
+- **`log::debug`:** Used for validation failures, canonicalize skips, and path diagnostics—suitable volume for production when default level is `info`.
+- **`log::info`:** Emitted on **every successful** list and read in `session_workflow_files.rs` and again in `connection_service.rs` (duplicate-style success lines). Under busy dashboards this may be **noisier than necessary**; consider a single summary line at the RPC layer or downgrade inner module success to `debug`.
+- **`log::warn`:** Used when a symlink or layout resolves outside the session tree—appropriate for security-relevant events.
+- **`log::error`:** On unexpected `read_to_string` failure—appropriate.
 
 ---
 
-*Scope: read-only review of paths listed in the validation request; aligned with `evaluation-report.md` where applicable.*
+## Configuration
+
+- **No new daemon YAML keys** for this feature: allowlist is **compile-time** in `WORKFLOW_FILE_ALLOWLIST`. Operators cannot widen/narrow files without a release—predictable for security, inflexible if product later needs per-org toggles.
+- **Proto** defines `ListSessionWorkflowFiles` / `ReadSessionWorkflowFile`; **web generated types are stale** until `buf generate` (or the project’s codegen script) is run and committed.
+
+---
+
+## Performance
+
+- **Sync I/O on async RPC path:** `list_session_workflow_files` and `read_session_workflow_file` are `async fn` but call blocking `std::fs` and `canonicalize` inline. Under load, this can **block the Tokio worker** thread. Production-hardening options: `tokio::task::spawn_blocking` for the filesystem work, or a small dedicated blocking pool—only needed if these endpoints see meaningful concurrency.
+- **List:** Up to four allowlisted paths × `exists` / `canonicalize` / `metadata`—bounded small work.
+- **Read:** Full file into a `String`; no streaming or cap.
+
+---
+
+## Production Gaps
+
+1. **Web ↔ daemon contract:** `connection_pb.ts` does not include the new RPCs; the browser cannot type-safely call them until codegen is refreshed and wired.
+2. **Product integration:** `ConnectionScreen` does not fetch workflow files or render `SessionFilesPanel`; session table UX is unchanged for file preview.
+3. **SessionMoreActionsMenu:** “Show files” does not open a panel, navigate, or trigger RPCs—placeholder only.
+4. **Operational logging:** Duplicate `info` success logs (module + service) and possible high volume on automated polling if added later without backoff.
+5. **Resource limits:** No max bytes for `ReadSessionWorkflowFile` response body.
+6. **Test comment drift:** `session_workflow_files_rpc.rs` header still says handlers are “not fully implemented yet (Red)”—stale vs current implementation.
+7. **Repository hygiene:** `.tddy-red-cargo-test.log` (and similar) should be gitignored or deleted before merge to avoid accidental commits and reviewer noise.
+
+---
+
+## Recommendations
+
+1. **Ship checklist:** Run **Buf / protoc codegen** for `packages/tddy-web`, commit `connection_pb.ts`, then implement **list + read** in `ConnectionScreen` (or a child component) with loading/error states.
+2. **Wire UX:** Connect **`SessionMoreActionsMenu`** “Show files” to state that shows **`SessionFilesPanel`** (drawer/modal) and loads files for the selected `session_id`.
+3. **Performance:** Move filesystem work to **`spawn_blocking`** (or document that call volume is low enough to accept blocking).
+4. **Safety / SRE:** Add a **max file size** (e.g. 1–4 MiB) for reads; return `invalid_argument` or `resource_exhausted` when exceeded.
+5. **Logging:** Deduplicate success **`log::info`** between `session_workflow_files` and `connection_service`; fix the **“UTF-8 chars”** log message to **bytes** or use `content.chars().count()` if character count is intended.
+6. **Hygiene:** Add `.tddy-red-*.log` to `.gitignore` if these artifacts are routine, or delete local copies; refresh the **Red** comment in the RPC test file.
+7. **Future configuration:** If the allowlist must vary by deployment, move it to config with explicit review—avoid silent broadening of readable paths.
+
+---
+
+*Scope: `session_workflow_files.rs`, `connection_service.rs` workflow RPC handlers, `connection.proto`, `packages/tddy-web/src/components/session/*.tsx`, `sessionWorkflowPreview.ts`, and known evaluation gaps.*
