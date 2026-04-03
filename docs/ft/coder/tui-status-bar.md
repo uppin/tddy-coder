@@ -43,6 +43,17 @@ In `MarkdownViewer`, **Approve** and **Reject** do not occupy a fixed footer ban
 - **Periodic render**: Headless `VirtualTui` wakes on a short interval for agent-active modes so the spinner animates smoothly; in clarification waits the interval is about one second so the idle heartbeat and frozen clock align with visible updates without high-frequency full-frame traffic when only the idle phase advances.
 - **Frame diffing**: Bytes go to the client when the rendered frame differs from the previous frame. Cursor-position-only updates (same cell paint, different CUP or cursor show/hide CSI sequences) are rate-limited by a minimum interval so the stream does not flood on caret motion alone.
 
+## Mouse mode: Enter control
+
+**Updated: 2026-04-03**
+
+When pointer reporting is active (`EnableMouseCapture`), the TUI exposes a fixed **3×2** cell **Enter** affordance at the **bottom-right** of the terminal, aligned with the prompt strip:
+
+- **Geometry**: Three columns by two rows. The **top** row sits on the line **immediately above** the first prompt line—usually the **status bar** row, so a **one-line** `prompt_bar` still fits the frame without growing the prompt height. The **bottom** row sits on the **first line of the prompt bar**; U+23CE appears only there. If `--debug` adds a debug log strip between status and prompt, the top row of the frame uses the **last line above the prompt** (e.g. bottom of the debug region). Status / debug / prompt text in those six cells may be overwritten after the corresponding `Paragraph` widgets render.
+- **Label**: ASCII `+--` on the upper row; `|`, U+23CE (`⏎`), and a space on the lower row.
+- **Hit-testing**: `packages/tddy-tui/src/mouse_map.rs` defines `enter_button_rect` and routes left-clicks anywhere in that 3×2—including `+`, `-`, `|`, and `⏎`—to the same intents as **Enter** (`key_event_to_intent`).
+- **Narrow terminals**: If there is no row above the prompt (`prompt_bar.y == 0`) or the row is narrower than three columns, painting and hit-testing skip the affordance.
+
 ## Operational notes
 
 - Status-bar policy helpers live in `packages/tddy-tui/src/status_bar_activity.rs`; formatting helpers in `packages/tddy-tui/src/ui.rs`; frame composition in `packages/tddy-tui/src/render.rs`.
