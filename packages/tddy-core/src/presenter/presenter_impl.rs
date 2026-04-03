@@ -426,6 +426,14 @@ impl Presenter {
                 if text.is_empty() {
                     return;
                 }
+                if let Some(ref dir) = self.workflow_session_dir {
+                    let mut cs = crate::changeset::read_changeset(dir)
+                        .unwrap_or_else(|_| crate::changeset::Changeset::default());
+                    cs.initial_prompt = Some(text.clone());
+                    if let Err(e) = crate::changeset::write_changeset(dir, &cs) {
+                        log::warn!("SubmitFeatureInput: persist changeset: {}", e);
+                    }
+                }
                 // Previous run finished (`workflow_result` set): start a new workflow. Do not send on
                 // `answer_tx` — it may still be `Some` until the worker thread exits, and a buffered
                 // send would skip `restart_workflow` and drop the second run.
