@@ -32,6 +32,14 @@ import {
   sessionPidDisplay,
 } from "../utils/sessionDisplay";
 import {
+  SESSION_TABLE_COLUMN_HEADER_LABEL,
+  SESSION_TABLE_COLUMN_KEYS_IN_TABLE_ORDER,
+  sessionTableColumnHeaderTestId,
+  useWindowInnerWidthPx,
+  visibleSessionTableColumnKeysForViewportWidth,
+  type SessionTableColumnKey,
+} from "./connection/sessionTableColumns";
+import {
   isSessionOrphan,
   projectForUnscopedSession,
   sortedSessionsForProjectTable,
@@ -502,6 +510,14 @@ export function ConnectionScreen({
     sessionId: string;
   } | null>(null);
   const client = useMemo(() => createConnectionClient(), []);
+  const sessionTableViewportWidthPx = useWindowInnerWidthPx();
+  const visibleSessionColumnKeys = useMemo(() => {
+    const keys = visibleSessionTableColumnKeysForViewportWidth(sessionTableViewportWidthPx);
+    return new Set<SessionTableColumnKey>(keys);
+  }, [sessionTableViewportWidthPx]);
+
+  const sessionColumnHideStyle = (col: SessionTableColumnKey) =>
+    visibleSessionColumnKeys.has(col) ? undefined : { display: "none" as const };
 
   const presenceReady =
     Boolean(commonRoom?.trim() && livekitUrl?.trim()) &&
@@ -541,10 +557,6 @@ export function ConnectionScreen({
       .then(([toolsRes, agentsRes]) => {
         setTools(toolsRes.tools);
         setAgents(agentsRes.agents);
-        console.debug("[ConnectionScreen] ListTools + ListAgents loaded", {
-          tools: toolsRes.tools.length,
-          agents: agentsRes.agents.length,
-        });
       })
       .catch((e) => {
         setTools([]);
@@ -933,32 +945,46 @@ export function ConnectionScreen({
               {projectSessions.length === 0 ? (
                 <p style={{ fontSize: 14, color: "#666" }}>No sessions for this project.</p>
               ) : (
-                <Table className="mt-3 w-full min-w-0" data-testid={`sessions-table-${p.projectId}`}>
+                <Table
+                  className="mt-3 w-full min-w-0 overflow-x-auto"
+                  data-testid={`sessions-table-${p.projectId}`}
+                >
                   <TableHeader>
                     <TableRow>
-                      <TableHead>ID</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Host</TableHead>
-                      <TableHead>PID</TableHead>
-                      <TableHead>Goal</TableHead>
-                      <TableHead>Workflow</TableHead>
-                      <TableHead>Elapsed</TableHead>
-                      <TableHead>Agent</TableHead>
-                      <TableHead>Model</TableHead>
-                      <TableHead>Actions</TableHead>
+                      {SESSION_TABLE_COLUMN_KEYS_IN_TABLE_ORDER.map((col) => (
+                        <TableHead
+                          key={col}
+                          style={sessionColumnHideStyle(col)}
+                          data-testid={sessionTableColumnHeaderTestId(col)}
+                        >
+                          {SESSION_TABLE_COLUMN_HEADER_LABEL[col]}
+                        </TableHead>
+                      ))}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {projectSessions.map((s) => (
                       <TableRow key={s.sessionId}>
-                        <TableCell>{sessionIdFirstSegment(s.sessionId)}</TableCell>
-                        <TableCell>{formatSessionCreatedAt(s.createdAt)}</TableCell>
-                        <TableCell>{s.status}</TableCell>
-                        <TableCell>{s.daemonInstanceId || "—"}</TableCell>
-                        <TableCell>{sessionPidDisplay(s.isActive, s.pid)}</TableCell>
-                        <SessionWorkflowStatusCells session={s} />
-                        <TableCell>
+                        <TableCell style={sessionColumnHideStyle("id")}>
+                          {sessionIdFirstSegment(s.sessionId)}
+                        </TableCell>
+                        <TableCell style={sessionColumnHideStyle("date")}>
+                          {formatSessionCreatedAt(s.createdAt)}
+                        </TableCell>
+                        <TableCell style={sessionColumnHideStyle("status")}>
+                          {s.status}
+                        </TableCell>
+                        <TableCell style={sessionColumnHideStyle("host")}>
+                          {s.daemonInstanceId || "—"}
+                        </TableCell>
+                        <TableCell style={sessionColumnHideStyle("pid")}>
+                          {sessionPidDisplay(s.isActive, s.pid)}
+                        </TableCell>
+                        <SessionWorkflowStatusCells
+                          session={s}
+                          visibleColumnKeys={visibleSessionColumnKeys}
+                        />
+                        <TableCell style={sessionColumnHideStyle("actions")}>
                           <span className="inline-flex flex-wrap items-center gap-2">
                             {s.isActive ? (
                               <>
@@ -1019,32 +1045,43 @@ export function ConnectionScreen({
             />
             Debug logging (browser terminal, Connect / Resume below)
           </label>
-          <Table className="mt-3 w-full min-w-0" data-testid="sessions-table-orphan">
+          <Table className="mt-3 w-full min-w-0 overflow-x-auto" data-testid="sessions-table-orphan">
             <TableHeader>
               <TableRow>
-                <TableHead>ID</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Host</TableHead>
-                <TableHead>PID</TableHead>
-                <TableHead>Goal</TableHead>
-                <TableHead>Workflow</TableHead>
-                <TableHead>Elapsed</TableHead>
-                <TableHead>Agent</TableHead>
-                <TableHead>Model</TableHead>
-                <TableHead>Actions</TableHead>
+                {SESSION_TABLE_COLUMN_KEYS_IN_TABLE_ORDER.map((col) => (
+                  <TableHead
+                    key={col}
+                    style={sessionColumnHideStyle(col)}
+                    data-testid={sessionTableColumnHeaderTestId(col)}
+                  >
+                    {SESSION_TABLE_COLUMN_HEADER_LABEL[col]}
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {orphanSessions.map((s) => (
                 <TableRow key={s.sessionId}>
-                  <TableCell>{sessionIdFirstSegment(s.sessionId)}</TableCell>
-                  <TableCell>{formatSessionCreatedAt(s.createdAt)}</TableCell>
-                  <TableCell>{s.status}</TableCell>
-                  <TableCell>{s.daemonInstanceId || "—"}</TableCell>
-                  <TableCell>{sessionPidDisplay(s.isActive, s.pid)}</TableCell>
-                  <SessionWorkflowStatusCells session={s} />
-                  <TableCell>
+                  <TableCell style={sessionColumnHideStyle("id")}>
+                    {sessionIdFirstSegment(s.sessionId)}
+                  </TableCell>
+                  <TableCell style={sessionColumnHideStyle("date")}>
+                    {formatSessionCreatedAt(s.createdAt)}
+                  </TableCell>
+                  <TableCell style={sessionColumnHideStyle("status")}>
+                    {s.status}
+                  </TableCell>
+                  <TableCell style={sessionColumnHideStyle("host")}>
+                    {s.daemonInstanceId || "—"}
+                  </TableCell>
+                  <TableCell style={sessionColumnHideStyle("pid")}>
+                    {sessionPidDisplay(s.isActive, s.pid)}
+                  </TableCell>
+                  <SessionWorkflowStatusCells
+                    session={s}
+                    visibleColumnKeys={visibleSessionColumnKeys}
+                  />
+                  <TableCell style={sessionColumnHideStyle("actions")}>
                     <span className="inline-flex flex-wrap items-center gap-2">
                       {s.isActive ? (
                         <>
