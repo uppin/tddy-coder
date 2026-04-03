@@ -49,6 +49,9 @@ pub struct DaemonConfig {
     /// and ConnectSession use `daemon-{instance_id}-{session_id}` as LiveKit server identity.
     #[serde(default)]
     pub daemon_instance_id: Option<String>,
+    /// Optional Telegram bot notifications (see `telegram_notifier` module).
+    #[serde(default)]
+    pub telegram: Option<TelegramConfig>,
 }
 
 impl Default for DaemonConfig {
@@ -67,8 +70,20 @@ impl Default for DaemonConfig {
             spawn_mouse: true,
             spawn_worker_request_timeout_secs: default_spawn_worker_request_timeout_secs(),
             daemon_instance_id: None,
+            telegram: None,
         }
     }
+}
+
+/// Telegram Bot API integration (teloxide). Loaded from daemon YAML under `telegram:`.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TelegramConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub bot_token: String,
+    #[serde(default)]
+    pub chat_ids: Vec<i64>,
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize)]

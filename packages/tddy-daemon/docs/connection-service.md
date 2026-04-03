@@ -31,6 +31,8 @@ If the changeset is missing, unreadable, or has no matching session row, the cor
 
 The directory listing and enrichment execute inside **`spawn_blocking_with_timeout`** so the async RPC handler does not block the Tokio runtime on disk I/O.
 
+Session **status** strings in metadata drive workflow display; optional Telegram notifications keyed on status transitions are documented in **[telegram-notifier.md](./telegram-notifier.md)** (product context: **[telegram-notifications.md](../../../docs/ft/daemon/telegram-notifications.md)**).
+
 ## DeleteSession behavior
 
 - **Auth**: Same `session_token` → GitHub user → mapped OS user → `sessions_base` as `ListSessions`.

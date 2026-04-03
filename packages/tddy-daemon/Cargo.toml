@@ -31,6 +31,7 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 tddy-connectrpc = { path = "../tddy-connectrpc" }
 uuid = { version = "1", features = ["v4", "v7"] }
+teloxide = { version = "0.17.0", features = ["macros", "rustls"], default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
