@@ -1,8 +1,8 @@
-//! RPC frontend encoding: crossterm events → bytes for VirtualTui.
+//! Crossterm events → bytes for VirtualTui input streams.
 //!
-//! Used by rpc_demo and tests. VirtualTui expects:
+//! VirtualTui expects:
 //! - Keys: raw bytes (Enter=\r, Up=ESC[A, etc.)
-//! - Mouse: SGR format ESC[<pb;px;py M/m
+//! - Mouse: SGR format ESC\[<pb;px;py M/m
 //! - Resize: OSC format ESC]resize;cols;rows BEL
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};

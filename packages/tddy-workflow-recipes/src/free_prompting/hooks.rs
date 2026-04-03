@@ -38,11 +38,25 @@ impl RunnerHooks for FreePromptingWorkflowHooks {
     fn before_task(
         &self,
         task_id: &str,
-        _context: &Context,
+        context: &Context,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         log::debug!("[free-prompting hooks] before_task: {}", task_id);
+        if let Some(answers) = context.get_sync::<String>("answers") {
+            if !answers.trim().is_empty() {
+                log::debug!(
+                    "[free-prompting hooks] transferring answers to prompt (len={})",
+                    answers.len()
+                );
+                context.set_sync("prompt", &answers);
+                context.remove_sync("answers");
+            }
+        }
         if let Some(ref tx) = self.event_tx {
             let _ = tx.send(WorkflowEvent::GoalStarted(task_id.to_string()));
+            let _ = tx.send(WorkflowEvent::StateChange {
+                from: String::new(),
+                to: "prompting".to_string(),
+            });
         }
         Ok(())
     }

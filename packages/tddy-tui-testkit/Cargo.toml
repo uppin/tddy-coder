@@ -1,0 +1,19 @@
+[package]
+name = "tddy-tui-testkit"
+version = "0.1.0"
+edition = "2021"
+description = "VT100-backed Playwright-style harness for in-process VirtualTui testing"
+
+[dependencies]
+tddy-service = { path = "../tddy-service" }
+crossterm = "0.29"
+vt100 = "0.15"
+tokio = { version = "1", features = ["sync", "time", "macros", "rt", "rt-multi-thread"] }
+anyhow = "1"
+log = "0.4"
+
+[dev-dependencies]
+tddy-core = { path = "../tddy-core" }
+tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+uuid = { version = "1", features = ["v4"] }
+env_logger = "0.11"

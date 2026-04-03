@@ -21,6 +21,7 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit", optional = true }
 tddy-service = { path = "../tddy-service" }
 tddy-tui = { path = "../tddy-tui" }
+tddy-tui-testkit = { path = "../tddy-tui-testkit" }
 anyhow = "1"
 env_logger = "0.11"
 log = "0.4"
