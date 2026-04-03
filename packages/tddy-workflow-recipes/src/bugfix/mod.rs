@@ -1,4 +1,4 @@
-//! Bug-fix workflow stub: **Reproduce → Green** (Open–closed proof recipe).
+//! Bug-fix workflow: **Reproduce** with clarification questions (demo-ready recipe).
 
 mod hooks;
 
@@ -13,11 +13,11 @@ use tddy_core::workflow::graph::{Graph, GraphBuilder};
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::recipe::{WorkflowEventSender, WorkflowRecipe};
-use tddy_core::workflow::task::{EchoTask, EndTask};
+use tddy_core::workflow::task::{BackendInvokeTask, EndTask};
 
 use crate::SessionArtifactManifest;
 
-/// Minimal bug-fix recipe: reproduce then green (echo tasks for wiring tests).
+/// Bug-fix recipe: invokes the backend for `reproduce` with agent output and clarification questions.
 #[derive(Clone, Copy, Default, Debug)]
 pub struct BugfixRecipe;
 
@@ -26,17 +26,19 @@ impl WorkflowRecipe for BugfixRecipe {
         "bugfix"
     }
 
-    fn build_graph(&self, _backend: Arc<dyn CodingBackend>) -> Graph {
-        let reproduce = Arc::new(EchoTask::new("reproduce"));
-        let green = Arc::new(EchoTask::new("green"));
+    fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
+        let reproduce = Arc::new(BackendInvokeTask::from_recipe(
+            "reproduce",
+            GoalId::new("reproduce"),
+            self,
+            backend,
+        ));
         let end = Arc::new(EndTask::new("end"));
 
-        GraphBuilder::new("bugfix_stub")
+        GraphBuilder::new("bugfix")
             .add_task(reproduce)
-            .add_task(green)
             .add_task(end)
-            .add_edge("reproduce", "green")
-            .add_edge("green", "end")
+            .add_edge("reproduce", "end")
             .build()
     }
 
@@ -45,24 +47,22 @@ impl WorkflowRecipe for BugfixRecipe {
     }
 
     fn goal_hints(&self, goal_id: &GoalId) -> Option<GoalHints> {
-        let (permission, display) = match goal_id.as_str() {
-            "reproduce" => (PermissionHint::ReadOnly, "Reproduce"),
-            "green" => (PermissionHint::AcceptEdits, "Green"),
-            _ => return None,
-        };
-        Some(GoalHints {
-            display_name: display.to_string(),
-            permission,
-            allowed_tools: vec![],
-            default_model: None,
-            agent_output: false,
-            agent_cli_plan_mode: false,
-            claude_nonzero_exit_ok_if_structured_response: false,
-        })
+        match goal_id.as_str() {
+            "reproduce" => Some(GoalHints {
+                display_name: "Reproduce".to_string(),
+                permission: PermissionHint::ReadOnly,
+                allowed_tools: vec![],
+                default_model: None,
+                agent_output: true,
+                agent_cli_plan_mode: false,
+                claude_nonzero_exit_ok_if_structured_response: false,
+            }),
+            _ => None,
+        }
     }
 
     fn goal_ids(&self) -> Vec<GoalId> {
-        vec![GoalId::new("reproduce"), GoalId::new("green")]
+        vec![GoalId::new("reproduce")]
     }
 
     fn submit_key(&self, goal_id: &GoalId) -> GoalId {
@@ -72,15 +72,13 @@ impl WorkflowRecipe for BugfixRecipe {
     fn next_goal_for_state(&self, state: &WorkflowState) -> Option<GoalId> {
         match state.as_str() {
             "Init" | "Reproducing" => Some(GoalId::new("reproduce")),
-            "Reproduced" | "Greening" => Some(GoalId::new("green")),
-            "GreenComplete" | "Failed" => None,
+            "Failed" => None,
             _ => Some(GoalId::new("reproduce")),
         }
     }
 
     fn status_for_state(&self, state: &WorkflowState) -> &'static str {
         match state.as_str() {
-            "GreenComplete" => "Completed",
             "Failed" => "Failed",
             _ => "Active",
         }
@@ -103,13 +101,16 @@ impl WorkflowRecipe for BugfixRecipe {
     }
 
     fn uses_primary_session_document(&self) -> bool {
-        log::debug!("BugfixRecipe::uses_primary_session_document -> true (fix-plan approval gate)");
-        true
+        false
     }
 
     fn read_primary_session_document_utf8(&self, session_dir: &Path) -> Option<String> {
         self.primary_document_basename()
             .and_then(|b| tddy_workflow::read_session_artifact_utf8(session_dir, &b))
+    }
+
+    fn goal_requires_tddy_tools_submit(&self, goal_id: &GoalId) -> bool {
+        goal_id.as_str() != "reproduce"
     }
 
     fn plain_goal_cli_output(
@@ -152,17 +153,15 @@ mod tests {
         let r: std::sync::Arc<dyn WorkflowRecipe> = std::sync::Arc::new(BugfixRecipe);
         assert_eq!(r.name(), "bugfix");
         assert_eq!(r.start_goal().as_str(), "reproduce");
-        assert_eq!(r.goal_ids().len(), 2);
+        assert_eq!(r.goal_ids().len(), 1);
     }
 
-    /// After the reproduce goal completes, the fix-plan session document must gate the green/fix
-    /// phase (preview + approve / reject / refine), same approval machinery as TDD plan PRD.
     #[test]
-    fn bugfix_reproduce_emits_session_document_approval_before_green() {
+    fn bugfix_reproduce_does_not_require_tddy_tools_submit() {
         let r = BugfixRecipe;
         assert!(
-            r.uses_primary_session_document(),
-            "BugfixRecipe must require session document approval before green/fix"
+            !r.goal_requires_tddy_tools_submit(&GoalId::new("reproduce")),
+            "reproduce goal should not require tddy-tools submit in demo"
         );
     }
 }

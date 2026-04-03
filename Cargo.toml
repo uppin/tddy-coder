@@ -9,6 +9,7 @@ members = [
     "packages/tddy-demo",
     "packages/tddy-tools",
     "packages/tddy-service",
+    "packages/tddy-tui-testkit",
     "packages/tddy-e2e",
     "packages/tddy-livekit",
     "packages/tddy-codegen",

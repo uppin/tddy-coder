@@ -24,6 +24,11 @@ mod keys {
     pub const DOWN: &[u8] = b"\x1b[B";
 }
 
+/// Prefix for assertion/debug output without splitting a UTF-8 codepoint.
+fn utf8_preview(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
 static LARGE_ECHO_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 const LARGE_ECHO_CHAR_CAP: usize = 1_000;
@@ -377,7 +382,7 @@ async fn grpc_terminal_io_receives_ansi_output() -> anyhow::Result<()> {
             || text.contains("Build"),
         "Expected terminal content, got stripped text (len {}): {:?}",
         text.len(),
-        &text[..text.len().min(200)]
+        utf8_preview(&text, 200)
     );
 
     Ok(())
@@ -448,14 +453,14 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
         "[TEST] total output: {} bytes, text_len={}, preview={:?}",
         all_output.len(),
         text.len(),
-        &text[..text.len().min(500)]
+        utf8_preview(&text, 500)
     );
 
     assert!(
         text.contains("State:") || text.contains("Scope"),
         "Should receive initial TUI output; got (len {}): {:?}",
         text.len(),
-        &text[..text.len().min(300)]
+        utf8_preview(&text, 300)
     );
 
     let progressed = text.contains("Session dir:")
@@ -470,7 +475,7 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
         progressed,
         "Keyboard inputs should advance the workflow past the initial screen; got (len {}): {:?}",
         text.len(),
-        &text[..text.len().min(500)]
+        utf8_preview(&text, 500)
     );
 
     Ok(())

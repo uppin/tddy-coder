@@ -5729,6 +5729,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-tui",
+ "tddy-tui-testkit",
  "tddy-workflow-recipes",
  "tempfile",
  "termwright",
@@ -5878,6 +5879,22 @@ dependencies = [
  "tddy-core",
  "tokio",
  "tui-markdown",
+]
+
+[[package]]
+name = "tddy-tui-testkit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossterm",
+ "env_logger",
+ "log",
+ "tddy-core",
+ "tddy-service",
+ "tddy-workflow-recipes",
+ "tokio",
+ "uuid",
+ "vt100",
 ]
 
 [[package]]

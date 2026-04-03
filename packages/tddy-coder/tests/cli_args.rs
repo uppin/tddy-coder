@@ -45,7 +45,7 @@ fn create_fake_tddy_tools(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// `--recipe tdd|bugfix` is accepted; invalid values are rejected.
+/// `--recipe tdd|bugfix|free-prompting` is accepted; invalid values are rejected.
 #[test]
 fn cli_accepts_recipe_flag() {
     let mut cmd = tddy_coder_bin();
@@ -59,8 +59,8 @@ fn cli_accepts_recipe_flag() {
         stdout
     );
     assert!(
-        stdout.contains("bugfix") && stdout.contains("tdd"),
-        "help should mention tdd and bugfix recipes, stdout: {}",
+        stdout.contains("bugfix") && stdout.contains("tdd") && stdout.contains("free-prompting"),
+        "help should mention tdd, bugfix, and free-prompting recipes, stdout: {}",
         stdout
     );
 
