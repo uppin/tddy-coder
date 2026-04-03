@@ -2,7 +2,11 @@
 
 ## Role
 
-`tddy-tui` implements the ratatui view layer for `tddy-coder`: key events map to `UserIntent`, local `ViewState` tracks scroll and UI buffers, and `draw()` renders activity log, dynamic area, status bar, and prompt bar.
+`tddy-tui` implements the ratatui view layer for `tddy-coder`: key events map to `UserIntent`, local `ViewState` tracks scroll and UI buffers, and `draw()` renders activity log, dynamic area, status bar, prompt bar, and footer row.
+
+## Layout and bottom chrome
+
+`layout::layout_chunks_with_inbox` splits the terminal into seven vertical regions: activity, spacer, dynamic (inbox / questions / slash menu), status, optional debug log, prompt, and **footer** (single row). `mouse_map::LayoutAreas` carries `activity_log`, `dynamic_area`, `status_bar`, `prompt_bar`, and `footer_bar`. In `AppMode::Running` with non-empty `running_input`, `render::paint_user_prompt_activity_strip` paints the last activity line as a white-on-dark-grey `> …` strip. `mouse_map::enter_button_rect` and `render::paint_enter_affordance` share the same three-column-wide rectangle covering the full height of status, prompt, and footer; when `TDDY_E2E_NO_ENTER_AFFORDANCE` is set, overlay paint is skipped.
 
 ## Status bar
 
@@ -29,6 +33,8 @@ The status bar is a single `Paragraph` line. Text is built by `render::status_ba
 
 | Module | Responsibility |
 |--------|----------------|
+| `layout` | Vertical splits including activity, dynamic, status, debug, prompt, footer |
+| `mouse_map` | `LayoutAreas`, `enter_button_rect`, pointer hit-testing |
 | `status_bar_activity` | Agent-active vs idle rules, displayed elapsed, activity glyph, VirtualTui periodic interval |
 | `ui` | Elapsed formatting, status line strings, session segment rules, activity prefix |
 | `render` | Frame layout, `draw`, question/inbox/plan/error sub-renderers |

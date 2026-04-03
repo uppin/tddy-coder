@@ -12,7 +12,7 @@ use crate::feature_input_buffer::FeaturePromptSegment;
 use crate::layout::{
     debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_height, question_height,
 };
-use crate::mouse_map::{enter_button_rect, LayoutAreas};
+use crate::mouse_map::{enter_button_rect, LayoutAreas, ENTER_BUTTON_COLS};
 use crate::status_bar_activity::{
     activity_prefix_char_for_draw, display_elapsed_for_goal_row, status_activity_is_agent_active,
 };
@@ -239,7 +239,7 @@ pub(crate) fn markdown_plan_action_layout_for_view(
     markdown_at_end: bool,
 ) -> MarkdownPlanActionLayout {
     let layout = MarkdownPlanActionLayout::TailWithDocumentWhenAtEnd;
-    log::info!(
+    log::trace!(
         "markdown_plan_action_layout_for_view: markdown_at_end={} -> {:?} (fixed footer retired)",
         markdown_at_end,
         layout
@@ -412,6 +412,37 @@ fn status_bar_text_for_draw(state: &PresenterState, view_state: &mut ViewState) 
 }
 
 /// Truncate long session ids in trace logs (correlation id, not a secret, but avoid full dumps).
+/// PRD FR1: last line of the activity pane shows the user-submitted prompt (white on dark grey).
+fn paint_user_prompt_activity_strip(frame: &mut Frame, activity_log: Rect, running_input: &str) {
+    crate::red_phase::tddy_marker("M004", "render::paint_user_prompt_activity_strip");
+    log::debug!(
+        "paint_user_prompt_activity_strip: activity_log={activity_log:?} len={}",
+        running_input.chars().count()
+    );
+    if activity_log.height == 0 || activity_log.width == 0 {
+        log::trace!("paint_user_prompt_activity_strip: skip (zero activity area)");
+        return;
+    }
+    let strip_y = activity_log.y + activity_log.height - 1;
+    let label = format!("> {}", running_input);
+    let style = Style::default().fg(Color::White).bg(Color::DarkGray);
+    let buf = frame.buffer_mut();
+    for (i, ch) in label.chars().enumerate() {
+        let x = activity_log.x.saturating_add(i as u16);
+        if x >= activity_log.x + activity_log.width {
+            break;
+        }
+        if let Some(cell) = buf.cell_mut(Position::new(x, strip_y)) {
+            cell.set_symbol(ch.to_string().as_str());
+            cell.set_style(style);
+        }
+    }
+    log::trace!(
+        "paint_user_prompt_activity_strip: painted strip_y={strip_y} prefix_len={}",
+        label.chars().count().min(activity_log.width as usize)
+    );
+}
+
 fn truncate_session_id_for_log(id: &str) -> String {
     const MAX: usize = 12;
     if id.len() <= MAX {
@@ -421,16 +452,22 @@ fn truncate_session_id_for_log(id: &str) -> String {
     }
 }
 
-/// Paints the Enter affordance: `+--` on the row above the first prompt line (usually the status
-/// row), then `|`, U+23CE, and a space on the first prompt line. Runs after status and prompt
-/// `Paragraph`s so pixels match [`enter_button_rect`].
+/// Paints the Enter affordance on the trailing 3 columns across **status + prompt + footer**:
+/// top/bottom borders `+--`, vertical `|`, U+23CE on the first prompt row of the stack (see
+/// [`enter_button_rect`]). Runs after status, prompt, and footer widgets so glyphs align with layout.
 fn paint_enter_affordance(frame: &mut Frame, areas: &LayoutAreas) {
+    crate::red_phase::tddy_marker("M003", "render::paint_enter_affordance");
     // Long echo / vt100 substring tests (`tddy-e2e` grpc_terminal_rpc) need a stable flattened
-    // screen; the 3×2 overlay is opt-out via env for those tests only.
+    // screen; the overlay is opt-out via env for those tests only (any defined value disables paint).
     if std::env::var_os("TDDY_E2E_NO_ENTER_AFFORDANCE").is_some() {
+        log::trace!("paint_enter_affordance: skipped (TDDY_E2E_NO_ENTER_AFFORDANCE)");
         return;
     }
     let r = enter_button_rect(areas);
+    log::debug!(
+        "paint_enter_affordance: rect={r:?} footer_bar={:?}",
+        areas.footer_bar
+    );
     if r.width == 0 || r.height == 0 {
         return;
     }
@@ -438,25 +475,47 @@ fn paint_enter_affordance(frame: &mut Frame, areas: &LayoutAreas) {
     if r.x.saturating_add(r.width) > frame_area.width
         || r.y.saturating_add(r.height) > frame_area.height
     {
+        log::debug!("paint_enter_affordance: rect outside frame, skip");
         return;
     }
+    let sb_h = areas.status_bar.height;
     let buf = frame.buffer_mut();
     const RETURN_SYMBOL: &str = "\u{23CE}";
-    let cells = [
-        (0u16, 0u16, "+"),
-        (1u16, 0u16, "-"),
-        (2u16, 0u16, "-"),
-        (0u16, 1u16, "|"),
-        (1u16, 1u16, RETURN_SYMBOL),
-        (2u16, 1u16, " "),
-    ];
-    for (dx, dy, sym) in cells {
-        let x = r.x + dx;
-        let y = r.y + dy;
-        if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
-            cell.set_symbol(sym);
+    let h = r.height;
+    for dy in 0..h {
+        for dx in 0..ENTER_BUTTON_COLS {
+            let sym = if dy == 0 {
+                match dx {
+                    0 => "+",
+                    1 | 2 => "-",
+                    _ => " ",
+                }
+            } else if dy == h - 1 {
+                match dx {
+                    0 => "+",
+                    1 | 2 => "-",
+                    _ => " ",
+                }
+            } else if dx == 0 {
+                "|"
+            } else if dy == sb_h && dx == 1 {
+                RETURN_SYMBOL
+            } else {
+                " "
+            };
+            let x = r.x + dx;
+            let y = r.y + dy;
+            if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                cell.set_symbol(sym);
+            }
         }
     }
+    log::trace!(
+        "paint_enter_affordance: painted {}×{} overlay at y={}",
+        r.width,
+        r.height,
+        r.y
+    );
 }
 
 /// Draw the TUI. When `layout_areas` is Some, stores the layout rects for mouse hit-testing.
@@ -490,8 +549,10 @@ pub fn draw(
     let max_height = (area.height / 3).max(1);
     let prompt_h = prompt_height(text_len, area_width, max_height);
 
-    let (activity_log, _status_spacer, dynamic_area, status_bar, debug_log, prompt_bar) =
+    let (activity_log, _status_spacer, dynamic_area, status_bar, debug_log, prompt_bar, footer_bar) =
         layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
+
+    log::debug!("draw: layout status={status_bar:?} prompt={prompt_bar:?} footer={footer_bar:?}");
 
     if let Some(areas) = layout_areas {
         *areas = LayoutAreas {
@@ -499,6 +560,7 @@ pub fn draw(
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
         };
     }
 
@@ -603,6 +665,13 @@ pub fn draw(
                 };
                 let widget = Paragraph::new(content).scroll((scroll_y, 0));
                 frame.render_widget(widget, activity_log);
+                if matches!(state.mode, AppMode::Running) && !view_state.running_input.is_empty() {
+                    paint_user_prompt_activity_strip(
+                        frame,
+                        activity_log,
+                        &view_state.running_input,
+                    );
+                }
             }
         }
     }
@@ -692,6 +761,12 @@ pub fn draw(
         }
     }
 
+    if footer_bar.height > 0 {
+        log::debug!("draw: footer_bar row rect={footer_bar:?}");
+        let widget = Paragraph::new("");
+        frame.render_widget(widget, footer_bar);
+    }
+
     paint_enter_affordance(
         frame,
         &LayoutAreas {
@@ -699,6 +774,7 @@ pub fn draw(
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
         },
     );
 
@@ -1052,12 +1128,18 @@ fn render_inbox(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use std::time::Instant;
-    use tddy_core::{AppMode, ClarificationQuestion, PresenterState, QuestionOption};
+    use tddy_core::{
+        ActivityEntry, ActivityKind, AppMode, ClarificationQuestion, PresenterState, QuestionOption,
+    };
 
     use crate::mouse_map::{enter_button_rect, LayoutAreas};
     use ratatui::buffer::Buffer;
     use ratatui::layout::{Position, Rect};
+    use ratatui::style::Color;
+
+    static ENTER_AFFORDANCE_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn status_bar_row_compact_prefix(buffer: &Buffer, area: Rect) -> String {
         let y = area.y;
@@ -1105,6 +1187,7 @@ mod tests {
             dynamic_area: Rect::default(),
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
         };
         terminal
             .draw(|f| {
@@ -1187,20 +1270,27 @@ mod tests {
         }
     }
 
+    /// PRD AC1: user-submitted prompt appears in the activity pane as white on dark grey.
     #[test]
-    fn enter_affordance_paints_ascii_border_straddling_status_and_prompt() {
+    fn activity_buffer_user_prompt_strip_white_on_grey() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let mut state = make_state(select_mode_with_goal());
+        let mut state = make_state(AppMode::Running);
         state.current_goal = Some("plan".to_string());
         state.current_state = Some("Running".to_string());
+        state.activity_log = vec![ActivityEntry {
+            text: "agent activity line".to_string(),
+            kind: ActivityKind::AgentOutput,
+        }];
         let mut vs = ViewState::new();
+        vs.running_input = "USER_PROMPT_STRIP".to_string();
         let mut areas = LayoutAreas {
             activity_log: Rect::default(),
             dynamic_area: Rect::default(),
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
         };
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1211,52 +1301,82 @@ mod tests {
             .unwrap();
 
         let buf = terminal.backend().buffer();
-        let pb = areas.prompt_bar;
-        let sb = areas.status_bar;
-        let expected = Rect::new(
-            pb.x + pb.width.saturating_sub(3),
-            pb.y.saturating_sub(1),
-            3,
-            2,
-        );
-        let r = enter_button_rect(&areas);
-        assert_eq!(
-            r, expected,
-            "enter_button_rect must be 3×2 with top row above first prompt line; prompt_bar={pb:?}"
-        );
-        assert!(
-            pb.height >= 1 && pb.y > 0,
-            "expected a single-line prompt strip; prompt_bar={pb:?}"
-        );
-        for dx in 0..r.width {
-            let x = r.x + dx;
-            assert!(
-                x >= sb.x && x < sb.x + sb.width && r.y >= sb.y && r.y < sb.y + sb.height,
-                "top row of affordance must lie on status bar; sb={sb:?} r={r:?}"
+        let strip_y = areas.activity_log.y + areas.activity_log.height - 1;
+        let label = "> USER_PROMPT_STRIP";
+        for (i, _) in label.chars().enumerate() {
+            let x = areas.activity_log.x + i as u16;
+            let cell = buf
+                .cell(Position::new(x, strip_y))
+                .expect("user prompt strip cell");
+            let st = cell.style();
+            assert_eq!(
+                st.fg,
+                Some(Color::White),
+                "user prompt strip fg at x={x} strip_y={strip_y}"
             );
-            assert!(
-                x >= pb.x && x < pb.x + pb.width && r.y + 1 >= pb.y && r.y + 1 < pb.y + pb.height,
-                "bottom row must lie on first prompt line; pb={pb:?} r={r:?}"
+            assert_eq!(
+                st.bg,
+                Some(Color::DarkGray),
+                "user prompt strip bg at x={x} strip_y={strip_y}"
             );
         }
+    }
 
-        let cell_sym = |x: u16, y: u16| {
-            buf.cell(Position::new(x, y))
-                .map(|c| c.symbol().to_string())
-                .unwrap_or_default()
+    /// PRD AC4 / FR5: env gate skips overlay; layout exposes footer for full-height affordance.
+    #[test]
+    #[allow(non_snake_case)]
+    fn TDDY_E2E_NO_ENTER_AFFORDANCE_skips_enter_overlay_paint() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let _lock = ENTER_AFFORDANCE_ENV_LOCK.lock().expect("env lock");
+        std::env::set_var("TDDY_E2E_NO_ENTER_AFFORDANCE", "1");
+
+        let mut state = make_state(select_mode_with_goal());
+        state.current_goal = Some("plan".to_string());
+        state.current_state = Some("Running".to_string());
+        let mut vs = ViewState::new();
+        let mut areas = LayoutAreas {
+            activity_log: Rect::default(),
+            dynamic_area: Rect::default(),
+            status_bar: Rect::default(),
+            prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
         };
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                draw(f, &state, &mut vs, false, Some(&mut areas));
+            })
+            .unwrap();
 
-        assert_eq!(cell_sym(r.x, r.y), "+");
-        assert_eq!(cell_sym(r.x + 1, r.y), "-");
-        assert_eq!(cell_sym(r.x + 2, r.y), "-");
-        assert_eq!(cell_sym(r.x, r.y + 1), "|");
-        let key = cell_sym(r.x + 1, r.y + 1);
-        assert!(
-            key.contains('\u{23CE}'),
-            "expected U+23CE on key cell, got {:?}",
-            key
+        std::env::remove_var("TDDY_E2E_NO_ENTER_AFFORDANCE");
+
+        assert_eq!(
+            areas.footer_bar.height,
+            1,
+            "draw must allocate exactly one footer row (PRD: +1 row; enter_button_rect/paint parity)"
         );
-        assert_eq!(cell_sym(r.x + 2, r.y + 1), " ");
+
+        let r = enter_button_rect(&areas);
+        let buf = terminal.backend().buffer();
+        const RETURN_SYMBOL: &str = "\u{23CE}";
+        for y in r.y..r.y.saturating_add(r.height) {
+            for x in r.x..r.x.saturating_add(r.width) {
+                let sym = buf
+                    .cell(Position::new(x, y))
+                    .map(|c| c.symbol())
+                    .unwrap_or_default();
+                assert!(
+                    sym != "+"
+                        && sym != "|"
+                        && !sym.contains(RETURN_SYMBOL)
+                        && !(sym == "-" && x >= r.x && x < r.x + r.width),
+                    "Enter overlay symbols must not be written when TDDY_E2E_NO_ENTER_AFFORDANCE is set; got {sym:?} at ({x},{y})"
+                );
+            }
+        }
     }
 
     /// Acceptance (PRD): `status_bar_frozen_elapsed_in_select_mode` — in Select with an active goal,
@@ -1435,6 +1555,7 @@ mod tests {
             dynamic_area: Rect::default(),
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
         };
 
         vs.feature_edit.set_plain_text("abcdef");
@@ -1573,6 +1694,7 @@ mod tests {
             dynamic_area: Rect::default(),
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
         };
         terminal
             .draw(|f| {
@@ -1613,6 +1735,7 @@ mod tests {
             dynamic_area: Rect::default(),
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
         };
         terminal
             .draw(|f| {
@@ -1662,6 +1785,7 @@ mod tests {
             dynamic_area: Rect::default(),
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
         };
         terminal
             .draw(|f| {
@@ -1698,6 +1822,7 @@ mod tests {
             dynamic_area: Rect::default(),
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
         };
         terminal
             .draw(|f| {

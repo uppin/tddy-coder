@@ -131,6 +131,7 @@ pub fn run_virtual_tui(
             dynamic_area: Rect::default(),
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
         };
         let render_and_send =
             |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
@@ -1120,7 +1121,7 @@ mod tests {
         let text_len = prompt_text.chars().count().min(u16::MAX as usize) as u16;
         let max_height = (ROWS / 3).max(1);
         let prompt_h = prompt_height(text_len, COLS, max_height);
-        let (_, _, _, status_bar, _, _) = layout_chunks_with_inbox(area, 0, 0, prompt_h);
+        let (_, _, _, status_bar, _, _, _) = layout_chunks_with_inbox(area, 0, 0, prompt_h);
         let prompt_start_row = status_bar.y + status_bar.height;
 
         // Collect prompt bar content without whitespace for substring search.

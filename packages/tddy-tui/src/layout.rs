@@ -70,13 +70,18 @@ pub fn prompt_height(text_len: u16, area_width: u16, max_height: u16) -> u16 {
     result
 }
 
-/// Split the terminal area into six regions, including inbox and optional debug log.
+/// Split the terminal area into seven regions: activity, spacer, dynamic (inbox), status, debug log,
+/// prompt, and **footer** (PRD: exactly one footer row below the prompt block).
 pub fn layout_chunks_with_inbox(
     area: Rect,
     inbox_h: u16,
     debug_log_h: u16,
     prompt_h: u16,
-) -> (Rect, Rect, Rect, Rect, Rect, Rect) {
+) -> (Rect, Rect, Rect, Rect, Rect, Rect, Rect) {
+    crate::red_phase::tddy_marker("M001", "layout::layout_chunks_with_inbox");
+    log::debug!(
+        "layout_chunks_with_inbox: area={area:?} inbox_h={inbox_h} debug_log_h={debug_log_h} prompt_h={prompt_h} footer_h=1"
+    );
     log::trace!("layout_chunks_with_inbox: area={area:?} inbox_h={inbox_h} debug_log_h={debug_log_h} prompt_h={prompt_h}");
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -87,10 +92,17 @@ pub fn layout_chunks_with_inbox(
             Constraint::Length(1),
             Constraint::Length(debug_log_h),
             Constraint::Length(prompt_h),
+            Constraint::Length(1),
         ])
         .split(area);
+    let footer_bar = chunks[6];
+    log::trace!(
+        "layout_chunks_with_inbox: activity={:?} footer_bar={:?}",
+        chunks[0],
+        footer_bar
+    );
     (
-        chunks[0], chunks[1], chunks[2], chunks[3], chunks[4], chunks[5],
+        chunks[0], chunks[1], chunks[2], chunks[3], chunks[4], chunks[5], footer_bar,
     )
 }
 
@@ -213,7 +225,7 @@ mod tests {
     fn test_layout_prompt_bar_height_matches_param() {
         let area = Rect::new(0, 0, 80, 24);
         let prompt_h: u16 = 3;
-        let (_activity, _spacer, _status, _inbox, _debug, prompt) =
+        let (_activity, _spacer, _status, _inbox, _debug, prompt, _footer) =
             layout_chunks_with_inbox(area, 0, 0, prompt_h);
         assert_eq!(prompt.height, prompt_h);
     }
@@ -232,7 +244,7 @@ mod tests {
         );
         let area = Rect::new(0, 0, 80, 24);
         let dynamic_h = question_height(&mode).max(inbox_height(0, false));
-        let (activity, spacer, dynamic, status, _debug, prompt) =
+        let (activity, spacer, dynamic, status, _debug, prompt, _footer) =
             layout_chunks_with_inbox(area, dynamic_h, 0, 1);
         assert_eq!(spacer.height, 1, "status spacer row");
         assert_eq!(
@@ -253,5 +265,22 @@ mod tests {
             "prompt must be below status"
         );
         assert!(activity.height > 0, "non-zero activity on 24×80");
+    }
+
+    /// PRD AC2: footer adds exactly one row to bottom chrome (status + prompt + **footer**).
+    #[test]
+    fn layout_footer_adds_exactly_one_row_to_bottom_chrome() {
+        let area = Rect::new(0, 0, 80, 24);
+        let (_, _, _, status, _, prompt, footer) = layout_chunks_with_inbox(area, 0, 0, 1);
+        assert_eq!(
+            footer.height,
+            1,
+            "layout must allocate exactly one footer row below the prompt block (PRD: +1 row contract)"
+        );
+        assert_eq!(
+            status.height + prompt.height + footer.height,
+            status.height + prompt.height + 1,
+            "bottom chrome row count must include the single footer row"
+        );
     }
 }

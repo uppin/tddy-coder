@@ -20,23 +20,39 @@ pub struct LayoutAreas {
     pub dynamic_area: Rect,
     pub status_bar: Rect,
     pub prompt_bar: Rect,
+    /// Single-row footer directly below the prompt text block (PRD: +1 bottom chrome row).
+    pub footer_bar: Rect,
 }
 
-/// Width and height in terminal cells of the pointer Enter affordance (see `enter_button_rect`).
+/// Width in terminal cells of the pointer Enter affordance (see `enter_button_rect`). Height is
+/// computed from layout: status + prompt + footer.
 pub const ENTER_BUTTON_COLS: u16 = 3;
+/// Legacy export: pre-footer overlay used two content rows for the ASCII frame. Actual hit target
+/// height is [`enter_button_rect`].`height` (full status + prompt + footer stack).
 pub const ENTER_BUTTON_ROWS: u16 = 2;
 
-/// Bottom-right **3×2** region: top row on the line **above** the first prompt line (typically the
-/// status bar — “borrowed” chrome so a one-line `prompt_bar` still fits the frame), bottom row on
-/// the first prompt line with U+23CE. [`LayoutAreas::prompt_bar`] may be a single line tall.
+/// Bottom-right **3 columns** wide: full vertical span of **status** + **prompt** + **footer** rows,
+/// right-aligned with the prompt block. Matches [`crate::render::paint_enter_affordance`].
 pub fn enter_button_rect(areas: &LayoutAreas) -> Rect {
+    crate::red_phase::tddy_marker("M002", "mouse_map::enter_button_rect");
+    let sb = areas.status_bar;
     let pb = areas.prompt_bar;
-    if pb.width < ENTER_BUTTON_COLS || pb.y == 0 {
+    let fb = areas.footer_bar;
+    if pb.width < ENTER_BUTTON_COLS || sb.height == 0 {
+        log::debug!("enter_button_rect: degenerate layout sb={sb:?} pb={pb:?} fb={fb:?} -> empty");
         return Rect::new(0, 0, 0, 0);
     }
     let x = pb.x + pb.width - ENTER_BUTTON_COLS;
-    let y = pb.y - 1;
-    Rect::new(x, y, ENTER_BUTTON_COLS, ENTER_BUTTON_ROWS)
+    let y = sb.y;
+    let h = sb
+        .height
+        .saturating_add(pb.height)
+        .saturating_add(fb.height);
+    log::trace!(
+        "enter_button_rect: x={x} y={y} w={} h={h} (status+prompt+footer)",
+        ENTER_BUTTON_COLS
+    );
+    Rect::new(x, y, ENTER_BUTTON_COLS, h)
 }
 
 /// Normalize mouse coordinates for local terminal (crossterm).
@@ -308,6 +324,7 @@ mod tests {
             dynamic_area: dynamic,
             status_bar: status,
             prompt_bar: prompt,
+            footer_bar: Rect::new(0, 24, 80, 0),
         }
     }
 
@@ -321,13 +338,14 @@ mod tests {
         let dynamic_h = question_height(&mode);
         let debug_h = 0u16;
         let prompt_h = 1u16;
-        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar, footer_bar) =
             layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
         LayoutAreas {
             activity_log,
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
         }
     }
 
@@ -347,13 +365,14 @@ mod tests {
         let area_width = area.width;
         let max_height = (area.height / 3).max(1);
         let prompt_h = prompt_height(text_len, area_width, max_height);
-        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar, footer_bar) =
             layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
         LayoutAreas {
             activity_log,
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
         }
     }
 
@@ -534,13 +553,14 @@ mod tests {
         };
         let area = Rect::new(0, 0, 80, 24);
         let dynamic_h = question_height(&mode);
-        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar, footer_bar) =
             layout_chunks_with_inbox(area, dynamic_h, 0, prompt_h);
         let areas = LayoutAreas {
             activity_log,
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
         };
         (mode, areas)
     }
@@ -623,28 +643,27 @@ mod tests {
         );
     }
 
+    /// PRD AC3: width 3; `y`/`height` cover status + prompt + footer; `x` is the rightmost 3 columns.
     #[test]
-    fn enter_button_rect_is_three_by_two_straddling_status_and_first_prompt_line() {
-        let (_, areas) = select_mode_fixture_80x24();
+    fn enter_button_rect_geometry_covers_status_prompt_and_footer_three_cols_wide() {
+        let sb = Rect::new(0, 20, 80, 1);
+        let pb = Rect::new(0, 21, 80, 1);
+        let fb = Rect::new(0, 22, 80, 1);
+        let areas = LayoutAreas {
+            activity_log: Rect::new(0, 0, 80, 20),
+            dynamic_area: Rect::new(0, 20, 80, 0),
+            status_bar: sb,
+            prompt_bar: pb,
+            footer_bar: fb,
+        };
         let r = super::enter_button_rect(&areas);
-        let pb = areas.prompt_bar;
-        let sb = areas.status_bar;
-        let expected = Rect::new(pb.x + pb.width - 3, pb.y - 1, 3, 2);
-        assert_eq!(r, expected);
-        assert_eq!(r.width, 3);
-        assert_eq!(r.height, 2);
+        let expected_h = sb.height + pb.height + fb.height;
+        assert_eq!(r.width, super::ENTER_BUTTON_COLS);
         assert_eq!(r.x + r.width, pb.x + pb.width);
-        assert!(
-            rect_contains(&sb, r.x, r.y)
-                && rect_contains(&sb, r.x + 1, r.y)
-                && rect_contains(&sb, r.x + 2, r.y),
-            "top row (+--) must sit on the status line; sb={sb:?} r={r:?}"
-        );
-        assert!(
-            rect_contains(&pb, r.x, r.y + 1)
-                && rect_contains(&pb, r.x + 1, r.y + 1)
-                && rect_contains(&pb, r.x + 2, r.y + 1),
-            "bottom row (|⏎) must sit on the first prompt line; pb={pb:?} r={r:?}"
+        assert_eq!(r.y, sb.y);
+        assert_eq!(
+            r.height, expected_h,
+            "Enter affordance height must equal status + prompt + footer; sb={sb:?} pb={pb:?} fb={fb:?} r={r:?}"
         );
     }
 
@@ -716,13 +735,14 @@ mod tests {
         let area = Rect::new(0, 0, 80, 24);
         let dynamic_h = 0u16;
         let prompt_h = 1u16;
-        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar, footer_bar) =
             layout_chunks_with_inbox(area, dynamic_h, 0, prompt_h);
         let areas = LayoutAreas {
             activity_log,
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
         };
         let mode = AppMode::MarkdownViewer {
             content: "# Plan".to_string(),
