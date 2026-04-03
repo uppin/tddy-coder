@@ -2,9 +2,12 @@
 
 Release note history for the Web product area.
 
-## 2026-04-03 — Web terminal: mouse Enter affordance (TUI parity)
+## 2026-04-03 — Session workflow files, project/worktree matching, delete hardening
 
-- **Docs**: [web-terminal.md](web-terminal.md) documents the streamed **3×2** Enter affordance (status row + first prompt line) for **`--mouse`** / SGR mouse, with a cross-link to [Mouse mode: Enter control](../coder/tui-status-bar.md#mouse-mode-enter-control) in the Coder feature docs.
+- **`connection.proto`**: **`ListSessionWorkflowFiles`** and **`ReadSessionWorkflowFile`** on **`ConnectionService`** for allowlisted workflow artifacts under the daemon-resolved session directory.
+- **tddy-daemon**: Allowlisted listing and UTF-8 reads (**`session_workflow_files`**, tests **`session_workflow_files_rpc`**). **`sessions_base`** for mapped users is the Tddy data root (**`~/.tddy`**), aligning RPC paths with **`tddy-coder`** session directories. **`DeleteSession`** stops a live tool process when needed, then removes the session directory; directories without readable **`.session.yaml`** can still be removed when the path is valid.
+- **tddy-web**: **`SessionWorkflowFilesModal`** loads list/read RPCs; **`SessionMoreActionsMenu`** → **Show files**; **`SessionFilesPanel`** + **`sessionWorkflowPreview`**. Cypress **`SessionWorkflowFiles.cy.tsx`**; Bun tests for preview and **`sessionProjectTable`** (unscoped sessions match a project when **`repoPath`** equals **`mainRepoPath`** or sits under it—longest-prefix wins). **Delete** (trash) is available for **active** and **inactive** rows; confirmation copy describes stop-then-delete.
+- **Feature docs**: [web-terminal.md](web-terminal.md); [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md).
 
 ## 2026-03-29 — Connection screen: backend options from `ListAgents`
 

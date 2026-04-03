@@ -14,6 +14,8 @@ service ConnectionService {
   rpc SignalSession(SignalSessionRequest) returns (SignalSessionResponse);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
   rpc ListEligibleDaemons(ListEligibleDaemonsRequest) returns (ListEligibleDaemonsResponse);
+  rpc ListSessionWorkflowFiles(ListSessionWorkflowFilesRequest) returns (ListSessionWorkflowFilesResponse);
+  rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
 }
 
 message ListToolsRequest {}
@@ -161,4 +163,28 @@ message EligibleDaemonEntry {
 }
 message ListEligibleDaemonsResponse {
   repeated EligibleDaemonEntry daemons = 1;
+}
+
+message ListSessionWorkflowFilesRequest {
+  string session_token = 1;
+  string session_id = 2;
+}
+
+message WorkflowFileEntry {
+  string basename = 1;
+}
+
+message ListSessionWorkflowFilesResponse {
+  repeated WorkflowFileEntry files = 1;
+}
+
+message ReadSessionWorkflowFileRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Allowlisted workflow file basename (server resolves under session dir only).
+  string basename = 3;
+}
+
+message ReadSessionWorkflowFileResponse {
+  string content_utf8 = 1;
 }
