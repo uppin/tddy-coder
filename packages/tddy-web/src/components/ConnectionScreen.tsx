@@ -31,6 +31,11 @@ import {
   sessionIdFirstSegment,
   sessionPidDisplay,
 } from "../utils/sessionDisplay";
+import {
+  isSessionOrphan,
+  projectForUnscopedSession,
+  sortedSessionsForProjectTable,
+} from "../utils/sessionProjectTable";
 import { sortSessionsForDisplay } from "../utils/sessionSort";
 import { SessionWorkflowStatusCells } from "./SessionWorkflowStatusCells";
 import { SessionMoreActionsMenu } from "./session/SessionMoreActionsMenu";
@@ -231,10 +236,6 @@ function ProjectSessionOptions({
   );
 }
 
-function sortedSessionsForProject(sessions: SessionEntry[], projectId: string): SessionEntry[] {
-  return sortSessionsForDisplay(sessions.filter((s) => s.projectId === projectId));
-}
-
 function SignalDropdown({
   sessionId,
   onSignal,
@@ -313,6 +314,29 @@ function SignalDropdown({
   );
 }
 
+/** Trash control — same `data-testid` for active and inactive rows. */
+function SessionDeleteButton({
+  sessionId,
+  onDelete,
+}: {
+  sessionId: string;
+  onDelete: (sessionId: string) => void | Promise<void>;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="destructive"
+      size="icon-sm"
+      aria-label="Delete session"
+      title="Delete session"
+      data-testid={`delete-session-${sessionId}`}
+      onClick={() => void onDelete(sessionId)}
+    >
+      <Trash2 />
+    </Button>
+  );
+}
+
 /** Resume + Delete for inactive session rows (project and orphan tables share stable `data-testid`s). */
 function InactiveSessionActions({
   sessionId,
@@ -334,17 +358,7 @@ function InactiveSessionActions({
       >
         Resume
       </Button>
-      <Button
-        type="button"
-        variant="destructive"
-        size="icon-sm"
-        aria-label="Delete session"
-        title="Delete session"
-        data-testid={`delete-session-${sessionId}`}
-        onClick={() => void onDelete(sessionId)}
-      >
-        <Trash2 />
-      </Button>
+      <SessionDeleteButton sessionId={sessionId} onDelete={onDelete} />
     </span>
   );
 }
@@ -615,9 +629,8 @@ export function ConnectionScreen({
     [projects]
   );
   const orphanSessions = useMemo(
-    () =>
-      sortSessionsForDisplay(sessions.filter((s) => !knownProjectIds.has(s.projectId))),
-    [sessions, knownProjectIds]
+    () => sortSessionsForDisplay(sessions.filter((s) => isSessionOrphan(s, projects))),
+    [sessions, projects]
   );
 
   const debugForSessionId = (sessionId: string): boolean => {
@@ -625,6 +638,12 @@ export function ConnectionScreen({
     if (!sess) return false;
     if (knownProjectIds.has(sess.projectId)) {
       return projectForms[sess.projectId]?.debugLogging ?? false;
+    }
+    if (sess.projectId.trim() === "") {
+      const matched = projectForUnscopedSession(sess, projects);
+      if (matched) {
+        return projectForms[matched.projectId]?.debugLogging ?? false;
+      }
     }
     return orphanSessionDebug;
   };
@@ -724,7 +743,11 @@ export function ConnectionScreen({
 
   const handleDeleteSession = async (sessionId: string) => {
     if (!sessionToken) return;
-    if (!window.confirm("Delete this session? This removes on-disk session data and cannot be undone.")) {
+    if (
+      !window.confirm(
+        "Delete this session? If the tool process is still running, it will be stopped first, then on-disk session data will be removed. This cannot be undone."
+      )
+    ) {
       return;
     }
     setError(null);
@@ -868,7 +891,7 @@ export function ConnectionScreen({
         <p style={{ fontSize: 14, color: "#666" }}>No projects yet. Create one above.</p>
       ) : (
         projects.map((p) => {
-          const projectSessions = sortedSessionsForProject(sessions, p.projectId);
+          const projectSessions = sortedSessionsForProjectTable(sessions, p, projects);
           return (
             <details
               key={p.projectId}
@@ -951,6 +974,10 @@ export function ConnectionScreen({
                                   sessionId={s.sessionId}
                                   onSignal={handleSignalSession}
                                 />
+                                <SessionDeleteButton
+                                  sessionId={s.sessionId}
+                                  onDelete={handleDeleteSession}
+                                />
                               </>
                             ) : (
                               <InactiveSessionActions
@@ -1032,6 +1059,10 @@ export function ConnectionScreen({
                           <SignalDropdown
                             sessionId={s.sessionId}
                             onSignal={handleSignalSession}
+                          />
+                          <SessionDeleteButton
+                            sessionId={s.sessionId}
+                            onDelete={handleDeleteSession}
                           />
                         </>
                       ) : (

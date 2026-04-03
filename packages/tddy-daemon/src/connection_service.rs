@@ -691,7 +691,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             sessions_base,
             os_user
         );
-        session_deletion::delete_inactive_session_directory(&sessions_base, session_id)?;
+        session_deletion::delete_session_directory(&sessions_base, session_id)?;
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
     }
