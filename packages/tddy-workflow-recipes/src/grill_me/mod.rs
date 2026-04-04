@@ -185,20 +185,6 @@ impl WorkflowRecipe for GrillMeRecipe {
     }
 }
 
-#[cfg(test)]
-mod plan_refinement_tests {
-    use super::GrillMeRecipe;
-    use tddy_core::GoalId;
-    use tddy_core::WorkflowRecipe;
-
-    #[test]
-    fn plan_refinement_goal_is_create_plan_not_grill() {
-        let r = GrillMeRecipe;
-        assert_eq!(r.plan_refinement_goal(), GoalId::new("create-plan"));
-        assert_ne!(r.plan_refinement_goal(), r.start_goal());
-    }
-}
-
 impl SessionArtifactManifest for GrillMeRecipe {
     fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
         &[("grill_brief", GRILL_ME_BRIEF_BASENAME)]
@@ -215,5 +201,19 @@ impl SessionArtifactManifest for GrillMeRecipe {
 
     fn primary_document_basename(&self) -> Option<String> {
         None
+    }
+}
+
+#[cfg(test)]
+mod plan_refinement_tests {
+    use super::GrillMeRecipe;
+    use tddy_core::GoalId;
+    use tddy_core::WorkflowRecipe;
+
+    #[test]
+    fn plan_refinement_goal_is_create_plan_not_grill() {
+        let r = GrillMeRecipe;
+        assert_eq!(r.plan_refinement_goal(), GoalId::new("create-plan"));
+        assert_ne!(r.plan_refinement_goal(), r.start_goal());
     }
 }

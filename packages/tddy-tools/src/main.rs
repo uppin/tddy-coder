@@ -40,6 +40,9 @@ enum Subcommand {
 
     /// Merge JSON into the active workflow session context (requires TDDY_SESSION_DIR / TDDY_WORKFLOW_SESSION_ID).
     SetSessionContext(cli::SetSessionContextArgs),
+
+    /// Merge workflow/demo fields into changeset.yaml (validated JSON, atomic write).
+    PersistChangesetWorkflow(cli::PersistChangesetWorkflowArgs),
 }
 
 #[tokio::main]
@@ -59,6 +62,7 @@ async fn main() -> Result<()> {
         Some(Subcommand::GetSchema(s)) => cli::run_get_schema(s)?,
         Some(Subcommand::ListSchemas(s)) => cli::run_list_schemas(s)?,
         Some(Subcommand::SetSessionContext(s)) => cli::run_set_session_context(s)?,
+        Some(Subcommand::PersistChangesetWorkflow(s)) => cli::run_persist_changeset_workflow(s)?,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);

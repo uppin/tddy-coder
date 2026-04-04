@@ -4,8 +4,10 @@
 
 use crate::backend::ClarificationQuestion;
 use crate::error::WorkflowError;
+use crate::workflow::context::Context;
 use crate::workflow::ids::{GoalId, WorkflowState};
 use crate::workflow::recipe::WorkflowRecipe;
+use log::{debug, info};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -78,6 +80,9 @@ pub struct Changeset {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub recipe: Option<String>,
+    /// Demo routing and options for the TDD graph (merged into session Context at bootstrap / resume).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<ChangesetWorkflow>,
 }
 
 /// A single session entry (plan, acceptance-tests, or impl).
@@ -139,6 +144,19 @@ pub struct TestInfrastructure {
     pub conventions: String,
 }
 
+/// Workflow routing flags and demo options persisted in `changeset.yaml` (PRD: graph predicates, resume).
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct ChangesetWorkflow {
+    /// Canonical boolean for the post-green conditional edge (`run_optional_step_x` in Context / graph).
+    #[serde(default)]
+    pub run_optional_step_x: Option<bool>,
+    #[serde(default)]
+    pub demo_options: Vec<String>,
+    /// Schema id for `tddy-tools` validation when writing this block (`goals.json` / JSON Schema).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_schema_id: Option<String>,
+}
+
 impl Default for Changeset {
     fn default() -> Self {
         let now = chrono::Utc::now().to_rfc3339();
@@ -167,6 +185,7 @@ impl Default for Changeset {
             remote_pushed: false,
             repo_path: None,
             recipe: None,
+            workflow: None,
         }
     }
 }
@@ -193,6 +212,81 @@ pub fn write_changeset(session_dir: &Path, changeset: &Changeset) -> Result<(), 
     let content =
         serde_yaml::to_string(changeset).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     fs::write(&path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    Ok(())
+}
+
+/// Atomically replace `changeset.yaml` (write temp + rename) so readers never see a partial file.
+pub fn write_changeset_atomic(
+    session_dir: &Path,
+    changeset: &Changeset,
+) -> Result<(), WorkflowError> {
+    info!(
+        target: "tddy_core::changeset",
+        "write_changeset_atomic: session_dir={}",
+        session_dir.display()
+    );
+    let path = session_dir.join("changeset.yaml");
+    let tmp = session_dir.join(".changeset.yaml.tmp");
+    let content =
+        serde_yaml::to_string(changeset).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    fs::write(&tmp, &content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    // Windows: rename cannot replace an existing target.
+    #[cfg(windows)]
+    {
+        let _ = fs::remove_file(&path);
+    }
+    fs::rename(&tmp, &path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        WorkflowError::WriteFailed(e.to_string())
+    })?;
+    Ok(())
+}
+
+/// Merges persisted workflow/demo fields from `changeset.yaml` into session [`Context`]
+/// (`run_optional_step_x`, demo options) so graph predicates match stored intent after interview/plan.
+///
+/// Legacy changesets without a `workflow` block leave context unchanged for these keys; the graph
+/// then uses the same defaults as an empty context (e.g. post-green routing per existing graph rules).
+pub fn merge_persisted_workflow_into_context(
+    session_dir: &Path,
+    context: &Context,
+) -> Result<(), WorkflowError> {
+    info!(
+        target: "tddy_core::changeset",
+        "merge_persisted_workflow_into_context: session_dir={}",
+        session_dir.display()
+    );
+    let cs = read_changeset(session_dir)?;
+    let Some(ref wf) = cs.workflow else {
+        debug!(
+            target: "tddy_core::changeset",
+            "merge_persisted_workflow_into_context: no workflow block in changeset — skipping"
+        );
+        return Ok(());
+    };
+    if let Some(b) = wf.run_optional_step_x {
+        debug!(
+            target: "tddy_core::changeset",
+            "merge_persisted_workflow_into_context: set run_optional_step_x={}",
+            b
+        );
+        context.set_sync("run_optional_step_x", b);
+    }
+    if !wf.demo_options.is_empty() {
+        info!(
+            target: "tddy_core::changeset",
+            "merge_persisted_workflow_into_context: set demo_options count={}",
+            wf.demo_options.len()
+        );
+        context.set_sync("demo_options", wf.demo_options.clone());
+    }
+    if let Some(ref id) = wf.tool_schema_id {
+        debug!(
+            target: "tddy_core::changeset",
+            "merge_persisted_workflow_into_context: tool_schema_id present (len={})",
+            id.len()
+        );
+    }
     Ok(())
 }
 

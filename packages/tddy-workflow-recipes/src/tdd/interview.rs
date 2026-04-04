@@ -24,6 +24,9 @@ pub fn system_prompt() -> String {
         "system_prompt: building interview system prompt"
     );
     r#"You are running the TDD workflow **interview** phase — elicit focused clarification about the feature before a PRD/plan is written.
+
+Before planning completes, you **must** surface the optional **demo** phase: use **tddy-tools ask** so the user decides (no silent default) whether to run the **demo** goal after **green**, and how (e.g. script-based vs manual, scope). Persist those answers for the workflow graph: the session/context key **run_optional_step_x** controls the post-green branch, and **demo_options** records how the demo should be done. Prefer **tddy-tools persist-changeset-workflow** (or follow-up plan steps) to write `workflow.run_optional_step_x`, `workflow.demo_options`, and `workflow.tool_schema_id` into **changeset.yaml** so resume and graph routing match this interview.
+
 Prefer **tddy-tools ask** for interactive questions when appropriate. Do not write PRD.md in this phase."#
         .to_string()
 }
@@ -35,7 +38,7 @@ pub fn build_interview_user_prompt(feature_input: &str) -> String {
         feature_input.len()
     );
     format!(
-        "Clarify requirements for the following feature before planning:\n\n{}",
+        "Clarify requirements for the following feature before planning. Include a **demo** yes/no and **demo_options** (how to run the demo) via **tddy-tools ask**, and persist **run_optional_step_x** / **demo_options** into **changeset.yaml** so routing after **green** matches the user's choice:\n\n{}",
         feature_input.trim()
     )
 }

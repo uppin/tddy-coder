@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tddy:tool/changeset-workflow",
+  "title": "ChangesetWorkflowPayload",
+  "type": "object",
+  "properties": {
+    "run_optional_step_x": { "type": "boolean" },
+    "demo_options": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "tool_schema_id": { "type": "string" }
+  }
+}
