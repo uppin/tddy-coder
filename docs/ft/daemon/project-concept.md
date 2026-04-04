@@ -15,6 +15,8 @@ A **Project** is a named configuration linking a **git URL** to a **main reposit
 | `name` | User-chosen name; also used as the directory name under the repos base |
 | `git_url` | Remote URL (e.g. `https://github.com/org/repo.git`) |
 | `main_repo_path` | Absolute path to the cloned repository |
+| `main_branch_ref` | Optional. Remote-tracking ref used as the integration base for worktree fetch and checkout (e.g. `origin/main`, `origin/master`). Omitted rows use **`origin/master`** as the documented default at resolution time. |
+| `host_repo_paths` | Per-host (or per-daemon-instance) checkout paths keyed by host key; see multi-host daemon docs. |
 
 ## Storage
 
@@ -45,7 +47,12 @@ repos_base_path: "repos"
 
 `tddy-core` `SessionMetadata` includes required **`project_id`**. Spawns pass **`--project-id`** to `tddy-coder`. Older `.session.yaml` files without `project_id` are skipped when listing (breaking change).
 
+## Multi-user daemon (`tddy-daemon`)
+
+The **`tddy-daemon`** binary is the multi-user orchestrator: serves the web bundle, exposes **AuthService** (GitHub OAuth via Connect-RPC), maps authenticated GitHub users to OS users, lists allowed tools and sessions, and spawns **`tddy-coder`** with LiveKit credentials and **`--project-id`** when applicable. **`tddy-coder --daemon`** remains for single-user local use. Service install and paths: [systemd-install.md](systemd-install.md). Connection UX: [Web terminal](../web/web-terminal.md).
+
 ## Related
 
-- [PRD: tddy-daemon (WIP)](1-WIP/PRD-2026-03-19-tddy-daemon.md) — multi-user daemon (tooling, auth, spawn); connection UX is project-based as documented here.
+- [Git integration base ref (worktrees)](../coder/git-integration-base-ref.md) — validation, default ref, project registry fields.
+- [gRPC remote control](../coder/grpc-remote-control.md) — daemon and transport roles.
 - [Web terminal](../web/web-terminal.md) — Connection screen UI.

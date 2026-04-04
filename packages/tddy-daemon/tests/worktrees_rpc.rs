@@ -171,6 +171,7 @@ async fn list_worktrees_refresh_returns_git_worktree_rows() {
         name: "rpc-worktrees-test".to_string(),
         git_url: "https://example.com/r.git".to_string(),
         main_repo_path: main_repo_path.display().to_string(),
+        main_branch_ref: None,
         host_repo_paths: std::collections::HashMap::new(),
     };
 

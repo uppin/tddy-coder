@@ -323,6 +323,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             name: name.to_string(),
             git_url: git_url.to_string(),
             main_repo_path,
+            main_branch_ref: None,
             host_repo_paths: std::collections::HashMap::new(),
         };
         let entry = ProtoProjectEntry {

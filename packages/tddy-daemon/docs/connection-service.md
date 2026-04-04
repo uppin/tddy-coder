@@ -60,6 +60,8 @@ Session **status** strings in metadata drive workflow display; optional Telegram
 | Clone default | `~/{repos_base_path}/{name}/` where `repos_base_path` comes from config (default `repos`) |
 | `CreateProject.user_relative_path` | Optional: clone/adopt at `~/<path>` instead (e.g. `Code/foo` or `~/Code/foo`); must stay under home |
 
+Project rows in **`projects.yaml`** may include optional **`main_branch_ref`** (`origin/<branch>`). **`effective_integration_base_ref_for_project`** in **`project_storage`** returns that value or the documented default **`origin/master`**. Invalid values fail **`add_project`** before the file is written. See [git-integration-base-ref.md](../../../../docs/ft/coder/git-integration-base-ref.md) and [project-concept.md](../../../../docs/ft/daemon/project-concept.md).
+
 ## Spawn worker
 
 Spawn and **git clone** requests run through a forked single-threaded worker (`spawn_worker`) so fork+setuid from a Tokio process avoids deadlocks. JSON protocol: `WorkerRequest` (`spawn` | `clone`) and `WorkerResponse` (`spawn_ok` | `clone_ok` | `error`).

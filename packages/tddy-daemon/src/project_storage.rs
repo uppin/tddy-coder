@@ -12,6 +12,10 @@ pub struct ProjectData {
     pub name: String,
     pub git_url: String,
     pub main_repo_path: String,
+    /// Remote-tracking ref used as the integration base for worktrees (`origin/main`, etc.).
+    /// Absent entries behave as [`tddy_core::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main_branch_ref: Option<String>,
     /// Per-host (or per-daemon-instance) checkout paths for the same logical `project_id`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub host_repo_paths: HashMap<String, String>,
@@ -57,6 +61,11 @@ pub fn write_projects(projects_dir: &Path, projects: &[ProjectData]) -> anyhow::
 
 /// Append one project after reading existing.
 pub fn add_project(projects_dir: &Path, project: ProjectData) -> anyhow::Result<()> {
+    log::info!("add_project: project_id={}", project.project_id);
+    if let Some(ref r) = project.main_branch_ref {
+        tddy_core::validate_integration_base_ref(r)
+            .map_err(|e| anyhow::anyhow!("invalid main_branch_ref: {}", e))?;
+    }
     let mut projects = read_projects(projects_dir)?;
     projects.push(project);
     write_projects(projects_dir, &projects)
@@ -66,6 +75,41 @@ pub fn add_project(projects_dir: &Path, project: ProjectData) -> anyhow::Result<
 pub fn find_project(projects_dir: &Path, project_id: &str) -> anyhow::Result<Option<ProjectData>> {
     let projects = read_projects(projects_dir)?;
     Ok(projects.into_iter().find(|p| p.project_id == project_id))
+}
+
+/// Resolves the git integration base ref for worktree setup for a registered project.
+///
+/// Legacy rows without [`ProjectData::main_branch_ref`] must resolve to
+/// [`tddy_core::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF`].
+pub fn effective_integration_base_ref_for_project(
+    projects_dir: &Path,
+    project_id: &str,
+) -> anyhow::Result<String> {
+    log::debug!(
+        "effective_integration_base_ref_for_project: project_id={}",
+        project_id
+    );
+    let project = find_project(projects_dir, project_id)?
+        .ok_or_else(|| anyhow::anyhow!("unknown project: {}", project_id))?;
+    match &project.main_branch_ref {
+        Some(r) => {
+            tddy_core::validate_integration_base_ref(r)
+                .map_err(|e| anyhow::anyhow!("invalid main_branch_ref: {}", e))?;
+            log::info!(
+                "effective_integration_base_ref_for_project: project_id={} ref={}",
+                project_id,
+                r
+            );
+            Ok(r.clone())
+        }
+        None => {
+            log::info!(
+                "effective_integration_base_ref_for_project: project_id={} using documented default",
+                project_id
+            );
+            Ok(tddy_core::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF.to_string())
+        }
+    }
 }
 
 /// Resolved `main_repo_path` for `project_id` on `host_key` (simulated host or daemon instance id).
@@ -116,6 +160,7 @@ mod per_host_path_unit_tests {
             name: "n".to_string(),
             git_url: "https://example.com/r.git".to_string(),
             main_repo_path: "/legacy".to_string(),
+            main_branch_ref: None,
             host_repo_paths,
         };
         write_projects(&projects_dir, &[project]).unwrap();
@@ -131,5 +176,56 @@ mod per_host_path_unit_tests {
         );
         assert_eq!(px, "/x/checkout");
         assert_eq!(py, "/y/checkout");
+    }
+}
+
+#[cfg(test)]
+mod project_integration_base_acceptance_tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::fs;
+
+    /// Legacy `projects.yaml` without `main_branch_ref` must resolve to the documented default ref.
+    #[test]
+    fn legacy_project_without_base_ref_uses_documented_default() {
+        let temp = tempfile::tempdir().unwrap();
+        let projects_dir = temp.path().join("projects");
+        fs::create_dir_all(&projects_dir).unwrap();
+        let yaml = r#"projects:
+- project_id: "p-legacy"
+  name: "n"
+  git_url: "https://example.com/r.git"
+  main_repo_path: "/tmp/r"
+"#;
+        fs::write(projects_file_path(&projects_dir), yaml).unwrap();
+
+        let eff = effective_integration_base_ref_for_project(&projects_dir, "p-legacy").unwrap();
+        assert_eq!(eff, tddy_core::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF);
+    }
+
+    /// Invalid `main_branch_ref` values must be rejected before YAML mutation.
+    #[test]
+    fn invalid_base_ref_rejected_at_boundary() {
+        let temp = tempfile::tempdir().unwrap();
+        let projects_dir = temp.path().join("projects");
+        fs::create_dir_all(&projects_dir).unwrap();
+        let project = ProjectData {
+            project_id: "bad-ref".to_string(),
+            name: "n".to_string(),
+            git_url: "https://example.com/r.git".to_string(),
+            main_repo_path: "/tmp/r".to_string(),
+            main_branch_ref: Some("refs/heads/main".to_string()),
+            host_repo_paths: HashMap::new(),
+        };
+        let r = add_project(&projects_dir, project);
+        assert!(
+            r.is_err(),
+            "invalid integration base ref must be rejected before persistence: {:?}",
+            r
+        );
+        assert!(
+            read_projects(&projects_dir).unwrap().is_empty(),
+            "projects.yaml must not be written when validation fails"
+        );
     }
 }
