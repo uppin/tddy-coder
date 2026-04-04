@@ -39,6 +39,6 @@ Integration base strings must match `origin/<one segment>` with no shell metacha
 - **tddy-core** `worktree` module — `fetch_integration_base`, `setup_worktree_for_session_with_integration_base`, `resolve_default_integration_base_ref`, `setup_worktree_for_session`.
 - **tddy-daemon** `project_storage` — `effective_integration_base_ref_for_project`, `add_project`.
 
-## Known follow-ups
+## Call-site behavior
 
-End-to-end wiring from a session’s **`project_id`** to `setup_worktree_for_session_with_integration_base` with the resolved ref belongs in the daemon and workflow recipe hooks when those layers pass the effective ref into worktree setup.
+**`setup_worktree_for_session(repo_root, session_dir)`** resolves the integration base inside **tddy-core** using the default remote branch rules above. Registry helpers (**`effective_integration_base_ref_for_project`**) apply when a caller has loaded **`ProjectData`**; those callers pass the explicit ref into **`setup_worktree_for_session_with_integration_base`**. Layers that only supply repository root and session directory rely on default resolution.

@@ -1,5 +1,11 @@
 # Daemon product area changelog
 
+## 2026-04-04 — Projects: `main_branch_ref` (git integration base)
+
+- **Registry**: Optional **`main_branch_ref`** on project rows; **`effective_integration_base_ref_for_project`**; **`add_project`** rejects invalid refs before **`projects.yaml`** writes (**`tddy_core::validate_integration_base_ref`**).
+- **Docs**: [git-integration-base-ref.md](../coder/git-integration-base-ref.md), [project-concept.md](project-concept.md); package [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md).
+- **PRD retired**: Prior WIP PRD for the multi-user daemon was merged into [project-concept.md](project-concept.md) (**Multi-user daemon**) and this changelog; source file removed from **`docs/ft/daemon/1-WIP/`**.
+
 ## 2026-04-03 — ConnectionService: workflow files, session base path, delete
 
 - **`ListSessionWorkflowFiles`** / **`ReadSessionWorkflowFile`**: Allowlisted basenames (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`) under **`{sessions_base}/sessions/{session_id}/`** with canonical-path checks (**`session_workflow_files`**; tests **`session_workflow_files_rpc`**).
@@ -53,10 +59,6 @@
 ## 2026-03-21 — StartSession: `agent`
 
 - **ConnectionService**: `StartSessionRequest` includes optional `agent`; forwarded to spawned `tddy-coder` as `--agent` when non-empty (skips interactive backend menu in the child).
-
-## 2026-03-21 — PRD: implementation status
-
-- **[PRD: tddy-daemon](1-WIP/PRD-2026-03-19-tddy-daemon.md)** updated with **Implementation status (2026-03-21)**: Phase 1 (binary, OAuth, spawn, project-centric web UX) documented; full success-criteria checklist remains open for validation.
 
 ## 2026-03-21 — Project concept
 

@@ -8,6 +8,7 @@ Release note history for the Coder product area.
 - **tddy-daemon**: **`ProjectData.main_branch_ref`** (optional); **`effective_integration_base_ref_for_project`**; **`add_project`** validates **`main_branch_ref`** before persistence.
 - **Tests**: **`tddy-core`** worktree integration tests; **`tddy-daemon`** project storage acceptance tests; **`tddy-integration-tests`** **`worktree_uses_configured_project_base_ref`**.
 - **Docs**: [git-integration-base-ref.md](git-integration-base-ref.md); **tddy-core** / **tddy-daemon** package **`changesets.md`**; [project concept](../daemon/project-concept.md) data model.
+- **Documentation wrap**: WIP changesets and validate-report folders under **`docs/dev/1-WIP/`** removed after transfer; **daemon** PRD removed with role summary merged into [project concept](../daemon/project-concept.md) and [daemon changelog](../daemon/changelog.md).
 
 ## 2026-04-03 — TUI Stop pane (interrupt beside Enter)
 
