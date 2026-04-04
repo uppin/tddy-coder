@@ -9,6 +9,8 @@ use crate::backend::QuestionOption;
 use crate::toolcall::{ToolCallRequest, ToolCallResponse};
 use crate::{ClarificationQuestion, SharedBackend, WorkflowRecipe};
 
+use crate::presenter::activity_prompt_log;
+use crate::presenter::agent_activity;
 use crate::presenter::intent::UserIntent;
 use crate::presenter::presenter_events::{ModeChangedDetails, PresenterEvent, ViewConnection};
 use crate::presenter::state::{
@@ -69,6 +71,8 @@ pub struct Presenter {
     current_question_index: usize,
     collected_answers: Vec<String>,
     agent_output_buffer: String,
+    /// When true, the last `activity_log` row is the in-progress agent line (updated incrementally until `\n`).
+    agent_output_partial_row_active: bool,
     /// Set when ClarificationNeeded is received with no questions; the workflow thread
     /// is blocked on `answer_rx` waiting for the next prompt (e.g. free-prompting multi-turn).
     awaiting_open_answer: bool,
@@ -150,6 +154,7 @@ impl Presenter {
             current_question_index: 0,
             collected_answers: Vec::new(),
             agent_output_buffer: String::new(),
+            agent_output_partial_row_active: false,
             awaiting_open_answer: false,
             workflow_handle: None,
             broadcast_tx: None,
@@ -434,6 +439,10 @@ impl Presenter {
                         log::warn!("SubmitFeatureInput: persist changeset: {}", e);
                     }
                 }
+                let user_line = activity_prompt_log::format_user_prompt_line(&text);
+                if !user_line.is_empty() {
+                    self.log_activity(user_line, ActivityKind::UserPrompt);
+                }
                 // Previous run finished (`workflow_result` set): start a new workflow. Do not send on
                 // `answer_tx` — it may still be `Some` until the worker thread exits, and a buffered
                 // send would skip `restart_workflow` and drop the second run.
@@ -606,6 +615,10 @@ impl Presenter {
                         let _ = tx.send(text);
                         return;
                     }
+                }
+                let queued_line = activity_prompt_log::format_queued_prompt_line(&text);
+                if !queued_line.is_empty() {
+                    self.log_activity(queued_line, ActivityKind::UserPrompt);
                 }
                 self.state.inbox.push(text);
                 self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
@@ -857,8 +870,80 @@ impl Presenter {
     fn flush_agent_output_buffer(&mut self) {
         if !self.agent_output_buffer.is_empty() {
             let line = std::mem::take(&mut self.agent_output_buffer);
+            log::debug!(
+                "flush_agent_output_buffer: len={}, partial_row_active={}",
+                line.len(),
+                self.agent_output_partial_row_active
+            );
+            // Avoid a duplicate `activity_log` row when the partial row already shows this text.
+            if self.agent_output_partial_row_active {
+                if let Some(last) = self.state.activity_log.last() {
+                    if last.kind == ActivityKind::AgentOutput && last.text == line {
+                        self.agent_output_partial_row_active = false;
+                        self.broadcast(PresenterEvent::ActivityLogged(ActivityEntry {
+                            text: line,
+                            kind: ActivityKind::AgentOutput,
+                        }));
+                        return;
+                    }
+                }
+                self.agent_output_partial_row_active = false;
+            }
             self.log_activity(line, ActivityKind::AgentOutput);
         }
+    }
+
+    /// Completes a full agent line in `activity_log` after a newline (no `ActivityLogged` broadcast;
+    /// streaming consumers use [`PresenterEvent::AgentOutput`]).
+    fn finalize_agent_line_in_activity_log(&mut self, line: String) {
+        if line.is_empty() {
+            return;
+        }
+        log::debug!(
+            "finalize_agent_line_in_activity_log: len={}, partial_row_active={}",
+            line.len(),
+            self.agent_output_partial_row_active
+        );
+        if self.agent_output_partial_row_active {
+            if let Some(last) = self.state.activity_log.last_mut() {
+                if last.kind == ActivityKind::AgentOutput {
+                    last.text = line;
+                    self.agent_output_partial_row_active = false;
+                    return;
+                }
+            }
+            self.agent_output_partial_row_active = false;
+        }
+        self.state.activity_log.push(ActivityEntry {
+            text: line,
+            kind: ActivityKind::AgentOutput,
+        });
+    }
+
+    /// Syncs the visible tail of the current incomplete agent line into `activity_log` (incremental).
+    fn sync_agent_partial_activity_log(&mut self) {
+        let tail = agent_activity::visible_tail_for_incremental_log(&self.agent_output_buffer);
+        if tail.is_empty() {
+            return;
+        }
+        log::debug!(
+            "sync_agent_partial_activity_log: tail_len={}, partial_row_active={}",
+            tail.len(),
+            self.agent_output_partial_row_active
+        );
+        if self.agent_output_partial_row_active {
+            if let Some(last) = self.state.activity_log.last_mut() {
+                if last.kind == ActivityKind::AgentOutput {
+                    last.text = tail;
+                    return;
+                }
+            }
+        }
+        self.state.activity_log.push(ActivityEntry {
+            text: tail,
+            kind: ActivityKind::AgentOutput,
+        });
+        self.agent_output_partial_row_active = true;
     }
 
     fn log_activity(&mut self, text: String, kind: ActivityKind) {
@@ -1176,23 +1261,26 @@ impl Presenter {
                     }
                 }
                 WorkflowEvent::AgentOutput(text) => {
+                    agent_activity::on_agent_chunk_received(&text);
+                    let channels = agent_activity::authoritative_channels_per_completed_line();
+                    log::info!(
+                        "poll_workflow: AgentOutput chunk len={}, policy_authoritative_channels={}",
+                        text.len(),
+                        channels
+                    );
                     for part in text.split_inclusive('\n') {
                         if part.ends_with('\n') {
                             self.agent_output_buffer
                                 .push_str(part.trim_end_matches('\n'));
                             let line = std::mem::take(&mut self.agent_output_buffer);
                             if !line.is_empty() {
-                                let entry = ActivityEntry {
-                                    text: line,
-                                    kind: ActivityKind::AgentOutput,
-                                };
-                                self.state.activity_log.push(entry.clone());
-                                self.broadcast(PresenterEvent::ActivityLogged(entry));
+                                self.finalize_agent_line_in_activity_log(line);
                             }
                         } else {
                             self.agent_output_buffer.push_str(part);
                         }
                     }
+                    self.sync_agent_partial_activity_log();
                     self.broadcast(PresenterEvent::AgentOutput(text.clone()));
                 }
             }
@@ -1896,5 +1984,83 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn make_presenter_with_broadcast(
+    ) -> (Presenter, tokio::sync::broadcast::Receiver<PresenterEvent>) {
+        let (tx, rx) = tokio::sync::broadcast::channel(256);
+        let p = make_presenter().with_broadcast(tx);
+        (p, rx)
+    }
+
+    /// Counts how many presenter events would cause a remote/UI consumer to show the same
+    /// completed agent line (PRD: at most one authoritative channel per logical line).
+    fn agent_line_authoritative_channel_count(
+        events: &[PresenterEvent],
+        line_without_newline: &str,
+    ) -> usize {
+        let mut n = 0;
+        for ev in events {
+            match ev {
+                PresenterEvent::ActivityLogged(e)
+                    if e.kind == ActivityKind::AgentOutput && e.text == line_without_newline =>
+                {
+                    n += 1;
+                }
+                PresenterEvent::AgentOutput(s) => {
+                    let t = s.strip_suffix('\n').unwrap_or(s.as_str());
+                    if t == line_without_newline {
+                        n += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        n
+    }
+
+    /// PRD: incremental agent text — partial chunks without `\n` must become visible in the activity
+    /// log (or equivalent incremental state), not only after a newline flush.
+    #[test]
+    fn agent_output_chunk_visible_before_newline() {
+        let mut p = make_presenter();
+        inject_workflow_event(
+            &mut p,
+            WorkflowEvent::AgentOutput("partial_without_newline".to_string()),
+        );
+        p.poll_workflow();
+        let last_agent = p
+            .state()
+            .activity_log
+            .iter()
+            .rev()
+            .find(|e| e.kind == ActivityKind::AgentOutput);
+        assert_eq!(
+            last_agent.map(|e| e.text.as_str()),
+            Some("partial_without_newline"),
+            "expected partial chunk to appear in activity log before first newline (PRD incremental visibility)"
+        );
+    }
+
+    /// PRD: do not emit both `ActivityLogged(AgentOutput)` and `AgentOutput` for the same logical
+    /// line in a way that duplicates full-line content for activity + remote consumers.
+    #[test]
+    fn agent_output_not_duplicated_across_activity_and_agent_output_events() {
+        let (mut p, mut rx) = make_presenter_with_broadcast();
+        inject_workflow_event(
+            &mut p,
+            WorkflowEvent::AgentOutput("single_line\n".to_string()),
+        );
+        p.poll_workflow();
+        let mut events = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            events.push(ev);
+        }
+        let channels = agent_line_authoritative_channel_count(&events, "single_line");
+        assert_eq!(
+            channels, 1,
+            "expected a single authoritative representation for agent line text in presenter events; got {} (events: {:?})",
+            channels, events
+        );
     }
 }

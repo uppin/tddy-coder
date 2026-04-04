@@ -11,7 +11,7 @@ use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use tddy_core::{AppMode, PresenterView, UserIntent, ViewConnection};
+use tddy_core::{AgentOutputActivityLogMerge, AppMode, PresenterView, UserIntent, ViewConnection};
 
 use crate::capturing_writer::CapturingWriter;
 use crate::ctrl_interrupt::{ctrl_c_interrupt_session, key_is_ctrl_c_press};
@@ -72,6 +72,7 @@ pub fn run_event_loop(
     let mut event_rx = conn.event_rx;
     let intent_tx = conn.intent_tx;
     let critical_state = conn.critical_state;
+    let mut agent_output_merge = AgentOutputActivityLogMerge::new();
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
@@ -79,7 +80,13 @@ pub fn run_event_loop(
         }
 
         // Apply any pending events from broadcast (handle Lagged per tokio semantics).
-        let _ = drain_presenter_broadcast(&mut event_rx, &mut state, &mut view, &critical_state);
+        let _ = drain_presenter_broadcast(
+            &mut event_rx,
+            &mut state,
+            &mut view,
+            &critical_state,
+            &mut agent_output_merge,
+        );
 
         let mut layout_areas = crate::mouse_map::LayoutAreas {
             activity_log: ratatui::layout::Rect::default(),

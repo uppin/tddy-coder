@@ -522,7 +522,13 @@ mod tests {
                 Ok(Ok(Some(msg))) => {
                     if let Some(event) = msg.event {
                         events.push(event);
-                        if events.len() >= 3 {
+                        let has_goal = events
+                            .iter()
+                            .any(|e| matches!(e, server_message::Event::GoalStarted(_)));
+                        let has_mode = events
+                            .iter()
+                            .any(|e| matches!(e, server_message::Event::ModeChanged(_)));
+                        if has_goal && has_mode {
                             break;
                         }
                     }

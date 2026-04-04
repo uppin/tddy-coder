@@ -477,7 +477,7 @@ fn after_plan(
             Some("system-prompt-plan.md".to_string()),
         );
     }
-    let _ = write_changeset(session_dir, &cs);
+    hooks_common::write_changeset_logged(session_dir, &cs, "after_plan Planned");
     Ok(())
 }
 
@@ -508,7 +508,7 @@ fn after_acceptance_tests(
             None,
         );
     }
-    let _ = write_changeset(session_dir, &cs);
+    hooks_common::write_changeset_logged(session_dir, &cs, "after_acceptance_tests");
     Ok(())
 }
 
@@ -540,7 +540,7 @@ fn after_red(
             None,
         );
     }
-    let _ = write_changeset(session_dir, &cs);
+    hooks_common::write_changeset_logged(session_dir, &cs, "after_red");
     Ok(())
 }
 
@@ -554,7 +554,7 @@ fn after_green(session_dir: &Path, output: &str) -> Result<(), Box<dyn Error + S
     if parsed.all_tests_passing() {
         if let Ok(mut cs) = read_changeset(session_dir) {
             update_state(&mut cs, WorkflowState::new("GreenComplete"));
-            let _ = write_changeset(session_dir, &cs);
+            hooks_common::write_changeset_logged(session_dir, &cs, "after_green GreenComplete");
         }
     }
     Ok(())
@@ -565,7 +565,7 @@ fn after_evaluate(session_dir: &Path, output: &str) -> Result<(), Box<dyn Error 
     let _ = write_evaluation_report(session_dir, &parsed);
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("Evaluated"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "after_evaluate Evaluated");
     }
     Ok(())
 }
@@ -590,7 +590,7 @@ fn after_validate(session_dir: &Path, output: &str) -> Result<(), Box<dyn Error 
     }
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("ValidateComplete"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "after_validate ValidateComplete");
     }
     Ok(())
 }
@@ -599,7 +599,7 @@ fn after_refactor(session_dir: &Path, output: &str) -> Result<(), Box<dyn Error 
     let _ = parse_refactor_response(output).map_err(WorkflowError::ParseError)?;
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("RefactorComplete"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "after_refactor RefactorComplete");
     }
     Ok(())
 }
@@ -608,7 +608,7 @@ fn after_update_docs(session_dir: &Path, output: &str) -> Result<(), Box<dyn Err
     let _ = parse_update_docs_response(output).map_err(WorkflowError::ParseError)?;
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("DocsUpdated"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "after_update_docs DocsUpdated");
     }
     Ok(())
 }
@@ -616,7 +616,7 @@ fn after_update_docs(session_dir: &Path, output: &str) -> Result<(), Box<dyn Err
 fn after_demo(session_dir: &Path) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("DemoComplete"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "after_demo DemoComplete");
     }
     Ok(())
 }
@@ -663,7 +663,11 @@ impl RunnerHooks for TddWorkflowHooks {
                             });
                         }
                         cs.state.session_id = Some(session_id.clone());
-                        let _ = write_changeset(dir, &cs);
+                        hooks_common::write_changeset_logged(
+                            dir,
+                            &cs,
+                            "progress_sink SessionStarted",
+                        );
                     }
                 }
             }

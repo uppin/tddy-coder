@@ -14,6 +14,7 @@ import {
   EligibleDaemonEntrySchema,
   StartSessionRequestSchema,
   ConnectSessionResponseSchema,
+  ResumeSessionResponseSchema,
 } from "../../src/gen/connection_pb";
 import {
   GetAuthStatusResponseSchema,
@@ -372,6 +373,25 @@ function interceptConnectSessionSuccess() {
       body: toArrayBuffer(body),
     });
   }).as("connectSession");
+}
+
+function interceptResumeSessionSuccess(sessionId: string) {
+  const body = toBinary(
+    ResumeSessionResponseSchema,
+    create(ResumeSessionResponseSchema, {
+      sessionId,
+      livekitRoom: "resume-room-ct",
+      livekitUrl: "ws://127.0.0.1:7880",
+      livekitServerIdentity: "server",
+    }),
+  );
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ResumeSession", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(body),
+    });
+  }).as("resumeSession");
 }
 
 function interceptTokenForPresence() {
@@ -1077,5 +1097,45 @@ describe("ConnectionScreen multi-host daemon selection", () => {
     cy.wait("@getAuthStatus");
     cy.get(`[data-testid="host-select-${PROJECT.projectId}"]`, { timeout: 5000 }).should("exist");
     cy.get(`[data-testid="host-select-${PROJECT.projectId}"] option`).should("have.length", 1);
+  });
+});
+
+describe("ConnectionScreen — reconnect vs new-session presentation", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("Resume inactive session shows floating overlay without pushing /terminal onto history", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([INACTIVE_SESSION]);
+    interceptResumeSessionSuccess(INACTIVE_SESSION.sessionId);
+    interceptTokenForPresence();
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.window().then((win) => {
+      cy.spy(win.history, "pushState").as("historyPush");
+    });
+    cy.get(`[data-testid="resume-${INACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
+    cy.wait("@resumeSession");
+    cy.get("[data-testid='terminal-reconnect-overlay-root']", { timeout: 15000 }).should("be.visible");
+    cy.get("@historyPush").should("not.have.been.called");
+  });
+
+  it("Connect active session opens floating overlay without pushing /terminal onto history", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION]);
+    interceptConnectSessionSuccess();
+    interceptTokenForPresence();
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.window().then((win) => {
+      cy.spy(win.history, "pushState").as("historyPush");
+    });
+    cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
+    cy.wait("@connectSession");
+    cy.get("[data-testid='terminal-reconnect-overlay-root']", { timeout: 15000 }).should("be.visible");
+    cy.get("[data-testid='connected-terminal-container']", { timeout: 15000 }).should("exist");
+    cy.get("@historyPush").should("not.have.been.called");
   });
 });

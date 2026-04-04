@@ -8,7 +8,10 @@
 
 use std::time::Instant;
 
-use tddy_core::{ActivityEntry, ActivityKind, AppMode, PresenterEvent, PresenterState};
+use tddy_core::{
+    ActivityEntry, ActivityKind, AgentOutputActivityLogMerge, AppMode, PresenterEvent,
+    PresenterState,
+};
 use tddy_tui::{apply_event, TuiView};
 
 fn base_state() -> PresenterState {
@@ -35,6 +38,7 @@ fn base_state() -> PresenterState {
 fn worktree_switch_broadcast_keeps_status_bar_segment_in_view_state() {
     let mut state = base_state();
     let mut view = TuiView::new();
+    let mut merge = AgentOutputActivityLogMerge::new();
 
     let worktree_path = std::path::Path::new("/tmp/tddy-worktree-sync-verify/my-wt-dir");
     let entry = ActivityEntry {
@@ -42,7 +46,12 @@ fn worktree_switch_broadcast_keeps_status_bar_segment_in_view_state() {
         kind: ActivityKind::Info,
     };
 
-    apply_event(&mut state, &mut view, PresenterEvent::ActivityLogged(entry));
+    apply_event(
+        &mut state,
+        &mut view,
+        &mut merge,
+        PresenterEvent::ActivityLogged(entry),
+    );
 
     assert_eq!(
         state.active_worktree_display.as_deref(),

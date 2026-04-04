@@ -123,6 +123,12 @@ This section records how the shipped recipes map to the same product philosophy 
 - **Pipeline:** **`plan` → `red` → `green` → `post-green-review` → `refactor` → `update-docs`** — a linear graph without standalone acceptance-tests, demo, evaluate, or validate tasks; **`post-green-review`** carries merged reporting concerns in one **`tddy-tools submit`** payload.
 - **Spirit:** Smaller session surface for teams that want TDD discipline without the full optional branches (demo routing, separate evaluate/validate invocations).
 
+### TDD-small (`tdd-small`)
+
+- **Start goal:** **`plan`** — same planning and PRD-style artifacts as full TDD.
+- **Pipeline:** **`plan` → `red` → `green` → `post-green-review` → `refactor` → `update-docs`** — a linear graph without standalone acceptance-tests, demo, evaluate, or validate tasks; **`post-green-review`** carries merged reporting concerns in one **`tddy-tools submit`** payload.
+- **Spirit:** Smaller session surface for teams that want TDD discipline without the full optional branches (demo routing, separate evaluate/validate invocations).
+
 ### Bugfix (`bugfix`)
 
 - **Start goal:** **`analyze`** — derive branch name, worktree directory name, optional changeset title, and optional short triage summary from the bug report (structured **`tddy-tools submit`** for **`analyze`**).

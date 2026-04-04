@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Trash2 } from "lucide-react";
+import { GripVertical, Minus, Trash2 } from "lucide-react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
@@ -55,11 +55,59 @@ import {
   parseTerminalSessionIdFromPathname,
   terminalPathForSessionId,
 } from "../routing/appRoutes";
+import {
+  applyDedicatedTerminalBackToMini,
+  clampTerminalOverlayPaneSize,
+  TERMINAL_OVERLAY_COLS,
+  TERMINAL_OVERLAY_FONT_MIN_PX,
+  TERMINAL_OVERLAY_PANE_HEIGHT_PX,
+  TERMINAL_OVERLAY_PANE_WIDTH_PX,
+  TERMINAL_OVERLAY_ROWS,
+  type TerminalPresentation,
+  nextPresentationFromAttach,
+} from "./connection/terminalPresentation";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
+import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
 
 /** Full viewport width shell (session tables are not max-width capped). */
 const screenShellClassName =
   "min-h-svh w-full min-w-0 box-border px-4 py-6 sm:px-6 font-sans text-foreground";
+
+/** Floating pane chrome (header row above terminal grid); used for position clamping. */
+const OVERLAY_HEADER_APPROX_PX = 36;
+const OVERLAY_PANE_EDGE_MARGIN = 16;
+
+function defaultOverlayPanePosition(
+  paneWidth: number,
+  paneInnerHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
+): { left: number; top: number } {
+  const m = OVERLAY_PANE_EDGE_MARGIN;
+  const outerH = OVERLAY_HEADER_APPROX_PX + paneInnerHeight;
+  return {
+    left: Math.max(m, viewportWidth - paneWidth - m),
+    top: Math.max(m, viewportHeight - outerH - m),
+  };
+}
+
+function clampOverlayPanePosition(
+  left: number,
+  top: number,
+  paneWidth: number,
+  paneInnerHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
+): { left: number; top: number } {
+  const m = OVERLAY_PANE_EDGE_MARGIN;
+  const outerH = OVERLAY_HEADER_APPROX_PX + paneInnerHeight;
+  const maxLeft = Math.max(m, viewportWidth - paneWidth - m);
+  const maxTop = Math.max(m, viewportHeight - outerH - m);
+  return {
+    left: Math.min(maxLeft, Math.max(m, left)),
+    top: Math.min(maxTop, Math.max(m, top)),
+  };
+}
 
 const inputStyle = {
   display: "block",
@@ -380,6 +428,12 @@ function ConnectedTerminal({
   debugLogging,
   onDisconnect,
   onTerminate,
+  onRemoteSessionEnded,
+  terminalLayout = "fullscreen",
+  onExpandTerminal,
+  onBackToMini,
+  onMinimizePane,
+  paneSessionLabel,
 }: {
   livekitUrl: string;
   roomName: string;
@@ -388,7 +442,19 @@ function ConnectedTerminal({
   debugLogging?: boolean;
   onDisconnect: () => void;
   onTerminate?: () => void | Promise<void>;
+  /** When daemon/coder session ends (LiveKit or stream), parent returns to Connection screen. */
+  onRemoteSessionEnded?: () => void;
+  /** fullscreen = dedicated route; overlay | mini = floating pane (80×24 terminal grid; header separate). */
+  terminalLayout?: "fullscreen" | "overlay" | "mini";
+  onExpandTerminal?: () => void;
+  /** Fullscreen only: shrink to mini without disconnecting. */
+  onBackToMini?: () => void;
+  /** Floating pane only: minimize control (session row uses Hide / Open). */
+  onMinimizePane?: () => void;
+  /** Short session id (same as session table first segment / two UUID groups). */
+  paneSessionLabel: string;
 }) {
+  type OverlayResizeCorner = "nw" | "ne" | "sw" | "se";
   const tokenClient = useMemo(() => createTokenClient(), []);
   const fullscreenTargetRef = useRef<HTMLDivElement>(null);
   const [initialToken, setInitialToken] = useState<string | null>(null);
@@ -398,6 +464,48 @@ function ConnectedTerminal({
   const isMobile =
     typeof window !== "undefined" &&
     (("ontouchstart" in window) || window.innerWidth < 768);
+
+  const [compactPaneWidth, setCompactPaneWidth] = useState(TERMINAL_OVERLAY_PANE_WIDTH_PX);
+  const [compactPaneHeight, setCompactPaneHeight] = useState(TERMINAL_OVERLAY_PANE_HEIGHT_PX);
+  const [paneLiveKitStatus, setPaneLiveKitStatus] = useState<"connecting" | "connected" | "error">(
+    "connecting",
+  );
+  const overlayResizeRef = useRef<{
+    pointerId: number;
+    corner: OverlayResizeCorner;
+    startW: number;
+    startH: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+
+  const [overlayPanePosition, setOverlayPanePosition] = useState(() =>
+    typeof window !== "undefined"
+      ? defaultOverlayPanePosition(
+          TERMINAL_OVERLAY_PANE_WIDTH_PX,
+          TERMINAL_OVERLAY_PANE_HEIGHT_PX,
+          window.innerWidth,
+          window.innerHeight,
+        )
+      : { left: OVERLAY_PANE_EDGE_MARGIN, top: OVERLAY_PANE_EDGE_MARGIN },
+  );
+  const overlayDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originLeft: number;
+    originTop: number;
+  } | null>(null);
+
+  const overlayPaneMaxSize = useCallback(() => {
+    if (typeof window === "undefined") {
+      return { maxW: 3840, maxH: 2160 };
+    }
+    return {
+      maxW: window.innerWidth - 32,
+      maxH: window.innerHeight - 96,
+    };
+  }, []);
 
   useEffect(() => {
     tokenClient
@@ -423,6 +531,148 @@ function ConnectedTerminal({
     [tokenClient, roomName, identity]
   );
 
+  const isCompact = terminalLayout === "overlay" || terminalLayout === "mini";
+
+  useEffect(() => {
+    if (!isCompact || typeof window === "undefined") return;
+    const vh = viewportHeight > 0 ? viewportHeight : window.innerHeight;
+    setOverlayPanePosition((p) =>
+      clampOverlayPanePosition(
+        p.left,
+        p.top,
+        compactPaneWidth,
+        compactPaneHeight,
+        window.innerWidth,
+        vh,
+      ),
+    );
+  }, [isCompact, compactPaneWidth, compactPaneHeight, viewportHeight]);
+
+  useEffect(() => {
+    if (!isCompact || typeof window === "undefined") return;
+    const onWinResize = () => {
+      const vh = viewportHeight > 0 ? viewportHeight : window.innerHeight;
+      setOverlayPanePosition((p) =>
+        clampOverlayPanePosition(
+          p.left,
+          p.top,
+          compactPaneWidth,
+          compactPaneHeight,
+          window.innerWidth,
+          vh,
+        ),
+      );
+    };
+    window.addEventListener("resize", onWinResize);
+    return () => window.removeEventListener("resize", onWinResize);
+  }, [isCompact, compactPaneWidth, compactPaneHeight, viewportHeight]);
+
+  const onOverlayDragPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isCompact || !onExpandTerminal) return;
+    if ((e.target as HTMLElement).closest("[data-terminal-header-actions]")) return;
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    overlayDragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      originLeft: overlayPanePosition.left,
+      originTop: overlayPanePosition.top,
+    };
+  };
+
+  const onOverlayDragPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = overlayDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    if (typeof window === "undefined") return;
+    const vh = viewportHeight > 0 ? viewportHeight : window.innerHeight;
+    const nextLeft = drag.originLeft + (e.clientX - drag.startX);
+    const nextTop = drag.originTop + (e.clientY - drag.startY);
+    setOverlayPanePosition(
+      clampOverlayPanePosition(
+        nextLeft,
+        nextTop,
+        compactPaneWidth,
+        compactPaneHeight,
+        window.innerWidth,
+        vh,
+      ),
+    );
+  };
+
+  const onOverlayDragPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = overlayDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    overlayDragRef.current = null;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+  };
+
+  const onOverlayResizePointerDown = (e: React.PointerEvent) => {
+    if (!isCompact) return;
+    const corner = (e.currentTarget as HTMLElement).dataset
+      .resizeCorner as OverlayResizeCorner | undefined;
+    if (!corner || !["nw", "ne", "sw", "se"].includes(corner)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    overlayResizeRef.current = {
+      pointerId: e.pointerId,
+      corner,
+      startW: compactPaneWidth,
+      startH: compactPaneHeight,
+      originX: e.clientX,
+      originY: e.clientY,
+    };
+  };
+
+  const onOverlayResizePointerMove = (e: React.PointerEvent) => {
+    const drag = overlayResizeRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const dx = e.clientX - drag.originX;
+    const dy = e.clientY - drag.originY;
+    let w = drag.startW;
+    let h = drag.startH;
+    switch (drag.corner) {
+      case "se":
+        w = drag.startW + dx;
+        h = drag.startH + dy;
+        break;
+      case "sw":
+        w = drag.startW - dx;
+        h = drag.startH + dy;
+        break;
+      case "ne":
+        w = drag.startW + dx;
+        h = drag.startH - dy;
+        break;
+      case "nw":
+        w = drag.startW - dx;
+        h = drag.startH - dy;
+        break;
+      default:
+        break;
+    }
+    const { maxW, maxH } = overlayPaneMaxSize();
+    const { width, height } = clampTerminalOverlayPaneSize(w, h, maxW, maxH);
+    setCompactPaneWidth(width);
+    setCompactPaneHeight(height);
+  };
+
+  const onOverlayResizePointerUp = (e: React.PointerEvent) => {
+    const drag = overlayResizeRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    overlayResizeRef.current = null;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+  };
+
   const fullscreenContainerStyle = {
     position: "fixed" as const,
     top: 0,
@@ -435,6 +685,84 @@ function ConnectedTerminal({
     flexDirection: "column" as const,
   };
 
+  const compactContainerBaseStyle = {
+    position: "fixed" as const,
+    zIndex: 50,
+    boxShadow: "0 8px 32px rgba(0,0,0,0.45)",
+    borderRadius: 8,
+    overflow: "hidden" as const,
+    display: "flex" as const,
+    flexDirection: "column" as const,
+    backgroundColor: "#0a0a0a",
+  };
+
+  const terminalPaneInnerStyle = isCompact
+    ? {
+        position: "relative" as const,
+        zIndex: 0,
+        width: "100%",
+        height: compactPaneHeight,
+        minHeight: 0,
+        flexShrink: 0,
+      }
+    : { flex: 1, minHeight: 0, position: "relative" as const };
+
+  const outerStyle = isCompact
+    ? {
+        ...compactContainerBaseStyle,
+        width: compactPaneWidth,
+        left: overlayPanePosition.left,
+        top: overlayPanePosition.top,
+        bottom: "auto" as const,
+        right: "auto" as const,
+      }
+    : fullscreenContainerStyle;
+
+  const overlayResizeHandles = isCompact
+    ? (
+        [
+          { corner: "nw" as const, cursor: "nw-resize", label: "Resize from top left", testSuffix: "nw" },
+          { corner: "ne" as const, cursor: "ne-resize", label: "Resize from top right", testSuffix: "ne" },
+          { corner: "sw" as const, cursor: "sw-resize", label: "Resize from bottom left", testSuffix: "sw" },
+          { corner: "se" as const, cursor: "se-resize", label: "Resize from bottom right", testSuffix: "se" },
+        ] as const
+      ).map(({ corner, cursor, label, testSuffix }) => (
+        <button
+          key={corner}
+          type="button"
+          data-testid={`terminal-overlay-resize-handle-${testSuffix}`}
+          data-resize-corner={corner}
+          aria-label={label}
+          onPointerDown={onOverlayResizePointerDown}
+          onPointerMove={onOverlayResizePointerMove}
+          onPointerUp={onOverlayResizePointerUp}
+          onPointerCancel={onOverlayResizePointerUp}
+          style={{
+            position: "absolute",
+            ...(corner === "nw" || corner === "sw" ? { left: 0 } : { right: 0 }),
+            ...(corner === "nw" || corner === "ne" ? { top: 0 } : { bottom: 0 }),
+            width: 14,
+            height: 14,
+            cursor,
+            touchAction: "none",
+            zIndex: 130,
+            border: "none",
+            padding: 0,
+            margin: 0,
+            background:
+              corner === "se"
+                ? "linear-gradient(135deg, transparent 50%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.2) 100%)"
+                : corner === "sw"
+                  ? "linear-gradient(225deg, transparent 50%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.2) 100%)"
+                  : corner === "ne"
+                    ? "linear-gradient(45deg, transparent 50%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.2) 100%)"
+                    : "linear-gradient(315deg, transparent 50%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.2) 100%)",
+            borderRadius: 4,
+          }}
+        />
+      ))
+    : null;
+
   if (error) {
     return (
       <div style={{ padding: 24 }}>
@@ -444,8 +772,55 @@ function ConnectedTerminal({
   }
   if (!initialToken || ttlSeconds === null) {
     return (
-      <div ref={fullscreenTargetRef} data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
-        <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+      <div
+        ref={fullscreenTargetRef}
+        data-testid="connected-terminal-container"
+        style={outerStyle}
+        className={isCompact ? "relative" : undefined}
+      >
+        {isCompact && onExpandTerminal ? (
+          <div
+            data-testid="terminal-overlay-drag-header"
+            className="flex shrink-0 cursor-grab select-none items-center gap-1 border-b border-border bg-muted px-2 py-1 text-[10px] text-foreground active:cursor-grabbing"
+            style={{ touchAction: "none", position: "relative", zIndex: 40 }}
+            onPointerDown={onOverlayDragPointerDown}
+            onPointerMove={onOverlayDragPointerMove}
+            onPointerUp={onOverlayDragPointerUp}
+            onPointerCancel={onOverlayDragPointerUp}
+          >
+            <GripVertical className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="min-w-0 flex-1 truncate font-mono">{paneSessionLabel}</span>
+            <div data-terminal-header-actions className="flex shrink-0 items-center gap-0.5">
+              <ConnectionTerminalChrome
+                chromeLayout="paneHeader"
+                overlayStatus="connecting"
+                onDisconnect={onDisconnect}
+                onTerminate={onTerminate}
+                fullscreenTargetRef={fullscreenTargetRef}
+              />
+              {onMinimizePane ? (
+                <button
+                  type="button"
+                  className="shrink-0 rounded border border-input bg-background p-0.5 text-foreground"
+                  data-testid="terminal-overlay-minimize"
+                  aria-label="Minimize terminal"
+                  onClick={onMinimizePane}
+                >
+                  <Minus className="size-3" aria-hidden />
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="shrink-0 rounded border border-input bg-background px-1.5 py-0.5"
+                data-testid="terminal-reconnect-expand"
+                onClick={onExpandTerminal}
+              >
+                Expand
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <div style={terminalPaneInnerStyle}>
           <ConnectionTerminalChrome
             overlayStatus="connecting"
             buildId={BUILD_ID}
@@ -454,27 +829,100 @@ function ConnectedTerminal({
             fullscreenTargetRef={fullscreenTargetRef}
           />
         </div>
+        {overlayResizeHandles}
       </div>
     );
   }
 
   return (
-    <div ref={fullscreenTargetRef} data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
-      <GhosttyTerminalLiveKit
-        url={livekitUrl}
-        token={initialToken}
-        getToken={getToken}
-        ttlSeconds={ttlSeconds}
-        roomName={roomName}
-        serverIdentity={serverIdentity}
-        debugMode={false}
-        debugLogging={debugLogging ?? false}
-        autoFocus={!isMobile}
-        preventFocusOnTap={isMobile && !isKeyboardOpen}
-        showMobileKeyboard={isMobile}
-        connectionOverlay={{ onDisconnect, buildId: BUILD_ID, onTerminate }}
-        fullscreenTargetRef={fullscreenTargetRef}
-      />
+    <div
+      ref={fullscreenTargetRef}
+      data-testid="connected-terminal-container"
+      style={outerStyle}
+      className={isCompact ? "relative" : undefined}
+    >
+      {!isCompact && onBackToMini ? (
+        <button
+          type="button"
+          data-testid="terminal-back-to-mini"
+          className="absolute left-2 top-2 z-[120] rounded border border-input bg-background/90 px-2 py-1 text-xs text-foreground shadow"
+          onClick={onBackToMini}
+        >
+          Back
+        </button>
+      ) : null}
+      {isCompact && onExpandTerminal ? (
+        <div
+          data-testid="terminal-overlay-drag-header"
+          className="flex shrink-0 cursor-grab select-none items-center gap-1 border-b border-border bg-muted px-2 py-1 text-[10px] text-foreground active:cursor-grabbing"
+          style={{ touchAction: "none", position: "relative", zIndex: 40 }}
+          onPointerDown={onOverlayDragPointerDown}
+          onPointerMove={onOverlayDragPointerMove}
+          onPointerUp={onOverlayDragPointerUp}
+          onPointerCancel={onOverlayDragPointerUp}
+        >
+          <GripVertical className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1 truncate font-mono">{paneSessionLabel}</span>
+          <div data-terminal-header-actions className="flex shrink-0 items-center gap-0.5">
+            <ConnectionTerminalChrome
+              chromeLayout="paneHeader"
+              overlayStatus={paneLiveKitStatus}
+              onDisconnect={onDisconnect}
+              onTerminate={onTerminate}
+              fullscreenTargetRef={fullscreenTargetRef}
+            />
+            {onMinimizePane ? (
+              <button
+                type="button"
+                className="shrink-0 rounded border border-input bg-background p-0.5 text-foreground"
+                data-testid="terminal-overlay-minimize"
+                aria-label="Minimize terminal"
+                onClick={onMinimizePane}
+              >
+                <Minus className="size-3" aria-hidden />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="shrink-0 rounded border border-input bg-background px-1.5 py-0.5"
+              data-testid="terminal-reconnect-expand"
+              onClick={onExpandTerminal}
+            >
+              Expand
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <div style={terminalPaneInnerStyle}>
+        <GhosttyTerminalLiveKit
+          url={livekitUrl}
+          token={initialToken}
+          getToken={getToken}
+          ttlSeconds={ttlSeconds}
+          roomName={roomName}
+          serverIdentity={serverIdentity}
+          debugMode={false}
+          debugLogging={debugLogging ?? false}
+          autoFocus={!isMobile && !isCompact}
+          preventFocusOnTap={isMobile && !isKeyboardOpen}
+          showMobileKeyboard={isMobile}
+          connectionOverlay={{ onDisconnect, buildId: BUILD_ID, onTerminate }}
+          connectionChromePlacement={isCompact ? "none" : "floating"}
+          onConnectionStatusChange={isCompact ? setPaneLiveKitStatus : undefined}
+          fullscreenTargetRef={fullscreenTargetRef}
+          fontSize={14}
+          minFontSize={isCompact ? TERMINAL_OVERLAY_FONT_MIN_PX : DEFAULT_TERMINAL_FONT_MIN}
+          maxFontSize={DEFAULT_TERMINAL_FONT_MAX}
+          terminalContainerMinHeightPx={isCompact ? 0 : undefined}
+          fixedViewportGrid={
+            isCompact
+              ? { cols: TERMINAL_OVERLAY_COLS, rows: TERMINAL_OVERLAY_ROWS }
+              : undefined
+          }
+          onRemoteSessionEnded={onRemoteSessionEnded}
+        />
+      </div>
+      {overlayResizeHandles}
     </div>
   );
 }
@@ -517,18 +965,34 @@ export function ConnectionScreen({
   );
   const [sessionsListHydrated, setSessionsListHydrated] = useState(false);
   const [terminalRouteUnknown, setTerminalRouteUnknown] = useState(false);
+  const [terminalPresentation, setTerminalPresentation] = useState<TerminalPresentation>("hidden");
+  const [terminalOverlayMinimized, setTerminalOverlayMinimized] = useState(false);
   const terminalDeepLinkSeqRef = useRef(0);
+  const sessionsEverLoadedRef = useRef(false);
   const client = useMemo(() => createConnectionClient(), []);
 
-  const navigatePath = useCallback((path: string, mode: "push" | "replace") => {
-    if (typeof window === "undefined") return;
-    if (mode === "push") {
-      window.history.pushState(null, "", path);
-    } else {
-      window.history.replaceState(null, "", path);
+  const navigatePath = useCallback(
+    (path: string, mode: "push" | "replace") => {
+      if (typeof window === "undefined") return;
+      if (mode === "push" && onNavigate) {
+        onNavigate(path);
+      } else {
+        if (mode === "push") {
+          window.history.pushState(null, "", path);
+        } else {
+          window.history.replaceState(null, "", path);
+        }
+      }
+      setRoutePath(path);
+    },
+    [onNavigate],
+  );
+
+  useEffect(() => {
+    if (!connected) {
+      setTerminalOverlayMinimized(false);
     }
-    setRoutePath(path);
-  }, []);
+  }, [connected]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -537,6 +1001,7 @@ export function ConnectionScreen({
       if (isSessionListPath(p)) {
         setConnected(null);
         setTerminalRouteUnknown(false);
+        setTerminalPresentation("hidden");
       }
     };
     window.addEventListener("popstate", onPopState);
@@ -573,11 +1038,15 @@ export function ConnectionScreen({
       .listSessions({ sessionToken })
       .then((res) => {
         setSessions(res.sessions);
+        sessionsEverLoadedRef.current = true;
         setSessionsListHydrated(true);
       })
-      .catch(() => {
+      .catch((e) => {
         setSessions([]);
         setSessionsListHydrated(true);
+        if (!sessionsEverLoadedRef.current) {
+          setError(e instanceof Error ? e.message : "Failed to list sessions");
+        }
       });
   }, [client, sessionToken]);
 
@@ -743,6 +1212,14 @@ export function ConnectionScreen({
           debugLogging: debugForSessionId(id),
           sessionId: id,
         });
+        const attachNew = nextPresentationFromAttach(terminalPresentation, "new");
+        setTerminalPresentation(attachNew.presentation);
+        if (attachNew.shouldPushTerminalRoute) {
+          const target = terminalPathForSessionId(id);
+          if (typeof window !== "undefined" && window.location.pathname !== target) {
+            navigatePath(target, "push");
+          }
+        }
       } catch {
         try {
           const res = await client.resumeSession({ sessionToken, sessionId: id });
@@ -755,6 +1232,8 @@ export function ConnectionScreen({
             debugLogging: debugForSessionId(id),
             sessionId: res.sessionId,
           });
+          const attachRe = nextPresentationFromAttach(terminalPresentation, "reconnect");
+          setTerminalPresentation(attachRe.presentation);
         } catch (e) {
           if (!cancelled && seq === terminalDeepLinkSeqRef.current) {
             setError(e instanceof Error ? e.message : "Failed to open session");
@@ -775,7 +1254,39 @@ export function ConnectionScreen({
     terminalRouteUnknown,
     client,
     debugForSessionId,
+    navigatePath,
+    terminalPresentation,
   ]);
+
+  const expandTerminalPresentationToFull = useCallback(() => {
+    if (!connected) return;
+    setTerminalPresentation("full");
+    navigatePath(terminalPathForSessionId(connected.sessionId), "push");
+  }, [connected, navigatePath]);
+
+  const shrinkTerminalPresentationToMini = useCallback(() => {
+    setTerminalPresentation(
+      applyDedicatedTerminalBackToMini({
+        connectSessionCalls: 0,
+        resumeSessionCalls: 0,
+        disconnectCalls: 0,
+      }).presentation,
+    );
+  }, []);
+
+  const exitTerminalToConnectionScreen = useCallback(() => {
+    navigatePath("/", "replace");
+    setConnected(null);
+    setTerminalPresentation("hidden");
+  }, [navigatePath]);
+
+  useEffect(() => {
+    if (!connected) return;
+    const row = sessions.find((s) => s.sessionId === connected.sessionId);
+    if (row && !row.isActive) {
+      exitTerminalToConnectionScreen();
+    }
+  }, [connected, sessions, exitTerminalToConnectionScreen]);
 
   const handleStartSession = async (projectId: string) => {
     const form = projectForms[projectId] ?? defaultProjectSessionForm(tools, agents, daemons);
@@ -798,7 +1309,11 @@ export function ConnectionScreen({
         debugLogging: form.debugLogging,
         sessionId: res.sessionId,
       });
-      navigatePath(terminalPathForSessionId(res.sessionId), "push");
+      const attach = nextPresentationFromAttach(terminalPresentation, "new");
+      setTerminalPresentation(attach.presentation);
+      if (attach.shouldPushTerminalRoute) {
+        navigatePath(terminalPathForSessionId(res.sessionId), "push");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start session");
     }
@@ -838,7 +1353,11 @@ export function ConnectionScreen({
         debugLogging: debugForSessionId(sessionId),
         sessionId,
       });
-      navigatePath(terminalPathForSessionId(sessionId), "push");
+      const attach = nextPresentationFromAttach(terminalPresentation, "new");
+      setTerminalPresentation(attach.presentation);
+      if (attach.shouldPushTerminalRoute) {
+        navigatePath(terminalPathForSessionId(sessionId), "push");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect to session");
     }
@@ -849,6 +1368,13 @@ export function ConnectionScreen({
     setError(null);
     try {
       const res = await client.resumeSession({ sessionToken, sessionId });
+      // Resume makes the session active; list data may still say inactive until the next ListSessions.
+      // Update before setConnected so the "inactive row → exit terminal" effect does not clear the connection.
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.sessionId === res.sessionId ? { ...s, isActive: true, status: "active" } : s
+        )
+      );
       setConnected({
         livekitUrl: res.livekitUrl,
         roomName: res.livekitRoom,
@@ -857,7 +1383,11 @@ export function ConnectionScreen({
         debugLogging: debugForSessionId(sessionId),
         sessionId: res.sessionId,
       });
-      navigatePath(terminalPathForSessionId(res.sessionId), "push");
+      const attach = nextPresentationFromAttach(terminalPresentation, "reconnect");
+      setTerminalPresentation(attach.presentation);
+      if (attach.shouldPushTerminalRoute) {
+        navigatePath(terminalPathForSessionId(res.sessionId), "push");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to resume session");
     }
@@ -892,7 +1422,29 @@ export function ConnectionScreen({
     }
   };
 
-  if (connected) {
+  const primaryFloatingSessionAction = (sessionId: string) => {
+    const docked =
+      connected?.sessionId === sessionId &&
+      (terminalPresentation === "overlay" || terminalPresentation === "mini");
+    if (docked && terminalOverlayMinimized) {
+      return {
+        label: "Open" as const,
+        onClick: () => setTerminalOverlayMinimized(false),
+      };
+    }
+    if (docked && !terminalOverlayMinimized) {
+      return {
+        label: "Hide" as const,
+        onClick: () => setTerminalOverlayMinimized(true),
+      };
+    }
+    return {
+      label: "Connect" as const,
+      onClick: () => void handleConnectSession(sessionId),
+    };
+  };
+
+  if (connected && terminalPresentation === "full") {
     return (
       <ConnectedTerminal
         livekitUrl={connected.livekitUrl}
@@ -900,11 +1452,16 @@ export function ConnectionScreen({
         identity={connected.identity}
         serverIdentity={connected.serverIdentity}
         debugLogging={connected.debugLogging}
+        terminalLayout="fullscreen"
+        paneSessionLabel={sessionIdFirstSegment(connected.sessionId)}
+        onBackToMini={shrinkTerminalPresentationToMini}
         onDisconnect={() => {
           navigatePath("/", "replace");
           setConnected(null);
+          setTerminalPresentation("hidden");
         }}
         onTerminate={() => void handleSignalSession(connected.sessionId, Signal.SIGTERM)}
+        onRemoteSessionEnded={exitTerminalToConnectionScreen}
       />
     );
   }
@@ -1110,7 +1667,9 @@ export function ConnectionScreen({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {projectSessions.map((s) => (
+                    {projectSessions.map((s) => {
+                      const sessionAction = primaryFloatingSessionAction(s.sessionId);
+                      return (
                       <TableRow key={s.sessionId}>
                         <TableCell>{sessionIdFirstSegment(s.sessionId)}</TableCell>
                         <TableCell>{formatSessionCreatedAt(s.createdAt)}</TableCell>
@@ -1126,9 +1685,9 @@ export function ConnectionScreen({
                                   type="button"
                                   size="sm"
                                   data-testid={`connect-${s.sessionId}`}
-                                  onClick={() => handleConnectSession(s.sessionId)}
+                                  onClick={() => sessionAction.onClick()}
                                 >
-                                  Connect
+                                  {sessionAction.label}
                                 </Button>
                                 <SignalDropdown
                                   sessionId={s.sessionId}
@@ -1153,7 +1712,8 @@ export function ConnectionScreen({
                           </span>
                         </TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}
@@ -1196,7 +1756,9 @@ export function ConnectionScreen({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {orphanSessions.map((s) => (
+              {orphanSessions.map((s) => {
+                const orphanSessionAction = primaryFloatingSessionAction(s.sessionId);
+                return (
                 <TableRow key={s.sessionId}>
                   <TableCell>{sessionIdFirstSegment(s.sessionId)}</TableCell>
                   <TableCell>{formatSessionCreatedAt(s.createdAt)}</TableCell>
@@ -1212,9 +1774,9 @@ export function ConnectionScreen({
                             type="button"
                             size="sm"
                             data-testid={`connect-${s.sessionId}`}
-                            onClick={() => handleConnectSession(s.sessionId)}
+                            onClick={() => orphanSessionAction.onClick()}
                           >
-                            Connect
+                            {orphanSessionAction.label}
                           </Button>
                           <SignalDropdown
                             sessionId={s.sessionId}
@@ -1239,7 +1801,8 @@ export function ConnectionScreen({
                     </span>
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         </>
@@ -1253,6 +1816,33 @@ export function ConnectionScreen({
           sessionToken={sessionToken}
           client={client}
         />
+      ) : null}
+
+      {connected && (terminalPresentation === "overlay" || terminalPresentation === "mini") ? (
+        <div
+          data-testid="terminal-reconnect-overlay-root"
+          style={terminalOverlayMinimized ? { display: "none" } : undefined}
+          aria-hidden={terminalOverlayMinimized}
+        >
+          <ConnectedTerminal
+            livekitUrl={connected.livekitUrl}
+            roomName={connected.roomName}
+            identity={connected.identity}
+            serverIdentity={connected.serverIdentity}
+            debugLogging={connected.debugLogging}
+            terminalLayout={terminalPresentation === "overlay" ? "overlay" : "mini"}
+            paneSessionLabel={sessionIdFirstSegment(connected.sessionId)}
+            onExpandTerminal={expandTerminalPresentationToFull}
+            onMinimizePane={() => setTerminalOverlayMinimized(true)}
+            onDisconnect={() => {
+              navigatePath("/", "replace");
+              setConnected(null);
+              setTerminalPresentation("hidden");
+            }}
+            onTerminate={() => void handleSignalSession(connected.sessionId, Signal.SIGTERM)}
+            onRemoteSessionEnded={exitTerminalToConnectionScreen}
+          />
+        </div>
       ) : null}
     </div>
   );
