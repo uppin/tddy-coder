@@ -64,6 +64,7 @@ Spawn and **git clone** requests run through a forked single-threaded worker (`s
 
 ## See also
 
+- Worktrees helpers (library, not yet exposed as RPCs): [worktrees.md](./worktrees.md)
 - Feature: [Session directory layout](../../../../docs/ft/coder/session-layout.md)
 - Feature: [docs/ft/daemon/project-concept.md](../../../../docs/ft/daemon/project-concept.md)
 - [changesets.md](./changesets.md)

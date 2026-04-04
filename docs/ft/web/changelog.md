@@ -2,6 +2,12 @@
 
 Release note history for the Web product area.
 
+## 2026-04-04 — Worktrees manager (library + UI shell)
+
+- **`tddy-daemon`**: **`worktrees`** module — **`git worktree list`** parsing, **`WorktreeStatsCache`** with JSON persistence under **`TDDY_PROJECTS_STATS_ROOT`** (default **`~/.tddy/projects`**), lexical path policy, **`git worktree remove`** for non-primary trees listed by Git. Covered by unit tests and **`tests/worktrees_rpc`** (requires **`git`**).
+- **`tddy-web`**: **`WorktreesScreen`** table component (path, branch, size, changed files, +/- lines, delete confirmation); Cypress **`WorktreesScreen.cy.tsx`** with mocked rows. **ConnectionService** worktree RPCs, shell navigation, and daemon host wiring for this screen are follow-up work.
+- **Feature docs**: [worktrees.md](worktrees.md); [web-terminal.md](web-terminal.md#worktrees-manager-scaffolding). Package: [worktrees.md](../../../packages/tddy-daemon/docs/worktrees.md).
+
 ## 2026-04-03 — Interrupt: TUI Stop pane; web Stop button removed
 
 - **tddy-web**: **`ConnectionTerminalChrome`** no longer renders a bottom-right **Stop** button or **`onStopInterrupt`**. Interrupt is the ratatui **Stop** pane (red **U+25A0**) beside the Enter strip; the browser forwards SGR mouse to the virtual TUI (same **0x03** path as **Ctrl+C**).
