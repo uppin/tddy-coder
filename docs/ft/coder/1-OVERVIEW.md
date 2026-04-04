@@ -2,7 +2,7 @@
 
 **Type**: Technical Product (Developer Tool)
 **Status**: Active
-**Updated**: 2026-03-29
+**Updated**: 2026-04-05
 
 ## Summary
 
@@ -49,7 +49,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 | Feature | Description |
 |---------|-------------|
 | [Workflow JSON Schemas](workflow-json-schemas.md) | JSON Schema contracts per goal; `goals.json` registry; `tddy-tools` `get-schema`, `list-schemas`, `submit` validation |
-| [Workflow recipes](workflow-recipes.md) | Pluggable `WorkflowRecipe`; `TddRecipe` (default) and `BugfixRecipe` (selectable); `recipe_resolve` in `tddy-workflow-recipes`; `GoalId` / string states |
+| [Workflow recipes](workflow-recipes.md) | Pluggable `WorkflowRecipe`; `TddRecipe` (default), `BugfixRecipe`, `FreePromptingRecipe`, `GrillMeRecipe` (selectable); `recipe_resolve` in `tddy-workflow-recipes`; `GoalId` / string states. **Grill me** **Create plan** brief: session `artifacts/grill-me-brief.md`; repo persistence per [AGENTS.md](../../../AGENTS.md) (`plans/` or feature-doc path). (Updated: 2026-04-05) |
 | [Planning Step](planning-step.md) | Plan goal, acceptance-tests goal, plan approval gate, CLI interface, LLM backend abstraction |
 | [Implementation Step](implementation-step.md) | Red, green, demo, evaluate goals; state machine; output artifacts |
 | [gRPC Remote Control](grpc-remote-control.md) | `--grpc` flag, bidirectional streaming, programmatic control for E2E and automation |

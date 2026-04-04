@@ -70,6 +70,18 @@ pub fn prompt_height(text_len: u16, area_width: u16, max_height: u16) -> u16 {
     result
 }
 
+/// Whether clarification / text-input prompts should be pinned to the **top** of the terminal.
+///
+/// Default layout places the dynamic strip between the activity log and the status bar; long agent
+/// output makes that easy to miss. For interactive elicitation we put questions first so they stay
+/// visible.
+pub fn clarification_questions_top(mode: &AppMode) -> bool {
+    matches!(
+        mode,
+        AppMode::Select { .. } | AppMode::MultiSelect { .. } | AppMode::TextInput { .. }
+    ) && question_height(mode) > 0
+}
+
 /// Split the terminal area into six regions, including inbox and optional debug log.
 pub fn layout_chunks_with_inbox(
     area: Rect,
@@ -91,6 +103,43 @@ pub fn layout_chunks_with_inbox(
         .split(area);
     (
         chunks[0], chunks[1], chunks[2], chunks[3], chunks[4], chunks[5],
+    )
+}
+
+/// Same six regions as [`layout_chunks_with_inbox`], but when `questions_top` is true and
+/// `dynamic_h > 0`, the dynamic strip (questions / inbox / slash menu height) is placed at the
+/// **top** of the frame, above the activity log.
+pub fn layout_chunks_with_inbox_maybe_top(
+    area: Rect,
+    dynamic_h: u16,
+    debug_log_h: u16,
+    prompt_h: u16,
+    questions_top: bool,
+) -> (Rect, Rect, Rect, Rect, Rect, Rect) {
+    if !questions_top || dynamic_h == 0 {
+        return layout_chunks_with_inbox(area, dynamic_h, debug_log_h, prompt_h);
+    }
+    log::trace!(
+        "layout_chunks_with_inbox_maybe_top: area={area:?} dynamic_h={dynamic_h} debug_log_h={debug_log_h} prompt_h={prompt_h}"
+    );
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(dynamic_h),
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+            Constraint::Length(debug_log_h),
+            Constraint::Length(prompt_h),
+        ])
+        .split(area);
+    (
+        chunks[2], // activity_log
+        chunks[1], // spacer (unused by draw)
+        chunks[0], // dynamic_area
+        chunks[3], // status_bar
+        chunks[4], // debug_log
+        chunks[5], // prompt_bar
     )
 }
 
@@ -253,5 +302,42 @@ mod tests {
             "prompt must be below status"
         );
         assert!(activity.height > 0, "non-zero activity on 24×80");
+    }
+
+    #[test]
+    fn clarification_questions_top_is_true_for_select_with_height() {
+        let q = ClarificationQuestion {
+            header: "H".to_string(),
+            question: "Q?".to_string(),
+            options: vec![QuestionOption {
+                label: "a".to_string(),
+                description: "".to_string(),
+            }],
+            multi_select: false,
+            allow_other: false,
+        };
+        let mode = AppMode::Select {
+            question: q,
+            question_index: 0,
+            total_questions: 1,
+            initial_selected: 0,
+        };
+        assert!(clarification_questions_top(&mode));
+    }
+
+    #[test]
+    fn questions_top_layout_places_dynamic_strip_at_top() {
+        let area = Rect::new(0, 0, 80, 24);
+        let dynamic_h = 7u16;
+        let (activity, _spacer, dynamic, status, _debug, prompt) =
+            layout_chunks_with_inbox_maybe_top(area, dynamic_h, 0, 1, true);
+        assert_eq!(dynamic.y, 0);
+        assert!(
+            dynamic.y < activity.y,
+            "elicitation strip must be above the activity log"
+        );
+        assert_eq!(dynamic.height, dynamic_h);
+        assert_eq!(status.height, 1);
+        assert_eq!(prompt.height, 1);
     }
 }

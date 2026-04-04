@@ -290,7 +290,10 @@ fn plan_approval_activity_footer_click(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::{layout_chunks_with_inbox, prompt_height, question_height};
+    use crate::layout::{
+        clarification_questions_top, layout_chunks_with_inbox, layout_chunks_with_inbox_maybe_top,
+        prompt_height, question_height,
+    };
     use crossterm::event::MouseButton;
     use ratatui::layout::Rect;
 
@@ -534,8 +537,9 @@ mod tests {
         };
         let area = Rect::new(0, 0, 80, 24);
         let dynamic_h = question_height(&mode);
+        let questions_top = clarification_questions_top(&mode);
         let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
-            layout_chunks_with_inbox(area, dynamic_h, 0, prompt_h);
+            layout_chunks_with_inbox_maybe_top(area, dynamic_h, 0, prompt_h, questions_top);
         let areas = LayoutAreas {
             activity_log,
             dynamic_area,

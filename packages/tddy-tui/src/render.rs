@@ -10,7 +10,8 @@ use tddy_core::{ActivityEntry, AppMode, PresenterState};
 
 use crate::feature_input_buffer::FeaturePromptSegment;
 use crate::layout::{
-    debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_height, question_height,
+    clarification_questions_top, debug_log_height, inbox_height,
+    layout_chunks_with_inbox_maybe_top, prompt_height, question_height,
 };
 use crate::mouse_map::{enter_button_rect, LayoutAreas};
 use crate::status_bar_activity::{
@@ -490,8 +491,9 @@ pub fn draw(
     let max_height = (area.height / 3).max(1);
     let prompt_h = prompt_height(text_len, area_width, max_height);
 
+    let questions_top = clarification_questions_top(&state.mode);
     let (activity_log, _status_spacer, dynamic_area, status_bar, debug_log, prompt_bar) =
-        layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
+        layout_chunks_with_inbox_maybe_top(area, dynamic_h, debug_h, prompt_h, questions_top);
 
     if let Some(areas) = layout_areas {
         *areas = LayoutAreas {

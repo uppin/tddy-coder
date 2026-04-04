@@ -8,7 +8,8 @@ use std::sync::Arc;
 use tddy_core::WorkflowRecipe;
 
 use crate::{
-    approval_policy, BugfixRecipe, FreePromptingRecipe, SessionArtifactManifest, TddRecipe,
+    approval_policy, BugfixRecipe, FreePromptingRecipe, GrillMeRecipe, SessionArtifactManifest,
+    TddRecipe,
 };
 
 /// Resolved workflow recipe plus its session-artifact manifest (same concrete type implements both).
@@ -74,6 +75,14 @@ pub fn workflow_recipe_and_manifest_from_cli_name(
                 r as Arc<dyn SessionArtifactManifest>,
             ))
         }
+        "grill-me" => {
+            log::info!("workflow recipe resolved: grill-me (GrillMeRecipe)");
+            let r: Arc<GrillMeRecipe> = Arc::new(GrillMeRecipe);
+            Ok((
+                r.clone() as Arc<dyn WorkflowRecipe>,
+                r as Arc<dyn SessionArtifactManifest>,
+            ))
+        }
         other => Err(unknown_workflow_recipe_error(other)),
     }
 }
@@ -114,5 +123,12 @@ mod tests {
         let (r, _) = workflow_recipe_and_manifest_from_cli_name("free-prompting").expect("resolve");
         assert_eq!(r.name(), "free-prompting");
         assert_eq!(r.start_goal().as_str(), "prompting");
+    }
+
+    #[test]
+    fn resolver_resolves_grill_me() {
+        let (r, _) = workflow_recipe_and_manifest_from_cli_name("grill-me").expect("resolve");
+        assert_eq!(r.name(), "grill-me");
+        assert_eq!(r.start_goal().as_str(), "grill");
     }
 }

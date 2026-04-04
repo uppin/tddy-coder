@@ -770,6 +770,25 @@ impl Presenter {
                     let _ = tx.send(ToolCallResponse::AskAnswer {
                         answers: answers.clone(),
                     });
+                    // `tddy-tools ask` does not go through WaitForInput; merge answers into workflow
+                    // context via grill hooks reading this file in `after_task("grill")`.
+                    if let Some(ref dir) = self.workflow_session_dir {
+                        let wf = dir.join(".workflow");
+                        if let Err(e) = std::fs::create_dir_all(&wf) {
+                            log::warn!("grill ask answers: create_dir_all {}: {}", wf.display(), e);
+                        } else {
+                            let path = wf.join("grill_ask_answers.txt");
+                            if let Err(e) = std::fs::write(&path, &answers) {
+                                log::warn!("grill ask answers: write {}: {}", path.display(), e);
+                            } else {
+                                log::debug!(
+                                    "grill ask answers: wrote {} bytes to {}",
+                                    answers.len(),
+                                    path.display()
+                                );
+                            }
+                        }
+                    }
                 }
                 PendingToolCallResponse::Approve(tx) => {
                     let allow = self
@@ -881,6 +900,11 @@ impl Presenter {
                             if questions.len() == 1 { "" } else { "s" },
                             summary.join(" | ")
                         ),
+                        ActivityKind::ToolUse,
+                    );
+                    self.log_activity(
+                        "Answer in the TUI question strip at the top (↑/↓ Enter). Not in Cursor."
+                            .to_string(),
                         ActivityKind::ToolUse,
                     );
                     self.flush_agent_output_buffer();

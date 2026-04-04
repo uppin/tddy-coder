@@ -83,7 +83,7 @@ fn vt100_compact_screen(all_output: &[u8], rows: u16, cols: u16) -> String {
 /// - Idle pulse glyphs (`·` / `•` / `●`) on the status line.
 /// - Mouse **Enter** affordance (`paint_enter_affordance`): ASCII `+--` on the status row, `|`,
 ///   U+23CE (⏎) on the first prompt row (`render` / `tddy-tui` changeset 2026-04-03).
-/// Those overlay the last columns of wrapped prompt lines and break naive contiguous-prefix checks.
+///   Those overlay the last columns of wrapped prompt lines and break naive contiguous-prefix checks.
 fn compact_screen_for_echo_assertions(compact: &str) -> String {
     let mut s: String = compact
         .chars()
