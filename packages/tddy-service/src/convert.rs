@@ -6,10 +6,10 @@ use crate::gen::{
     app_mode_proto, client_message, server_message, ActivityLogged, AgentOutput, AnswerMultiSelect,
     AnswerOther, AnswerSelect, AnswerText, AppModeDocumentReview, AppModeDone, AppModeFeatureInput,
     AppModeMarkdownViewer, AppModeMultiSelect, AppModeProto, AppModeRunning, AppModeSelect,
-    AppModeTextInput, ApproveSessionDocument, ClarificationQuestionProto, ClientMessage,
-    DeleteInboxItem, DismissViewer, EditInboxItem, GoalStarted, InboxChanged, IntentReceived,
-    ModeChanged, QuestionOptionProto, QueuePrompt, Quit, RefineSessionDocument, Scroll,
-    ServerMessage, StateChanged, SubmitFeatureInput, ViewSessionDocument, WorkflowComplete,
+    AppModeTextInput, ApproveSessionDocument, BackendSelected, ClarificationQuestionProto,
+    ClientMessage, DeleteInboxItem, DismissViewer, EditInboxItem, GoalStarted, InboxChanged,
+    IntentReceived, ModeChanged, QuestionOptionProto, QueuePrompt, Quit, RefineSessionDocument,
+    Scroll, ServerMessage, StateChanged, SubmitFeatureInput, ViewSessionDocument, WorkflowComplete,
 };
 
 /// Convert ClientMessage to UserIntent. Returns None if the message has no intent.
@@ -145,7 +145,9 @@ pub fn event_to_server_message(event: PresenterEvent) -> ServerMessage {
                 ServerMessage { event: None }
             }
         }
-        PresenterEvent::BackendSelected { .. } => ServerMessage { event: None },
+        PresenterEvent::BackendSelected { agent, model } => ServerMessage {
+            event: Some(Event::BackendSelected(BackendSelected { agent, model })),
+        },
         PresenterEvent::ShouldQuit => {
             if let Some(msg) = intent_to_client_message(&UserIntent::Quit) {
                 ServerMessage {

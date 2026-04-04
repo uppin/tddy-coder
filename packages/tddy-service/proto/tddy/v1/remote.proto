@@ -106,6 +106,7 @@ message ServerMessage {
     SessionCreated session_created = 9;
     WorktreeElicitation worktree_elicitation = 10;
     SessionStatusChanged session_status_changed = 11;
+    BackendSelected backend_selected = 12;
   }
 }
 
@@ -208,6 +209,11 @@ message ActivityLogged {
 
 message GoalStarted {
   string goal = 1;
+}
+
+message BackendSelected {
+  string agent = 1;
+  string model = 2;
 }
 
 message StateChanged {

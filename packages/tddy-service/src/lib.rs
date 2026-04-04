@@ -7,6 +7,7 @@
 pub mod convert;
 pub mod daemon_service;
 pub mod echo_service;
+pub mod observer_service;
 pub mod service;
 pub mod terminal_service;
 pub mod token_service;
@@ -14,6 +15,7 @@ pub mod token_service;
 pub use convert::{client_message_to_intent, event_to_server_message};
 pub use daemon_service::DaemonService;
 pub use echo_service::{create_echo_bridge, EchoServiceImpl};
+pub use observer_service::PresenterObserverService;
 pub use proto::auth::AuthServiceServer;
 pub use proto::connection::ConnectionServiceServer;
 pub use proto::terminal::TerminalServiceServer;
