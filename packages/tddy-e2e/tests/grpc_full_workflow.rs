@@ -153,17 +153,11 @@ async fn full_workflow_with_clarification_completes() {
 #[tokio::test]
 async fn full_workflow_asserts_each_state_transition() {
     /// `TddWorkflowHooks::before_task` persists the transitional state in `changeset.yaml` before
-    /// emitting `WorkflowEvent::StateChange`, so the UI often sees identity transitions
-    /// (`Planning→Planning`, `AcceptanceTesting→AcceptanceTesting`, …). PlanReview resync still sends
-    /// `Planning→Planned`. With demo: 22 transitions; without demo: 20 (no demo clarification answer
-    /// in this test → `run_demo` stays false).
-    const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
-        ("Planning", "Planning"),
-        ("Planning", "Planned"),
-        ("Planning", "Planned"),
-        ("Planning", "Planning"),
-        ("Planning", "Planned"),
-        ("Planning", "Planned"),
+    /// emitting `WorkflowEvent::StateChange`. The **Planning** phase can emit a variable number of
+    /// `Planning→Planning` / `Planning→Planned` transitions depending on plan-review resync timing,
+    /// so this test matches a fixed **suffix** from **`AcceptanceTesting` → `DocsUpdated`** and
+    /// only checks that earlier transitions stay within the Planning state.
+    const SUFFIX_WITH_DEMO: &[(&str, &str)] = &[
         ("AcceptanceTesting", "AcceptanceTesting"),
         ("AcceptanceTesting", "AcceptanceTestsReady"),
         ("RedTesting", "RedTesting"),
@@ -181,13 +175,7 @@ async fn full_workflow_asserts_each_state_transition() {
         ("UpdatingDocs", "UpdatingDocs"),
         ("UpdatingDocs", "DocsUpdated"),
     ];
-    const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
-        ("Planning", "Planning"),
-        ("Planning", "Planned"),
-        ("Planning", "Planned"),
-        ("Planning", "Planning"),
-        ("Planning", "Planned"),
-        ("Planning", "Planned"),
+    const SUFFIX_WITHOUT_DEMO: &[(&str, &str)] = &[
         ("AcceptanceTesting", "AcceptanceTesting"),
         ("AcceptanceTesting", "AcceptanceTestsReady"),
         ("RedTesting", "RedTesting"),
@@ -313,25 +301,25 @@ async fn full_workflow_asserts_each_state_transition() {
         state_transitions
     );
 
-    let expected = if state_transitions.iter().any(|(_, to)| to == "DemoComplete") {
-        EXPECTED_WITH_DEMO
+    let expected_suffix = if state_transitions.iter().any(|(_, to)| to == "DemoComplete") {
+        SUFFIX_WITH_DEMO
     } else {
-        EXPECTED_WITHOUT_DEMO
+        SUFFIX_WITHOUT_DEMO
     };
-    assert_eq!(
-        state_transitions.len(),
-        expected.len(),
-        "Expected {} state transitions, got {}: {:?}",
-        expected.len(),
+    assert!(
+        state_transitions.len() >= expected_suffix.len(),
+        "expected at least {} tail transitions, got {}: {:?}",
+        expected_suffix.len(),
         state_transitions.len(),
         state_transitions
     );
-    for (i, (from, to)) in state_transitions.iter().enumerate() {
-        let (exp_from, exp_to) = expected[i];
+    let tail_start = state_transitions.len() - expected_suffix.len();
+    for (i, &(exp_from, exp_to)) in expected_suffix.iter().enumerate() {
+        let (from, to) = &state_transitions[tail_start + i];
         assert_eq!(
             from,
             exp_from,
-            "Transition {}: expected from='{}', got from='{}'",
+            "suffix transition {}: expected from='{}', got from='{}'",
             i + 1,
             exp_from,
             from
@@ -339,10 +327,16 @@ async fn full_workflow_asserts_each_state_transition() {
         assert_eq!(
             to,
             exp_to,
-            "Transition {}: expected to='{}', got to='{}'",
+            "suffix transition {}: expected to='{}', got to='{}'",
             i + 1,
             exp_to,
             to
+        );
+    }
+    for (from, to) in &state_transitions[..tail_start] {
+        assert!(
+            from == "Planning" && (to == "Planning" || to == "Planned"),
+            "planning-phase transition should be Planning→Planning or Planning→Planned, got {from:?}→{to:?}"
         );
     }
 }

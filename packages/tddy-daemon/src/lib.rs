@@ -16,3 +16,4 @@ pub mod spawner;
 pub mod tddy_user_config;
 pub mod token_provider;
 pub mod user_sessions_path;
+pub mod worktrees;

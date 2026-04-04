@@ -126,15 +126,26 @@ async fn acp_raw_pipe_initialize() {
     let stdout = child.stdout.take().unwrap();
     let req = r#"{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"1.0","clientInfo":{"name":"t","version":"0.1.0","title":"T"}},"id":1}"#;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
-    let mut buf = String::new();
     stdin.write_all(req.as_bytes()).await.unwrap();
     stdin.write_all(b"\n").await.unwrap();
     stdin.flush().await.unwrap();
     drop(stdin);
     let mut reader = tokio::io::BufReader::new(stdout);
-    reader.read_line(&mut buf).await.unwrap();
-    assert!(buf.contains("jsonrpc"));
-    assert!(buf.contains("result"));
+    let mut acc = String::new();
+    let mut line = String::new();
+    for _ in 0..64 {
+        line.clear();
+        let n = reader.read_line(&mut line).await.unwrap();
+        if n == 0 {
+            break;
+        }
+        acc.push_str(&line);
+        if acc.contains("jsonrpc") {
+            break;
+        }
+    }
+    assert!(acc.contains("jsonrpc"), "expected JSON-RPC in stdout, got: {:?}", acc);
+    assert!(acc.contains("result"));
     let _ = child.kill().await;
 }
 

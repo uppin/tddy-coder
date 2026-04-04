@@ -14,7 +14,7 @@ Library helpers for the Worktrees manager feature: parse **`git worktree list`**
 | **`parse_git_worktree_list`** | Parses non-porcelain **`git worktree list`** stdout. |
 | **`projects_stats_cache_root`** | Root directory; honors **`TDDY_PROJECTS_STATS_ROOT`**. |
 | **`validate_worktree_path_within_repo_root`** | Lexical **`..`** / absolute resolution; no filesystem canonicalize. |
-| **`WorktreeStatsCache`** | **`new`**, **`refresh_stats_for_project`**, **`list_cached_stats`**, **`invalidate_project`**. Test-only atomics **`test_git_diff_invocations`** / **`test_git_diff_on_list_calls`** assert list RPCs do not re-run diff work. |
+| **`WorktreeStatsCache`** | **`new`**, **`refresh_stats_for_project`**, **`list_cached_stats`**, **`invalidate_project`**. Test-only atomic **`test_git_diff_invocations`** counts refresh-side diff/stat work; list path does not re-run diff. |
 | **`RemoveWorktreeError`** | **`GitFailed`**, **`NotListed`**, **`CannotRemovePrimary`**, **`Io`**. |
 | **`remove_worktree_under_repo`** | Validates membership via **`git worktree list`**, blocks primary row, runs **`git worktree remove`**. |
 
@@ -33,7 +33,7 @@ Uses the **`log`** crate (**`debug!`**, **`info!`**, **`warn!`**) for parse, cac
 ## Tests
 
 - Unit tests in **`src/worktrees.rs`**: parser fixtures; path policy.
-- Integration tests in **`tests/worktrees_rpc.rs`**: cache counter semantics (requires **`git`**).
+- Integration tests in **`tests/worktrees_acceptance.rs`**: cache counter semantics (requires **`git`**).
 
 ## Feature documentation
 

@@ -29,7 +29,7 @@ The **`worktrees`** module provides:
 |-------|--------|
 | Stats baseline | Per-worktree **`git diff --numstat HEAD`** (working tree vs **`HEAD`**). |
 | Cache location | **`TDDY_PROJECTS_STATS_ROOT`** or default **`~/.tddy/projects`** / **`{project_id}/worktree_stats.json`**. |
-| Tests | **`cargo test -p tddy-daemon --no-fail-fast`** (includes **`worktrees_rpc`**); Cypress **`cypress/component/WorktreesScreen.cy.tsx`**. |
+| Tests | **`cargo test -p tddy-daemon --no-fail-fast`** (includes **`worktrees_acceptance`**); Cypress **`cypress/component/WorktreesScreen.cy.tsx`**. |
 
 ## Related documentation
 

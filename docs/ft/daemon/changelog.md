@@ -2,7 +2,7 @@
 
 ## 2026-04-04 — Worktrees library module
 
-- **`tddy_daemon::worktrees`**: Parses **`git worktree list`** output; **`WorktreeStatsCache`** persists per-project snapshots under **`TDDY_PROJECTS_STATS_ROOT`** (default **`~/.tddy/projects`**); **`validate_worktree_path_within_repo_root`** (lexical containment); **`remove_worktree_under_repo`** (membership in **`git worktree list`**, refuses primary worktree). Intended for future **ConnectionService** handlers; no worktree RPCs on the wire yet. Tests: **`worktrees`** unit tests, **`worktrees_rpc`** integration (requires **`git`**).
+- **`tddy_daemon::worktrees`**: Parses **`git worktree list`** output; **`WorktreeStatsCache`** persists per-project snapshots under **`TDDY_PROJECTS_STATS_ROOT`** (default **`~/.tddy/projects`**); **`validate_worktree_path_within_repo_root`** (lexical containment); **`remove_worktree_under_repo`** (membership in **`git worktree list`**, refuses primary worktree). Intended for future **ConnectionService** handlers; no worktree RPCs on the wire yet. Tests: **`worktrees`** unit tests, **`worktrees_acceptance`** integration (requires **`git`**).
 - **Package doc**: [worktrees.md](../../packages/tddy-daemon/docs/worktrees.md). Web feature: [worktrees.md](../web/worktrees.md).
 
 ## 2026-04-03 — ConnectionService: workflow files, session base path, delete
