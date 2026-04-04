@@ -62,8 +62,10 @@ async fn collect_output_window(
 async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Result<()> {
     std::env::set_var("TDDY_DISABLE_ANIMATIONS", "1");
     let _ = env_logger::builder().is_test(true).try_init();
+    // SKIP_QUESTIONS: skip stub interview clarification so this test reaches acceptance-tests
+    // permission Select without driving interview Select/MultiSelect over the terminal stream.
     let (_handle, port, shutdown) =
-        spawn_presenter_with_terminal_service(Some("Build auth".to_string()));
+        spawn_presenter_with_terminal_service(Some("SKIP_QUESTIONS Build auth".to_string()));
 
     // PRD approval is a gRPC `DocumentReview` mode; approve so the stub run reaches acceptance-tests.
     let port_doc = port;
@@ -125,10 +127,11 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
         }
     }
     let initial_text = ansi_to_text(&stream1_output);
+    let preview: String = initial_text.chars().take(400).collect();
     assert!(
         initial_text.contains("Permission") || initial_text.contains("Allow creating"),
         "Should reach acceptance-tests permission Select; got: {:?}",
-        &initial_text[..initial_text.len().min(400)]
+        preview
     );
 
     let mut parser1 = ScreenParser::new(24, 80);

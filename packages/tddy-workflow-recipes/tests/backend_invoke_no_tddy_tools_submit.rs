@@ -86,8 +86,12 @@ async fn grill_me_backend_invoke_continues_when_grill_ask_answers_file_present()
 async fn tdd_interview_backend_invoke_completes_without_tddy_tools_submit() {
     let recipe = TddRecipe;
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
-    let task =
-        BackendInvokeTask::from_recipe("interview", GoalId::new("interview"), Arc::new(recipe), backend);
+    let task = BackendInvokeTask::from_recipe(
+        "interview",
+        GoalId::new("interview"),
+        Arc::new(recipe),
+        backend,
+    );
 
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");

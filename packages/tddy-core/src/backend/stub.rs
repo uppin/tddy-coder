@@ -277,6 +277,51 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
         }]
     }
 
+    fn interview_questions() -> Vec<ClarificationQuestion> {
+        vec![
+            ClarificationQuestion {
+                header: "Feature scope".to_string(),
+                question: "What is the core capability you want to build?".to_string(),
+                options: vec![
+                    QuestionOption {
+                        label: "New API endpoint".to_string(),
+                        description: "REST or RPC service endpoint".to_string(),
+                    },
+                    QuestionOption {
+                        label: "UI component".to_string(),
+                        description: "Frontend feature or widget".to_string(),
+                    },
+                    QuestionOption {
+                        label: "Data pipeline".to_string(),
+                        description: "Processing, transformation, or ETL".to_string(),
+                    },
+                ],
+                multi_select: false,
+                allow_other: true,
+            },
+            ClarificationQuestion {
+                header: "Constraints".to_string(),
+                question: "Any specific constraints or requirements?".to_string(),
+                options: vec![
+                    QuestionOption {
+                        label: "Must be backward compatible".to_string(),
+                        description: "Cannot break existing APIs".to_string(),
+                    },
+                    QuestionOption {
+                        label: "Performance critical".to_string(),
+                        description: "Needs to handle high load".to_string(),
+                    },
+                    QuestionOption {
+                        label: "No special constraints".to_string(),
+                        description: "Standard development".to_string(),
+                    },
+                ],
+                multi_select: true,
+                allow_other: true,
+            },
+        ]
+    }
+
     /// Permission question for acceptance-tests (demo mode): like Claude would ask before creating files.
     /// Binary Yes/No — no "Other (type your own)".
     fn permission_questions() -> Vec<ClarificationQuestion> {
@@ -420,6 +465,27 @@ impl CodingBackend for StubBackend {
         if prompt.contains(FAIL_SCHEMA) {
             emit_agent_exited(&request, 0);
             return Ok(self.fail_schema_response(&request.goal_id));
+        }
+
+        // Interview: clarify first; when answered, proceed to response_for_goal("interview").
+        // SKIP_QUESTIONS: for tests (e.g. FlowRunner) that cannot provide clarification input.
+        if request.goal_id.as_str() == "interview"
+            && !has_answers
+            && !prompt.contains(SKIP_QUESTIONS)
+        {
+            log::debug!("[stub] interview: returning clarification questions (no submit)");
+            emit_agent_exited(&request, 0);
+            return Ok(InvokeResponse {
+                output: "Let me understand the feature better.".to_string(),
+                exit_code: 0,
+                session_id: Some(format!(
+                    "stub-{}",
+                    self.invocation_count.load(Ordering::SeqCst)
+                )),
+                questions: Self::interview_questions(),
+                raw_stream: None,
+                stderr: None,
+            });
         }
 
         // Plan: always clarify; when answered (HERE ARE THE USER'S ANSWERS) or refinement, proceed.

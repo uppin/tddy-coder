@@ -63,6 +63,7 @@ fn initial_tui_visible(text: &str) -> bool {
 
 fn select_like_prompt_visible(text: &str) -> bool {
     text.contains("Email/password")
+        || text.contains("Feature scope")
         || text.contains("Scope")
         || text.contains("Plan generated")
         || text.contains("Permission")
@@ -602,13 +603,13 @@ async fn grpc_virtual_tui_idle_animation_cadence() -> anyhow::Result<()> {
 /// Bug reproduction: in Select mode over RPC, pressing Down arrow briefly moves the
 /// selection highlight but the periodic re-render resets it back to the first option.
 ///
-/// Uses **acceptance-tests** permission (Yes / No): interview→plan handoff skips plan-scope
-/// Select, so we assert on the next stub Select.
+/// Uses **acceptance-tests** permission (Yes / No): SKIP_QUESTIONS skips stub interview so we
+/// reach permission Select without terminal input through interview Feature scope / Constraints.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
     let (_handle, port, shutdown) =
-        spawn_presenter_with_terminal_service(Some("Build auth".to_string()));
+        spawn_presenter_with_terminal_service(Some("SKIP_QUESTIONS Build auth".to_string()));
     let _approve = spawn_pr_document_approve(port);
 
     let mut client = connect_terminal_grpc(port).await?;

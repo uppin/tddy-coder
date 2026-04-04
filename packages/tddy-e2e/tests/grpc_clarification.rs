@@ -11,7 +11,8 @@ use tddy_e2e::{connect_grpc, spawn_presenter_with_grpc};
 use tddy_service::gen::app_mode_proto;
 use tddy_service::gen::server_message;
 use tddy_service::gen::{
-    client_message, AnswerSelect, ApproveSessionDocument, ClientMessage, QueuePrompt,
+    client_message, AnswerMultiSelect, AnswerSelect, ApproveSessionDocument, ClientMessage,
+    QueuePrompt,
 };
 
 #[tokio::test]
@@ -58,18 +59,40 @@ async fn clarification_flow_submit_answer_select_workflow_completes() {
                                 {
                                     seen_select_mode = true;
                                     let q = select.question.as_ref().unwrap();
-                                    // StubBackend: plan clarification (Scope), acceptance-tests permission (Permission), or demo (Demo)
+                                    // StubBackend: interview (Feature scope), plan (Scope), acceptance-tests (Permission), demo (Demo)
                                     assert!(
-                                        q.header == "Scope"
+                                        q.header == "Feature scope"
+                                            || q.header == "Scope"
                                             || q.header == "Permission"
                                             || q.header == "Demo",
-                                        "expected Scope, Permission, or Demo, got {}",
+                                        "expected Feature scope, Scope, Permission, or Demo, got {}",
                                         q.header
                                     );
 
                                     tx.send(ClientMessage {
                                         intent: Some(client_message::Intent::AnswerSelect(
                                             AnswerSelect { index: 0 },
+                                        )),
+                                    })
+                                    .await
+                                    .unwrap();
+                                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                                } else if let Some(app_mode_proto::Variant::MultiSelect(ms)) =
+                                    &mode.variant
+                                {
+                                    seen_select_mode = true;
+                                    let q = ms.question.as_ref().unwrap();
+                                    assert!(
+                                        q.header == "Constraints",
+                                        "expected Constraints (interview multi-select), got {}",
+                                        q.header
+                                    );
+                                    tx.send(ClientMessage {
+                                        intent: Some(client_message::Intent::AnswerMultiSelect(
+                                            AnswerMultiSelect {
+                                                indices: vec![0],
+                                                other: String::new(),
+                                            },
                                         )),
                                     })
                                     .await

@@ -1,7 +1,8 @@
 //! gRPC-driven E2E test: full workflow.
 //!
-//! full_workflow_with_clarification_completes: Uses "Build auth", answers all Select prompts
-//! (Scope, Permission, Demo) with index 0. Verifies workflow completes successfully.
+//! full_workflow_with_clarification_completes: Uses "Build auth", answers interview Select +
+//! MultiSelect, then all later Select prompts (Scope, Permission, Demo) with index 0. Verifies
+//! workflow completes successfully.
 
 use std::time::Duration;
 
@@ -12,7 +13,8 @@ use tddy_e2e::{connect_grpc, spawn_presenter_with_grpc};
 use tddy_service::gen::app_mode_proto;
 use tddy_service::gen::server_message;
 use tddy_service::gen::{
-    client_message, AnswerSelect, ApproveSessionDocument, ClientMessage, SubmitFeatureInput,
+    client_message, AnswerMultiSelect, AnswerSelect, ApproveSessionDocument, ClientMessage,
+    SubmitFeatureInput,
 };
 
 #[tokio::test]
@@ -58,6 +60,19 @@ async fn full_workflow_with_clarification_completes() {
                                     tx.send(ClientMessage {
                                         intent: Some(client_message::Intent::AnswerSelect(
                                             AnswerSelect { index: 0 },
+                                        )),
+                                    })
+                                    .await
+                                    .ok();
+                                } else if let Some(app_mode_proto::Variant::MultiSelect(_)) =
+                                    &mode.variant
+                                {
+                                    tx.send(ClientMessage {
+                                        intent: Some(client_message::Intent::AnswerMultiSelect(
+                                            AnswerMultiSelect {
+                                                indices: vec![0],
+                                                other: String::new(),
+                                            },
                                         )),
                                     })
                                     .await
@@ -147,17 +162,25 @@ async fn full_workflow_with_clarification_completes() {
     );
 }
 
-/// Full workflow with StubBackend: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor.
-/// Asserts each state transition in order. Answers plan clarification (Scope), acceptance-tests permission (Permission),
-/// and demo (Create & run). StubBackend plan includes demo_plan, so demo step runs.
+/// Full workflow with StubBackend: interview → plan → acceptance-tests → red → green → demo → evaluate → validate → refactor.
+/// Asserts each state transition in order. Answers interview (Feature scope + Constraints), plan clarification (Scope),
+/// acceptance-tests permission (Permission), and demo (Create & run). StubBackend plan includes demo_plan, so demo step runs.
 #[tokio::test]
 async fn full_workflow_asserts_each_state_transition() {
     /// `TddWorkflowHooks::before_task` persists the transitional state in `changeset.yaml` before
-    /// emitting `WorkflowEvent::StateChange`. The **interview** and **Planning** phases can emit
-    /// variable duplicate transitions (`Interviewing→…`, `Planning→…`) depending on timing, so this
-    /// test matches a fixed **suffix** from **`AcceptanceTesting` → `DocsUpdated`** and only checks
-    /// that earlier transitions stay within interview + planning phases.
-    const SUFFIX_WITH_DEMO: &[(&str, &str)] = &[
+    /// emitting `WorkflowEvent::StateChange`, so the UI often sees identity transitions
+    /// (`Planning→Planning`, `AcceptanceTesting→AcceptanceTesting`, …). PlanReview resync still sends
+    /// `Planning→Planned`. Captured from StubBackend full graph (interview → plan handoff skips extra plan Select).
+    const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
+        ("Interviewing", "Interviewing"),
+        ("Interviewing", "Interviewing"),
+        ("Interviewing", "Interviewed"),
+        ("Planning", "Planned"),
+        ("Planning", "Planned"),
+        ("Interviewing", "Interviewing"),
+        ("Interviewing", "Interviewing"),
+        ("Interviewing", "Interviewed"),
+        ("Planning", "Interviewed"),
         ("AcceptanceTesting", "AcceptanceTesting"),
         ("AcceptanceTesting", "AcceptanceTestsReady"),
         ("RedTesting", "RedTesting"),
@@ -175,7 +198,16 @@ async fn full_workflow_asserts_each_state_transition() {
         ("UpdatingDocs", "UpdatingDocs"),
         ("UpdatingDocs", "DocsUpdated"),
     ];
-    const SUFFIX_WITHOUT_DEMO: &[(&str, &str)] = &[
+    const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
+        ("Interviewing", "Interviewing"),
+        ("Interviewing", "Interviewing"),
+        ("Interviewing", "Interviewed"),
+        ("Planning", "Planned"),
+        ("Planning", "Planned"),
+        ("Interviewing", "Interviewing"),
+        ("Interviewing", "Interviewing"),
+        ("Interviewing", "Interviewed"),
+        ("Planning", "Interviewed"),
         ("AcceptanceTesting", "AcceptanceTesting"),
         ("AcceptanceTesting", "AcceptanceTestsReady"),
         ("RedTesting", "RedTesting"),
@@ -233,6 +265,19 @@ async fn full_workflow_asserts_each_state_transition() {
                                     tx.send(ClientMessage {
                                         intent: Some(client_message::Intent::AnswerSelect(
                                             AnswerSelect { index: 0 },
+                                        )),
+                                    })
+                                    .await
+                                    .ok();
+                                } else if let Some(app_mode_proto::Variant::MultiSelect(_)) =
+                                    &mode.variant
+                                {
+                                    tx.send(ClientMessage {
+                                        intent: Some(client_message::Intent::AnswerMultiSelect(
+                                            AnswerMultiSelect {
+                                                indices: vec![0],
+                                                other: String::new(),
+                                            },
                                         )),
                                     })
                                     .await
@@ -301,25 +346,25 @@ async fn full_workflow_asserts_each_state_transition() {
         state_transitions
     );
 
-    let expected_suffix = if state_transitions.iter().any(|(_, to)| to == "DemoComplete") {
-        SUFFIX_WITH_DEMO
+    let expected = if state_transitions.iter().any(|(_, to)| to == "DemoComplete") {
+        EXPECTED_WITH_DEMO
     } else {
-        SUFFIX_WITHOUT_DEMO
+        EXPECTED_WITHOUT_DEMO
     };
-    assert!(
-        state_transitions.len() >= expected_suffix.len(),
-        "expected at least {} tail transitions, got {}: {:?}",
-        expected_suffix.len(),
+    assert_eq!(
+        state_transitions.len(),
+        expected.len(),
+        "Expected {} state transitions, got {}: {:?}",
+        expected.len(),
         state_transitions.len(),
         state_transitions
     );
-    let tail_start = state_transitions.len() - expected_suffix.len();
-    for (i, &(exp_from, exp_to)) in expected_suffix.iter().enumerate() {
-        let (from, to) = &state_transitions[tail_start + i];
+    for (i, (from, to)) in state_transitions.iter().enumerate() {
+        let (exp_from, exp_to) = expected[i];
         assert_eq!(
             from,
             exp_from,
-            "suffix transition {}: expected from='{}', got from='{}'",
+            "Transition {}: expected from='{}', got from='{}'",
             i + 1,
             exp_from,
             from
@@ -327,27 +372,10 @@ async fn full_workflow_asserts_each_state_transition() {
         assert_eq!(
             to,
             exp_to,
-            "suffix transition {}: expected to='{}', got to='{}'",
+            "Transition {}: expected to='{}', got to='{}'",
             i + 1,
             exp_to,
             to
-        );
-    }
-    fn is_early_tdd_transition(from: &str, to: &str) -> bool {
-        matches!(
-            (from, to),
-            ("Init" | "Interview", "Interviewing")
-                | ("Interviewing", "Interviewing" | "Interviewed")
-                | ("Interviewed", "Planning")
-                // Ordering can interleave interview completion with plan start (both update changeset).
-                | ("Planning", "Interviewed")
-                | ("Planning", "Planning" | "Planned")
-        )
-    }
-    for (from, to) in &state_transitions[..tail_start] {
-        assert!(
-            is_early_tdd_transition(from, to),
-            "early transition should be interview- or planning-phase, got {from:?}→{to:?}"
         );
     }
 }

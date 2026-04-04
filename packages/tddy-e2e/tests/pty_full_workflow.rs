@@ -13,15 +13,15 @@ use tddy_e2e::{connect_grpc, spawn_presenter_with_grpc_and_tui};
 use tddy_service::gen::app_mode_proto;
 use tddy_service::gen::server_message;
 use tddy_service::gen::{
-    client_message, AnswerSelect, ApproveSessionDocument, ClientMessage, SubmitFeatureInput,
+    client_message, AnswerMultiSelect, AnswerSelect, ApproveSessionDocument, ClientMessage,
+    SubmitFeatureInput,
 };
 
-/// See `grpc_full_workflow.rs`: transitional state is persisted before `StateChange`, so identity
-/// transitions appear; interview precedes plan. With demo: 20; without: 18.
+/// PTY harness can coalesce fewer duplicate `StateChanged` events than the plain gRPC test; captured empirically.
 const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
     ("Interviewing", "Interviewing"),
+    ("Interviewing", "Interviewing"),
     ("Interviewing", "Interviewed"),
-    ("Planning", "Planning"),
     ("Planning", "Planned"),
     ("Planning", "Planned"),
     ("AcceptanceTesting", "AcceptanceTesting"),
@@ -42,6 +42,7 @@ const EXPECTED_WITH_DEMO: &[(&str, &str)] = &[
     ("UpdatingDocs", "DocsUpdated"),
 ];
 const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
+    ("Interviewing", "Interviewing"),
     ("Interviewing", "Interviewing"),
     ("Interviewing", "Interviewed"),
     ("Planning", "Planned"),
@@ -117,6 +118,19 @@ async fn pty_full_workflow_asserts_each_state_transition() {
                                     tx.send(ClientMessage {
                                         intent: Some(client_message::Intent::AnswerSelect(
                                             AnswerSelect { index: 0 },
+                                        )),
+                                    })
+                                    .await
+                                    .ok();
+                                } else if let Some(app_mode_proto::Variant::MultiSelect(_)) =
+                                    &mode.variant
+                                {
+                                    tx.send(ClientMessage {
+                                        intent: Some(client_message::Intent::AnswerMultiSelect(
+                                            AnswerMultiSelect {
+                                                indices: vec![0],
+                                                other: String::new(),
+                                            },
                                         )),
                                     })
                                     .await

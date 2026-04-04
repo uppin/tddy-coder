@@ -101,7 +101,10 @@ fn before_interview(context: &Context) -> Result<(), Box<dyn Error + Send + Sync
     let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
     if let Some(answers) = context.get_sync::<String>("answers") {
         if !answers.trim().is_empty() {
-            context.set_sync("prompt", answers);
+            context.set_sync(
+                "prompt",
+                interview::build_followup_prompt(&feature_input, &answers),
+            );
             context.remove_sync("answers");
         } else {
             context.set_sync(
@@ -140,11 +143,7 @@ fn before_interview(context: &Context) -> Result<(), Box<dyn Error + Send + Sync
     context.set_sync("model", model);
     if let Ok(mut cs) = read_changeset(&session_dir) {
         update_state(&mut cs, WorkflowState::new("Interviewing"));
-        hooks_common::write_changeset_logged(
-            &session_dir,
-            &cs,
-            "before_interview Interviewing",
-        );
+        hooks_common::write_changeset_logged(&session_dir, &cs, "before_interview Interviewing");
     }
     Ok(())
 }
@@ -166,11 +165,7 @@ fn after_interview(
     interview::persist_interview_handoff_for_plan(session_dir, &text)?;
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("Interviewed"));
-        hooks_common::write_changeset_logged(
-            session_dir,
-            &cs,
-            "after_interview Interviewed",
-        );
+        hooks_common::write_changeset_logged(session_dir, &cs, "after_interview Interviewed");
     }
     Ok(())
 }
