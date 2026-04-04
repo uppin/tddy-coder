@@ -17,7 +17,10 @@ use tddy_e2e::{
 };
 use tddy_service::proto::terminal::TerminalInput;
 use tddy_service::{start_virtual_tui_session, VirtualTuiSession};
-use vt100::Parser;
+use tddy_tui_testkit::{
+    assert_segmented_echo, eventually_segmented_echo, ScreenParser, SegmentedEchoFailureStyle,
+    SegmentedEchoWaitParams,
+};
 
 mod keys {
     pub const ENTER: &[u8] = b"\r";
@@ -70,180 +73,6 @@ fn build_large_echo_segmented_payload(
     let full: String = segments.iter().cloned().collect();
     assert_eq!(full.chars().count(), total_len);
     (full, segments)
-}
-
-fn vt100_compact_screen(all_output: &[u8], rows: u16, cols: u16) -> String {
-    let mut parser = Parser::new(rows, cols, 0);
-    parser.process(all_output);
-    let screen = parser.screen().contents();
-    screen.chars().filter(|c| !c.is_whitespace()).collect()
-}
-
-/// Normalize the flattened VT100 string before echo substring checks:
-///
-/// - Idle pulse glyphs (`·` / `•` / `●`) on the status line.
-/// - Mouse **Enter** affordance (`paint_enter_affordance`): light box-drawing border (`┌─` … `│` …)
-///   and U+23CE on the first prompt text row; legacy ASCII `+--` / `|` may still appear in old logs.
-///
-/// These glyphs overlay the last columns of wrapped prompt lines and break naive contiguous-prefix checks.
-fn compact_screen_for_echo_assertions(compact: &str) -> String {
-    let mut s: String = compact
-        .chars()
-        .filter(|&c| !matches!(c, '·' | '•' | '●'))
-        .collect();
-    while s.contains("+--") {
-        s = s.replace("+--", "");
-    }
-    s.chars()
-        .filter(|&c| {
-            !matches!(c, '|' | '\u{23CE}')
-                && !matches!(
-                    c,
-                    '\u{2500}' | '\u{2502}' | '\u{250C}' | '\u{2510}' | '\u{2514}' | '\u{2518}'
-                )
-        })
-        .collect()
-}
-
-fn longest_echo_prefix_len_in_compact(compact: &str, expected_no_ws: &str) -> usize {
-    let normalized = compact_screen_for_echo_assertions(compact);
-    let mut lo = 0usize;
-    let mut hi = expected_no_ws.len();
-    while lo < hi {
-        let mid = (lo + hi).div_ceil(2);
-        if normalized.contains(&expected_no_ws[..mid]) {
-            lo = mid;
-        } else {
-            hi = mid - 1;
-        }
-    }
-    lo
-}
-
-fn segmented_echo_complete_in_vt100(
-    all_output: &[u8],
-    expected_full: &str,
-    rows: u16,
-    cols: u16,
-) -> bool {
-    let compact = vt100_compact_screen(all_output, rows, cols);
-    let expected_no_ws: String = expected_full
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
-    longest_echo_prefix_len_in_compact(&compact, &expected_no_ws) == expected_no_ws.len()
-}
-
-/// Eventually wait until the full expected echo appears in the VT100 parse, or timeout.
-/// Throttles expensive `segmented_echo_complete_in_vt100` calls (interval and/or byte growth).
-async fn eventually_segmented_echo_in_vt100_buffer(
-    buf: &Arc<Mutex<Vec<u8>>>,
-    expected_full: &str,
-    rows: u16,
-    cols: u16,
-) -> bool {
-    let deadline = tokio::time::Instant::now() + LARGE_ECHO_VT100_SYNC_TIMEOUT;
-    let mut last_check_at = tokio::time::Instant::now() - LARGE_ECHO_VT100_SYNC_MIN_INTERVAL;
-    let mut last_check_len = 0usize;
-
-    while tokio::time::Instant::now() < deadline {
-        let ok = {
-            let g = buf.lock().expect("echo sync buffer");
-            let len = g.len();
-            let due = last_check_at.elapsed() >= LARGE_ECHO_VT100_SYNC_MIN_INTERVAL
-                || len.saturating_sub(last_check_len) >= LARGE_ECHO_VT100_SYNC_MIN_NEW_BYTES;
-            if due {
-                last_check_at = tokio::time::Instant::now();
-                last_check_len = len;
-                segmented_echo_complete_in_vt100(&g, expected_full, rows, cols)
-            } else {
-                false
-            }
-        };
-        if ok {
-            return true;
-        }
-        tokio::time::sleep(LARGE_ECHO_VT100_SYNC_LOOP_SLEEP).await;
-    }
-
-    let g = buf.lock().expect("echo sync buffer");
-    segmented_echo_complete_in_vt100(&g, expected_full, rows, cols)
-}
-
-fn assert_segmented_echo_in_vt100(
-    all_output: &[u8],
-    expected_full: &str,
-    segments: &[String],
-    rows: u16,
-    cols: u16,
-) {
-    let compact_raw = vt100_compact_screen(all_output, rows, cols);
-    let compact = compact_screen_for_echo_assertions(&compact_raw);
-    let expected_no_ws: String = expected_full
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
-
-    let mut seg_full_in_compact: Vec<bool> = Vec::with_capacity(segments.len());
-    let mut seg_marker_in_compact: Vec<bool> = Vec::with_capacity(segments.len());
-    for (i, seg) in segments.iter().enumerate() {
-        let seg_no_ws: String = seg.chars().filter(|c| !c.is_whitespace()).collect();
-        seg_full_in_compact.push(compact.contains(&seg_no_ws));
-        let marker = format!("#SEG-{}:", i);
-        seg_marker_in_compact.push(compact.contains(marker.as_str()));
-    }
-
-    let lo = longest_echo_prefix_len_in_compact(&compact, &expected_no_ws);
-
-    let missing_full: Vec<usize> = seg_full_in_compact
-        .iter()
-        .enumerate()
-        .filter(|(_, ok)| !**ok)
-        .map(|(i, _)| i)
-        .collect();
-    let missing_markers: Vec<usize> = seg_marker_in_compact
-        .iter()
-        .enumerate()
-        .filter(|(_, ok)| !**ok)
-        .map(|(i, _)| i)
-        .collect();
-
-    let last_idx = segments.len().saturating_sub(1);
-    let region_hint = if missing_full.is_empty() {
-        "all segment bodies visible as substrings"
-    } else if missing_full.contains(&0) {
-        "leading: segment 0 missing (start of echoed input not present as substring)"
-    } else if missing_full.len() == 1 && missing_full[0] == last_idx {
-        if seg_marker_in_compact[last_idx] && !seg_full_in_compact[last_idx] {
-            "trailing: last #SEG marker is present but the tail of that segment (after the marker) is not present as one contiguous substring"
-        } else {
-            "trailing: only the last segment missing (marker and body)"
-        }
-    } else if missing_full.iter().all(|&i| i > 0) && missing_full.iter().any(|&i| i < last_idx) {
-        "middle: some interior segment(s) missing (first missing index > 0)"
-    } else {
-        "mixed: see missing_full indices vs segment count"
-    };
-
-    assert_eq!(
-        lo,
-        expected_no_ws.len(),
-        "vt100 contiguous echo check failed.\n\
-         longest prefix (no ws) found: {} of {}\n\
-         per-segment full body in compact: {:?} (indices 0..{})\n\
-         per-segment #SEG-n: marker in compact: {:?}\n\
-         segments missing as full substring: {:?}\n\
-         markers missing: {:?}\n\
-         region hint: {}\n",
-        lo,
-        expected_no_ws.len(),
-        seg_full_in_compact,
-        segments.len(),
-        seg_marker_in_compact,
-        missing_full,
-        missing_markers,
-        region_hint
-    );
 }
 
 fn ansi_to_text(bytes: &[u8]) -> String {
@@ -509,29 +338,6 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
     Ok(())
 }
 
-/// Virtual terminal viewer that mimics Ghostty: receives ANSI output via RPC,
-/// parses with vt100, exposes visible screen content for assertions.
-struct VirtualTerminalViewer {
-    parser: Parser,
-}
-
-impl VirtualTerminalViewer {
-    fn new() -> Self {
-        Self {
-            parser: Parser::new(24, 80, 0),
-        }
-    }
-
-    fn feed(&mut self, bytes: &[u8]) {
-        self.parser.process(bytes);
-    }
-
-    #[allow(dead_code)]
-    fn visible_content(&self) -> String {
-        self.parser.screen().contents()
-    }
-}
-
 /// Full e2e: virtual terminal (vt100) as viewer, gRPC for I/O sync, virtual keyboard
 /// interactions. Asserts on visible terminal content like GhosttyTerminalLiveKit.
 #[tokio::test]
@@ -549,7 +355,7 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
         .await?
         .into_inner();
 
-    let mut viewer = VirtualTerminalViewer::new();
+    let mut viewer = ScreenParser::new(24, 80);
 
     // Phase 1: send init, drain ALL initial TUI render output into vt100
     input_tx.send(TerminalInput { data: vec![] }).await?;
@@ -771,9 +577,9 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
 
     // Feed initial output into vt100 parser to verify initial state:
     // first option "Email/password" should have "> " prefix (selected).
-    let mut parser = Parser::new(24, 80, 0);
-    parser.process(&initial);
-    let before_screen = parser.screen().contents();
+    let mut parser = ScreenParser::new(24, 80);
+    parser.feed(&initial);
+    let before_screen = parser.contents();
     eprintln!("[TEST] before Down — screen:\n{}", before_screen);
 
     // Verify initial selection is on first option.
@@ -796,27 +602,27 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
     // verify that EVERY chunk after Down maintains the correct selection, not just the
     // final state.
     let mut chunks_with_selection_reset = Vec::new();
-    let mut chunk_parser = Parser::new(24, 80, 0);
-    chunk_parser.process(&initial); // start from same state
+    let mut chunk_parser = ScreenParser::new(24, 80);
+    chunk_parser.feed(&initial); // start from same state
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     let mut chunk_idx = 0u32;
     while tokio::time::Instant::now() < deadline {
         match tokio::time::timeout(Duration::from_millis(300), stream.message()).await {
             Ok(Ok(Some(output))) => {
                 chunk_idx += 1;
-                chunk_parser.process(&output.data);
-                let screen = chunk_parser.screen().contents();
+                chunk_parser.feed(&output.data);
+                let screen = chunk_parser.contents();
                 if screen.contains("> Email/password") && !screen.contains("> OAuth") {
                     chunks_with_selection_reset.push((chunk_idx, screen.clone()));
                 }
-                parser.process(&output.data);
+                parser.feed(&output.data);
             }
             Ok(Ok(None)) => break,
             Ok(Err(e)) => return Err(anyhow::anyhow!("stream error: {}", e)),
             Err(_) => break,
         }
     }
-    let after_screen = parser.screen().contents();
+    let after_screen = parser.contents();
     eprintln!(
         "[TEST] after Down + periodic renders — screen:\n{}",
         after_screen
@@ -907,9 +713,9 @@ async fn grpc_resize_shrink_grow_shows_pgup_pgdn_scroll_exactly_once() -> anyhow
     shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
     drop(input_tx);
 
-    let mut parser = Parser::new(24, 80, 0);
-    parser.process(&all_output);
-    let visible = parser.screen().contents();
+    let mut parser = ScreenParser::new(24, 80);
+    parser.feed(&all_output);
+    let visible = parser.contents();
     let count = visible.matches("PgUp/PgDn scroll").count();
     assert_eq!(
         count, 1,
@@ -977,7 +783,20 @@ async fn grpc_virtual_tui_rpc_large_echo_char_by_char() -> anyhow::Result<()> {
             input_tx.send(TerminalInput { data: vec![*byte] }).await?;
         }
 
-        eventually_segmented_echo_in_vt100_buffer(&buf, expected.as_str(), ROWS, COLS).await;
+        eventually_segmented_echo(
+            &buf,
+            expected.as_str(),
+            ROWS,
+            COLS,
+            SegmentedEchoWaitParams {
+                timeout: LARGE_ECHO_VT100_SYNC_TIMEOUT,
+                min_interval: LARGE_ECHO_VT100_SYNC_MIN_INTERVAL,
+                min_new_bytes: LARGE_ECHO_VT100_SYNC_MIN_NEW_BYTES,
+                loop_sleep: LARGE_ECHO_VT100_SYNC_LOOP_SLEEP,
+                style: SegmentedEchoFailureStyle::Grpc,
+            },
+        )
+        .await;
 
         drop(input_tx);
         shutdown.store(true, Ordering::Relaxed);
@@ -988,7 +807,14 @@ async fn grpc_virtual_tui_rpc_large_echo_char_by_char() -> anyhow::Result<()> {
         all_output
     };
 
-    assert_segmented_echo_in_vt100(&all_output, &expected, &segments, ROWS, COLS);
+    assert_segmented_echo(
+        &all_output,
+        &expected,
+        &segments,
+        ROWS,
+        COLS,
+        SegmentedEchoFailureStyle::Grpc,
+    );
 
     Ok(())
 }
@@ -1052,7 +878,20 @@ async fn virtual_tui_large_echo_char_by_char_direct_vt100() -> anyhow::Result<()
                 .map_err(|e| anyhow::anyhow!("input_tx byte: {}", e))?;
         }
 
-        eventually_segmented_echo_in_vt100_buffer(&buf, expected.as_str(), ROWS, COLS).await;
+        eventually_segmented_echo(
+            &buf,
+            expected.as_str(),
+            ROWS,
+            COLS,
+            SegmentedEchoWaitParams {
+                timeout: LARGE_ECHO_VT100_SYNC_TIMEOUT,
+                min_interval: LARGE_ECHO_VT100_SYNC_MIN_INTERVAL,
+                min_new_bytes: LARGE_ECHO_VT100_SYNC_MIN_NEW_BYTES,
+                loop_sleep: LARGE_ECHO_VT100_SYNC_LOOP_SLEEP,
+                style: SegmentedEchoFailureStyle::Grpc,
+            },
+        )
+        .await;
 
         drop(input_tx);
         vt_shutdown.store(true, Ordering::Relaxed);
@@ -1064,7 +903,14 @@ async fn virtual_tui_large_echo_char_by_char_direct_vt100() -> anyhow::Result<()
         all_output
     };
 
-    assert_segmented_echo_in_vt100(&all_output, &expected, &segments, ROWS, COLS);
+    assert_segmented_echo(
+        &all_output,
+        &expected,
+        &segments,
+        ROWS,
+        COLS,
+        SegmentedEchoFailureStyle::Grpc,
+    );
 
     Ok(())
 }

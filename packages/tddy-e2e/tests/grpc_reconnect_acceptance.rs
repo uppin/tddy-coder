@@ -14,7 +14,7 @@ use std::time::Duration;
 use strip_ansi_escapes::strip;
 use tddy_e2e::{connect_terminal_grpc, spawn_presenter_with_terminal_service};
 use tddy_service::proto::terminal::TerminalInput;
-use vt100::Parser;
+use tddy_tui_testkit::ScreenParser;
 
 mod keys {
     pub const DOWN: &[u8] = b"\x1b[B";
@@ -73,9 +73,9 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
         &initial_text[..initial_text.len().min(300)]
     );
 
-    let mut parser1 = Parser::new(24, 80, 0);
-    parser1.process(&stream1_output);
-    let before = parser1.screen().contents();
+    let mut parser1 = ScreenParser::new(24, 80);
+    parser1.feed(&stream1_output);
+    let before = parser1.contents();
     assert!(
         before.contains("> Email/password"),
         "Initially first option should be selected; screen:\n{}",
@@ -91,9 +91,9 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
     let mut full_out = stream1_output;
     full_out.extend_from_slice(&after_down);
 
-    let mut parser_after = Parser::new(24, 80, 0);
-    parser_after.process(&full_out);
-    let reference_screen = parser_after.screen().contents();
+    let mut parser_after = ScreenParser::new(24, 80);
+    parser_after.feed(&full_out);
+    let reference_screen = parser_after.contents();
     assert!(
         reference_screen.contains("> OAuth"),
         "Stream1: Down should select OAuth; screen:\n{}",
@@ -139,9 +139,9 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
         reconnect_burst.len()
     );
 
-    let mut p2 = Parser::new(24, 80, 0);
-    p2.process(&reconnect_burst);
-    let reconnect_screen = p2.screen().contents();
+    let mut p2 = ScreenParser::new(24, 80);
+    p2.feed(&reconnect_burst);
+    let reconnect_screen = p2.contents();
 
     assert!(
         reconnect_screen.contains("> OAuth"),
