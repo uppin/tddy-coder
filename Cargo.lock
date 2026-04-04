@@ -5737,7 +5737,6 @@ dependencies = [
  "tokio-stream",
  "tonic 0.12.3",
  "uuid",
- "vt100",
 ]
 
 [[package]]
@@ -5876,6 +5875,7 @@ dependencies = [
  "libc",
  "log",
  "ratatui",
+ "serial_test",
  "tddy-core",
  "tokio",
  "tui-markdown",

@@ -43,14 +43,34 @@ In `MarkdownViewer`, **Approve** and **Reject** do not occupy a fixed footer ban
 - **Periodic render**: Headless `VirtualTui` wakes on a short interval for agent-active modes so the spinner animates smoothly; in clarification waits the interval is about one second so the idle heartbeat and frozen clock align with visible updates without high-frequency full-frame traffic when only the idle phase advances.
 - **Frame diffing**: Bytes go to the client when the rendered frame differs from the previous frame. Cursor-position-only updates (same cell paint, different CUP or cursor show/hide CSI sequences) are rate-limited by a minimum interval so the stream does not flood on caret motion alone.
 
+## Running mode: User prompt strip (activity pane)
+
+In `AppMode::Running`, when `ViewState::running_input` is non-empty, the **last line** of the activity log renders a context strip `> {text}` with **white** foreground (`Color::White`) and **dark grey** background (`Color::DarkGray`). The strip is painted after the activity `Paragraph` so streamed tool and agent lines sit above this anchor.
+
+## Bottom chrome: Footer row
+
+Vertical layout reserves **one** terminal row immediately below the prompt text block as `footer_bar`. An empty `Paragraph` clears that row so the bottom chrome has stable height for overlays and optional future footer content.
+
 ## Mouse mode: Enter control
 
-When pointer reporting is active (`EnableMouseCapture`), the TUI exposes a fixed **3×2** cell **Enter** affordance at the **bottom-right** of the terminal, aligned with the prompt strip:
+When pointer reporting is active (`EnableMouseCapture`), the TUI draws **Enter** and (when the terminal is wide enough) **Stop** affordances to the right of the prompt text. The layout narrows `prompt_bar` and `footer_bar` by `right_chrome_reserve_cols(terminal_width)`: **four** columns (margin + Enter strip) on very narrow terminals, **eight** columns when there is room for Enter plus Stop (margin + Stop strip).
 
-- **Geometry**: Three columns by two rows. The **top** row sits on the line **immediately above** the first prompt line—usually the **status bar** row, so a **one-line** `prompt_bar` still fits the frame without growing the prompt height. The **bottom** row sits on the **first line of the prompt bar**; U+23CE appears only there. If `--debug` adds a debug log strip between status and prompt, the top row of the frame uses the **last line above the prompt** (e.g. bottom of the debug region). Status / debug / prompt text in those six cells may be overwritten after the corresponding `Paragraph` widgets render.
-- **Label**: ASCII `+--` on the upper row; `|`, U+23CE (`⏎`), and a space on the lower row.
-- **Hit-testing**: `packages/tddy-tui/src/mouse_map.rs` defines `enter_button_rect` and routes left-clicks anywhere in that 3×2—including `+`, `-`, `|`, and `⏎`—to the same intents as **Enter** (`key_event_to_intent`).
-- **Narrow terminals**: If there is no row above the prompt (`prompt_bar.y == 0`) or the row is narrower than three columns, painting and hit-testing skip the affordance.
+- **Layout**: `layout_chunks_with_inbox` splits the terminal into **eight** vertical regions: activity, spacer, dynamic (inbox / questions / slash menu), status bar, **one empty row**, optional debug log, prompt block, and footer. The Enter strip’s **top** aligns with the **first row below the status bar** (the separator band: that empty row plus any debug rows allocated above the prompt chunk). Its **height** spans that band through the **prompt text** lines and the **footer** row. When the prompt chunk has more than one row, the **bottom** row is a horizontal rule (`U+2500`); that rule row is excluded from prompt line count and from Enter height so the rule stays visually separate from the frame.
+- **Geometry**: Width **three** columns. Horizontal origin: `prompt_bar.x + prompt_bar.width + ENTER_STRIP_MARGIN_COLS`. When the status bar has height zero, the strip starts at `prompt_bar.y` and spans prompt text lines plus footer only.
+- **Label**: Light box-drawing characters (`U+250C`–`U+2518`, `U+2500`, `U+2502`). **U+23CE** (`⏎`) sits on the **first prompt text row** inside the strip (below the top border when a separator band exists). Widgets for status, debug, prompt, and footer render first; the overlay paints afterward in the reserved columns.
+- **Hit-testing**: `packages/tddy-tui/src/mouse_map.rs` defines `enter_button_rect` to match `render::paint_enter_affordance`; left-clicks inside the rectangle map to the same intents as **Enter** (`key_event_to_intent`).
+- **E2E / stable screens**: When the environment variable `TDDY_E2E_NO_ENTER_AFFORDANCE` is set to any value, `paint_enter_affordance` returns without writing overlay symbols (byte-level terminal tests and gRPC terminal streams avoid frame noise).
+- **Narrow terminals**: If the prompt region is too narrow for the margin plus three columns, painting and hit-testing omit the Enter affordance.
+
+## Mouse mode: Stop control
+
+When **`right_chrome_reserve_cols`** includes the Stop strip (terminal wider than the full eight-column reserve), the TUI paints a second three-column strip **immediately to the right of** the Enter strip, separated by `STOP_STRIP_MARGIN_COLS` (one column).
+
+- **Label**: Same light box-drawing frame as Enter; the key cell uses **U+25A0** (■) in **red** (`Color::Red`) instead of U+23CE.
+- **Hit-testing**: `stop_button_rect` matches `paint_stop_affordance`; left-click maps to **`UserIntent::Interrupt`**, which the local event loop and `VirtualTui` handle by calling **`ctrl_c_interrupt_session`** (same as **Ctrl+C** / byte **0x03** over the terminal stream). The intent is not sent to the presenter.
+- **Semantics**: **`ctrl_c_interrupt_session`** only **`kill_child_process`** (tracked agent/backend PID). It does **not** set the workflow **`shutdown`** flag — the TUI and presenter keep running; full teardown uses the **`ctrlc`** SIGINT handler or daemon shutdown.
+- **E2E / stable screens**: The same `TDDY_E2E_NO_ENTER_AFFORDANCE` gate skips both Enter and Stop overlay paint.
+- **Narrow terminals**: If only the four-column Enter reserve fits, `stop_button_rect` is empty and the Stop affordance is omitted.
 
 ## Operational notes
 

@@ -4,13 +4,11 @@ import { ConnectionTerminalChrome } from "../../src/components/connection/Connec
 describe("ConnectionTerminalChrome", () => {
   it("places fullscreen control to the right of the connection status dot", () => {
     const onDisconnect = cy.stub();
-    const onStopInterrupt = cy.stub();
     cy.mount(
       <div style={{ position: "relative", width: 480, height: 320 }}>
         <ConnectionTerminalChrome
           overlayStatus="connected"
           onDisconnect={onDisconnect}
-          onStopInterrupt={onStopInterrupt}
         />
       </div>
     );

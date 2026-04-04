@@ -8,12 +8,11 @@ use anyhow::Context;
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use tokio::sync::Mutex;
-use vt100::Parser;
-
 use tddy_service::VirtualTuiSession;
+use tokio::sync::Mutex;
 
 use crate::input_encoding::{encode_resize, event_to_bytes};
+use crate::screen_parser::ScreenParser;
 
 /// Harness for driving VirtualTui in tests: keyboard, mouse, resize, and VT100 screen queries.
 pub struct TuiTestkit {
@@ -56,9 +55,9 @@ impl TuiTestkit {
     }
 
     fn parse_screen(acc: &[u8], cols: u16, rows: u16) -> String {
-        let mut parser = Parser::new(rows, cols, 0);
-        parser.process(acc);
-        parser.screen().contents()
+        let mut parser = ScreenParser::new(rows, cols);
+        parser.feed(acc);
+        parser.contents()
     }
 
     async fn send_bytes(&self, bytes: Vec<u8>) -> anyhow::Result<()> {

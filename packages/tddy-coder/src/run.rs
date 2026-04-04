@@ -1021,8 +1021,8 @@ fn on_progress(_event: &ProgressEvent) {
 /// - **agent_working_dir** — repository root for the coding agent (`InvokeRequest::working_dir`).
 /// - **session_artifact_dir** — directory for session files (`PRD.md`, `changeset.yaml`, metadata,
 ///   logs).
-/// - **session_dir_for_presenter** — `Some(artifact dir)` when resuming an existing session;
-///   `None` when starting fresh (workflow allocates the session directory).
+/// - **session_dir_for_presenter** — `Some(artifact dir)` for both new and resumed sessions so the
+///   workflow reuses the same tree as `.session.yaml` under `{tddy_data_dir}/sessions/<id>/`.
 fn livekit_daemon_workflow_paths(
     tddy_data_dir: &Path,
     resume_from: Option<&str>,
@@ -1048,11 +1048,7 @@ fn livekit_daemon_workflow_paths(
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     };
 
-    let session_dir_for_presenter = if resume_from.is_some() {
-        Some(session_artifact_dir.clone())
-    } else {
-        None
-    };
+    let session_dir_for_presenter = Some(session_artifact_dir.clone());
     (
         agent_working_dir,
         session_artifact_dir,
@@ -2816,9 +2812,9 @@ mod livekit_daemon_path_contract_tests {
         let base =
             std::env::temp_dir().join(format!("tddy-livekit-path-new-{}", std::process::id()));
         std::fs::create_dir_all(base.join("sessions")).unwrap();
-        let (working_dir, _artifact, presenter_dir) =
+        let (working_dir, artifact, presenter_dir) =
             livekit_daemon_workflow_paths(&base, None, None);
-        assert!(presenter_dir.is_none());
+        assert_eq!(presenter_dir, Some(artifact.clone()));
         assert_ne!(
             working_dir.parent().and_then(|p| p.file_name()),
             Some(OsStr::new("sessions")),

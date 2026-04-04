@@ -2,6 +2,23 @@
 
 Release note history for the Web product area.
 
+## 2026-04-04 — Terminal font zoom (pitch in / out)
+
+- **tddy-web**: **`terminalZoom`** / **`terminalZoomBridge`** (bounds, bridge + sync events, validated **`CustomEvent`** detail); **`GhosttyTerminal`** applies **`options.fontSize`**, **`FitAddon.fit()`**, **`data-terminal-font-size`**; keyboard (**Ctrl**/**⌘** +/-/0), touch pinch, trackpad pinch, and bridge dispatch (no on-screen zoom toolbar); **`GhosttyTerminalLiveKit`** **`fontSize`** prop as session baseline; optional **`VITE_TERMINAL_ZOOM_DEBUG`**. Bun tests and Cypress **`TerminalZoomAcceptance.cy.tsx`** cover zoom and resize OSC behavior.
+- **Package docs**: [terminal-zoom.md](../../../packages/tddy-web/docs/terminal-zoom.md) (implementation reference; includes Cypress guidance on waiting for prop sync before imperative **`setTerminalFontSize`** in component tests).
+- **Feature docs**: [web-terminal.md](web-terminal.md) (Font zoom).
+- **Repo**: **`.tddy-red-test-output.txt`** is gitignored for local red-phase captures.
+- **Dev WIP**: Removed stale pre-release reports from **`docs/dev/1-WIP/terminal-zoom-pitch/`** (superseded by shipped code and package docs).
+
+## 2026-04-03 — Interrupt: TUI Stop pane; web Stop button removed
+
+- **tddy-web**: **`ConnectionTerminalChrome`** no longer renders a bottom-right **Stop** button or **`onStopInterrupt`**. Interrupt is the ratatui **Stop** pane (red **U+25A0**) beside the Enter strip; the browser forwards SGR mouse to the virtual TUI (same **0x03** path as **Ctrl+C**).
+- **Feature docs**: [web-terminal.md](web-terminal.md) (Connection chrome); [TUI Stop control](../coder/tui-status-bar.md#mouse-mode-stop-control).
+
+## 2026-04-03 — Web terminal documentation: TUI mouse Enter affordance
+
+- **Docs**: [web-terminal.md](web-terminal.md) (**Connected Terminal UX**) describes the **three-column** Enter affordance to the right of the prompt (starts below the status bar; box drawing + **U+23CE** on the first prompt text row), aligned with [TUI status bar — mouse mode](../coder/tui-status-bar.md#mouse-mode-enter-control).
+
 ## 2026-04-03 — Session workflow files, project/worktree matching, delete hardening
 
 - **`connection.proto`**: **`ListSessionWorkflowFiles`** and **`ReadSessionWorkflowFile`** on **`ConnectionService`** for allowlisted workflow artifacts under the daemon-resolved session directory.

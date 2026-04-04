@@ -58,7 +58,7 @@ export interface GhosttyTerminalLiveKitProps {
   debugLogging?: boolean;
   /** Called with a function to focus the terminal. Used by mobile keyboard button. */
   onRegisterFocus?: (focus: () => void) => void;
-  /** When set, show connection chrome (status dot menu, Stop); Stop uses the same RPC input path as keyboard. */
+  /** When set, show connection chrome (status dot menu). Interrupt is the TUI Stop pane (SGR mouse → 0x03). */
   connectionOverlay?: {
     onDisconnect: () => void;
     buildId?: string;
@@ -75,6 +75,8 @@ export interface GhosttyTerminalLiveKitProps {
   serverIdentity?: string;
   /** When set, fullscreen targets this node (e.g. fixed `connected-terminal-container`); otherwise the terminal flex root inside this component. */
   fullscreenTargetRef?: React.RefObject<HTMLElement | null>;
+  /** Initial terminal font size (session baseline for Ctrl/⌘+0 reset). Default 14. */
+  fontSize?: number;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -93,6 +95,7 @@ export function GhosttyTerminalLiveKit({
   serverIdentity = "server",
   connectionOverlay,
   fullscreenTargetRef: fullscreenTargetRefProp,
+  fontSize = 14,
 }: GhosttyTerminalLiveKitProps) {
   const log = debugLogging
     ? (...args: unknown[]) => console.log("[GhosttyLiveKit]", ...args)
@@ -506,6 +509,7 @@ export function GhosttyTerminalLiveKit({
         ) : (
           <GhosttyTerminal
             ref={termRef}
+            fontSize={fontSize}
             sessionActive={coderSessionActive}
             debugLogging={debugLogging}
             preventFocusOnTap={preventFocusOnTap}
@@ -541,9 +545,6 @@ export function GhosttyTerminalLiveKit({
             onDisconnect={connectionOverlay.onDisconnect}
             onTerminate={connectionOverlay.onTerminate}
             fullscreenTargetRef={fullscreenTargetRef}
-            onStopInterrupt={() => {
-              enqueueTerminalInput(new Uint8Array([0x03]));
-            }}
           />
         )}
       </div>
