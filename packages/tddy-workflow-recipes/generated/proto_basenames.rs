@@ -4,6 +4,7 @@ pub const EXPECTED_PROTO_BASENAMES: &[&str] = &[
     "acceptance_tests.proto",
     "red.proto",
     "green.proto",
+    "post_green_review.proto",
     "evaluate_changes.proto",
     "validate_subagents.proto",
     "refactor.proto",

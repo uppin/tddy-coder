@@ -332,7 +332,7 @@ pub struct CoderArgs {
     pub config: Option<PathBuf>,
 
     /// Goal to execute: plan / reproduce (recipe start), acceptance-tests, red, green, … Omit to run full workflow.
-    #[arg(long, value_parser = ["plan", "reproduce", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
+    #[arg(long, value_parser = ["plan", "reproduce", "acceptance-tests", "red", "green", "post-green-review", "demo", "evaluate", "validate", "refactor", "update-docs"])]
     pub goal: Option<String>,
 
     /// Session directory for plan artifacts (default: `{TDDY_SESSIONS_DIR}/sessions/<session_id>/`). Optional override (e.g. tests).
@@ -478,7 +478,7 @@ pub struct DemoArgs {
     pub config: Option<PathBuf>,
 
     /// Goal to execute: plan / reproduce, acceptance-tests, … Omit to run full workflow.
-    #[arg(long, value_parser = ["plan", "reproduce", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
+    #[arg(long, value_parser = ["plan", "reproduce", "acceptance-tests", "red", "green", "post-green-review", "demo", "evaluate", "validate", "refactor", "update-docs"])]
     pub goal: Option<String>,
 
     /// Session directory for plan artifacts (default: `{TDDY_SESSIONS_DIR}/sessions/<session_id>/`). Optional override (e.g. tests).

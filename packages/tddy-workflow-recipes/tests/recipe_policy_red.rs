@@ -11,8 +11,10 @@ use tddy_workflow_recipes::{FreePromptingRecipe, GrillMeRecipe};
 fn supported_cli_names_includes_free_prompting_and_grill_me() {
     let names = approval_policy::supported_workflow_recipe_cli_names();
     assert!(
-        names.contains(&"free-prompting") && names.contains(&"grill-me"),
-        "F5: supported CLI names must include free-prompting and grill-me for resolver/daemon parity: {:?}",
+        names.contains(&"free-prompting")
+            && names.contains(&"grill-me")
+            && names.contains(&"tdd-small"),
+        "F5: supported CLI names must include free-prompting, grill-me, and tdd-small for resolver/daemon parity: {:?}",
         names
     );
 }

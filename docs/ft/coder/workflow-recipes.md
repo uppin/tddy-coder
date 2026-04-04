@@ -1,24 +1,24 @@
 # Workflow recipes (pluggable workflows)
 
 **Product area:** Coder  
-**Updated:** 2026-04-03
+**Updated:** 2026-04-04
 
 ## Summary
 
 Workflow behavior is defined by **recipes** in the **`tddy-workflow-recipes`** crate. **`tddy-core`** implements a recipe-agnostic engine (`WorkflowRecipe`, `WorkflowEngine`, graph execution, `CodingBackend`). Goals, states, transitions, hooks, backend hints, and permissions are **recipe-provided strings and metadata**, not a fixed enum in core.
 
-The shipped recipes are **`TddRecipe`** (default), **`BugfixRecipe`**, **`FreePromptingRecipe`**, and **`GrillMeRecipe`**. Recipe selection uses a single resolution path in **`tddy-workflow-recipes::recipe_resolve`**: `workflow_recipe_and_manifest_from_cli_name` and `resolve_workflow_recipe_from_cli_name` return the active `WorkflowRecipe` (and, where needed, the paired **`SessionArtifactManifest`** on the same concrete type).
+The shipped recipes are **`TddRecipe`** (default), **`TddSmallRecipe`**, **`BugfixRecipe`**, **`FreePromptingRecipe`**, and **`GrillMeRecipe`**. Recipe selection uses a single resolution path in **`tddy-workflow-recipes::recipe_resolve`**: `workflow_recipe_and_manifest_from_cli_name` and `resolve_workflow_recipe_from_cli_name` return the active `WorkflowRecipe` (and, where needed, the paired **`SessionArtifactManifest`** on the same concrete type).
 
 ## Selecting a recipe
 
 | Surface | Mechanism |
 |---------|-----------|
-| **tddy-coder** | `--recipe tdd`, `--recipe bugfix`, `--recipe free-prompting`, or `--recipe grill-me`; optional YAML `recipe:` (CLI overrides). |
+| **tddy-coder** | `--recipe tdd`, `--recipe tdd-small`, `--recipe bugfix`, `--recipe free-prompting`, or `--recipe grill-me`; optional YAML `recipe:` (CLI overrides). |
 | **changeset.yaml** | Optional `recipe:` records the workflow for resume and session lists; empty or absent values behave like **`tdd`**. Initial session creation (presenter bootstrap and matching CLI paths) persists **`recipe`** on the written **`changeset.yaml`** so resume and tooling read the same recipe name as **`StartSession`**. |
 | **tddy-daemon** | Spawns **`tddy-coder`** with `--recipe` when set; **`ConnectionService` `StartSessionRequest`** and **`TddyRemote` `StartSession`** carry a **`recipe`** string. |
 | **tddy-web** | **ConnectionScreen** exposes a **Workflow recipe** control per **Start New Session**; the value is sent on **`StartSession`**. |
 
-Allowed names are **`tdd`**, **`bugfix`**, **`free-prompting`**, and **`grill-me`** (aligned with **`WorkflowRecipe::name()`**). Invalid names fail on the CLI with a clear error; daemon streams report failure via **`WorkflowComplete`** with a descriptive message that lists supported names.
+Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, and **`grill-me`** (aligned with **`WorkflowRecipe::name()`**). Invalid names fail on the CLI with a clear error; daemon streams report failure via **`WorkflowComplete`** with a descriptive message that lists supported names.
 
 ## TddRecipe
 
@@ -26,6 +26,14 @@ Allowed names are **`tdd`**, **`bugfix`**, **`free-prompting`**, and **`grill-me
 - **Pipeline:** plan → acceptance-tests → red → green → demo → evaluate → validate → refactor → update-docs (full TDD graph).
 - **Primary session document:** **`prd`** → **`PRD.md`** under the session artifact layout (see **`SessionArtifactManifest`**).
 - **Session document approval:** Hook-driven **`ElicitationEvent::DocumentApproval`** after the plan task when **`WorkflowRecipe::uses_primary_session_document`** is **`true`** and the primary document is readable; the presenter and plain CLI use the same recipe-driven gate.
+
+## TddSmallRecipe
+
+- **CLI / recipe name:** **`tdd-small`** (**`WorkflowRecipe::name()`**).
+- **Start goal:** **`plan`**.
+- **Pipeline:** **`plan` → `red` → `green` → `post-green-review` → `refactor` → `update-docs` → `end`**. There are no separate graph nodes for **`acceptance-tests`**, **`demo`**, **`evaluate-changes`**, or **`validate`**; the **`red`** step uses merged red/evaluate-style prompt text, and **`post-green-review`** is a single structured submit that covers evaluate- and validate-style reporting (see **`tddy-tools get-schema post-green-review`**).
+- **Primary session document:** **`prd`** → **`PRD.md`** (same manifest pattern as full TDD); **`TddSmallRecipe::uses_primary_session_document`** is **`true`** so the plan approval gate applies after **`plan`**.
+- **Structured submit:** Goals follow the same JSON Schema registry as full TDD where applicable; **`post-green-review`** has a dedicated schema and parser (**`parse_post_green_review_response`**) in **`tddy-workflow-recipes`**.
 
 ## BugfixRecipe
 
@@ -62,6 +70,7 @@ Allowed names are **`tdd`**, **`bugfix`**, **`free-prompting`**, and **`grill-me
 | **`GoalId`**, **`WorkflowState`** | String-backed identifiers (serde-transparent); core does not match on fixed goal names. |
 | **`WorkflowRecipe`** | Trait: graph, hooks, state machine helpers, permissions, artifacts, backend hints (`GoalHints` / `PermissionHint`). |
 | **`TddRecipe`** | Full TDD workflow graph, `TddWorkflowHooks`, parsers, plan task wiring. |
+| **`TddSmallRecipe`** | Shortened TDD graph (`plan` → merged **`red`** → **`green`** → **`post-green-review`** → **`refactor`** → **`update-docs`**), `TddSmallWorkflowHooks`, merged red and post-green prompts. |
 | **`BugfixRecipe`** | Bugfix workflow graph, hooks, and artifact manifest for reproduce / fix-plan / green. |
 | **`FreePromptingRecipe`** | Minimal graph and hooks for the **Prompting** loop without TDD gates. |
 | **`GrillMeRecipe`** | Two goals (**`grill`** → **`create-plan`**); session **`artifacts/grill-me-brief.md`**; repo copy per **AGENTS.md** / **`plans/`** default. |
@@ -104,6 +113,12 @@ This section records how the shipped recipes map to the same product philosophy 
 - **Default** when **`--recipe`** is omitted or **`changeset.yaml`** has no **`recipe`** field (backward compatible).
 - **Start goal:** **`plan`** — greenfield planning, PRD/TODO-style artifacts, full graph (plan → acceptance-tests → red → green → …).
 - **Spirit:** Aligns with a typical feature-development workflow (plan first, then tests and implementation).
+
+### TDD-small (`tdd-small`)
+
+- **Start goal:** **`plan`** — same planning and PRD-style artifacts as full TDD.
+- **Pipeline:** **`plan` → `red` → `green` → `post-green-review` → `refactor` → `update-docs`** — a linear graph without standalone acceptance-tests, demo, evaluate, or validate tasks; **`post-green-review`** carries merged reporting concerns in one **`tddy-tools submit`** payload.
+- **Spirit:** Smaller session surface for teams that want TDD discipline without the full optional branches (demo routing, separate evaluate/validate invocations).
 
 ### Bugfix (`bugfix`)
 
