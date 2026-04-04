@@ -2,6 +2,12 @@
 
 Release note history for the Web product area.
 
+## 2026-04-04 — Connection screen: pending elicitation indicator
+
+- **`SessionEntry`**: **`pending_elicitation`** on **`ListSessions`** (proto field **14**); generated clients expose **`pendingElicitation`**.
+- **`ConnectionScreen`**: Session rows show an **Input needed** badge when **`pendingElicitation`** is true; each row sets **`data-pending-elicitation`** on the **`<tr>`**; badge **`aria-label`** for screen readers. Cypress **`ConnectionScreen.cy.tsx`** covers true/false cases.
+- **Feature doc**: [web-terminal.md](web-terminal.md) (Pending elicitation on session rows). Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-04-05 — Documentation wrap (worktrees PRD retired)
 
 - **Docs**: WIP PRD for worktrees ConnectionService + web removed from **`docs/ft/web/1-WIP/`**; behavior remains in [worktrees.md](worktrees.md) and [web-terminal.md](web-terminal.md). Session validation report copies under **`plans/`** for terminal reconnect removed. Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**.

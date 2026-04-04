@@ -21,7 +21,15 @@ The **`telegram_notifier`** module implements session status notifications using
 | **`mask_bot_token_for_logs(token)`** | Returns a fixed-format string that does not embed the token (length-only metadata). |
 | **`send_telegram_via_teloxide(bot, chat_id, text)`** | **`Requester::send_message`**; maps teloxide errors to **`anyhow::Error`**. |
 | **`TelegramSender`** | Async trait: **`send_message(chat_id: i64, text: &str)`**. |
-| **`TelegramSessionWatcher`** | Holds **`last_status: HashMap<String, String>`**. **`on_metadata_tick`** implements the baseline / transition / inactive rules documented in the module rustdoc. |
+| **`TelegramSessionWatcher`** | Holds **`last_status`**, transition dedupe maps for stream events, and **`last_elicitation_signature`** for **`ModeChanged`** dedupe. **`on_metadata_tick`** implements the baseline / transition / inactive rules; **`on_server_message`** maps **`ServerMessage`** variants including presenter **`ModeChanged`** via **`tddy_daemon::elicitation`**. |
+
+## Elicitation (`tddy_daemon::elicitation`)
+
+| Item | Role |
+|------|------|
+| **`pending_elicitation_for_session_dir(session_dir)`** | Reads **`SessionMetadata.pending_elicitation`** from **`.session.yaml`** for Connection **`ListSessions`** enrichment (boolean; missing file → **`false`**). |
+| **`elicitation_signature_for_mode_changed(mc)`** | Canonical string for deduplicating identical **`ModeChanged`** payloads per session. |
+| **`telegram_elicitation_line_for_mode_changed(label, mc)`** | **`Some(line)`** for user-gated presenter modes (document review, markdown viewer, feature input, select/multi-select, text input); **`None`** for **`Running`** / **`Done`**. |
 
 ## Logging
 

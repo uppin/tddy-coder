@@ -1,5 +1,12 @@
 # Daemon product area changelog
 
+## 2026-04-04 — Session elicitation: Telegram `ModeChanged` + `ListSessions` flag
+
+- **`connection.proto`**: **`SessionEntry.pending_elicitation`** (field **14**).
+- **`tddy_core`**: **`SessionMetadata.pending_elicitation`** in **`.session.yaml`** (serde default **`false`**).
+- **`tddy-daemon`**: Module **`elicitation`** — list flag from metadata; **`TelegramSessionWatcher::on_server_message`** handles **`ModeChanged`** with dedupe and generic approval/input Telegram lines; **`session_list_enrichment`** sets the proto field. Tests: **`telegram_notifier`** acceptance unit tests, **`list_sessions_enriched`**, **`session_list_enrichment`** unit test.
+- **Feature docs**: [telegram-notifications.md](telegram-notifications.md) (Presenter stream: elicitation); [web-terminal.md](../web/web-terminal.md) (pending elicitation on rows). Package: [telegram-notifier.md](../../packages/tddy-daemon/docs/telegram-notifier.md), [changesets.md](../../packages/tddy-daemon/docs/changesets.md). Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-04-05 — Documentation wrap (telegram presenter PRD retired)
 
 - **Docs**: WIP PRD for Telegram **PresenterObserver** stream removed from **`docs/ft/daemon/1-WIP/`**; product and integration remain in [telegram-notifications.md](telegram-notifications.md). **`docs/dev/1-WIP/daemon-telegram-validate/`** report bundle removed. Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**.
