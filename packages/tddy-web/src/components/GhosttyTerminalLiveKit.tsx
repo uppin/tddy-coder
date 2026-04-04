@@ -10,7 +10,6 @@ import { create } from "@bufbuild/protobuf";
 import { shouldShowVisibleLiveKitStatusStrip } from "../lib/liveKitStatusPresentation";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
-import { TerminalZoomToolbar } from "./terminal/TerminalZoomToolbar";
 
 /** Human-readable description of a terminal input byte sequence. */
 function describeKey(bytes: Uint8Array): string {
@@ -76,7 +75,7 @@ export interface GhosttyTerminalLiveKitProps {
   serverIdentity?: string;
   /** When set, fullscreen targets this node (e.g. fixed `connected-terminal-container`); otherwise the terminal flex root inside this component. */
   fullscreenTargetRef?: React.RefObject<HTMLElement | null>;
-  /** Initial terminal font size — must match `TerminalZoomToolbar` baseline for reset. Default 14. */
+  /** Initial terminal font size (session baseline for Ctrl/⌘+0 reset). Default 14. */
   fontSize?: number;
 }
 
@@ -478,10 +477,6 @@ export function GhosttyTerminalLiveKit({
         <div data-testid="livekit-error">{errorMsg}</div>
       )}
       <div ref={internalFullscreenTargetRef} style={{ flex: 1, minHeight: 0, position: "relative" }}>
-        {/* Toolbar lives in ConnectionTerminalChrome when connection overlay is shown — avoid duplicate controls */}
-        {!connectionOverlay ? (
-          <TerminalZoomToolbar baselineFontSize={fontSize} />
-        ) : null}
         {!coderSessionActive && (
           <div
             data-testid="terminal-coder-unavailable"

@@ -2,6 +2,7 @@
 
 Wrapped changesets that span multiple packages or don’t map to a single `packages/*/docs/changesets.md` only.
 
+- **2026-04-04** [Documentation] **Terminal zoom — changeset wrapped** — **`packages/tddy-web/docs/terminal-zoom.md`**; removed **`docs/dev/1-WIP/2026-04-04-terminal-zoom-pitch.md`**. (tddy-web, docs)
 - **2026-04-04** [Feature] **Web terminal font zoom** — **`tddy-web`**: pitch toolbar, bridge + font sync events, **`GhosttyTerminal`** dynamic font + **`GhosttyTerminalLiveKit`** **`fontSize`**, keyboard shortcuts, env **`VITE_TERMINAL_ZOOM_DEBUG`**. Feature **`docs/ft/web/web-terminal.md`**, **`docs/ft/web/changelog.md`**; package **`packages/tddy-web/docs/changesets.md`**. (tddy-web)
 
 - **2026-03-29** [Documentation] **Free prompting — product and package docs** — Feature **`docs/ft/coder/workflow-recipes.md`** (invoke graph, **`goal_requires_tddy_tools_submit`**, activity pane hooks); **`docs/ft/coder/changelog.md`**; **`packages/tddy-core/docs/changesets.md`**, **`packages/tddy-workflow-recipes/docs/changesets.md`**. Validation notes remain under **`docs/dev/1-WIP/workflow-free-prompting-validate/`** (reports, not a formal wrapped changeset file). (tddy-core, tddy-workflow-recipes, docs)

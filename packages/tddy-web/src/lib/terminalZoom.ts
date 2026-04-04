@@ -62,3 +62,34 @@ export function canPitchOut(
   const step = opts.step ?? DEFAULT_TERMINAL_ZOOM_STEP;
   return current - step >= min;
 }
+
+/** Accumulated `wheel.deltaY` (trackpad pinch) before one font step. */
+export const TRACKPAD_PINCH_STEP_ACCUM_PX = 48;
+
+/**
+ * Merge a wheel event into running pinch accumulation and compute the next font size.
+ * Used for laptop trackpads (wheel + `ctrlKey`). Touchscreens use touch span instead.
+ */
+export function reduceTrackpadPinchAccum(
+  accum: number,
+  deltaY: number,
+  ctrlKey: boolean,
+  stepPx: number,
+  startFont: number,
+  opts: TerminalZoomStepOptions = {}
+): { accum: number; fontSize: number } {
+  if (!ctrlKey) {
+    return { accum: 0, fontSize: startFont };
+  }
+  let a = accum + deltaY;
+  let font = startFont;
+  while (a <= -stepPx && canPitchIn(font, opts)) {
+    font = pitchInFontSize(font, opts);
+    a += stepPx;
+  }
+  while (a >= stepPx && canPitchOut(font, opts)) {
+    font = pitchOutFontSize(font, opts);
+    a -= stepPx;
+  }
+  return { accum: a, fontSize: font };
+}

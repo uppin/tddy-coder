@@ -8,19 +8,33 @@ import React, {
 } from "react";
 import { init, Terminal, FitAddon } from "ghostty-web";
 import {
+  canPitchIn,
+  canPitchOut,
   clampTerminalFontSize,
-  pitchInFontSize,
-  pitchOutFontSize,
   DEFAULT_TERMINAL_FONT_MAX,
   DEFAULT_TERMINAL_FONT_MIN,
+  pitchInFontSize,
+  pitchOutFontSize,
+  reduceTrackpadPinchAccum,
+  TRACKPAD_PINCH_STEP_ACCUM_PX,
 } from "../lib/terminalZoom";
 import {
   dispatchTerminalFontSizeSync,
+  dispatchTerminalZoomBridge,
   isTerminalZoomDebugEnabled,
   parseTerminalZoomBridgeDetail,
   TERMINAL_ZOOM_BRIDGE_EVENT,
 } from "../lib/terminalZoomBridge";
 
+/** Finger separation change (px) required before applying one font step during touch pinch. */
+const PINCH_FONT_STEP_SPAN_PX = 22;
+
+/** Limit Ctrl/Cmd +/-/0 so we do not steal shortcuts from other page inputs (e.g. browser address bar). */
+function shouldHandleTerminalZoomKeys(): boolean {
+  const el = document.activeElement;
+  if (!el || el === document.body) return true;
+  return el.closest("[data-testid='ghostty-terminal']") !== null;
+}
 export interface GhosttyTerminalTheme {
   background?: string;
   foreground?: string;
@@ -46,6 +60,11 @@ export interface GhosttyTerminalProps {
   preventFocusOnTap?: boolean;
   /** When false, the backend session is gone — disable interaction and expose data-session-active for accessibility/tests. */
   sessionActive?: boolean;
+  /**
+   * When true (default), a two-finger pinch on the terminal adjusts font size (same as pitch in/out).
+   * Single-finger touch still forwards SGR mouse when the TUI has mouse tracking enabled.
+   */
+  pinchZoomFont?: boolean;
 }
 
 export interface BufferLineInfo {
@@ -85,6 +104,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       debugLogging = false,
       preventFocusOnTap = false,
       sessionActive = true,
+      pinchZoomFont = true,
     },
     ref
   ) {
@@ -99,6 +119,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const [displayFontSize, setDisplayFontSize] = useState(fontSize);
 
     const disposablesRef = useRef<{ dispose: () => void }[]>([]);
+    /** Accumulates `deltaY` for trackpad pinch (Ctrl+wheel); touch pinch uses separate logic. */
+    const wheelPinchAccumRef = useRef(0);
 
     const applyFontSizePx = useCallback(
       (px: number, bounds?: { min: number; max: number }) => {
@@ -264,6 +286,145 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     }, [minFontSize, maxFontSize, applyFontSizePx, zoomVerbose]);
 
     useEffect(() => {
+      if (!sessionActive) return;
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (!e.ctrlKey && !e.metaKey) return;
+        if (!shouldHandleTerminalZoomKeys()) return;
+        const term = termRef.current;
+        if (!term) return;
+        const live = term.options.fontSize;
+        const stepOpts = { min: minFontSize, max: maxFontSize };
+        const key = e.key;
+        if (key === "+" || key === "=") {
+          if (!canPitchIn(live, stepOpts)) return;
+          e.preventDefault();
+          dispatchTerminalZoomBridge({
+            action: "pitch-in",
+            baselineFontSize: fontSize,
+            opts: stepOpts,
+          });
+          return;
+        }
+        if (key === "-" || key === "_") {
+          if (!canPitchOut(live, stepOpts)) return;
+          e.preventDefault();
+          dispatchTerminalZoomBridge({
+            action: "pitch-out",
+            baselineFontSize: fontSize,
+            opts: stepOpts,
+          });
+          return;
+        }
+        if (key === "0") {
+          e.preventDefault();
+          dispatchTerminalZoomBridge({
+            action: "reset",
+            baselineFontSize: fontSize,
+            opts: stepOpts,
+          });
+        }
+      };
+      document.addEventListener("keydown", onKeyDown);
+      return () => document.removeEventListener("keydown", onKeyDown);
+    }, [sessionActive, minFontSize, maxFontSize, fontSize]);
+
+    // Two-finger pinch → font pitch in/out (mobile); uses finger span like browser zoom.
+    useEffect(() => {
+      if (!pinchZoomFont || !sessionActive) return;
+      const container = containerRef.current;
+      // `ready` is set only after `termRef` is assigned; do not require `termRef` here so
+      // listeners attach in the same commit (avoids races with tests / strict mode).
+      if (!container || !ready) return;
+
+      let anchorSpan = 0;
+
+      const spanOf = (e: TouchEvent): number => {
+        if (e.touches.length < 2) return 0;
+        const a = e.touches[0];
+        const b = e.touches[1];
+        return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+      };
+
+      const stepOpts = () => ({ min: minFontSize, max: maxFontSize });
+
+      const onTouchStart = (e: TouchEvent) => {
+        if (e.touches.length === 2) {
+          anchorSpan = spanOf(e);
+        }
+      };
+
+      const onTouchMove = (e: TouchEvent) => {
+        if (e.touches.length < 2 || anchorSpan <= 0) return;
+        const span = spanOf(e);
+        const delta = span - anchorSpan;
+        const term = termRef.current;
+        if (!term) return;
+        const current = term.options.fontSize;
+        const opts = stepOpts();
+        if (delta > PINCH_FONT_STEP_SPAN_PX && canPitchIn(current, opts)) {
+          applyFontSizePx(pitchInFontSize(current, opts), opts);
+          anchorSpan = span;
+          e.preventDefault();
+        } else if (delta < -PINCH_FONT_STEP_SPAN_PX && canPitchOut(current, opts)) {
+          applyFontSizePx(pitchOutFontSize(current, opts), opts);
+          anchorSpan = span;
+          e.preventDefault();
+        }
+      };
+
+      const endPinch = (e: TouchEvent) => {
+        if (e.touches.length < 2) {
+          anchorSpan = 0;
+        }
+      };
+
+      // Trackpad pinch (macOS / Windows): `wheel` + `ctrlKey` — must not depend on `onData`
+      // (the mouse/SGR effect is skipped when `onData` is unset).
+      const onWheelTrackpad = (e: WheelEvent) => {
+        if (!e.ctrlKey) return;
+        const t = termRef.current;
+        if (!t) return;
+        const opts = { min: minFontSize, max: maxFontSize };
+        const cur = t.options.fontSize;
+        const { accum, fontSize } = reduceTrackpadPinchAccum(
+          wheelPinchAccumRef.current,
+          e.deltaY,
+          true,
+          TRACKPAD_PINCH_STEP_ACCUM_PX,
+          cur,
+          opts
+        );
+        wheelPinchAccumRef.current = accum;
+        if (fontSize !== cur) {
+          applyFontSizePx(fontSize, opts);
+        }
+        e.preventDefault();
+      };
+
+      container.addEventListener("touchstart", onTouchStart, { passive: true });
+      container.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
+      container.addEventListener("touchend", endPinch, { passive: true });
+      container.addEventListener("touchcancel", endPinch, { passive: true });
+      // Capture: run before xterm/ghostty wheel handlers so trackpad pinch adjusts font instead of scroll.
+      container.addEventListener("wheel", onWheelTrackpad, { capture: true, passive: false });
+
+      return () => {
+        container.removeEventListener("touchstart", onTouchStart);
+        container.removeEventListener("touchmove", onTouchMove, { capture: true });
+        container.removeEventListener("touchend", endPinch);
+        container.removeEventListener("touchcancel", endPinch);
+        container.removeEventListener("wheel", onWheelTrackpad, { capture: true });
+      };
+    }, [
+      ready,
+      pinchZoomFont,
+      sessionActive,
+      minFontSize,
+      maxFontSize,
+      applyFontSizePx,
+    ]);
+
+    useEffect(() => {
       if (!ready || !termRef.current?.textarea) return;
       const ta = termRef.current.textarea;
       if (sessionActive) {
@@ -319,6 +480,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
       };
       const onWheel = (e: WheelEvent) => {
+        if (e.ctrlKey) {
+          // Font zoom from trackpad pinch — handled in capture phase (pinch effect) without `onData`.
+          return;
+        }
+        wheelPinchAccumRef.current = 0;
+
         const rect = container.getBoundingClientRect();
         const offsetX = e.clientX - rect.left;
         const offsetY = e.clientY - rect.top;
@@ -336,6 +503,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
       // Capture-phase touch handlers run before preventFocus — ensures SGR is sent for interactive TUI
       const onTouchStartCapture = (e: TouchEvent) => {
+        if (e.touches.length > 1) return;
         if (e.changedTouches.length === 0) return;
         const t = e.changedTouches[0];
         const rect = container.getBoundingClientRect();
@@ -349,6 +517,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       };
       const onTouchEndCapture = (e: TouchEvent) => {
         if (e.changedTouches.length === 0) return;
+        // Another finger still on the surface — skip release (pinch / multi-touch).
+        if (e.touches.length > 0) return;
         const t = e.changedTouches[0];
         const rect = container.getBoundingClientRect();
         const offsetX = t.clientX - rect.left;

@@ -4,7 +4,8 @@ Release note history for the Web product area.
 
 ## 2026-04-04 — Terminal font zoom (pitch in / out)
 
-- **tddy-web**: **`terminalZoom`** / **`terminalZoomBridge`** (bounds, bridge + sync events, validated **`CustomEvent`** detail); **`TerminalZoomToolbar`**; **`GhosttyTerminal`** applies **`options.fontSize`**, **`FitAddon.fit()`**, **`data-terminal-font-size`**; **`ConnectionTerminalChrome`** **`terminalBaselineFontSize`**; **`GhosttyTerminalLiveKit`** **`fontSize`** prop aligned with toolbar baseline; document keyboard shortcuts (**Ctrl**/**⌘** +/-/0) when focus is on the terminal or toolbar; optional **`VITE_TERMINAL_ZOOM_DEBUG`**. Bun tests and Cypress **`TerminalZoomAcceptance.cy.tsx`** cover zoom and resize OSC behavior.
+- **tddy-web**: **`terminalZoom`** / **`terminalZoomBridge`** (bounds, bridge + sync events, validated **`CustomEvent`** detail); **`GhosttyTerminal`** applies **`options.fontSize`**, **`FitAddon.fit()`**, **`data-terminal-font-size`**; keyboard (**Ctrl**/**⌘** +/-/0), touch pinch, trackpad pinch, and bridge dispatch (no on-screen zoom toolbar); **`GhosttyTerminalLiveKit`** **`fontSize`** prop as session baseline; optional **`VITE_TERMINAL_ZOOM_DEBUG`**. Bun tests and Cypress **`TerminalZoomAcceptance.cy.tsx`** cover zoom and resize OSC behavior.
+- **Package docs**: [terminal-zoom.md](../../../packages/tddy-web/docs/terminal-zoom.md) (implementation reference).
 - **Feature docs**: [web-terminal.md](web-terminal.md) (Font zoom).
 - **Repo**: **`.tddy-red-test-output.txt`** is gitignored for local red-phase captures.
 

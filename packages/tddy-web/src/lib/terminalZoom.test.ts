@@ -7,6 +7,8 @@ import {
   DEFAULT_TERMINAL_FONT_MIN,
   pitchInFontSize,
   pitchOutFontSize,
+  reduceTrackpadPinchAccum,
+  TRACKPAD_PINCH_STEP_ACCUM_PX,
 } from "./terminalZoom";
 
 describe("terminalZoom (granular — Green phase implements correct math)", () => {
@@ -35,5 +37,22 @@ describe("terminalZoom (granular — Green phase implements correct math)", () =
   test("canPitchOut is false at min", () => {
     expect(canPitchOut(9)).toBe(true);
     expect(canPitchOut(8)).toBe(false);
+  });
+
+  test("reduceTrackpadPinchAccum resets when ctrlKey is false", () => {
+    const r = reduceTrackpadPinchAccum(10, -5, false, TRACKPAD_PINCH_STEP_ACCUM_PX, 14, {});
+    expect(r.accum).toBe(0);
+    expect(r.fontSize).toBe(14);
+  });
+
+  test("reduceTrackpadPinchAccum pitch-in when deltaY negative and span exceeds step", () => {
+    const r = reduceTrackpadPinchAccum(0, -120, true, TRACKPAD_PINCH_STEP_ACCUM_PX, 14, {});
+    expect(r.fontSize).toBeGreaterThan(14);
+    expect(r.accum).toBeGreaterThan(-TRACKPAD_PINCH_STEP_ACCUM_PX);
+  });
+
+  test("reduceTrackpadPinchAccum pitch-out when deltaY positive", () => {
+    const r = reduceTrackpadPinchAccum(0, 120, true, TRACKPAD_PINCH_STEP_ACCUM_PX, 20, {});
+    expect(r.fontSize).toBeLessThan(20);
   });
 });

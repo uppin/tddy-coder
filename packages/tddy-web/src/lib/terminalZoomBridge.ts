@@ -11,7 +11,7 @@ export interface TerminalZoomBridgeDetail {
 
 export const TERMINAL_ZOOM_BRIDGE_EVENT = "tddy-terminal-zoom";
 
-/** Emitted when the terminal’s applied font size changes (for toolbar disabled state). */
+/** Emitted when the terminal’s applied font size changes (listeners may sync UI state). */
 export const TERMINAL_FONT_SIZE_SYNC_EVENT = "tddy-terminal-font-size-sync";
 
 export interface TerminalFontSizeSyncDetail {
@@ -81,7 +81,11 @@ export function parseTerminalFontSizeSyncDetail(raw: unknown): number | null {
   return fs;
 }
 
-export function dispatchTerminalZoomBridge(detail: TerminalZoomBridgeDetail): void {
+/** Dispatch on a specific `Window` (e.g. Cypress component tests use the AUT iframe’s `window`). */
+export function dispatchTerminalZoomBridgeOn(
+  target: Window,
+  detail: TerminalZoomBridgeDetail
+): void {
   if (isTerminalZoomDebugEnabled()) {
     console.info("[tddy][terminalZoomBridge] dispatch", {
       action: detail.action,
@@ -89,13 +93,17 @@ export function dispatchTerminalZoomBridge(detail: TerminalZoomBridgeDetail): vo
       opts: detail.opts,
     });
   }
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(
+  target.dispatchEvent(
     new CustomEvent<TerminalZoomBridgeDetail>(TERMINAL_ZOOM_BRIDGE_EVENT, {
       detail,
       bubbles: false,
     })
   );
+}
+
+export function dispatchTerminalZoomBridge(detail: TerminalZoomBridgeDetail): void {
+  if (typeof window === "undefined") return;
+  dispatchTerminalZoomBridgeOn(window, detail);
 }
 
 export function dispatchTerminalFontSizeSync(fontSize: number): void {

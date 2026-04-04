@@ -6,10 +6,17 @@ import react from "@vitejs/plugin-react";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** Cypress component tests rely on imperative refs and predictable state; React Compiler can break those paths. */
+const useReactCompiler = process.env.CYPRESS_DISABLE_REACT_COMPILER !== "1";
+
 export default defineConfig({
   plugins: [
     tailwindcss(),
-    react({ babel: { plugins: ["babel-plugin-react-compiler"] } }),
+    react(
+      useReactCompiler
+        ? { babel: { plugins: ["babel-plugin-react-compiler"] } }
+        : {}
+    ),
   ],
   resolve: {
     alias: {
