@@ -19,6 +19,7 @@ const VALID_GOALS: &[&str] = &[
     "acceptance-tests",
     "red",
     "green",
+    "post-green-review",
     "evaluate-changes",
     "validate",
     "refactor",
@@ -96,6 +97,12 @@ fn valid_update_docs_passes_schema_validation() {
 fn valid_demo_passes_schema_validation() {
     let json = r#"{"goal":"demo","summary":"Demo completed.","demo_type":"cli","steps_completed":2,"verification":"All steps passed."}"#;
     assert!(validate_output("demo", json).is_ok());
+}
+
+#[test]
+fn valid_post_green_review_passes_schema_validation() {
+    let json = r#"{"goal":"post-green-review","summary":"s","risk_level":"low","validity_assessment":"ok","tests_report_written":true,"prod_ready_report_written":false,"clean_code_report_written":true}"#;
+    assert!(validate_output("post-green-review", json).is_ok());
 }
 
 #[test]

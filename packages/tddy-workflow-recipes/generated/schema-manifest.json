@@ -26,6 +26,11 @@
       "schema": "green.schema.json"
     },
     {
+      "name": "post-green-review",
+      "proto": "post_green_review.proto",
+      "schema": "post-green-review.schema.json"
+    },
+    {
       "name": "evaluate-changes",
       "proto": "evaluate_changes.proto",
       "schema": "evaluate.schema.json"

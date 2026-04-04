@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tddy:goal/post-green-review",
+  "title": "Post-green review (merged evaluate + validate) output",
+  "description": "Single structured submit from the post-green-review goal (tdd-small workflow).",
+  "type": "object",
+  "required": [
+    "goal",
+    "summary",
+    "risk_level",
+    "validity_assessment",
+    "tests_report_written",
+    "prod_ready_report_written",
+    "clean_code_report_written"
+  ],
+  "properties": {
+    "goal": {
+      "type": "string",
+      "const": "post-green-review"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "risk_level": {
+      "type": "string",
+      "minLength": 1
+    },
+    "validity_assessment": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tests_report_written": { "type": "boolean" },
+    "prod_ready_report_written": { "type": "boolean" },
+    "clean_code_report_written": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}
