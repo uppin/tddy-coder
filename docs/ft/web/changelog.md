@@ -2,13 +2,12 @@
 
 Release note history for the Web product area.
 
-## 2026-04-04 — Terminal font zoom (pitch in / out)
+## 2026-04-04 — Worktrees manager (library + RPC + UI)
 
-- **tddy-web**: **`terminalZoom`** / **`terminalZoomBridge`** (bounds, bridge + sync events, validated **`CustomEvent`** detail); **`GhosttyTerminal`** applies **`options.fontSize`**, **`FitAddon.fit()`**, **`data-terminal-font-size`**; keyboard (**Ctrl**/**⌘** +/-/0), touch pinch, trackpad pinch, and bridge dispatch (no on-screen zoom toolbar); **`GhosttyTerminalLiveKit`** **`fontSize`** prop as session baseline; optional **`VITE_TERMINAL_ZOOM_DEBUG`**. Bun tests and Cypress **`TerminalZoomAcceptance.cy.tsx`** cover zoom and resize OSC behavior.
-- **Package docs**: [terminal-zoom.md](../../../packages/tddy-web/docs/terminal-zoom.md) (implementation reference; includes Cypress guidance on waiting for prop sync before imperative **`setTerminalFontSize`** in component tests).
-- **Feature docs**: [web-terminal.md](web-terminal.md) (Font zoom).
-- **Repo**: **`.tddy-red-test-output.txt`** is gitignored for local red-phase captures.
-- **Dev WIP**: Removed stale pre-release reports from **`docs/dev/1-WIP/terminal-zoom-pitch/`** (superseded by shipped code and package docs).
+- **`tddy-daemon`**: **`worktrees`** module — **`git worktree list`** parsing, **`WorktreeStatsCache`** with JSON persistence under **`TDDY_PROJECTS_STATS_ROOT`** (default **`~/.tddy/projects`**), lexical path policy, **`git worktree remove`** for non-primary trees listed by Git. **ConnectionService** exposes **`ListWorktreesForProject`** and **`RemoveWorktree`** (tests **`worktrees_acceptance`**, **`worktrees_rpc`**).
+- **`tddy-service` / proto**: **`WorktreeRow`**, **`ListWorktreesForProject`**, **`RemoveWorktree`** on **`ConnectionService`**.
+- **`tddy-web`**: **`WorktreesAppPage`** loads projects/daemons, **Refresh stats**, table rows, and delete via Connect; **`WorktreesScreen`** (stale hint, empty state). Cypress **`WorktreesScreen.cy.tsx`** (mocked rows).
+- **Feature docs**: [worktrees.md](worktrees.md); [web-terminal.md](web-terminal.md#worktrees-manager-scaffolding). Package: [worktrees.md](../../../packages/tddy-daemon/docs/worktrees.md).
 
 ## 2026-04-03 — Interrupt: TUI Stop pane; web Stop button removed
 

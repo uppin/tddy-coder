@@ -1,81 +1,115 @@
-# Validate prod-ready report: workflow free-prompting / approval policy
+# Validate prod-ready report: worktrees manager (partial PRD)
 
 ## Executive summary
 
-The free-prompting recipe, resolver wiring, CLI/TUI surfaces, and presenter bootstrap (`recipe` in `changeset.yaml`) are implemented coherently for production use: errors surface as `String`/`anyhow` user-facing messages, workflow paths use `log::` (not raw stdout in the workflow-recipes crate), and approval behavior for “no PRD gate” is enforced via **`WorkflowRecipe::uses_primary_session_document`** (false for free-prompting). **Medium residual risk** comes from **manual synchronization** of recipe names across several lists (resolver, `approval_policy`, clap `value_parser`, TUI question mapping), **`approval_policy::recipe_should_skip_session_document_approval` not being referenced from runtime code** (policy vs. trait could drift), **verbose `log::info` of agent output** in free-prompting CLI output handling, and **repo hygiene** (untracked red-test output file; product docs gap noted in the evaluation report). No secrets are introduced in the reviewed paths.
+The worktrees module in `packages/tddy-daemon/src/worktrees.rs` is a **library-only** slice of the Worktrees manager PRD: git subprocess calls, a JSON stats cache under **`TDDY_PROJECTS_STATS_ROOT`** (default `~/.tddy/projects`), lexical path policy, and **`remove_worktree_under_repo`** with primary-worktree protection. **There is no daemon RPC wiring yet** — the acceptance test file is named `worktrees_acceptance.rs` but exercises the library directly, not Connect/gRPC handlers. The web **`WorktreesScreen`** is **mock-data / Cypress-only** with an explicit comment that RPC is not connected.
 
-**Cross-reference — `evaluation-report.md`:**  
-- **Docs gap:** `workflow-recipes.md` / A4-style product docs not updated in the evaluated diff.  
-- **Drift:** `approval_policy` list must stay aligned with `recipe_resolve` (and implicitly with CLI/TUI allowlists).  
-- **Hygiene:** `.tddy-workflow-recipes-red-test-output.txt` should not be committed.
+**Production readiness:** suitable as an **internal building block** with clear follow-ups before calling it “done” for daemon deployment: structured errors and surfacing for refresh/list cache paths, log level hygiene, git subprocess timeouts and `PATH` assumptions, and tightening path policy where symlinks matter. **Residual risk: medium** until RPC, authz, and operational controls are defined.
 
----
+**Evaluation context (aligned):**
 
-## Findings by area
-
-### Errors
-
-- **Resolver:** `unknown_workflow_recipe_error` returns a clear `String` listing allowed names via `approval_policy::supported_workflow_recipe_cli_names()` — good UX for CLI/YAML/daemon parity (`recipe_resolve.rs`).
-- **CLI:** `validate_recipe_cli` / `recipe_arc_for_args` map resolver errors through `anyhow` for early exit with `eprintln!` in `run_main` — appropriate for non-TUI CLI bootstrap.
-- **Presenter bootstrap:** `workflow_runner` propagates failures via `WorkflowEvent::WorkflowComplete(Err(...))` rather than panicking on I/O; `write_changeset` is still invoked with **`let _ =`** — **silent ignore on write failure** remains a risk (recipe might not persist if disk fails); this pattern predates the feature but affects correctness of the new `recipe` field.
-- **`approval_policy`:** `recipe_should_skip_session_document_approval` is **only used in tests** (`recipe_policy_red.rs`); runtime approval gating does **not** call it. If someone updates the policy table without updating `FreePromptingRecipe::uses_primary_session_document`, behavior could diverge from the documented “policy table.”
-
-### Logging
-
-- **workflow-recipes:** Uses `log::debug!` / `log::info!` only — no `println!` in reviewed files — consistent with AGENTS.md guidance for non-TUI library code.
-- **Free-prompting verbosity:** `FreePromptingRecipe::plain_goal_cli_output` logs the **full optional output body** at **`log::info!`** (`[free-prompting] output:\n{}`). In production this can mean **large or sensitive agent text in logs**; consider `debug` or truncation for prod defaults.
-- **Hooks:** `FreePromptingWorkflowHooks::before_task` uses `let _ = tx.send(...)` on full channel — same fire-and-forget pattern as elsewhere; no extra user-facing error.
-
-### Configuration surface
-
-- **`--recipe`:** `CoderArgs` / `DemoArgs` use clap `value_parser = ["tdd", "bugfix", "free-prompting"]` — matches resolver arms (`run.rs`).
-- **Resume:** `apply_recipe_from_changeset_if_needed` loads `recipe` from `changeset.yaml` when `--recipe` is omitted and `session_dir` is set — aligns with bootstrap write in `workflow_runner` (`recipe: Some(recipe_name)`).
-- **TUI:** `workflow_recipe_selection_question` + `recipe_cli_name_from_selection_label` add “Free prompting” → `free-prompting` (`backend/mod.rs`) — fourth list to keep in sync.
-- **DemoArgs goals:** `DemoArgs::goal` `value_parser` still lists classic TDD/bugfix goals (plan, reproduce, …) and does **not** include **`prompting`**. For `tddy-demo` + free-prompting, users selecting an invalid goal via CLI is possible — matches the evaluation report’s “may need prompting” note.
-
-### Security
-
-- **No new secrets** in the reviewed code; OAuth/LiveKit env vars unchanged in scope.
-- **Error strings:** Unknown recipe messages embed the user-supplied name with `{:?}` — safe for injection; may expose odd Unicode in logs.
-- **Logging:** Session directory paths and agent output in logs could be sensitive in shared log aggregation — especially `plain_goal_cli_output` info-level body.
-
-### Performance
-
-- **Resolver:** O(1) match on recipe name; `unknown_workflow_recipe_error` allocates the “expected” string — cold path only.
-- **Recipe graph:** `FreePromptingRecipe::build_graph` is tiny (echo → end); `log::info!` on every build is negligible CPU but **noisy** at scale.
-- **Hooks:** Minimal work per task; event send is cheap.
+- Partial PRD — no RPC surface in daemon server code for list/refresh/delete.
+- Lexical path validation — no `canonicalize` / filesystem bind; `..` traversal is rejected relative to normalized repo root.
+- Cache under `TDDY_PROJECTS_STATS_ROOT` — documented override for tests; default uses `HOME` (panics if unset).
+- Git subprocess — `Command::new("git")` with no configurable binary path or timeouts.
 
 ---
 
-## Risks
+## Error handling
 
-| Risk | Severity | Notes |
-|------|----------|--------|
-| **Multi-site recipe name drift** | Medium | Resolver, `approval_policy`, clap parsers, TUI labels must all agree; a partial update breaks UX or daemon YAML. |
-| **Policy helper unused at runtime** | Low–Medium | `recipe_should_skip_session_document_approval` duplicates intent of `uses_primary_session_document`; drift between them is possible. |
-| **Verbose agent output in logs** | Medium | `plain_goal_cli_output` info logs full output. |
-| **Silent changeset write failure** | Low | `let _ = write_changeset` in presenter path. |
-| **Docs / hygiene** | Process | Untracked red test output file; product docs not updated per evaluation report. |
+| Area | Behavior | Prod concern |
+|------|-----------|--------------|
+| `parse_git_worktree_list` | Returns `Vec`; unrecognized lines → `warn!` + skip | Silent data loss in list; acceptable if UI treats partial as degraded |
+| `refresh_stats_for_project` | **`()` — no `Result`** | Git `worktree list` failure → empty string → **empty snapshot persisted** (or overwrite with empty). Spawns warn logs but **callers cannot distinguish success from total failure** |
+| `git_diff_numstat_summary` | **`(0,0,0)` on any failure** | Stats silently zero; no distinction “repo missing” vs “clean tree” |
+| `directory_size_bytes_best_effort` | Ignores read/metadata errors | Disk size can be **under-reported** with no signal |
+| `list_cached_stats` | Missing file → `[]`; read/parse error → `warn!` + `[]` | **Stale-empty vs error** indistinguishable to consumers |
+| `remove_worktree_under_repo` | **`Result<_, RemoveWorktreeError>`** | Strongest API: git failures, not listed, primary protected, UTF-8 path |
+| `validate_worktree_path_within_repo_root` | **`Result<_, WorktreePathError>`** | Good for RPC pre-checks once wired |
+| `projects_stats_cache_root` | **`HOME` unset → `expect` panic** | Breaks minimal/containers without `HOME`; should be `Result` or explicit error for prod |
 
----
-
-## Recommendations
-
-1. **Single source of truth for CLI names:** Prefer generating clap allowed values and/or TUI option lists from the same `&'static [&str]` as `approval_policy` / resolver (or a shared macro/const module) to eliminate drift.
-2. **Wire or document `approval_policy`:** Either call `recipe_should_skip_session_document_approval` from the code paths that interpret **string** recipe names (if any), or document that **`WorkflowRecipe::uses_primary_session_document` is authoritative** and treat `approval_policy` as test-only documentation — avoid two competing definitions.
-3. **Logging:** Downgrade or truncate agent output in `plain_goal_cli_output` unless debug/trace is enabled.
-4. **Changeset write:** Propagate or log failures from `write_changeset` when initializing session metadata so `recipe` cannot disappear silently.
-5. **Repo hygiene:** Do not add `.tddy-workflow-recipes-red-test-output.txt` to version control; complete **product docs** (`workflow-recipes.md` / changeset workflow) when merging.
-6. **tddy-demo:** Extend goal allowlist or validation when recipe is `free-prompting` so `--goal prompting` (or equivalent) is consistent with the recipe.
+**Git stderr:** Not captured on failed `git worktree list` in `refresh_stats_for_project` (only `status` in `remove_worktree_under_repo` path is partially surfaced). Debugging production failures will rely on warn lines without stderr text.
 
 ---
 
-## Files reviewed (production focus)
+## Logging
 
-- `packages/tddy-workflow-recipes/src/recipe_resolve.rs`
-- `packages/tddy-workflow-recipes/src/approval_policy.rs`
-- `packages/tddy-workflow-recipes/src/free_prompting/mod.rs`
-- `packages/tddy-workflow-recipes/src/free_prompting/hooks.rs`
-- `packages/tddy-core/src/presenter/workflow_runner.rs` (bootstrap `recipe` in changeset)
-- `packages/tddy-coder/src/run.rs` (`--recipe`, resume, validation)
-- `packages/tddy-core/src/backend/mod.rs` (recipe selection question / label mapping)
+- Uses **`log::{debug, info, warn}`** — consistent with daemon style; no `println!` in this module.
+- **Noise risk:** Successful paths log at **`info!`** for routine operations (`parse_git_worktree_list` row count, `list_cached_stats` snapshot count, `validate_worktree_path_within_repo_root` success, `WorktreeStatsCache::new`, `refresh_stats_for_project` row counts). Under default **info** level in a busy multi-project daemon, this can **flood** logs on every list/refresh.
+- **Recommendation:** Prefer **`debug!`** for per-request success paths; reserve **`info!`** for state changes (cache write, worktree removed, policy rejection).
+
+**Web:** `WorktreesScreen` uses **`console.error`** for `logTddyMarker("M009", ...)` on every render — **noisy in browser consoles** if this ships unchanged in production builds.
+
+---
+
+## Configuration
+
+| Mechanism | Purpose |
+|-----------|---------|
+| **`TDDY_PROJECTS_STATS_ROOT`** | Overrides cache root (integration tests, custom data dir). Logged at **info** when set (path value visible in logs). |
+| **`HOME`** | Default cache: `~/.tddy/projects`. **Required** for default branch; otherwise panic. |
+
+**Gaps:** No daemon config file key for stats root (env-only). No separate toggle for “enable worktrees feature.” **`git` binary** is hardcoded — no `GIT_BINARY` / config override for Nix or minimal images.
+
+---
+
+## Security
+
+**Path policy (`validate_worktree_path_within_repo_root`):**
+
+- **Lexical** normalization only — **does not resolve symlinks**. A symlink under `repo_root` pointing outside could differ from lexical containment in edge cases depending on OS and deployment.
+- **`starts_with` on `PathBuf`** — acceptable for Unix; Windows prefix/canonical path edge cases need review if that platform is supported.
+- **Traversal:** `../../../etc/passwd` style paths are rejected when joined to repo root (test coverage in-module).
+
+**Removal (`remove_worktree_under_repo`):**
+
+- **Authority = `git worktree list` output** parsed by the same parser as refresh — path must be listed for `repo_root` and must **not** match the **first** row (primary). Comment notes worktrees may live **outside** the main directory; removal is still constrained to git’s notion of registered worktrees, not arbitrary paths.
+- **No `--force`** in current `git worktree remove` invocation — safer default; dirty trees may fail with git error (surfaced as `GitFailed`).
+- **UTF-8:** Non–UTF-8 paths cannot be passed to `git` args (error returned).
+
+**Cache on disk:** JSON under per-`project_id` directory with `project_id` sanitized (`/`, `\`, `:` → `_`). No encryption; world-readable if umask allows — **same class of risk as other `~/.tddy` data**.
+
+**RPC/authz:** Not implemented — **who may refresh or delete** is undefined at the transport layer.
+
+---
+
+## Performance
+
+- **Refresh (`refresh_stats_for_project`):** One `git worktree list`, then **per worktree**: full **directory tree walk** for size + **`git diff --numstat HEAD`**. Cost grows **linearly with worktree count** and with tree size; **no parallelism cap**, no batching, no incremental diff.
+- **List (`list_cached_stats`):** Single file read + JSON parse — **does not** call `git_diff_numstat_summary` (by design). Acceptance test asserts diff counter does not increase on repeated list calls.
+- **Note:** `test_git_diff_on_list_calls` in `WorktreeStatsCache` is **never incremented** in `worktrees.rs`; the invariant is enforced structurally (list path does not call diff), not by the atomic counter.
+
+---
+
+## Operational gaps (daemon deployment)
+
+1. **No RPC/handlers** — Feature not exposed through existing daemon server; clients cannot use it without new protobuf/Connect messages and wiring.
+2. **`git` on `PATH`** — Service units must ensure git is installed; no preflight or clear startup error if missing.
+3. **No subprocess timeouts** — Hung `git` could block a worker thread indefinitely.
+4. **Resource limits** — No max worktrees per project, no max refresh frequency, no disk quota on cache directory.
+5. **Observability** — No metrics (refresh duration, cache hit rate, git failure count); logs only.
+6. **Cache coherence** — After `remove_worktree_under_repo`, **callers must** call `invalidate_project` (or refresh) if the cache should drop stale rows; **not automatic** from `remove_worktree_under_repo`.
+7. **Test name accuracy:** Renamed to **`remove_worktree_drops_listing_and_repeat_fails`** (library-level remove, not RPC). Extend when RPC + cache integration exists.
+
+---
+
+## Web + Cypress
+
+- **`WorktreesScreen.tsx`:** Presentational; **mock rows only**; comment states daemon/RPC future.
+- **`WorktreesScreen.cy.tsx`:** Component test with **injected props** — explicitly **no live RPC** (per spec comment). Adequate for UI shell; **not** an E2E against daemon.
+
+---
+
+## Verdict
+
+| Dimension | Status |
+|-----------|--------|
+| Error handling (remove/validate) | **Good** — typed errors |
+| Error handling (refresh/list cache) | **Weak** — silent empty/stale, no `Result` on refresh |
+| Logging | **Functional** — tune levels for prod |
+| Configuration | **Minimal** — env + `HOME`; document and harden |
+| Security (remove + lexical policy) | **Reasonable baseline** — symlink/canonical edge cases + authz TBD |
+| Performance (list vs refresh) | **List path OK**; **refresh can be heavy** |
+| Daemon deployment | **Not ready** — RPC, timeouts, HOME, observability, cache invalidation contract |
+
+**Suggested next steps before prod:** Wire RPC with authz; return `Result` or structured status from refresh; downgrade routine logs to `debug`; add git timeouts; replace `HOME` panic with explicit error; document cache invalidation after delete; consider `git` binary override for controlled environments.

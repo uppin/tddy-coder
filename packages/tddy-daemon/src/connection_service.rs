@@ -15,10 +15,12 @@ use tddy_service::proto::connection::{
     ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
     ListProjectsRequest, ListProjectsResponse, ListSessionWorkflowFilesRequest,
     ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse, ListToolsRequest,
-    ListToolsResponse, ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
-    ReadSessionWorkflowFileResponse, ResumeSessionRequest, ResumeSessionResponse,
-    SessionEntry as ProtoSessionEntry, Signal, SignalSessionRequest, SignalSessionResponse,
-    StartSessionRequest, StartSessionResponse, ToolInfo, WorkflowFileEntry,
+    ListToolsResponse, ListWorktreesForProjectRequest, ListWorktreesForProjectResponse,
+    ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
+    ReadSessionWorkflowFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SessionEntry as ProtoSessionEntry, Signal,
+    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
+    ToolInfo, WorkflowFileEntry, WorktreeRow,
 };
 use uuid::Uuid;
 
@@ -35,6 +37,7 @@ use crate::telegram_session_subscriber::TelegramDaemonHooks;
 use crate::user_sessions_path::{
     project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
 };
+use crate::worktrees::{self, RemoveWorktreeError, WorktreeStatsCache};
 
 /// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
 async fn spawn_blocking_with_timeout<T: Send + 'static>(
@@ -78,6 +81,7 @@ pub struct ConnectionServiceImpl {
     spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     telegram: Option<Arc<TelegramDaemonHooks>>,
+    worktree_stats_cache: Arc<WorktreeStatsCache>,
 }
 
 impl ConnectionServiceImpl {
@@ -92,6 +96,9 @@ impl ConnectionServiceImpl {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
         let eligible_daemon_source = eligible_daemon_source
             .unwrap_or_else(|| Arc::new(StubEligibleDaemonSource) as Arc<dyn EligibleDaemonSource>);
+        let worktree_stats_cache = Arc::new(WorktreeStatsCache::new(
+            worktrees::projects_stats_cache_root(),
+        ));
         Self {
             config,
             sessions_base_for_user,
@@ -99,6 +106,7 @@ impl ConnectionServiceImpl {
             spawn_client,
             eligible_daemon_source,
             telegram,
+            worktree_stats_cache,
         }
     }
 
@@ -808,6 +816,157 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(ReadSessionWorkflowFileResponse {
             content_utf8,
         }))
+    }
+
+    async fn list_worktrees_for_project(
+        &self,
+        request: Request<ListWorktreesForProjectRequest>,
+    ) -> Result<Response<ListWorktreesForProjectResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let project_id = req.project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+
+        let projects_dir = projects_path_for_user(os_user)
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let local_id = self.local_daemon_instance_id_string();
+        let main_repo_str =
+            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
+                .map_err(|e| Status::internal(e.to_string()))?
+                .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let main_repo = PathBuf::from(&main_repo_str);
+        if !main_repo.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
+        let cache = Arc::clone(&self.worktree_stats_cache);
+        let pid = project_id.to_string();
+        let repo = main_repo.clone();
+        let refresh = req.refresh;
+        let timeout = self.config.spawn_worker_request_timeout();
+
+        let snapshots = spawn_blocking_with_timeout(
+            timeout,
+            "ListWorktreesForProject: cache read/refresh",
+            move || {
+                if refresh {
+                    cache.refresh_stats_for_project(&pid, &repo);
+                }
+                Ok(cache.list_cached_stats(&pid))
+            },
+        )
+        .await?;
+
+        let worktrees: Vec<WorktreeRow> = snapshots
+            .into_iter()
+            .map(|s| WorktreeRow {
+                path: s.path.to_string_lossy().to_string(),
+                branch_label: s.branch_label,
+                disk_bytes: s.disk_bytes,
+                changed_files: s.changed_files,
+                lines_added: s.lines_added,
+                lines_removed: s.lines_removed,
+                updated_at_unix_ms: s.updated_at_unix_ms,
+                stale: s.stale,
+            })
+            .collect();
+
+        Ok(Response::new(ListWorktreesForProjectResponse { worktrees }))
+    }
+
+    async fn remove_worktree(
+        &self,
+        request: Request<RemoveWorktreeRequest>,
+    ) -> Result<Response<RemoveWorktreeResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let project_id = req.project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+        let worktree_path_raw = req.worktree_path.trim();
+        if worktree_path_raw.is_empty() {
+            return Err(Status::invalid_argument("worktree_path is required"));
+        }
+
+        let projects_dir = projects_path_for_user(os_user)
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let local_id = self.local_daemon_instance_id_string();
+        let main_repo_str =
+            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
+                .map_err(|e| Status::internal(e.to_string()))?
+                .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let main_repo = PathBuf::from(&main_repo_str);
+        if !main_repo.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
+        let worktree_path = PathBuf::from(worktree_path_raw);
+
+        let repo_blocking = main_repo.clone();
+        let wt_blocking = worktree_path.clone();
+        let timeout = self.config.spawn_worker_request_timeout();
+        let join = tokio::task::spawn_blocking(move || {
+            worktrees::remove_worktree_under_repo(&repo_blocking, &wt_blocking)
+        });
+
+        match tokio::time::timeout(timeout, join).await {
+            Ok(Ok(Ok(()))) => {
+                self.worktree_stats_cache.invalidate_project(project_id);
+                Ok(Response::new(RemoveWorktreeResponse {
+                    ok: true,
+                    message: String::new(),
+                }))
+            }
+            Ok(Ok(Err(e))) => Err(map_remove_worktree_error(e)),
+            Ok(Err(join_err)) => Err(Status::internal(join_err.to_string())),
+            Err(_elapsed) => Err(Status::deadline_exceeded(format!(
+                "RemoveWorktree: timed out after {}s (spawn_worker_request_timeout_secs)",
+                timeout.as_secs()
+            ))),
+        }
+    }
+}
+
+fn map_remove_worktree_error(e: RemoveWorktreeError) -> Status {
+    match e {
+        RemoveWorktreeError::NotListed => {
+            Status::not_found("worktree path is not in git worktree list")
+        }
+        RemoveWorktreeError::CannotRemovePrimary => {
+            Status::failed_precondition("cannot remove primary worktree")
+        }
+        RemoveWorktreeError::GitFailed { message } | RemoveWorktreeError::Io(message) => {
+            Status::internal(message)
+        }
     }
 }
 

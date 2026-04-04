@@ -127,6 +127,10 @@ The fullscreen **GhosttyTerminalLiveKit** view opened from **Connect / Resume** 
 - **Host dropdown**: Per project, the selected host is sent as **`daemon_instance_id`** on **`StartSession`**. Empty or matching the local instance keeps the existing local spawn path. Selecting a non-local instance is rejected by the daemon until cross-daemon spawn routing exists.
 - **Session host column**: **`ListSessions`** returns **`daemon_instance_id`** per row; the UI shows it in project and **Other sessions** tables.
 
+### Worktrees manager scaffolding
+
+The **Worktrees** product area includes a **`WorktreesScreen`** table component (mocked data in component tests) and a **`tddy-daemon`** **`worktrees`** library for **`git worktree list`**, on-disk stats cache, and **`git worktree remove`**. **ConnectionService** does not expose worktree RPCs yet; shell navigation from the main app to a dedicated route is follow-up work. Full operator semantics, cache layout, and test commands: [worktrees.md](worktrees.md).
+
 ## See also (development)
 
 - [LiveKit and gRPC terminal RPC E2E](../../dev/guides/livekit-terminal-rpc-e2e.md) — `tddy-e2e` tests, VirtualTui vs LiveKit bidi behavior, assertion patterns.

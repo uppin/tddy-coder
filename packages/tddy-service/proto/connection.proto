@@ -16,6 +16,8 @@ service ConnectionService {
   rpc ListEligibleDaemons(ListEligibleDaemonsRequest) returns (ListEligibleDaemonsResponse);
   rpc ListSessionWorkflowFiles(ListSessionWorkflowFilesRequest) returns (ListSessionWorkflowFilesResponse);
   rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
+  rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
+  rpc RemoveWorktree(RemoveWorktreeRequest) returns (RemoveWorktreeResponse);
 }
 
 message ListToolsRequest {}
@@ -187,4 +189,40 @@ message ReadSessionWorkflowFileRequest {
 
 message ReadSessionWorkflowFileResponse {
   string content_utf8 = 1;
+}
+
+// --- Worktrees (local daemon; see docs/ft/web/worktrees.md) ---
+
+message WorktreeRow {
+  string path = 1;
+  string branch_label = 2;
+  uint64 disk_bytes = 3;
+  uint32 changed_files = 4;
+  int64 lines_added = 5;
+  int64 lines_removed = 6;
+  int64 updated_at_unix_ms = 7;
+  bool stale = 8;
+}
+
+message ListWorktreesForProjectRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // When true, runs git/diff/stat refresh for this project before returning cached rows.
+  bool refresh = 3;
+}
+
+message ListWorktreesForProjectResponse {
+  repeated WorktreeRow worktrees = 1;
+}
+
+message RemoveWorktreeRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Absolute or repo-relative path as accepted by server validation (must appear in git worktree list).
+  string worktree_path = 3;
+}
+
+message RemoveWorktreeResponse {
+  bool ok = 1;
+  string message = 2;
 }

@@ -18,3 +18,4 @@ pub mod telegram_notifier;
 pub mod telegram_session_subscriber;
 pub mod token_provider;
 pub mod user_sessions_path;
+pub mod worktrees;
