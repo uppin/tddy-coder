@@ -429,7 +429,7 @@ impl Presenter {
                 }
                 let user_line = activity_prompt_log::format_user_prompt_line(&text);
                 if !user_line.is_empty() {
-                    self.log_activity(user_line, ActivityKind::Info);
+                    self.log_activity(user_line, ActivityKind::UserPrompt);
                 }
                 // Previous run finished (`workflow_result` set): start a new workflow. Do not send on
                 // `answer_tx` — it may still be `Some` until the worker thread exits, and a buffered
@@ -594,7 +594,7 @@ impl Presenter {
                 if !text.is_empty() {
                     let queued_line = activity_prompt_log::format_queued_prompt_line(&text);
                     if !queued_line.is_empty() {
-                        self.log_activity(queued_line, ActivityKind::Info);
+                        self.log_activity(queued_line, ActivityKind::UserPrompt);
                     }
                     self.state.inbox.push(text);
                     self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));

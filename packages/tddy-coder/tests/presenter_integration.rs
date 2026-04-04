@@ -1322,10 +1322,8 @@ fn workflow_error_propagates() {
     );
 }
 
-// --- Activity prompts in log / streaming PRD (prefixes are the stable acceptance contract) ---
+// --- Activity prompts in log / streaming PRD (queued prefix is the stable acceptance contract) ---
 
-/// User-submitted feature prompts must appear as activity lines with this prefix (PRD).
-const USER_PROMPT_ACTIVITY_PREFIX: &str = "User: ";
 /// Queued inbox prompts must appear as activity lines with this prefix (PRD).
 const QUEUED_PROMPT_ACTIVITY_PREFIX: &str = "Queued: ";
 
@@ -1350,17 +1348,18 @@ fn submit_feature_input_appends_user_prompt_activity() {
     events.drain();
 
     assert!(
-        presenter.state().activity_log.iter().any(|e| {
-            e.text.starts_with(USER_PROMPT_ACTIVITY_PREFIX) && e.text.contains(prompt)
-        }),
-        "expected activity log to record submitted feature prompt with prefix {:?} (PRD); got {:?}",
-        USER_PROMPT_ACTIVITY_PREFIX,
+        presenter
+            .state()
+            .activity_log
+            .iter()
+            .any(|e| e.text == prompt),
+        "expected activity log to record submitted feature prompt text (PRD); got {:?}",
         presenter.state().activity_log
     );
 
     let logged = events.events().iter().any(|e| {
         if let TestEvent::ActivityLogged(entry) = e {
-            entry.text.starts_with(USER_PROMPT_ACTIVITY_PREFIX) && entry.text.contains(prompt)
+            entry.text == prompt
         } else {
             false
         }

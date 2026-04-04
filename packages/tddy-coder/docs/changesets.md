@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-04-04** [Feature] Presenter integration tests — user prompt activity asserts exact submitted text and **`ActivityKind::UserPrompt`**; queued lines keep **`Queued: `** prefix. Feature doc: [activity-log-streaming.md](../../../docs/ft/coder/activity-log-streaming.md). (tddy-coder)
 - **2026-03-29** [Feature] Presenter integration tests for activity log streaming — **`presenter_integration`**: **`submit_feature_input_appends_user_prompt_activity`**, **`queue_prompt_appends_queued_prompt_activity`** (stable prefixes and **`ActivityLogged`**). Feature doc: [activity-log-streaming.md](../../../docs/ft/coder/activity-log-streaming.md). (tddy-coder)
 - **2026-03-29** [Feature] Presenter recipe resolver for slash **`/recipe`** — **`run.rs`**: **`with_recipe_resolver`** on daemon and full TUI **`Presenter`** builds, delegating to **`resolve_workflow_recipe_from_cli_name`**. Integration tests **`prompt_slash_skills_acceptance`**, **`prompt_slash_skills_lower`**. Feature doc: [feature-prompt-agent-skills.md](../../../docs/ft/coder/feature-prompt-agent-skills.md). (tddy-coder)
 - **2026-03-29** [Feature] OpenAI Codex CLI backend — **`--agent codex`**; **`resolve_codex_binary`** (**`--codex-cli-path`**, **`TDDY_CODEX_CLI`**, then **`codex`** on **`PATH`**); optional YAML **`codex_cli_path`** merged from config; **`verify_tddy_tools_available`** applies like Claude and Cursor. See [1-OVERVIEW.md](../../../docs/ft/coder/1-OVERVIEW.md). (tddy-coder)

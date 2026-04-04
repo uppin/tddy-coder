@@ -227,6 +227,7 @@ fn activity_kind_to_str(k: &ActivityKind) -> String {
         ActivityKind::TaskProgress => "TaskProgress".to_string(),
         ActivityKind::StateChange => "StateChange".to_string(),
         ActivityKind::Info => "Info".to_string(),
+        ActivityKind::UserPrompt => "UserPrompt".to_string(),
         ActivityKind::AgentOutput => "AgentOutput".to_string(),
     }
 }

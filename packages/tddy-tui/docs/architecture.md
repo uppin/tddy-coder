@@ -4,6 +4,10 @@
 
 `tddy-tui` implements the ratatui view layer for `tddy-coder`: key events map to `UserIntent`, local `ViewState` tracks scroll and UI buffers, and `draw()` renders activity log, dynamic area, status bar, and prompt bar.
 
+## Activity log (user prompts)
+
+For **`ActivityKind::UserPrompt`** entries, `render::draw` builds a fixed **three-row** block in the activity pane: **row one** is an empty padded line inside the styled panel; **rows two and three** carry hard-wrapped text (with an ellipsis on the third row when content exceeds two text rows). The block is inset with **one blank line** above and below and **one column** of margin on the left and right. Panel background **`Rgb(85, 85, 85)`**; text **`Rgb(255, 255, 255)`** with **bold**. Other activity kinds render as plain `Paragraph` lines without this treatment.
+
 ## Status bar
 
 The status bar is a single `Paragraph` line. Text is built by `render::status_bar_text_for_draw`, which:
@@ -44,4 +48,5 @@ The status bar is a single `Paragraph` line. Text is built by `render::status_ba
 ## Further reading
 
 - [Feature: TUI status bar](../../../../docs/ft/coder/tui-status-bar.md)
+- [Feature: Activity log streaming](../../../../docs/ft/coder/activity-log-streaming.md)
 - [Changesets](./changesets.md)
