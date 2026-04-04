@@ -79,8 +79,10 @@ pub use workflow::{
     GoalOptions,
 };
 pub use worktree::{
-    create_worktree, fetch_origin_master, list_worktrees, remove_worktree,
-    setup_worktree_for_session, worktree_dir, WorktreeInfo,
+    create_worktree, fetch_integration_base, fetch_origin_master, list_worktrees, remove_worktree,
+    resolve_default_integration_base_ref, setup_worktree_for_session,
+    setup_worktree_for_session_with_integration_base, validate_integration_base_ref, worktree_dir,
+    WorktreeInfo, DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF,
 };
 
 #[cfg(test)]

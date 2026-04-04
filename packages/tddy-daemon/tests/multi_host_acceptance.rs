@@ -75,6 +75,7 @@ fn per_host_project_path_roundtrip() {
         name: "app".to_string(),
         git_url: "https://github.com/org/repo.git".to_string(),
         main_repo_path: "/legacy/or/default/path".to_string(),
+        main_branch_ref: None,
         host_repo_paths,
     };
     tddy_daemon::project_storage::write_projects(&projects_dir, &[project]).unwrap();

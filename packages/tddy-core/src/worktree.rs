@@ -7,6 +7,48 @@ use std::process::Command;
 
 use crate::changeset::{read_changeset, write_changeset};
 
+/// Default remote-tracking ref used for integration worktrees when a project does not specify
+/// `main_branch_ref` in the daemon project registry (legacy YAML rows).
+///
+/// This matches the historical hardcoded contract (`origin/master`) before per-project base refs.
+pub const DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF: &str = "origin/master";
+
+/// Validates a per-project integration base ref: a single remote-tracking ref `origin/<branch>` with
+/// no shell metacharacters or extra git arguments.
+pub fn validate_integration_base_ref(s: &str) -> Result<(), String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("integration base ref must not be empty".to_string());
+    }
+    let rest = s
+        .strip_prefix("origin/")
+        .ok_or_else(|| "integration base ref must start with origin/".to_string())?;
+    if rest.is_empty() {
+        return Err("integration base ref must be origin/<branch-name>".to_string());
+    }
+    if rest.contains('/') {
+        return Err(
+            "integration base ref must be a single remote branch segment: origin/<branch-name>"
+                .to_string(),
+        );
+    }
+    if rest.chars().any(|c| c.is_whitespace()) {
+        return Err("integration base ref must not contain whitespace".to_string());
+    }
+    for forbidden in [';', '|', '&', '$', '`', '\n', '\r'] {
+        if rest.contains(forbidden) {
+            return Err(format!(
+                "integration base ref contains forbidden character: {:?}",
+                forbidden
+            ));
+        }
+    }
+    if rest.contains("--") {
+        return Err("integration base ref must not contain `--`".to_string());
+    }
+    Ok(())
+}
+
 /// Path to the worktrees directory under repo root.
 pub fn worktree_dir(repo_root: &Path) -> PathBuf {
     repo_root.join(".worktrees")
@@ -14,16 +56,39 @@ pub fn worktree_dir(repo_root: &Path) -> PathBuf {
 
 /// Fetch origin/master. Must succeed before creating worktree from origin/master.
 pub fn fetch_origin_master(repo_root: &Path) -> Result<(), String> {
+    log::debug!("fetch_origin_master: repo_root={}", repo_root.display());
+    fetch_integration_base(repo_root, DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF)
+}
+
+/// Fetches the given remote-tracking integration base ref (e.g. `origin/main`).
+pub fn fetch_integration_base(repo_root: &Path, integration_base_ref: &str) -> Result<(), String> {
+    validate_integration_base_ref(integration_base_ref)?;
+    let branch = integration_base_ref
+        .strip_prefix("origin/")
+        .expect("validate_integration_base_ref ensures origin/ prefix");
+    log::info!(
+        "fetch_integration_base: repo={} integration_base_ref={}",
+        repo_root.display(),
+        integration_base_ref
+    );
     let output = Command::new("git")
-        .args(["fetch", "origin", "master"])
+        .args(["fetch", "origin", branch])
         .current_dir(repo_root)
         .output()
-        .map_err(|e| format!("git fetch: {}", e))?;
+        .map_err(|e| format!("git fetch origin {}: {}", branch, e))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git fetch origin master failed: {}", stderr));
+        log::debug!(
+            "fetch_integration_base: git fetch failed stderr={}",
+            stderr.trim()
+        );
+        return Err(format!("git fetch origin {} failed: {}", branch, stderr));
     }
+    log::debug!(
+        "fetch_integration_base: fetch completed for {}",
+        integration_base_ref
+    );
     Ok(())
 }
 
@@ -104,9 +169,18 @@ fn create_worktree_with_retry(
     ))
 }
 
-/// Create worktree for a session from origin/master. Fetches first, then creates,
-/// updates changeset with worktree, branch, repo_path. Returns the worktree path.
-pub fn setup_worktree_for_session(repo_root: &Path, session_dir: &Path) -> Result<PathBuf, String> {
+/// Create worktree for a session using an explicit integration base ref (e.g. `origin/main`).
+pub fn setup_worktree_for_session_with_integration_base(
+    repo_root: &Path,
+    session_dir: &Path,
+    integration_base_ref: &str,
+) -> Result<PathBuf, String> {
+    validate_integration_base_ref(integration_base_ref)?;
+    log::info!(
+        "setup_worktree_for_session_with_integration_base: repo={} ref={}",
+        repo_root.display(),
+        integration_base_ref
+    );
     let mut cs = read_changeset(session_dir).map_err(|e| e.to_string())?;
 
     let branch = cs
@@ -126,17 +200,100 @@ pub fn setup_worktree_for_session(repo_root: &Path, session_dir: &Path) -> Resul
         .or_else(|| cs.name.as_ref().map(|n| slugify_for_worktree(n)))
         .ok_or("no worktree suggestion or name for worktree")?;
 
-    fetch_origin_master(repo_root)?;
+    fetch_integration_base(repo_root, integration_base_ref)?;
 
-    let (worktree_path, actual_branch) =
-        create_worktree_with_retry(repo_root, &worktree_name, &branch, Some("origin/master"))?;
+    let (worktree_path, actual_branch) = create_worktree_with_retry(
+        repo_root,
+        &worktree_name,
+        &branch,
+        Some(integration_base_ref),
+    )?;
 
     cs.worktree = Some(worktree_path.to_string_lossy().to_string());
     cs.branch = Some(actual_branch);
     cs.repo_path = Some(worktree_path.to_string_lossy().to_string());
     write_changeset(session_dir, &cs).map_err(|e| e.to_string())?;
 
+    log::debug!(
+        "setup_worktree_for_session_with_integration_base: worktree_path={}",
+        worktree_path.display()
+    );
     Ok(worktree_path)
+}
+
+/// Resolves which remote-tracking ref to use when no per-project override is supplied.
+///
+/// Runs `git fetch origin`, then prefers `origin/master` when present (legacy default contract),
+/// otherwise `origin/main` if present, otherwise follows `refs/remotes/origin/HEAD`.
+pub fn resolve_default_integration_base_ref(repo_root: &Path) -> Result<String, String> {
+    log::info!(
+        "resolve_default_integration_base_ref: fetching origin repo={}",
+        repo_root.display()
+    );
+    let fetch_out = Command::new("git")
+        .args(["fetch", "origin"])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git fetch origin: {}", e))?;
+    if !fetch_out.status.success() {
+        let stderr = String::from_utf8_lossy(&fetch_out.stderr);
+        return Err(format!("git fetch origin failed: {}", stderr));
+    }
+
+    if remote_ref_exists(repo_root, "origin/master")? {
+        log::debug!("resolve_default_integration_base_ref: chose origin/master");
+        return Ok("origin/master".to_string());
+    }
+    if remote_ref_exists(repo_root, "origin/main")? {
+        log::debug!("resolve_default_integration_base_ref: chose origin/main");
+        return Ok("origin/main".to_string());
+    }
+
+    let sym = Command::new("git")
+        .args(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git symbolic-ref: {}", e))?;
+    if sym.status.success() {
+        let sym_ref = String::from_utf8_lossy(&sym.stdout).trim().to_string();
+        log::debug!(
+            "resolve_default_integration_base_ref: origin/HEAD -> {}",
+            sym_ref
+        );
+        if let Some(rest) = sym_ref.strip_prefix("refs/remotes/") {
+            validate_integration_base_ref(rest)?;
+            return Ok(rest.to_string());
+        }
+    }
+
+    Err(
+        "could not resolve integration base ref: no origin/master, origin/main, or origin/HEAD"
+            .to_string(),
+    )
+}
+
+fn remote_ref_exists(repo_root: &Path, rev: &str) -> Result<bool, String> {
+    let out = Command::new("git")
+        .args(["rev-parse", "--verify", rev])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git rev-parse: {}", e))?;
+    Ok(out.status.success())
+}
+
+/// Create worktree for a session. Fetches the resolved integration base, then creates,
+/// updates changeset with worktree, branch, repo_path. Returns the worktree path.
+///
+/// When no project-specific ref is available, the ref is resolved with
+/// [`resolve_default_integration_base_ref`] (prefers `origin/master`, then `origin/main`, then
+/// `origin/HEAD`).
+pub fn setup_worktree_for_session(repo_root: &Path, session_dir: &Path) -> Result<PathBuf, String> {
+    log::info!(
+        "setup_worktree_for_session: repo_root={}",
+        repo_root.display()
+    );
+    let integration_base_ref = resolve_default_integration_base_ref(repo_root)?;
+    setup_worktree_for_session_with_integration_base(repo_root, session_dir, &integration_base_ref)
 }
 
 /// Remove an existing worktree. Uses `git worktree remove --force`.
@@ -225,4 +382,136 @@ pub fn list_worktrees(repo_root: &Path) -> Result<Vec<WorktreeInfo>, String> {
     }
 
     Ok(worktrees)
+}
+
+#[cfg(test)]
+mod integration_base_red_tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+
+    /// `fetch_integration_base` runs `git fetch origin <branch>` for a valid remote-tracking ref.
+    #[test]
+    fn fetch_integration_base_succeeds_for_valid_origin_main_red() {
+        let base = std::env::temp_dir().join("tddy-core-fetch-int-base-green");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "t@t.com"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "T"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        fs::write(repo.join("f"), "x").unwrap();
+        Command::new("git")
+            .args(["add", "f"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "c"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["remote", "add", "origin", repo.to_str().unwrap()])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["push", "-u", "origin", "main"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        assert!(
+            fetch_integration_base(&repo, "origin/main").is_ok(),
+            "fetch_integration_base must succeed for a valid repo and ref"
+        );
+    }
+
+    /// RED: session setup with explicit `origin/main` must complete worktree creation (skeleton returns Err).
+    #[test]
+    fn setup_worktree_with_integration_base_completes_red() {
+        let base = std::env::temp_dir().join("tddy-core-setup-int-base-red");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "t@t.com"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "T"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        fs::write(repo.join("f"), "x").unwrap();
+        Command::new("git")
+            .args(["add", "f"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "c"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["remote", "add", "origin", repo.to_str().unwrap()])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["push", "-u", "origin", "main"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        let session_dir = base.join("sess");
+        fs::create_dir_all(&session_dir).unwrap();
+        let cs = crate::changeset::Changeset {
+            name: Some("n".to_string()),
+            branch_suggestion: Some("feature/x".to_string()),
+            worktree_suggestion: Some("feature-x".to_string()),
+            ..Default::default()
+        };
+        crate::changeset::write_changeset(&session_dir, &cs).unwrap();
+
+        let r =
+            setup_worktree_for_session_with_integration_base(&repo, &session_dir, "origin/main");
+        assert!(
+            r.is_ok(),
+            "GREEN: must create worktree from origin/main; got {:?}",
+            r.err()
+        );
+    }
 }
