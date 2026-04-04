@@ -9,7 +9,8 @@ use crate::parser::{
     parse_update_docs_response, parse_validate_subagents_response, PlanningOutput,
 };
 use crate::tdd::{
-    acceptance_tests, demo, evaluate, green, red, refactor, update_docs, validate_subagents,
+    acceptance_tests, demo, evaluate, green, interview, red, refactor, update_docs,
+    validate_subagents,
 };
 use crate::writer::{
     update_acceptance_tests_file, update_progress_file, write_acceptance_tests_file,
@@ -170,6 +171,87 @@ fn before_plan(context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut cs = read_changeset(&dir).map_err(|e| e.to_string())?;
     update_state(&mut cs, WorkflowState::new("Planning"));
     let _ = write_changeset(&dir, &cs);
+    interview::apply_staged_interview_handoff_to_plan_context(&dir, context)?;
+    Ok(())
+}
+
+fn before_interview(context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+    log::debug!(
+        target: "tddy_workflow_recipes::tdd::hooks",
+        "before_interview: preparing prompts and session_dir"
+    );
+    let session_dir: PathBuf = context
+        .get_sync("session_dir")
+        .or_else(|| context.get_sync("output_dir"))
+        .ok_or("interview requires session_dir or output_dir")?;
+    context.set_sync("session_dir", session_dir.clone());
+
+    let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
+    if let Some(answers) = context.get_sync::<String>("answers") {
+        if !answers.trim().is_empty() {
+            context.set_sync("prompt", answers);
+            context.remove_sync("answers");
+        } else {
+            context.set_sync(
+                "prompt",
+                interview::build_interview_user_prompt(&feature_input),
+            );
+        }
+    } else {
+        context.set_sync(
+            "prompt",
+            interview::build_interview_user_prompt(&feature_input),
+        );
+    }
+    context.set_sync("system_prompt", interview::system_prompt());
+    if context
+        .get_sync::<String>("session_id")
+        .map(|s| s.trim().is_empty())
+        .unwrap_or(true)
+    {
+        let session_id = uuid::Uuid::now_v7().to_string();
+        log::debug!(
+            target: "tddy_workflow_recipes::tdd::hooks",
+            "before_interview: allocating new session_id (none in context)"
+        );
+        context.set_sync("session_id", session_id);
+    } else {
+        log::debug!(
+            target: "tddy_workflow_recipes::tdd::hooks",
+            "before_interview: keeping existing session_id (workflow session)"
+        );
+    }
+    context.set_sync("is_resume", false);
+    let model = context
+        .get_sync::<String>("model")
+        .unwrap_or_else(|| "sonnet".to_string());
+    context.set_sync("model", model);
+    if let Ok(mut cs) = read_changeset(&session_dir) {
+        update_state(&mut cs, WorkflowState::new("Interviewing"));
+        let _ = write_changeset(&session_dir, &cs);
+    }
+    Ok(())
+}
+
+fn after_interview(
+    session_dir: &Path,
+    result: &TaskResult,
+    handoff_snapshot: Option<String>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    log::debug!(
+        target: "tddy_workflow_recipes::tdd::hooks",
+        "after_interview: persisting handoff for session_dir={:?}",
+        session_dir
+    );
+    let mut text = handoff_snapshot.unwrap_or_default();
+    if text.trim().is_empty() {
+        text = result.response.clone();
+    }
+    interview::persist_interview_handoff_for_plan(session_dir, &text)?;
+    if let Ok(mut cs) = read_changeset(session_dir) {
+        update_state(&mut cs, WorkflowState::new("Interviewed"));
+        let _ = write_changeset(session_dir, &cs);
+    }
     Ok(())
 }
 
@@ -262,9 +344,19 @@ fn before_acceptance_tests(
     );
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", acceptance_tests::system_prompt());
-    // Plan-mode sessions cannot be resumed with acceptEdits; create fresh session.
-    let session_id = uuid::Uuid::now_v7().to_string();
-    context.set_sync("session_id", session_id);
+    // Plan-mode agent sessions use Fresh(); keep workflow session_id when already set (engine contract).
+    if context
+        .get_sync::<String>("session_id")
+        .map(|s| s.trim().is_empty())
+        .unwrap_or(true)
+    {
+        let session_id = uuid::Uuid::now_v7().to_string();
+        log::debug!(
+            target: "tddy_workflow_recipes::tdd::hooks",
+            "before_acceptance_tests: allocating new session_id (none in context)"
+        );
+        context.set_sync("session_id", session_id);
+    }
     context.set_sync("is_resume", false);
     context.set_sync("session_dir", session_dir.to_path_buf());
     context.set_sync("model", model);
@@ -311,8 +403,18 @@ fn before_red(
     context.set_sync("system_prompt", red::system_prompt());
     context.set_sync("session_dir", session_dir.to_path_buf());
     context.set_sync("model", model);
-    let session_id = uuid::Uuid::now_v7().to_string();
-    context.set_sync("session_id", session_id);
+    if context
+        .get_sync::<String>("session_id")
+        .map(|s| s.trim().is_empty())
+        .unwrap_or(true)
+    {
+        let session_id = uuid::Uuid::now_v7().to_string();
+        log::debug!(
+            target: "tddy_workflow_recipes::tdd::hooks",
+            "before_red: allocating new session_id (none in context)"
+        );
+        context.set_sync("session_id", session_id);
+    }
     context.set_sync("is_resume", false);
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("RedTesting"));
@@ -518,7 +620,7 @@ fn before_update_docs(
 }
 
 fn after_plan(
-    recipe: &dyn WorkflowRecipe,
+    _recipe: &dyn WorkflowRecipe,
     manifest: &dyn SessionArtifactManifest,
     session_dir: &Path,
     context: &Context,
@@ -553,14 +655,14 @@ fn after_plan(
     cs.branch_suggestion = planning.branch_suggestion.clone();
     cs.worktree_suggestion = planning.worktree_suggestion.clone();
     let session_exists = cs.sessions.iter().any(|s| s.id == session_id);
-    let start_tag = recipe.start_goal().as_str().to_string();
+    let plan_session_tag = "plan";
     if session_exists {
         update_state(&mut cs, WorkflowState::new("Planned"));
     } else {
         append_session_and_update_state(
             &mut cs,
             session_id,
-            &start_tag,
+            plan_session_tag,
             WorkflowState::new("Planned"),
             &backend_name,
             Some("system-prompt-plan.md".to_string()),
@@ -772,7 +874,9 @@ impl RunnerHooks for TddWorkflowHooks {
         if let Some(ref tx) = self.event_tx {
             let _ = tx.send(WorkflowEvent::GoalStarted(task_id.to_string()));
         }
-        if task_id == "plan" {
+        if task_id == "interview" {
+            before_interview(context)?;
+        } else if task_id == "plan" {
             before_plan(context)?;
         } else {
             let session_dir: Option<PathBuf> = context
@@ -836,6 +940,7 @@ impl RunnerHooks for TddWorkflowHooks {
                     .map(|c| c.state.current)
                     .unwrap_or_else(|| WorkflowState::new("Init"));
                 let to_transitional = match task_id {
+                    "interview" => Some("Interviewing"),
                     "plan" => Some("Planning"),
                     "acceptance-tests" => Some("AcceptanceTesting"),
                     "red" => Some("RedTesting"),
@@ -862,8 +967,16 @@ impl RunnerHooks for TddWorkflowHooks {
         &self,
         task_id: &str,
         context: &Context,
-        _result: &TaskResult,
+        result: &TaskResult,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let interview_handoff_snapshot: Option<String> = if task_id == "interview" {
+            context
+                .get_sync::<String>("prompt")
+                .or_else(|| context.get_sync::<String>("answers"))
+        } else {
+            None
+        };
+
         let session_dir: Option<PathBuf> = context
             .get_sync("session_dir")
             .or_else(|| context.get_sync("output_dir"));
@@ -873,6 +986,7 @@ impl RunnerHooks for TddWorkflowHooks {
                 .map(|c| c.state.current)
                 .unwrap_or_else(|| WorkflowState::new("Init"));
             let (from, to) = match task_id {
+                "interview" => ("Interviewing", "Interviewed"),
                 "plan" => ("Planning", "Planned"),
                 "acceptance-tests" => ("AcceptanceTesting", "AcceptanceTestsReady"),
                 "red" => ("RedTesting", "RedTestsReady"),
@@ -899,6 +1013,13 @@ impl RunnerHooks for TddWorkflowHooks {
         context.remove_sync("answers");
         context.remove_sync("is_resume");
         match task_id {
+            "interview" => {
+                let session_dir: PathBuf = context
+                    .get_sync("session_dir")
+                    .or_else(|| context.get_sync("output_dir"))
+                    .ok_or("interview after_task requires session_dir or output_dir")?;
+                after_interview(&session_dir, result, interview_handoff_snapshot)?;
+            }
             "plan" => {
                 let session_dir: PathBuf = context
                     .get_sync("session_dir")
@@ -952,7 +1073,8 @@ impl RunnerHooks for TddWorkflowHooks {
         context: &Context,
         _result: &TaskResult,
     ) -> Option<ElicitationEvent> {
-        if task_id != self.recipe.start_goal().as_str() {
+        // PRD approval gate runs after **plan** (primary session document), not the interview entry goal.
+        if task_id != "plan" {
             return None;
         }
         let session_dir: PathBuf = context

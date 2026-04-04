@@ -59,6 +59,15 @@ pub trait WorkflowRecipe: Send + Sync {
 
     fn start_goal(&self) -> GoalId;
 
+    /// Goal to run for **plan refinement** (PRD feedback after primary document review).
+    ///
+    /// Defaults to [`start_goal`](Self::start_goal). Recipes with a dedicated planning step after
+    /// elicitation must override (e.g. TDD **`plan`** after **`interview`**, grill-me **`create-plan`**
+    /// after **`grill`**).
+    fn plan_refinement_goal(&self) -> GoalId {
+        self.start_goal()
+    }
+
     fn default_models(&self) -> BTreeMap<GoalId, String>;
 
     fn goal_requires_session_dir(&self, goal_id: &GoalId) -> bool;
@@ -96,5 +105,18 @@ pub trait WorkflowRecipe: Send + Sync {
     fn goal_requires_tddy_tools_submit(&self, goal_id: &GoalId) -> bool {
         let _ = goal_id;
         true
+    }
+
+    /// Whether to ignore this history transition when choosing a resume goal after `Failed`
+    /// ([`crate::changeset::start_goal_for_session_continue`]). Default: skip when the computed
+    /// next goal equals [`start_goal`](WorkflowRecipe::start_goal). Recipes with a pre-plan step may
+    /// override (e.g. TDD skips `Planning` → `plan` as restart noise even when `start_goal` is `interview`).
+    fn skip_failed_resume_transition(
+        &self,
+        transition_state: &WorkflowState,
+        next_goal: &GoalId,
+    ) -> bool {
+        let _ = transition_state;
+        next_goal == &self.start_goal()
     }
 }

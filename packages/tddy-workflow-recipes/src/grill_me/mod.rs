@@ -116,6 +116,10 @@ impl WorkflowRecipe for GrillMeRecipe {
         GoalId::new("grill")
     }
 
+    fn plan_refinement_goal(&self) -> GoalId {
+        GoalId::new("create-plan")
+    }
+
     fn default_models(&self) -> BTreeMap<GoalId, String> {
         BTreeMap::new()
     }
@@ -147,6 +151,20 @@ impl WorkflowRecipe for GrillMeRecipe {
 
     fn goal_requires_tddy_tools_submit(&self, goal_id: &GoalId) -> bool {
         !matches!(goal_id.as_str(), "grill" | "create-plan")
+    }
+}
+
+#[cfg(test)]
+mod plan_refinement_tests {
+    use super::GrillMeRecipe;
+    use tddy_core::GoalId;
+    use tddy_core::WorkflowRecipe;
+
+    #[test]
+    fn plan_refinement_goal_is_create_plan_not_grill() {
+        let r = GrillMeRecipe;
+        assert_eq!(r.plan_refinement_goal(), GoalId::new("create-plan"));
+        assert_ne!(r.plan_refinement_goal(), r.start_goal());
     }
 }
 

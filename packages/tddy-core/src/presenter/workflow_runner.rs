@@ -628,8 +628,11 @@ pub fn run_workflow(
 
     let start_tag = recipe.start_goal().as_str().to_string();
     let start_goal_needs_completion = cs_pre.as_ref().is_some_and(|c| {
+        let st = c.state.current.as_str();
+        let at_initial =
+            st == recipe.initial_state().as_str() || (recipe.name() == "tdd" && st == "Init");
         recipe.uses_primary_session_document()
-            && c.state.current.as_str() == "Init"
+            && at_initial
             && (recipe
                 .read_primary_session_document_utf8(&session_dir)
                 .is_none()

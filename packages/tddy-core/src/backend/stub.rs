@@ -225,6 +225,14 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
 
     fn response_for_goal(&self, goal_id: &GoalId) -> InvokeResponse {
         match goal_id.as_str() {
+            "interview" => InvokeResponse {
+                output: "**[Stub]** Interview phase complete.\n".to_string(),
+                exit_code: 0,
+                session_id: None,
+                questions: vec![],
+                raw_stream: None,
+                stderr: None,
+            },
             "plan" => self.plan_response(),
             "acceptance-tests" => self.acceptance_tests_response(),
             "red" => self.red_response(),

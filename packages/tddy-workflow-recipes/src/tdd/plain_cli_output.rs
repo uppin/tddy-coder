@@ -17,6 +17,9 @@ pub fn print_plain_goal_output(
     session_dir: &Path,
 ) -> Result<(), String> {
     match goal_id.as_str() {
+        "interview" => {
+            let _ = (output, session_dir);
+        }
         "plan" => {
             // Plan goal: print only the path (CLI contract for piping/scripts)
             println!("{}", session_dir.display());

@@ -1,7 +1,7 @@
 # Workflow recipes (pluggable workflows)
 
 **Product area:** Coder  
-**Updated:** 2026-04-03
+**Updated:** 2026-04-04
 
 ## Summary
 
@@ -22,8 +22,11 @@ Allowed names are **`tdd`**, **`bugfix`**, **`free-prompting`**, and **`grill-me
 
 ## TddRecipe
 
-- **Start goal:** **`plan`**
-- **Pipeline:** plan → acceptance-tests → red → green → demo → evaluate → validate → refactor → update-docs (full TDD graph).
+- **Start goal:** **`interview`** (upfront elicitation before structured planning).
+- **Pipeline (minimal graph):** **`interview` → `plan` → acceptance-tests → red → green → end**. **Full graph:** **`interview` → `plan` → acceptance-tests → red → green →** (optional **`demo`**) **→ evaluate → validate → refactor → update-docs → end**.
+- **Handoff:** Interview output is written to **`.workflow/tdd_interview_handoff.txt`** under the session directory; **`before_plan`** loads it into context as **`answers`** so **`PlanTask`** can build a follow-up prompt (same relay idea as grill-me’s persisted answers).
+- **Structured submit:** **`WorkflowRecipe::goal_requires_tddy_tools_submit`** is **`false`** for **`interview`** (elicitation turns complete without **`tddy-tools submit`**); **`plan`** and later structured goals keep the submit contract.
+- **Plan refinement (PRD feedback):** **`WorkflowRecipe::plan_refinement_goal()`** selects the planning goal for refinement flows. For **`TddRecipe`** the value is **`plan`** (not **`interview`**). **`GrillMeRecipe`** uses **`create-plan`** (not **`grill`**). Recipes without a separate elicitation step inherit the default (**`start_goal()`**).
 - **Primary session document:** **`prd`** → **`PRD.md`** under the session artifact layout (see **`SessionArtifactManifest`**).
 - **Session document approval:** Hook-driven **`ElicitationEvent::DocumentApproval`** after the plan task when **`WorkflowRecipe::uses_primary_session_document`** is **`true`** and the primary document is readable; the presenter and plain CLI use the same recipe-driven gate.
 
@@ -87,7 +90,7 @@ JSON Schemas for workflow goals (`plan`, `red`, `green`, etc.) live in **`tddy-w
 
 ## Session artifacts and primary planning documents
 
-**Goal IDs** (e.g. `"plan"`, `"reproduce"`, `"prompting"`, `"grill"`, `"create-plan"`) stay stable as wire/API identifiers. (**`grill-me`** is the **recipe** CLI name, not a goal id.) **Filenames and on-disk layout** for the primary planning document and related artifacts are defined by each recipe’s manifest (**`SessionArtifactManifest`**, `default_artifacts` / `known_artifacts`), not by fixed defaults inside **`tddy-core`**.
+**Goal IDs** (e.g. `"interview"`, `"plan"`, `"reproduce"`, `"prompting"`, `"grill"`, `"create-plan"`) stay stable as wire/API identifiers. (**`grill-me`** is the **recipe** CLI name, not a goal id.) **Filenames and on-disk layout** for the primary planning document and related artifacts are defined by each recipe’s manifest (**`SessionArtifactManifest`**, `default_artifacts` / `known_artifacts`), not by fixed defaults inside **`tddy-core`**.
 
 - **`tddy-core`** exposes **`WorkflowRecipe::uses_primary_session_document`** and **`read_primary_session_document_utf8`** for approval gates, plain CLI, and daemon flows.
 - **`tddy-workflow`** provides **`artifact_paths`** helpers (`session_dir/artifacts/`, legacy `sessions/<uuid>/` layouts, resolution order).
@@ -101,9 +104,9 @@ This section records how the shipped recipes map to the same product philosophy 
 
 ### TDD (`tdd`)
 
-- **Default** when **`--recipe`** is omitted or **`changeset.yaml`** has no **`recipe`** field (backward compatible).
-- **Start goal:** **`plan`** — greenfield planning, PRD/TODO-style artifacts, full graph (plan → acceptance-tests → red → green → …).
-- **Spirit:** Aligns with a typical feature-development workflow (plan first, then tests and implementation).
+- **Default** when **`--recipe`** is omitted or **`changeset.yaml`** has no **`recipe`** field.
+- **Start goal:** **`interview`** — clarification before PRD/plan; **`plan`** follows with PRD/TODO-style artifacts; full graph continues with acceptance-tests → red → green → ….
+- **Spirit:** Discovery-style elicitation (interview), then structured planning, then tests and implementation.
 
 ### Bugfix (`bugfix`)
 

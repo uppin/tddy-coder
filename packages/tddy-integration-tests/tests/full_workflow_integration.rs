@@ -172,7 +172,11 @@ fn next_goal_for_state_maps_states_correctly() {
     let r = common::tdd_recipe();
     assert_eq!(
         r.next_goal_for_state(&WorkflowState::new("Init")),
-        Some(GoalId::new("plan"))
+        Some(GoalId::new("interview"))
+    );
+    assert_eq!(
+        r.next_goal_for_state(&WorkflowState::new("Interview")),
+        Some(GoalId::new("interview"))
     );
     assert_eq!(
         r.next_goal_for_state(&WorkflowState::new("Planned")),
@@ -193,7 +197,7 @@ fn next_goal_for_state_maps_states_correctly() {
     assert_eq!(r.next_goal_for_state(&WorkflowState::new("Failed")), None);
     assert_eq!(
         r.next_goal_for_state(&WorkflowState::new("Unknown")),
-        Some(GoalId::new("plan"))
+        Some(GoalId::new("interview"))
     );
 }
 

@@ -22,6 +22,26 @@ fn normalize_idle_pulse(s: &str) -> String {
         .collect()
 }
 
+/// Stable markers that the presenter has rendered substantive UI (plan clarify, interview, or approval).
+fn screen_has_expected_tui_content(s: &str) -> bool {
+    s.contains("Email/password")
+        || s.contains("Scope")
+        || s.contains("Plan generated")
+        || s.contains("Interview")
+}
+
+/// Status bar elapsed seconds advance while waiting; normalize so before/after snapshots stay comparable.
+fn normalize_status_bar_timer(s: &str) -> String {
+    let mut t = normalize_idle_pulse(s);
+    for i in 0..=120 {
+        let pat = format!("│ {i}s │");
+        if t.contains(&pat) {
+            t = t.replace(&pat, "│ Ns │");
+        }
+    }
+    t
+}
+
 async fn collect_output_window(
     stream: &mut tonic::Streaming<TerminalOutput>,
     window: Duration,
@@ -70,8 +90,8 @@ async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::R
     parser1.feed(&stream1_initial);
     let screen1_before = parser1.contents();
     assert!(
-        screen1_before.contains("Email/password") || screen1_before.contains("Scope"),
-        "Client 1 should see user question at 80×24; got:\n{}",
+        screen_has_expected_tui_content(&screen1_before),
+        "Client 1 should see presenter content at 80×24; got:\n{}",
         screen1_before
     );
 
@@ -95,8 +115,8 @@ async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::R
     parser2.feed(&stream2_output);
     let screen2 = parser2.contents();
     assert!(
-        screen2.contains("Email/password") || screen2.contains("Scope"),
-        "Client 2 (60×16) should see the user question; got:\n{}",
+        screen_has_expected_tui_content(&screen2),
+        "Client 2 (60×16) should see presenter content; got:\n{}",
         screen2
     );
 
@@ -107,14 +127,14 @@ async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::R
     let screen1_after = parser1.contents();
 
     assert!(
-        screen1_after.contains("Email/password") || screen1_after.contains("Scope"),
+        screen_has_expected_tui_content(&screen1_after),
         "Client 1 must not go blank after client 2 connects with smaller screen; got:\n{}",
         screen1_after
     );
 
     assert_eq!(
-        normalize_idle_pulse(&screen1_before),
-        normalize_idle_pulse(&screen1_after),
+        normalize_status_bar_timer(&screen1_before),
+        normalize_status_bar_timer(&screen1_after),
         "Client 1 screen content must not change when client 2 connects with different dimensions.\n\
          Before:\n{}\n\nAfter:\n{}",
         screen1_before, screen1_after

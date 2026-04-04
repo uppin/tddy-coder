@@ -153,10 +153,10 @@ async fn full_workflow_with_clarification_completes() {
 #[tokio::test]
 async fn full_workflow_asserts_each_state_transition() {
     /// `TddWorkflowHooks::before_task` persists the transitional state in `changeset.yaml` before
-    /// emitting `WorkflowEvent::StateChange`. The **Planning** phase can emit a variable number of
-    /// `Planning→Planning` / `Planning→Planned` transitions depending on plan-review resync timing,
-    /// so this test matches a fixed **suffix** from **`AcceptanceTesting` → `DocsUpdated`** and
-    /// only checks that earlier transitions stay within the Planning state.
+    /// emitting `WorkflowEvent::StateChange`. The **interview** and **Planning** phases can emit
+    /// variable duplicate transitions (`Interviewing→…`, `Planning→…`) depending on timing, so this
+    /// test matches a fixed **suffix** from **`AcceptanceTesting` → `DocsUpdated`** and only checks
+    /// that earlier transitions stay within interview + planning phases.
     const SUFFIX_WITH_DEMO: &[(&str, &str)] = &[
         ("AcceptanceTesting", "AcceptanceTesting"),
         ("AcceptanceTesting", "AcceptanceTestsReady"),
@@ -333,10 +333,21 @@ async fn full_workflow_asserts_each_state_transition() {
             to
         );
     }
+    fn is_early_tdd_transition(from: &str, to: &str) -> bool {
+        matches!(
+            (from, to),
+            ("Init" | "Interview", "Interviewing")
+                | ("Interviewing", "Interviewing" | "Interviewed")
+                | ("Interviewed", "Planning")
+                // Ordering can interleave interview completion with plan start (both update changeset).
+                | ("Planning", "Interviewed")
+                | ("Planning", "Planning" | "Planned")
+        )
+    }
     for (from, to) in &state_transitions[..tail_start] {
         assert!(
-            from == "Planning" && (to == "Planning" || to == "Planned"),
-            "planning-phase transition should be Planning→Planning or Planning→Planned, got {from:?}→{to:?}"
+            is_early_tdd_transition(from, to),
+            "early transition should be interview- or planning-phase, got {from:?}→{to:?}"
         );
     }
 }

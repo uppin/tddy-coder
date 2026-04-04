@@ -948,14 +948,22 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
     let recipe = recipe_arc_for_args(args)?;
     let start_goal_id = recipe.start_goal();
     let start_g = start_goal_id.as_str();
-    if args.goal.as_deref() != Some(start_g) {
+    let goal_arg = args.goal.as_deref();
+    let tdd_explicit_plan = recipe.name() == "tdd" && goal_arg == Some("plan");
+    if goal_arg != Some(start_g) && !tdd_explicit_plan {
         anyhow::bail!(
-            "unsupported goal: {} (expected `{}` for recipe `{}`)",
-            args.goal.as_deref().unwrap_or("(none)"),
+            "unsupported goal: {} (expected `{}` for recipe `{}`{})",
+            goal_arg.unwrap_or("(none)"),
             start_g,
-            recipe.name()
+            recipe.name(),
+            if recipe.name() == "tdd" {
+                ", or `plan` to skip the interview step"
+            } else {
+                ""
+            }
         );
     }
+    let goal_to_run = if tdd_explicit_plan { "plan" } else { start_g };
 
     let input = read_feature_input(args).context("read feature description")?;
     let input = input.trim().to_string();
@@ -1004,7 +1012,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             serde_json::to_value(session_dir.clone()).unwrap(),
         );
     });
-    run_goal_plain(args, backend, start_g, ctx, true, &shutdown)
+    run_goal_plain(args, backend, goal_to_run, ctx, true, &shutdown)
 }
 
 fn on_progress(_event: &ProgressEvent) {
@@ -2185,13 +2193,17 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         )?;
     }
 
-    // When the session has Init state and no primary session document (or no start-goal session), run start goal to complete it.
+    // When the session is at the recipe's initial state (legacy TDD `Init` included) and no primary
+    // session document (or no start-goal session), run start goal to complete it.
     let cs_pre = read_changeset(&session_dir).ok();
     let start_goal_id = recipe.start_goal();
     let start_tag_str = start_goal_id.as_str();
     let plan_needs_completion = cs_pre.as_ref().is_some_and(|c| {
+        let st = c.state.current.as_str();
+        let at_initial =
+            st == recipe.initial_state().as_str() || (recipe.name() == "tdd" && st == "Init");
         recipe.uses_primary_session_document()
-            && c.state.current.as_str() == "Init"
+            && at_initial
             && (recipe
                 .read_primary_session_document_utf8(&session_dir)
                 .is_none()
@@ -2450,11 +2462,11 @@ fn run_plan_refinement(
         .and_then(|c| c.initial_prompt.clone())
         .unwrap_or_else(|| "feature".to_string());
     let recipe = recipe_arc_for_args(args)?;
-    let start_goal_id = recipe.start_goal();
-    let start_tag = start_goal_id.as_str();
+    let refine_goal = recipe.plan_refinement_goal();
+    let refine_tag = refine_goal.as_str();
     let session_id_for_refine = read_changeset(session_dir)
         .ok()
-        .and_then(|c| get_session_for_tag(&c, start_tag));
+        .and_then(|c| get_session_for_tag(&c, refine_tag));
     // output_dir from build_goal_context (repo_path in changeset); session_dir.parent() wrong when under ~/.tddy/sessions/
     let refine_storage = tddy_core::workflow::session::workflow_engine_storage_dir(session_dir);
     std::fs::create_dir_all(&refine_storage).context("create refine session dir")?;
@@ -2481,9 +2493,8 @@ fn run_plan_refinement(
     if let Some(sid) = session_id_for_refine {
         refine_ctx.insert("session_id".to_string(), serde_json::json!(sid));
     }
-    let plan_gid = recipe.start_goal();
     let mut refine_result = rt
-        .block_on(refine_engine.run_goal(&plan_gid, refine_ctx))
+        .block_on(refine_engine.run_goal(&refine_goal, refine_ctx))
         .map_err(|e| anyhow::anyhow!("refinement: {}", e))?;
     loop {
         match &refine_result.status {
@@ -2976,7 +2987,7 @@ mod start_goal_for_session_continue_contract_tests {
         cs.state.history.clear();
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
         let g = start_goal_for_session_continue(recipe.as_ref(), &cs);
-        assert_eq!(g, GoalId::new("plan"));
+        assert_eq!(g, GoalId::new("interview"));
     }
 
     /// `Planning` immediately before `Failed` (e.g. full workflow restarted plan) must not hide
