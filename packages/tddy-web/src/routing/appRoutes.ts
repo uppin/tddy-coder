@@ -9,6 +9,16 @@ export function terminalPathForSessionId(sessionId: string): string {
   return `${TERMINAL_SESSION_ROUTE_PREFIX}/${encodeURIComponent(sessionId)}`;
 }
 
+/**
+ * Canonical path for terminal deep links. Must stay aligned with {@link terminalPathForSessionId}
+ * when optional presentation query/hash is added (PRD).
+ */
+export function terminalDeepLinkSessionPath(sessionId: string): string {
+  const path = terminalPathForSessionId(sessionId);
+  console.debug("[tddy][appRoutes] terminalDeepLinkSessionPath", { path });
+  return path;
+}
+
 export function parseTerminalSessionIdFromPathname(pathname: string): string | null {
   const prefix = `${TERMINAL_SESSION_ROUTE_PREFIX}/`;
   if (!pathname.startsWith(prefix)) {

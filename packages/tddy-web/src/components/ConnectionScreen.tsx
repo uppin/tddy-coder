@@ -55,6 +55,11 @@ import {
   parseTerminalSessionIdFromPathname,
   terminalPathForSessionId,
 } from "../routing/appRoutes";
+import {
+  applyDedicatedTerminalBackToMini,
+  type TerminalPresentation,
+  nextPresentationFromAttach,
+} from "./connection/terminalPresentation";
 
 /** Full viewport width shell (session tables are not max-width capped). */
 const screenShellClassName =
@@ -379,6 +384,9 @@ function ConnectedTerminal({
   debugLogging,
   onDisconnect,
   onTerminate,
+  terminalLayout = "fullscreen",
+  onExpandTerminal,
+  onBackToMini,
 }: {
   livekitUrl: string;
   roomName: string;
@@ -387,6 +395,11 @@ function ConnectedTerminal({
   debugLogging?: boolean;
   onDisconnect: () => void;
   onTerminate?: () => void | Promise<void>;
+  /** fullscreen = dedicated route; overlay | mini = floating 160px preview (PRD). */
+  terminalLayout?: "fullscreen" | "overlay" | "mini";
+  onExpandTerminal?: () => void;
+  /** Fullscreen only: shrink to mini without disconnecting. */
+  onBackToMini?: () => void;
 }) {
   const tokenClient = useMemo(() => createTokenClient(), []);
   const fullscreenTargetRef = useRef<HTMLDivElement>(null);
@@ -422,6 +435,8 @@ function ConnectedTerminal({
     [tokenClient, roomName, identity]
   );
 
+  const isCompact = terminalLayout === "overlay" || terminalLayout === "mini";
+
   const fullscreenContainerStyle = {
     position: "fixed" as const,
     top: 0,
@@ -434,6 +449,23 @@ function ConnectedTerminal({
     flexDirection: "column" as const,
   };
 
+  const compactContainerStyle = {
+    position: "fixed" as const,
+    zIndex: 50,
+    width: 160,
+    bottom: 16,
+    right: 16,
+    maxHeight: "min(40vh, 360px)",
+    boxShadow: "0 8px 32px rgba(0,0,0,0.45)",
+    borderRadius: 8,
+    overflow: "hidden" as const,
+    display: "flex" as const,
+    flexDirection: "column" as const,
+    backgroundColor: "#0a0a0a",
+  };
+
+  const outerStyle = isCompact ? compactContainerStyle : fullscreenContainerStyle;
+
   if (error) {
     return (
       <div style={{ padding: 24 }}>
@@ -443,7 +475,25 @@ function ConnectedTerminal({
   }
   if (!initialToken || ttlSeconds === null) {
     return (
-      <div ref={fullscreenTargetRef} data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
+      <div
+        ref={fullscreenTargetRef}
+        data-testid="connected-terminal-container"
+        style={outerStyle}
+        className={isCompact ? "relative" : undefined}
+      >
+        {isCompact && onExpandTerminal ? (
+          <div className="flex shrink-0 items-center justify-between gap-1 border-b border-border bg-muted px-2 py-1 text-[10px] text-foreground">
+            <span className="truncate">Preview</span>
+            <button
+              type="button"
+              className="shrink-0 rounded border border-input bg-background px-1.5 py-0.5"
+              data-testid="terminal-reconnect-expand"
+              onClick={onExpandTerminal}
+            >
+              Expand
+            </button>
+          </div>
+        ) : null}
         <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
           <ConnectionTerminalChrome
             overlayStatus="connecting"
@@ -458,22 +508,52 @@ function ConnectedTerminal({
   }
 
   return (
-    <div ref={fullscreenTargetRef} data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
-      <GhosttyTerminalLiveKit
-        url={livekitUrl}
-        token={initialToken}
-        getToken={getToken}
-        ttlSeconds={ttlSeconds}
-        roomName={roomName}
-        serverIdentity={serverIdentity}
-        debugMode={false}
-        debugLogging={debugLogging ?? false}
-        autoFocus={!isMobile}
-        preventFocusOnTap={isMobile && !isKeyboardOpen}
-        showMobileKeyboard={isMobile}
-        connectionOverlay={{ onDisconnect, buildId: BUILD_ID, onTerminate }}
-        fullscreenTargetRef={fullscreenTargetRef}
-      />
+    <div
+      ref={fullscreenTargetRef}
+      data-testid="connected-terminal-container"
+      style={outerStyle}
+      className={isCompact ? "relative" : undefined}
+    >
+      {!isCompact && onBackToMini ? (
+        <button
+          type="button"
+          data-testid="terminal-back-to-mini"
+          className="absolute left-2 top-2 z-[120] rounded border border-input bg-background/90 px-2 py-1 text-xs text-foreground shadow"
+          onClick={onBackToMini}
+        >
+          Back
+        </button>
+      ) : null}
+      {isCompact && onExpandTerminal ? (
+        <div className="flex shrink-0 items-center justify-between gap-1 border-b border-border bg-muted px-2 py-1 text-[10px] text-foreground">
+          <span className="truncate">Terminal</span>
+          <button
+            type="button"
+            className="shrink-0 rounded border border-input bg-background px-1.5 py-0.5"
+            data-testid="terminal-reconnect-expand"
+            onClick={onExpandTerminal}
+          >
+            Expand
+          </button>
+        </div>
+      ) : null}
+      <div style={{ flex: 1, minHeight: 0, position: "relative", minHeight: isCompact ? 120 : undefined }}>
+        <GhosttyTerminalLiveKit
+          url={livekitUrl}
+          token={initialToken}
+          getToken={getToken}
+          ttlSeconds={ttlSeconds}
+          roomName={roomName}
+          serverIdentity={serverIdentity}
+          debugMode={false}
+          debugLogging={debugLogging ?? false}
+          autoFocus={!isMobile && !isCompact}
+          preventFocusOnTap={isMobile && !isKeyboardOpen}
+          showMobileKeyboard={isMobile}
+          connectionOverlay={{ onDisconnect, buildId: BUILD_ID, onTerminate }}
+          fullscreenTargetRef={fullscreenTargetRef}
+        />
+      </div>
     </div>
   );
 }
@@ -516,18 +596,27 @@ export function ConnectionScreen({
   );
   const [sessionsListHydrated, setSessionsListHydrated] = useState(false);
   const [terminalRouteUnknown, setTerminalRouteUnknown] = useState(false);
+  const [terminalPresentation, setTerminalPresentation] = useState<TerminalPresentation>("hidden");
   const terminalDeepLinkSeqRef = useRef(0);
+  const sessionsEverLoadedRef = useRef(false);
   const client = useMemo(() => createConnectionClient(), []);
 
-  const navigatePath = useCallback((path: string, mode: "push" | "replace") => {
-    if (typeof window === "undefined") return;
-    if (mode === "push") {
-      window.history.pushState(null, "", path);
-    } else {
-      window.history.replaceState(null, "", path);
-    }
-    setRoutePath(path);
-  }, []);
+  const navigatePath = useCallback(
+    (path: string, mode: "push" | "replace") => {
+      if (typeof window === "undefined") return;
+      if (mode === "push" && onNavigate) {
+        onNavigate(path);
+      } else {
+        if (mode === "push") {
+          window.history.pushState(null, "", path);
+        } else {
+          window.history.replaceState(null, "", path);
+        }
+      }
+      setRoutePath(path);
+    },
+    [onNavigate],
+  );
 
   useEffect(() => {
     const onPopState = () => {
@@ -536,6 +625,7 @@ export function ConnectionScreen({
       if (isSessionListPath(p)) {
         setConnected(null);
         setTerminalRouteUnknown(false);
+        setTerminalPresentation("hidden");
       }
     };
     window.addEventListener("popstate", onPopState);
@@ -569,11 +659,15 @@ export function ConnectionScreen({
       .listSessions({ sessionToken })
       .then((res) => {
         setSessions(res.sessions);
+        sessionsEverLoadedRef.current = true;
         setSessionsListHydrated(true);
       })
-      .catch(() => {
+      .catch((e) => {
         setSessions([]);
         setSessionsListHydrated(true);
+        if (!sessionsEverLoadedRef.current) {
+          setError(e instanceof Error ? e.message : "Failed to list sessions");
+        }
       });
   }, [client, sessionToken]);
 
@@ -739,6 +833,14 @@ export function ConnectionScreen({
           debugLogging: debugForSessionId(id),
           sessionId: id,
         });
+        const attachNew = nextPresentationFromAttach(terminalPresentation, "new");
+        setTerminalPresentation(attachNew.presentation);
+        if (attachNew.shouldPushTerminalRoute) {
+          const target = terminalPathForSessionId(id);
+          if (typeof window !== "undefined" && window.location.pathname !== target) {
+            navigatePath(target, "push");
+          }
+        }
       } catch {
         try {
           const res = await client.resumeSession({ sessionToken, sessionId: id });
@@ -751,6 +853,8 @@ export function ConnectionScreen({
             debugLogging: debugForSessionId(id),
             sessionId: res.sessionId,
           });
+          const attachRe = nextPresentationFromAttach(terminalPresentation, "reconnect");
+          setTerminalPresentation(attachRe.presentation);
         } catch (e) {
           if (!cancelled && seq === terminalDeepLinkSeqRef.current) {
             setError(e instanceof Error ? e.message : "Failed to open session");
@@ -771,7 +875,25 @@ export function ConnectionScreen({
     terminalRouteUnknown,
     client,
     debugForSessionId,
+    navigatePath,
+    terminalPresentation,
   ]);
+
+  const expandTerminalPresentationToFull = useCallback(() => {
+    if (!connected) return;
+    setTerminalPresentation("full");
+    navigatePath(terminalPathForSessionId(connected.sessionId), "push");
+  }, [connected, navigatePath]);
+
+  const shrinkTerminalPresentationToMini = useCallback(() => {
+    setTerminalPresentation(
+      applyDedicatedTerminalBackToMini({
+        connectSessionCalls: 0,
+        resumeSessionCalls: 0,
+        disconnectCalls: 0,
+      }).presentation,
+    );
+  }, []);
 
   const handleStartSession = async (projectId: string) => {
     const form = projectForms[projectId] ?? defaultProjectSessionForm(tools, agents, daemons);
@@ -794,7 +916,11 @@ export function ConnectionScreen({
         debugLogging: form.debugLogging,
         sessionId: res.sessionId,
       });
-      navigatePath(terminalPathForSessionId(res.sessionId), "push");
+      const attach = nextPresentationFromAttach(terminalPresentation, "new");
+      setTerminalPresentation(attach.presentation);
+      if (attach.shouldPushTerminalRoute) {
+        navigatePath(terminalPathForSessionId(res.sessionId), "push");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start session");
     }
@@ -834,7 +960,11 @@ export function ConnectionScreen({
         debugLogging: debugForSessionId(sessionId),
         sessionId,
       });
-      navigatePath(terminalPathForSessionId(sessionId), "push");
+      const attach = nextPresentationFromAttach(terminalPresentation, "new");
+      setTerminalPresentation(attach.presentation);
+      if (attach.shouldPushTerminalRoute) {
+        navigatePath(terminalPathForSessionId(sessionId), "push");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect to session");
     }
@@ -853,7 +983,11 @@ export function ConnectionScreen({
         debugLogging: debugForSessionId(sessionId),
         sessionId: res.sessionId,
       });
-      navigatePath(terminalPathForSessionId(res.sessionId), "push");
+      const attach = nextPresentationFromAttach(terminalPresentation, "reconnect");
+      setTerminalPresentation(attach.presentation);
+      if (attach.shouldPushTerminalRoute) {
+        navigatePath(terminalPathForSessionId(res.sessionId), "push");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to resume session");
     }
@@ -888,7 +1022,7 @@ export function ConnectionScreen({
     }
   };
 
-  if (connected) {
+  if (connected && terminalPresentation === "full") {
     return (
       <ConnectedTerminal
         livekitUrl={connected.livekitUrl}
@@ -896,9 +1030,12 @@ export function ConnectionScreen({
         identity={connected.identity}
         serverIdentity={connected.serverIdentity}
         debugLogging={connected.debugLogging}
+        terminalLayout="fullscreen"
+        onBackToMini={shrinkTerminalPresentationToMini}
         onDisconnect={() => {
           navigatePath("/", "replace");
           setConnected(null);
+          setTerminalPresentation("hidden");
         }}
         onTerminate={() => void handleSignalSession(connected.sessionId, Signal.SIGTERM)}
       />
@@ -1249,6 +1386,26 @@ export function ConnectionScreen({
           sessionToken={sessionToken}
           client={client}
         />
+      ) : null}
+
+      {connected && (terminalPresentation === "overlay" || terminalPresentation === "mini") ? (
+        <div data-testid="terminal-reconnect-overlay-root">
+          <ConnectedTerminal
+            livekitUrl={connected.livekitUrl}
+            roomName={connected.roomName}
+            identity={connected.identity}
+            serverIdentity={connected.serverIdentity}
+            debugLogging={connected.debugLogging}
+            terminalLayout={terminalPresentation === "overlay" ? "overlay" : "mini"}
+            onExpandTerminal={expandTerminalPresentationToFull}
+            onDisconnect={() => {
+              navigatePath("/", "replace");
+              setConnected(null);
+              setTerminalPresentation("hidden");
+            }}
+            onTerminate={() => void handleSignalSession(connected.sessionId, Signal.SIGTERM)}
+          />
+        </div>
       ) : null}
     </div>
   );
