@@ -72,7 +72,11 @@ impl RunnerHooks for GrillMeWorkflowHooks {
             "grill" => {
                 context.set_sync("system_prompt", prompt::grill_system_prompt());
                 if let Some(answers) = context.get_sync::<String>("answers") {
-                    if !answers.trim().is_empty() {
+                    if answers.trim() == prompt::GRILL_HOST_GATE_ACK {
+                        log::debug!("[grill-me hooks] host gate ack → proceed to create-plan");
+                        context.remove_sync("answers");
+                        context.set_sync("grill_host_proceed", true);
+                    } else if !answers.trim().is_empty() {
                         log::debug!(
                             "[grill-me hooks] transferring answers to prompt (len={})",
                             answers.len()

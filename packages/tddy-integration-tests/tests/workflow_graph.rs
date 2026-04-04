@@ -279,7 +279,7 @@ async fn backend_invoke_task_submit_takes_priority_over_questions() {
     let task = BackendInvokeTask::from_recipe(
         "plan",
         GoalId::new("plan"),
-        common::tdd_recipe().as_ref(),
+        common::tdd_recipe(),
         backend.clone(),
     );
     let ctx = Context::new();

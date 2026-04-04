@@ -1,7 +1,29 @@
 //! System prompts for the **grill-me** workflow: **Grill** (questions) then **Create plan** (brief).
 
+use tddy_core::backend::{ClarificationQuestion, QuestionOption};
+
 /// Basename of the markdown brief under the session artifacts directory (see [`super::GrillMeRecipe`] manifest).
 pub const GRILL_ME_BRIEF_BASENAME: &str = "grill-me-brief.md";
+
+/// Single-select label the host uses to confirm advancing from **Grill** to **Create plan** (must match TUI selection text).
+pub const GRILL_HOST_GATE_ACK: &str = "Continue to create plan";
+
+/// Host confirmation when the grill agent turn finished without relayed `tddy-tools ask` answers on disk.
+#[must_use]
+pub fn grill_host_gate_question() -> ClarificationQuestion {
+    ClarificationQuestion {
+        header: "Grill me".to_string(),
+        question: "The grill phase finished. When you are ready, continue to the plan brief step."
+            .to_string(),
+        options: vec![QuestionOption {
+            label: GRILL_HOST_GATE_ACK.to_string(),
+            description: "Use answers from tddy-tools ask or prior messages in the next step."
+                .to_string(),
+        }],
+        multi_select: false,
+        allow_other: false,
+    }
+}
 
 /// **Grill** phase: clarification only. Prefer **`tddy-tools ask`** so the TUI receives questions via the host socket relay.
 pub fn grill_system_prompt() -> String {
