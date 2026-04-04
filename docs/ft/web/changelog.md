@@ -5,9 +5,10 @@ Release note history for the Web product area.
 ## 2026-04-04 — Terminal font zoom (pitch in / out)
 
 - **tddy-web**: **`terminalZoom`** / **`terminalZoomBridge`** (bounds, bridge + sync events, validated **`CustomEvent`** detail); **`GhosttyTerminal`** applies **`options.fontSize`**, **`FitAddon.fit()`**, **`data-terminal-font-size`**; keyboard (**Ctrl**/**⌘** +/-/0), touch pinch, trackpad pinch, and bridge dispatch (no on-screen zoom toolbar); **`GhosttyTerminalLiveKit`** **`fontSize`** prop as session baseline; optional **`VITE_TERMINAL_ZOOM_DEBUG`**. Bun tests and Cypress **`TerminalZoomAcceptance.cy.tsx`** cover zoom and resize OSC behavior.
-- **Package docs**: [terminal-zoom.md](../../../packages/tddy-web/docs/terminal-zoom.md) (implementation reference).
+- **Package docs**: [terminal-zoom.md](../../../packages/tddy-web/docs/terminal-zoom.md) (implementation reference; includes Cypress guidance on waiting for prop sync before imperative **`setTerminalFontSize`** in component tests).
 - **Feature docs**: [web-terminal.md](web-terminal.md) (Font zoom).
 - **Repo**: **`.tddy-red-test-output.txt`** is gitignored for local red-phase captures.
+- **Dev WIP**: Removed stale pre-release reports from **`docs/dev/1-WIP/terminal-zoom-pitch/`** (superseded by shipped code and package docs).
 
 ## 2026-04-03 — Interrupt: TUI Stop pane; web Stop button removed
 

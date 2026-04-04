@@ -35,6 +35,10 @@ There are no `TouchEvent`s for a built-in trackpad. Browsers map **`pinch-to-zoo
 - **Bun**: `src/lib/terminalZoom.test.ts`, `src/lib/terminalZoomBridge.test.ts`
 - **Cypress (component)**: `cypress/component/TerminalZoomAcceptance.cy.tsx`
 
+### Cypress: imperative font size vs prop sync
+
+Component specs that call the imperative **`setTerminalFontSize`** ref must run **after** the terminal has finished its initial async setup and the effect that syncs **`fontSize` from props** (`applyFontSizePx` when `ready` is true). Calling **`setTerminalFontSize` too early** can be overwritten when that effect runs, which shows up as flaky tests on a fast second mount. **`TerminalZoomAcceptance`** waits for the terminal **textarea**, then yields one macrotask after **double `requestAnimationFrame`** before **`flushSync` + `setTerminalFontSize`**.
+
 ## Assumptions
 
 The bridge uses global **`window`** listeners. The product targets a **single** embedded terminal surface per relevant view; multiple independent terminals on one page would need a scoped channel or React context if that becomes a requirement.
