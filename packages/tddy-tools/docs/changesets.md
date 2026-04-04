@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-tools.
 
+- **2026-04-04** [Feature] **`persist-changeset-workflow`** — Validates **`--data`** against **`changeset-workflow`**; atomic write of **`workflow`** on **`changeset.yaml`**; **`list-schemas`** / **`get-schema changeset-workflow`**. Feature docs: [workflow-json-schemas.md](../../../../docs/ft/coder/workflow-json-schemas.md); [json-schema.md](../json-schema.md). (tddy-tools)
 - **2026-04-04** [Bug Fix] Embeds **`analyze`** schema — **`get-schema`** / **`submit`** for bugfix **`analyze`**; **`goals.json`**-driven build alongside existing workflow schemas. See [docs/ft/coder/workflow-json-schemas.md](../../../../docs/ft/coder/workflow-json-schemas.md). (tddy-tools, tddy-workflow-recipes)
 - **2026-03-28** [Feature] Session context CLI — `set-session-context` merges JSON into `.workflow/<id>.session.json` (`TDDY_SESSION_DIR`, `TDDY_WORKFLOW_SESSION_ID`); aligns with `Context::merge_json_object_sync` for `goal_conditions`. See `docs/ft/coder/workflow-json-schemas.md` and this file’s CLI table. (tddy-tools, tddy-core)
 - **2026-03-28** [Feature] Workflow JSON Schemas — Embeds schemas from `tddy-workflow-recipes/generated/` via `goals.json`-driven build; CLI `list-schemas`, manifest module `schema_manifest`, common-schema load fail-fast with cache, stdin size cap. See `docs/ft/coder/workflow-json-schemas.md` and `packages/tddy-tools/docs/json-schema.md`. (tddy-tools, tddy-workflow-recipes)
