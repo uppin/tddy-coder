@@ -17,6 +17,8 @@ packages/tddy-workflow-recipes/.tdd-small-red-test-output.txt
 .evaluate-submit.json
 .refactor-submit.json
 .update-docs-submit.json
+.tddy-red-submit.json
+.tddy-red-test-output.txt
 
 # Build artifacts
 target/

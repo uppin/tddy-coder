@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-service.
 
+- **2026-04-04** [Feature] ActivityLogged kind **`UserPrompt`** — `convert::activity_kind_to_str` emits **`UserPrompt`** for `ActivityKind::UserPrompt`; `remote.proto` activity `kind` comment lists it. Feature doc [activity-log-streaming.md](../../../docs/ft/coder/activity-log-streaming.md). (tddy-service)
 - **2026-04-03** [Feature] **`intent_to_client_message`**: **`UserIntent::Interrupt`** returns **`None`** (handled only in TUI / not sent over RPC). (tddy-service)
 - **2026-04-03** [Feature] **`ListSessionWorkflowFiles`** / **`ReadSessionWorkflowFile`** — **`connection.proto`**: requests/responses and **`ConnectionService`** RPCs; filesystem policy and **`sessions_base`** resolution live in **tddy-daemon** ([connection-service.md](../../tddy-daemon/docs/connection-service.md)). (tddy-service, tddy-daemon, tddy-web)
 - **2026-03-28** [Feature] DaemonService GetSession validation — **`get_session`** rejects malformed **`session_id`** via **`validate_session_id_segment`** before joining **`sessions_base`** and **`SESSIONS_SUBDIR`**. Integration tests cover invalid ids and **`list_sessions`** visibility under the unified tree. [session-layout.md](../../../docs/ft/coder/session-layout.md). (tddy-service)

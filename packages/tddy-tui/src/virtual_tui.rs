@@ -20,7 +20,8 @@ use tokio::sync::broadcast::error::TryRecvError;
 use tokio::sync::mpsc;
 
 use tddy_core::{
-    AppMode, PresenterEvent, PresenterState, PresenterView, UserIntent, ViewConnection,
+    AgentOutputActivityLogMerge, AppMode, PresenterEvent, PresenterState, PresenterView,
+    UserIntent, ViewConnection,
 };
 
 use crate::capturing_writer::CapturingWriter;
@@ -242,12 +243,18 @@ pub fn run_virtual_tui(
         let mut recv_chunk_count: u64 = 0;
         let mut total_input_bytes: u64 = 0;
         let mut total_keys_parsed: u64 = 0;
+        let mut agent_output_merge = AgentOutputActivityLogMerge::new();
 
         loop {
             let mut updated = false;
 
-            let had_events =
-                drain_presenter_broadcast(&mut event_rx, &mut state, &mut view, &critical_state);
+            let had_events = drain_presenter_broadcast(
+                &mut event_rx,
+                &mut state,
+                &mut view,
+                &critical_state,
+                &mut agent_output_merge,
+            );
             if had_events {
                 log::debug!("VirtualTui: drained PresenterEvents from broadcast");
                 updated = true;
@@ -263,6 +270,7 @@ pub fn run_virtual_tui(
                             &mut state,
                             &mut view,
                             &critical_state,
+                            &mut agent_output_merge,
                         );
                         if had_more {
                             updated = true;
@@ -338,6 +346,7 @@ pub fn run_virtual_tui(
                                 &mut state,
                                 &mut view,
                                 &critical_state,
+                                &mut agent_output_merge,
                             );
                             if had_more {
                                 straggler_updated = true;
@@ -553,6 +562,7 @@ pub fn drain_presenter_broadcast(
     state: &mut PresenterState,
     view: &mut TuiView,
     critical_state: &std::sync::Mutex<tddy_core::CriticalPresenterState>,
+    agent_output_merge: &mut AgentOutputActivityLogMerge,
 ) -> bool {
     let mut any = false;
     loop {
@@ -562,7 +572,7 @@ pub fn drain_presenter_broadcast(
                     "VirtualTui: PresenterEvent {:?}",
                     std::mem::discriminant(&ev)
                 );
-                apply_event(state, view, ev);
+                apply_event(state, view, agent_output_merge, ev);
                 any = true;
             }
             Err(TryRecvError::Lagged(skipped)) => {
@@ -583,7 +593,12 @@ pub fn drain_presenter_broadcast(
     any
 }
 
-pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: PresenterEvent) {
+pub fn apply_event(
+    state: &mut PresenterState,
+    view: &mut TuiView,
+    agent_output_merge: &mut AgentOutputActivityLogMerge,
+    ev: PresenterEvent,
+) {
     use std::time::Instant;
 
     match ev {
@@ -638,6 +653,8 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
             view.on_inbox_changed(&state.inbox);
         }
         PresenterEvent::WorkflowComplete(ref result) => {
+            agent_output_merge.flush_buffer(&mut state.activity_log);
+            view.view_state_mut().scroll_offset = usize::MAX;
             state.mode = match result {
                 Ok(_) => AppMode::FeatureInput,
                 Err(_) => AppMode::ErrorRecovery {
@@ -647,6 +664,8 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
             view.on_workflow_complete(result);
         }
         PresenterEvent::AgentOutput(text) => {
+            agent_output_merge.apply_chunk(&text, &mut state.activity_log);
+            view.view_state_mut().scroll_offset = usize::MAX;
             view.on_agent_output(&text);
         }
         PresenterEvent::IntentReceived(UserIntent::Quit) => {
@@ -1203,8 +1222,15 @@ mod tests {
             active_worktree_display: None,
         };
         let mut view = TuiView::new();
+        let mut agent_output_merge = AgentOutputActivityLogMerge::new();
 
-        drain_presenter_broadcast(&mut rx, &mut state, &mut view, &critical_state);
+        drain_presenter_broadcast(
+            &mut rx,
+            &mut state,
+            &mut view,
+            &critical_state,
+            &mut agent_output_merge,
+        );
 
         assert_eq!(
             state.current_goal.as_deref(),
@@ -1253,9 +1279,16 @@ mod tests {
             active_worktree_display: None,
         };
         let mut view = TuiView::new();
+        let mut agent_output_merge = AgentOutputActivityLogMerge::new();
 
         assert!(
-            drain_presenter_broadcast(&mut rx, &mut state, &mut view, &critical_state),
+            drain_presenter_broadcast(
+                &mut rx,
+                &mut state,
+                &mut view,
+                &critical_state,
+                &mut agent_output_merge,
+            ),
             "expected at least one event after lag"
         );
         assert!(

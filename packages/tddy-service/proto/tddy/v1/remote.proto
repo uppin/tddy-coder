@@ -204,7 +204,7 @@ message QuestionOptionProto {
 
 message ActivityLogged {
   string text = 1;
-  string kind = 2;  // ToolUse, TaskStarted, TaskProgress, StateChange, Info, AgentOutput
+  string kind = 2;  // ToolUse, TaskStarted, TaskProgress, StateChange, Info, UserPrompt, AgentOutput
 }
 
 message GoalStarted {
