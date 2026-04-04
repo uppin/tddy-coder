@@ -9,6 +9,9 @@ import { AccessToken } from "livekit-server-sdk";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** Read by `vite.config.ts` when Cypress spawns the component-testing dev server (script env alone is not always inherited). */
+process.env.CYPRESS_DISABLE_REACT_COMPILER = "1";
+
 const DEV_API_KEY = "devkey";
 const DEV_API_SECRET = "secret";
 const SERVER_IDENTITY = "server";
