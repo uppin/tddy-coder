@@ -21,6 +21,8 @@
 #   LIVEKIT_PUBLIC_URL — Override LiveKit URL (tddy-daemon); e.g. ws://192.168.1.10:7880
 #   LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET — LiveKit overrides (tddy-daemon)
 #   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_REDIRECT_URI — GitHub OAuth (tddy-daemon)
+#   TDDY_TELEGRAM_BOT_TOKEN, TDDY_TELEGRAM_CHAT_IDS, TDDY_TELEGRAM_ENABLED — Telegram (tddy-daemon);
+#                     see docs/ft/daemon/telegram-notifications.md
 #
 # Press Ctrl+C to stop both servers.
 set -euo pipefail

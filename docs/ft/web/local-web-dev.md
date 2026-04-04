@@ -33,7 +33,7 @@ The dev overlay **`HMR: N`** (bottom-left) only increments when the Vite client 
 | `WEB_HOST` | **Bind address** for Vite only (default `127.0.0.1`; `0.0.0.0` = all interfaces). Not the URL you type in the browser. |
 | `VITE_PORT` | Vite port (default `5173`) |
 | `VITE_URL` | **Public app origin** — OAuth, `import.meta.env.VITE_URL`, and what you open in the browser. Default `http://127.0.0.1:<VITE_PORT>`. For LAN: `VITE_URL=http://<your-lan-ip>:5173` (same host/port you use to load the app). `web-dev` sets `WEB_PUBLIC_URL=$VITE_URL` for `tddy-daemon`; do not point `WEB_PUBLIC_URL` at the daemon port (`:8899`) for frontend dev. |
-| LiveKit, GitHub | See `web-dev` script header (`LIVEKIT_*`, `GITHUB_*`) |
+| LiveKit, GitHub, Telegram | See `web-dev` script header (`LIVEKIT_*`, `GITHUB_*`, `TDDY_TELEGRAM_*`); Telegram details in [telegram-notifications.md](../daemon/telegram-notifications.md) |
 
 ## Port cleanup
 

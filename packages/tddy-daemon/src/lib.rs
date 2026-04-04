@@ -14,5 +14,7 @@ pub mod session_workflow_files;
 pub mod spawn_worker;
 pub mod spawner;
 pub mod tddy_user_config;
+pub mod telegram_notifier;
+pub mod telegram_session_subscriber;
 pub mod token_provider;
 pub mod user_sessions_path;

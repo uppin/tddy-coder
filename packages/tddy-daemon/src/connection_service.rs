@@ -31,6 +31,7 @@ use crate::session_list_enrichment;
 use crate::session_reader;
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
+use crate::telegram_session_subscriber::TelegramDaemonHooks;
 use crate::user_sessions_path::{
     project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
 };
@@ -76,6 +77,7 @@ pub struct ConnectionServiceImpl {
     user_resolver: SessionUserResolver,
     spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
+    telegram: Option<Arc<TelegramDaemonHooks>>,
 }
 
 impl ConnectionServiceImpl {
@@ -85,6 +87,7 @@ impl ConnectionServiceImpl {
         user_resolver: SessionUserResolver,
         spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
         eligible_daemon_source: Option<Arc<dyn EligibleDaemonSource>>,
+        telegram: Option<Arc<TelegramDaemonHooks>>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
         let eligible_daemon_source = eligible_daemon_source
@@ -95,6 +98,13 @@ impl ConnectionServiceImpl {
             user_resolver,
             spawn_client,
             eligible_daemon_source,
+            telegram,
+        }
+    }
+
+    fn maybe_spawn_telegram_observer(&self, session_id: &str, grpc_port: u16) {
+        if let Some(ref tg) = self.telegram {
+            tg.spawn_presenter_observer_task(session_id, grpc_port);
         }
     }
 
@@ -444,6 +454,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             "StartSession: spawn_blocking returned, session_id={}",
             result.session_id
         );
+        self.maybe_spawn_telegram_observer(&result.session_id, result.grpc_port);
         Ok(Response::new(StartSessionResponse {
             session_id: result.session_id,
             livekit_room: result.livekit_room,
@@ -576,6 +587,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             }
         })
         .await?;
+        self.maybe_spawn_telegram_observer(&result.session_id, result.grpc_port);
         Ok(Response::new(ResumeSessionResponse {
             session_id: result.session_id,
             livekit_room: result.livekit_room,
@@ -825,7 +837,14 @@ mod signal_session_unit_tests {
                 None
             }
         });
-        ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None)
+        ConnectionServiceImpl::new(
+            config,
+            sessions_base_resolver,
+            user_resolver,
+            None,
+            None,
+            None,
+        )
     }
 
     fn write_unit_session(session_dir: &std::path::Path, pid: u32) {
@@ -932,7 +951,14 @@ mod delete_session_unit_tests {
                 None
             }
         });
-        ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None)
+        ConnectionServiceImpl::new(
+            config,
+            sessions_base_resolver,
+            user_resolver,
+            None,
+            None,
+            None,
+        )
     }
 
     /// Unit: delete_session rejects an invalid session token before touching the filesystem.

@@ -17,3 +17,11 @@ fn cli_recipe_tdd_defaults_match_legacy() {
     assert_eq!(r.name(), "tdd");
     assert_eq!(r.start_goal().as_str(), "plan");
 }
+
+/// `--recipe grill-me` resolves to GrillMeRecipe (`grill-me` name, `grill` start goal).
+#[test]
+fn cli_recipe_grill_me_selects_grill_me_recipe() {
+    let r = WorkflowRecipeResolver::from_cli_name("grill-me").expect("resolve grill-me recipe");
+    assert_eq!(r.name(), "grill-me");
+    assert_eq!(r.start_goal().as_str(), "grill");
+}

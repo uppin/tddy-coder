@@ -34,6 +34,29 @@ pub async fn serve_web_bundle(
     rpc_router: Option<Router>,
     client_config: Option<ClientConfig>,
 ) -> anyhow::Result<()> {
+    serve_web_bundle_with_shutdown(
+        host,
+        port,
+        bundle_path,
+        rpc_router,
+        client_config,
+        std::future::pending(),
+    )
+    .await
+}
+
+/// Same as [`serve_web_bundle`], but stops the HTTP server when `shutdown` completes (graceful shutdown).
+pub async fn serve_web_bundle_with_shutdown<F>(
+    host: impl AsRef<str>,
+    port: u16,
+    bundle_path: PathBuf,
+    rpc_router: Option<Router>,
+    client_config: Option<ClientConfig>,
+    shutdown: F,
+) -> anyhow::Result<()>
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
     let host = host.as_ref();
     let index_path = bundle_path.join("index.html");
     let service = ServeDir::new(&bundle_path)
@@ -64,6 +87,7 @@ pub async fn serve_web_bundle(
         port
     );
     axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
         .await
         .map_err(|e| anyhow::anyhow!("web server error: {}", e))?;
     Ok(())

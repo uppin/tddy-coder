@@ -43,7 +43,14 @@ fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
             None
         }
     });
-    ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None)
+    ConnectionServiceImpl::new(
+        config,
+        sessions_base_resolver,
+        user_resolver,
+        None,
+        None,
+        None,
+    )
 }
 
 fn write_session_yaml(session_dir: &std::path::Path, session_id: &str, pid: u32) {

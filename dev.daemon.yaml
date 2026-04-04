@@ -36,6 +36,12 @@ users:
 # When true (default), pass --mouse to spawned tddy-* (browser / touch terminals).
 spawn_mouse: true
 
+telegram:
+  enabled: false
+  bot_token: "<token>"
+  chat_ids:
+    - -5239346661
+
 # Backends shown in tddy-web (ConnectionScreen); ids are passed to StartSession / `tddy-coder --agent`.
 allowed_agents:
   - id: claude
