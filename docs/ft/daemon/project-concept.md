@@ -15,6 +15,8 @@ A **Project** is a named configuration linking a **git URL** to a **main reposit
 | `name` | User-chosen name; also used as the directory name under the repos base |
 | `git_url` | Remote URL (e.g. `https://github.com/org/repo.git`) |
 | `main_repo_path` | Absolute path to the cloned repository |
+| `main_branch_ref` | Optional. Remote-tracking ref used as the integration base for worktree fetch and checkout (e.g. `origin/main`, `origin/master`). Omitted rows use **`origin/master`** as the documented default at resolution time. |
+| `host_repo_paths` | Per-host (or per-daemon-instance) checkout paths keyed by host key; see multi-host daemon docs. |
 
 ## Storage
 
@@ -47,5 +49,6 @@ repos_base_path: "repos"
 
 ## Related
 
+- [Git integration base ref (worktrees)](../coder/git-integration-base-ref.md) — validation, default ref, project registry fields.
 - [PRD: tddy-daemon (WIP)](1-WIP/PRD-2026-03-19-tddy-daemon.md) — multi-user daemon (tooling, auth, spawn); connection UX is project-based as documented here.
 - [Web terminal](../web/web-terminal.md) — Connection screen UI.

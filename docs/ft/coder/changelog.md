@@ -2,6 +2,13 @@
 
 Release note history for the Coder product area.
 
+## 2026-04-04 — Git integration base ref for worktrees
+
+- **tddy-core**: **`validate_integration_base_ref`**, **`fetch_integration_base`**, **`setup_worktree_for_session_with_integration_base`**, **`resolve_default_integration_base_ref`**, **`DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF`** (`origin/master` for legacy rows); **`setup_worktree_for_session`** resolves default remote refs (`origin/master` → `origin/main` → **`origin/HEAD`**) after **`git fetch origin`**, then delegates to **`setup_worktree_for_session_with_integration_base`**; **`fetch_origin_master`** delegates to **`fetch_integration_base`** with the documented default.
+- **tddy-daemon**: **`ProjectData.main_branch_ref`** (optional); **`effective_integration_base_ref_for_project`**; **`add_project`** validates **`main_branch_ref`** before persistence.
+- **Tests**: **`tddy-core`** worktree integration tests; **`tddy-daemon`** project storage acceptance tests; **`tddy-integration-tests`** **`worktree_uses_configured_project_base_ref`**.
+- **Docs**: [git-integration-base-ref.md](git-integration-base-ref.md); **tddy-core** / **tddy-daemon** package **`changesets.md`**; [project concept](../daemon/project-concept.md) data model.
+
 ## 2026-04-03 — TUI Stop pane (interrupt beside Enter)
 
 - **tddy-tui**: **`right_chrome_reserve_cols`** reserves **four** or **eight** columns for Enter-only vs Enter+Stop; **`stop_button_rect`** / **`paint_stop_affordance`** (red **U+25A0**); left-click → **`UserIntent::Interrupt`** → **`ctrl_c_interrupt_session`** (not sent to presenter). **`VirtualTui`** and local **`event_loop`** handle **`Interrupt`** like **Ctrl+C**.
