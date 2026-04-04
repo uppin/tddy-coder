@@ -827,7 +827,7 @@ fn cli_bugfix_plain_keeps_explicit_session_dir_when_fix_plan_missing() {
 }
 
 /// Resume merges `sessions/<id>/coder-config.yaml`. A stale `goal: plan` from a TDD-style config
-/// must not prevent `--recipe bugfix` from running the full workflow (start goal `reproduce`).
+/// must not prevent `--recipe bugfix` from running the full workflow (start goal `analyze`).
 #[test]
 #[cfg(unix)]
 fn cli_bugfix_resume_clears_stale_session_config_goal_plan() {

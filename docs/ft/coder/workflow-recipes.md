@@ -37,10 +37,10 @@ Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**
 
 ## BugfixRecipe
 
-- **Start goal:** **`reproduce`**
-- **Pipeline:** reproduce → green (focused bugfix graph); human approval gates the session document before implementation work that matches **green** / fix semantics.
-- **Primary session document:** fix-plan style content (e.g. **`fix-plan.md`**); **`BugfixRecipe::uses_primary_session_document`** is **`true`** so preview / approve / reject / refine flows apply before **green**.
-- **Product alignment:** The workflow follows the same discipline as **reproduce-then-fix** and **focused test repair** workflows (deterministic reproduction, small verification loops).
+- **Start goal:** **`analyze`**
+- **Pipeline:** **`analyze` → `reproduce` → `end`**. The **`analyze`** goal uses structured **`tddy-tools submit`** output (JSON Schema goal **`analyze`**) to record **`branch_suggestion`**, **`worktree_suggestion`**, optional **`name`**, and optional **`summary`** on **`changeset.yaml`** (with **`summary`** also available for the **`reproduce`** prompt via **`changeset.artifacts["analyze_summary"]`**). The **`reproduce`** goal does not require **`tddy-tools submit`** by default (**`goal_requires_tddy_tools_submit`** is **`false`** for **`reproduce`**).
+- **Primary session document:** The manifest registers **`fix_plan` → `fix-plan.md`** for tooling and prompts; **`BugfixRecipe::uses_primary_session_document`** is **`false`**, so the hook-driven PRD-style primary-document approval gate does not run for this recipe.
+- **Product alignment:** The workflow combines triage and branch/worktree naming (**`analyze`**) with **reproduce-then-fix** discipline (**`reproduce`**) and focused test repair (small verification loops).
 
 ## FreePromptingRecipe
 
@@ -71,7 +71,7 @@ Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**
 | **`WorkflowRecipe`** | Trait: graph, hooks, state machine helpers, permissions, artifacts, backend hints (`GoalHints` / `PermissionHint`). |
 | **`TddRecipe`** | Full TDD workflow graph, `TddWorkflowHooks`, parsers, plan task wiring. |
 | **`TddSmallRecipe`** | Shortened TDD graph (`plan` → merged **`red`** → **`green`** → **`post-green-review`** → **`refactor`** → **`update-docs`**), `TddSmallWorkflowHooks`, merged red and post-green prompts. |
-| **`BugfixRecipe`** | Bugfix workflow graph, hooks, and artifact manifest for reproduce / fix-plan / green. |
+| **`BugfixRecipe`** | Bugfix workflow graph (**`analyze` → `reproduce` → `end`**) hooks, and artifact manifest for **`analyze`**, **`reproduce`**, and fix-plan. |
 | **`FreePromptingRecipe`** | Minimal graph and hooks for the **Prompting** loop without TDD gates. |
 | **`GrillMeRecipe`** | Two goals (**`grill`** → **`create-plan`**); session **`artifacts/grill-me-brief.md`**; repo copy per **AGENTS.md** / **`plans/`** default. |
 | **`approval_policy`** | Supported CLI name list and skip rules aligned with **`recipe_resolve`** and acceptance tests. |
@@ -96,11 +96,11 @@ JSON Schemas for workflow goals (`plan`, `red`, `green`, etc.) live in **`tddy-w
 
 ## Session artifacts and primary planning documents
 
-**Goal IDs** (e.g. `"plan"`, `"reproduce"`, `"prompting"`, `"grill"`, `"create-plan"`) stay stable as wire/API identifiers. (**`grill-me`** is the **recipe** CLI name, not a goal id.) **Filenames and on-disk layout** for the primary planning document and related artifacts are defined by each recipe’s manifest (**`SessionArtifactManifest`**, `default_artifacts` / `known_artifacts`), not by fixed defaults inside **`tddy-core`**.
+**Goal IDs** (e.g. `"plan"`, `"analyze"`, `"reproduce"`, `"prompting"`, `"grill"`, `"create-plan"`) stay stable as wire/API identifiers. (**`grill-me`** is the **recipe** CLI name, not a goal id.) **Filenames and on-disk layout** for the primary planning document and related artifacts are defined by each recipe’s manifest (**`SessionArtifactManifest`**, `default_artifacts` / `known_artifacts`), not by fixed defaults inside **`tddy-core`**.
 
 - **`tddy-core`** exposes **`WorkflowRecipe::uses_primary_session_document`** and **`read_primary_session_document_utf8`** for approval gates, plain CLI, and daemon flows.
 - **`tddy-workflow`** provides **`artifact_paths`** helpers (`session_dir/artifacts/`, legacy `sessions/<uuid>/` layouts, resolution order).
-- **TDD** uses **`prd` → `PRD.md`** in its manifest; **Bugfix** uses **`fix_plan` / `fix-plan.md`** for the primary session document; **Free prompting** does not define a primary planning basename for that approval path; **Grill me** registers **`grill_brief` → `grill-me-brief.md`** without using it for the primary-document approval gate in v1; long-lived copy in the repo follows **AGENTS.md** (**`plans/`** or a **`docs/ft/`**-specified path).
+- **TDD** uses **`prd` → `PRD.md`** in its manifest; **Bugfix** registers **`fix_plan` / `fix-plan.md`** with **`uses_primary_session_document`** **`false`** (no automatic document-approval gate on that path); **Free prompting** does not define a primary planning basename for that approval path; **Grill me** registers **`grill_brief` → `grill-me-brief.md`** without using it for the primary-document approval gate in v1; long-lived copy in the repo follows **AGENTS.md** (**`plans/`** or a **`docs/ft/`**-specified path).
 
 Custom recipes **declare** artifact keys in manifest; there is no silent core fallback string for the primary planning basename.
 
@@ -122,10 +122,11 @@ This section records how the shipped recipes map to the same product philosophy 
 
 ### Bugfix (`bugfix`)
 
-- **Start goal:** **`reproduce`** — confirm or create a failing test / deterministic reproduction before changing production code.
-- **Artifacts:** Primary session document is a **fix plan** (e.g. **`fix-plan.md`** under the session artifact layout), not only PRD semantics.
-- **Spirit:** Maps to the ideas behind **`.cursor/commands/reproduce.md`** (reproduction discipline) and **`.cursor/commands/fix-tests.md`** (focused diagnosis and fix, small verification loops).
-- **Gate:** After reproduce, the user **previews** the session document and **approves or rejects** before **green** / fix implementation runs (same approval machinery as plan review where applicable).
+- **Start goal:** **`analyze`** — derive branch name, worktree directory name, optional changeset title, and optional short triage summary from the bug report (structured **`tddy-tools submit`** for **`analyze`**).
+- **Pipeline:** **`analyze` → `reproduce` → `end`**. **`reproduce`** confirms or creates a failing test / deterministic reproduction before deeper fix work.
+- **Artifacts:** **fix-plan** content (e.g. **`fix-plan.md`** under the session artifact layout) and **`changeset.yaml`** fields populated from **`analyze`** submit.
+- **Spirit:** Combines naming discipline with **`.cursor/commands/reproduce.md`** (reproduction discipline) and **`.cursor/commands/fix-tests.md`** (focused diagnosis and fix, small verification loops).
+- **Session document approval:** **`uses_primary_session_document`** is **`false`** for **bugfix**, so the automatic PRD-style document-approval step does not run; **`fix-plan.md`** remains a manifest artifact for context and tooling.
 
 ### Free prompting (`free-prompting`)
 

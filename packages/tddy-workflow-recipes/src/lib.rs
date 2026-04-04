@@ -17,15 +17,16 @@ pub use bugfix::BugfixRecipe;
 pub use free_prompting::FreePromptingRecipe;
 pub use grill_me::GrillMeRecipe;
 pub use parser::{
-    parse_acceptance_tests_response, parse_demo_response, parse_evaluate_response,
-    parse_green_response, parse_planning_response, parse_planning_response_with_base,
-    parse_red_response, parse_refactor_response, parse_update_docs_response,
-    parse_validate_subagents_response, validate_red_marker_source_paths, AcceptanceTestInfo,
-    AcceptanceTestsOutput, DemoOutput, DemoPlan, DemoResults, DemoStep, EvaluateAffectedTest,
-    EvaluateBuildResult, EvaluateChangedFile, EvaluateChangesetSync, EvaluateFileAnalyzed,
-    EvaluateIssue, EvaluateOutput, EvaluateTestImpact, GreenOutput, GreenTestResult,
-    ImplementationInfo, MarkerInfo, MarkerResult, PlanningOutput, RedOutput, RedTestInfo,
-    RefactorOutput, SkeletonInfo, UpdateDocsOutput, ValidateSubagentsOutput,
+    parse_acceptance_tests_response, parse_analyze_response, parse_demo_response,
+    parse_evaluate_response, parse_green_response, parse_planning_response,
+    parse_planning_response_with_base, parse_red_response, parse_refactor_response,
+    parse_update_docs_response, parse_validate_subagents_response,
+    validate_red_marker_source_paths, AcceptanceTestInfo, AcceptanceTestsOutput, AnalyzeOutput,
+    DemoOutput, DemoPlan, DemoResults, DemoStep, EvaluateAffectedTest, EvaluateBuildResult,
+    EvaluateChangedFile, EvaluateChangesetSync, EvaluateFileAnalyzed, EvaluateIssue,
+    EvaluateOutput, EvaluateTestImpact, GreenOutput, GreenTestResult, ImplementationInfo,
+    MarkerInfo, MarkerResult, PlanningOutput, RedOutput, RedTestInfo, RefactorOutput, SkeletonInfo,
+    UpdateDocsOutput, ValidateSubagentsOutput,
 };
 pub use permissions::{
     acceptance_tests_allowlist, demo_allowlist, evaluate_allowlist, green_allowlist,

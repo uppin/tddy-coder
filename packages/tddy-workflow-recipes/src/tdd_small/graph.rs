@@ -25,31 +25,31 @@ pub fn build_tdd_small_workflow_graph(
     let red = Arc::new(BackendInvokeTask::from_recipe(
         "red",
         GoalId::new("red"),
-        recipe.as_ref(),
+        recipe.clone(),
         backend.clone(),
     ));
     let green = Arc::new(BackendInvokeTask::from_recipe(
         "green",
         GoalId::new("green"),
-        recipe.as_ref(),
+        recipe.clone(),
         backend.clone(),
     ));
     let post_green = Arc::new(BackendInvokeTask::from_recipe(
         "post-green-review",
         GoalId::new("post-green-review"),
-        recipe.as_ref(),
+        recipe.clone(),
         backend.clone(),
     ));
     let refactor = Arc::new(BackendInvokeTask::from_recipe(
         "refactor",
         GoalId::new("refactor"),
-        recipe.as_ref(),
+        recipe.clone(),
         backend.clone(),
     ));
     let update_docs = Arc::new(BackendInvokeTask::from_recipe(
         "update-docs",
         GoalId::new("update-docs"),
-        recipe.as_ref(),
+        recipe.clone(),
         backend.clone(),
     ));
     let end = Arc::new(EndTask::new("end"));
