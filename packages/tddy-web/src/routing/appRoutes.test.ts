@@ -4,6 +4,7 @@ import {
   isAuthCallbackPath,
   isSessionListPath,
   parseTerminalSessionIdFromPathname,
+  terminalDeepLinkSessionPath,
   terminalPathForSessionId,
 } from "./appRoutes";
 
@@ -22,5 +23,10 @@ describe("appRoutes helpers (canonical path rules)", () => {
 
   it("auth_callback_route_unchanged_and_still_handles_oauth", () => {
     expect(isAuthCallbackPath("/auth/callback")).toBe(true);
+  });
+
+  it("acceptance: terminalDeepLinkSessionPath stays aligned with terminalPathForSessionId (encoded ids)", () => {
+    const id = "sess/with space";
+    expect(terminalDeepLinkSessionPath(id)).toBe(terminalPathForSessionId(id));
   });
 });

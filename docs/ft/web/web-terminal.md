@@ -65,8 +65,19 @@ When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated us
 ### URL routes (daemon mode)
 
 - **Session list**: `/` — project tables, **Other sessions**, create project, presence panel when configured.
-- **Terminal**: `/terminal/{sessionId}` — one URL-encoded path segment after the fixed prefix `/terminal`. After **Start New Session**, **Connect**, or **Resume**, the app **pushes** this path so **Back** returns to the list. **Disconnect** replaces the URL with `/`. A full page load on `/terminal/{id}` loads the SPA (same **`index.html`** as `/`; the static server uses SPA fallback for unknown paths) and **`ConnectionScreen`** attaches the session via **`connectSession`** then **`resumeSession`** if needed. If the id is not in **`ListSessions`**, a **session not found** banner appears with **Back to sessions** (returns to `/`).
-- **OAuth**: `/auth/callback` is unchanged; **`App`** still renders **`AuthCallback`** for that path.
+- **Terminal**: `/terminal/{sessionId}` — one URL-encoded path segment after the fixed prefix `/terminal`. **`terminalPathForSessionId`** and **`terminalDeepLinkSessionPath`** build the same encoded path for navigation and deep links.
+
+**Attach behavior and presentation**
+
+- **Start New Session** and **Connect** use a **new** attach: the app selects **`full`** terminal presentation and **pushes** `/terminal/{id}` onto the history stack when a push applies (redundant pushes are skipped when presentation is already **`full`** for the same logical session).
+- **Resume** uses a **reconnect** attach: the app selects **`overlay`** presentation — a floating **160px**-wide live preview (default **bottom-right**) — and does **not** push `/terminal/{id}` automatically. The session list stays visible. **Expand** on the preview switches to **`full`** presentation and **pushes** the terminal route. **Back** on the dedicated fullscreen terminal switches to **`mini`** presentation (same strip width) without tearing down LiveKit or issuing another **connectSession** / **resumeSession**.
+
+**Deep link** (`/terminal/{id}` on full page load): **`ConnectionScreen`** attaches with **`connectSession`**, then **`resumeSession`** if connect fails. A successful **connectSession** follows **new** attach rules; a successful **resumeSession** follows **reconnect** attach rules.
+
+- **Disconnect** replaces the URL with `/` and clears presentation state. **popstate** to `/` clears the connected session and resets presentation to **`hidden`**. A full page load on `/terminal/{id}` loads the SPA (same **`index.html`** as `/`; the static server uses SPA fallback for unknown paths). If the id is not in **`ListSessions`**, a **session not found** banner appears with **Back to sessions** (returns to `/`).
+- **OAuth**: `/auth/callback` is unchanged; **`App`** renders **`AuthCallback`** for that path.
+
+Implementation reference: **`terminalPresentation`** helpers ([terminal-presentation.md](../../../packages/tddy-web/docs/terminal-presentation.md)), **`ConnectionScreen`**, **`appRoutes.ts`**.
 
 **Standalone** (`daemon_mode: false`): connection uses **query parameters** (`url`, `identity`, `roomName`, optional `debug`). A **`/terminal/...`** path is not part of the standalone flow; the client **replaces** the URL with **`/`** on load if such a path is present so the address bar matches the documented standalone model.
 
@@ -121,7 +132,7 @@ See [daemon project concept](../daemon/project-concept.md).
 
 ### Shared LiveKit room (`livekit.common_room`)
 
-When the daemon sets **`livekit.common_room`** in YAML, that name is exposed to the web client as **`common_room`** in **`GET /api/config`** (with **`livekit_url`**). After GitHub sign-in, the browser joins that room with identity **`web-{githubLogin}`** and shows a **Connected participants** table on the session list screen (identity, role, joined time, metadata), updated live via LiveKit participant events. The fullscreen terminal opened by **Connect / Resume** is unchanged; the presence connection remains active in the background while the terminal is open.
+When the daemon sets **`livekit.common_room`** in YAML, that name is exposed to the web client as **`common_room`** in **`GET /api/config`** (with **`livekit_url`**). After GitHub sign-in, the browser joins that room with identity **`web-{githubLogin}`** and shows a **Connected participants** table on the session list screen (identity, role, joined time, metadata), updated live via LiveKit participant events. The **Connect** path opens a fullscreen terminal; **Resume** opens a floating preview first, then fullscreen after **Expand** — the presence connection stays active in the background while any terminal presentation is open.
 
 If **`common_room`** is unset or blank, that panel is not shown and no extra LiveKit connection is made for presence.
 
@@ -129,7 +140,7 @@ Spawned **`tddy-*`** sessions use the same configured room for **`--livekit-room
 
 ### Fullscreen terminal session chrome
 
-The fullscreen **GhosttyTerminalLiveKit** view opened from **Connect / Resume** uses the **connection chrome** described under [Connection chrome (LiveKit overlay)](#connection-chrome-livekit-overlay). **Terminate** in the dot menu, after confirmation, calls **`SignalSession`** with SIGTERM when the UI holds an active **session id** (same semantics as **Terminate (SIGTERM)** in the per-session **Signal** dropdown).
+The fullscreen **GhosttyTerminalLiveKit** view opened after **Connect** or after **Expand** from a **Resume** overlay uses the **connection chrome** described under [Connection chrome (LiveKit overlay)](#connection-chrome-livekit-overlay). **Terminate** in the dot menu, after confirmation, calls **`SignalSession`** with SIGTERM when the UI holds an active **session id** (same semantics as **Terminate (SIGTERM)** in the per-session **Signal** dropdown).
 
 ### Eligible daemons and host selection
 

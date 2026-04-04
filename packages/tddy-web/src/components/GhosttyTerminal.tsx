@@ -25,9 +25,19 @@ import {
   parseTerminalZoomBridgeDetail,
   TERMINAL_ZOOM_BRIDGE_EVENT,
 } from "../lib/terminalZoomBridge";
+import { TERMINAL_OVERLAY_FIXED_GRID_CHAR_WIDTH_EM } from "./connection/config";
 
 /** Finger separation change (px) required before applying one font step during touch pinch. */
 const PINCH_FONT_STEP_SPAN_PX = 22;
+
+/** Canvas/CSS width of the rendered grid (not the full-width xterm root). Used for X-axis font fit. */
+function measureTerminalCanvasCssWidth(term: Terminal): number {
+  const root = term.element;
+  if (!root) return 0;
+  const canvas = root.querySelector("canvas");
+  if (!canvas) return 0;
+  return canvas.getBoundingClientRect().width;
+}
 
 /** Limit Ctrl/Cmd +/-/0 so we do not steal shortcuts from other page inputs (e.g. browser address bar). */
 function shouldHandleTerminalZoomKeys(): boolean {
@@ -65,6 +75,14 @@ export interface GhosttyTerminalProps {
    * Single-finger touch still forwards SGR mouse when the TUI has mouse tracking enabled.
    */
   pinchZoomFont?: boolean;
+  /**
+   * Minimum CSS height for the terminal container. Default 200 (full-page embed). Use `0` for small fixed panes (e.g. floating overlay) so content is not clipped.
+   */
+  containerMinHeightPx?: number;
+  /**
+   * Keep an exact col×row grid; font size follows container size (resize the pane to scale). Disables FitAddon fitting and user font zoom shortcuts.
+   */
+  fixedViewportGrid?: { cols: number; rows: number };
 }
 
 export interface BufferLineInfo {
@@ -105,6 +123,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       preventFocusOnTap = false,
       sessionActive = true,
       pinchZoomFont = true,
+      containerMinHeightPx,
+      fixedViewportGrid,
     },
     ref
   ) {
@@ -141,19 +161,24 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
         if (term) {
           term.options.fontSize = clamped;
-          fit?.fit();
+          if (fixedViewportGrid) {
+            term.resize(fixedViewportGrid.cols, fixedViewportGrid.rows);
+          } else {
+            fit?.fit();
+          }
           if (zoomVerbose) {
-            console.debug("[tddy][GhosttyTerminal] after fitAddon.fit", {
+            console.debug("[tddy][GhosttyTerminal] after font/geometry", {
               cols: term.cols,
               rows: term.rows,
               fontSize: term.options.fontSize,
+              fixedGrid: !!fixedViewportGrid,
             });
           }
         }
         setDisplayFontSize(clamped);
         dispatchTerminalFontSizeSync(clamped);
       },
-      [minFontSize, maxFontSize, zoomVerbose]
+      [minFontSize, maxFontSize, zoomVerbose, fixedViewportGrid]
     );
 
     useEffect(() => {
@@ -205,8 +230,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const fitAddon = new FitAddon();
         term.loadAddon(fitAddon);
         fitAddonRef.current = fitAddon;
-        fitAddon.fit();
-        fitAddon.observeResize();
+        if (fixedViewportGrid) {
+          term.resize(fixedViewportGrid.cols, fixedViewportGrid.rows);
+        } else {
+          fitAddon.fit();
+          fitAddon.observeResize();
+        }
 
         log("lifecycle: term opened, calling onReady");
         setReady(true);
@@ -239,11 +268,53 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     }, [initialContent, ready]);
 
     useEffect(() => {
-      if (!ready || !termRef.current) return;
+      if (!ready || !termRef.current || fixedViewportGrid) return;
       applyFontSizePx(fontSize, { min: minFontSize, max: maxFontSize });
-    }, [ready, fontSize, minFontSize, maxFontSize, applyFontSizePx]);
+    }, [ready, fontSize, minFontSize, maxFontSize, applyFontSizePx, fixedViewportGrid]);
 
     useEffect(() => {
+      if (!ready || !fixedViewportGrid || !containerRef.current || !termRef.current) return;
+      const term = termRef.current;
+      const el = containerRef.current;
+      const { cols: gc, rows: gr } = fixedViewportGrid;
+
+      const sync = () => {
+        const w = el.clientWidth;
+        const h = el.clientHeight;
+        if (w < 4 || h < 4) return;
+
+        /**
+         * `term.element` is typically width:100% of the pane, so its offsetWidth does not change with
+         * fontSize — binary search on that always picked maxFontSize and ignored resize. Size from pane
+         * width (X) and refine against the canvas grid width.
+         */
+        const em = TERMINAL_OVERLAY_FIXED_GRID_CHAR_WIDTH_EM;
+        let chosen = clampTerminalFontSize(w / (gc * em), minFontSize, maxFontSize);
+        term.options.fontSize = chosen;
+        term.resize(gc, gr);
+
+        for (let i = 0; i < 8; i++) {
+          void term.element?.offsetWidth;
+          const innerW = measureTerminalCanvasCssWidth(term);
+          if (innerW <= 0) break;
+          if (Math.abs(innerW - w) <= 1.5) break;
+          chosen = clampTerminalFontSize(chosen * (w / innerW), minFontSize, maxFontSize);
+          term.options.fontSize = chosen;
+          term.resize(gc, gr);
+        }
+
+        setDisplayFontSize(chosen);
+        dispatchTerminalFontSizeSync(chosen);
+      };
+
+      const ro = new ResizeObserver(() => sync());
+      ro.observe(el);
+      sync();
+      return () => ro.disconnect();
+    }, [ready, fixedViewportGrid?.cols, fixedViewportGrid?.rows, minFontSize, maxFontSize]);
+
+    useEffect(() => {
+      if (fixedViewportGrid) return;
       const onBridge = (ev: Event) => {
         const ce = ev as CustomEvent<unknown>;
         const parsed = parseTerminalZoomBridgeDetail(ce.detail);
@@ -283,10 +354,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       window.addEventListener(TERMINAL_ZOOM_BRIDGE_EVENT, onBridge as EventListener);
       return () =>
         window.removeEventListener(TERMINAL_ZOOM_BRIDGE_EVENT, onBridge as EventListener);
-    }, [minFontSize, maxFontSize, applyFontSizePx, zoomVerbose]);
+    }, [minFontSize, maxFontSize, applyFontSizePx, zoomVerbose, fixedViewportGrid]);
 
     useEffect(() => {
-      if (!sessionActive) return;
+      if (!sessionActive || fixedViewportGrid) return;
       const onKeyDown = (e: KeyboardEvent) => {
         if (!e.ctrlKey && !e.metaKey) return;
         if (!shouldHandleTerminalZoomKeys()) return;
@@ -326,11 +397,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       };
       document.addEventListener("keydown", onKeyDown);
       return () => document.removeEventListener("keydown", onKeyDown);
-    }, [sessionActive, minFontSize, maxFontSize, fontSize]);
+    }, [sessionActive, minFontSize, maxFontSize, fontSize, fixedViewportGrid]);
 
     // Two-finger pinch → font pitch in/out (mobile); uses finger span like browser zoom.
     useEffect(() => {
-      if (!pinchZoomFont || !sessionActive) return;
+      if (!pinchZoomFont || !sessionActive || fixedViewportGrid) return;
       const container = containerRef.current;
       // `ready` is set only after `termRef` is assigned; do not require `termRef` here so
       // listeners attach in the same commit (avoids races with tests / strict mode).
@@ -419,6 +490,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       ready,
       pinchZoomFont,
       sessionActive,
+      fixedViewportGrid,
       minFontSize,
       maxFontSize,
       applyFontSizePx,
@@ -665,7 +737,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         style={{
           width: "100%",
           height: "100%",
-          minHeight: 200,
+          minWidth: fixedViewportGrid ? 0 : undefined,
+          minHeight: containerMinHeightPx !== undefined ? containerMinHeightPx : 200,
+          overflow: fixedViewportGrid ? "hidden" : undefined,
           ...(sessionActive
             ? {}
             : { opacity: 0.55, pointerEvents: "none" as const }),

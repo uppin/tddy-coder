@@ -251,7 +251,7 @@ describe("App routing (daemon mode, acceptance)", () => {
     interceptDaemonModeConfig();
   });
 
-  it("terminal_route_after_connect_contains_session_id", () => {
+  it("connect keeps home URL and shows overlay; Expand pushes dedicated terminal route", () => {
     window.localStorage.setItem("tddy_session_token", "fake-token");
     interceptDaemonAppRpcs([ACTIVE_SESSION]);
     interceptConnectSessionSuccess();
@@ -264,6 +264,9 @@ describe("App routing (daemon mode, acceptance)", () => {
     cy.wait("@getAuthStatus");
     cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 8000 }).click();
     cy.wait("@connectSession");
+    cy.window().its("location.pathname").should("eq", "/");
+    cy.get("[data-testid='terminal-reconnect-overlay-root']", { timeout: 15000 }).should("be.visible");
+    cy.get("[data-testid='terminal-reconnect-expand']", { timeout: 15000 }).should("be.visible").click();
     cy.window()
       .its("location.pathname")
       .should("contain", `${TERMINAL_SESSION_ROUTE_PREFIX}/${ACTIVE_SESSION.sessionId}`);
@@ -282,6 +285,8 @@ describe("App routing (daemon mode, acceptance)", () => {
     cy.wait("@getAuthStatus");
     cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 8000 }).click();
     cy.wait("@connectSession");
+    cy.get("[data-testid='terminal-reconnect-overlay-root']", { timeout: 8000 }).should("be.visible");
+    cy.get("[data-testid='terminal-reconnect-expand']", { timeout: 8000 }).should("be.visible").click();
     cy.get("[data-testid='connected-terminal-container']", { timeout: 8000 }).should("exist");
     cy.window().then((win) => {
       win.history.back();

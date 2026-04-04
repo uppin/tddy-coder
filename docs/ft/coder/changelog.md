@@ -2,6 +2,9 @@
 
 Release note history for the Coder product area.
 
+## 2026-04-05 — Documentation wrap (grill-me PRD retired)
+
+- **Docs**: WIP PRD for **grill-me** removed from **`docs/ft/coder/1-WIP/`**; product behavior remains in [workflow-recipes.md](workflow-recipes.md). Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**.
 ## 2026-04-04 — Activity log: user prompt lines and TUI presentation
 
 - **Core**: **`ActivityKind::UserPrompt`** marks submitted feature text and queued inbox lines in **`activity_log`** / **`ActivityLogged`**. **`format_user_prompt_line`** returns plain text (no `User: ` prefix); **`format_queued_prompt_line`** keeps the **`Queued: `** prefix. **`tddy-service`** maps the kind to the **`UserPrompt`** string for RPC consumers.
