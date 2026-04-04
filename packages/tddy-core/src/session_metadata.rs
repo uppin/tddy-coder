@@ -23,6 +23,9 @@ pub struct SessionMetadata {
     pub tool: Option<String>,
     #[serde(default)]
     pub livekit_room: Option<String>,
+    /// When true, the workflow is waiting on the user (plan/doc approval, clarifications, etc.).
+    #[serde(default)]
+    pub pending_elicitation: bool,
 }
 
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
@@ -67,6 +70,7 @@ pub fn write_initial_tool_session_metadata(
         pid: opts.pid,
         tool: opts.tool,
         livekit_room: opts.livekit_room,
+        pending_elicitation: false,
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -126,6 +130,7 @@ mod tests {
         assert_eq!(read.pid, Some(4242));
         assert_eq!(read.tool.as_deref(), Some("tddy-coder"));
         assert!(read.livekit_room.is_none());
+        assert!(!read.pending_elicitation);
 
         let _ = fs::remove_dir_all(&tmp);
     }

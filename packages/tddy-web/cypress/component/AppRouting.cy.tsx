@@ -54,6 +54,7 @@ type MockSessionRow = {
   pid: number;
   isActive: boolean;
   projectId: string;
+  pendingElicitation?: boolean;
 };
 
 function mockAuthAuthenticated() {
@@ -91,7 +92,12 @@ function mockListSessionsResponse(sessions: MockSessionRow[]) {
   return toBinary(
     ListSessionsResponseSchema,
     create(ListSessionsResponseSchema, {
-      sessions: sessions.map((s) => create(SessionEntrySchema, s)),
+      sessions: sessions.map((s) =>
+        create(SessionEntrySchema, {
+          ...s,
+          pendingElicitation: s.pendingElicitation ?? false,
+        }),
+      ),
     }),
   );
 }

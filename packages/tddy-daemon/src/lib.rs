@@ -4,6 +4,7 @@ pub mod agent_list_mapping;
 pub mod auth;
 pub mod config;
 pub mod connection_service;
+pub mod elicitation;
 pub mod multi_host;
 pub mod project_storage;
 pub mod server;
