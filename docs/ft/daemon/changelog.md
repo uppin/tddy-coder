@@ -1,5 +1,9 @@
 # Daemon product area changelog
 
+## 2026-04-05 — Documentation wrap (telegram presenter PRD retired)
+
+- **Docs**: WIP PRD for Telegram **PresenterObserver** stream removed from **`docs/ft/daemon/1-WIP/`**; product and integration remain in [telegram-notifications.md](telegram-notifications.md). **`docs/dev/1-WIP/daemon-telegram-validate/`** report bundle removed. Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-04-04 — Projects: `main_branch_ref` (git integration base)
 
 - **Registry**: Optional **`main_branch_ref`** on project rows; **`effective_integration_base_ref_for_project`**; **`add_project`** rejects invalid refs before **`projects.yaml`** writes (**`tddy_core::validate_integration_base_ref`**).

@@ -2,6 +2,10 @@
 
 Release note history for the Web product area.
 
+## 2026-04-05 — Documentation wrap (worktrees PRD retired)
+
+- **Docs**: WIP PRD for worktrees ConnectionService + web removed from **`docs/ft/web/1-WIP/`**; behavior remains in [worktrees.md](worktrees.md) and [web-terminal.md](web-terminal.md). Session validation report copies under **`plans/`** for terminal reconnect removed. Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-04-04 — Terminal reconnect overlay (presentation + routing)
 
 - **tddy-web**: **`terminalPresentation`** pure helpers (**`nextPresentationFromAttach`**, **`applyOverlayPreviewClickToFull`**, **`applyDedicatedTerminalBackToMini`**, **`reconcileReconnectOverlayInstances`**, **`defaultTerminalMiniOverlayPlacement`**). **`ConnectionScreen`** branches **new** vs **reconnect** attach: **Start** / **Connect** → **`full`** + route push when applicable; **Resume** → **`overlay`** (floating **160px** preview, **`terminal-reconnect-overlay-root`**) without automatic route push; **Expand** → **`full`** + push; **Back** → **`mini`**. **`ConnectedTerminal`** supports **`fullscreen`** | **`overlay`** | **`mini`** layouts. **`terminalDeepLinkSessionPath`** aligns with **`terminalPathForSessionId`**. **`navigatePath`** uses the shell **`onNavigate`** callback for **push** so **`App`** `path` stays aligned. First failed **`ListSessions`** surfaces **`setError`**. Bun tests (**`terminalPresentation.test.ts`**, **`appRoutes.test.ts`**, **`ConnectionScreen.test.tsx`**); Cypress **`ConnectionScreen.cy.tsx`** (resume omits **`history.pushState`**; connect performs push).

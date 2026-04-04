@@ -2,6 +2,10 @@
 
 Release note history for the Coder product area.
 
+## 2026-04-05 — Documentation wrap (grill-me PRD retired)
+
+- **Docs**: WIP PRD for **grill-me** removed from **`docs/ft/coder/1-WIP/`**; product behavior remains in [workflow-recipes.md](workflow-recipes.md). Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-04-04 — Git integration base ref for worktrees
 
 - **tddy-core**: **`validate_integration_base_ref`**, **`fetch_integration_base`**, **`setup_worktree_for_session_with_integration_base`**, **`resolve_default_integration_base_ref`**, **`DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF`** (`origin/master` for legacy rows); **`setup_worktree_for_session`** resolves default remote refs (`origin/master` → `origin/main` → **`origin/HEAD`**) after **`git fetch origin`**, then delegates to **`setup_worktree_for_session_with_integration_base`**; **`fetch_origin_master`** delegates to **`fetch_integration_base`** with the documented default.
