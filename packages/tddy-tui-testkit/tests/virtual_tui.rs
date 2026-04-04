@@ -191,7 +191,8 @@ async fn free_prompting_stub_responds_to_first_prompt() {
     let (_handle, factory, shutdown) =
         spawn_stub_presenter_with_recipe(None, Arc::new(FreePromptingRecipe));
     let session = start_virtual_tui_session(&*factory, false).expect("session");
-    let tk = TuiTestkit::new(session, 120, 30);
+    // Match VirtualTui default viewport (80×24); parser cols/rows must match emitted frames.
+    let tk = TuiTestkit::new(session, 80, 24);
 
     tk.wait_for_text("feature description", Duration::from_secs(5))
         .await
@@ -217,7 +218,7 @@ async fn free_prompting_second_prompt_produces_new_response() {
     let (_handle, factory, shutdown) =
         spawn_stub_presenter_with_recipe(None, Arc::new(FreePromptingRecipe));
     let session = start_virtual_tui_session(&*factory, false).expect("session");
-    let tk = TuiTestkit::new(session, 120, 30);
+    let tk = TuiTestkit::new(session, 80, 24);
 
     tk.wait_for_text("feature description", Duration::from_secs(5))
         .await
@@ -271,7 +272,7 @@ async fn bugfix_demo_asks_two_questions_after_first_prompt() {
     let (_handle, factory, shutdown) =
         spawn_stub_presenter_with_recipe(None, Arc::new(BugfixRecipe));
     let session = start_virtual_tui_session(&*factory, false).expect("session");
-    let tk = TuiTestkit::new(session, 120, 30);
+    let tk = TuiTestkit::new(session, 80, 24);
 
     tk.wait_for_text("feature description", Duration::from_secs(5))
         .await

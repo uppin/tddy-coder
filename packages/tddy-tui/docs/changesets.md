@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-tui.
 
+- **2026-04-04** [Feature] Activity log user prompt panel — `ActivityKind::UserPrompt` entries render as a three-row inset block (margins on all sides), first row empty, rows two–three for wrapped text with ellipsis overflow; fill `Rgb(85,85,85)`, text `Rgb(255,255,255)` bold. Feature doc `docs/ft/coder/activity-log-streaming.md`. (tddy-tui)
 - **2026-04-03** [Bug Fix] **`ctrl_c_interrupt_session`** — only **`kill_child_process`**; does **not** set workflow **`shutdown`** (Stop / TUI Ctrl+C / ETX no longer end the full TUI/presenter loop). **`process_virtual_tui_input_chunk`** drops unused **`shutdown`** parameter. Contract tests in **`ctrl_interrupt`**. (tddy-tui)
 - **2026-04-03** [Feature] TUI Stop pane — `right_chrome_reserve_cols`, **`stop_pane`** in **`LayoutAreas`**, **`stop_button_rect`**, **`paint_stop_affordance`** (red ■); **`handle_mouse_event`** → **`UserIntent::Interrupt`**; **`event_loop`** / **`virtual_tui`** call **`ctrl_c_interrupt_session`**; narrow width omits Stop. **`TDDY_E2E_NO_ENTER_AFFORDANCE`** hides Enter and Stop. Feature docs **`docs/ft/coder/tui-status-bar.md`**, **`docs/ft/web/web-terminal.md`**. (tddy-tui)
 - **2026-03-29** [Feature] Feature prompt skill tokens — `FeatureInputBuffer` stores compact `/skill-name` in the TUI; `SubmitFeatureInput` expands via `compose_prompt_skill_reference`. Atomic Backspace and Left/Right across tokens. `ViewState.feature_edit` replaces flat `feature_input` string. Skill token drawn with dark-navy background in `render`. (tddy-tui)

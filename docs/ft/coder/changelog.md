@@ -5,6 +5,31 @@ Release note history for the Coder product area.
 ## 2026-04-05 — Documentation wrap (grill-me PRD retired)
 
 - **Docs**: WIP PRD for **grill-me** removed from **`docs/ft/coder/1-WIP/`**; product behavior remains in [workflow-recipes.md](workflow-recipes.md). Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**.
+## 2026-04-04 — Activity log: user prompt lines and TUI presentation
+
+- **Core**: **`ActivityKind::UserPrompt`** marks submitted feature text and queued inbox lines in **`activity_log`** / **`ActivityLogged`**. **`format_user_prompt_line`** returns plain text (no `User: ` prefix); **`format_queued_prompt_line`** keeps the **`Queued: `** prefix. **`tddy-service`** maps the kind to the **`UserPrompt`** string for RPC consumers.
+- **TUI**: User prompt entries render as a three-row inset block (margins on all sides): first row empty, text on rows two and three with hard wrap and ellipsis when needed; panel **`Rgb(85, 85, 85)`**, text **`Rgb(255, 255, 255)`** bold.
+- **Tests**: **`presenter_integration`** expects exact submitted text; **`tddy-tui`** unit tests for user-prompt row layout helpers.
+- **Docs**: [Activity log streaming](activity-log-streaming.md); **`packages/tddy-core/docs/architecture.md`**; **`packages/tddy-tui/docs/architecture.md`**.
+
+## 2026-03-29 — Activity log: user prompts and incremental agent streaming
+
+- **Core**: **`presenter::activity_prompt_log`** (**`User: `** / **`Queued: `** prefixes) wires **`SubmitFeatureInput`** and **`QueuePrompt`** into **`activity_log`** and **`ActivityLogged`**. **`presenter::agent_activity`** holds incremental tail helpers and channel policy constants. **`Presenter::poll_workflow`** on **`WorkflowEvent::AgentOutput`** maintains a growing partial **`AgentOutput`** row in **`activity_log`**, finalizes completed lines at newline boundaries, and broadcasts each chunk via **`PresenterEvent::AgentOutput`** without duplicating routine streaming text on **`ActivityLogged`**.
+- **Tests**: Presenter unit tests in **`tddy-core`**; **`presenter_integration`** acceptance tests for user and queued prompt lines.
+- **Docs**: [Activity log streaming](activity-log-streaming.md), [overview](1-OVERVIEW.md), **`packages/tddy-core/docs/architecture.md`**.
+
+## 2026-04-04 — Bugfix recipe: `analyze` start goal and structured submit
+
+- **Recipes**: **`BugfixRecipe`** graph is **`analyze` → `reproduce` → `end`**; **start goal** **`analyze`**; **`analyze`** uses **`tddy-tools submit`** with JSON Schema **`analyze`** (`branch_suggestion`, **`worktree_suggestion`**, optional **`name`**, optional **`summary`**); **`summary`** is available to **`reproduce`** via **`changeset.artifacts["analyze_summary"]`**; **`reproduce`** has **`goal_requires_tddy_tools_submit`** **`false`**; **`uses_primary_session_document`** is **`false`** (manifest still lists **`fix-plan.md`**).
+- **Registry**: **`goals.json`** includes **`analyze`**; **`tddy-tools`** embeds the schema.
+- **Docs**: [workflow-recipes.md](workflow-recipes.md) (BugfixRecipe and developer reference); [workflow-json-schemas.md](workflow-json-schemas.md) (registry summary lists **`analyze`**).
+
+## 2026-04-04 — TDD-small workflow recipe and `post-green-review` schema
+
+- **Recipes**: **`TddSmallRecipe`** (**`tdd-small`**) — graph **`plan` → `red` → `green` → `post-green-review` → `refactor` → `update-docs` → `end`**; merged red prompt path; single **`post-green-review`** structured submit for evaluate/validate-style fields; **`TddSmallWorkflowHooks`** with shared helpers alongside classic TDD hooks.
+- **Registry**: **`goals.json`** includes **`post-green-review`** with **`generated/tdd/post-green-review.schema.json`** and **`proto/post_green_review.proto`**; **`tddy-tools`** **`get-schema post-green-review`**, **`list-schemas`**, and validated **`submit`** use the same registry.
+- **CLI**: **`--recipe tdd-small`**; **`--goal`** accepts **`post-green-review`** where the active recipe defines it.
+- **Docs**: [workflow-recipes.md](workflow-recipes.md), [workflow-json-schemas.md](workflow-json-schemas.md); **`packages/tddy-workflow-recipes/docs/changesets.md`**.
 
 ## 2026-04-04 — Git integration base ref for worktrees
 
@@ -36,6 +61,7 @@ Release note history for the Coder product area.
 - **CLI / TUI / web**: **`--recipe free-prompting`**; **`workflow_recipe_selection_question`** includes **Free prompting**; **`recipe_cli_name_from_selection_label`** maps the label to **`free-prompting`**.
 - **Tests**: **`workflow_recipe_acceptance`**, **`recipe_policy_red`**, **`presenter_integration`** acceptance cases for TDD document approval, bugfix **`reproduce`**, and free-prompting without **DocumentReview**; **`grpc_terminal_rpc`** UTF-8-safe assertion previews.
 - **Docs**: [workflow-recipes.md](workflow-recipes.md).
+
 ## 2026-04-03 — TUI bottom chrome: user prompt strip, footer row, Enter affordance
 
 - **Layout**: **`layout_chunks_with_inbox`** allocates a **footer** row below the prompt block, a **separator row** below the status bar, and **`LayoutAreas`** includes **`footer_bar`** and **`enter_pane`**.

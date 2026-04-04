@@ -1,20 +1,20 @@
 # Workflow JSON Schemas (structured agent output)
 
 **Product area:** Coder  
-**Updated:** 2026-03-28
+**Updated:** 2026-04-04
 
 ## Summary
 
-Structured outputs for workflow goals (plan, red, green, acceptance-tests, evaluate-changes, validate, refactor, update-docs, demo) are defined as **JSON Schema** artifacts owned by **`tddy-workflow-recipes`**. The **`tddy-tools`** binary embeds those schemas, validates `submit` payloads, exposes **`get-schema <goal>`**, and lists registered goals via **`list-schemas`**. A single **`goals.json`** registry lists each CLI goal name, schema filename, and Protocol Buffer filename so registry drift is testable.
+Structured outputs for workflow goals (including **`analyze`** for the bugfix recipe, plus plan, red, green, acceptance-tests, **post-green-review**, evaluate-changes, validate, refactor, update-docs, demo) are defined as **JSON Schema** artifacts under **`generated/{recipe}/`** in **`tddy-workflow-recipes`**, registered in **`goals.json`**. The **`tddy-tools`** binary embeds those schemas, validates `submit` payloads, exposes **`get-schema <goal>`**, and lists registered goals via **`list-schemas`**. Each registry entry lists the CLI goal name, schema filename, and Protocol Buffer filename so registry drift is testable.
 
 ## Source layout
 
 | Location | Role |
 |----------|------|
 | `packages/tddy-workflow-recipes/goals.json` | Registry: `name`, `schema`, `proto` per workflow goal |
-| `packages/tddy-workflow-recipes/schemas/` | Authoritative JSON Schema files (including `common/`) |
+| `packages/tddy-workflow-recipes/generated/{recipe}/` | JSON Schema files per goal (e.g. `generated/tdd/post-green-review.schema.json`) plus `common/` refs |
 | `packages/tddy-workflow-recipes/proto/` | Protocol Buffer messages documenting the same contracts at the IDL layer |
-| `packages/tddy-workflow-recipes/generated/` | Build output: copied schemas, `schema-manifest.json`, generated Rust snippets for proto basenames |
+| `packages/tddy-workflow-recipes/generated/` | `schema-manifest.json`, `proto_basenames.rs`, and embedded schema tree consumed by **`tddy-tools`** |
 
 ## tddy-tools behavior
 

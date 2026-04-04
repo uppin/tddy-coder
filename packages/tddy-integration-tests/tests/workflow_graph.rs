@@ -28,7 +28,7 @@ use tddy_workflow_recipes::{
     parse_red_response, parse_update_docs_response, PlanTask, PlanningOutput,
 };
 
-use common::stub_invoke_request;
+use common::{bugfix_recipe, bugfix_stub_invoke_request, stub_invoke_request};
 
 /// Graph topology: build_tdd_workflow_graph creates correct edges.
 #[tokio::test]
@@ -217,6 +217,34 @@ async fn stub_backend_green_returns_valid_response() {
         .expect("stub stores green via tool executor");
     let parsed = parse_green_response(&output).expect("should parse");
     assert!(!parsed.summary.is_empty());
+}
+
+/// Acceptance: bugfix `analyze` goal uses StubBackend structured submit with branch/worktree fields.
+#[tokio::test]
+async fn stub_or_mock_backend_analyze_submit_valid() {
+    let recipe = bugfix_recipe();
+    assert!(
+        recipe.goal_hints(&GoalId::new("analyze")).is_some(),
+        "BugfixRecipe must define goal_hints for analyze"
+    );
+    let backend = StubBackend::new();
+    let req = bugfix_stub_invoke_request("SKIP_QUESTIONS bug report", "analyze");
+    let _resp = backend.invoke(req).await.unwrap();
+    let ch = backend.submit_channel().expect("StubBackend has channel");
+    let output = ch
+        .take_for_goal("analyze")
+        .expect("stub must submit analyze JSON via tool executor");
+    let v: serde_json::Value = serde_json::from_str(&output).expect("valid JSON");
+    let branch = v
+        .get("branch_suggestion")
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    let wt = v
+        .get("worktree_suggestion")
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    assert!(!branch.is_empty(), "branch_suggestion must be non-empty");
+    assert!(!wt.is_empty(), "worktree_suggestion must be non-empty");
 }
 
 /// CLARIFY with "Here are the user's answers" in prompt skips clarification (returns normal response).

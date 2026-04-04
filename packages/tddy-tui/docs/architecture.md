@@ -8,6 +8,10 @@
 
 `layout::layout_chunks_with_inbox` splits the terminal into **eight** vertical regions: activity, spacer, dynamic (inbox / questions / slash menu), status, **one empty row** (separator between status and the block below), optional debug log, prompt, and **footer** (single row). `mouse_map::LayoutAreas` carries `activity_log`, `dynamic_area`, `status_bar`, `prompt_bar`, `footer_bar`, and `enter_pane`. In `AppMode::Running` with non-empty `running_input`, `render::paint_user_prompt_activity_strip` paints the last activity line as a white-on-dark-grey `> …` strip. `mouse_map::enter_button_rect` and `render::paint_enter_affordance` use the same three-column-wide rectangle to the right of the prompt text (margin `ENTER_STRIP_MARGIN_COLS`): it starts on the **first row below the status bar** (empty row plus any debug rows above the prompt chunk), spans prompt **text** lines and the footer, and excludes the bottom prompt rule row when the prompt chunk is multi-line. Light box-drawing characters and **U+23CE** on the first prompt text row; when `TDDY_E2E_NO_ENTER_AFFORDANCE` is set, overlay paint is skipped.
 
+## Activity log (user prompts)
+
+For **`ActivityKind::UserPrompt`** entries, `render::draw` builds a fixed **three-row** block in the activity pane: **row one** is an empty padded line inside the styled panel; **rows two and three** carry hard-wrapped text (with an ellipsis on the third row when content exceeds two text rows). The block is inset with **one blank line** above and below and **one column** of margin on the left and right. Panel background **`Rgb(85, 85, 85)`**; text **`Rgb(255, 255, 255)`** with **bold**. Other activity kinds render as plain `Paragraph` lines without this treatment.
+
 ## Status bar
 
 The status bar is a single `Paragraph` line. Text is built by `render::status_bar_text_for_draw`, which:
@@ -50,4 +54,5 @@ The status bar is a single `Paragraph` line. Text is built by `render::status_ba
 ## Further reading
 
 - [Feature: TUI status bar](../../../../docs/ft/coder/tui-status-bar.md)
+- [Feature: Activity log streaming](../../../../docs/ft/coder/activity-log-streaming.md)
 - [Changesets](./changesets.md)

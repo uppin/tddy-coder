@@ -12,6 +12,8 @@ pub enum ActivityKind {
     TaskProgress,
     StateChange,
     Info,
+    /// User-submitted feature text or queued inbox prompt (activity log styling).
+    UserPrompt,
     AgentOutput,
 }
 

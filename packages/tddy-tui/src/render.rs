@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use tddy_core::{ActivityEntry, AppMode, PresenterState};
+use tddy_core::{ActivityKind, AppMode, PresenterState};
 
 use crate::feature_input_buffer::FeaturePromptSegment;
 use crate::layout::{
@@ -164,6 +164,96 @@ fn prompt_text(state: &PresenterState, view_state: &ViewState) -> String {
 /// Dark navy fill behind `/skill-name` tokens in the feature prompt; label text is white.
 fn feature_skill_token_style() -> Style {
     Style::default().bg(Color::Rgb(18, 36, 68)).fg(Color::White)
+}
+
+/// Activity pane style for user-submitted / queued prompt lines ([`ActivityKind::UserPrompt`]).
+fn activity_log_user_prompt_line_style() -> Style {
+    Style::default()
+        .bg(Color::Rgb(85, 85, 85))
+        .fg(Color::Rgb(255, 255, 255))
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Fixed height (terminal rows) for each [`ActivityKind::UserPrompt`] text block in the activity log.
+const USER_PROMPT_ACTIVITY_ROWS: usize = 3;
+/// Horizontal margin (columns) on **each** side of the styled block (left and right).
+const USER_PROMPT_MARGIN_H: u16 = 1;
+/// Blank lines above and below the styled block (top and bottom margin).
+const USER_PROMPT_MARGIN_V: usize = 1;
+
+/// Hard-wrap `text` to at most `line_width` characters per line; `\n` starts a new line.
+fn hard_wrap_activity_lines(text: &str, line_width: usize) -> Vec<String> {
+    if line_width == 0 {
+        return vec![];
+    }
+    let mut lines = Vec::new();
+    for part in text.split('\n') {
+        if part.is_empty() {
+            lines.push(String::new());
+            continue;
+        }
+        let mut remaining = part;
+        while !remaining.is_empty() {
+            let mut end_byte = 0;
+            for (n, (i, ch)) in remaining.char_indices().enumerate() {
+                if n >= line_width {
+                    break;
+                }
+                end_byte = i + ch.len_utf8();
+            }
+            lines.push(remaining[..end_byte].to_string());
+            remaining = &remaining[end_byte..];
+        }
+    }
+    if lines.is_empty() && text.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+fn ellipsis_tail_to_width(s: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let n = s.chars().count();
+    if n <= max_chars {
+        return s.to_string();
+    }
+    let take = max_chars.saturating_sub(1);
+    format!("{}…", s.chars().take(take).collect::<String>())
+}
+
+fn pad_row_to_char_width(s: &str, width: usize) -> String {
+    let n = s.chars().count();
+    if n >= width {
+        return s.to_string();
+    }
+    let mut out = s.to_string();
+    out.extend(std::iter::repeat_n(' ', width - n));
+    out
+}
+
+/// Three rows: **row 1 empty**, row 2–3 hold wrapped text (second line uses ellipsis if more remains).
+fn user_prompt_activity_row_strings(
+    text: &str,
+    content_width: usize,
+) -> [String; USER_PROMPT_ACTIVITY_ROWS] {
+    let wrapped = hard_wrap_activity_lines(text, content_width);
+    let row_top = String::new();
+
+    match wrapped.len() {
+        0 => [row_top, String::new(), String::new()],
+        1 => [row_top, wrapped[0].clone(), String::new()],
+        2 => [row_top, wrapped[0].clone(), wrapped[1].clone()],
+        _ => {
+            let tail = wrapped[1..].concat();
+            [
+                row_top,
+                wrapped[0].clone(),
+                ellipsis_tail_to_width(&tail, content_width),
+            ]
+        }
+    }
 }
 
 /// Character-wrap prompt spans while preserving per-character styles (matches `prompt_height`).
@@ -863,13 +953,54 @@ pub fn draw(
                 }
             }
             _ => {
-                let content = state
-                    .activity_log
-                    .iter()
-                    .map(|e: &ActivityEntry| e.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let line_count = state.activity_log.len();
+                let mut display_lines: Vec<Line> = Vec::new();
+                let pane_w = activity_log.width;
+                for e in &state.activity_log {
+                    if e.kind == ActivityKind::UserPrompt {
+                        if pane_w == 0 {
+                            continue;
+                        }
+                        let style = activity_log_user_prompt_line_style();
+                        let margin_h = USER_PROMPT_MARGIN_H.min(pane_w / 2);
+                        let content_w = pane_w.saturating_sub(margin_h.saturating_mul(2)) as usize;
+
+                        for _ in 0..USER_PROMPT_MARGIN_V {
+                            display_lines.push(Line::default());
+                        }
+
+                        if content_w == 0 {
+                            for _ in 0..USER_PROMPT_ACTIVITY_ROWS {
+                                display_lines.push(Line::default());
+                            }
+                        } else {
+                            let rows = user_prompt_activity_row_strings(&e.text, content_w);
+                            let pad_side = " ".repeat(margin_h as usize);
+                            for row in rows {
+                                let padded = pad_row_to_char_width(&row, content_w);
+                                display_lines.push(Line::from(vec![
+                                    Span::raw(pad_side.clone()),
+                                    Span::styled(padded, style),
+                                    Span::raw(pad_side.clone()),
+                                ]));
+                            }
+                        }
+
+                        for _ in 0..USER_PROMPT_MARGIN_V {
+                            display_lines.push(Line::default());
+                        }
+                    } else {
+                        let style = Style::default();
+                        if e.text.is_empty() {
+                            display_lines.push(Line::from(Span::styled("", style)));
+                        } else {
+                            for sub in e.text.split('\n') {
+                                display_lines
+                                    .push(Line::from(Span::styled(sub.to_string(), style)));
+                            }
+                        }
+                    }
+                }
+                let line_count = display_lines.len();
                 let area_height = activity_log.height as usize;
                 let scroll_y = if line_count > area_height {
                     let max_scroll = line_count.saturating_sub(area_height);
@@ -877,7 +1008,7 @@ pub fn draw(
                 } else {
                     0
                 };
-                let widget = Paragraph::new(content).scroll((scroll_y, 0));
+                let widget = Paragraph::new(Text::from(display_lines)).scroll((scroll_y, 0));
                 frame.render_widget(widget, activity_log);
                 if matches!(state.mode, AppMode::Running) && !view_state.running_input.is_empty() {
                     paint_user_prompt_activity_strip(
@@ -1393,6 +1524,23 @@ mod tests {
             .collect::<String>()
             .trim_end()
             .to_string()
+    }
+
+    #[test]
+    fn user_prompt_activity_row_strings_keeps_first_row_empty() {
+        let r = user_prompt_activity_row_strings("hello", 80);
+        assert_eq!(r[0], "");
+        assert_eq!(r[1], "hello");
+        assert_eq!(r[2], "");
+    }
+
+    #[test]
+    fn user_prompt_activity_row_strings_ellipsis_on_overflow() {
+        let s: String = std::iter::repeat_n('a', 50).collect();
+        let r = user_prompt_activity_row_strings(&s, 10);
+        assert_eq!(r[0], "");
+        assert_eq!(r[1].chars().count(), 10);
+        assert!(r[2].ends_with('…'), "got {:?}", r[2]);
     }
 
     /// Acceptance (PRD): Virtual TUI uses the same `draw()` path as the local TUI; autonomous
