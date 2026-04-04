@@ -68,6 +68,7 @@ Spawn and **git clone** requests run through a forked single-threaded worker (`s
 
 ## See also
 
+- **Worktrees**: **`ListWorktreesForProject`** (cached rows; **`refresh`** runs **`WorktreeStatsCache::refresh_stats_for_project`** in a blocking worker), **`RemoveWorktree`** ( **`remove_worktree_under_repo`**, then **`invalidate_project`**). Project checkout: **`main_repo_path_for_host`** with the local **`daemon_instance_id`**. Details: [worktrees.md](./worktrees.md), [docs/ft/web/worktrees.md](../../../../docs/ft/web/worktrees.md).
 - Feature: [Session directory layout](../../../../docs/ft/coder/session-layout.md)
 - Feature: [docs/ft/daemon/project-concept.md](../../../../docs/ft/daemon/project-concept.md)
 - [changesets.md](./changesets.md)

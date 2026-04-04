@@ -40,6 +40,7 @@ import { sortSessionsForDisplay } from "../utils/sessionSort";
 import { SessionWorkflowStatusCells } from "./SessionWorkflowStatusCells";
 import { SessionMoreActionsMenu } from "./session/SessionMoreActionsMenu";
 import { SessionWorkflowFilesModal } from "./session/SessionWorkflowFilesModal";
+import { DaemonNavMenu } from "./shell/DaemonNavMenu";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -475,9 +476,12 @@ function ConnectedTerminal({
 export function ConnectionScreen({
   livekitUrl,
   commonRoom,
+  onNavigate,
 }: {
   livekitUrl?: string;
   commonRoom?: string;
+  /** Client-side navigation (daemon shell: Sessions ↔ Worktrees). */
+  onNavigate?: (path: string) => void;
 } = {}) {
   const { user, isAuthenticated, isLoading, login, logout, sessionToken } = useAuth();
   const [tools, setTools] = useState<ToolInfo[]>([]);
@@ -789,9 +793,14 @@ export function ConnectionScreen({
 
   return (
     <div className={screenShellClassName}>
-      <h1>tddy-web</h1>
-      {user && <UserAvatar user={user} onLogout={logout} />}
-      <h2 style={{ marginTop: 24, fontSize: 18 }}>Start or connect to a session</h2>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          {onNavigate ? <DaemonNavMenu onNavigate={onNavigate} /> : null}
+          <h1 className="text-2xl font-semibold">tddy-web</h1>
+        </div>
+        {user ? <UserAvatar user={user} onLogout={logout} /> : null}
+      </div>
+      <h2 className="mt-6 text-lg font-medium">Start or connect to a session</h2>
 
       {presenceReady && (
         <div
