@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Start Storybook for tddy-web (default port 6006, listen on all interfaces — 0.0.0.0).
+# Uses the nix dev shell so bun/node match AGENTS.md.
+#
+# Usage: ./storybook
+#        ./storybook -- --debug   # extra args after -- are passed to storybook dev (if supported)
+set -euo pipefail
+cd "$(dirname "$0")"
+exec ./dev bun run --filter tddy-web storybook "$@"

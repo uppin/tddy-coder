@@ -1,8 +1,6 @@
-import { useEffect, useState } from "react";
-
 /**
  * Logical session table columns (left → right). Single source of truth for header `data-testid`
- * suffixes and responsive visibility policy (GREEN phase).
+ * suffixes and responsive visibility policy.
  */
 export type SessionTableColumnKey =
   | "id"
@@ -87,6 +85,10 @@ export function sessionTableColumnHeaderTestId(key: SessionTableColumnKey): stri
   return `session-table-col-header-${key}`;
 }
 
+/** Full wide table header `data-testid` sequence (left → right). */
+export const SESSION_TABLE_HEADER_TESTIDS_IN_TABLE_ORDER: readonly string[] =
+  SESSION_TABLE_COLUMN_KEYS_IN_TABLE_ORDER.map(sessionTableColumnHeaderTestId);
+
 /**
  * Viewport widths (px) at which each tier of {@link SESSION_TABLE_COLUMN_REMOVAL_ORDER} applies,
  * sorted ascending — one entry per removable column, aligned with
@@ -107,22 +109,43 @@ export function visibleSessionTableColumnKeysForViewportWidth(widthPx: number): 
   );
 }
 
-/** Subscribe to `window.innerWidth` for responsive column policy (session tables). */
-export function useWindowInnerWidthPx(): number {
-  const [w, setW] = useState(() =>
-    typeof window !== "undefined" ? window.innerWidth : 1024,
+/** Header `data-testid` values visible at this viewport width, in table order. */
+export function visibleSessionTableHeaderTestIdsForWidth(widthPx: number): readonly string[] {
+  return visibleSessionTableColumnKeysForViewportWidth(widthPx).map(sessionTableColumnHeaderTestId);
+}
+
+/**
+ * Effective width (px) for session table column policy: the narrower of the browser window and the
+ * session-tables host element when the host is measured; otherwise the window width.
+ */
+export function effectiveSessionTableLayoutWidthPx(
+  windowInnerWidthPx: number,
+  sessionTableHostWidthPx: number | null,
+): number {
+  if (sessionTableHostWidthPx == null || sessionTableHostWidthPx <= 0) {
+    return windowInnerWidthPx;
+  }
+  return Math.min(windowInnerWidthPx, sessionTableHostWidthPx);
+}
+
+/** Column keys when both window and session-table host widths are known (e.g. split layouts). */
+export function visibleSessionTableColumnKeysForLayout(
+  windowInnerWidthPx: number,
+  sessionTableHostWidthPx: number | null,
+): SessionTableColumnKey[] {
+  return visibleSessionTableColumnKeysForViewportWidth(
+    effectiveSessionTableLayoutWidthPx(windowInnerWidthPx, sessionTableHostWidthPx),
   );
-  useEffect(() => {
-    let raf = 0;
-    const onResize = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => setW(window.innerWidth));
-    };
-    window.addEventListener("resize", onResize);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", onResize);
-    };
-  }, []);
-  return w;
+}
+
+/**
+ * CSS `@container session-tables` rules for `[data-session-col]`, generated from
+ * {@link SESSION_TABLE_COLUMN_MIN_WIDTH_PX}. The session-tables host uses `container-type: inline-size`
+ * so column hiding follows the **rendered** width of that region (layout-enforced).
+ */
+export function sessionTableResponsiveContainerCss(): string {
+  return SESSION_TABLE_COLUMN_REMOVAL_ORDER.map(
+    (key) =>
+      `@container session-tables (max-width: ${SESSION_TABLE_COLUMN_MIN_WIDTH_PX[key] - 1}px) { [data-session-col="${key}"] { display: none !important; } }`,
+  ).join("\n");
 }

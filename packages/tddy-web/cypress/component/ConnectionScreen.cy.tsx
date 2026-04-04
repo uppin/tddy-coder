@@ -1,6 +1,7 @@
 import React from "react";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { ConnectionScreen } from "../../src/components/ConnectionScreen";
+import { SESSION_TABLE_HEADER_TESTIDS_IN_TABLE_ORDER } from "../../src/components/connection/sessionTableColumns";
 import {
   ListToolsResponseSchema,
   ToolInfoSchema,
@@ -1080,21 +1081,6 @@ describe("ConnectionScreen multi-host daemon selection", () => {
   });
 });
 
-/** Column header `data-testid` values — single source of truth for responsive session table acceptance tests. */
-const SESSION_TABLE_COL_HEADER_TESTIDS = [
-  "session-table-col-header-id",
-  "session-table-col-header-date",
-  "session-table-col-header-status",
-  "session-table-col-header-host",
-  "session-table-col-header-pid",
-  "session-table-col-header-goal",
-  "session-table-col-header-workflow",
-  "session-table-col-header-elapsed",
-  "session-table-col-header-agent",
-  "session-table-col-header-model",
-  "session-table-col-header-actions",
-] as const;
-
 /** Project + orphan rows with workflow columns so Model/Agent cells render with stable test ids. */
 const RESPONSIVE_PARITY_SESSION_PROJECT: MockSessionRow = {
   ...STATUS_PARITY_SESSION_V1,
@@ -1147,7 +1133,7 @@ describe("ConnectionScreen session table responsive columns (acceptance)", () =>
     cy.wait("@getAuthStatus");
     const assertFullHeaderRow = (tableTestId: string) => {
       cy.get(`[data-testid="${tableTestId}"]`, { timeout: 8000 }).should("exist");
-      SESSION_TABLE_COL_HEADER_TESTIDS.forEach((testId, index) => {
+      SESSION_TABLE_HEADER_TESTIDS_IN_TABLE_ORDER.forEach((testId, index) => {
         cy.get(`[data-testid="${tableTestId}"] thead tr th`)
           .eq(index)
           .should("have.attr", "data-testid", testId);
@@ -1155,6 +1141,23 @@ describe("ConnectionScreen session table responsive columns (acceptance)", () =>
     };
     assertFullHeaderRow(`sessions-table-${PROJECT.projectId}`);
     assertFullHeaderRow("sessions-table-orphan");
+  });
+
+  it("connection_screen_hides_model_when_table_container_is_narrow_even_if_window_is_wide", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([RESPONSIVE_PARITY_SESSION_PROJECT, RESPONSIVE_PARITY_SESSION_ORPHAN]);
+    cy.viewport(1440, 900);
+    cy.mount(
+      <div style={{ width: 360, maxWidth: "100%", overflow: "hidden" }}>
+        <ConnectionScreen />
+      </div>,
+    );
+    cy.wait("@getAuthStatus");
+    const projTable = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
+    cy.get(projTable, { timeout: 8000 }).should("exist");
+    cy.get(`${projTable} thead [data-testid="session-table-col-header-model"]`).should(
+      "not.be.visible",
+    );
   });
 
   it("connection_screen_orphan_table_column_visibility_matches_project_table", () => {

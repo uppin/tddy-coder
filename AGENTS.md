@@ -55,7 +55,7 @@ All `./` scripts use nix dev shell via `--profile ./.nix-profile` for a consiste
 | Run CLI | `cargo run -p tddy-coder -- --goal plan` (reads feature from stdin) |
 | Web install | `./dev bun install` — install web workspace dependencies |
 | Web build | `./dev bun run build` (from root or `packages/tddy-web`) |
-| Storybook | `./dev bun run storybook` — dev server at http://localhost:6006 |
+| Storybook | `./storybook` — dev server at http://localhost:6006 (listen `0.0.0.0`; see `packages/tddy-web/package.json`) |
 | Cypress component | `./dev bun run cypress:component` (from root or `packages/tddy-web`) |
 | Cypress e2e | `./dev bun run cypress:e2e` (from root or `packages/tddy-web`; builds Storybook, serves on ephemeral port, runs tests) |
 
@@ -70,7 +70,7 @@ Either enter the shell first, or run commands via `./dev`:
 ```bash
 ./dev                    # Enter shell, then: bun install, bun run storybook, etc.
 ./dev bun install        # One-off: install deps
-./dev bun run storybook  # One-off: start Storybook
+./storybook              # One-off: start Storybook (nix shell + `tddy-web`)
 ```
 
 **Setup**
@@ -93,7 +93,8 @@ bun run cypress:e2e              # Builds Storybook, serves on ephemeral port, r
 
 **Storybook**
 ```bash
-bun run storybook                # Dev server at http://localhost:6006
+./storybook                      # Dev server at http://localhost:6006 (all interfaces)
+bun run storybook                # Same via root package.json → ./storybook
 ```
 
 All commands can be run from repo root (they use `--filter tddy-web`) or from `packages/tddy-web`.
