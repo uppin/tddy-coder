@@ -9,6 +9,12 @@ Release note history for the Web product area.
 - **`tddy-web`**: **`WorktreesAppPage`** loads projects/daemons, **Refresh stats**, table rows, and delete via Connect; **`WorktreesScreen`** (stale hint, empty state). Cypress **`WorktreesScreen.cy.tsx`** (mocked rows).
 - **Feature docs**: [worktrees.md](worktrees.md); [web-terminal.md](web-terminal.md#worktrees-manager-scaffolding). Package: [worktrees.md](../../../packages/tddy-daemon/docs/worktrees.md).
 
+## 2026-04-04 — Daemon URL routes: `/terminal/{sessionId}`, SPA fallback, standalone cleanup
+
+- **tddy-web**: **`appRoutes`** helpers (`/terminal/:id`, `/`, `/auth/callback`). **`ConnectionScreen`** (daemon mode) **pushes** the terminal path after Start/Connect/Resume, **replaces** with `/` on Disconnect, handles **popstate** for Back, deep-link attach on load, and unknown-session UI. **`App`** (standalone) **replaces** a stray **`/terminal/...`** URL with **`/`** so standalone keeps the query-param connect model.
+- **tddy-coder**: **`web_bundle_acceptance`** asserts **`GET /terminal/...`** returns the SPA **`index.html`** (same stack as **`serve_web_bundle`** SPA fallback).
+- **Feature docs**: [web-terminal.md](web-terminal.md) (URL routes — daemon mode).
+
 ## 2026-04-03 — Interrupt: TUI Stop pane; web Stop button removed
 
 - **tddy-web**: **`ConnectionTerminalChrome`** no longer renders a bottom-right **Stop** button or **`onStopInterrupt`**. Interrupt is the ratatui **Stop** pane (red **U+25A0**) beside the Enter strip; the browser forwards SGR mouse to the virtual TUI (same **0x03** path as **Ctrl+C**).

@@ -50,6 +50,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  isSessionListPath,
+  parseTerminalSessionIdFromPathname,
+  terminalPathForSessionId,
+} from "../routing/appRoutes";
 
 /** Full viewport width shell (session tables are not max-width capped). */
 const screenShellClassName =
@@ -506,7 +511,36 @@ export function ConnectionScreen({
     debugLogging: boolean;
     sessionId: string;
   } | null>(null);
+  const [routePath, setRoutePath] = useState(
+    () => (typeof window !== "undefined" ? window.location.pathname : "/"),
+  );
+  const [sessionsListHydrated, setSessionsListHydrated] = useState(false);
+  const [terminalRouteUnknown, setTerminalRouteUnknown] = useState(false);
+  const terminalDeepLinkSeqRef = useRef(0);
   const client = useMemo(() => createConnectionClient(), []);
+
+  const navigatePath = useCallback((path: string, mode: "push" | "replace") => {
+    if (typeof window === "undefined") return;
+    if (mode === "push") {
+      window.history.pushState(null, "", path);
+    } else {
+      window.history.replaceState(null, "", path);
+    }
+    setRoutePath(path);
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const p = window.location.pathname;
+      setRoutePath(p);
+      if (isSessionListPath(p)) {
+        setConnected(null);
+        setTerminalRouteUnknown(false);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   const presenceReady =
     Boolean(commonRoom?.trim() && livekitUrl?.trim()) &&
@@ -533,8 +567,14 @@ export function ConnectionScreen({
     if (!sessionToken) return;
     client
       .listSessions({ sessionToken })
-      .then((res) => setSessions(res.sessions))
-      .catch(() => setSessions([]));
+      .then((res) => {
+        setSessions(res.sessions);
+        setSessionsListHydrated(true);
+      })
+      .catch(() => {
+        setSessions([]);
+        setSessionsListHydrated(true);
+      });
   }, [client, sessionToken]);
 
   useEffect(() => {
@@ -638,20 +678,100 @@ export function ConnectionScreen({
     [sessions, projects]
   );
 
-  const debugForSessionId = (sessionId: string): boolean => {
-    const sess = sessions.find((s) => s.sessionId === sessionId);
-    if (!sess) return false;
-    if (knownProjectIds.has(sess.projectId)) {
-      return projectForms[sess.projectId]?.debugLogging ?? false;
-    }
-    if (sess.projectId.trim() === "") {
-      const matched = projectForUnscopedSession(sess, projects);
-      if (matched) {
-        return projectForms[matched.projectId]?.debugLogging ?? false;
+  const debugForSessionId = useCallback(
+    (sessionId: string): boolean => {
+      const sess = sessions.find((s) => s.sessionId === sessionId);
+      if (!sess) return false;
+      if (knownProjectIds.has(sess.projectId)) {
+        return projectForms[sess.projectId]?.debugLogging ?? false;
       }
+      if (sess.projectId.trim() === "") {
+        const matched = projectForUnscopedSession(sess, projects);
+        if (matched) {
+          return projectForms[matched.projectId]?.debugLogging ?? false;
+        }
+      }
+      return orphanSessionDebug;
+    },
+    [sessions, projectForms, knownProjectIds, projects, orphanSessionDebug],
+  );
+
+  useEffect(() => {
+    if (!sessionsListHydrated || !isAuthenticated || !sessionToken) {
+      return;
     }
-    return orphanSessionDebug;
-  };
+    const id = parseTerminalSessionIdFromPathname(routePath);
+    if (!id) {
+      setTerminalRouteUnknown(false);
+      return;
+    }
+    if (connected?.sessionId === id) {
+      setTerminalRouteUnknown(false);
+      return;
+    }
+    const known = sessions.some((s) => s.sessionId === id);
+    setTerminalRouteUnknown(!known);
+  }, [routePath, sessions, sessionsListHydrated, isAuthenticated, sessionToken, connected]);
+
+  useEffect(() => {
+    if (!sessionsListHydrated || !isAuthenticated || !sessionToken || terminalRouteUnknown) {
+      return;
+    }
+    const id = parseTerminalSessionIdFromPathname(routePath);
+    if (!id || connected?.sessionId === id) {
+      return;
+    }
+    if (!sessions.some((s) => s.sessionId === id)) {
+      return;
+    }
+    const seq = ++terminalDeepLinkSeqRef.current;
+    let cancelled = false;
+    void (async () => {
+      setError(null);
+      try {
+        const res = await client.connectSession({ sessionToken, sessionId: id });
+        if (cancelled || seq !== terminalDeepLinkSeqRef.current) return;
+        setConnected({
+          livekitUrl: res.livekitUrl,
+          roomName: res.livekitRoom,
+          identity: `browser-${id}-${Date.now()}`,
+          serverIdentity: res.livekitServerIdentity,
+          debugLogging: debugForSessionId(id),
+          sessionId: id,
+        });
+      } catch {
+        try {
+          const res = await client.resumeSession({ sessionToken, sessionId: id });
+          if (cancelled || seq !== terminalDeepLinkSeqRef.current) return;
+          setConnected({
+            livekitUrl: res.livekitUrl,
+            roomName: res.livekitRoom,
+            identity: `browser-${res.sessionId}-${Date.now()}`,
+            serverIdentity: res.livekitServerIdentity,
+            debugLogging: debugForSessionId(id),
+            sessionId: res.sessionId,
+          });
+        } catch (e) {
+          if (!cancelled && seq === terminalDeepLinkSeqRef.current) {
+            setError(e instanceof Error ? e.message : "Failed to open session");
+          }
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    routePath,
+    sessions,
+    sessionsListHydrated,
+    isAuthenticated,
+    sessionToken,
+    connected,
+    terminalRouteUnknown,
+    client,
+    debugForSessionId,
+  ]);
 
   const handleStartSession = async (projectId: string) => {
     const form = projectForms[projectId] ?? defaultProjectSessionForm(tools, agents, daemons);
@@ -674,6 +794,7 @@ export function ConnectionScreen({
         debugLogging: form.debugLogging,
         sessionId: res.sessionId,
       });
+      navigatePath(terminalPathForSessionId(res.sessionId), "push");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start session");
     }
@@ -713,6 +834,7 @@ export function ConnectionScreen({
         debugLogging: debugForSessionId(sessionId),
         sessionId,
       });
+      navigatePath(terminalPathForSessionId(sessionId), "push");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect to session");
     }
@@ -731,6 +853,7 @@ export function ConnectionScreen({
         debugLogging: debugForSessionId(sessionId),
         sessionId: res.sessionId,
       });
+      navigatePath(terminalPathForSessionId(res.sessionId), "push");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to resume session");
     }
@@ -773,7 +896,10 @@ export function ConnectionScreen({
         identity={connected.identity}
         serverIdentity={connected.serverIdentity}
         debugLogging={connected.debugLogging}
-        onDisconnect={() => setConnected(null)}
+        onDisconnect={() => {
+          navigatePath("/", "replace");
+          setConnected(null);
+        }}
         onTerminate={() => void handleSignalSession(connected.sessionId, Signal.SIGTERM)}
       />
     );
@@ -801,6 +927,26 @@ export function ConnectionScreen({
         {user ? <UserAvatar user={user} onLogout={logout} /> : null}
       </div>
       <h2 className="mt-6 text-lg font-medium">Start or connect to a session</h2>
+
+      {terminalRouteUnknown && (
+        <div
+          data-testid="terminal-route-unknown-session"
+          className="mb-4 rounded-md border border-destructive/40 bg-destructive/5 p-4"
+        >
+          <p className="mb-3 text-sm text-foreground">Session not found or no longer available.</p>
+          <Button
+            type="button"
+            variant="secondary"
+            data-testid="terminal-route-unknown-session-home"
+            onClick={() => {
+              navigatePath("/", "replace");
+              setTerminalRouteUnknown(false);
+            }}
+          >
+            Back to sessions
+          </Button>
+        </div>
+      )}
 
       {presenceReady && (
         <div
