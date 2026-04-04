@@ -133,6 +133,7 @@ pub fn run_virtual_tui(
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         let render_and_send =
             |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
@@ -281,7 +282,6 @@ pub fn run_virtual_tui(
                             &mut view,
                             &layout_areas,
                             &intent_tx,
-                            &shutdown,
                         );
                     }
                     Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
@@ -356,7 +356,6 @@ pub fn run_virtual_tui(
                                 &mut view,
                                 &layout_areas,
                                 &intent_tx,
-                                &shutdown,
                             );
                         }
                         Ok(_) => {}
@@ -405,7 +404,6 @@ fn process_virtual_tui_input_chunk(
     view: &mut TuiView,
     layout_areas: &LayoutAreas,
     intent_tx: &std_mpsc::Sender<UserIntent>,
-    shutdown: &Arc<AtomicBool>,
 ) {
     *recv_chunk_count += 1;
     let chunk_len = bytes.len() as u64;
@@ -437,7 +435,11 @@ fn process_virtual_tui_input_chunk(
                 layout_areas,
                 state.inbox.len(),
             ) {
-                let _ = intent_tx.send(intent);
+                if intent == UserIntent::Interrupt {
+                    ctrl_c_interrupt_session();
+                } else {
+                    let _ = intent_tx.send(intent);
+                }
             }
             if matches!(state.mode, AppMode::Select { .. }) {
                 let idx = view.view_state().select_selected;
@@ -456,7 +458,7 @@ fn process_virtual_tui_input_chunk(
             *total_keys_parsed
         );
         if key_is_ctrl_c_press(&key) {
-            ctrl_c_interrupt_session(shutdown.as_ref());
+            ctrl_c_interrupt_session();
             input_buf.drain(..consumed);
             *updated = true;
             continue;

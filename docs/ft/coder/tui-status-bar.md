@@ -53,14 +53,24 @@ Vertical layout reserves **one** terminal row immediately below the prompt text 
 
 ## Mouse mode: Enter control
 
-When pointer reporting is active (`EnableMouseCapture`), the TUI draws an **Enter** affordance in the **trailing three columns** to the right of the prompt text, separated by a one-column margin (`ENTER_STRIP_MARGIN_COLS`). The layout narrows `prompt_bar` and `footer_bar` so the strip does not overlap prompt text cells.
+When pointer reporting is active (`EnableMouseCapture`), the TUI draws **Enter** and (when the terminal is wide enough) **Stop** affordances to the right of the prompt text. The layout narrows `prompt_bar` and `footer_bar` by `right_chrome_reserve_cols(terminal_width)`: **four** columns (margin + Enter strip) on very narrow terminals, **eight** columns when there is room for Enter plus Stop (margin + Stop strip).
 
 - **Layout**: `layout_chunks_with_inbox` splits the terminal into **eight** vertical regions: activity, spacer, dynamic (inbox / questions / slash menu), status bar, **one empty row**, optional debug log, prompt block, and footer. The Enter strip’s **top** aligns with the **first row below the status bar** (the separator band: that empty row plus any debug rows allocated above the prompt chunk). Its **height** spans that band through the **prompt text** lines and the **footer** row. When the prompt chunk has more than one row, the **bottom** row is a horizontal rule (`U+2500`); that rule row is excluded from prompt line count and from Enter height so the rule stays visually separate from the frame.
 - **Geometry**: Width **three** columns. Horizontal origin: `prompt_bar.x + prompt_bar.width + ENTER_STRIP_MARGIN_COLS`. When the status bar has height zero, the strip starts at `prompt_bar.y` and spans prompt text lines plus footer only.
 - **Label**: Light box-drawing characters (`U+250C`–`U+2518`, `U+2500`, `U+2502`). **U+23CE** (`⏎`) sits on the **first prompt text row** inside the strip (below the top border when a separator band exists). Widgets for status, debug, prompt, and footer render first; the overlay paints afterward in the reserved columns.
 - **Hit-testing**: `packages/tddy-tui/src/mouse_map.rs` defines `enter_button_rect` to match `render::paint_enter_affordance`; left-clicks inside the rectangle map to the same intents as **Enter** (`key_event_to_intent`).
 - **E2E / stable screens**: When the environment variable `TDDY_E2E_NO_ENTER_AFFORDANCE` is set to any value, `paint_enter_affordance` returns without writing overlay symbols (byte-level terminal tests and gRPC terminal streams avoid frame noise).
-- **Narrow terminals**: If the prompt region is too narrow for the margin plus three columns, painting and hit-testing omit the affordance.
+- **Narrow terminals**: If the prompt region is too narrow for the margin plus three columns, painting and hit-testing omit the Enter affordance.
+
+## Mouse mode: Stop control
+
+When **`right_chrome_reserve_cols`** includes the Stop strip (terminal wider than the full eight-column reserve), the TUI paints a second three-column strip **immediately to the right of** the Enter strip, separated by `STOP_STRIP_MARGIN_COLS` (one column).
+
+- **Label**: Same light box-drawing frame as Enter; the key cell uses **U+25A0** (■) in **red** (`Color::Red`) instead of U+23CE.
+- **Hit-testing**: `stop_button_rect` matches `paint_stop_affordance`; left-click maps to **`UserIntent::Interrupt`**, which the local event loop and `VirtualTui` handle by calling **`ctrl_c_interrupt_session`** (same as **Ctrl+C** / byte **0x03** over the terminal stream). The intent is not sent to the presenter.
+- **Semantics**: **`ctrl_c_interrupt_session`** only **`kill_child_process`** (tracked agent/backend PID). It does **not** set the workflow **`shutdown`** flag — the TUI and presenter keep running; full teardown uses the **`ctrlc`** SIGINT handler or daemon shutdown.
+- **E2E / stable screens**: The same `TDDY_E2E_NO_ENTER_AFFORDANCE` gate skips both Enter and Stop overlay paint.
+- **Narrow terminals**: If only the four-column Enter reserve fits, `stop_button_rect` is empty and the Stop affordance is omitted.
 
 ## Operational notes
 

@@ -59,10 +59,8 @@ pub fn prompt_chunk_height_including_rule(
     terminal_width: u16,
     terminal_height: u16,
 ) -> u16 {
-    let content_width = terminal_width
-        .saturating_sub(crate::mouse_map::ENTER_STRIP_MARGIN_COLS)
-        .saturating_sub(crate::mouse_map::ENTER_BUTTON_COLS)
-        .max(1);
+    let reserve = crate::mouse_map::right_chrome_reserve_cols(terminal_width);
+    let content_width = terminal_width.saturating_sub(reserve).max(1);
     let max_height = (terminal_height / 3).max(1);
     let text_lines = prompt_height(text_len, content_width, max_height.saturating_sub(1).max(1));
     text_lines.saturating_add(1)
@@ -113,7 +111,7 @@ pub fn layout_chunks_with_inbox(
             Constraint::Length(1),
         ])
         .split(area);
-    let reserve = crate::mouse_map::ENTER_STRIP_MARGIN_COLS + crate::mouse_map::ENTER_BUTTON_COLS;
+    let reserve = crate::mouse_map::right_chrome_reserve_cols(area.width);
     let inner_w = area.width.saturating_sub(reserve);
     let mut prompt_bar = chunks[6];
     let mut footer_bar = chunks[7];
@@ -307,16 +305,26 @@ mod tests {
         );
     }
 
-    /// Prompt row width leaves one column margin plus the Enter strip; prompt text must not share cells with Enter.
+    /// Prompt row width leaves right chrome (Enter + Stop when wide enough).
     #[test]
     fn prompt_bar_width_reserves_margin_and_enter_columns() {
-        use crate::mouse_map::{ENTER_BUTTON_COLS, ENTER_STRIP_MARGIN_COLS};
+        use crate::mouse_map::right_chrome_reserve_cols;
         let area = Rect::new(0, 0, 80, 24);
         let (_, _, _, _, _, _, prompt_bar, _) = layout_chunks_with_inbox(area, 0, 0, 1);
         let expected = area
             .width
-            .saturating_sub(ENTER_STRIP_MARGIN_COLS)
-            .saturating_sub(ENTER_BUTTON_COLS);
+            .saturating_sub(right_chrome_reserve_cols(area.width));
+        assert_eq!(prompt_bar.width, expected);
+    }
+
+    /// Narrow terminal: only Enter strip reserved (no Stop).
+    #[test]
+    fn prompt_bar_width_enter_only_when_too_narrow_for_stop() {
+        use crate::mouse_map::{right_chrome_reserve_cols, ENTER_RESERVE_COLS};
+        let area = Rect::new(0, 0, 8, 24);
+        let (_, _, _, _, _, _, prompt_bar, _) = layout_chunks_with_inbox(area, 0, 0, 1);
+        assert_eq!(right_chrome_reserve_cols(area.width), ENTER_RESERVE_COLS);
+        let expected = area.width.saturating_sub(ENTER_RESERVE_COLS);
         assert_eq!(prompt_bar.width, expected);
     }
 }

@@ -24,6 +24,8 @@ pub struct LayoutAreas {
     pub footer_bar: Rect,
     /// Dedicated terminal region for the pointer Enter affordance (must not overlap [`prompt_bar`]).
     pub enter_pane: Rect,
+    /// Dedicated terminal region for the pointer Stop affordance (to the right of Enter).
+    pub stop_pane: Rect,
 }
 
 /// Width in terminal cells of the pointer Enter affordance (see `enter_button_rect`). Height is
@@ -32,6 +34,14 @@ pub struct LayoutAreas {
 pub const ENTER_BUTTON_COLS: u16 = 3;
 /// Empty columns between the prompt text block and the Enter strip (to the right of prompt text).
 pub const ENTER_STRIP_MARGIN_COLS: u16 = 1;
+/// Width of the Stop strip (see [`stop_button_rect`]); matches Enter strip width.
+pub const STOP_BUTTON_COLS: u16 = 3;
+/// Empty columns between the Enter strip and the Stop strip.
+pub const STOP_STRIP_MARGIN_COLS: u16 = 1;
+/// Columns reserved for Enter margin + strip (see [`right_chrome_reserve_cols`]).
+pub const ENTER_RESERVE_COLS: u16 = ENTER_STRIP_MARGIN_COLS + ENTER_BUTTON_COLS;
+/// Extra columns when Stop is shown: margin + Stop strip.
+pub const STOP_EXTRA_RESERVE_COLS: u16 = STOP_STRIP_MARGIN_COLS + STOP_BUTTON_COLS;
 /// Legacy export: pre-footer overlay used two content rows for the ASCII frame. Actual hit target
 /// height is [`enter_button_rect`].`height` (prompt text + footer; status bar is excluded).
 pub const ENTER_BUTTON_ROWS: u16 = 2;
@@ -80,6 +90,43 @@ pub fn enter_button_rect(areas: &LayoutAreas) -> Rect {
         ENTER_BUTTON_COLS
     );
     Rect::new(x, y, ENTER_BUTTON_COLS, h)
+}
+
+/// Right-hand chrome width: Enter strip only, or Enter + Stop when the terminal is wide enough
+/// (prompt keeps at least one column beside the full strip).
+#[must_use]
+pub fn right_chrome_reserve_cols(terminal_width: u16) -> u16 {
+    let full = ENTER_RESERVE_COLS.saturating_add(STOP_EXTRA_RESERVE_COLS);
+    if terminal_width > full {
+        full
+    } else {
+        ENTER_RESERVE_COLS
+    }
+}
+
+/// True when layout reserves space for both Enter and Stop (see [`right_chrome_reserve_cols`]).
+#[must_use]
+pub fn stop_affordance_active(terminal_width: u16) -> bool {
+    right_chrome_reserve_cols(terminal_width)
+        >= ENTER_RESERVE_COLS.saturating_add(STOP_EXTRA_RESERVE_COLS)
+}
+
+/// **3 columns** wide, immediately to the right of the Enter strip (with [`STOP_STRIP_MARGIN_COLS`]).
+/// Same vertical span as [`enter_button_rect`]. Empty when [`stop_affordance_active`] is false or Enter is omitted.
+pub fn stop_button_rect(areas: &LayoutAreas) -> Rect {
+    let term_w = areas.activity_log.width;
+    if !stop_affordance_active(term_w) {
+        return Rect::new(0, 0, 0, 0);
+    }
+    let enter = enter_button_rect(areas);
+    if enter.width == 0 || enter.height == 0 {
+        return Rect::new(0, 0, 0, 0);
+    }
+    let x = enter
+        .x
+        .saturating_add(enter.width)
+        .saturating_add(STOP_STRIP_MARGIN_COLS);
+    Rect::new(x, enter.y, STOP_BUTTON_COLS, enter.height)
 }
 
 /// Normalize mouse coordinates for local terminal (crossterm).
@@ -156,6 +203,9 @@ pub fn handle_mouse_event(
             }
             if rect_contains(&enter_button_rect(areas), col, row) {
                 return click_enter_affordance(mode, view_state);
+            }
+            if rect_contains(&stop_button_rect(areas), col, row) {
+                return Some(UserIntent::Interrupt);
             }
         }
         _ => {}
@@ -353,6 +403,7 @@ mod tests {
             prompt_bar: prompt,
             footer_bar: Rect::new(0, 24, 80, 0),
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         }
     }
 
@@ -375,6 +426,7 @@ mod tests {
             prompt_bar,
             footer_bar,
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         }
     }
 
@@ -403,6 +455,7 @@ mod tests {
             prompt_bar,
             footer_bar,
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         }
     }
 
@@ -592,6 +645,7 @@ mod tests {
             prompt_bar,
             footer_bar,
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         (mode, areas)
     }
@@ -688,8 +742,9 @@ mod tests {
     fn enter_button_rect_is_right_of_prompt_with_margin_and_disjoint_from_prompt_and_footer() {
         let sb = Rect::new(0, 20, 80, 1);
         // One-row gap below status (y=21); debug height 0 so prompt starts at 22.
-        let pb = Rect::new(0, 22, 76, 1);
-        let fb = Rect::new(0, 23, 76, 1);
+        // 80 cols − 8 right chrome (Enter + Stop) = 72 prompt cols
+        let pb = Rect::new(0, 22, 72, 1);
+        let fb = Rect::new(0, 23, 72, 1);
         let areas = LayoutAreas {
             activity_log: Rect::new(0, 0, 80, 20),
             dynamic_area: Rect::new(0, 20, 80, 0),
@@ -697,6 +752,7 @@ mod tests {
             prompt_bar: pb,
             footer_bar: fb,
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         let r = super::enter_button_rect(&areas);
         let prompt_rows = if pb.height > 1 {
@@ -819,6 +875,7 @@ mod tests {
             prompt_bar,
             footer_bar,
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         let mode = AppMode::MarkdownViewer {
             content: "# Plan".to_string(),
@@ -852,5 +909,51 @@ mod tests {
             Some(UserIntent::RefineSessionDocument),
             "click on Reject footer line must request refinement"
         );
+    }
+
+    #[test]
+    fn stop_button_rect_empty_when_terminal_too_narrow_for_stop_strip() {
+        let area = Rect::new(0, 0, 8, 24);
+        let (activity_log, _sp, dynamic_area, status_bar, _g, _d, prompt_bar, footer_bar) =
+            layout_chunks_with_inbox(area, 0, 0, 1);
+        let areas = LayoutAreas {
+            activity_log,
+            dynamic_area,
+            status_bar,
+            prompt_bar,
+            footer_bar,
+            enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
+        };
+        assert_eq!(super::stop_button_rect(&areas).width, 0);
+    }
+
+    #[test]
+    fn stop_button_rect_sits_right_of_enter_with_margin() {
+        let (mode, areas) = select_mode_fixture_80x24();
+        let _ = mode;
+        let er = super::enter_button_rect(&areas);
+        let sr = super::stop_button_rect(&areas);
+        assert!(sr.width > 0);
+        assert_eq!(sr.x, er.x + er.width + super::STOP_STRIP_MARGIN_COLS);
+        assert_eq!(sr.y, er.y);
+        assert_eq!(sr.height, er.height);
+    }
+
+    #[test]
+    fn click_stop_affordance_produces_interrupt() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        let sr = super::stop_button_rect(&areas);
+        assert!(sr.width > 0, "expected Stop pane on 80×24");
+        let row = sr.y.saturating_add(sr.height / 2);
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: sr.x + 1,
+            row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+        assert_eq!(intent, Some(UserIntent::Interrupt));
     }
 }

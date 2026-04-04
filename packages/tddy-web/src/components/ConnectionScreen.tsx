@@ -443,7 +443,6 @@ function ConnectedTerminal({
             onDisconnect={onDisconnect}
             onTerminate={onTerminate}
             fullscreenTargetRef={fullscreenTargetRef}
-            onStopInterrupt={() => {}}
           />
         </div>
       </div>

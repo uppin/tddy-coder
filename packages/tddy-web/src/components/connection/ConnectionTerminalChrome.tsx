@@ -47,21 +47,18 @@ export interface ConnectionTerminalChromeProps {
   onDisconnect: () => void;
   /** When set, Terminate entry is shown (SIGTERM path). */
   onTerminate?: () => void;
-  /** Same path as legacy Ctrl+C — parent binds enqueue of 0x03. */
-  onStopInterrupt: () => void;
   /** Element to pass to the Fullscreen API (connected terminal subtree). */
   fullscreenTargetRef?: React.RefObject<HTMLElement | null>;
 }
 
 /**
- * Top-right status dot (with menu: Disconnect / optional Terminate) and bottom-right Stop.
+ * Top-right status dot (with menu: Disconnect / optional Terminate). Interrupt (Stop) is the TUI Stop pane.
  */
 export function ConnectionTerminalChrome({
   overlayStatus,
   buildId,
   onDisconnect,
   onTerminate,
-  onStopInterrupt,
   fullscreenTargetRef,
 }: ConnectionTerminalChromeProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -142,12 +139,6 @@ export function ConnectionTerminalChrome({
       return;
     }
     void requestFullscreenForConnectedTerminal(target);
-  };
-
-  const handleStopClick = (ev: React.MouseEvent) => {
-    ev.preventDefault();
-    ev.stopPropagation();
-    onStopInterrupt();
   };
 
   const statusAttr = dataConnectionStatusValue(overlayStatus);
@@ -281,15 +272,6 @@ export function ConnectionTerminalChrome({
           ) : null}
         </div>
       )}
-      <button
-        type="button"
-        data-testid="terminal-stop-button"
-        aria-label="Send interrupt (Stop)"
-        style={{ ...CHROME_BTN, bottom: 8, right: 8, top: "auto", left: "auto", minWidth: 44, minHeight: 44 }}
-        onClick={handleStopClick}
-      >
-        Stop
-      </button>
     </>
   );
 }

@@ -272,6 +272,8 @@ fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
         UserIntent::SelectHighlightChanged(_) => return None,
         // Local-only: feature-prompt slash menu `/recipe` (no wire proto yet)
         UserIntent::FeatureSlashBuiltinRecipe => return None,
+        // Local-only: TUI Stop pane — handled before presenter (`ctrl_c_interrupt_session`)
+        UserIntent::Interrupt => return None,
     };
     Some(ClientMessage {
         intent: Some(intent),

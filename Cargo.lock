@@ -5876,6 +5876,7 @@ dependencies = [
  "libc",
  "log",
  "ratatui",
+ "serial_test",
  "tddy-core",
  "tokio",
  "tui-markdown",

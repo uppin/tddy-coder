@@ -631,6 +631,9 @@ impl Presenter {
             UserIntent::Quit => {
                 self.state.should_quit = true;
             }
+            UserIntent::Interrupt => {
+                // TUI / VirtualTui call `ctrl_c_interrupt_session` without sending this intent.
+            }
             UserIntent::ContinueWithAgent => {
                 let session_id = if let Some(cs_dir) = self.changeset_read_dir() {
                     log::info!(
