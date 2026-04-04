@@ -36,10 +36,10 @@ impl CodingBackend for OutputOnlyBackend {
 }
 
 #[tokio::test]
-async fn grill_me_backend_invoke_completes_without_tddy_tools_submit() {
-    let recipe = GrillMeRecipe;
+async fn grill_me_backend_invoke_waits_for_host_gate_without_relayed_ask_answers() {
+    let recipe: Arc<dyn WorkflowRecipe> = Arc::new(GrillMeRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
-    let task = BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), &recipe, backend);
+    let task = BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), recipe, backend);
 
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");
@@ -50,15 +50,44 @@ async fn grill_me_backend_invoke_completes_without_tddy_tools_submit() {
         .await
         .expect("task should succeed without submit");
     assert_eq!(result.response, "agent reply without submit");
+    assert!(matches!(result.next_action, NextAction::WaitForInput));
+}
+
+#[tokio::test]
+async fn grill_me_backend_invoke_continues_when_grill_ask_answers_file_present() {
+    let recipe: Arc<dyn WorkflowRecipe> = Arc::new(GrillMeRecipe);
+    let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
+    let task = BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), recipe, backend);
+
+    let tmp = std::env::temp_dir().join(format!("grill-gate-relay-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join(".workflow")).unwrap();
+    std::fs::write(
+        tmp.join(".workflow").join("grill_ask_answers.txt"),
+        "from tddy-tools ask relay",
+    )
+    .unwrap();
+
+    let ctx = Context::new();
+    ctx.set_sync("feature_input", "hello");
+    ctx.set_sync("output_dir", std::env::temp_dir());
+    ctx.set_sync("session_dir", tmp.clone());
+
+    let result = task
+        .run(ctx)
+        .await
+        .expect("task should succeed without submit");
+    assert_eq!(result.response, "agent reply without submit");
     assert!(matches!(result.next_action, NextAction::Continue));
+    let _ = std::fs::remove_dir_all(&tmp);
 }
 
 #[tokio::test]
 async fn free_prompting_backend_invoke_completes_without_tddy_tools_submit() {
-    let recipe = FreePromptingRecipe;
+    let recipe: Arc<dyn WorkflowRecipe> = Arc::new(FreePromptingRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
     let task =
-        BackendInvokeTask::from_recipe("prompting", GoalId::new("prompting"), &recipe, backend);
+        BackendInvokeTask::from_recipe("prompting", GoalId::new("prompting"), recipe, backend);
 
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");

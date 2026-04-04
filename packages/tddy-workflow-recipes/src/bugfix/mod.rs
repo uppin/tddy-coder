@@ -27,10 +27,11 @@ impl WorkflowRecipe for BugfixRecipe {
     }
 
     fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
         let reproduce = Arc::new(BackendInvokeTask::from_recipe(
             "reproduce",
             GoalId::new("reproduce"),
-            self,
+            recipe,
             backend,
         ));
         let end = Arc::new(EndTask::new("end"));

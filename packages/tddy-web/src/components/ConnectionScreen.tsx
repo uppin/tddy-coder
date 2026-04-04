@@ -60,6 +60,7 @@ import {
   type TerminalPresentation,
   nextPresentationFromAttach,
 } from "./connection/terminalPresentation";
+import { presenceIdentityForUser } from "../lib/presenceIdentity";
 
 /** Full viewport width shell (session tables are not max-width capped). */
 const screenShellClassName =
@@ -638,7 +639,10 @@ export function ConnectionScreen({
     !isLoading &&
     Boolean(user);
 
-  const presenceIdentity = user ? `web-${user.login}` : undefined;
+  const presenceIdentity = useMemo(
+    () => (user ? presenceIdentityForUser(user.login) : undefined),
+    [user?.login],
+  );
 
   const { room: presenceRoom, status: presenceStatus, error: presenceError } = useCommonRoom(
     presenceReady ? livekitUrl : undefined,

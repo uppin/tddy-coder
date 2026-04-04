@@ -146,7 +146,7 @@ echo "  Daemon (RPC):  http://127.0.0.1:${DAEMON_PORT}  — static dist; /rpc an
 echo ""
 
 # Start Vite dev server with DAEMON_PORT for proxy config (run via ./dev for nix env)
-./dev bash -c "cd packages/tddy-web && DAEMON_PORT='$DAEMON_PORT' WEB_PUBLIC_URL='$WEB_PUBLIC_URL' VITE_URL='$VITE_URL' npx vite --port '$VITE_PORT' --host '$WEB_HOST'" &
+./dev bash -c "cd packages/tddy-web && DAEMON_PORT='$DAEMON_PORT' WEB_PUBLIC_URL='$WEB_PUBLIC_URL' VITE_URL='$VITE_URL' bunx vite --port '$VITE_PORT' --host '$WEB_HOST'" &
 vite_pid=$!
 
 # Cleanup and exit. Kill by port (most reliable) since process groups may not

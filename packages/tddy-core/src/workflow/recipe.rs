@@ -1,7 +1,8 @@
 //! Pluggable workflow definitions (`WorkflowRecipe`).
 
-use crate::backend::CodingBackend;
+use crate::backend::{ClarificationQuestion, CodingBackend};
 use crate::presenter::WorkflowEvent;
+use crate::workflow::context::Context;
 use crate::workflow::graph::Graph;
 use crate::workflow::hooks::RunnerHooks;
 use crate::workflow::ids::{GoalId, WorkflowState};
@@ -96,5 +97,16 @@ pub trait WorkflowRecipe: Send + Sync {
     fn goal_requires_tddy_tools_submit(&self, goal_id: &GoalId) -> bool {
         let _ = goal_id;
         true
+    }
+
+    /// After a no-submit backend turn, optional host clarification before advancing (e.g. grill-me
+    /// confirming the user is ready for **Create plan** when `tddy-tools ask` did not persist answers).
+    fn host_clarification_gate_after_no_submit_turn(
+        &self,
+        goal_id: &GoalId,
+        context: &Context,
+    ) -> Option<Vec<ClarificationQuestion>> {
+        let _ = (goal_id, context);
+        None
     }
 }

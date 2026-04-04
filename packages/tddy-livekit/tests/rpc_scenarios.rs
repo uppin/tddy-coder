@@ -820,6 +820,62 @@ async fn rpc_scenarios() -> Result<()> {
         harness.teardown();
     }
 
+    // -----------------------------------------------------------------------
+    // Duplicate identity: second client with same identity disconnects first
+    // -----------------------------------------------------------------------
+    //
+    // Reproduces: tddy-web presence room uses `web-${user.login}` as identity,
+    // which is fixed per user. Opening a second browser tab joins with the same
+    // identity, causing LiveKit to disconnect the first tab's presence connection.
+    {
+        let room_name = "duplicate-identity";
+        let url = livekit.get_ws_url();
+
+        let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
+        let server = LiveKitParticipant::connect(
+            &url,
+            &server_token,
+            EchoServiceServer::new(EchoServiceImpl),
+            RoomOptions::default(),
+        )
+        .await?;
+        let server_handle = tokio::spawn(async move { server.run().await });
+
+        let duplicate_identity = "web-testuser";
+        let client1_token = livekit.generate_token(room_name, duplicate_identity)?;
+        let (client1_room, mut client1_events) =
+            Room::connect(&url, &client1_token, RoomOptions::default())
+                .await
+                .map_err(|e| anyhow::anyhow!("client1 connect: {}", e))?;
+        wait_for_participant(&client1_room, &mut client1_events, SERVER_IDENTITY).await?;
+
+        let client1_disconnected = Arc::new(AtomicBool::new(false));
+        let client1_disconnected_clone = client1_disconnected.clone();
+        let mut client1_sub = client1_room.subscribe();
+        tokio::spawn(async move {
+            while let Some(event) = client1_sub.recv().await {
+                if let RoomEvent::Disconnected { .. } = event {
+                    client1_disconnected_clone.store(true, Ordering::SeqCst);
+                }
+            }
+        });
+
+        let client2_token = livekit.generate_token(room_name, duplicate_identity)?;
+        let (_client2_room, _) = Room::connect(&url, &client2_token, RoomOptions::default())
+            .await
+            .map_err(|e| anyhow::anyhow!("client2 connect with same identity: {}", e))?;
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        assert!(
+            client1_disconnected.load(Ordering::SeqCst),
+            "first client must be disconnected when a second client joins with the same identity \
+             (simulates two browser tabs using presence identity 'web-{{login}}')"
+        );
+
+        server_handle.abort();
+    }
+
     log::debug!("rpc_scenarios: all scenarios passed, container will be cleaned up");
     // `livekit` dropped here — ContainerAsync::Drop stops and removes the container
     Ok(())
