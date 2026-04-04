@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package tddy.v1;
+
+import "tddy/v1/remote.proto";
+
+// Passive stream of Presenter-derived events for observers (e.g. daemon Telegram bridge).
+// Uses the same ServerMessage envelope as TddyRemote.Stream.
+service PresenterObserver {
+  rpc ObserveEvents(ObserveRequest) returns (stream ServerMessage);
+}
+
+message ObserveRequest {}

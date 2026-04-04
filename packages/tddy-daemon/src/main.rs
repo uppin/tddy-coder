@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
+use tokio::sync::Mutex;
 
 /// Apply environment variable overrides to config (e.g. from .env loaded by web-dev).
 fn apply_env_overrides(config: &mut tddy_daemon::config::DaemonConfig) {
@@ -55,6 +56,7 @@ fn apply_env_overrides(config: &mut tddy_daemon::config::DaemonConfig) {
             g.redirect_uri = Some(v);
         }
     }
+    config.apply_telegram_env_overrides();
 }
 
 fn env_var(name: &str) -> Option<String> {
@@ -149,6 +151,29 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    let telegram_hooks: Option<Arc<tddy_daemon::telegram_session_subscriber::TelegramDaemonHooks>> =
+        match config.telegram.as_ref() {
+            Some(tg) if tg.enabled && !tg.bot_token.is_empty() => {
+                let sender: Arc<dyn tddy_daemon::telegram_notifier::TelegramSender + Send + Sync> =
+                    Arc::new(
+                        tddy_daemon::telegram_notifier::TeloxideSender::from_bot_token(
+                            tg.bot_token.clone(),
+                        ),
+                    );
+                let watcher = Arc::new(Mutex::new(
+                    tddy_daemon::telegram_notifier::TelegramSessionWatcher::new(),
+                ));
+                Some(Arc::new(
+                    tddy_daemon::telegram_session_subscriber::TelegramDaemonHooks {
+                        config: config.clone(),
+                        sender: sender.clone(),
+                        watcher,
+                    },
+                ))
+            }
+            _ => None,
+        };
+
     if let Some(user_resolver) = auth_result.user_resolver {
         let connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
             config.clone(),
@@ -156,6 +181,7 @@ fn main() -> anyhow::Result<()> {
             user_resolver,
             spawn_client,
             Some(Arc::new(tddy_daemon::multi_host::StubEligibleDaemonSource)),
+            telegram_hooks.clone(),
         );
         let connection_server = tddy_service::ConnectionServiceServer::new(connection_impl);
         rpc_entries.push(tddy_rpc::ServiceEntry {
@@ -167,6 +193,13 @@ fn main() -> anyhow::Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
+    let lifecycle_telegram = telegram_hooks.as_ref().map(|h| {
+        (
+            config.clone(),
+            h.sender.clone()
+                as Arc<dyn tddy_daemon::telegram_notifier::TelegramSender + Send + Sync>,
+        )
+    });
     rt.block_on(tddy_daemon::server::run_server(
         host,
         port,
@@ -174,5 +207,6 @@ fn main() -> anyhow::Result<()> {
         rpc_entries,
         livekit_url,
         common_room,
+        lifecycle_telegram,
     ))
 }

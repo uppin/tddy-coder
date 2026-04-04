@@ -12,6 +12,7 @@ use crate::error::BackendError;
 use crate::stream::ProgressEvent;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn emit_agent_exited(request: &InvokeRequest, exit_code: i32) {
     if let Some(ref sink) = request.progress_sink {
@@ -189,8 +190,51 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
         self.submit_and_respond("update-docs", json, None)
     }
 
+    fn prompting_response(&self) -> InvokeResponse {
+        const PHRASES: &[&str] = &[
+            "Great question!\nBreak it into smaller parts.",
+            "Start simple, then iterate.\nShip early, refine often.",
+            "Three approaches here.\nPick speed, clarity, or flex.",
+            "Data flow drives design.\nGet that right first.",
+            "Every abstraction costs.\nMake sure it pays off.",
+            "Define inputs and outputs.\nWrite a test. Implement.",
+            "Separate change from stable.\nThe design follows.",
+            "Prefer composition.\nMore flexibility later.",
+            "Unix philosophy applies.\nDo one thing well.",
+            "Spike it first.\nValidate before committing.",
+            "Flip the problem.\nIs there a simpler way?",
+            "Iterate, don't plan forever.\nGet feedback early.",
+        ];
+        let n = self.invocation_count.load(Ordering::SeqCst) as u64;
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos() as u64;
+        let idx =
+            ((n.wrapping_mul(6364136223846793005).wrapping_add(nanos)) as usize) % PHRASES.len();
+        let phrase = PHRASES[idx];
+        InvokeResponse {
+            output: format!("**[Stub]** {}", phrase),
+            exit_code: 0,
+            session_id: None,
+            questions: vec![],
+            raw_stream: None,
+            stderr: None,
+        }
+    }
+
+    fn analyze_response(&self) -> InvokeResponse {
+        let n = self.invocation_count.load(Ordering::SeqCst);
+        let json = format!(
+            r#"{{"goal":"analyze","branch_suggestion":"bugfix/stub-{}","worktree_suggestion":"bugfix-stub-{}","name":"Stub bugfix analyze","summary":"Stub triage summary for reproduce context."}}"#,
+            n, n
+        );
+        self.submit_and_respond("analyze", &json, None)
+    }
+
     fn response_for_goal(&self, goal_id: &GoalId) -> InvokeResponse {
         match goal_id.as_str() {
+            "analyze" => self.analyze_response(),
             "plan" => self.plan_response(),
             "acceptance-tests" => self.acceptance_tests_response(),
             "red" => self.red_response(),
@@ -200,6 +244,8 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
             "validate" => self.validate_response(),
             "refactor" => self.refactor_response(),
             "update-docs" => self.update_docs_response(),
+            "prompting" => self.prompting_response(),
+            "reproduce" => self.reproduce_response(),
             _ => self.plan_response(),
         }
     }
@@ -242,6 +288,58 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
             multi_select: false,
             allow_other: false,
         }]
+    }
+
+    fn reproduce_questions() -> Vec<ClarificationQuestion> {
+        vec![
+            ClarificationQuestion {
+                header: "Question 1".to_string(),
+                question: "What environment does the bug occur in?".to_string(),
+                options: vec![
+                    QuestionOption {
+                        label: "Production".to_string(),
+                        description: "Live environment".to_string(),
+                    },
+                    QuestionOption {
+                        label: "Development".to_string(),
+                        description: "Local dev server".to_string(),
+                    },
+                ],
+                multi_select: false,
+                allow_other: true,
+            },
+            ClarificationQuestion {
+                header: "Question 2".to_string(),
+                question: "Is the bug reproducible consistently?".to_string(),
+                options: vec![
+                    QuestionOption {
+                        label: "Always".to_string(),
+                        description: "Every time".to_string(),
+                    },
+                    QuestionOption {
+                        label: "Sometimes".to_string(),
+                        description: "Intermittent".to_string(),
+                    },
+                    QuestionOption {
+                        label: "Rare".to_string(),
+                        description: "Hard to trigger".to_string(),
+                    },
+                ],
+                multi_select: false,
+                allow_other: false,
+            },
+        ]
+    }
+
+    fn reproduce_response(&self) -> InvokeResponse {
+        InvokeResponse {
+            output: "**[Stub]** Reproduction confirmed.\nTest added to verify the fix.".to_string(),
+            exit_code: 0,
+            session_id: None,
+            questions: vec![],
+            raw_stream: None,
+            stderr: None,
+        }
     }
 
     fn fail_parse_response(&self, _goal_id: &GoalId) -> InvokeResponse {
@@ -362,6 +460,22 @@ impl CodingBackend for StubBackend {
             });
         }
 
+        if request.goal_id.as_str() == "reproduce"
+            && !has_answers
+            && !prompt.contains(SKIP_QUESTIONS)
+        {
+            log::debug!("[stub] reproduce: returning bug triage questions (no submit)");
+            emit_agent_exited(&request, 0);
+            return Ok(InvokeResponse {
+                output: "Gathering details about the bug.".to_string(),
+                exit_code: 0,
+                session_id: None,
+                questions: Self::reproduce_questions(),
+                raw_stream: None,
+                stderr: None,
+            });
+        }
+
         if prompt.contains(SLOW) {
             log::debug!("[stub] SLOW: sleeping 50ms");
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -369,6 +483,11 @@ impl CodingBackend for StubBackend {
 
         log::debug!("[stub] returning response_for_goal {}", request.goal_id);
         let response = self.response_for_goal(&request.goal_id);
+        if request.agent_output {
+            if let Some(ref sink) = request.agent_output_sink {
+                sink.emit(&response.output);
+            }
+        }
         emit_agent_exited(&request, response.exit_code);
         Ok(response)
     }

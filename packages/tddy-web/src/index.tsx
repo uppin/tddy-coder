@@ -1,5 +1,5 @@
 import "./index.css";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
@@ -45,6 +45,25 @@ import { AuthCallback } from "./components/AuthCallback";
 import { UserAvatar } from "./components/UserAvatar";
 import { Button } from "./components/ui/button";
 import { ConnectionScreen } from "./components/ConnectionScreen";
+import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
+import { parseTerminalSessionIdFromPathname } from "./routing/appRoutes";
+
+function usePathname(): [string, (path: string) => void] {
+  const [path, setPath] = useState(
+    () => (typeof window !== "undefined" ? window.location.pathname : "/")
+  );
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  const navigate = useCallback((to: string) => {
+    if (typeof window === "undefined") return;
+    window.history.pushState(null, "", to);
+    setPath(to);
+  }, []);
+  return [path, navigate];
+}
 
 function getParamsFromUrl(): { url: string; identity: string; roomName: string; debugLogging: boolean } {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
@@ -175,7 +194,6 @@ function ConnectedTerminal({
             onDisconnect={onDisconnect}
             onTerminate={onTerminate}
             fullscreenTargetRef={fullscreenTargetRef}
-            onStopInterrupt={() => {}}
           />
         </div>
       </div>
@@ -329,7 +347,7 @@ function ConnectionForm() {
 }
 
 export function App() {
-  const path = typeof window !== "undefined" ? window.location.pathname : "/";
+  const [path, navigate] = usePathname();
   const [appConfig, setAppConfig] = useState<{
     daemonMode: boolean | null;
     livekitUrl?: string;
@@ -357,6 +375,14 @@ export function App() {
 
   const daemonMode = appConfig.daemonMode;
 
+  // Standalone mode uses query params for LiveKit fields, not `/terminal/:id`. Strip misleading paths.
+  useEffect(() => {
+    if (daemonMode !== false || typeof window === "undefined") return;
+    if (parseTerminalSessionIdFromPathname(window.location.pathname) !== null) {
+      window.history.replaceState(null, "", "/");
+    }
+  }, [daemonMode]);
+
   return (
     <>
       {path === "/auth/callback" ? (
@@ -364,7 +390,15 @@ export function App() {
       ) : daemonMode === null ? (
         <div style={{ padding: 24 }}>Loading…</div>
       ) : daemonMode === true ? (
-        <ConnectionScreen livekitUrl={appConfig.livekitUrl} commonRoom={appConfig.commonRoom} />
+        path === "/worktrees" ? (
+          <WorktreesAppPage onNavigate={navigate} />
+        ) : (
+          <ConnectionScreen
+            livekitUrl={appConfig.livekitUrl}
+            commonRoom={appConfig.commonRoom}
+            onNavigate={navigate}
+          />
+        )
       ) : (
         <ConnectionForm />
       )}

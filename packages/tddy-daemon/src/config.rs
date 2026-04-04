@@ -49,6 +49,9 @@ pub struct DaemonConfig {
     /// and ConnectSession use `daemon-{instance_id}-{session_id}` as LiveKit server identity.
     #[serde(default)]
     pub daemon_instance_id: Option<String>,
+    /// Optional Telegram bot notifications (see `telegram_notifier` module).
+    #[serde(default)]
+    pub telegram: Option<TelegramConfig>,
 }
 
 impl Default for DaemonConfig {
@@ -67,8 +70,20 @@ impl Default for DaemonConfig {
             spawn_mouse: true,
             spawn_worker_request_timeout_secs: default_spawn_worker_request_timeout_secs(),
             daemon_instance_id: None,
+            telegram: None,
         }
     }
+}
+
+/// Telegram Bot API integration (teloxide). Loaded from daemon YAML under `telegram:`.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TelegramConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub bot_token: String,
+    #[serde(default)]
+    pub chat_ids: Vec<i64>,
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize)]
@@ -171,6 +186,177 @@ impl DaemonConfig {
     pub fn spawn_worker_request_timeout(&self) -> Duration {
         let secs = self.spawn_worker_request_timeout_secs.max(1);
         Duration::from_secs(secs)
+    }
+
+    /// Merge Telegram settings from process environment (after YAML load).
+    ///
+    /// Variables:
+    /// - `TDDY_TELEGRAM_BOT_TOKEN` — Bot API token; when set, assigns the token. If there was no
+    ///   `telegram:` block in YAML, a new block is created.
+    /// - `TDDY_TELEGRAM_CHAT_IDS` — Comma-separated chat ids (e.g. `-1001234567890,123456`).
+    /// - `TDDY_TELEGRAM_ENABLED` — `true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off` (case-insensitive).
+    ///
+    /// When a new `telegram` block is created solely because `TDDY_TELEGRAM_BOT_TOKEN` is set,
+    /// `enabled` defaults to `true` unless `TDDY_TELEGRAM_ENABLED` is set. When merging into an
+    /// existing YAML `telegram` block, `enabled` is not changed by the token alone (set
+    /// `TDDY_TELEGRAM_ENABLED` explicitly).
+    pub fn apply_telegram_env_overrides(&mut self) {
+        let bot_token = non_empty_env("TDDY_TELEGRAM_BOT_TOKEN");
+        let chat_ids_csv = non_empty_env("TDDY_TELEGRAM_CHAT_IDS");
+        let enabled = non_empty_env("TDDY_TELEGRAM_ENABLED");
+        merge_telegram_env(
+            self,
+            bot_token.as_deref(),
+            chat_ids_csv.as_deref(),
+            enabled.as_deref(),
+        );
+    }
+}
+
+fn non_empty_env(name: &str) -> Option<String> {
+    std::env::var(name).ok().and_then(|s| {
+        let t = s.trim();
+        if t.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
+    })
+}
+
+fn parse_chat_ids_csv(s: &str) -> Result<Vec<i64>, ()> {
+    let mut out = Vec::new();
+    for part in s.split(',') {
+        let p = part.trim();
+        if p.is_empty() {
+            continue;
+        }
+        let n: i64 = p.parse().map_err(|_| ())?;
+        out.push(n);
+    }
+    Ok(out)
+}
+
+fn parse_env_bool(s: &str) -> Option<bool> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn merge_telegram_env(
+    config: &mut DaemonConfig,
+    bot_token: Option<&str>,
+    chat_ids_csv: Option<&str>,
+    enabled: Option<&str>,
+) {
+    if bot_token.is_none() && chat_ids_csv.is_none() && enabled.is_none() {
+        return;
+    }
+
+    let mut created_from_env_token = false;
+    if config.telegram.is_none() {
+        if bot_token.is_none() {
+            if chat_ids_csv.is_some() || enabled.is_some() {
+                log::warn!(
+                    target: "tddy_daemon::config",
+                    "telegram: set TDDY_TELEGRAM_BOT_TOKEN or add a `telegram:` block to the config file before using TDDY_TELEGRAM_CHAT_IDS / TDDY_TELEGRAM_ENABLED"
+                );
+            }
+            return;
+        }
+        created_from_env_token = true;
+        config.telegram = Some(TelegramConfig {
+            enabled: false,
+            bot_token: String::new(),
+            chat_ids: Vec::new(),
+        });
+    }
+
+    let tg = config.telegram.as_mut().expect("telegram just ensured");
+
+    if let Some(t) = bot_token {
+        tg.bot_token = t.trim().to_string();
+    }
+
+    if let Some(csv) = chat_ids_csv {
+        match parse_chat_ids_csv(csv) {
+            Ok(ids) if !ids.is_empty() => tg.chat_ids = ids,
+            Ok(_) => {}
+            Err(()) => log::warn!(
+                target: "tddy_daemon::config",
+                "TDDY_TELEGRAM_CHAT_IDS: expected comma-separated integers, ignoring"
+            ),
+        }
+    }
+
+    if let Some(e) = enabled {
+        match parse_env_bool(e) {
+            Some(b) => tg.enabled = b,
+            None => log::warn!(
+                target: "tddy_daemon::config",
+                "TDDY_TELEGRAM_ENABLED: expected true/false/1/0/yes/no/on/off, ignoring"
+            ),
+        }
+    } else if bot_token.is_some() && created_from_env_token {
+        tg.enabled = true;
+    }
+}
+
+#[cfg(test)]
+mod telegram_env_tests {
+    use super::*;
+
+    #[test]
+    fn token_from_env_creates_telegram_and_enables_by_default() {
+        let mut c = DaemonConfig::default();
+        merge_telegram_env(&mut c, Some("tok"), None, None);
+        let tg = c.telegram.as_ref().expect("telegram");
+        assert_eq!(tg.bot_token, "tok");
+        assert!(tg.enabled);
+        assert!(tg.chat_ids.is_empty());
+    }
+
+    #[test]
+    fn token_override_on_existing_yaml_does_not_auto_enable() {
+        let mut c = DaemonConfig {
+            telegram: Some(TelegramConfig {
+                enabled: false,
+                bot_token: "old".to_string(),
+                chat_ids: vec![1],
+            }),
+            ..Default::default()
+        };
+        merge_telegram_env(&mut c, Some("new"), None, None);
+        let tg = c.telegram.as_ref().expect("telegram");
+        assert_eq!(tg.bot_token, "new");
+        assert!(!tg.enabled);
+        assert_eq!(tg.chat_ids, vec![1]);
+    }
+
+    #[test]
+    fn chat_ids_from_env_merge_into_existing_block() {
+        let mut c = DaemonConfig {
+            telegram: Some(TelegramConfig {
+                enabled: true,
+                bot_token: "t".to_string(),
+                chat_ids: vec![1],
+            }),
+            ..Default::default()
+        };
+        merge_telegram_env(&mut c, None, Some("-100, 42"), None);
+        let tg = c.telegram.as_ref().expect("telegram");
+        assert_eq!(tg.chat_ids, vec![-100, 42]);
+    }
+
+    #[test]
+    fn enabled_false_disables_even_when_created_from_env_token() {
+        let mut c = DaemonConfig::default();
+        merge_telegram_env(&mut c, Some("tok"), None, Some("false"));
+        let tg = c.telegram.as_ref().expect("telegram");
+        assert_eq!(tg.bot_token, "tok");
+        assert!(!tg.enabled);
     }
 }
 

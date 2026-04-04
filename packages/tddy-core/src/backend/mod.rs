@@ -389,18 +389,28 @@ pub fn workflow_recipe_selection_question() -> ClarificationQuestion {
                 label: "Bugfix".to_string(),
                 description: "Reproduce → fix workflow".to_string(),
             },
+            QuestionOption {
+                label: "Free prompting".to_string(),
+                description: "Open-ended agent loop without PRD/TDD gates".to_string(),
+            },
+            QuestionOption {
+                label: "Grill me".to_string(),
+                description: "Grill (questions) then Create plan (grill-me-brief.md)".to_string(),
+            },
         ],
         multi_select: false,
         allow_other: false,
     }
 }
 
-/// Map a [`workflow_recipe_selection_question`] option label to CLI recipe name (`tdd` / `bugfix`).
+/// Map a [`workflow_recipe_selection_question`] option label to CLI recipe name.
 #[must_use]
 pub fn recipe_cli_name_from_selection_label(label: &str) -> Option<&'static str> {
     match label {
         "TDD" => Some("tdd"),
         "Bugfix" => Some("bugfix"),
+        "Free prompting" => Some("free-prompting"),
+        "Grill me" => Some("grill-me"),
         _ => None,
     }
 }

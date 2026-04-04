@@ -2,6 +2,35 @@
 
 Release note history for the Web product area.
 
+## 2026-04-04 — Worktrees manager (library + RPC + UI)
+
+- **`tddy-daemon`**: **`worktrees`** module — **`git worktree list`** parsing, **`WorktreeStatsCache`** with JSON persistence under **`TDDY_PROJECTS_STATS_ROOT`** (default **`~/.tddy/projects`**), lexical path policy, **`git worktree remove`** for non-primary trees listed by Git. **ConnectionService** exposes **`ListWorktreesForProject`** and **`RemoveWorktree`** (tests **`worktrees_acceptance`**, **`worktrees_rpc`**).
+- **`tddy-service` / proto**: **`WorktreeRow`**, **`ListWorktreesForProject`**, **`RemoveWorktree`** on **`ConnectionService`**.
+- **`tddy-web`**: **`WorktreesAppPage`** loads projects/daemons, **Refresh stats**, table rows, and delete via Connect; **`WorktreesScreen`** (stale hint, empty state). Cypress **`WorktreesScreen.cy.tsx`** (mocked rows).
+- **Feature docs**: [worktrees.md](worktrees.md); [web-terminal.md](web-terminal.md#worktrees-manager-scaffolding). Package: [worktrees.md](../../../packages/tddy-daemon/docs/worktrees.md).
+
+## 2026-04-04 — Daemon URL routes: `/terminal/{sessionId}`, SPA fallback, standalone cleanup
+
+- **tddy-web**: **`appRoutes`** helpers (`/terminal/:id`, `/`, `/auth/callback`). **`ConnectionScreen`** (daemon mode) **pushes** the terminal path after Start/Connect/Resume, **replaces** with `/` on Disconnect, handles **popstate** for Back, deep-link attach on load, and unknown-session UI. **`App`** (standalone) **replaces** a stray **`/terminal/...`** URL with **`/`** so standalone keeps the query-param connect model.
+- **tddy-coder**: **`web_bundle_acceptance`** asserts **`GET /terminal/...`** returns the SPA **`index.html`** (same stack as **`serve_web_bundle`** SPA fallback).
+- **Feature docs**: [web-terminal.md](web-terminal.md) (URL routes — daemon mode).
+
+## 2026-04-03 — Interrupt: TUI Stop pane; web Stop button removed
+
+- **tddy-web**: **`ConnectionTerminalChrome`** no longer renders a bottom-right **Stop** button or **`onStopInterrupt`**. Interrupt is the ratatui **Stop** pane (red **U+25A0**) beside the Enter strip; the browser forwards SGR mouse to the virtual TUI (same **0x03** path as **Ctrl+C**).
+- **Feature docs**: [web-terminal.md](web-terminal.md) (Connection chrome); [TUI Stop control](../coder/tui-status-bar.md#mouse-mode-stop-control).
+
+## 2026-04-03 — Web terminal documentation: TUI mouse Enter affordance
+
+- **Docs**: [web-terminal.md](web-terminal.md) (**Connected Terminal UX**) describes the **three-column** Enter affordance to the right of the prompt (starts below the status bar; box drawing + **U+23CE** on the first prompt text row), aligned with [TUI status bar — mouse mode](../coder/tui-status-bar.md#mouse-mode-enter-control).
+
+## 2026-04-03 — Session workflow files, project/worktree matching, delete hardening
+
+- **`connection.proto`**: **`ListSessionWorkflowFiles`** and **`ReadSessionWorkflowFile`** on **`ConnectionService`** for allowlisted workflow artifacts under the daemon-resolved session directory.
+- **tddy-daemon**: Allowlisted listing and UTF-8 reads (**`session_workflow_files`**, tests **`session_workflow_files_rpc`**). **`sessions_base`** for mapped users is the Tddy data root (**`~/.tddy`**), aligning RPC paths with **`tddy-coder`** session directories. **`DeleteSession`** stops a live tool process when needed, then removes the session directory; directories without readable **`.session.yaml`** can still be removed when the path is valid.
+- **tddy-web**: **`SessionWorkflowFilesModal`** loads list/read RPCs; **`SessionMoreActionsMenu`** → **Show files**; **`SessionFilesPanel`** + **`sessionWorkflowPreview`**. Cypress **`SessionWorkflowFiles.cy.tsx`**; Bun tests for preview and **`sessionProjectTable`** (unscoped sessions match a project when **`repoPath`** equals **`mainRepoPath`** or sits under it—longest-prefix wins). **Delete** (trash) is available for **active** and **inactive** rows; confirmation copy describes stop-then-delete.
+- **Feature docs**: [web-terminal.md](web-terminal.md); [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md).
+
 ## 2026-03-29 — Connection screen: backend options from `ListAgents`
 
 - **ConnectionScreen**: **Backend** (per project) is populated from **`ListAgents`**; option values are agent **`id`** strings from daemon **`allowed_agents`**, with labels from the RPC (blank optional labels resolve to **`id`** on the server). **Start New Session** requires a selected backend when the list is non-empty. The default selection is the first RPC entry unless a stored choice for that project still exists in the list.

@@ -32,9 +32,14 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Worktree (`worktree.rs`)
 
-- **setup_worktree_for_session**: Fetches `origin/master`, creates a git worktree from that ref, updates changeset with `worktree`, `branch`, `repo_path`. Used by TUI and daemon after plan approval.
-- **fetch_origin_master**: Runs `git fetch origin master`; failure is a hard error (no fallback).
-- **create_worktree**: Creates worktree with optional `start_point` (e.g. `origin/master`). Worktrees live in `.worktrees/` relative to repo root.
+- **DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF**: `origin/master` — effective integration base for legacy project registry rows without `main_branch_ref`.
+- **validate_integration_base_ref**: Accepts only `origin/<single-branch-segment>` refs; rejects empty, multi-segment paths, whitespace, and characters that could widen `git` invocation beyond a single branch argument.
+- **fetch_integration_base**: Runs `git fetch origin <branch>` for a validated integration base ref.
+- **resolve_default_integration_base_ref**: Runs `git fetch origin`, then prefers `origin/master` if present, else `origin/main`, else follows `refs/remotes/origin/HEAD` when it resolves to a valid `origin/<branch>`.
+- **setup_worktree_for_session_with_integration_base**: Fetches the given integration base ref, creates a worktree from that ref via **create_worktree** / retry helper, updates changeset with `worktree`, `branch`, `repo_path`.
+- **setup_worktree_for_session**: Resolves the default integration base ref, then calls **setup_worktree_for_session_with_integration_base**. Used by TUI and daemon after plan approval when no explicit ref is passed at this API layer.
+- **fetch_origin_master**: Equivalent to **fetch_integration_base** with **DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF**.
+- **create_worktree**: Creates worktree with optional `start_point` (remote-tracking ref). Worktrees live in `.worktrees/` relative to repo root.
 - **ensure_worktree_for_acceptance_tests**: Uses `output_dir` from context (must be main repo root). When `backend_name == "stub"` (demo), skips worktree creation and uses `output_dir` directly. Otherwise calls `find_git_root(&output_dir)` to locate `.git`; fallback to `output_dir.parent()`. After creation, `cs.repo_path` is overwritten with worktree path; later goals use `worktree_dir`.
 
 **Repo root resolution** (where `output_dir`/`repo_path` comes from):

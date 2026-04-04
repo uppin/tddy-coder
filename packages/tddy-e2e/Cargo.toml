@@ -21,6 +21,7 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit", optional = true }
 tddy-service = { path = "../tddy-service" }
 tddy-tui = { path = "../tddy-tui" }
+tddy-tui-testkit = { path = "../tddy-tui-testkit" }
 anyhow = "1"
 env_logger = "0.11"
 log = "0.4"
@@ -33,7 +34,6 @@ strip-ansi-escapes = "0.2"
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.29"
 futures-util = "0.3"
-vt100 = "0.15"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 async-stream = "0.3"

@@ -9,14 +9,13 @@ use crate::parser::{
     parse_update_docs_response, parse_validate_subagents_response, PlanningOutput,
 };
 use crate::tdd::{
-    acceptance_tests, demo, evaluate, green, red, refactor, update_docs, validate_subagents,
+    acceptance_tests, demo, evaluate, red, refactor, update_docs, validate_subagents,
 };
 use crate::writer::{
     update_acceptance_tests_file, update_progress_file, write_acceptance_tests_file,
     write_artifacts, write_demo_results_file, write_evaluation_report, write_progress_file,
     write_red_output_file,
 };
-use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -24,12 +23,11 @@ use std::sync::Arc;
 
 use tddy_core::backend::{AgentOutputSink, ProgressSink};
 use tddy_core::changeset::{
-    append_session_and_update_state, get_session_for_tag, read_changeset, resolve_model,
-    update_state, write_changeset, Changeset, SessionEntry,
+    append_session_and_update_state, read_changeset, resolve_model, update_state, write_changeset,
+    Changeset, SessionEntry,
 };
 use tddy_core::error::WorkflowError;
 use tddy_core::presenter::WorkflowEvent;
-use tddy_core::setup_worktree_for_session;
 use tddy_core::stream::ProgressEvent as StreamProgressEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::ElicitationEvent;
@@ -38,36 +36,10 @@ use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::recipe::WorkflowRecipe;
 
 use crate::SessionArtifactManifest;
+use tddy_core::workflow::prepend_context_header;
 use tddy_core::workflow::task::TaskResult;
-use tddy_core::workflow::{find_git_root, prepend_context_header};
 
-/// Read primary planning document bytes using recipe basename and migration-aware resolution.
-fn read_primary_session_document(
-    session_dir: &Path,
-    manifest: &dyn SessionArtifactManifest,
-) -> Result<String, Box<dyn Error + Send + Sync>> {
-    let bn = manifest
-        .primary_document_basename()
-        .ok_or("recipe has no primary session document key (prd) in manifest")?;
-    let path =
-        tddy_workflow::resolve_existing_session_artifact(session_dir, &bn).ok_or_else(|| {
-            format!(
-                "primary planning document ({}) not found under {:?}",
-                bn, session_dir
-            )
-        })?;
-    log::debug!("[tdd hooks] read_primary_session_document: {:?}", path);
-    std::fs::read_to_string(&path)
-        .map_err(|e| format!("read primary planning document {}: {}", path.display(), e).into())
-}
-
-fn read_primary_session_document_optional(
-    session_dir: &Path,
-    manifest: &dyn SessionArtifactManifest,
-) -> Option<String> {
-    let bn = manifest.primary_document_basename()?;
-    tddy_workflow::read_session_artifact_utf8(session_dir, &bn)
-}
+use super::hooks_common;
 
 /// Hooks for the TDD workflow. Handles file I/O. Event emission for TUI when event_tx is set.
 pub struct TddWorkflowHooks {
@@ -115,130 +87,15 @@ impl TddWorkflowHooks {
     }
 }
 
-/// Active agent CLI thread id from `changeset.yaml`: `state.session_id`, else tagged `impl`
-/// session, else `.impl-session` (same rules as `before_green`).
-fn recipe_default_models_str(recipe: &dyn WorkflowRecipe) -> BTreeMap<String, String> {
-    recipe
-        .default_models()
-        .into_iter()
-        .map(|(k, v)| (k.as_str().to_string(), v))
-        .collect()
-}
-
-fn resolve_agent_session_id(session_dir: &Path) -> Result<String, Box<dyn Error + Send + Sync>> {
-    let changeset =
-        read_changeset(session_dir).map_err(|e| -> Box<dyn Error + Send + Sync> { Box::new(e) })?;
-    changeset
-        .state
-        .session_id
-        .clone()
-        .or_else(|| get_session_for_tag(&changeset, "impl"))
-        .or_else(|| {
-            std::fs::read_to_string(session_dir.join(".impl-session"))
-                .ok()
-                .map(|s| s.trim().to_string())
-        })
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| -> Box<dyn Error + Send + Sync> {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "agent session id missing: need changeset.state.session_id, impl session, or .impl-session",
-            ))
-        })
-}
-
-fn before_plan(context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
-    use super::session_dir_resolve::resolve_existing_session_dir_for_plan;
-    let dir: PathBuf = resolve_existing_session_dir_for_plan(context).map_err(|e| {
-        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
-            as Box<dyn Error + Send + Sync>
-    })?;
-    context.set_sync("session_dir", dir.clone());
-    // Create changeset if missing (directory must already exist; entry layer creates the tree).
-    if read_changeset(&dir).is_err() {
-        let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
-        let repo_path = context
-            .get_sync::<PathBuf>("output_dir")
-            .map(|p| p.display().to_string());
-        let init_cs = Changeset {
-            initial_prompt: Some(feature_input),
-            repo_path,
-            ..Changeset::default()
-        };
-        let _ = write_changeset(&dir, &init_cs);
-    }
-    let mut cs = read_changeset(&dir).map_err(|e| e.to_string())?;
-    update_state(&mut cs, WorkflowState::new("Planning"));
-    let _ = write_changeset(&dir, &cs);
-    Ok(())
-}
-
-/// Ensure worktree exists before acceptance-tests. Creates from origin/master if needed.
-/// Sets worktree_dir in context; sends WorktreeSwitched when event_tx is set.
-/// Skips worktree creation for stub backend (demo): uses output_dir directly.
-fn ensure_worktree_for_acceptance_tests(
-    session_dir: &Path,
-    context: &Context,
-    event_tx: Option<&mpsc::Sender<WorkflowEvent>>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    if context.get_sync::<PathBuf>("worktree_dir").is_some() {
-        return Ok(());
-    }
-    let cs = read_changeset(session_dir).map_err(|e| e.to_string())?;
-    if let Some(ref wt) = cs.worktree {
-        context.set_sync("worktree_dir", PathBuf::from(wt));
-        return Ok(());
-    }
-    let output_dir: PathBuf = context
-        .get_sync("output_dir")
-        .ok_or("output_dir required for worktree creation")?;
-
-    let backend_name = context
-        .get_sync::<String>("backend_name")
-        .unwrap_or_default();
-    if backend_name == "stub" {
-        log::debug!(
-            "[tddy-core] acceptance-tests: stub backend, using output_dir as worktree (no git fetch)"
-        );
-        context.set_sync("worktree_dir", output_dir.clone());
-        if let Some(tx) = event_tx {
-            let _ = tx.send(WorkflowEvent::WorktreeSwitched { path: output_dir });
-        }
-        return Ok(());
-    }
-
-    let repo_root = find_git_root(&output_dir);
-    match setup_worktree_for_session(&repo_root, session_dir) {
-        Ok(worktree_path) => {
-            context.set_sync("worktree_dir", worktree_path.clone());
-            if let Some(tx) = event_tx {
-                let _ = tx.send(WorkflowEvent::WorktreeSwitched {
-                    path: worktree_path,
-                });
-            }
-            Ok(())
-        }
-        Err(e) => {
-            log::error!(
-                "[tddy-core] worktree creation failed: repo_root={:?}, session_dir={:?}, error={}",
-                repo_root,
-                session_dir,
-                e
-            );
-            Err(format!("worktree creation failed: {}", e).into())
-        }
-    }
-}
-
 fn before_acceptance_tests(
     session_dir: &Path,
     context: &Context,
     recipe: &dyn WorkflowRecipe,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let prd = read_primary_session_document(session_dir, manifest)?;
+    let prd = hooks_common::read_primary_session_document(session_dir, manifest)?;
     let changeset = read_changeset(session_dir).map_err(|e| e.to_string())?;
-    let defaults = recipe_default_models_str(recipe);
+    let defaults = hooks_common::recipe_default_models_str(recipe);
     let model = resolve_model(
         Some(&changeset),
         "acceptance-tests",
@@ -270,7 +127,11 @@ fn before_acceptance_tests(
     context.set_sync("model", model);
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("AcceptanceTesting"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(
+            session_dir,
+            &cs,
+            "before_acceptance_tests AcceptanceTesting",
+        );
     }
     Ok(())
 }
@@ -281,11 +142,11 @@ fn before_red(
     recipe: &dyn WorkflowRecipe,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let prd = read_primary_session_document(session_dir, manifest)?;
+    let prd = hooks_common::read_primary_session_document(session_dir, manifest)?;
     let at = std::fs::read_to_string(session_dir.join("acceptance-tests.md"))
         .map_err(|e| format!("read acceptance-tests.md: {}", e))?;
     let changeset = read_changeset(session_dir).ok();
-    let defaults = recipe_default_models_str(recipe);
+    let defaults = hooks_common::recipe_default_models_str(recipe);
     let model = resolve_model(
         changeset.as_ref(),
         "red",
@@ -316,65 +177,7 @@ fn before_red(
     context.set_sync("is_resume", false);
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("RedTesting"));
-        let _ = write_changeset(session_dir, &cs);
-    }
-    Ok(())
-}
-
-fn before_green(
-    session_dir: &Path,
-    context: &Context,
-    recipe: &dyn WorkflowRecipe,
-    manifest: &dyn SessionArtifactManifest,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let progress = std::fs::read_to_string(session_dir.join("progress.md"))
-        .map_err(|e| format!("read progress.md: {}", e))?;
-    let prd = read_primary_session_document_optional(session_dir, manifest);
-    let at = std::fs::read_to_string(session_dir.join("acceptance-tests.md")).ok();
-    let changeset = read_changeset(session_dir).ok();
-    let new_agent_session = context
-        .get_sync::<bool>("new_agent_session")
-        .unwrap_or(false);
-    if new_agent_session {
-        context.remove_sync("session_id");
-        context.set_sync("is_resume", false);
-    } else {
-        let session_id = resolve_agent_session_id(session_dir).map_err(|e| {
-            format!(
-                "green requires changeset with state.session_id, impl session, or .impl-session file: {}",
-                e
-            )
-        })?;
-        context.set_sync("session_id", session_id);
-        context.set_sync("is_resume", true);
-    }
-    let defaults = recipe_default_models_str(recipe);
-    let model = resolve_model(
-        changeset.as_ref(),
-        "green",
-        context.get_sync::<String>("model").as_deref(),
-        Some(&defaults),
-    );
-    let run_optional_step_x = context
-        .get_sync::<bool>("run_optional_step_x")
-        .unwrap_or(false);
-    log::debug!(
-        target: "tddy_workflow_recipes::tdd::hooks",
-        "before_green: run_optional_step_x={} new_agent_session={}",
-        run_optional_step_x, new_agent_session
-    );
-    let answers: Option<String> = context.get_sync("answers");
-    let prompt = match &answers {
-        Some(a) => green::build_followup_prompt(&progress, a, prd.as_deref(), at.as_deref()),
-        None => green::build_prompt(&progress, prd.as_deref(), at.as_deref()),
-    };
-    context.set_sync("prompt", prompt);
-    context.set_sync("system_prompt", green::system_prompt(run_optional_step_x));
-    context.set_sync("session_dir", session_dir.to_path_buf());
-    context.set_sync("model", model);
-    if let Ok(mut cs) = read_changeset(session_dir) {
-        update_state(&mut cs, WorkflowState::new("GreenImplementing"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "before_red RedTesting");
     }
     Ok(())
 }
@@ -386,7 +189,7 @@ fn before_demo(session_dir: &Path, context: &Context) -> Result<(), Box<dyn Erro
         "Execute the demo described in demo-plan.md:\n\n{}",
         demo_plan
     );
-    let session_id = resolve_agent_session_id(session_dir)?;
+    let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", demo::system_prompt());
     context.set_sync("session_dir", session_dir.to_path_buf());
@@ -394,7 +197,7 @@ fn before_demo(session_dir: &Path, context: &Context) -> Result<(), Box<dyn Erro
     context.set_sync("is_resume", true);
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("DemoRunning"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "before_demo DemoRunning");
     }
     Ok(())
 }
@@ -405,10 +208,10 @@ fn before_evaluate(
     _recipe: &dyn WorkflowRecipe,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let prd = read_primary_session_document_optional(session_dir, manifest);
+    let prd = hooks_common::read_primary_session_document_optional(session_dir, manifest);
     let changeset_raw = std::fs::read_to_string(session_dir.join("changeset.yaml")).ok();
     let prompt = evaluate::build_prompt(prd.as_deref(), changeset_raw.as_deref());
-    let session_id = resolve_agent_session_id(session_dir)?;
+    let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", evaluate::system_prompt());
     context.set_sync("session_dir", session_dir.to_path_buf());
@@ -418,7 +221,7 @@ fn before_evaluate(
     // e.g. GreenComplete → next "demo" while the evaluate goal is actually running.
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("Evaluating"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "before_evaluate Evaluating");
     }
     Ok(())
 }
@@ -430,7 +233,7 @@ fn before_validate(
     let eval_report = std::fs::read_to_string(session_dir.join("evaluation-report.md"))
         .map_err(|e| format!("read evaluation-report.md: {}", e))?;
     let prompt = validate_subagents::build_prompt(&eval_report);
-    let session_id = resolve_agent_session_id(session_dir)?;
+    let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", validate_subagents::system_prompt());
     context.set_sync("session_dir", session_dir.to_path_buf());
@@ -438,7 +241,7 @@ fn before_validate(
     context.set_sync("is_resume", true);
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("Validating"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "before_validate Validating");
     }
     Ok(())
 }
@@ -450,7 +253,7 @@ fn before_refactor(
     let refactor_plan = std::fs::read_to_string(session_dir.join("refactoring-plan.md"))
         .map_err(|e| format!("read refactoring-plan.md: {}", e))?;
     let prompt = refactor::build_prompt(&refactor_plan);
-    let session_id = resolve_agent_session_id(session_dir)?;
+    let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", refactor::system_prompt());
     context.set_sync("session_dir", session_dir.to_path_buf());
@@ -458,7 +261,7 @@ fn before_refactor(
     context.set_sync("is_resume", true);
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("Refactoring"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "before_refactor Refactoring");
     }
     Ok(())
 }
@@ -507,12 +310,12 @@ fn before_update_docs(
     }
     context.set_sync("system_prompt", system_prompt);
     context.set_sync("session_dir", session_dir.to_path_buf());
-    let session_id = resolve_agent_session_id(session_dir)?;
+    let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", true);
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("UpdatingDocs"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "before_update_docs UpdatingDocs");
     }
     Ok(())
 }
@@ -566,7 +369,7 @@ fn after_plan(
             Some("system-prompt-plan.md".to_string()),
         );
     }
-    let _ = write_changeset(session_dir, &cs);
+    hooks_common::write_changeset_logged(session_dir, &cs, "after_plan Planned");
     Ok(())
 }
 
@@ -597,7 +400,7 @@ fn after_acceptance_tests(
             None,
         );
     }
-    let _ = write_changeset(session_dir, &cs);
+    hooks_common::write_changeset_logged(session_dir, &cs, "after_acceptance_tests");
     Ok(())
 }
 
@@ -629,7 +432,7 @@ fn after_red(
             None,
         );
     }
-    let _ = write_changeset(session_dir, &cs);
+    hooks_common::write_changeset_logged(session_dir, &cs, "after_red");
     Ok(())
 }
 
@@ -643,7 +446,7 @@ fn after_green(session_dir: &Path, output: &str) -> Result<(), Box<dyn Error + S
     if parsed.all_tests_passing() {
         if let Ok(mut cs) = read_changeset(session_dir) {
             update_state(&mut cs, WorkflowState::new("GreenComplete"));
-            let _ = write_changeset(session_dir, &cs);
+            hooks_common::write_changeset_logged(session_dir, &cs, "after_green GreenComplete");
         }
     }
     Ok(())
@@ -654,7 +457,7 @@ fn after_evaluate(session_dir: &Path, output: &str) -> Result<(), Box<dyn Error 
     let _ = write_evaluation_report(session_dir, &parsed);
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("Evaluated"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "after_evaluate Evaluated");
     }
     Ok(())
 }
@@ -679,7 +482,7 @@ fn after_validate(session_dir: &Path, output: &str) -> Result<(), Box<dyn Error 
     }
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("ValidateComplete"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "after_validate ValidateComplete");
     }
     Ok(())
 }
@@ -688,7 +491,7 @@ fn after_refactor(session_dir: &Path, output: &str) -> Result<(), Box<dyn Error 
     let _ = parse_refactor_response(output).map_err(WorkflowError::ParseError)?;
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("RefactorComplete"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "after_refactor RefactorComplete");
     }
     Ok(())
 }
@@ -697,7 +500,7 @@ fn after_update_docs(session_dir: &Path, output: &str) -> Result<(), Box<dyn Err
     let _ = parse_update_docs_response(output).map_err(WorkflowError::ParseError)?;
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("DocsUpdated"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "after_update_docs DocsUpdated");
     }
     Ok(())
 }
@@ -705,7 +508,7 @@ fn after_update_docs(session_dir: &Path, output: &str) -> Result<(), Box<dyn Err
 fn after_demo(session_dir: &Path) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Ok(mut cs) = read_changeset(session_dir) {
         update_state(&mut cs, WorkflowState::new("DemoComplete"));
-        let _ = write_changeset(session_dir, &cs);
+        hooks_common::write_changeset_logged(session_dir, &cs, "after_demo DemoComplete");
     }
     Ok(())
 }
@@ -752,7 +555,11 @@ impl RunnerHooks for TddWorkflowHooks {
                             });
                         }
                         cs.state.session_id = Some(session_id.clone());
-                        let _ = write_changeset(dir, &cs);
+                        hooks_common::write_changeset_logged(
+                            dir,
+                            &cs,
+                            "progress_sink SessionStarted",
+                        );
                     }
                 }
             }
@@ -773,7 +580,7 @@ impl RunnerHooks for TddWorkflowHooks {
             let _ = tx.send(WorkflowEvent::GoalStarted(task_id.to_string()));
         }
         if task_id == "plan" {
-            before_plan(context)?;
+            hooks_common::before_plan(context)?;
         } else {
             let session_dir: Option<PathBuf> = context
                 .get_sync("session_dir")
@@ -785,10 +592,11 @@ impl RunnerHooks for TddWorkflowHooks {
 
             match task_id {
                 "acceptance-tests" => {
-                    ensure_worktree_for_acceptance_tests(
+                    hooks_common::ensure_worktree_for_session(
                         &session_dir,
                         context,
                         self.event_tx.as_ref(),
+                        "[tddy-core] acceptance-tests",
                     )?;
                     before_acceptance_tests(
                         &session_dir,
@@ -803,11 +611,12 @@ impl RunnerHooks for TddWorkflowHooks {
                     self.recipe.as_ref(),
                     self.manifest.as_ref(),
                 )?,
-                "green" => before_green(
+                "green" => hooks_common::before_green(
                     &session_dir,
                     context,
                     self.recipe.as_ref(),
                     self.manifest.as_ref(),
+                    "tddy_workflow_recipes::tdd::hooks",
                 )?,
                 "demo" => before_demo(&session_dir, context)?,
                 "evaluate" => before_evaluate(
@@ -983,7 +792,12 @@ impl RunnerHooks for TddWorkflowHooks {
         };
         let from = cs.state.current.to_string();
         update_state(&mut cs, WorkflowState::new("Failed"));
-        if write_changeset(dir, &cs).is_err() {
+        if let Err(e) = write_changeset(dir, &cs) {
+            log::warn!(
+                "[tdd hooks] on_error: could not persist Failed state: {} (session_dir={})",
+                e,
+                dir.display()
+            );
             return;
         }
         if let Some(ref tx) = self.event_tx {

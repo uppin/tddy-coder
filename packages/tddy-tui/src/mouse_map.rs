@@ -3,7 +3,7 @@
 //! Hit-tests against layout areas to determine which UI element was clicked.
 //! Scroll events adjust scroll offsets; clicks in dynamic_area map to option selection.
 
-use crossterm::event::{MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use tddy_core::{AppMode, UserIntent};
 
@@ -20,6 +20,113 @@ pub struct LayoutAreas {
     pub dynamic_area: Rect,
     pub status_bar: Rect,
     pub prompt_bar: Rect,
+    /// Single-row footer directly below the prompt text block (PRD: +1 bottom chrome row).
+    pub footer_bar: Rect,
+    /// Dedicated terminal region for the pointer Enter affordance (must not overlap [`prompt_bar`]).
+    pub enter_pane: Rect,
+    /// Dedicated terminal region for the pointer Stop affordance (to the right of Enter).
+    pub stop_pane: Rect,
+}
+
+/// Width in terminal cells of the pointer Enter affordance (see `enter_button_rect`). Height is
+/// computed from layout (see `enter_button_rect`): rows from below the status bar through prompt
+/// text and footer (excludes the prompt rule row when present).
+pub const ENTER_BUTTON_COLS: u16 = 3;
+/// Empty columns between the prompt text block and the Enter strip (to the right of prompt text).
+pub const ENTER_STRIP_MARGIN_COLS: u16 = 1;
+/// Width of the Stop strip (see [`stop_button_rect`]); matches Enter strip width.
+pub const STOP_BUTTON_COLS: u16 = 3;
+/// Empty columns between the Enter strip and the Stop strip.
+pub const STOP_STRIP_MARGIN_COLS: u16 = 1;
+/// Columns reserved for Enter margin + strip (see [`right_chrome_reserve_cols`]).
+pub const ENTER_RESERVE_COLS: u16 = ENTER_STRIP_MARGIN_COLS + ENTER_BUTTON_COLS;
+/// Extra columns when Stop is shown: margin + Stop strip.
+pub const STOP_EXTRA_RESERVE_COLS: u16 = STOP_STRIP_MARGIN_COLS + STOP_BUTTON_COLS;
+/// Legacy export: pre-footer overlay used two content rows for the ASCII frame. Actual hit target
+/// height is [`enter_button_rect`].`height` (prompt text + footer; status bar is excluded).
+pub const ENTER_BUTTON_ROWS: u16 = 2;
+
+/// **3 columns** wide: starts at the first row **below the status bar** (the separator band: empty
+/// row plus any debug rows above [`LayoutAreas::prompt_bar`]), then spans **prompt text** + **footer**.
+/// Placed to the right of the prompt text block with [`ENTER_STRIP_MARGIN_COLS`] gap. Does not cover
+/// the status bar itself. When the prompt chunk has more than one row, the bottom row is the
+/// horizontal rule (`U+2500`) and is **not** included in height. Matches
+/// [`crate::render::paint_enter_affordance`].
+pub fn enter_button_rect(areas: &LayoutAreas) -> Rect {
+    crate::red_phase::tddy_marker("M002", "mouse_map::enter_button_rect");
+    let sb = areas.status_bar;
+    let pb = areas.prompt_bar;
+    let fb = areas.footer_bar;
+    if pb.width < ENTER_BUTTON_COLS {
+        log::debug!("enter_button_rect: degenerate layout pb={pb:?} fb={fb:?} -> empty");
+        return Rect::new(0, 0, 0, 0);
+    }
+    let prompt_rows = if pb.height > 1 {
+        pb.height.saturating_sub(1)
+    } else {
+        pb.height
+    };
+    if prompt_rows == 0 && fb.height == 0 {
+        log::debug!("enter_button_rect: zero-height prompt+footer pb={pb:?} fb={fb:?} -> empty");
+        return Rect::new(0, 0, 0, 0);
+    }
+    let x = pb.x + pb.width + ENTER_STRIP_MARGIN_COLS;
+    let (y, h) = if sb.height > 0 {
+        let strip_top = sb.y.saturating_add(sb.height);
+        let above_prompt = pb.y.saturating_sub(strip_top);
+        let h = above_prompt
+            .saturating_add(prompt_rows)
+            .saturating_add(fb.height);
+        (strip_top, h)
+    } else {
+        let h = prompt_rows.saturating_add(fb.height);
+        (pb.y, h)
+    };
+    if h == 0 {
+        return Rect::new(0, 0, 0, 0);
+    }
+    log::trace!(
+        "enter_button_rect: x={x} y={y} w={} h={h} (from below status through prompt text+footer, excluding prompt rule row)",
+        ENTER_BUTTON_COLS
+    );
+    Rect::new(x, y, ENTER_BUTTON_COLS, h)
+}
+
+/// Right-hand chrome width: Enter strip only, or Enter + Stop when the terminal is wide enough
+/// (prompt keeps at least one column beside the full strip).
+#[must_use]
+pub fn right_chrome_reserve_cols(terminal_width: u16) -> u16 {
+    let full = ENTER_RESERVE_COLS.saturating_add(STOP_EXTRA_RESERVE_COLS);
+    if terminal_width > full {
+        full
+    } else {
+        ENTER_RESERVE_COLS
+    }
+}
+
+/// True when layout reserves space for both Enter and Stop (see [`right_chrome_reserve_cols`]).
+#[must_use]
+pub fn stop_affordance_active(terminal_width: u16) -> bool {
+    right_chrome_reserve_cols(terminal_width)
+        >= ENTER_RESERVE_COLS.saturating_add(STOP_EXTRA_RESERVE_COLS)
+}
+
+/// **3 columns** wide, immediately to the right of the Enter strip (with [`STOP_STRIP_MARGIN_COLS`]).
+/// Same vertical span as [`enter_button_rect`]. Empty when [`stop_affordance_active`] is false or Enter is omitted.
+pub fn stop_button_rect(areas: &LayoutAreas) -> Rect {
+    let term_w = areas.activity_log.width;
+    if !stop_affordance_active(term_w) {
+        return Rect::new(0, 0, 0, 0);
+    }
+    let enter = enter_button_rect(areas);
+    if enter.width == 0 || enter.height == 0 {
+        return Rect::new(0, 0, 0, 0);
+    }
+    let x = enter
+        .x
+        .saturating_add(enter.width)
+        .saturating_add(STOP_STRIP_MARGIN_COLS);
+    Rect::new(x, enter.y, STOP_BUTTON_COLS, enter.height)
 }
 
 /// Normalize mouse coordinates for local terminal (crossterm).
@@ -93,6 +200,12 @@ pub fn handle_mouse_event(
             }
             if rect_contains(&areas.dynamic_area, col, row) {
                 return click_dynamic_area(mode, view_state, areas, row);
+            }
+            if rect_contains(&enter_button_rect(areas), col, row) {
+                return click_enter_affordance(mode, view_state);
+            }
+            if rect_contains(&stop_button_rect(areas), col, row) {
+                return Some(UserIntent::Interrupt);
             }
         }
         _ => {}
@@ -170,8 +283,14 @@ fn click_dynamic_area(
             if option_idx >= max {
                 return None;
             }
+            let is_double_click = view_state.last_select_click_option == Some(option_idx);
             view_state.select_selected = option_idx;
-            None
+            view_state.last_select_click_option = Some(option_idx);
+            if is_double_click && option_idx < question.options.len() {
+                Some(UserIntent::AnswerSelect(option_idx))
+            } else {
+                None
+            }
         }
         AppMode::DocumentReview { .. } => {
             let header_lines = 1;
@@ -211,6 +330,11 @@ fn click_dynamic_area(
         }
         _ => None,
     }
+}
+
+fn click_enter_affordance(mode: &AppMode, view_state: &ViewState) -> Option<UserIntent> {
+    let enter = KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::empty(), KeyEventKind::Press);
+    crate::key_map::key_event_to_intent(enter, mode, view_state, false)
 }
 
 /// Plan approval footer: two stacked lines (Approve then Reject) like Select options, or one row
@@ -259,7 +383,10 @@ fn plan_approval_activity_footer_click(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::{layout_chunks_with_inbox, prompt_height, question_height};
+    use crate::layout::{
+        clarification_questions_top, layout_chunks_with_inbox, layout_chunks_with_inbox_maybe_top,
+        prompt_height, question_height,
+    };
     use crossterm::event::MouseButton;
     use ratatui::layout::Rect;
 
@@ -277,6 +404,9 @@ mod tests {
             dynamic_area: dynamic,
             status_bar: status,
             prompt_bar: prompt,
+            footer_bar: Rect::new(0, 24, 80, 0),
+            enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         }
     }
 
@@ -290,13 +420,16 @@ mod tests {
         let dynamic_h = question_height(&mode);
         let debug_h = 0u16;
         let prompt_h = 1u16;
-        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+        let (activity_log, _spacer, dynamic_area, status_bar, _gap, _debug, prompt_bar, footer_bar) =
             layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
         LayoutAreas {
             activity_log,
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
+            enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         }
     }
 
@@ -316,13 +449,16 @@ mod tests {
         let area_width = area.width;
         let max_height = (area.height / 3).max(1);
         let prompt_h = prompt_height(text_len, area_width, max_height);
-        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+        let (activity_log, _spacer, dynamic_area, status_bar, _gap, _debug, prompt_bar, footer_bar) =
             layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
         LayoutAreas {
             activity_log,
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
+            enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         }
     }
 
@@ -489,6 +625,243 @@ mod tests {
         );
     }
 
+    fn select_mode_fixture_80x24() -> (AppMode, LayoutAreas) {
+        select_mode_fixture_with_prompt_h(1u16)
+    }
+
+    fn select_mode_fixture_with_prompt_h(prompt_h: u16) -> (AppMode, LayoutAreas) {
+        let question = tddy_core::backend_selection_question();
+        let mode = AppMode::Select {
+            question,
+            question_index: 0,
+            total_questions: 1,
+            initial_selected: 0,
+        };
+        let area = Rect::new(0, 0, 80, 24);
+        let dynamic_h = question_height(&mode);
+        let questions_top = clarification_questions_top(&mode);
+        let (activity_log, _spacer, dynamic_area, status_bar, _gap, _debug, prompt_bar, footer_bar) =
+            layout_chunks_with_inbox_maybe_top(area, dynamic_h, 0, prompt_h, questions_top);
+        let areas = LayoutAreas {
+            activity_log,
+            dynamic_area,
+            status_bar,
+            prompt_bar,
+            footer_bar,
+            enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
+        };
+        (mode, areas)
+    }
+
+    #[test]
+    fn single_click_in_select_mode_highlights_without_confirming() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        let option_row = areas.dynamic_area.y + 2;
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: option_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+        assert_eq!(
+            vs.select_selected, 0,
+            "single click must highlight option 0"
+        );
+        assert!(
+            intent.is_none(),
+            "single click must not confirm selection (no AnswerSelect)"
+        );
+    }
+
+    #[test]
+    fn double_click_in_select_mode_confirms_selection() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        let option_row = areas.dynamic_area.y + 2;
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: option_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let _ = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+        assert_eq!(vs.select_selected, 0);
+
+        let ev2 = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: option_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev2, &mode, &mut vs, &areas, 0);
+        assert_eq!(
+            intent,
+            Some(UserIntent::AnswerSelect(0)),
+            "double-click (two rapid clicks at same row) must confirm selection"
+        );
+    }
+
+    #[test]
+    fn double_click_on_different_rows_does_not_confirm() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        let first_option_row = areas.dynamic_area.y + 2;
+        let second_option_row = areas.dynamic_area.y + 3;
+        let ev1 = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: first_option_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let _ = handle_mouse_event(ev1, &mode, &mut vs, &areas, 0);
+
+        let ev2 = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: second_option_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev2, &mode, &mut vs, &areas, 0);
+        assert_eq!(vs.select_selected, 1);
+        assert!(
+            intent.is_none(),
+            "clicking a different row must not confirm — it should only highlight"
+        );
+    }
+
+    fn rects_overlap(a: Rect, b: Rect) -> bool {
+        a.x < b.x.saturating_add(b.width)
+            && a.x.saturating_add(a.width) > b.x
+            && a.y < b.y.saturating_add(b.height)
+            && a.y.saturating_add(a.height) > b.y
+    }
+
+    /// Enter strip is three columns wide from the row below the status bar through prompt + footer,
+    /// separated from the prompt text block by [`super::ENTER_STRIP_MARGIN_COLS`] and must not overlap
+    /// `prompt_bar` cells.
+    #[test]
+    fn enter_button_rect_is_right_of_prompt_with_margin_and_disjoint_from_prompt_and_footer() {
+        let sb = Rect::new(0, 20, 80, 1);
+        // One-row gap below status (y=21); debug height 0 so prompt starts at 22.
+        // 80 cols − 8 right chrome (Enter + Stop) = 72 prompt cols
+        let pb = Rect::new(0, 22, 72, 1);
+        let fb = Rect::new(0, 23, 72, 1);
+        let areas = LayoutAreas {
+            activity_log: Rect::new(0, 0, 80, 20),
+            dynamic_area: Rect::new(0, 20, 80, 0),
+            status_bar: sb,
+            prompt_bar: pb,
+            footer_bar: fb,
+            enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
+        };
+        let r = super::enter_button_rect(&areas);
+        let prompt_rows = if pb.height > 1 {
+            pb.height - 1
+        } else {
+            pb.height
+        };
+        let strip_top = sb.y.saturating_add(sb.height);
+        let above_prompt = pb.y.saturating_sub(strip_top);
+        let expected_h = above_prompt
+            .saturating_add(prompt_rows)
+            .saturating_add(fb.height);
+        assert_eq!(r.width, super::ENTER_BUTTON_COLS);
+        assert_eq!(r.x, pb.x + pb.width + super::ENTER_STRIP_MARGIN_COLS);
+        assert_eq!(
+            r.y, strip_top,
+            "Enter strip must start below status (separator band)"
+        );
+        assert_eq!(
+            r.height, expected_h,
+            "Enter height = rows below status through prompt text + footer (exclude prompt rule row); sb={sb:?} pb={pb:?} fb={fb:?} r={r:?}"
+        );
+        assert!(
+            !rects_overlap(r, pb),
+            "Enter hit target must not overlap prompt_bar; r={r:?} pb={pb:?}"
+        );
+        assert!(
+            !rects_overlap(r, fb),
+            "Enter hit target must not overlap footer_bar; r={r:?} fb={fb:?}"
+        );
+    }
+
+    #[test]
+    fn click_enter_affordance_left_border_confirms_select() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        vs.select_selected = 0;
+        let r = super::enter_button_rect(&areas);
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: r.x,
+            row: r.y + 1,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+        assert_eq!(
+            intent,
+            Some(UserIntent::AnswerSelect(0)),
+            "click on vertical border left of the key must act like Enter"
+        );
+    }
+
+    #[test]
+    fn click_enter_affordance_corner_cell_confirms_select() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        vs.select_selected = 0;
+        let r = super::enter_button_rect(&areas);
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: r.x,
+            row: r.y,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+        assert_eq!(
+            intent,
+            Some(UserIntent::AnswerSelect(0)),
+            "click on top-left corner of the ASCII frame must act like Enter"
+        );
+    }
+
+    #[test]
+    fn click_enter_affordance_return_symbol_cell_confirms_select() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        vs.select_selected = 0;
+        let r = super::enter_button_rect(&areas);
+        let above = areas
+            .prompt_bar
+            .y
+            .saturating_sub(areas.status_bar.y.saturating_add(areas.status_bar.height));
+        let return_row = if r.height <= 1 {
+            r.y
+        } else if above >= 1 {
+            r.y.saturating_add(above)
+        } else if r.height >= 3 {
+            r.y + 1
+        } else {
+            r.y
+        };
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: r.x + 1,
+            row: return_row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+        assert_eq!(
+            intent,
+            Some(UserIntent::AnswerSelect(0)),
+            "click on the U+23CE key cell must confirm the selected option"
+        );
+    }
+
     /// PRD: Approve / Refine sit at the bottom of the activity rect (not the old PlanReview strip).
     /// With a normal layout, the footer is two lines; Approve is the upper line, Reject the lower.
     #[test]
@@ -497,13 +870,16 @@ mod tests {
         let area = Rect::new(0, 0, 80, 24);
         let dynamic_h = 0u16;
         let prompt_h = 1u16;
-        let (activity_log, _spacer, dynamic_area, status_bar, _debug, prompt_bar) =
+        let (activity_log, _spacer, dynamic_area, status_bar, _gap, _debug, prompt_bar, footer_bar) =
             layout_chunks_with_inbox(area, dynamic_h, 0, prompt_h);
         let areas = LayoutAreas {
             activity_log,
             dynamic_area,
             status_bar,
             prompt_bar,
+            footer_bar,
+            enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         let mode = AppMode::MarkdownViewer {
             content: "# Plan".to_string(),
@@ -537,5 +913,51 @@ mod tests {
             Some(UserIntent::RefineSessionDocument),
             "click on Reject footer line must request refinement"
         );
+    }
+
+    #[test]
+    fn stop_button_rect_empty_when_terminal_too_narrow_for_stop_strip() {
+        let area = Rect::new(0, 0, 8, 24);
+        let (activity_log, _sp, dynamic_area, status_bar, _g, _d, prompt_bar, footer_bar) =
+            layout_chunks_with_inbox(area, 0, 0, 1);
+        let areas = LayoutAreas {
+            activity_log,
+            dynamic_area,
+            status_bar,
+            prompt_bar,
+            footer_bar,
+            enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
+        };
+        assert_eq!(super::stop_button_rect(&areas).width, 0);
+    }
+
+    #[test]
+    fn stop_button_rect_sits_right_of_enter_with_margin() {
+        let (mode, areas) = select_mode_fixture_80x24();
+        let _ = mode;
+        let er = super::enter_button_rect(&areas);
+        let sr = super::stop_button_rect(&areas);
+        assert!(sr.width > 0);
+        assert_eq!(sr.x, er.x + er.width + super::STOP_STRIP_MARGIN_COLS);
+        assert_eq!(sr.y, er.y);
+        assert_eq!(sr.height, er.height);
+    }
+
+    #[test]
+    fn click_stop_affordance_produces_interrupt() {
+        let mut vs = ViewState::new();
+        let (mode, areas) = select_mode_fixture_80x24();
+        let sr = super::stop_button_rect(&areas);
+        assert!(sr.width > 0, "expected Stop pane on 80×24");
+        let row = sr.y.saturating_add(sr.height / 2);
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: sr.x + 1,
+            row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+        assert_eq!(intent, Some(UserIntent::Interrupt));
     }
 }

@@ -1,5 +1,30 @@
 # Daemon product area changelog
 
+## 2026-04-04 — Projects: `main_branch_ref` (git integration base)
+
+- **Registry**: Optional **`main_branch_ref`** on project rows; **`effective_integration_base_ref_for_project`**; **`add_project`** rejects invalid refs before **`projects.yaml`** writes (**`tddy_core::validate_integration_base_ref`**).
+- **Docs**: [git-integration-base-ref.md](../coder/git-integration-base-ref.md), [project-concept.md](project-concept.md); package [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md).
+- **PRD retired**: Prior WIP PRD for the multi-user daemon was merged into [project-concept.md](project-concept.md) (**Multi-user daemon**) and this changelog; source file removed from **`docs/ft/daemon/1-WIP/`**.
+
+## 2026-04-04 — Worktrees library + ConnectionService RPCs
+
+- **`tddy_daemon::worktrees`**: Parses **`git worktree list`** output; **`WorktreeStatsCache`** persists per-project snapshots under **`TDDY_PROJECTS_STATS_ROOT`** (default **`~/.tddy/projects`**); **`validate_worktree_path_within_repo_root`** (lexical containment); **`remove_worktree_under_repo`** (membership in **`git worktree list`**, refuses primary worktree).
+- **ConnectionService**: **`ListWorktreesForProject`** (optional **`refresh`** → **`refresh_stats_for_project`** in **`spawn_blocking`**), **`RemoveWorktree`** (invalidates cache on success). Project path via **`main_repo_path_for_host`** and local **`daemon_instance_id`** (remote daemon routing for these RPCs is out of scope). Tests: **`worktrees`**, **`worktrees_acceptance`**, **`worktrees_rpc`** (requires **`git`**, **`USER`** for registry tests).
+- **Package doc**: [worktrees.md](../../packages/tddy-daemon/docs/worktrees.md), [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md). Web feature: [worktrees.md](../web/worktrees.md).
+
+## 2026-04-03 — Telegram session notifications (library)
+
+- **Config**: Optional **`telegram`** block in **`daemon.yaml`** with **`enabled`**, **`bot_token`**, and **`chat_ids`** (integer chat targets); unknown keys on the block are rejected under **`deny_unknown_fields`**.
+- **Behavior**: The **`tddy_daemon::telegram_notifier`** module provides **`TelegramSessionWatcher`** (baseline + one notification per status transition for active sessions), **`session_telegram_label`** (first two hyphen segments of **`session_id`**), **`mask_bot_token_for_logs`**, and **`send_telegram_via_teloxide`** (teloxide **`Bot::send_message`**). Tests use a mock **`TelegramSender`**; CI avoids the live Telegram API.
+- **Docs**: Product reference **[telegram-notifications.md](telegram-notifications.md)**; technical reference **[telegram-notifier.md](../../packages/tddy-daemon/docs/telegram-notifier.md)**.
+
+## 2026-04-03 — ConnectionService: workflow files, session base path, delete
+
+- **`ListSessionWorkflowFiles`** / **`ReadSessionWorkflowFile`**: Allowlisted basenames (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`) under **`{sessions_base}/sessions/{session_id}/`** with canonical-path checks (**`session_workflow_files`**; tests **`session_workflow_files_rpc`**).
+- **Sessions base**: **`sessions_base_for_user`** resolves the Tddy **data directory** (typically **`~/.tddy`**), matching **`tddy_core::output::tddy_data_dir_path`** when **`TDDY_SESSIONS_DIR`** is unset, so listing/connect/delete target the same trees as **`tddy-coder`**.
+- **`DeleteSession`**: Terminates a live **`metadata.pid`** when needed (SIGTERM/SIGKILL; Linux zombie handling), then removes the directory; directories without readable **`.session.yaml`** are removed when the resolved path is valid.
+- **Package**: [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md). Web: [web-terminal.md](../web/web-terminal.md), [web changelog](../web/changelog.md).
+
 ## 2026-03-29 — ConnectionService: `ListAgents` and `allowed_agents`
 
 - **Config**: Daemon YAML includes **`allowed_agents`**, a list of **`id`** (required) and optional **`label`** entries (same shape as tool allowlist entries; unknown keys on each entry are rejected when using **`deny_unknown_fields`**).
@@ -30,7 +55,8 @@
 
 ## 2026-03-24 — ConnectionService: DeleteSession
 
-- **`DeleteSession`**: Removes the on-disk session directory under the authenticated user’s sessions base when `.session.yaml` indicates an **inactive** session (no live process for the recorded PID, consistent with `ListSessions`). Rejects active sessions, missing sessions, and invalid session ids with the appropriate gRPC status. Filesystem removal errors return a generic **`INTERNAL`** message to clients; full error detail is logged on the server.
+- **`DeleteSession`**: Removes the on-disk session directory under the authenticated user’s **`{sessions_base}/sessions/{session_id}/`** tree. Rejects invalid session ids with **`INVALID_ARGUMENT`**. Filesystem removal errors return a generic **`INTERNAL`** message to clients; full error detail is logged on the server.
+- **Current behavior** (terminate live processes, metadata-less directories, **`sessions_base`** resolution): see **2026-04-03 — ConnectionService: workflow files, session base path, delete** above.
 
 ## 2026-03-23 — Root `./install --systemd`
 
@@ -45,10 +71,6 @@
 ## 2026-03-21 — StartSession: `agent`
 
 - **ConnectionService**: `StartSessionRequest` includes optional `agent`; forwarded to spawned `tddy-coder` as `--agent` when non-empty (skips interactive backend menu in the child).
-
-## 2026-03-21 — PRD: implementation status
-
-- **[PRD: tddy-daemon](1-WIP/PRD-2026-03-19-tddy-daemon.md)** updated with **Implementation status (2026-03-21)**: Phase 1 (binary, OAuth, spawn, project-centric web UX) documented; full success-criteria checklist remains open for validation.
 
 ## 2026-03-21 — Project concept
 

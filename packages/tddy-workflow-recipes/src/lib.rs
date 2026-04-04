@@ -1,25 +1,32 @@
 //! Workflow recipes (TDD, bug-fix, …) for tddy-coder.
 
+pub mod approval_policy;
 pub mod bugfix;
+pub mod free_prompting;
+pub mod grill_me;
 pub mod parser;
 pub mod permissions;
 pub mod recipe_resolve;
 pub mod schema_pipeline;
 pub mod session_artifact_manifest;
 pub mod tdd;
+pub mod tdd_small;
 pub mod writer;
 
 pub use bugfix::BugfixRecipe;
+pub use free_prompting::FreePromptingRecipe;
+pub use grill_me::GrillMeRecipe;
 pub use parser::{
-    parse_acceptance_tests_response, parse_demo_response, parse_evaluate_response,
-    parse_green_response, parse_planning_response, parse_planning_response_with_base,
-    parse_red_response, parse_refactor_response, parse_update_docs_response,
-    parse_validate_subagents_response, validate_red_marker_source_paths, AcceptanceTestInfo,
-    AcceptanceTestsOutput, DemoOutput, DemoPlan, DemoResults, DemoStep, EvaluateAffectedTest,
-    EvaluateBuildResult, EvaluateChangedFile, EvaluateChangesetSync, EvaluateFileAnalyzed,
-    EvaluateIssue, EvaluateOutput, EvaluateTestImpact, GreenOutput, GreenTestResult,
-    ImplementationInfo, MarkerInfo, MarkerResult, PlanningOutput, RedOutput, RedTestInfo,
-    RefactorOutput, SkeletonInfo, UpdateDocsOutput, ValidateSubagentsOutput,
+    parse_acceptance_tests_response, parse_analyze_response, parse_demo_response,
+    parse_evaluate_response, parse_green_response, parse_planning_response,
+    parse_planning_response_with_base, parse_red_response, parse_refactor_response,
+    parse_update_docs_response, parse_validate_subagents_response,
+    validate_red_marker_source_paths, AcceptanceTestInfo, AcceptanceTestsOutput, AnalyzeOutput,
+    DemoOutput, DemoPlan, DemoResults, DemoStep, EvaluateAffectedTest, EvaluateBuildResult,
+    EvaluateChangedFile, EvaluateChangesetSync, EvaluateFileAnalyzed, EvaluateIssue,
+    EvaluateOutput, EvaluateTestImpact, GreenOutput, GreenTestResult, ImplementationInfo,
+    MarkerInfo, MarkerResult, PlanningOutput, RedOutput, RedTestInfo, RefactorOutput, SkeletonInfo,
+    UpdateDocsOutput, ValidateSubagentsOutput,
 };
 pub use permissions::{
     acceptance_tests_allowlist, demo_allowlist, evaluate_allowlist, green_allowlist,
@@ -32,6 +39,10 @@ pub use recipe_resolve::{
 };
 pub use session_artifact_manifest::SessionArtifactManifest;
 pub use tdd::{PlanTask, TddRecipe, TddWorkflowHooks};
+pub use tdd_small::{
+    build_tdd_small_workflow_graph, merged_red_system_prompt, parse_post_green_review_response,
+    PostGreenReviewOutput, TddSmallRecipe, TddSmallWorkflowHooks,
+};
 pub use writer::{
     create_session_dir_in, create_session_dir_under, create_session_dir_with_id,
     read_impl_session_file, read_session_file, slugify_directory_name, tddy_data_dir_path,

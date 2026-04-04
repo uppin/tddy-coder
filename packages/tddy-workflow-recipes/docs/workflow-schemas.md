@@ -8,7 +8,7 @@ This crate owns the **JSON Schema** contracts under **`generated/{recipe}/`**, t
 
 Each entry contains:
 
-- **`name`** — CLI goal string (e.g. `evaluate-changes`, `validate`).
+- **`name`** — CLI goal string (e.g. `post-green-review`, `evaluate-changes`, `validate`).
 - **`schema`** — File under `generated/{recipe}/` (e.g. `evaluate.schema.json`).
 - **`proto`** — File under `proto/` (e.g. `evaluate_changes.proto`).
 

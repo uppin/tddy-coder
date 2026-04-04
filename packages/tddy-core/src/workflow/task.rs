@@ -146,6 +146,8 @@ pub struct BackendInvokeTask {
     submit_key: GoalId,
     hints: GoalHints,
     backend: Arc<dyn CodingBackend>,
+    recipe: Arc<dyn WorkflowRecipe>,
+    requires_tddy_tools_submit: bool,
 }
 
 impl BackendInvokeTask {
@@ -155,6 +157,8 @@ impl BackendInvokeTask {
         submit_key: GoalId,
         hints: GoalHints,
         backend: Arc<dyn CodingBackend>,
+        recipe: Arc<dyn WorkflowRecipe>,
+        requires_tddy_tools_submit: bool,
     ) -> Self {
         Self {
             id: id.into(),
@@ -162,6 +166,8 @@ impl BackendInvokeTask {
             submit_key,
             hints,
             backend,
+            recipe,
+            requires_tddy_tools_submit,
         }
     }
 
@@ -169,7 +175,7 @@ impl BackendInvokeTask {
     pub fn from_recipe(
         id: impl Into<String>,
         goal_id: GoalId,
-        recipe: &dyn WorkflowRecipe,
+        recipe: Arc<dyn WorkflowRecipe>,
         backend: Arc<dyn CodingBackend>,
     ) -> Self {
         let hints = recipe.goal_hints(&goal_id).unwrap_or_else(|| {
@@ -180,7 +186,16 @@ impl BackendInvokeTask {
             )
         });
         let submit_key = recipe.submit_key(&goal_id);
-        Self::new(id, goal_id, submit_key, hints, backend)
+        let requires_tddy_tools_submit = recipe.goal_requires_tddy_tools_submit(&goal_id);
+        Self::new(
+            id,
+            goal_id,
+            submit_key,
+            hints,
+            backend,
+            recipe,
+            requires_tddy_tools_submit,
+        )
     }
 }
 
@@ -195,6 +210,32 @@ fn missing_submit_remediation_line(submit_key: &str) -> String {
     )
 }
 
+/// Merge `grill_ask_answers.txt` into context (same path as [`crate::workflow::hooks`] grill-me hook).
+/// Keeps `BackendInvokeTask` and `after_task` idempotent when both are skipped for one turn.
+fn merge_grill_ask_answers_file_into_context(context: &Context, session_dir: Option<&PathBuf>) {
+    let Some(dir) = session_dir else {
+        return;
+    };
+    let path = dir.join(".workflow").join("grill_ask_answers.txt");
+    if !path.exists() {
+        return;
+    }
+    match std::fs::read_to_string(&path) {
+        Ok(s) => {
+            let t = s.trim();
+            if !t.is_empty() {
+                context.set_sync("answers", t.to_string());
+            }
+            if let Err(e) = std::fs::remove_file(&path) {
+                log::warn!("grill ask answers: remove {}: {}", path.display(), e);
+            }
+        }
+        Err(e) => {
+            log::warn!("grill ask answers: read {}: {}", path.display(), e);
+        }
+    }
+}
+
 #[async_trait]
 impl Task for BackendInvokeTask {
     fn id(&self) -> &str {
@@ -205,6 +246,20 @@ impl Task for BackendInvokeTask {
         &self,
         context: Context,
     ) -> Result<TaskResult, Box<dyn std::error::Error + Send + Sync>> {
+        if self.goal_id.as_str() == "grill"
+            && context
+                .get_sync::<bool>("grill_host_proceed")
+                .unwrap_or(false)
+        {
+            context.remove_sync("grill_host_proceed");
+            return Ok(TaskResult {
+                response: String::new(),
+                next_action: NextAction::GoTo("create-plan".to_string()),
+                task_id: self.id.clone(),
+                status_message: Some("Proceeding to create plan".to_string()),
+            });
+        }
+
         // Prefer prompt (set by before_* hooks, e.g. followup with answers) over feature_input.
         // Hooks like before_acceptance_tests set prompt when resuming from clarification.
         let prompt: String = context
@@ -297,6 +352,58 @@ impl Task for BackendInvokeTask {
                     next_action: NextAction::WaitForInput,
                     task_id: self.id.clone(),
                     status_message: Some("Clarification needed".to_string()),
+                });
+            }
+
+            if !self.requires_tddy_tools_submit {
+                if self.goal_id.as_str() == "grill" {
+                    merge_grill_ask_answers_file_into_context(&context, session_dir.as_ref());
+                }
+                if let Some(gate) = self
+                    .recipe
+                    .host_clarification_gate_after_no_submit_turn(&self.goal_id, &context)
+                {
+                    let prior = context.get_sync::<String>("session_id");
+                    if let Some(eff) = crate::session_lifecycle::resolve_effective_session_id(
+                        prior.as_deref(),
+                        response.session_id.as_deref(),
+                    ) {
+                        log::debug!(
+                            "BackendInvokeTask {}: host gate session_id {:?} -> {}",
+                            self.id,
+                            prior,
+                            eff
+                        );
+                        context.set_sync("session_id", eff);
+                    }
+                    context.set_sync("output", response.output.clone());
+                    context.set_sync("pending_questions", gate);
+                    return Ok(TaskResult {
+                        response: response.output,
+                        next_action: NextAction::WaitForInput,
+                        task_id: self.id.clone(),
+                        status_message: Some("Confirm before creating the plan".to_string()),
+                    });
+                }
+                let prior = context.get_sync::<String>("session_id");
+                if let Some(eff) = crate::session_lifecycle::resolve_effective_session_id(
+                    prior.as_deref(),
+                    response.session_id.as_deref(),
+                ) {
+                    log::debug!(
+                        "BackendInvokeTask {}: no-submit goal session_id {:?} -> {}",
+                        self.id,
+                        prior,
+                        eff
+                    );
+                    context.set_sync("session_id", eff);
+                }
+                context.set_sync("output", response.output.clone());
+                return Ok(TaskResult {
+                    response: response.output,
+                    next_action: NextAction::Continue,
+                    task_id: self.id.clone(),
+                    status_message: Some(format!("{} step complete", self.id)),
                 });
             }
 

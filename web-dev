@@ -21,6 +21,8 @@
 #   LIVEKIT_PUBLIC_URL — Override LiveKit URL (tddy-daemon); e.g. ws://192.168.1.10:7880
 #   LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET — LiveKit overrides (tddy-daemon)
 #   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_REDIRECT_URI — GitHub OAuth (tddy-daemon)
+#   TDDY_TELEGRAM_BOT_TOKEN, TDDY_TELEGRAM_CHAT_IDS, TDDY_TELEGRAM_ENABLED — Telegram (tddy-daemon);
+#                     see docs/ft/daemon/telegram-notifications.md
 #
 # Press Ctrl+C to stop both servers.
 set -euo pipefail
@@ -94,6 +96,12 @@ export WEB_PUBLIC_URL="${VITE_URL}"
 echo "=== Starting tddy-daemon on :${DAEMON_PORT} (config: ${CONFIG}) ==="
 echo "=== VITE_URL=${VITE_URL} (open this in the browser; OAuth redirect base for daemon) ==="
 
+# Readiness uses GET /api/config (always 200 when the daemon is up). Do not use GET / alone:
+# without packages/tddy-web/dist (run: ./dev bun run build), static / may 404 while RPC is fine.
+if [ ! -f packages/tddy-web/dist/index.html ]; then
+  echo "=== Note: packages/tddy-web/dist/index.html missing — open the Vite URL above for HMR; optional: ./dev bun run build for daemon static bundle ===" >&2
+fi
+
 # Clean up stale processes from previous runs. SIGKILLs listeners on these ports; on a shared
 # machine, ensure ports are free or avoid conflicts before running ./web-dev.
 fuser -k -9 -s "${DAEMON_PORT}/tcp" "${VITE_PORT}/tcp" 2>/dev/null || true
@@ -103,14 +111,14 @@ sleep 2
 ./dev "$binary" "${daemon_args[@]}" &
 daemon_pid=$!
 
-# Wait for daemon to be ready (HTTP 200, verified twice to avoid race)
+# Wait for daemon to be ready (HTTP 200 on /api/config, verified twice to avoid race)
 # nix + daemon can take 10–15s on first run; allow 90s
 daemon_ready=false
 for i in $(seq 1 180); do
-  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${DAEMON_PORT}/" 2>/dev/null || echo "000")
+  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${DAEMON_PORT}/api/config" 2>/dev/null || echo "000")
   if [ "$code" = "200" ]; then
     sleep 1
-    code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${DAEMON_PORT}/" 2>/dev/null || echo "000")
+    code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${DAEMON_PORT}/api/config" 2>/dev/null || echo "000")
     if [ "$code" = "200" ]; then
       daemon_ready=true
       break
@@ -119,7 +127,7 @@ for i in $(seq 1 180); do
   sleep 0.5
 done
 if [ "$daemon_ready" != "true" ]; then
-  echo "Error: daemon did not respond with HTTP 200 on port ${DAEMON_PORT} within 90s." >&2
+  echo "Error: daemon did not respond with HTTP 200 on http://127.0.0.1:${DAEMON_PORT}/api/config within 90s." >&2
   echo "Check tmp/logs/daemon for errors. Port may be in use: fuser ${DAEMON_PORT}/tcp" >&2
   kill -9 -"$daemon_pid" 2>/dev/null || true
   exit 1
@@ -138,7 +146,7 @@ echo "  Daemon (RPC):  http://127.0.0.1:${DAEMON_PORT}  — static dist; /rpc an
 echo ""
 
 # Start Vite dev server with DAEMON_PORT for proxy config (run via ./dev for nix env)
-./dev bash -c "cd packages/tddy-web && DAEMON_PORT='$DAEMON_PORT' WEB_PUBLIC_URL='$WEB_PUBLIC_URL' VITE_URL='$VITE_URL' npx vite --port '$VITE_PORT' --host '$WEB_HOST'" &
+./dev bash -c "cd packages/tddy-web && DAEMON_PORT='$DAEMON_PORT' WEB_PUBLIC_URL='$WEB_PUBLIC_URL' VITE_URL='$VITE_URL' bunx vite --port '$VITE_PORT' --host '$WEB_HOST'" &
 vite_pid=$!
 
 # Cleanup and exit. Kill by port (most reliable) since process groups may not

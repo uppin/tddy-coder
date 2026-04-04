@@ -2,7 +2,7 @@
 
 **Type**: Technical Product (Developer Tool)
 **Status**: Active
-**Updated**: 2026-03-29
+**Updated**: 2026-04-05
 
 ## Summary
 
@@ -32,7 +32,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 | **LiveKit** | `--livekit-url`, `--livekit-room`, `--livekit-identity` with either `--livekit-token` or `--livekit-api-key`/`--livekit-api-secret`. Key/secret generate tokens locally and auto-refresh before expiry. |
 | **Web Bundle** | `--web-port` and `--web-bundle-path` serve pre-built tddy-web static assets over HTTP (TUI and daemon modes) |
 | **Backend selection** | With `--agent` omitted, users pick the coding backend (Claude, Claude ACP, Cursor, Codex, Stub) via TUI `AppMode::Select` or a plain numbered menu. With `--agent` set, selection is skipped. Per-backend default models apply; `--model` overrides. Cursor receives `--model` on `cursor agent` when configured; Codex receives `-m` on `codex exec` when configured. |
-| **Workflow recipe** | **`--recipe tdd`** (default) runs **`TddRecipe`**; **`--recipe bugfix`** runs **`BugfixRecipe`** (reproduce-first, fix-plan approval before green). Optional YAML **`recipe:`**; **`changeset.yaml`** stores **`recipe`** for resume. |
+| **Workflow recipe** | **`--recipe tdd`** (default) runs **`TddRecipe`**; **`--recipe bugfix`** runs **`BugfixRecipe`** (**`analyze` → `reproduce` → `end`**, start goal **`analyze`**, structured **`tddy-tools submit`** for **`analyze`**). Optional YAML **`recipe:`**; **`changeset.yaml`** stores **`recipe`** for resume. |
 | **Project agent skills** | Skills under **`.agents/skills/<name>/SKILL.md`** with matching frontmatter **`name`**; **`tddy_core::agent_skills`** supplies discovery, slash menu items, and composed prompts; built-in **`/recipe`** in the presenter selects TDD vs Bugfix when wired with **`with_recipe_resolver`**. Slash completion in the ratatui feature input is outside this surface. |
 
 ## Backend selection at session start
@@ -49,7 +49,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 | Feature | Description |
 |---------|-------------|
 | [Workflow JSON Schemas](workflow-json-schemas.md) | JSON Schema contracts per goal; `goals.json` registry; `tddy-tools` `get-schema`, `list-schemas`, `submit` validation |
-| [Workflow recipes](workflow-recipes.md) | Pluggable `WorkflowRecipe`; `TddRecipe` (default) and `BugfixRecipe` (selectable); `recipe_resolve` in `tddy-workflow-recipes`; `GoalId` / string states |
+| [Workflow recipes](workflow-recipes.md) | Pluggable `WorkflowRecipe`; `TddRecipe` (default), `BugfixRecipe`, `FreePromptingRecipe`, `GrillMeRecipe` (selectable); `recipe_resolve` in `tddy-workflow-recipes`; `GoalId` / string states. **Grill me** **Create plan** brief: session `artifacts/grill-me-brief.md`; repo persistence per [AGENTS.md](../../../AGENTS.md) (`plans/` or feature-doc path). (Updated: 2026-04-05) |
 | [Planning Step](planning-step.md) | Plan goal, acceptance-tests goal, plan approval gate, CLI interface, LLM backend abstraction |
 | [Implementation Step](implementation-step.md) | Red, green, demo, evaluate goals; state machine; output artifacts |
 | [gRPC Remote Control](grpc-remote-control.md) | `--grpc` flag, bidirectional streaming, programmatic control for E2E and automation |

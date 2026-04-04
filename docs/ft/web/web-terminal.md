@@ -32,7 +32,8 @@ When the terminal connects and renders, it supports:
 - **Fullscreen**: Fills 100% of the viewport (width and height). **Connection chrome** overlays sit above the terminal canvas (high `z-index`, pointer events on controls only).
 - **Auto-focus**: Keyboard focus is set on the terminal when ready. User can type immediately. (On mobile, auto-focus is disabled; see Mobile UX.)
 - **Adaptive size**: FitAddon auto-sizes the terminal to its container. Resize events are sent to the virtual TUI via `\x1b]resize;{cols};{rows}\x07`.
-- **Touch/mouse mode**: When `--mouse` is set on tddy-coder, the TUI sends EnableMouseCapture. GhosttyTerminal encodes SGR mouse sequences `\x1b[<Pb;Px;PyM/m` (press/release) and forwards them via onData. Click-to-select and scroll work. Touch events (touchstart/touchend) are forwarded for tap-to-click on mobile.
+- **Font zoom (pitch)**: The terminal supports **pitch-in** (larger glyphs), **pitch-out** (smaller glyphs), and **reset** to the session baseline. There are **no on-screen +/−/0 buttons**; zoom is via **keyboard** (**Ctrl** or **⌘** with **+**/**=**, **-**, or **0** when focus is inside **`[data-testid='ghostty-terminal']`**), **two-finger touch pinch**, **trackpad pinch** (**`wheel`** with **`ctrlKey`**), or programmatic **`CustomEvent`** dispatch. Default font bounds are **8–32** px with step **1**; at the minimum or maximum, further pitch-in or pitch-out is ignored. **`GhosttyTerminal`** exposes the live size on **`data-terminal-font-size`** (integer string). Font changes apply to the running ghostty-web **`Terminal`** (`options.fontSize`), then **`FitAddon.fit()`** recomputes columns and rows; **`onResize`** runs when the grid changes, so the existing resize OSC sequence reaches the TUI backend on the same input path as keyboard data. **`GhosttyTerminalLiveKit`** accepts **`fontSize`** (default **14**) and passes it to **`GhosttyTerminal`** as the reset baseline. Bridge events use **`tddy-terminal-zoom`** and **`tddy-terminal-font-size-sync`**; payloads are validated before handling. Optional trace logging uses **`VITE_TERMINAL_ZOOM_DEBUG=true`** in the Vite build, or **`debugLogging`** on **`GhosttyTerminal`**. Implementation reference: [terminal-zoom.md](../../../packages/tddy-web/docs/terminal-zoom.md).
+- **Touch/mouse mode**: When `--mouse` is set on tddy-coder, the TUI sends EnableMouseCapture. GhosttyTerminal encodes SGR mouse sequences `\x1b[<Pb;Px;PyM/m` (press/release) and forwards them via onData. Click-to-select and scroll work. Touch events (touchstart/touchend) are forwarded for tap-to-click on mobile. The TUI draws Enter and (when wide enough) Stop affordances to the right of the prompt; see [Mouse mode: Enter control](../coder/tui-status-bar.md#mouse-mode-enter-control) and [Mouse mode: Stop control](../coder/tui-status-bar.md#mouse-mode-stop-control).
 
 ### Connection chrome (LiveKit overlay)
 
@@ -43,7 +44,7 @@ When **`GhosttyTerminalLiveKit`** is mounted with **`connectionOverlay`**, the s
 - **LiveKit status strip**: With the overlay enabled, the plain **`livekit-status`** row does not occupy layout during **`connecting`** or **`connected`**; the dot carries those phases. Token, room, and stream failures surface through **`data-testid="livekit-error"`** and related error UI.
 - **Fullscreen**: A dedicated control (`data-testid="terminal-fullscreen-button"`, top-right beside the dot) enters or exits document fullscreen on the connected terminal subtree. The implementation uses the standard Fullscreen API with vendor-prefixed fallbacks (`packages/tddy-web/src/lib/browserFullscreen.ts`). The parent passes **`fullscreenTargetRef`** to select the element; when absent, chrome supplies an internal fullscreen target wrapper (`data-testid="connection-chrome-fullscreen-fallback-target"`). **`fullscreenchange`** and **`webkitfullscreenchange`** on **`document`** keep the control label in sync with the active element.
 - **Menu**: Activating the dot opens a menu with **Disconnect** (`data-testid="connection-menu-disconnect"`) and **Terminate** (`data-testid="connection-menu-terminate"`) when the host passes **`onTerminate`** (daemon flows with session context). The standalone GitHub connect flow omits **Terminate** when no session-backed handler exists. **Terminate** runs a native **`window.confirm`** dialog; **`onTerminate`** runs only after the user confirms. The menu closes on **Escape** or an outside pointer press.
-- **Stop**: A **Stop** control (`data-testid="terminal-stop-button"`, bottom-right, touch-friendly minimum size) sends byte **0x03** through the same **`enqueueTerminalInput`** path as keyboard **Ctrl+C**.
+- **Interrupt (Stop)**: There is no web **Stop** button; interrupt is the TUI **Stop** pane (red **U+25A0**), to the right of the Enter strip. Clicks are SGR mouse bytes to the virtual TUI, same path as keyboard **Ctrl+C** (byte **0x03**).
 
 **ConnectedTerminal** wrappers (**App** after connect and **ConnectionScreen** after session connect) render the fullscreen **`connected-terminal-container`** with this chrome during JWT acquisition so the status dot reflects the loading phase while **`livekit-status`** text stays suppressed for normal overlay states.
 
@@ -54,18 +55,29 @@ On touch-capable devices or narrow viewports (width &lt; 768px):
 - **Keyboard-aware resize**: The terminal container uses the Visual Viewport API. When the virtual keyboard opens, the container shrinks to fit the visible area above the keyboard; when it closes, the terminal fills the screen again.
 - **Manual keyboard button**: A floating "Keyboard" button appears at the bottom center. Tapping it focuses the terminal (opens the virtual keyboard). The button hides while the keyboard is open and reappears when it closes.
 - **Focus prevention**: Tapping the terminal does not open the keyboard. The terminal uses `preventFocusOnTap` (event prevention + readonly textarea) so the keyboard opens only when the user taps the Keyboard button.
-- **Touch forwarding**: Tap-to-click works for TUI menus and interactive elements. Capture-phase touch handlers send SGR mouse sequences before focus prevention, so interactive TUIs (vim, htop) receive correct mouse events.
+- **Touch forwarding**: Tap-to-click works for TUI menus and interactive elements. Capture-phase touch handlers send SGR mouse sequences before focus prevention, so interactive TUIs (vim, htop) receive correct mouse events. A **second finger** on the surface does not emit SGR press/release pairs (avoids confusing the TUI during pinch). **Two-finger pinch** on the terminal adjusts **font size** (same bounds and steps as pitch in/out); disable with **`pinchZoomFont={false}`** on **`GhosttyTerminal`** if needed.
 - **Build ID**: A build timestamp is shown in the top-left when connected for cache verification on mobile.
 
 ## Daemon mode: Connection screen (project-centric)
 
 When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated users see **ConnectionScreen** (not the manual LiveKit URL form):
 
+### URL routes (daemon mode)
+
+- **Session list**: `/` — project tables, **Other sessions**, create project, presence panel when configured.
+- **Terminal**: `/terminal/{sessionId}` — one URL-encoded path segment after the fixed prefix `/terminal`. After **Start New Session**, **Connect**, or **Resume**, the app **pushes** this path so **Back** returns to the list. **Disconnect** replaces the URL with `/`. A full page load on `/terminal/{id}` loads the SPA (same **`index.html`** as `/`; the static server uses SPA fallback for unknown paths) and **`ConnectionScreen`** attaches the session via **`connectSession`** then **`resumeSession`** if needed. If the id is not in **`ListSessions`**, a **session not found** banner appears with **Back to sessions** (returns to `/`).
+- **OAuth**: `/auth/callback` is unchanged; **`App`** still renders **`AuthCallback`** for that path.
+
+**Standalone** (`daemon_mode: false`): connection uses **query parameters** (`url`, `identity`, `roomName`, optional `debug`). A **`/terminal/...`** path is not part of the standalone flow; the client **replaces** the URL with **`/`** on load if such a path is present so the address bar matches the documented standalone model.
+
+Implementation helpers: **`packages/tddy-web/src/routing/appRoutes.ts`**. Static serving: **`packages/tddy-coder/src/web_server.rs`** (`ServeDir` fallback to **`index.html`**).
+
 - **Create project** (collapsible): name + git URL → `CreateProject` (clone or adopt existing path under `~/repos/<name>/` by default). Optional **path under home** overrides the clone destination (e.g. `Code/my-app`).
 - **Projects** as collapsible sections (`<details>`): each shows name, git URL, `main_repo_path`, then **Host** (target daemon instance from `ListEligibleDaemons`), **Tool** (options from `ListTools`, reflecting daemon `allowed_tools`), **Backend** (options from `ListAgents`, reflecting daemon `allowed_agents`; each option’s value is the agent **`id`** sent on **`StartSession.agent`**; the selected backend is the first list entry unless a prior choice for that project still appears in the list), **Workflow recipe** (`tdd` or `bugfix` on `StartSession.recipe`), and **Debug logging** (browser terminal only)—all **per session**, not stored on the project—then **Start New Session** (`StartSession` with `project_id`, optional `daemon_instance_id`, and `recipe`), and a table of sessions for that `project_id`. Session tables include a **Host** column (`daemon_instance_id` from `ListSessions`). Connect/Resume in that section uses that project’s debug setting.
 - After authentication, the client loads **Tool** and **Backend** options together (`ListTools` and `ListAgents`); a failure in either RPC clears both lists and surfaces an error in the shared connection error area.
 - **Other sessions**: Connect/Resume uses a separate **debug** checkbox for that list (sessions not tied to a listed project).
 - Sessions whose `project_id` is not in the listed projects appear under **Other sessions**.
+- **Project association for unscoped sessions**: When **`project_id`** is empty, the UI assigns a session to a project if **`repoPath`** equals that project’s **`mainRepoPath`** or is a subdirectory of it (git worktrees under the main clone). If several projects could match, the **longest** **`mainRepoPath`** wins.
 
 ### Session table ordering
 
@@ -91,13 +103,19 @@ While the session list includes at least one row with **`isActive`**, the client
 - **Web / daemon (`ListSessions` enrichment)**: Elapsed is **`format_elapsed_compact(now - step_start)`** where **`step_start`** is parsed from **`changeset.yaml`**: the **`at`** timestamp of the **last** **`state.history`** entry whose **`state`** matches **`state.current`**, or else **`state.updated_at`**. The web shows **persisted** wall-clock duration since the last recorded transition, not the in-process **`Instant`**.
 - **Comparison**: When the workflow has **persisted** the latest state to **`changeset.yaml`**, web and TUI **should align** on goal, state, agent, model, and a **similar** elapsed string (same formatting rules in **`tddy_core::format_elapsed_compact`** and TUI **`format_elapsed`**). If the live process has **not yet written** **`changeset.yaml`**, the web may show an **older** elapsed or placeholders until the next **`ListSessions`** poll picks up new disk state.
 
-### Inactive session deletion
+### Session workflow files (read-only RPCs and preview components)
 
-- **Inactive rows** (`!isActive`): The actions column shows **Resume** and **Delete**. **Delete** opens a browser **confirm** dialog; on confirmation the client calls **`DeleteSession`** with the session id, reloads the session list on success, and shows RPC errors in the same error area as other connection actions.
-- **Active rows**: **Connect** and **Signal** appear; **Delete** is absent.
-- **Orphan table** follows the same inactive vs active rules as project session tables.
+- **`ListSessionWorkflowFiles`**: Authenticated callers receive **`WorkflowFileEntry`** rows whose **`basename`** values identify allowlisted files present under the resolved session directory (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`). The daemon resolves **`session_id`** server-side; clients do not send filesystem paths.
+- **`ReadSessionWorkflowFile`**: Returns **`content_utf8`** for one allowlisted basename under that directory. Traversal-like **`basename`** values and symlink escapes are rejected or omitted per **`session_workflow_files`** rules in **tddy-daemon**.
+- **Web** (`packages/tddy-web/src/components/session/`): **`workflowPreviewKind`** classifies filenames for YAML vs Markdown vs plain preview. **`SessionFilesPanel`** lists files and previews content (Markdown as structured line blocks without raw HTML injection; YAML in a monospace **`pre`**). **`SessionMoreActionsMenu`** includes **Show files**, which opens **`SessionWorkflowFilesModal`** (list on open, read on selection). **Cypress** covers **`SessionWorkflowFiles.cy.tsx`**; **Bun** tests cover **`workflowPreviewKind`**. **`ConnectionScreen`** wires the menu and modal on project and **Other sessions** tables.
 
-The daemon implements **`DeleteSession`** with the same GitHub user → OS user → sessions base resolution as **`ListSessions`**, removes only the target directory under that tree when the session is inactive (no live PID for the value stored in `.session.yaml`), and returns gRPC errors for missing sessions, active processes, or invalid ids. See [daemon changelog](../daemon/changelog.md) and [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md).
+### Session deletion
+
+- **Delete** (trash): Available for **active** and **inactive** rows. Confirm explains that a running tool process is stopped first, then on-disk data is removed. On success, **`ListSessions`** is refreshed; errors use the shared connection error area.
+- **Inactive rows** also show **Resume**; **active** rows show **Connect** and **Signal** (dropdown) alongside **Delete**.
+- **Orphan** table follows the same actions pattern as project session tables.
+
+The daemon **`DeleteSession`** uses the same GitHub user → OS user → **`sessions_base`** resolution as **`ListSessions`**, terminates a live **`metadata.pid`** when needed, then removes **`{sessions_base}/sessions/{session_id}/`**. See [daemon changelog](../daemon/changelog.md) and [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md).
 
 See [daemon project concept](../daemon/project-concept.md).
 
@@ -118,6 +136,10 @@ The fullscreen **GhosttyTerminalLiveKit** view opened from **Connect / Resume** 
 - **`ListEligibleDaemons`**: After sign-in, **ConnectionScreen** loads eligible daemon entries (`instance_id`, `label`, `is_local`) alongside tools and projects. The daemon implementation lists instances from **`EligibleDaemonSource`** (currently the local daemon; LiveKit common-room peer discovery is deferred).
 - **Host dropdown**: Per project, the selected host is sent as **`daemon_instance_id`** on **`StartSession`**. Empty or matching the local instance keeps the existing local spawn path. Selecting a non-local instance is rejected by the daemon until cross-daemon spawn routing exists.
 - **Session host column**: **`ListSessions`** returns **`daemon_instance_id`** per row; the UI shows it in project and **Other sessions** tables.
+
+### Worktrees manager scaffolding
+
+The **Worktrees** product area includes a **`WorktreesScreen`** table component (mocked data in component tests) and a **`tddy-daemon`** **`worktrees`** library for **`git worktree list`**, on-disk stats cache, and **`git worktree remove`**. **ConnectionService** does not expose worktree RPCs yet; shell navigation from the main app to a dedicated route is follow-up work. Full operator semantics, cache layout, and test commands: [worktrees.md](worktrees.md).
 
 ## See also (development)
 

@@ -393,7 +393,7 @@ fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_di
     );
 
     presenter.handle_intent(UserIntent::SubmitFeatureInput(
-        "user first typed feature".to_string(),
+        "user first typed feature SKIP_QUESTIONS".to_string(),
     ));
 
     let mut iterations = 0;
@@ -403,6 +403,9 @@ fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_di
         events.drain();
         if presenter.is_done() {
             break;
+        }
+        if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
         }
         iterations += 1;
         std::thread::sleep(Duration::from_millis(5));

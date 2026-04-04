@@ -73,6 +73,9 @@ pub struct Presenter {
     agent_output_buffer: String,
     /// When true, the last `activity_log` row is the in-progress agent line (updated incrementally until `\n`).
     agent_output_partial_row_active: bool,
+    /// Set when ClarificationNeeded is received with no questions; the workflow thread
+    /// is blocked on `answer_rx` waiting for the next prompt (e.g. free-prompting multi-turn).
+    awaiting_open_answer: bool,
     workflow_handle: Option<thread::JoinHandle<()>>,
     /// When set, events are broadcast for gRPC subscribers.
     broadcast_tx: Option<tokio::sync::broadcast::Sender<PresenterEvent>>,
@@ -152,6 +155,7 @@ impl Presenter {
             collected_answers: Vec::new(),
             agent_output_buffer: String::new(),
             agent_output_partial_row_active: false,
+            awaiting_open_answer: false,
             workflow_handle: None,
             broadcast_tx: None,
             intent_tx: None,
@@ -427,6 +431,14 @@ impl Presenter {
                 if text.is_empty() {
                     return;
                 }
+                if let Some(ref dir) = self.workflow_session_dir {
+                    let mut cs = crate::changeset::read_changeset(dir)
+                        .unwrap_or_else(|_| crate::changeset::Changeset::default());
+                    cs.initial_prompt = Some(text.clone());
+                    if let Err(e) = crate::changeset::write_changeset(dir, &cs) {
+                        log::warn!("SubmitFeatureInput: persist changeset: {}", e);
+                    }
+                }
                 let user_line = activity_prompt_log::format_user_prompt_line(&text);
                 if !user_line.is_empty() {
                     self.log_activity(user_line, ActivityKind::UserPrompt);
@@ -591,14 +603,25 @@ impl Presenter {
                 }
             }
             UserIntent::QueuePrompt(text) => {
-                if !text.is_empty() {
-                    let queued_line = activity_prompt_log::format_queued_prompt_line(&text);
-                    if !queued_line.is_empty() {
-                        self.log_activity(queued_line, ActivityKind::UserPrompt);
-                    }
-                    self.state.inbox.push(text);
-                    self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
+                if text.is_empty() {
+                    return;
                 }
+                if self.awaiting_open_answer {
+                    if let Some(ref tx) = self.answer_tx {
+                        log::debug!(
+                            "QueuePrompt → answer_tx (awaiting_open_answer, len={})",
+                            text.len()
+                        );
+                        let _ = tx.send(text);
+                        return;
+                    }
+                }
+                let queued_line = activity_prompt_log::format_queued_prompt_line(&text);
+                if !queued_line.is_empty() {
+                    self.log_activity(queued_line, ActivityKind::UserPrompt);
+                }
+                self.state.inbox.push(text);
+                self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
             }
             UserIntent::EditInboxItem { index, text } => {
                 if index < self.state.inbox.len() {
@@ -620,6 +643,9 @@ impl Presenter {
             }
             UserIntent::Quit => {
                 self.state.should_quit = true;
+            }
+            UserIntent::Interrupt => {
+                // TUI / VirtualTui call `ctrl_c_interrupt_session` without sending this intent.
             }
             UserIntent::ContinueWithAgent => {
                 let session_id = if let Some(cs_dir) = self.changeset_read_dir() {
@@ -768,6 +794,25 @@ impl Presenter {
                     let _ = tx.send(ToolCallResponse::AskAnswer {
                         answers: answers.clone(),
                     });
+                    // `tddy-tools ask` does not go through WaitForInput; merge answers into workflow
+                    // context via grill hooks reading this file in `after_task("grill")`.
+                    if let Some(ref dir) = self.workflow_session_dir {
+                        let wf = dir.join(".workflow");
+                        if let Err(e) = std::fs::create_dir_all(&wf) {
+                            log::warn!("grill ask answers: create_dir_all {}: {}", wf.display(), e);
+                        } else {
+                            let path = wf.join("grill_ask_answers.txt");
+                            if let Err(e) = std::fs::write(&path, &answers) {
+                                log::warn!("grill ask answers: write {}: {}", path.display(), e);
+                            } else {
+                                log::debug!(
+                                    "grill ask answers: wrote {} bytes to {}",
+                                    answers.len(),
+                                    path.display()
+                                );
+                            }
+                        }
+                    }
                 }
                 PendingToolCallResponse::Approve(tx) => {
                     let allow = self
@@ -953,6 +998,11 @@ impl Presenter {
                         ),
                         ActivityKind::ToolUse,
                     );
+                    self.log_activity(
+                        "Answer in the TUI question strip at the top (↑/↓ Enter). Not in Cursor."
+                            .to_string(),
+                        ActivityKind::ToolUse,
+                    );
                     self.flush_agent_output_buffer();
                     self.pending_questions = questions;
                     self.current_question_index = 0;
@@ -1090,6 +1140,7 @@ impl Presenter {
                     });
                 }
                 WorkflowEvent::GoalStarted(goal) => {
+                    self.awaiting_open_answer = false;
                     self.state.current_goal = Some(goal.clone());
                     if let Ok(mut cs) = self.critical_state.lock() {
                         cs.current_goal = Some(goal.clone());
@@ -1103,6 +1154,7 @@ impl Presenter {
                 }
                 WorkflowEvent::ClarificationNeeded { questions } => {
                     self.flush_agent_output_buffer();
+                    self.awaiting_open_answer = questions.is_empty();
                     self.pending_questions = questions;
                     self.current_question_index = 0;
                     self.collected_answers.clear();
@@ -1146,6 +1198,7 @@ impl Presenter {
                     }
                 }
                 WorkflowEvent::WorkflowComplete(result) => {
+                    self.awaiting_open_answer = false;
                     self.flush_agent_output_buffer();
                     self.workflow_result = Some(result.clone());
                     self.broadcast(PresenterEvent::WorkflowComplete(result.clone()));

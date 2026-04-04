@@ -357,3 +357,96 @@ fn test_create_worktree_with_start_point_uses_origin_master() {
 
     let _ = fs::remove_dir_all(&base);
 }
+
+/// When the project's integration base ref is `origin/main` (remote default branch `main`),
+/// the new worktree's HEAD must match `git rev-parse origin/main` in the main repo after fetch.
+#[test]
+fn worktree_uses_configured_project_base_ref() {
+    let base = temp_dir("configured-base-ref");
+    let repo = base.join("repo");
+    fs::create_dir_all(&repo).unwrap();
+
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["config", "user.email", "test@test.com"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["config", "user.name", "Test"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    fs::write(repo.join("README"), "initial").unwrap();
+    std::process::Command::new("git")
+        .args(["add", "README"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["branch", "-M", "main"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["remote", "add", "origin", repo.to_str().unwrap()])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["push", "-u", "origin", "main"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+
+    let session_dir = base.join("plan");
+    fs::create_dir_all(&session_dir).unwrap();
+    let cs = Changeset {
+        name: Some("Main Default Branch".to_string()),
+        initial_prompt: Some("feature".to_string()),
+        state: ChangesetState {
+            current: WorkflowState::new("Planned"),
+            ..Changeset::default().state
+        },
+        branch_suggestion: Some("feature/main-default".to_string()),
+        worktree_suggestion: Some("feature-main-default".to_string()),
+        ..Changeset::default()
+    };
+    write_changeset(&session_dir, &cs).unwrap();
+    fs::write(session_dir.join("PRD.md"), "# PRD\n## TODO\n- [ ] Do").unwrap();
+
+    let result = setup_worktree_for_session(&repo, &session_dir);
+    assert!(
+        result.is_ok(),
+        "worktree setup must fetch and create from the project's integration base (origin/main); got {:?}",
+        result.err()
+    );
+    let worktree_path = result.unwrap();
+
+    let head = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(&worktree_path)
+        .output()
+        .unwrap();
+    let origin_main = std::process::Command::new("git")
+        .args(["rev-parse", "origin/main"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&head.stdout).trim(),
+        String::from_utf8_lossy(&origin_main.stdout).trim(),
+        "worktree HEAD must equal origin/main for a project whose integration base is origin/main"
+    );
+
+    let _ = fs::remove_dir_all(&base);
+}

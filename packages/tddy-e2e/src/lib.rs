@@ -13,7 +13,9 @@ use tonic::transport::Server;
 
 #[cfg(feature = "livekit")]
 use tddy_core::ViewConnection;
-use tddy_core::{AnyBackend, Presenter, PresenterHandle, SharedBackend, StubBackend};
+use tddy_core::{
+    AgentOutputActivityLogMerge, AnyBackend, Presenter, PresenterHandle, SharedBackend, StubBackend,
+};
 use tddy_service::gen::tddy_remote_server::TddyRemoteServer;
 use tddy_service::TddyRemoteService;
 use tddy_tui::{render::draw, virtual_tui::drain_presenter_broadcast, TuiView};
@@ -22,7 +24,7 @@ use tddy_workflow_recipes::TddRecipe;
 use crate::test_util::temp_dir_with_git_repo;
 
 pub mod install_contract;
-pub mod rpc_frontend;
+pub use tddy_tui_testkit::input_encoding as rpc_frontend;
 pub mod test_util;
 pub mod web_dev_contract;
 
@@ -178,6 +180,7 @@ pub fn spawn_presenter_with_grpc_and_tui(
         let mut view = TuiView::new();
         let mut event_rx = conn.event_rx;
         let critical_state = conn.critical_state;
+        let mut agent_output_merge = AgentOutputActivityLogMerge::new();
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -186,8 +189,13 @@ pub fn spawn_presenter_with_grpc_and_tui(
             if shutdown_clone.load(Ordering::Relaxed) {
                 break;
             }
-            let _ =
-                drain_presenter_broadcast(&mut event_rx, &mut state, &mut view, &critical_state);
+            let _ = drain_presenter_broadcast(
+                &mut event_rx,
+                &mut state,
+                &mut view,
+                &critical_state,
+                &mut agent_output_merge,
+            );
             terminal
                 .draw(|f| draw(f, &state, view.view_state_mut(), false, None))
                 .unwrap();

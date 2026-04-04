@@ -49,10 +49,10 @@ pub use log_backend::{
     LogOutput, LogPolicy, LogRotation, LogSelector, LoggerDefinition, MatchedPolicy,
 };
 pub use presenter::{
-    format_worktree_for_status_bar, ActivityEntry, ActivityKind, AppMode, CriticalPresenterState,
-    ExitAction, ModeChangedDetails, PendingWorkflowStart, Presenter, PresenterEvent,
-    PresenterHandle, PresenterState, PresenterView, UserIntent, ViewConnection,
-    WorkflowCompletePayload, WorkflowEvent,
+    format_worktree_for_status_bar, ActivityEntry, ActivityKind, AgentOutputActivityLogMerge,
+    AppMode, CriticalPresenterState, ExitAction, ModeChangedDetails, PendingWorkflowStart,
+    Presenter, PresenterEvent, PresenterHandle, PresenterState, PresenterView, UserIntent,
+    ViewConnection, WorkflowCompletePayload, WorkflowEvent,
 };
 pub use session_lifecycle::{
     materialize_unified_session_directory, resolve_effective_session_id, unified_session_dir_path,
@@ -79,8 +79,10 @@ pub use workflow::{
     GoalOptions,
 };
 pub use worktree::{
-    create_worktree, fetch_origin_master, list_worktrees, remove_worktree,
-    setup_worktree_for_session, worktree_dir, WorktreeInfo,
+    create_worktree, fetch_integration_base, fetch_origin_master, list_worktrees, remove_worktree,
+    resolve_default_integration_base_ref, setup_worktree_for_session,
+    setup_worktree_for_session_with_integration_base, validate_integration_base_ref, worktree_dir,
+    WorktreeInfo, DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF,
 };
 
 #[cfg(test)]

@@ -4,10 +4,12 @@
 
 # Agent verification output (when terminal capture is broken)
 .verify-result.txt
+packages/tddy-workflow-recipes/.tdd-small-red-test-output.txt
 .red-markers-test-output.txt
 .green-web-dev-test-output.txt
 .red-web-dev-test-output.txt
 .red-phase-test-output.txt
+.tddy-red-test-output.txt
 .red-session-lifecycle-test-output.txt
 .green-submit.json
 .red-submit.json

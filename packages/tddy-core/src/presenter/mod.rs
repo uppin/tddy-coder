@@ -2,6 +2,7 @@
 
 mod activity_prompt_log;
 mod agent_activity;
+pub mod agent_output_log_merge;
 mod events;
 mod intent;
 mod presenter_events;
@@ -16,6 +17,7 @@ mod worktree_display;
 pub use events::WorkflowCompletePayload;
 pub use events::WorkflowEvent;
 
+pub use agent_output_log_merge::AgentOutputActivityLogMerge;
 pub use intent::UserIntent;
 pub use presenter_events::{ModeChangedDetails, PresenterEvent, PresenterHandle, ViewConnection};
 pub use presenter_impl::{PendingWorkflowStart, Presenter};

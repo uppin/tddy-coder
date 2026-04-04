@@ -20,7 +20,8 @@ use tokio::sync::broadcast::error::TryRecvError;
 use tokio::sync::mpsc;
 
 use tddy_core::{
-    AppMode, PresenterEvent, PresenterState, PresenterView, UserIntent, ViewConnection,
+    AgentOutputActivityLogMerge, AppMode, PresenterEvent, PresenterState, PresenterView,
+    UserIntent, ViewConnection,
 };
 
 use crate::capturing_writer::CapturingWriter;
@@ -131,6 +132,9 @@ pub fn run_virtual_tui(
             dynamic_area: Rect::default(),
             status_bar: Rect::default(),
             prompt_bar: Rect::default(),
+            footer_bar: Rect::default(),
+            enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         let render_and_send =
             |term: &mut Terminal<CrosstermBackend<CapturingWriter>>,
@@ -239,12 +243,18 @@ pub fn run_virtual_tui(
         let mut recv_chunk_count: u64 = 0;
         let mut total_input_bytes: u64 = 0;
         let mut total_keys_parsed: u64 = 0;
+        let mut agent_output_merge = AgentOutputActivityLogMerge::new();
 
         loop {
             let mut updated = false;
 
-            let had_events =
-                drain_presenter_broadcast(&mut event_rx, &mut state, &mut view, &critical_state);
+            let had_events = drain_presenter_broadcast(
+                &mut event_rx,
+                &mut state,
+                &mut view,
+                &critical_state,
+                &mut agent_output_merge,
+            );
             if had_events {
                 log::debug!("VirtualTui: drained PresenterEvents from broadcast");
                 updated = true;
@@ -260,6 +270,7 @@ pub fn run_virtual_tui(
                             &mut state,
                             &mut view,
                             &critical_state,
+                            &mut agent_output_merge,
                         );
                         if had_more {
                             updated = true;
@@ -279,7 +290,6 @@ pub fn run_virtual_tui(
                             &mut view,
                             &layout_areas,
                             &intent_tx,
-                            &shutdown,
                         );
                     }
                     Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
@@ -336,6 +346,7 @@ pub fn run_virtual_tui(
                                 &mut state,
                                 &mut view,
                                 &critical_state,
+                                &mut agent_output_merge,
                             );
                             if had_more {
                                 straggler_updated = true;
@@ -354,7 +365,6 @@ pub fn run_virtual_tui(
                                 &mut view,
                                 &layout_areas,
                                 &intent_tx,
-                                &shutdown,
                             );
                         }
                         Ok(_) => {}
@@ -403,7 +413,6 @@ fn process_virtual_tui_input_chunk(
     view: &mut TuiView,
     layout_areas: &LayoutAreas,
     intent_tx: &std_mpsc::Sender<UserIntent>,
-    shutdown: &Arc<AtomicBool>,
 ) {
     *recv_chunk_count += 1;
     let chunk_len = bytes.len() as u64;
@@ -435,7 +444,11 @@ fn process_virtual_tui_input_chunk(
                 layout_areas,
                 state.inbox.len(),
             ) {
-                let _ = intent_tx.send(intent);
+                if intent == UserIntent::Interrupt {
+                    ctrl_c_interrupt_session();
+                } else {
+                    let _ = intent_tx.send(intent);
+                }
             }
             if matches!(state.mode, AppMode::Select { .. }) {
                 let idx = view.view_state().select_selected;
@@ -454,7 +467,7 @@ fn process_virtual_tui_input_chunk(
             *total_keys_parsed
         );
         if key_is_ctrl_c_press(&key) {
-            ctrl_c_interrupt_session(shutdown.as_ref());
+            ctrl_c_interrupt_session();
             input_buf.drain(..consumed);
             *updated = true;
             continue;
@@ -549,6 +562,7 @@ pub fn drain_presenter_broadcast(
     state: &mut PresenterState,
     view: &mut TuiView,
     critical_state: &std::sync::Mutex<tddy_core::CriticalPresenterState>,
+    agent_output_merge: &mut AgentOutputActivityLogMerge,
 ) -> bool {
     let mut any = false;
     loop {
@@ -558,7 +572,7 @@ pub fn drain_presenter_broadcast(
                     "VirtualTui: PresenterEvent {:?}",
                     std::mem::discriminant(&ev)
                 );
-                apply_event(state, view, ev);
+                apply_event(state, view, agent_output_merge, ev);
                 any = true;
             }
             Err(TryRecvError::Lagged(skipped)) => {
@@ -579,7 +593,12 @@ pub fn drain_presenter_broadcast(
     any
 }
 
-pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: PresenterEvent) {
+pub fn apply_event(
+    state: &mut PresenterState,
+    view: &mut TuiView,
+    agent_output_merge: &mut AgentOutputActivityLogMerge,
+    ev: PresenterEvent,
+) {
     use std::time::Instant;
 
     match ev {
@@ -634,6 +653,8 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
             view.on_inbox_changed(&state.inbox);
         }
         PresenterEvent::WorkflowComplete(ref result) => {
+            agent_output_merge.flush_buffer(&mut state.activity_log);
+            view.view_state_mut().scroll_offset = usize::MAX;
             state.mode = match result {
                 Ok(_) => AppMode::FeatureInput,
                 Err(_) => AppMode::ErrorRecovery {
@@ -643,6 +664,8 @@ pub fn apply_event(state: &mut PresenterState, view: &mut TuiView, ev: Presenter
             view.on_workflow_complete(result);
         }
         PresenterEvent::AgentOutput(text) => {
+            agent_output_merge.apply_chunk(&text, &mut state.activity_log);
+            view.view_state_mut().scroll_offset = usize::MAX;
             view.on_agent_output(&text);
         }
         PresenterEvent::IntentReceived(UserIntent::Quit) => {
@@ -1058,7 +1081,7 @@ mod tests {
         use ratatui::{TerminalOptions, Viewport};
         use tddy_core::{AppMode, PresenterState};
 
-        use crate::layout::{layout_chunks_with_inbox, prompt_height};
+        use crate::layout::{layout_chunks_with_inbox, prompt_chunk_height_including_rule};
         use crate::render::draw;
         use crate::view_state::ViewState;
 
@@ -1118,16 +1141,15 @@ mod tests {
         let area = ratatui::layout::Rect::new(0, 0, COLS, ROWS);
         let prompt_text = format!("> {}", input);
         let text_len = prompt_text.chars().count().min(u16::MAX as usize) as u16;
-        let max_height = (ROWS / 3).max(1);
-        let prompt_h = prompt_height(text_len, COLS, max_height);
-        let (_, _, _, status_bar, _, _) = layout_chunks_with_inbox(area, 0, 0, prompt_h);
-        let prompt_start_row = status_bar.y + status_bar.height;
+        let prompt_h = prompt_chunk_height_including_rule(text_len, COLS, ROWS);
+        let (_, _, _, _, _, _, prompt_bar, _) = layout_chunks_with_inbox(area, 0, 0, prompt_h);
 
-        // Collect prompt bar content without whitespace for substring search.
-        let prompt_compact: String = (prompt_start_row..ROWS)
+        // Collect prompt text rows (exclude bottom horizontal-rule row) without whitespace.
+        let prompt_compact: String = (prompt_bar.y
+            ..prompt_bar.y + prompt_bar.height.saturating_sub(1))
             .flat_map(|row| {
                 let buf = &buf;
-                (0..COLS).filter_map(move |col| {
+                (prompt_bar.x..prompt_bar.x + prompt_bar.width).filter_map(move |col| {
                     buf.cell(ratatui::layout::Position::new(col, row))
                         .map(|c| c.symbol().chars().next().unwrap_or(' '))
                 })
@@ -1200,8 +1222,15 @@ mod tests {
             active_worktree_display: None,
         };
         let mut view = TuiView::new();
+        let mut agent_output_merge = AgentOutputActivityLogMerge::new();
 
-        drain_presenter_broadcast(&mut rx, &mut state, &mut view, &critical_state);
+        drain_presenter_broadcast(
+            &mut rx,
+            &mut state,
+            &mut view,
+            &critical_state,
+            &mut agent_output_merge,
+        );
 
         assert_eq!(
             state.current_goal.as_deref(),
@@ -1250,9 +1279,16 @@ mod tests {
             active_worktree_display: None,
         };
         let mut view = TuiView::new();
+        let mut agent_output_merge = AgentOutputActivityLogMerge::new();
 
         assert!(
-            drain_presenter_broadcast(&mut rx, &mut state, &mut view, &critical_state),
+            drain_presenter_broadcast(
+                &mut rx,
+                &mut state,
+                &mut view,
+                &critical_state,
+                &mut agent_output_merge,
+            ),
             "expected at least one event after lag"
         );
         assert!(

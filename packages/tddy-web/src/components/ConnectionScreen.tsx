@@ -31,8 +31,16 @@ import {
   sessionIdFirstSegment,
   sessionPidDisplay,
 } from "../utils/sessionDisplay";
+import {
+  isSessionOrphan,
+  projectForUnscopedSession,
+  sortedSessionsForProjectTable,
+} from "../utils/sessionProjectTable";
 import { sortSessionsForDisplay } from "../utils/sessionSort";
 import { SessionWorkflowStatusCells } from "./SessionWorkflowStatusCells";
+import { SessionMoreActionsMenu } from "./session/SessionMoreActionsMenu";
+import { SessionWorkflowFilesModal } from "./session/SessionWorkflowFilesModal";
+import { DaemonNavMenu } from "./shell/DaemonNavMenu";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -42,6 +50,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  isSessionListPath,
+  parseTerminalSessionIdFromPathname,
+  terminalPathForSessionId,
+} from "../routing/appRoutes";
+import { presenceIdentityForUser } from "../lib/presenceIdentity";
 
 /** Full viewport width shell (session tables are not max-width capped). */
 const screenShellClassName =
@@ -77,7 +91,7 @@ function createTokenClient() {
 type ProjectSessionForm = {
   toolPath: string;
   agent: string;
-  /** Workflow recipe: `tdd` or `bugfix` (matches `WorkflowRecipe::name()`). */
+  /** Workflow recipe: `tdd`, `bugfix`, `free-prompting`, or `grill-me` (matches `WorkflowRecipe::name()`). */
   recipe: string;
   debugLogging: boolean;
   daemonInstanceId: string;
@@ -205,6 +219,8 @@ function ProjectSessionOptions({
           >
             <option value="tdd">TDD (plan → implement)</option>
             <option value="bugfix">Bugfix (reproduce → fix)</option>
+            <option value="free-prompting">Free prompting (open-ended)</option>
+            <option value="grill-me">Grill me (Grill → Create plan)</option>
           </select>
         </div>
         <label
@@ -227,10 +243,6 @@ function ProjectSessionOptions({
       </div>
     </>
   );
-}
-
-function sortedSessionsForProject(sessions: SessionEntry[], projectId: string): SessionEntry[] {
-  return sortSessionsForDisplay(sessions.filter((s) => s.projectId === projectId));
 }
 
 function SignalDropdown({
@@ -311,6 +323,29 @@ function SignalDropdown({
   );
 }
 
+/** Trash control — same `data-testid` for active and inactive rows. */
+function SessionDeleteButton({
+  sessionId,
+  onDelete,
+}: {
+  sessionId: string;
+  onDelete: (sessionId: string) => void | Promise<void>;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="destructive"
+      size="icon-sm"
+      aria-label="Delete session"
+      title="Delete session"
+      data-testid={`delete-session-${sessionId}`}
+      onClick={() => void onDelete(sessionId)}
+    >
+      <Trash2 />
+    </Button>
+  );
+}
+
 /** Resume + Delete for inactive session rows (project and orphan tables share stable `data-testid`s). */
 function InactiveSessionActions({
   sessionId,
@@ -332,17 +367,7 @@ function InactiveSessionActions({
       >
         Resume
       </Button>
-      <Button
-        type="button"
-        variant="destructive"
-        size="icon-sm"
-        aria-label="Delete session"
-        title="Delete session"
-        data-testid={`delete-session-${sessionId}`}
-        onClick={() => void onDelete(sessionId)}
-      >
-        <Trash2 />
-      </Button>
+      <SessionDeleteButton sessionId={sessionId} onDelete={onDelete} />
     </span>
   );
 }
@@ -427,7 +452,6 @@ function ConnectedTerminal({
             onDisconnect={onDisconnect}
             onTerminate={onTerminate}
             fullscreenTargetRef={fullscreenTargetRef}
-            onStopInterrupt={() => {}}
           />
         </div>
       </div>
@@ -458,9 +482,12 @@ function ConnectedTerminal({
 export function ConnectionScreen({
   livekitUrl,
   commonRoom,
+  onNavigate,
 }: {
   livekitUrl?: string;
   commonRoom?: string;
+  /** Client-side navigation (daemon shell: Sessions ↔ Worktrees). */
+  onNavigate?: (path: string) => void;
 } = {}) {
   const { user, isAuthenticated, isLoading, login, logout, sessionToken } = useAuth();
   const [tools, setTools] = useState<ToolInfo[]>([]);
@@ -470,6 +497,7 @@ export function ConnectionScreen({
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [projectForms, setProjectForms] = useState<Record<string, ProjectSessionForm>>({});
   const [orphanSessionDebug, setOrphanSessionDebug] = useState(false);
+  const [workflowFilesSessionId, setWorkflowFilesSessionId] = useState<string | null>(null);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectGitUrl, setNewProjectGitUrl] = useState("");
@@ -484,7 +512,36 @@ export function ConnectionScreen({
     debugLogging: boolean;
     sessionId: string;
   } | null>(null);
+  const [routePath, setRoutePath] = useState(
+    () => (typeof window !== "undefined" ? window.location.pathname : "/"),
+  );
+  const [sessionsListHydrated, setSessionsListHydrated] = useState(false);
+  const [terminalRouteUnknown, setTerminalRouteUnknown] = useState(false);
+  const terminalDeepLinkSeqRef = useRef(0);
   const client = useMemo(() => createConnectionClient(), []);
+
+  const navigatePath = useCallback((path: string, mode: "push" | "replace") => {
+    if (typeof window === "undefined") return;
+    if (mode === "push") {
+      window.history.pushState(null, "", path);
+    } else {
+      window.history.replaceState(null, "", path);
+    }
+    setRoutePath(path);
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const p = window.location.pathname;
+      setRoutePath(p);
+      if (isSessionListPath(p)) {
+        setConnected(null);
+        setTerminalRouteUnknown(false);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   const presenceReady =
     Boolean(commonRoom?.trim() && livekitUrl?.trim()) &&
@@ -492,7 +549,10 @@ export function ConnectionScreen({
     !isLoading &&
     Boolean(user);
 
-  const presenceIdentity = user ? `web-${user.login}` : undefined;
+  const presenceIdentity = useMemo(
+    () => (user ? presenceIdentityForUser(user.login) : undefined),
+    [user?.login],
+  );
 
   const { room: presenceRoom, status: presenceStatus, error: presenceError } = useCommonRoom(
     presenceReady ? livekitUrl : undefined,
@@ -511,8 +571,14 @@ export function ConnectionScreen({
     if (!sessionToken) return;
     client
       .listSessions({ sessionToken })
-      .then((res) => setSessions(res.sessions))
-      .catch(() => setSessions([]));
+      .then((res) => {
+        setSessions(res.sessions);
+        setSessionsListHydrated(true);
+      })
+      .catch(() => {
+        setSessions([]);
+        setSessionsListHydrated(true);
+      });
   }, [client, sessionToken]);
 
   useEffect(() => {
@@ -612,19 +678,104 @@ export function ConnectionScreen({
     [projects]
   );
   const orphanSessions = useMemo(
-    () =>
-      sortSessionsForDisplay(sessions.filter((s) => !knownProjectIds.has(s.projectId))),
-    [sessions, knownProjectIds]
+    () => sortSessionsForDisplay(sessions.filter((s) => isSessionOrphan(s, projects))),
+    [sessions, projects]
   );
 
-  const debugForSessionId = (sessionId: string): boolean => {
-    const sess = sessions.find((s) => s.sessionId === sessionId);
-    if (!sess) return false;
-    if (knownProjectIds.has(sess.projectId)) {
-      return projectForms[sess.projectId]?.debugLogging ?? false;
+  const debugForSessionId = useCallback(
+    (sessionId: string): boolean => {
+      const sess = sessions.find((s) => s.sessionId === sessionId);
+      if (!sess) return false;
+      if (knownProjectIds.has(sess.projectId)) {
+        return projectForms[sess.projectId]?.debugLogging ?? false;
+      }
+      if (sess.projectId.trim() === "") {
+        const matched = projectForUnscopedSession(sess, projects);
+        if (matched) {
+          return projectForms[matched.projectId]?.debugLogging ?? false;
+        }
+      }
+      return orphanSessionDebug;
+    },
+    [sessions, projectForms, knownProjectIds, projects, orphanSessionDebug],
+  );
+
+  useEffect(() => {
+    if (!sessionsListHydrated || !isAuthenticated || !sessionToken) {
+      return;
     }
-    return orphanSessionDebug;
-  };
+    const id = parseTerminalSessionIdFromPathname(routePath);
+    if (!id) {
+      setTerminalRouteUnknown(false);
+      return;
+    }
+    if (connected?.sessionId === id) {
+      setTerminalRouteUnknown(false);
+      return;
+    }
+    const known = sessions.some((s) => s.sessionId === id);
+    setTerminalRouteUnknown(!known);
+  }, [routePath, sessions, sessionsListHydrated, isAuthenticated, sessionToken, connected]);
+
+  useEffect(() => {
+    if (!sessionsListHydrated || !isAuthenticated || !sessionToken || terminalRouteUnknown) {
+      return;
+    }
+    const id = parseTerminalSessionIdFromPathname(routePath);
+    if (!id || connected?.sessionId === id) {
+      return;
+    }
+    if (!sessions.some((s) => s.sessionId === id)) {
+      return;
+    }
+    const seq = ++terminalDeepLinkSeqRef.current;
+    let cancelled = false;
+    void (async () => {
+      setError(null);
+      try {
+        const res = await client.connectSession({ sessionToken, sessionId: id });
+        if (cancelled || seq !== terminalDeepLinkSeqRef.current) return;
+        setConnected({
+          livekitUrl: res.livekitUrl,
+          roomName: res.livekitRoom,
+          identity: `browser-${id}-${Date.now()}`,
+          serverIdentity: res.livekitServerIdentity,
+          debugLogging: debugForSessionId(id),
+          sessionId: id,
+        });
+      } catch {
+        try {
+          const res = await client.resumeSession({ sessionToken, sessionId: id });
+          if (cancelled || seq !== terminalDeepLinkSeqRef.current) return;
+          setConnected({
+            livekitUrl: res.livekitUrl,
+            roomName: res.livekitRoom,
+            identity: `browser-${res.sessionId}-${Date.now()}`,
+            serverIdentity: res.livekitServerIdentity,
+            debugLogging: debugForSessionId(id),
+            sessionId: res.sessionId,
+          });
+        } catch (e) {
+          if (!cancelled && seq === terminalDeepLinkSeqRef.current) {
+            setError(e instanceof Error ? e.message : "Failed to open session");
+          }
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    routePath,
+    sessions,
+    sessionsListHydrated,
+    isAuthenticated,
+    sessionToken,
+    connected,
+    terminalRouteUnknown,
+    client,
+    debugForSessionId,
+  ]);
 
   const handleStartSession = async (projectId: string) => {
     const form = projectForms[projectId] ?? defaultProjectSessionForm(tools, agents, daemons);
@@ -647,6 +798,7 @@ export function ConnectionScreen({
         debugLogging: form.debugLogging,
         sessionId: res.sessionId,
       });
+      navigatePath(terminalPathForSessionId(res.sessionId), "push");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start session");
     }
@@ -686,6 +838,7 @@ export function ConnectionScreen({
         debugLogging: debugForSessionId(sessionId),
         sessionId,
       });
+      navigatePath(terminalPathForSessionId(sessionId), "push");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect to session");
     }
@@ -704,6 +857,7 @@ export function ConnectionScreen({
         debugLogging: debugForSessionId(sessionId),
         sessionId: res.sessionId,
       });
+      navigatePath(terminalPathForSessionId(res.sessionId), "push");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to resume session");
     }
@@ -721,7 +875,11 @@ export function ConnectionScreen({
 
   const handleDeleteSession = async (sessionId: string) => {
     if (!sessionToken) return;
-    if (!window.confirm("Delete this session? This removes on-disk session data and cannot be undone.")) {
+    if (
+      !window.confirm(
+        "Delete this session? If the tool process is still running, it will be stopped first, then on-disk session data will be removed. This cannot be undone."
+      )
+    ) {
       return;
     }
     setError(null);
@@ -742,7 +900,10 @@ export function ConnectionScreen({
         identity={connected.identity}
         serverIdentity={connected.serverIdentity}
         debugLogging={connected.debugLogging}
-        onDisconnect={() => setConnected(null)}
+        onDisconnect={() => {
+          navigatePath("/", "replace");
+          setConnected(null);
+        }}
         onTerminate={() => void handleSignalSession(connected.sessionId, Signal.SIGTERM)}
       />
     );
@@ -762,9 +923,34 @@ export function ConnectionScreen({
 
   return (
     <div className={screenShellClassName}>
-      <h1>tddy-web</h1>
-      {user && <UserAvatar user={user} onLogout={logout} />}
-      <h2 style={{ marginTop: 24, fontSize: 18 }}>Start or connect to a session</h2>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          {onNavigate ? <DaemonNavMenu onNavigate={onNavigate} /> : null}
+          <h1 className="text-2xl font-semibold">tddy-web</h1>
+        </div>
+        {user ? <UserAvatar user={user} onLogout={logout} /> : null}
+      </div>
+      <h2 className="mt-6 text-lg font-medium">Start or connect to a session</h2>
+
+      {terminalRouteUnknown && (
+        <div
+          data-testid="terminal-route-unknown-session"
+          className="mb-4 rounded-md border border-destructive/40 bg-destructive/5 p-4"
+        >
+          <p className="mb-3 text-sm text-foreground">Session not found or no longer available.</p>
+          <Button
+            type="button"
+            variant="secondary"
+            data-testid="terminal-route-unknown-session-home"
+            onClick={() => {
+              navigatePath("/", "replace");
+              setTerminalRouteUnknown(false);
+            }}
+          >
+            Back to sessions
+          </Button>
+        </div>
+      )}
 
       {presenceReady && (
         <div
@@ -865,7 +1051,7 @@ export function ConnectionScreen({
         <p style={{ fontSize: 14, color: "#666" }}>No projects yet. Create one above.</p>
       ) : (
         projects.map((p) => {
-          const projectSessions = sortedSessionsForProject(sessions, p.projectId);
+          const projectSessions = sortedSessionsForProjectTable(sessions, p, projects);
           return (
             <details
               key={p.projectId}
@@ -933,29 +1119,38 @@ export function ConnectionScreen({
                         <TableCell>{sessionPidDisplay(s.isActive, s.pid)}</TableCell>
                         <SessionWorkflowStatusCells session={s} />
                         <TableCell>
-                          {s.isActive ? (
-                            <>
-                              <Button
-                                type="button"
-                                size="sm"
-                                data-testid={`connect-${s.sessionId}`}
-                                className="mr-1"
-                                onClick={() => handleConnectSession(s.sessionId)}
-                              >
-                                Connect
-                              </Button>
-                              <SignalDropdown
+                          <span className="inline-flex flex-wrap items-center gap-2">
+                            {s.isActive ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  data-testid={`connect-${s.sessionId}`}
+                                  onClick={() => handleConnectSession(s.sessionId)}
+                                >
+                                  Connect
+                                </Button>
+                                <SignalDropdown
+                                  sessionId={s.sessionId}
+                                  onSignal={handleSignalSession}
+                                />
+                                <SessionDeleteButton
+                                  sessionId={s.sessionId}
+                                  onDelete={handleDeleteSession}
+                                />
+                              </>
+                            ) : (
+                              <InactiveSessionActions
                                 sessionId={s.sessionId}
-                                onSignal={handleSignalSession}
+                                onResume={handleResumeSession}
+                                onDelete={handleDeleteSession}
                               />
-                            </>
-                          ) : (
-                            <InactiveSessionActions
+                            )}
+                            <SessionMoreActionsMenu
                               sessionId={s.sessionId}
-                              onResume={handleResumeSession}
-                              onDelete={handleDeleteSession}
+                              onShowFiles={() => setWorkflowFilesSessionId(s.sessionId)}
                             />
-                          )}
+                          </span>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1010,29 +1205,38 @@ export function ConnectionScreen({
                   <TableCell>{sessionPidDisplay(s.isActive, s.pid)}</TableCell>
                   <SessionWorkflowStatusCells session={s} />
                   <TableCell>
-                    {s.isActive ? (
-                      <>
-                        <Button
-                          type="button"
-                          size="sm"
-                          data-testid={`connect-${s.sessionId}`}
-                          className="mr-1"
-                          onClick={() => handleConnectSession(s.sessionId)}
-                        >
-                          Connect
-                        </Button>
-                        <SignalDropdown
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {s.isActive ? (
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            data-testid={`connect-${s.sessionId}`}
+                            onClick={() => handleConnectSession(s.sessionId)}
+                          >
+                            Connect
+                          </Button>
+                          <SignalDropdown
+                            sessionId={s.sessionId}
+                            onSignal={handleSignalSession}
+                          />
+                          <SessionDeleteButton
+                            sessionId={s.sessionId}
+                            onDelete={handleDeleteSession}
+                          />
+                        </>
+                      ) : (
+                        <InactiveSessionActions
                           sessionId={s.sessionId}
-                          onSignal={handleSignalSession}
+                          onResume={handleResumeSession}
+                          onDelete={handleDeleteSession}
                         />
-                      </>
-                    ) : (
-                      <InactiveSessionActions
+                      )}
+                      <SessionMoreActionsMenu
                         sessionId={s.sessionId}
-                        onResume={handleResumeSession}
-                        onDelete={handleDeleteSession}
+                        onShowFiles={() => setWorkflowFilesSessionId(s.sessionId)}
                       />
-                    )}
+                    </span>
                   </TableCell>
                 </TableRow>
               ))}
@@ -1040,6 +1244,16 @@ export function ConnectionScreen({
           </Table>
         </>
       )}
+
+      {sessionToken && workflowFilesSessionId ? (
+        <SessionWorkflowFilesModal
+          open
+          onClose={() => setWorkflowFilesSessionId(null)}
+          sessionId={workflowFilesSessionId}
+          sessionToken={sessionToken}
+          client={client}
+        />
+      ) : null}
     </div>
   );
 }

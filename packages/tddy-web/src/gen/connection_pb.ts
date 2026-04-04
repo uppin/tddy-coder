@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file connection.proto.
  */
 export const file_connection: GenFile = /*@__PURE__*/
-  fileDesc("ChBjb25uZWN0aW9uLnByb3RvEgpjb25uZWN0aW9uIhIKEExpc3RUb29sc1JlcXVlc3QiOAoRTGlzdFRvb2xzUmVzcG9uc2USIwoFdG9vbHMYASADKAsyFC5jb25uZWN0aW9uLlRvb2xJbmZvIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkiEwoRTGlzdEFnZW50c1JlcXVlc3QiOwoSTGlzdEFnZW50c1Jlc3BvbnNlEiUKBmFnZW50cxgBIAMoCzIVLmNvbm5lY3Rpb24uQWdlbnRJbmZvIiYKCUFnZW50SW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSIsChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiQgoUTGlzdFNlc3Npb25zUmVzcG9uc2USKgoIc2Vzc2lvbnMYASADKAsyGC5jb25uZWN0aW9uLlNlc3Npb25FbnRyeSKPAgoMU2Vzc2lvbkVudHJ5EhIKCnNlc3Npb25faWQYASABKAkSEgoKY3JlYXRlZF9hdBgCIAEoCRIOCgZzdGF0dXMYAyABKAkSEQoJcmVwb19wYXRoGAQgASgJEgsKA3BpZBgFIAEoDRIRCglpc19hY3RpdmUYBiABKAgSEgoKcHJvamVjdF9pZBgHIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYCCABKAkSFQoNd29ya2Zsb3dfZ29hbBgJIAEoCRIWCg53b3JrZmxvd19zdGF0ZRgKIAEoCRIXCg9lbGFwc2VkX2Rpc3BsYXkYCyABKAkSDQoFYWdlbnQYDCABKAkSDQoFbW9kZWwYDSABKAkiWQoMUHJvamVjdEVudHJ5EhIKCnByb2plY3RfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhYKDm1haW5fcmVwb19wYXRoGAQgASgJIiwKE0xpc3RQcm9qZWN0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJCChRMaXN0UHJvamVjdHNSZXNwb25zZRIqCghwcm9qZWN0cxgBIAMoCzIYLmNvbm5lY3Rpb24uUHJvamVjdEVudHJ5ImgKFENyZWF0ZVByb2plY3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhoKEnVzZXJfcmVsYXRpdmVfcGF0aBgEIAEoCSJCChVDcmVhdGVQcm9qZWN0UmVzcG9uc2USKQoHcHJvamVjdBgBIAEoCzIYLmNvbm5lY3Rpb24uUHJvamVjdEVudHJ5Io4BChNTdGFydFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEQoJdG9vbF9wYXRoGAIgASgJEhIKCnByb2plY3RfaWQYAyABKAkSDQoFYWdlbnQYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEg4KBnJlY2lwZRgGIAEoCSJ2ChRTdGFydFNlc3Npb25SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGxpdmVraXRfcm9vbRgCIAEoCRITCgtsaXZla2l0X3VybBgDIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgEIAEoCSJCChVDb25uZWN0U2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJImQKFkNvbm5lY3RTZXNzaW9uUmVzcG9uc2USFAoMbGl2ZWtpdF9yb29tGAEgASgJEhMKC2xpdmVraXRfdXJsGAIgASgJEh8KF2xpdmVraXRfc2VydmVyX2lkZW50aXR5GAMgASgJIkEKFFJlc3VtZVNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJ3ChVSZXN1bWVTZXNzaW9uUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIUCgxsaXZla2l0X3Jvb20YAiABKAkSEwoLbGl2ZWtpdF91cmwYAyABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYBCABKAkiUQoUU2lnbmFsU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBnNpZ25hbBgDIAEoBSI0ChVTaWduYWxTZXNzaW9uUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJBChREZWxldGVTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiIwoVRGVsZXRlU2Vzc2lvblJlc3BvbnNlEgoKAm9rGAEgASgIIjMKGkxpc3RFbGlnaWJsZURhZW1vbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiSwoTRWxpZ2libGVEYWVtb25FbnRyeRITCgtpbnN0YW5jZV9pZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIQCghpc19sb2NhbBgDIAEoCCJPChtMaXN0RWxpZ2libGVEYWVtb25zUmVzcG9uc2USMAoHZGFlbW9ucxgBIAMoCzIfLmNvbm5lY3Rpb24uRWxpZ2libGVEYWVtb25FbnRyeSpDCgZTaWduYWwSEQoNU0lHTkFMX1NJR0lOVBAAEhIKDlNJR05BTF9TSUdURVJNEAESEgoOU0lHTkFMX1NJR0tJTEwQAjK8BwoRQ29ubmVjdGlvblNlcnZpY2USSAoJTGlzdFRvb2xzEhwuY29ubmVjdGlvbi5MaXN0VG9vbHNSZXF1ZXN0Gh0uY29ubmVjdGlvbi5MaXN0VG9vbHNSZXNwb25zZRJLCgpMaXN0QWdlbnRzEh0uY29ubmVjdGlvbi5MaXN0QWdlbnRzUmVxdWVzdBoeLmNvbm5lY3Rpb24uTGlzdEFnZW50c1Jlc3BvbnNlElEKDExpc3RTZXNzaW9ucxIfLmNvbm5lY3Rpb24uTGlzdFNlc3Npb25zUmVxdWVzdBogLmNvbm5lY3Rpb24uTGlzdFNlc3Npb25zUmVzcG9uc2USUQoMTGlzdFByb2plY3RzEh8uY29ubmVjdGlvbi5MaXN0UHJvamVjdHNSZXF1ZXN0GiAuY29ubmVjdGlvbi5MaXN0UHJvamVjdHNSZXNwb25zZRJUCg1DcmVhdGVQcm9qZWN0EiAuY29ubmVjdGlvbi5DcmVhdGVQcm9qZWN0UmVxdWVzdBohLmNvbm5lY3Rpb24uQ3JlYXRlUHJvamVjdFJlc3BvbnNlElEKDFN0YXJ0U2Vzc2lvbhIfLmNvbm5lY3Rpb24uU3RhcnRTZXNzaW9uUmVxdWVzdBogLmNvbm5lY3Rpb24uU3RhcnRTZXNzaW9uUmVzcG9uc2USVwoOQ29ubmVjdFNlc3Npb24SIS5jb25uZWN0aW9uLkNvbm5lY3RTZXNzaW9uUmVxdWVzdBoiLmNvbm5lY3Rpb24uQ29ubmVjdFNlc3Npb25SZXNwb25zZRJUCg1SZXN1bWVTZXNzaW9uEiAuY29ubmVjdGlvbi5SZXN1bWVTZXNzaW9uUmVxdWVzdBohLmNvbm5lY3Rpb24uUmVzdW1lU2Vzc2lvblJlc3BvbnNlElQKDVNpZ25hbFNlc3Npb24SIC5jb25uZWN0aW9uLlNpZ25hbFNlc3Npb25SZXF1ZXN0GiEuY29ubmVjdGlvbi5TaWduYWxTZXNzaW9uUmVzcG9uc2USVAoNRGVsZXRlU2Vzc2lvbhIgLmNvbm5lY3Rpb24uRGVsZXRlU2Vzc2lvblJlcXVlc3QaIS5jb25uZWN0aW9uLkRlbGV0ZVNlc3Npb25SZXNwb25zZRJmChNMaXN0RWxpZ2libGVEYWVtb25zEiYuY29ubmVjdGlvbi5MaXN0RWxpZ2libGVEYWVtb25zUmVxdWVzdBonLmNvbm5lY3Rpb24uTGlzdEVsaWdpYmxlRGFlbW9uc1Jlc3BvbnNlYgZwcm90bzM");
+  fileDesc("ChBjb25uZWN0aW9uLnByb3RvEgpjb25uZWN0aW9uIhIKEExpc3RUb29sc1JlcXVlc3QiOAoRTGlzdFRvb2xzUmVzcG9uc2USIwoFdG9vbHMYASADKAsyFC5jb25uZWN0aW9uLlRvb2xJbmZvIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkiEwoRTGlzdEFnZW50c1JlcXVlc3QiOwoSTGlzdEFnZW50c1Jlc3BvbnNlEiUKBmFnZW50cxgBIAMoCzIVLmNvbm5lY3Rpb24uQWdlbnRJbmZvIiYKCUFnZW50SW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSIsChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiQgoUTGlzdFNlc3Npb25zUmVzcG9uc2USKgoIc2Vzc2lvbnMYASADKAsyGC5jb25uZWN0aW9uLlNlc3Npb25FbnRyeSKPAgoMU2Vzc2lvbkVudHJ5EhIKCnNlc3Npb25faWQYASABKAkSEgoKY3JlYXRlZF9hdBgCIAEoCRIOCgZzdGF0dXMYAyABKAkSEQoJcmVwb19wYXRoGAQgASgJEgsKA3BpZBgFIAEoDRIRCglpc19hY3RpdmUYBiABKAgSEgoKcHJvamVjdF9pZBgHIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYCCABKAkSFQoNd29ya2Zsb3dfZ29hbBgJIAEoCRIWCg53b3JrZmxvd19zdGF0ZRgKIAEoCRIXCg9lbGFwc2VkX2Rpc3BsYXkYCyABKAkSDQoFYWdlbnQYDCABKAkSDQoFbW9kZWwYDSABKAkiWQoMUHJvamVjdEVudHJ5EhIKCnByb2plY3RfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhYKDm1haW5fcmVwb19wYXRoGAQgASgJIiwKE0xpc3RQcm9qZWN0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJCChRMaXN0UHJvamVjdHNSZXNwb25zZRIqCghwcm9qZWN0cxgBIAMoCzIYLmNvbm5lY3Rpb24uUHJvamVjdEVudHJ5ImgKFENyZWF0ZVByb2plY3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhoKEnVzZXJfcmVsYXRpdmVfcGF0aBgEIAEoCSJCChVDcmVhdGVQcm9qZWN0UmVzcG9uc2USKQoHcHJvamVjdBgBIAEoCzIYLmNvbm5lY3Rpb24uUHJvamVjdEVudHJ5Io4BChNTdGFydFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEQoJdG9vbF9wYXRoGAIgASgJEhIKCnByb2plY3RfaWQYAyABKAkSDQoFYWdlbnQYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEg4KBnJlY2lwZRgGIAEoCSJ2ChRTdGFydFNlc3Npb25SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGxpdmVraXRfcm9vbRgCIAEoCRITCgtsaXZla2l0X3VybBgDIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgEIAEoCSJCChVDb25uZWN0U2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJImQKFkNvbm5lY3RTZXNzaW9uUmVzcG9uc2USFAoMbGl2ZWtpdF9yb29tGAEgASgJEhMKC2xpdmVraXRfdXJsGAIgASgJEh8KF2xpdmVraXRfc2VydmVyX2lkZW50aXR5GAMgASgJIkEKFFJlc3VtZVNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJ3ChVSZXN1bWVTZXNzaW9uUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIUCgxsaXZla2l0X3Jvb20YAiABKAkSEwoLbGl2ZWtpdF91cmwYAyABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYBCABKAkiUQoUU2lnbmFsU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBnNpZ25hbBgDIAEoBSI0ChVTaWduYWxTZXNzaW9uUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJBChREZWxldGVTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiIwoVRGVsZXRlU2Vzc2lvblJlc3BvbnNlEgoKAm9rGAEgASgIIjMKGkxpc3RFbGlnaWJsZURhZW1vbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiSwoTRWxpZ2libGVEYWVtb25FbnRyeRITCgtpbnN0YW5jZV9pZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIQCghpc19sb2NhbBgDIAEoCCJPChtMaXN0RWxpZ2libGVEYWVtb25zUmVzcG9uc2USMAoHZGFlbW9ucxgBIAMoCzIfLmNvbm5lY3Rpb24uRWxpZ2libGVEYWVtb25FbnRyeSJMCh9MaXN0U2Vzc2lvbldvcmtmbG93RmlsZXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIlChFXb3JrZmxvd0ZpbGVFbnRyeRIQCghiYXNlbmFtZRgBIAEoCSJQCiBMaXN0U2Vzc2lvbldvcmtmbG93RmlsZXNSZXNwb25zZRIsCgVmaWxlcxgBIAMoCzIdLmNvbm5lY3Rpb24uV29ya2Zsb3dGaWxlRW50cnkiXQoeUmVhZFNlc3Npb25Xb3JrZmxvd0ZpbGVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIQCghiYXNlbmFtZRgDIAEoCSI3Ch9SZWFkU2Vzc2lvbldvcmtmbG93RmlsZVJlc3BvbnNlEhQKDGNvbnRlbnRfdXRmOBgBIAEoCSKzAQoLV29ya3RyZWVSb3cSDAoEcGF0aBgBIAEoCRIUCgxicmFuY2hfbGFiZWwYAiABKAkSEgoKZGlza19ieXRlcxgDIAEoBBIVCg1jaGFuZ2VkX2ZpbGVzGAQgASgNEhMKC2xpbmVzX2FkZGVkGAUgASgDEhUKDWxpbmVzX3JlbW92ZWQYBiABKAMSGgoSdXBkYXRlZF9hdF91bml4X21zGAcgASgDEg0KBXN0YWxlGAggASgIIlwKHkxpc3RXb3JrdHJlZXNGb3JQcm9qZWN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSDwoHcmVmcmVzaBgDIAEoCCJNCh9MaXN0V29ya3RyZWVzRm9yUHJvamVjdFJlc3BvbnNlEioKCXdvcmt0cmVlcxgBIAMoCzIXLmNvbm5lY3Rpb24uV29ya3RyZWVSb3ciWQoVUmVtb3ZlV29ya3RyZWVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJIjUKFlJlbW92ZVdvcmt0cmVlUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSpDCgZTaWduYWwSEQoNU0lHTkFMX1NJR0lOVBAAEhIKDlNJR05BTF9TSUdURVJNEAESEgoOU0lHTkFMX1NJR0tJTEwQAjL0CgoRQ29ubmVjdGlvblNlcnZpY2USSAoJTGlzdFRvb2xzEhwuY29ubmVjdGlvbi5MaXN0VG9vbHNSZXF1ZXN0Gh0uY29ubmVjdGlvbi5MaXN0VG9vbHNSZXNwb25zZRJLCgpMaXN0QWdlbnRzEh0uY29ubmVjdGlvbi5MaXN0QWdlbnRzUmVxdWVzdBoeLmNvbm5lY3Rpb24uTGlzdEFnZW50c1Jlc3BvbnNlElEKDExpc3RTZXNzaW9ucxIfLmNvbm5lY3Rpb24uTGlzdFNlc3Npb25zUmVxdWVzdBogLmNvbm5lY3Rpb24uTGlzdFNlc3Npb25zUmVzcG9uc2USUQoMTGlzdFByb2plY3RzEh8uY29ubmVjdGlvbi5MaXN0UHJvamVjdHNSZXF1ZXN0GiAuY29ubmVjdGlvbi5MaXN0UHJvamVjdHNSZXNwb25zZRJUCg1DcmVhdGVQcm9qZWN0EiAuY29ubmVjdGlvbi5DcmVhdGVQcm9qZWN0UmVxdWVzdBohLmNvbm5lY3Rpb24uQ3JlYXRlUHJvamVjdFJlc3BvbnNlElEKDFN0YXJ0U2Vzc2lvbhIfLmNvbm5lY3Rpb24uU3RhcnRTZXNzaW9uUmVxdWVzdBogLmNvbm5lY3Rpb24uU3RhcnRTZXNzaW9uUmVzcG9uc2USVwoOQ29ubmVjdFNlc3Npb24SIS5jb25uZWN0aW9uLkNvbm5lY3RTZXNzaW9uUmVxdWVzdBoiLmNvbm5lY3Rpb24uQ29ubmVjdFNlc3Npb25SZXNwb25zZRJUCg1SZXN1bWVTZXNzaW9uEiAuY29ubmVjdGlvbi5SZXN1bWVTZXNzaW9uUmVxdWVzdBohLmNvbm5lY3Rpb24uUmVzdW1lU2Vzc2lvblJlc3BvbnNlElQKDVNpZ25hbFNlc3Npb24SIC5jb25uZWN0aW9uLlNpZ25hbFNlc3Npb25SZXF1ZXN0GiEuY29ubmVjdGlvbi5TaWduYWxTZXNzaW9uUmVzcG9uc2USVAoNRGVsZXRlU2Vzc2lvbhIgLmNvbm5lY3Rpb24uRGVsZXRlU2Vzc2lvblJlcXVlc3QaIS5jb25uZWN0aW9uLkRlbGV0ZVNlc3Npb25SZXNwb25zZRJmChNMaXN0RWxpZ2libGVEYWVtb25zEiYuY29ubmVjdGlvbi5MaXN0RWxpZ2libGVEYWVtb25zUmVxdWVzdBonLmNvbm5lY3Rpb24uTGlzdEVsaWdpYmxlRGFlbW9uc1Jlc3BvbnNlEnUKGExpc3RTZXNzaW9uV29ya2Zsb3dGaWxlcxIrLmNvbm5lY3Rpb24uTGlzdFNlc3Npb25Xb3JrZmxvd0ZpbGVzUmVxdWVzdBosLmNvbm5lY3Rpb24uTGlzdFNlc3Npb25Xb3JrZmxvd0ZpbGVzUmVzcG9uc2UScgoXUmVhZFNlc3Npb25Xb3JrZmxvd0ZpbGUSKi5jb25uZWN0aW9uLlJlYWRTZXNzaW9uV29ya2Zsb3dGaWxlUmVxdWVzdBorLmNvbm5lY3Rpb24uUmVhZFNlc3Npb25Xb3JrZmxvd0ZpbGVSZXNwb25zZRJyChdMaXN0V29ya3RyZWVzRm9yUHJvamVjdBIqLmNvbm5lY3Rpb24uTGlzdFdvcmt0cmVlc0ZvclByb2plY3RSZXF1ZXN0GisuY29ubmVjdGlvbi5MaXN0V29ya3RyZWVzRm9yUHJvamVjdFJlc3BvbnNlElcKDlJlbW92ZVdvcmt0cmVlEiEuY29ubmVjdGlvbi5SZW1vdmVXb3JrdHJlZVJlcXVlc3QaIi5jb25uZWN0aW9uLlJlbW92ZVdvcmt0cmVlUmVzcG9uc2ViBnByb3RvMw");
 
 /**
  * @generated from message connection.ListToolsRequest
@@ -686,6 +686,257 @@ export const ListEligibleDaemonsResponseSchema: GenMessage<ListEligibleDaemonsRe
   messageDesc(file_connection, 26);
 
 /**
+ * @generated from message connection.ListSessionWorkflowFilesRequest
+ */
+export type ListSessionWorkflowFilesRequest = Message<"connection.ListSessionWorkflowFilesRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message connection.ListSessionWorkflowFilesRequest.
+ * Use `create(ListSessionWorkflowFilesRequestSchema)` to create a new message.
+ */
+export const ListSessionWorkflowFilesRequestSchema: GenMessage<ListSessionWorkflowFilesRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 27);
+
+/**
+ * @generated from message connection.WorkflowFileEntry
+ */
+export type WorkflowFileEntry = Message<"connection.WorkflowFileEntry"> & {
+  /**
+   * @generated from field: string basename = 1;
+   */
+  basename: string;
+};
+
+/**
+ * Describes the message connection.WorkflowFileEntry.
+ * Use `create(WorkflowFileEntrySchema)` to create a new message.
+ */
+export const WorkflowFileEntrySchema: GenMessage<WorkflowFileEntry> = /*@__PURE__*/
+  messageDesc(file_connection, 28);
+
+/**
+ * @generated from message connection.ListSessionWorkflowFilesResponse
+ */
+export type ListSessionWorkflowFilesResponse = Message<"connection.ListSessionWorkflowFilesResponse"> & {
+  /**
+   * @generated from field: repeated connection.WorkflowFileEntry files = 1;
+   */
+  files: WorkflowFileEntry[];
+};
+
+/**
+ * Describes the message connection.ListSessionWorkflowFilesResponse.
+ * Use `create(ListSessionWorkflowFilesResponseSchema)` to create a new message.
+ */
+export const ListSessionWorkflowFilesResponseSchema: GenMessage<ListSessionWorkflowFilesResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 29);
+
+/**
+ * @generated from message connection.ReadSessionWorkflowFileRequest
+ */
+export type ReadSessionWorkflowFileRequest = Message<"connection.ReadSessionWorkflowFileRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * Allowlisted workflow file basename (server resolves under session dir only).
+   *
+   * @generated from field: string basename = 3;
+   */
+  basename: string;
+};
+
+/**
+ * Describes the message connection.ReadSessionWorkflowFileRequest.
+ * Use `create(ReadSessionWorkflowFileRequestSchema)` to create a new message.
+ */
+export const ReadSessionWorkflowFileRequestSchema: GenMessage<ReadSessionWorkflowFileRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 30);
+
+/**
+ * @generated from message connection.ReadSessionWorkflowFileResponse
+ */
+export type ReadSessionWorkflowFileResponse = Message<"connection.ReadSessionWorkflowFileResponse"> & {
+  /**
+   * @generated from field: string content_utf8 = 1;
+   */
+  contentUtf8: string;
+};
+
+/**
+ * Describes the message connection.ReadSessionWorkflowFileResponse.
+ * Use `create(ReadSessionWorkflowFileResponseSchema)` to create a new message.
+ */
+export const ReadSessionWorkflowFileResponseSchema: GenMessage<ReadSessionWorkflowFileResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 31);
+
+/**
+ * @generated from message connection.WorktreeRow
+ */
+export type WorktreeRow = Message<"connection.WorktreeRow"> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * @generated from field: string branch_label = 2;
+   */
+  branchLabel: string;
+
+  /**
+   * @generated from field: uint64 disk_bytes = 3;
+   */
+  diskBytes: bigint;
+
+  /**
+   * @generated from field: uint32 changed_files = 4;
+   */
+  changedFiles: number;
+
+  /**
+   * @generated from field: int64 lines_added = 5;
+   */
+  linesAdded: bigint;
+
+  /**
+   * @generated from field: int64 lines_removed = 6;
+   */
+  linesRemoved: bigint;
+
+  /**
+   * @generated from field: int64 updated_at_unix_ms = 7;
+   */
+  updatedAtUnixMs: bigint;
+
+  /**
+   * @generated from field: bool stale = 8;
+   */
+  stale: boolean;
+};
+
+/**
+ * Describes the message connection.WorktreeRow.
+ * Use `create(WorktreeRowSchema)` to create a new message.
+ */
+export const WorktreeRowSchema: GenMessage<WorktreeRow> = /*@__PURE__*/
+  messageDesc(file_connection, 32);
+
+/**
+ * @generated from message connection.ListWorktreesForProjectRequest
+ */
+export type ListWorktreesForProjectRequest = Message<"connection.ListWorktreesForProjectRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * When true, runs git/diff/stat refresh for this project before returning cached rows.
+   *
+   * @generated from field: bool refresh = 3;
+   */
+  refresh: boolean;
+};
+
+/**
+ * Describes the message connection.ListWorktreesForProjectRequest.
+ * Use `create(ListWorktreesForProjectRequestSchema)` to create a new message.
+ */
+export const ListWorktreesForProjectRequestSchema: GenMessage<ListWorktreesForProjectRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 33);
+
+/**
+ * @generated from message connection.ListWorktreesForProjectResponse
+ */
+export type ListWorktreesForProjectResponse = Message<"connection.ListWorktreesForProjectResponse"> & {
+  /**
+   * @generated from field: repeated connection.WorktreeRow worktrees = 1;
+   */
+  worktrees: WorktreeRow[];
+};
+
+/**
+ * Describes the message connection.ListWorktreesForProjectResponse.
+ * Use `create(ListWorktreesForProjectResponseSchema)` to create a new message.
+ */
+export const ListWorktreesForProjectResponseSchema: GenMessage<ListWorktreesForProjectResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 34);
+
+/**
+ * @generated from message connection.RemoveWorktreeRequest
+ */
+export type RemoveWorktreeRequest = Message<"connection.RemoveWorktreeRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * Absolute or repo-relative path as accepted by server validation (must appear in git worktree list).
+   *
+   * @generated from field: string worktree_path = 3;
+   */
+  worktreePath: string;
+};
+
+/**
+ * Describes the message connection.RemoveWorktreeRequest.
+ * Use `create(RemoveWorktreeRequestSchema)` to create a new message.
+ */
+export const RemoveWorktreeRequestSchema: GenMessage<RemoveWorktreeRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 35);
+
+/**
+ * @generated from message connection.RemoveWorktreeResponse
+ */
+export type RemoveWorktreeResponse = Message<"connection.RemoveWorktreeResponse"> & {
+  /**
+   * @generated from field: bool ok = 1;
+   */
+  ok: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+};
+
+/**
+ * Describes the message connection.RemoveWorktreeResponse.
+ * Use `create(RemoveWorktreeResponseSchema)` to create a new message.
+ */
+export const RemoveWorktreeResponseSchema: GenMessage<RemoveWorktreeResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 36);
+
+/**
  * @generated from enum connection.Signal
  */
 export enum Signal {
@@ -802,6 +1053,38 @@ export const ConnectionService: GenService<{
     methodKind: "unary";
     input: typeof ListEligibleDaemonsRequestSchema;
     output: typeof ListEligibleDaemonsResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.ListSessionWorkflowFiles
+   */
+  listSessionWorkflowFiles: {
+    methodKind: "unary";
+    input: typeof ListSessionWorkflowFilesRequestSchema;
+    output: typeof ListSessionWorkflowFilesResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.ReadSessionWorkflowFile
+   */
+  readSessionWorkflowFile: {
+    methodKind: "unary";
+    input: typeof ReadSessionWorkflowFileRequestSchema;
+    output: typeof ReadSessionWorkflowFileResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.ListWorktreesForProject
+   */
+  listWorktreesForProject: {
+    methodKind: "unary";
+    input: typeof ListWorktreesForProjectRequestSchema;
+    output: typeof ListWorktreesForProjectResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.RemoveWorktree
+   */
+  removeWorktree: {
+    methodKind: "unary";
+    input: typeof RemoveWorktreeRequestSchema;
+    output: typeof RemoveWorktreeResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_connection, 0);

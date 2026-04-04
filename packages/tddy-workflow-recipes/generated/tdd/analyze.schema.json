@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tddy:goal/analyze",
+  "title": "AnalyzeOutput",
+  "type": "object",
+  "required": ["goal", "branch_suggestion", "worktree_suggestion"],
+  "properties": {
+    "goal": { "const": "analyze" },
+    "branch_suggestion": { "type": "string", "minLength": 1 },
+    "worktree_suggestion": { "type": "string", "minLength": 1 },
+    "name": { "type": "string" },
+    "summary": { "type": "string" }
+  }
+}

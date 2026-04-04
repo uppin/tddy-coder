@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Bugfix analyze goal output. JSON Schema: analyze.schema.json.
+message AnalyzeOutput {
+  string goal = 1;
+  string branch_suggestion = 2;
+  string worktree_suggestion = 3;
+}

@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use tddy_core::{AppMode, PresenterEvent, PresenterState, UserIntent};
+use tddy_core::{AgentOutputActivityLogMerge, AppMode, PresenterEvent, PresenterState, UserIntent};
 use tddy_tui::{apply_event, key_event_to_intent, TuiView, ViewState};
 
 fn sample_state() -> PresenterState {
@@ -29,10 +29,12 @@ fn sample_state() -> PresenterState {
 fn workflow_complete_error_sets_error_recovery_mode() {
     let mut state = sample_state();
     let mut view = TuiView::new();
+    let mut merge = AgentOutputActivityLogMerge::new();
     let err = "read refactoring-plan.md: No such file or directory (os error 2)";
     apply_event(
         &mut state,
         &mut view,
+        &mut merge,
         PresenterEvent::WorkflowComplete(Err(err.to_string())),
     );
     assert!(
@@ -50,12 +52,19 @@ fn workflow_complete_error_sets_error_recovery_mode() {
 fn should_quit_event_exits_tui_loop_state() {
     let mut state = sample_state();
     let mut view = TuiView::new();
+    let mut merge = AgentOutputActivityLogMerge::new();
     apply_event(
         &mut state,
         &mut view,
+        &mut merge,
         PresenterEvent::WorkflowComplete(Err("boom".into())),
     );
-    apply_event(&mut state, &mut view, PresenterEvent::ShouldQuit);
+    apply_event(
+        &mut state,
+        &mut view,
+        &mut merge,
+        PresenterEvent::ShouldQuit,
+    );
     assert!(state.should_quit);
 }
 
@@ -63,9 +72,11 @@ fn should_quit_event_exits_tui_loop_state() {
 fn workflow_error_preserves_goal_and_state_for_status_bar() {
     let mut state = sample_state();
     let mut view = TuiView::new();
+    let mut merge = AgentOutputActivityLogMerge::new();
     apply_event(
         &mut state,
         &mut view,
+        &mut merge,
         PresenterEvent::WorkflowComplete(Err("read refactoring-plan.md: ...".into())),
     );
     assert_eq!(state.current_goal.as_deref(), Some("refactor"));
@@ -80,9 +91,11 @@ fn intent_received_quit_sets_should_quit_in_error_recovery() {
             .to_string(),
     };
     let mut view = TuiView::new();
+    let mut merge = AgentOutputActivityLogMerge::new();
     apply_event(
         &mut state,
         &mut view,
+        &mut merge,
         PresenterEvent::IntentReceived(UserIntent::Quit),
     );
     assert!(
@@ -111,14 +124,17 @@ fn error_recovery_exit_selection_enter_maps_to_quit_intent() {
 fn workflow_error_then_quit_intent_exits() {
     let mut state = sample_state();
     let mut view = TuiView::new();
+    let mut merge = AgentOutputActivityLogMerge::new();
     apply_event(
         &mut state,
         &mut view,
+        &mut merge,
         PresenterEvent::WorkflowComplete(Err("boom".into())),
     );
     apply_event(
         &mut state,
         &mut view,
+        &mut merge,
         PresenterEvent::IntentReceived(UserIntent::Quit),
     );
     assert!(state.should_quit);

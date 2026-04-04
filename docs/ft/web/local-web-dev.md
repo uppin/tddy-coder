@@ -23,7 +23,7 @@ The dev overlay **`HMR: N`** (bottom-left) only increments when the Vite client 
 2. **Config file**: `DAEMON_CONFIG` selects the YAML path; when unset, the script uses **`dev.daemon.yaml`** at the repo root. The script variable holding that path is named `CONFIG` in the shell; the generic `CONFIG` key from `.env` does **not** supply this path—set **`DAEMON_CONFIG`** for a custom file. That YAML defines **`allowed_tools`** (connection screen **Tool** dropdown via **`ListTools`**) and **`allowed_agents`** (connection screen **Backend** dropdown via **`ListAgents`**); see [Web terminal — Connection screen](web-terminal.md#daemon-mode-connection-screen-project-centric).
 3. **Temp config**: A copy of the YAML is written to a temp file with `CURRENT_USER` replaced by the login name (`sed` with `|` delimiters). The daemon receives `-c` pointing at that file.
 4. **Extra CLI**: Arguments after the script name pass through to `tddy-daemon`. If both the script and the user pass `-c`, the daemon receives two `-c` arguments; the effective config follows daemon rules. **`DAEMON_PORT`** for the Vite proxy comes from the YAML file selected in step 2 (the `grep`/`awk` port line), not from a second `-c` on the command line.
-5. **Vite**: After the daemon answers HTTP 200 on its port, the script starts Vite under `./dev` with `DAEMON_PORT` set for the proxy.
+5. **Vite**: After the daemon answers HTTP **200** on **`GET /api/config`** (not `GET /` — the static bundle under **`web_bundle_path`** may be missing until you run **`bun run build`**), the script starts Vite under `./dev` with `DAEMON_PORT` set for the proxy.
 
 ## Environment (common)
 
@@ -33,7 +33,7 @@ The dev overlay **`HMR: N`** (bottom-left) only increments when the Vite client 
 | `WEB_HOST` | **Bind address** for Vite only (default `127.0.0.1`; `0.0.0.0` = all interfaces). Not the URL you type in the browser. |
 | `VITE_PORT` | Vite port (default `5173`) |
 | `VITE_URL` | **Public app origin** — OAuth, `import.meta.env.VITE_URL`, and what you open in the browser. Default `http://127.0.0.1:<VITE_PORT>`. For LAN: `VITE_URL=http://<your-lan-ip>:5173` (same host/port you use to load the app). `web-dev` sets `WEB_PUBLIC_URL=$VITE_URL` for `tddy-daemon`; do not point `WEB_PUBLIC_URL` at the daemon port (`:8899`) for frontend dev. |
-| LiveKit, GitHub | See `web-dev` script header (`LIVEKIT_*`, `GITHUB_*`) |
+| LiveKit, GitHub, Telegram | See `web-dev` script header (`LIVEKIT_*`, `GITHUB_*`, `TDDY_TELEGRAM_*`); Telegram details in [telegram-notifications.md](../daemon/telegram-notifications.md) |
 
 ## Port cleanup
 
