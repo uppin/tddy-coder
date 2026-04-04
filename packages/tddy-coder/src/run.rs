@@ -1488,7 +1488,7 @@ fn merge_session_coder_config_from_dir(args: &mut Args, session_dir: &Path) -> a
 }
 
 /// Session or global `coder-config.yaml` may set `goal: plan` from a TDD-oriented template.
-/// When the selected recipe uses another start goal (e.g. bugfix → `reproduce`), that stale `goal`
+/// When the selected recipe uses another start goal (e.g. bugfix → `analyze`), that stale `goal`
 /// forces single-goal routing and fails before any task runs (`unsupported goal`).
 ///
 /// Clears [`Args::goal`] when it is neither the recipe start goal nor one of [`WorkflowRecipe::goal_ids`].

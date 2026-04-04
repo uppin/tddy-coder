@@ -1,5 +1,6 @@
 {
   "goals": [
+    { "name": "analyze", "schema": "analyze.schema.json", "proto": "analyze.proto" },
     { "name": "plan", "schema": "plan.schema.json", "proto": "plan.proto" },
     {
       "name": "acceptance-tests",

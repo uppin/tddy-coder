@@ -2,6 +2,12 @@
 
 Release note history for the Coder product area.
 
+## 2026-04-04 — Bugfix recipe: `analyze` start goal and structured submit
+
+- **Recipes**: **`BugfixRecipe`** graph is **`analyze` → `reproduce` → `end`**; **start goal** **`analyze`**; **`analyze`** uses **`tddy-tools submit`** with JSON Schema **`analyze`** (`branch_suggestion`, **`worktree_suggestion`**, optional **`name`**, optional **`summary`**); **`summary`** is available to **`reproduce`** via **`changeset.artifacts["analyze_summary"]`**; **`reproduce`** has **`goal_requires_tddy_tools_submit`** **`false`**; **`uses_primary_session_document`** is **`false`** (manifest still lists **`fix-plan.md`**).
+- **Registry**: **`goals.json`** includes **`analyze`**; **`tddy-tools`** embeds the schema.
+- **Docs**: [workflow-recipes.md](workflow-recipes.md) (BugfixRecipe and developer reference); [workflow-json-schemas.md](workflow-json-schemas.md) (registry summary lists **`analyze`**).
+
 ## 2026-04-04 — Git integration base ref for worktrees
 
 - **tddy-core**: **`validate_integration_base_ref`**, **`fetch_integration_base`**, **`setup_worktree_for_session_with_integration_base`**, **`resolve_default_integration_base_ref`**, **`DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF`** (`origin/master` for legacy rows); **`setup_worktree_for_session`** resolves default remote refs (`origin/master` → `origin/main` → **`origin/HEAD`**) after **`git fetch origin`**, then delegates to **`setup_worktree_for_session_with_integration_base`**; **`fetch_origin_master`** delegates to **`fetch_integration_base`** with the documented default.

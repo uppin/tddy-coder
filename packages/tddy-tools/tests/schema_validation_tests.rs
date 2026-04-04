@@ -202,6 +202,17 @@ fn red_schema_includes_source_file_field() {
     );
 }
 
+/// Acceptance: `analyze` goal schema is embedded in tddy-tools (see `goals.json` / generated registry).
+#[test]
+fn analyze_goal_schema_embedded() {
+    let content = get_schema("analyze").expect("analyze schema must be registered");
+    assert!(!content.is_empty(), "analyze schema must be non-empty JSON");
+    assert!(
+        content.contains("$schema") || content.contains("branch_suggestion"),
+        "analyze schema should be valid embedded JSON Schema"
+    );
+}
+
 #[test]
 fn format_validation_errors_produces_readable_output() {
     let errors = vec![

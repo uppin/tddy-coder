@@ -1,6 +1,11 @@
 {
   "goals": [
     {
+      "name": "analyze",
+      "proto": "analyze.proto",
+      "schema": "analyze.schema.json"
+    },
+    {
       "name": "plan",
       "proto": "plan.proto",
       "schema": "plan.schema.json"
