@@ -5857,6 +5857,7 @@ dependencies = [
  "teloxide",
  "tempfile",
  "tokio",
+ "tonic 0.12.3",
  "uuid",
 ]
 

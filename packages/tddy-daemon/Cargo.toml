@@ -22,7 +22,8 @@ log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal"] }
+tonic = { version = "0.12", default-features = false, features = ["transport"] }
 tddy-coder = { path = "../tddy-coder" }
 tddy-core = { path = "../tddy-core" }
 tddy-github = { path = "../tddy-github" }

@@ -36,7 +36,9 @@ Secrets: full bot tokens do not belong in log lines; helpers return **masked** r
 
 ## Integration surface
 
-Callers that read **`.session.yaml`** (or equivalent) on an interval supply **`session_id`**, **`status`**, **`is_active`**, **`DaemonConfig`**, and an object implementing **`TelegramSender`** (tests use mocks; production code uses **teloxide** through the provided send helper). Technical detail lives in **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)**.
+When the daemon spawns a **`tddy-coder --daemon`** session, it connects to the child’s gRPC **`PresenterObserver.ObserveEvents`** stream (see **`tddy-service`** proto) and maps **`ServerMessage`** events to Telegram text (state transitions, workflow completion, goal started, backend selected). Daemon startup and graceful shutdown also send short lifecycle messages when Telegram is enabled.
+
+Callers that read **`.session.yaml`** (or equivalent) on an interval can still use **`TelegramSessionWatcher::on_metadata_tick`** with **`session_id`**, **`status`**, **`is_active`**, **`DaemonConfig`**, and **`TelegramSender`**. Technical detail lives in **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)**.
 
 ## Tests
 

@@ -214,6 +214,8 @@ pub struct SpawnResult {
     pub livekit_server_identity: String,
     pub livekit_url: String,
     pub pid: u32,
+    /// gRPC listen port for the spawned `tddy-coder --daemon` child (localhost observer / TddyRemote).
+    pub grpc_port: u16,
 }
 
 /// Clone a git repository as the given OS user. If `destination` already exists, skips clone.
@@ -556,6 +558,7 @@ pub fn spawn_as_user(
         livekit_server_identity: identity,
         livekit_url: livekit.url.clone(),
         pid,
+        grpc_port,
     })
 }
 
