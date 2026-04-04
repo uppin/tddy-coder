@@ -16,6 +16,16 @@ Daemon YAML may include an optional top-level **`telegram`** block:
 
 Unknown keys under **`telegram`** are rejected when the file uses the same **`deny_unknown_fields`** policy as the rest of **`DaemonConfig`**.
 
+### Environment overrides (`.env` / shell)
+
+After the YAML file is loaded, **`tddy-daemon`** merges optional process environment variables (for example values set in a repo-root **`.env`** that **`./web-dev`** loads). This avoids committing secrets in YAML.
+
+| Variable | Meaning |
+|----------|---------|
+| **`TDDY_TELEGRAM_BOT_TOKEN`** | Bot API token. If there is no `telegram:` block in YAML, a block is created and **`enabled`** defaults to **`true`** unless **`TDDY_TELEGRAM_ENABLED`** is set. |
+| **`TDDY_TELEGRAM_CHAT_IDS`** | Comma-separated integer chat ids (e.g. `-1001234567890,123456`). Requires an existing `telegram:` block in YAML **or** **`TDDY_TELEGRAM_BOT_TOKEN`**. |
+| **`TDDY_TELEGRAM_ENABLED`** | Explicit **`true`** / **`false`** (also **`1`**/**`0`**, **`yes`**/**`no`**, **`on`**/**`off`**). When unset, a token supplied only via env for a **new** config block enables Telegram; merging a token into YAML does not force **`enabled`** on—set this variable to turn notifications on or off. |
+
 ## Message content
 
 Each notification is plain text. It includes:

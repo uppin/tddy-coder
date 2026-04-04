@@ -56,6 +56,7 @@ fn apply_env_overrides(config: &mut tddy_daemon::config::DaemonConfig) {
             g.redirect_uri = Some(v);
         }
     }
+    config.apply_telegram_env_overrides();
 }
 
 fn env_var(name: &str) -> Option<String> {
