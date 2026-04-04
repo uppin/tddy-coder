@@ -1,6 +1,8 @@
 //! Workflow recipes (TDD, bug-fix, …) for tddy-coder.
 
+pub mod approval_policy;
 pub mod bugfix;
+pub mod free_prompting;
 pub mod parser;
 pub mod permissions;
 pub mod recipe_resolve;
@@ -10,6 +12,7 @@ pub mod tdd;
 pub mod writer;
 
 pub use bugfix::BugfixRecipe;
+pub use free_prompting::FreePromptingRecipe;
 pub use parser::{
     parse_acceptance_tests_response, parse_demo_response, parse_evaluate_response,
     parse_green_response, parse_planning_response, parse_planning_response_with_base,

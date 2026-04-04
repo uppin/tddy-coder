@@ -9,7 +9,18 @@ use std::time::Duration;
 use tddy_e2e::rpc_frontend::encode_resize;
 use tddy_e2e::{connect_terminal_grpc, spawn_presenter_with_terminal_service};
 use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
-use vt100::Parser;
+use tddy_tui_testkit::ScreenParser;
+
+/// Idle status-bar pulse cycles `·` / `•` / `●` (see `IDLE_DOT_PULSE_CHARS` in tddy-tui). Two snapshots
+/// taken a second apart may differ only by that glyph; normalize so we still detect blanking regressions.
+fn normalize_idle_pulse(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '•' | '●' => '·',
+            c => c,
+        })
+        .collect()
+}
 
 async fn collect_output_window(
     stream: &mut tonic::Streaming<TerminalOutput>,
@@ -55,9 +66,9 @@ async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::R
     input_tx1.send(TerminalInput { data: vec![] }).await?;
     let stream1_initial = collect_output_window(&mut stream1, Duration::from_millis(700)).await?;
 
-    let mut parser1 = Parser::new(24, 80, 0);
-    parser1.process(&stream1_initial);
-    let screen1_before = parser1.screen().contents();
+    let mut parser1 = ScreenParser::new(24, 80);
+    parser1.feed(&stream1_initial);
+    let screen1_before = parser1.contents();
     assert!(
         screen1_before.contains("Email/password") || screen1_before.contains("Scope"),
         "Client 1 should see user question at 80×24; got:\n{}",
@@ -80,9 +91,9 @@ async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::R
         .await?;
     let stream2_output = collect_output_window(&mut stream2, Duration::from_millis(1500)).await?;
 
-    let mut parser2 = Parser::new(16, 60, 0);
-    parser2.process(&stream2_output);
-    let screen2 = parser2.screen().contents();
+    let mut parser2 = ScreenParser::new(16, 60);
+    parser2.feed(&stream2_output);
+    let screen2 = parser2.contents();
     assert!(
         screen2.contains("Email/password") || screen2.contains("Scope"),
         "Client 2 (60×16) should see the user question; got:\n{}",
@@ -92,8 +103,8 @@ async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::R
     // --- Verify client 1 was not affected ---
     let stream1_after_client2 =
         collect_output_window(&mut stream1, Duration::from_millis(1500)).await?;
-    parser1.process(&stream1_after_client2);
-    let screen1_after = parser1.screen().contents();
+    parser1.feed(&stream1_after_client2);
+    let screen1_after = parser1.contents();
 
     assert!(
         screen1_after.contains("Email/password") || screen1_after.contains("Scope"),
@@ -102,7 +113,8 @@ async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::R
     );
 
     assert_eq!(
-        screen1_before, screen1_after,
+        normalize_idle_pulse(&screen1_before),
+        normalize_idle_pulse(&screen1_after),
         "Client 1 screen content must not change when client 2 connects with different dimensions.\n\
          Before:\n{}\n\nAfter:\n{}",
         screen1_before, screen1_after

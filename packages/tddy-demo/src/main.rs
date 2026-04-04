@@ -9,6 +9,10 @@ use clap::Parser;
 use tddy_coder::{load_config, merge_config_into_args, run_main, Args, DemoArgs};
 
 fn main() {
+    if env::var("TDDY_SESSIONS_DIR").is_err() {
+        env::set_var("TDDY_SESSIONS_DIR", env::temp_dir().join("tddy-demo"));
+    }
+
     let mut cli_args: Vec<String> = env::args().collect();
     let has_agent = cli_args
         .iter()

@@ -146,6 +146,7 @@ pub struct BackendInvokeTask {
     submit_key: GoalId,
     hints: GoalHints,
     backend: Arc<dyn CodingBackend>,
+    requires_tddy_tools_submit: bool,
 }
 
 impl BackendInvokeTask {
@@ -155,6 +156,7 @@ impl BackendInvokeTask {
         submit_key: GoalId,
         hints: GoalHints,
         backend: Arc<dyn CodingBackend>,
+        requires_tddy_tools_submit: bool,
     ) -> Self {
         Self {
             id: id.into(),
@@ -162,6 +164,7 @@ impl BackendInvokeTask {
             submit_key,
             hints,
             backend,
+            requires_tddy_tools_submit,
         }
     }
 
@@ -180,7 +183,15 @@ impl BackendInvokeTask {
             )
         });
         let submit_key = recipe.submit_key(&goal_id);
-        Self::new(id, goal_id, submit_key, hints, backend)
+        let requires_tddy_tools_submit = recipe.goal_requires_tddy_tools_submit(&goal_id);
+        Self::new(
+            id,
+            goal_id,
+            submit_key,
+            hints,
+            backend,
+            requires_tddy_tools_submit,
+        )
     }
 }
 
@@ -297,6 +308,29 @@ impl Task for BackendInvokeTask {
                     next_action: NextAction::WaitForInput,
                     task_id: self.id.clone(),
                     status_message: Some("Clarification needed".to_string()),
+                });
+            }
+
+            if !self.requires_tddy_tools_submit {
+                let prior = context.get_sync::<String>("session_id");
+                if let Some(eff) = crate::session_lifecycle::resolve_effective_session_id(
+                    prior.as_deref(),
+                    response.session_id.as_deref(),
+                ) {
+                    log::debug!(
+                        "BackendInvokeTask {}: no-submit goal session_id {:?} -> {}",
+                        self.id,
+                        prior,
+                        eff
+                    );
+                    context.set_sync("session_id", eff);
+                }
+                context.set_sync("output", response.output.clone());
+                return Ok(TaskResult {
+                    response: response.output,
+                    next_action: NextAction::Continue,
+                    task_id: self.id.clone(),
+                    status_message: Some(format!("{} step complete", self.id)),
                 });
             }
 

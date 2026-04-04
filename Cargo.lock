@@ -5893,6 +5893,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-tui",
+ "tddy-tui-testkit",
  "tddy-workflow-recipes",
  "tempfile",
  "termwright",
@@ -5900,7 +5901,6 @@ dependencies = [
  "tokio-stream",
  "tonic 0.12.3",
  "uuid",
- "vt100",
 ]
 
 [[package]]
@@ -6039,9 +6039,26 @@ dependencies = [
  "libc",
  "log",
  "ratatui",
+ "serial_test",
  "tddy-core",
  "tokio",
  "tui-markdown",
+]
+
+[[package]]
+name = "tddy-tui-testkit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossterm",
+ "env_logger",
+ "log",
+ "tddy-core",
+ "tddy-service",
+ "tddy-workflow-recipes",
+ "tokio",
+ "uuid",
+ "vt100",
 ]
 
 [[package]]

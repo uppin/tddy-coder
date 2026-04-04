@@ -144,9 +144,8 @@ describe("App", () => {
     cy.get("[data-testid='connection-status-dot']", { timeout: 5000 }).should("exist");
     cy.get("#livekit-url").should("not.exist");
 
-    // Acceptance: new chrome — top-right status dot (with state) and bottom-right Stop; no top Ctrl+C row.
+    // Acceptance: connection chrome — top-right status dot (with state); interrupt is TUI Stop pane (not web Stop).
     cy.get("[data-testid='connection-status-dot']").should("have.attr", "data-connection-status");
-    cy.get("[data-testid='terminal-stop-button']", { timeout: 5000 }).should("exist");
     cy.get("[data-testid='ctrl-c-button']").should("not.exist");
 
     // Acceptance: connected terminal container is fullscreen (100vw x 100vh)

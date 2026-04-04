@@ -372,7 +372,7 @@ pub fn spawn_as_user(
     let session_id = opts
         .resume_session_id
         .map(String::from)
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
+        .unwrap_or_else(|| Uuid::now_v7().to_string());
     let livekit_room = resolve_livekit_room_name(livekit.common_room.as_deref(), &session_id);
     let instance = livekit
         .daemon_instance_id

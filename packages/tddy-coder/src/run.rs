@@ -318,7 +318,7 @@ pub struct Args {
     pub cursor_agent_path: Option<PathBuf>,
     /// Path to the Codex CLI. When set, overrides `TDDY_CODEX_CLI` and the default `codex` on `PATH`.
     pub codex_cli_path: Option<PathBuf>,
-    /// Workflow recipe name (`tdd` or `bugfix`). `None` means default `tdd` or recipe from changeset on resume.
+    /// Workflow recipe name (`tdd`, `bugfix`, or `free-prompting`). `None` means default `tdd` or recipe from changeset on resume.
     pub recipe: Option<String>,
 }
 
@@ -455,8 +455,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default) or `bugfix` (reproduce-then-fix). Must match [`WorkflowRecipe::name`].
-    #[arg(long, value_parser = ["tdd", "bugfix"])]
+    /// Workflow recipe: `tdd` (default), `bugfix`, or `free-prompting`. Must match [`WorkflowRecipe::name`].
+    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting"])]
     pub recipe: Option<String>,
 
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
@@ -601,8 +601,8 @@ pub struct DemoArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default) or `bugfix`.
-    #[arg(long, value_parser = ["tdd", "bugfix"])]
+    /// Workflow recipe: `tdd` (default), `bugfix`, or `free-prompting`.
+    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting"])]
     pub recipe: Option<String>,
 }
 
@@ -1021,8 +1021,8 @@ fn on_progress(_event: &ProgressEvent) {
 /// - **agent_working_dir** — repository root for the coding agent (`InvokeRequest::working_dir`).
 /// - **session_artifact_dir** — directory for session files (`PRD.md`, `changeset.yaml`, metadata,
 ///   logs).
-/// - **session_dir_for_presenter** — `Some(artifact dir)` when resuming an existing session;
-///   `None` when starting fresh (workflow allocates the session directory).
+/// - **session_dir_for_presenter** — `Some(artifact dir)` for both new and resumed sessions so the
+///   workflow reuses the same tree as `.session.yaml` under `{tddy_data_dir}/sessions/<id>/`.
 fn livekit_daemon_workflow_paths(
     tddy_data_dir: &Path,
     resume_from: Option<&str>,
@@ -1048,11 +1048,7 @@ fn livekit_daemon_workflow_paths(
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     };
 
-    let session_dir_for_presenter = if resume_from.is_some() {
-        Some(session_artifact_dir.clone())
-    } else {
-        None
-    };
+    let session_dir_for_presenter = Some(session_artifact_dir.clone());
     (
         agent_working_dir,
         session_artifact_dir,
@@ -1151,7 +1147,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 None,
                 None,
                 false,
-                None,
+                args.session_id.clone(),
                 toolcall_socket_path,
                 tool_call_rx,
             );
@@ -2816,9 +2812,9 @@ mod livekit_daemon_path_contract_tests {
         let base =
             std::env::temp_dir().join(format!("tddy-livekit-path-new-{}", std::process::id()));
         std::fs::create_dir_all(base.join("sessions")).unwrap();
-        let (working_dir, _artifact, presenter_dir) =
+        let (working_dir, artifact, presenter_dir) =
             livekit_daemon_workflow_paths(&base, None, None);
-        assert!(presenter_dir.is_none());
+        assert_eq!(presenter_dir, Some(artifact.clone()));
         assert_ne!(
             working_dir.parent().and_then(|p| p.file_name()),
             Some(OsStr::new("sessions")),
@@ -3064,7 +3060,7 @@ mod start_goal_for_session_continue_contract_tests {
     }
 
     #[test]
-    fn bugfix_failed_after_greening_resumes_green() {
+    fn bugfix_failed_after_reproducing_resumes_reproduce() {
         let mut cs = Changeset::default();
         cs.state.current = WorkflowState::new("Failed");
         cs.state.history = vec![
@@ -3073,43 +3069,12 @@ mod start_goal_for_session_continue_contract_tests {
                 at: "t1".into(),
             },
             StateTransition {
-                state: WorkflowState::new("Greening"),
-                at: "t2".into(),
-            },
-            StateTransition {
                 state: WorkflowState::new("Failed"),
-                at: "t3".into(),
+                at: "t2".into(),
             },
         ];
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(BugfixRecipe);
         let g = start_goal_for_session_continue(recipe.as_ref(), &cs);
-        assert_eq!(g, GoalId::new("green"));
-    }
-
-    #[test]
-    fn bugfix_failed_skips_trailing_reproducing_for_earlier_greening() {
-        let mut cs = Changeset::default();
-        cs.state.current = WorkflowState::new("Failed");
-        cs.state.history = vec![
-            StateTransition {
-                state: WorkflowState::new("Reproduced"),
-                at: "t1".into(),
-            },
-            StateTransition {
-                state: WorkflowState::new("Greening"),
-                at: "t2".into(),
-            },
-            StateTransition {
-                state: WorkflowState::new("Reproducing"),
-                at: "t3".into(),
-            },
-            StateTransition {
-                state: WorkflowState::new("Failed"),
-                at: "t4".into(),
-            },
-        ];
-        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(BugfixRecipe);
-        let g = start_goal_for_session_continue(recipe.as_ref(), &cs);
-        assert_eq!(g, GoalId::new("green"));
+        assert_eq!(g, GoalId::new("reproduce"));
     }
 }

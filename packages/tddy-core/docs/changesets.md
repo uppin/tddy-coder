@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-core.
 
+- **2026-04-03** [Feature] **`UserIntent::Interrupt`** — TUI Stop pane / streamed mouse; **`presenter_impl`** no-op arm (interrupt handled in TUI event loop before presenter RPC). (tddy-core)
 - **2026-03-29** [Feature] Agent skills and feature-prompt slash support — **`agent_skills`** module: **`.agents/skills`** scan, **`SkillScanReport`**, **`SlashMenuItem`**, **`compose_prompt_with_selected_skill`**; presenter **`apply_feature_slash_builtin_recipe`**, **`recipe_slash_selection_active`**, **`RecipeResolverFn`** / **`with_recipe_resolver`**; **`workflow_recipe_selection_question`**, **`recipe_cli_name_from_selection_label`**. Feature doc: [feature-prompt-agent-skills.md](../../../../docs/ft/coder/feature-prompt-agent-skills.md). (tddy-core)
 - **2026-03-29** [Feature] OpenAI Codex CLI backend — **`CodexBackend`** (**`backend/codex.rs`**), **`build_codex_exec_argv`**, **`stream/codex`** JSONL parsing, **`AnyBackend::Codex`**, backend menu + **`backend_from_label`** / **`default_model_for_agent`** / **`preselected_index_for_agent`** for agent key **`codex`**. Tests: **`codex.rs`**, **`stream/codex.rs`**, **`tddy-integration-tests`** **`codex_backend`**. Coder overview: [1-OVERVIEW.md](../../../../docs/ft/coder/1-OVERVIEW.md). (tddy-core)
 - **2026-03-29** [Feature] Presenter worktree display for TUI — `presenter::worktree_display::format_worktree_for_status_bar`; `PresenterState::active_worktree_display` set on `WorkflowEvent::WorktreeSwitched`. (tddy-core)

@@ -89,4 +89,12 @@ pub trait WorkflowRecipe: Send + Sync {
         output: Option<&str>,
         session_dir: &Path,
     ) -> Result<(), String>;
+
+    /// When `false`, [`crate::workflow::task::BackendInvokeTask`] may complete a turn from agent output
+    /// alone (no `tddy-tools submit`), e.g. open-ended chat goals. Default `true` preserves structured
+    /// submit for TDD-style goals.
+    fn goal_requires_tddy_tools_submit(&self, goal_id: &GoalId) -> bool {
+        let _ = goal_id;
+        true
+    }
 }

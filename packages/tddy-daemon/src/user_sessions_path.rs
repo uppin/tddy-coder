@@ -30,10 +30,14 @@ pub fn home_dir_for_user(_os_user: &str) -> Option<PathBuf> {
     None
 }
 
-/// Resolve the sessions base path for an OS user (~user/.tddy/sessions).
+/// Resolve the Tddy **data directory** for an OS user (`~user/.tddy`), matching
+/// [`tddy_core::output::tddy_data_dir_path`] when `TDDY_SESSIONS_DIR` is unset.
+///
+/// Session trees live at `{this}/sessions/<session_id>/` ([`tddy_core::session_lifecycle::unified_session_dir_path`]).
+/// This must not be `~/.tddy/sessions` or RPCs double-append `sessions/` and miss on-disk data.
 #[cfg(unix)]
 pub fn sessions_base_for_user(os_user: &str) -> Option<PathBuf> {
-    Some(home_dir_for_user(os_user)?.join(".tddy").join("sessions"))
+    Some(home_dir_for_user(os_user)?.join(".tddy"))
 }
 
 #[cfg(not(unix))]
@@ -119,6 +123,14 @@ pub fn project_path_under_home_from_user_relative(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sessions_base_for_user_is_tddy_data_root() {
+        let u = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+        let base = sessions_base_for_user(&u).expect("sessions base");
+        let home = home_dir_for_user(&u).expect("home");
+        assert_eq!(base, home.join(".tddy"));
+    }
 
     #[test]
     fn project_path_under_home_accepts_simple_relative() {

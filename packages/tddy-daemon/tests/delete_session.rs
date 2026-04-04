@@ -1,7 +1,7 @@
 //! Acceptance tests for DeleteSession RPC (inactive session directory removal).
 //!
-//! These verify filesystem-safe deletion for stopped sessions and rejection when
-//! the session is still active. Implementation is tracked in the feature PRD.
+//! These verify filesystem-safe deletion: inactive sessions, and active sessions after the
+//! daemon terminates the recorded PID (SIGTERM then SIGKILL).
 //!
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -111,10 +111,10 @@ async fn daemon_delete_removes_inactive_session_directory() {
     );
 }
 
-/// Acceptance: DeleteSession rejects deletion when the session process is still active.
+/// Acceptance: DeleteSession terminates a live PID then removes the session directory.
 #[cfg(unix)]
 #[tokio::test]
-async fn daemon_delete_rejects_active_session() {
+async fn daemon_delete_terminates_active_session_then_removes_directory() {
     let mut child = std::process::Command::new("sleep")
         .arg("60")
         .spawn()
@@ -123,30 +123,25 @@ async fn daemon_delete_rejects_active_session() {
 
     let temp = tempfile::tempdir().unwrap();
     let sessions_base = temp.path().to_path_buf();
-    let session_dir = unified_session_dir_path(&sessions_base, "active-no-delete");
+    let session_dir = unified_session_dir_path(&sessions_base, "active-delete-me");
     std::fs::create_dir_all(&session_dir).unwrap();
     write_session_yaml(&session_dir, pid);
 
     let service = test_service(sessions_base.clone());
     let request = Request::new(DeleteSessionRequest {
         session_token: "valid-token".to_string(),
-        session_id: "active-no-delete".to_string(),
+        session_id: "active-delete-me".to_string(),
     });
-    let result = service.delete_session(request).await;
+    let response = service
+        .delete_session(request)
+        .await
+        .expect("DeleteSession should terminate the process and remove the directory");
+    assert!(response.into_inner().ok);
     assert!(
-        result.is_err(),
-        "DeleteSession must not remove an active session"
-    );
-    assert_eq!(
-        result.unwrap_err().code,
-        tddy_rpc::Code::FailedPrecondition,
-        "active session delete should be failed precondition"
-    );
-    assert!(
-        session_dir.exists(),
-        "session directory must remain when delete is rejected"
+        !session_dir.exists(),
+        "session directory should be removed after delete"
     );
 
-    let _ = child.kill();
-    let _ = child.wait();
+    let wait = child.wait();
+    assert!(wait.is_ok(), "child should have been signalled");
 }

@@ -102,10 +102,26 @@ impl FlowRunner {
                     current_task_id: None,
                 });
             }
-            NextAction::Continue | NextAction::ContinueAndExecute => self
-                .graph
-                .next_task_id(&session.current_task_id, &ctx)
-                .ok_or("No next task")?,
+            NextAction::Continue | NextAction::ContinueAndExecute => {
+                match self.graph.next_task_id(&session.current_task_id, &ctx) {
+                    Some(next) => next,
+                    None => {
+                        // No successor (e.g. free-prompting single `prompting` node): pause like
+                        // WaitForInput so `run_full_workflow` returns and the UI can stay in Running
+                        // for the next user line instead of failing or completing the graph.
+                        let mut session = session;
+                        session.status_message = result.status_message.clone();
+                        self.storage.save(&session).await?;
+                        return Ok(ExecutionResult {
+                            status: ExecutionStatus::WaitingForInput {
+                                message: result.status_message,
+                            },
+                            session_id: session_id.to_string(),
+                            current_task_id: Some(session.current_task_id),
+                        });
+                    }
+                }
+            }
             NextAction::GoTo(id) => id.clone(),
             NextAction::GoBack => return Err("GoBack not implemented".into()),
         };

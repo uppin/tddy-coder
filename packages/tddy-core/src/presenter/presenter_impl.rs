@@ -69,6 +69,9 @@ pub struct Presenter {
     current_question_index: usize,
     collected_answers: Vec<String>,
     agent_output_buffer: String,
+    /// Set when ClarificationNeeded is received with no questions; the workflow thread
+    /// is blocked on `answer_rx` waiting for the next prompt (e.g. free-prompting multi-turn).
+    awaiting_open_answer: bool,
     workflow_handle: Option<thread::JoinHandle<()>>,
     /// When set, events are broadcast for gRPC subscribers.
     broadcast_tx: Option<tokio::sync::broadcast::Sender<PresenterEvent>>,
@@ -147,6 +150,7 @@ impl Presenter {
             current_question_index: 0,
             collected_answers: Vec::new(),
             agent_output_buffer: String::new(),
+            awaiting_open_answer: false,
             workflow_handle: None,
             broadcast_tx: None,
             intent_tx: None,
@@ -422,6 +426,14 @@ impl Presenter {
                 if text.is_empty() {
                     return;
                 }
+                if let Some(ref dir) = self.workflow_session_dir {
+                    let mut cs = crate::changeset::read_changeset(dir)
+                        .unwrap_or_else(|_| crate::changeset::Changeset::default());
+                    cs.initial_prompt = Some(text.clone());
+                    if let Err(e) = crate::changeset::write_changeset(dir, &cs) {
+                        log::warn!("SubmitFeatureInput: persist changeset: {}", e);
+                    }
+                }
                 // Previous run finished (`workflow_result` set): start a new workflow. Do not send on
                 // `answer_tx` — it may still be `Some` until the worker thread exits, and a buffered
                 // send would skip `restart_workflow` and drop the second run.
@@ -582,10 +594,21 @@ impl Presenter {
                 }
             }
             UserIntent::QueuePrompt(text) => {
-                if !text.is_empty() {
-                    self.state.inbox.push(text);
-                    self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
+                if text.is_empty() {
+                    return;
                 }
+                if self.awaiting_open_answer {
+                    if let Some(ref tx) = self.answer_tx {
+                        log::debug!(
+                            "QueuePrompt → answer_tx (awaiting_open_answer, len={})",
+                            text.len()
+                        );
+                        let _ = tx.send(text);
+                        return;
+                    }
+                }
+                self.state.inbox.push(text);
+                self.broadcast(PresenterEvent::InboxChanged(self.state.inbox.clone()));
             }
             UserIntent::EditInboxItem { index, text } => {
                 if index < self.state.inbox.len() {
@@ -607,6 +630,9 @@ impl Presenter {
             }
             UserIntent::Quit => {
                 self.state.should_quit = true;
+            }
+            UserIntent::Interrupt => {
+                // TUI / VirtualTui call `ctrl_c_interrupt_session` without sending this intent.
             }
             UserIntent::ContinueWithAgent => {
                 let session_id = if let Some(cs_dir) = self.changeset_read_dir() {
@@ -1005,6 +1031,7 @@ impl Presenter {
                     });
                 }
                 WorkflowEvent::GoalStarted(goal) => {
+                    self.awaiting_open_answer = false;
                     self.state.current_goal = Some(goal.clone());
                     if let Ok(mut cs) = self.critical_state.lock() {
                         cs.current_goal = Some(goal.clone());
@@ -1018,6 +1045,7 @@ impl Presenter {
                 }
                 WorkflowEvent::ClarificationNeeded { questions } => {
                     self.flush_agent_output_buffer();
+                    self.awaiting_open_answer = questions.is_empty();
                     self.pending_questions = questions;
                     self.current_question_index = 0;
                     self.collected_answers.clear();
@@ -1061,6 +1089,7 @@ impl Presenter {
                     }
                 }
                 WorkflowEvent::WorkflowComplete(result) => {
+                    self.awaiting_open_answer = false;
                     self.flush_agent_output_buffer();
                     self.workflow_result = Some(result.clone());
                     self.broadcast(PresenterEvent::WorkflowComplete(result.clone()));

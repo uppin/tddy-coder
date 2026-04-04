@@ -2,6 +2,36 @@
 
 Release note history for the Coder product area.
 
+## 2026-04-03 — TUI Stop pane (interrupt beside Enter)
+
+- **tddy-tui**: **`right_chrome_reserve_cols`** reserves **four** or **eight** columns for Enter-only vs Enter+Stop; **`stop_button_rect`** / **`paint_stop_affordance`** (red **U+25A0**); left-click → **`UserIntent::Interrupt`** → **`ctrl_c_interrupt_session`** (not sent to presenter). **`VirtualTui`** and local **`event_loop`** handle **`Interrupt`** like **Ctrl+C**.
+- **tddy-tui**: **`ctrl_c_interrupt_session`** only kills the tracked backend child (**`kill_child_process`**); it no longer sets the workflow **`shutdown`** flag, so Stop / TUI **Ctrl+C** / byte **0x03** do not exit the full TUI run (SIGINT via **`ctrlc`** still tears down the runner).
+- **tddy-core**: **`UserIntent::Interrupt`** (presenter no-op for exhaustiveness).
+- **Docs**: [tui-status-bar.md](tui-status-bar.md) (**Mouse mode: Stop control**).
+
+## 2026-03-29 — Free prompting: invoke loop, optional submit, and activity pane
+
+- **Core**: **`WorkflowRecipe::goal_requires_tddy_tools_submit`** (default **`true`**); **`BackendInvokeTask`** completes a turn from agent **`InvokeResponse::output`** when the recipe opts out for that goal; **`FlowRunner`** maps **`Continue`** with no next graph task to **`WaitingForInput`** so a single-node graph can take another user line without **`EndTask`**.
+- **Recipes**: **`FreePromptingRecipe`** graph is one **`BackendInvokeTask`** for **`prompting`**; **`goal_requires_tddy_tools_submit`** is **`false`** for **`prompting`**; **`FreePromptingWorkflowHooks::agent_output_sink`** emits **`WorkflowEvent::AgentOutput`** for streaming assistant text to the TUI activity pane.
+- **Stub**: **`StubBackend`** **`response_for_goal`** includes a **`prompting`** arm for deterministic tests.
+- **Docs**: [workflow-recipes.md](workflow-recipes.md).
+
+## 2026-03-29 — Workflow recipes: free-prompting and recipe-driven session document policy
+
+- **Recipes**: **`FreePromptingRecipe`** (**`free-prompting`**): **Prompting** loop with start goal **`prompting`**; **`uses_primary_session_document`** **`false`** (no PRD-style primary-document approval gate on that path).
+- **Registry**: **`tddy-workflow-recipes::approval_policy`** (**`supported_workflow_recipe_cli_names`**, **`recipe_should_skip_session_document_approval`**); **`recipe_resolve`** resolves **`free-prompting`**; **`unknown_workflow_recipe_error`** enumerates supported CLI names.
+- **Bootstrap**: Presenter **`workflow_runner`** **`run_start_goal_without_output_dir`** writes **`recipe`** into **`changeset.yaml`** when creating the session directory (same field as daemon **`StartSession`** and CLI session bootstrap).
+- **CLI / TUI / web**: **`--recipe free-prompting`**; **`workflow_recipe_selection_question`** includes **Free prompting**; **`recipe_cli_name_from_selection_label`** maps the label to **`free-prompting`**.
+- **Tests**: **`workflow_recipe_acceptance`**, **`recipe_policy_red`**, **`presenter_integration`** acceptance cases for TDD document approval, bugfix **`reproduce`**, and free-prompting without **DocumentReview**; **`grpc_terminal_rpc`** UTF-8-safe assertion previews.
+- **Docs**: [workflow-recipes.md](workflow-recipes.md).
+## 2026-04-03 — TUI bottom chrome: user prompt strip, footer row, Enter affordance
+
+- **Layout**: **`layout_chunks_with_inbox`** allocates a **footer** row below the prompt block, a **separator row** below the status bar, and **`LayoutAreas`** includes **`footer_bar`** and **`enter_pane`**.
+- **Activity (Running)**: The last line of the activity log shows **`> {running_input}`** with **white** foreground on **dark grey** background when follow-up text is non-empty.
+- **Mouse**: **`enter_button_rect`** is **three** columns wide to the right of the prompt text (with margin); height spans from the first row **below the status bar** through prompt **text** lines and the **footer** (the bottom prompt **rule** row is excluded when present). **`paint_enter_affordance`** draws a light box frame with **U+23CE** on the first prompt text row. **`TDDY_E2E_NO_ENTER_AFFORDANCE`** skips overlay paint for stable byte-level tests. **`ViewState::last_select_click_option`** supports double-click to confirm in **Select** mode.
+- **Tests**: **`packages/tddy-tui`** layout, rect geometry, strip styling, and env-gate tests; **`tddy-e2e`** **`grpc_terminal_rpc`** where terminal streaming uses the env gate.
+- **Docs**: [tui-status-bar.md](tui-status-bar.md); [web-terminal.md](../web/web-terminal.md#connected-terminal-ux); **`packages/tddy-tui/docs/changesets.md`**.
+
 ## 2026-03-29 — Feature prompt: project agent skills and `/recipe`
 
 - **Core**: **`tddy_core::agent_skills`** scans **`.agents/skills/<folder>/SKILL.md`**, parses YAML frontmatter (**`name`**, **`description`**), rejects folder/name mismatches with **`InvalidSkillEntry`**, exposes **`slash_menu_items`** (**`BuiltinRecipe`** plus valid skills), **`compose_prompt_with_selected_skill`** (PRD-shaped block with path and body), and **`agents_skills_scan_cache_token`** for scan invalidation hints.

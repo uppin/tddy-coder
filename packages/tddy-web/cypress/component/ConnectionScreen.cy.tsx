@@ -635,18 +635,7 @@ describe("ConnectionScreen Delete session", () => {
     ORPHAN_INACTIVE_SESSION,
   ];
 
-  it("delete_button_visible_only_for_inactive_session_row", () => {
-    window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs(sessionsForDeleteSuite);
-    cy.mount(<ConnectionScreen />);
-    cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="sessions-table-${PROJECT.projectId}"]`, { timeout: 5000 }).should("exist");
-    cy.get(`[data-testid="delete-session-${INACTIVE_SESSION.sessionId}"]`).should("exist");
-    cy.get(`[data-testid="delete-session-${ORPHAN_INACTIVE_SESSION.sessionId}"]`).should("exist");
-    cy.get("[data-testid='sessions-table-orphan']", { timeout: 5000 }).should("exist");
-  });
-
-  it("delete_button_hidden_for_active_session_row", () => {
+  it("delete_button_visible_for_active_and_inactive_session_rows", () => {
     window.localStorage.setItem("tddy_session_token", "fake-token");
     interceptAllRpcs(sessionsForDeleteSuite);
     cy.mount(<ConnectionScreen />);
@@ -654,11 +643,11 @@ describe("ConnectionScreen Delete session", () => {
     cy.get(`[data-testid="sessions-table-${PROJECT.projectId}"]`, { timeout: 5000 }).should("exist");
     cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).should("exist");
     cy.get(`[data-testid="connect-${ORPHAN_ACTIVE_SESSION.sessionId}"]`).should("exist");
-    // Prerequisite for this spec: inactive rows expose Delete — then active rows must not.
+    cy.get(`[data-testid="delete-session-${ACTIVE_SESSION.sessionId}"]`).should("exist");
+    cy.get(`[data-testid="delete-session-${ORPHAN_ACTIVE_SESSION.sessionId}"]`).should("exist");
     cy.get(`[data-testid="delete-session-${INACTIVE_SESSION.sessionId}"]`).should("exist");
     cy.get(`[data-testid="delete-session-${ORPHAN_INACTIVE_SESSION.sessionId}"]`).should("exist");
-    cy.get(`[data-testid="delete-session-${ACTIVE_SESSION.sessionId}"]`).should("not.exist");
-    cy.get(`[data-testid="delete-session-${ORPHAN_ACTIVE_SESSION.sessionId}"]`).should("not.exist");
+    cy.get("[data-testid='sessions-table-orphan']", { timeout: 5000 }).should("exist");
   });
 
   it("clicking_delete_confirmed_calls_delete_session_rpc", () => {

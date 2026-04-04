@@ -26,7 +26,10 @@ mod livekit_tests {
     use tddy_livekit_testkit::LiveKitTestkit;
     use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
     use tddy_service::{TerminalServiceServer, TerminalServiceVirtualTui};
-    use vt100::Parser;
+    use tddy_tui_testkit::{
+        assert_segmented_echo, eventually_segmented_echo, ScreenParser, SegmentedEchoFailureStyle,
+        SegmentedEchoWaitParams,
+    };
 
     const SERVER_IDENTITY: &str = "server";
     const CLIENT_IDENTITY: &str = "client";
@@ -313,156 +316,6 @@ mod livekit_tests {
         Ok(())
     }
 
-    /// Virtual terminal viewer that mimics Ghostty: receives ANSI output via RPC,
-    /// parses with vt100, exposes visible screen content for assertions.
-    struct VirtualTerminalViewer {
-        parser: Parser,
-    }
-
-    impl VirtualTerminalViewer {
-        fn new() -> Self {
-            Self {
-                parser: Parser::new(24, 80, 0),
-            }
-        }
-
-        fn feed(&mut self, bytes: &[u8]) {
-            self.parser.process(bytes);
-        }
-
-        #[allow(dead_code)]
-        fn visible_content(&self) -> String {
-            self.parser.screen().contents()
-        }
-    }
-
-    // ── vt100 echo helpers (mirroring grpc_terminal_rpc.rs helpers) ────────────
-
-    fn lk_vt100_compact_screen(all_output: &[u8], rows: u16, cols: u16) -> String {
-        let mut parser = vt100::Parser::new(rows, cols, 0);
-        parser.process(all_output);
-        let screen = parser.screen().contents();
-        screen.chars().filter(|c| !c.is_whitespace()).collect()
-    }
-
-    fn lk_longest_echo_prefix(compact: &str, expected_no_ws: &str) -> usize {
-        let mut lo = 0usize;
-        let mut hi = expected_no_ws.len();
-        while lo < hi {
-            let mid = (lo + hi).div_ceil(2);
-            if compact.contains(&expected_no_ws[..mid]) {
-                lo = mid;
-            } else {
-                hi = mid - 1;
-            }
-        }
-        lo
-    }
-
-    async fn lk_eventually_echo_in_vt100(
-        buf: &Arc<Mutex<Vec<u8>>>,
-        expected: &str,
-        rows: u16,
-        cols: u16,
-    ) -> bool {
-        // LiveKit has higher per-chunk latency than gRPC; use a longer timeout.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
-        let min_interval = Duration::from_millis(400);
-        let min_new_bytes = 4096usize;
-        let mut last_check_at = tokio::time::Instant::now() - min_interval;
-        let mut last_check_len = 0usize;
-        let expected_no_ws: String = expected.chars().filter(|c| !c.is_whitespace()).collect();
-
-        while tokio::time::Instant::now() < deadline {
-            let ok = {
-                let g = buf.lock().expect("output buffer");
-                let len = g.len();
-                let due = last_check_at.elapsed() >= min_interval
-                    || len.saturating_sub(last_check_len) >= min_new_bytes;
-                if due {
-                    last_check_at = tokio::time::Instant::now();
-                    last_check_len = len;
-                    let compact = lk_vt100_compact_screen(&g, rows, cols);
-                    lk_longest_echo_prefix(&compact, &expected_no_ws) == expected_no_ws.len()
-                } else {
-                    false
-                }
-            };
-            if ok {
-                return true;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-
-        let g = buf.lock().expect("output buffer");
-        let compact = lk_vt100_compact_screen(&g, rows, cols);
-        let expected_no_ws: String = expected.chars().filter(|c| !c.is_whitespace()).collect();
-        lk_longest_echo_prefix(&compact, &expected_no_ws) == expected_no_ws.len()
-    }
-
-    fn lk_assert_segmented_echo_vt100(
-        all_output: &[u8],
-        expected: &str,
-        segments: &[String],
-        rows: u16,
-        cols: u16,
-    ) {
-        let compact = lk_vt100_compact_screen(all_output, rows, cols);
-        let expected_no_ws: String = expected.chars().filter(|c| !c.is_whitespace()).collect();
-
-        let seg_full: Vec<bool> = segments
-            .iter()
-            .map(|s| {
-                compact.contains(
-                    s.chars()
-                        .filter(|c| !c.is_whitespace())
-                        .collect::<String>()
-                        .as_str(),
-                )
-            })
-            .collect();
-        let seg_marker: Vec<bool> = segments
-            .iter()
-            .enumerate()
-            .map(|(i, _)| compact.contains(format!("#SEG-{}:", i).as_str()))
-            .collect();
-
-        let lo = lk_longest_echo_prefix(&compact, &expected_no_ws);
-
-        let missing_full: Vec<usize> = seg_full
-            .iter()
-            .enumerate()
-            .filter(|(_, ok)| !**ok)
-            .map(|(i, _)| i)
-            .collect();
-        let missing_markers: Vec<usize> = seg_marker
-            .iter()
-            .enumerate()
-            .filter(|(_, ok)| !**ok)
-            .map(|(i, _)| i)
-            .collect();
-
-        assert_eq!(
-            lo,
-            expected_no_ws.len(),
-            "livekit vt100 echo check failed.\n\
-             longest prefix (no ws) found: {} of {}\n\
-             per-segment full body in compact: {:?} (indices 0..{})\n\
-             per-segment #SEG-n: marker in compact: {:?}\n\
-             segments missing as full substring: {:?}\n\
-             markers missing: {:?}\n",
-            lo,
-            expected_no_ws.len(),
-            seg_full,
-            segments.len(),
-            seg_marker,
-            missing_full,
-            missing_markers,
-        );
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-
     /// Mirror of `grpc_virtual_tui_rpc_large_echo_char_by_char` over LiveKit transport.
     ///
     /// Sends 1000 chars as 10 `#SEG-N:` segments byte-by-byte via a LiveKit bidi-stream
@@ -583,7 +436,21 @@ mod livekit_tests {
         }
 
         // Wait for the full segmented echo to appear in the vt100-parsed output.
-        lk_eventually_echo_in_vt100(&buf, &expected, ROWS, COLS).await;
+        // LiveKit has higher per-chunk latency than gRPC; use a longer timeout than gRPC e2e.
+        eventually_segmented_echo(
+            &buf,
+            &expected,
+            ROWS,
+            COLS,
+            SegmentedEchoWaitParams {
+                timeout: Duration::from_secs(180),
+                min_interval: Duration::from_millis(400),
+                min_new_bytes: 4096,
+                loop_sleep: Duration::from_millis(50),
+                style: SegmentedEchoFailureStyle::LiveKit,
+            },
+        )
+        .await;
 
         sender
             .send(TerminalInput { data: vec![] }.encode_to_vec(), true)
@@ -594,7 +461,14 @@ mod livekit_tests {
         reader.abort();
 
         let all_output = buf.lock().expect("output buffer").clone();
-        lk_assert_segmented_echo_vt100(&all_output, &expected, &segments, ROWS, COLS);
+        assert_segmented_echo(
+            &all_output,
+            &expected,
+            &segments,
+            ROWS,
+            COLS,
+            SegmentedEchoFailureStyle::LiveKit,
+        );
 
         Ok(())
     }
@@ -639,7 +513,7 @@ mod livekit_tests {
             .start_bidi_stream("terminal.TerminalService", "StreamTerminalIO")
             .map_err(|e| anyhow::anyhow!("start bidi: {}", e))?;
 
-        let mut viewer = VirtualTerminalViewer::new();
+        let mut viewer = ScreenParser::new(24, 80);
 
         // Phase 1: send init, drain initial TUI output.
         sender

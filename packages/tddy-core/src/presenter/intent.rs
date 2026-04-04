@@ -36,6 +36,9 @@ pub enum UserIntent {
     Scroll(i32),
     /// User requested quit.
     Quit,
+    /// Pointer Stop pane / interrupt — handled in TUI layer (`ctrl_c_interrupt_session`); must not
+    /// be sent to the presenter in normal flows (exhaustiveness / tests only).
+    Interrupt,
     /// User selected Resume in ErrorRecovery mode.
     ResumeFromError,
     /// User selected "Continue with agent" in ErrorRecovery mode.

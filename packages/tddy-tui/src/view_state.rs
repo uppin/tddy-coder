@@ -86,6 +86,8 @@ pub struct ViewState {
     pub(crate) frozen_goal_elapsed_for_status_bar: Option<Duration>,
     /// Wall-clock anchor for 1 Hz idle dot (· ↔ •) in user-wait modes.
     pub(crate) idle_dot_animation_anchor: Option<Instant>,
+    /// Last clicked option index in Select mode dynamic area (for double-click confirm).
+    pub last_select_click_option: Option<usize>,
     /// Feature-prompt slash menu (skills + `/recipe`) is visible.
     pub feature_slash_open: bool,
     /// Menu rows from [`tddy_core::slash_menu_entries`].
@@ -211,6 +213,7 @@ impl ViewState {
     pub fn on_mode_changed(&mut self, mode: &AppMode) {
         if !matches!(mode, AppMode::Select { .. }) {
             self.last_select_identity = None;
+            self.last_select_click_option = None;
         }
         match mode {
             AppMode::FeatureInput => {
@@ -228,6 +231,7 @@ impl ViewState {
                 if !same_question {
                     self.select_other_text.clear();
                     self.select_typing_other = false;
+                    self.last_select_click_option = None;
                 }
                 self.last_select_identity = Some(id);
                 self.select_selected = *initial_selected;
