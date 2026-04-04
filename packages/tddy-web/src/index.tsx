@@ -46,6 +46,7 @@ import { UserAvatar } from "./components/UserAvatar";
 import { Button } from "./components/ui/button";
 import { ConnectionScreen } from "./components/ConnectionScreen";
 import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
+import { parseTerminalSessionIdFromPathname } from "./routing/appRoutes";
 
 function usePathname(): [string, (path: string) => void] {
   const [path, setPath] = useState(
@@ -373,6 +374,14 @@ export function App() {
   }, []);
 
   const daemonMode = appConfig.daemonMode;
+
+  // Standalone mode uses query params for LiveKit fields, not `/terminal/:id`. Strip misleading paths.
+  useEffect(() => {
+    if (daemonMode !== false || typeof window === "undefined") return;
+    if (parseTerminalSessionIdFromPathname(window.location.pathname) !== null) {
+      window.history.replaceState(null, "", "/");
+    }
+  }, [daemonMode]);
 
   return (
     <>

@@ -173,3 +173,62 @@ fn daemon_with_web_flags_serves_index_html_at_root() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// Deep links under `/terminal/...` must receive `index.html` (SPA fallback) so the client router can run.
+#[test]
+#[cfg(unix)]
+fn web_bundle_serves_index_html_for_terminal_deep_link_path() {
+    let tmp = std::env::temp_dir().join("tddy-web-spa-terminal-fallback-test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).expect("create tmp");
+
+    let index_content = "<!DOCTYPE html><html><body>SPA Terminal Deep Link</body></html>";
+    std::fs::write(tmp.join("index.html"), index_content).expect("write index.html");
+
+    let sessions_base = tmp.join("sessions-base");
+    std::fs::create_dir_all(&sessions_base).expect("create sessions base");
+
+    let grpc_port = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral");
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        port
+    };
+    let web_port = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral");
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        port
+    };
+
+    let child = StdCommand::new(assert_cmd::cargo::cargo_bin!("tddy-coder"))
+        .env_clear()
+        .env(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap())
+        .args([
+            "--agent",
+            "stub",
+            "--daemon",
+            "--grpc",
+            &grpc_port.to_string(),
+            "--web-port",
+            &web_port.to_string(),
+            "--web-bundle-path",
+            tmp.to_str().unwrap(),
+        ])
+        .spawn()
+        .expect("spawn tddy-coder daemon");
+
+    let _guard = KillOnDrop(child);
+
+    let url = format!("http://127.0.0.1:{}/terminal/session-from-url", web_port);
+    let body = retry_until_ready(|| reqwest::blocking::get(&url).and_then(|r| r.text()))
+        .expect("HTTP GET /terminal/... within timeout");
+
+    assert!(
+        body.contains("SPA Terminal Deep Link"),
+        "GET /terminal/... should return index.html (SPA fallback), got: {}",
+        body
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

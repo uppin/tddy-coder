@@ -62,6 +62,16 @@ On touch-capable devices or narrow viewports (width &lt; 768px):
 
 When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated users see **ConnectionScreen** (not the manual LiveKit URL form):
 
+### URL routes (daemon mode)
+
+- **Session list**: `/` — project tables, **Other sessions**, create project, presence panel when configured.
+- **Terminal**: `/terminal/{sessionId}` — one URL-encoded path segment after the fixed prefix `/terminal`. After **Start New Session**, **Connect**, or **Resume**, the app **pushes** this path so **Back** returns to the list. **Disconnect** replaces the URL with `/`. A full page load on `/terminal/{id}` loads the SPA (same **`index.html`** as `/`; the static server uses SPA fallback for unknown paths) and **`ConnectionScreen`** attaches the session via **`connectSession`** then **`resumeSession`** if needed. If the id is not in **`ListSessions`**, a **session not found** banner appears with **Back to sessions** (returns to `/`).
+- **OAuth**: `/auth/callback` is unchanged; **`App`** still renders **`AuthCallback`** for that path.
+
+**Standalone** (`daemon_mode: false`): connection uses **query parameters** (`url`, `identity`, `roomName`, optional `debug`). A **`/terminal/...`** path is not part of the standalone flow; the client **replaces** the URL with **`/`** on load if such a path is present so the address bar matches the documented standalone model.
+
+Implementation helpers: **`packages/tddy-web/src/routing/appRoutes.ts`**. Static serving: **`packages/tddy-coder/src/web_server.rs`** (`ServeDir` fallback to **`index.html`**).
+
 - **Create project** (collapsible): name + git URL → `CreateProject` (clone or adopt existing path under `~/repos/<name>/` by default). Optional **path under home** overrides the clone destination (e.g. `Code/my-app`).
 - **Projects** as collapsible sections (`<details>`): each shows name, git URL, `main_repo_path`, then **Host** (target daemon instance from `ListEligibleDaemons`), **Tool** (options from `ListTools`, reflecting daemon `allowed_tools`), **Backend** (options from `ListAgents`, reflecting daemon `allowed_agents`; each option’s value is the agent **`id`** sent on **`StartSession.agent`**; the selected backend is the first list entry unless a prior choice for that project still appears in the list), **Workflow recipe** (`tdd` or `bugfix` on `StartSession.recipe`), and **Debug logging** (browser terminal only)—all **per session**, not stored on the project—then **Start New Session** (`StartSession` with `project_id`, optional `daemon_instance_id`, and `recipe`), and a table of sessions for that `project_id`. Session tables include a **Host** column (`daemon_instance_id` from `ListSessions`). Connect/Resume in that section uses that project’s debug setting.
 - After authentication, the client loads **Tool** and **Backend** options together (`ListTools` and `ListAgents`); a failure in either RPC clears both lists and surfaces an error in the shared connection error area.
