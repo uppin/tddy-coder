@@ -223,6 +223,15 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
         }
     }
 
+    fn analyze_response(&self) -> InvokeResponse {
+        let n = self.invocation_count.load(Ordering::SeqCst);
+        let json = format!(
+            r#"{{"goal":"analyze","branch_suggestion":"bugfix/stub-{}","worktree_suggestion":"bugfix-stub-{}","name":"Stub bugfix analyze","summary":"Stub triage summary for reproduce context."}}"#,
+            n, n
+        );
+        self.submit_and_respond("analyze", &json, None)
+    }
+
     fn response_for_goal(&self, goal_id: &GoalId) -> InvokeResponse {
         match goal_id.as_str() {
             "interview" => InvokeResponse {
@@ -233,6 +242,7 @@ Or run `tddy-demo` with no `--goal` to continue the full workflow from the TUI.
                 raw_stream: None,
                 stderr: None,
             },
+            "analyze" => self.analyze_response(),
             "plan" => self.plan_response(),
             "acceptance-tests" => self.acceptance_tests_response(),
             "red" => self.red_response(),

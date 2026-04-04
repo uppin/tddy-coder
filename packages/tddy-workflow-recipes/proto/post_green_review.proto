@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Merged post-green review output (evaluate + validate). JSON Schema: post-green-review.schema.json.
+message PostGreenReviewOutput {
+  string goal = 1;
+  string summary = 2;
+  string risk_level = 3;
+  string validity_assessment = 4;
+  bool tests_report_written = 5;
+  bool prod_ready_report_written = 6;
+  bool clean_code_report_written = 7;
+}

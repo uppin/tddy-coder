@@ -12,7 +12,8 @@ pub use hooks::GrillMeWorkflowHooks;
 pub use prompt::{create_plan_system_prompt, grill_system_prompt, GRILL_ME_BRIEF_BASENAME};
 pub use repo_plan::{persisted_grill_me_brief_path, GrillMePersistedBriefPathError};
 
-use tddy_core::backend::{CodingBackend, GoalHints, GoalId, PermissionHint};
+use tddy_core::backend::{ClarificationQuestion, CodingBackend, GoalHints, GoalId, PermissionHint};
+use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::{Graph, GraphBuilder};
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::ids::WorkflowState;
@@ -32,16 +33,17 @@ impl WorkflowRecipe for GrillMeRecipe {
 
     fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
         log::info!("GrillMeRecipe::build_graph: grill -> create-plan -> end");
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
         let grill = Arc::new(BackendInvokeTask::from_recipe(
             "grill",
             GoalId::new("grill"),
-            self,
+            recipe.clone(),
             backend.clone(),
         ));
         let create_plan = Arc::new(BackendInvokeTask::from_recipe(
             "create-plan",
             GoalId::new("create-plan"),
-            self,
+            recipe,
             backend,
         ));
         let end = Arc::new(EndTask::new("end"));
@@ -151,6 +153,35 @@ impl WorkflowRecipe for GrillMeRecipe {
 
     fn goal_requires_tddy_tools_submit(&self, goal_id: &GoalId) -> bool {
         !matches!(goal_id.as_str(), "grill" | "create-plan")
+    }
+
+    fn host_clarification_gate_after_no_submit_turn(
+        &self,
+        goal_id: &GoalId,
+        context: &Context,
+    ) -> Option<Vec<ClarificationQuestion>> {
+        if goal_id.as_str() != "grill" {
+            return None;
+        }
+        if context
+            .get_sync::<String>("answers")
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+        {
+            return None;
+        }
+        let Some(dir) = context.get_sync::<std::path::PathBuf>("session_dir") else {
+            return Some(vec![prompt::grill_host_gate_question()]);
+        };
+        let path = dir.join(".workflow").join("grill_ask_answers.txt");
+        if path.exists() {
+            if let Ok(s) = std::fs::read_to_string(&path) {
+                if !s.trim().is_empty() {
+                    return None;
+                }
+            }
+        }
+        Some(vec![prompt::grill_host_gate_question()])
     }
 }
 

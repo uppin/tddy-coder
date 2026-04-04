@@ -352,13 +352,14 @@ impl WorktreeStatsCache {
 }
 
 fn directory_size_bytes_best_effort(path: &Path) -> u64 {
+    let walk_root = path.to_path_buf();
     let mut total = 0u64;
     if let Ok(m) = fs::metadata(path) {
         if m.is_file() {
             return m.len();
         }
     }
-    let mut stack = vec![path.to_path_buf()];
+    let mut stack = vec![walk_root.clone()];
     while let Some(p) = stack.pop() {
         let read_dir = match fs::read_dir(&p) {
             Ok(d) => d,
@@ -370,6 +371,11 @@ fn directory_size_bytes_best_effort(path: &Path) -> u64 {
                 Err(_) => continue,
             };
             if meta.is_dir() {
+                if paths_equal(&p, &walk_root)
+                    && ent.file_name().as_os_str() == std::ffi::OsStr::new(".worktrees")
+                {
+                    continue;
+                }
                 stack.push(ent.path());
             } else {
                 total += meta.len();
@@ -479,6 +485,53 @@ pub fn remove_worktree_under_repo(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BUG: When the main repo has linked worktrees under `.worktrees/` (a subdirectory of the
+    /// main checkout), `directory_size_bytes_best_effort` recurses into those nested worktree
+    /// directories, inflating the main worktree's `disk_bytes` with bytes that are separately
+    /// reported under each secondary worktree row.
+    ///
+    /// This test creates a realistic directory layout:
+    ///   main_repo/
+    ///     README.md          (100 bytes)
+    ///     src/lib.rs         (200 bytes)
+    ///     .worktrees/
+    ///       wt1/
+    ///         README.md      (100 bytes)
+    ///         feature.rs     (500 bytes)
+    ///
+    /// The main worktree's own files total 300 bytes. But the current implementation reports
+    /// 300 + 600 = 900, because it walks into `.worktrees/wt1/`.
+    #[test]
+    fn main_worktree_size_excludes_nested_worktree_directories() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let main_repo = tmp.path().join("repo");
+        let wt_dir = main_repo.join(".worktrees").join("wt1");
+        fs::create_dir_all(main_repo.join("src")).unwrap();
+        fs::create_dir_all(&wt_dir).unwrap();
+
+        let main_readme = vec![b'A'; 100];
+        let main_lib = vec![b'B'; 200];
+        let wt_readme = vec![b'C'; 100];
+        let wt_feature = vec![b'D'; 500];
+
+        fs::write(main_repo.join("README.md"), &main_readme).unwrap();
+        fs::write(main_repo.join("src").join("lib.rs"), &main_lib).unwrap();
+        fs::write(wt_dir.join("README.md"), &wt_readme).unwrap();
+        fs::write(wt_dir.join("feature.rs"), &wt_feature).unwrap();
+
+        let main_own_bytes: u64 = 100 + 200; // README.md + src/lib.rs
+        let wt_bytes: u64 = 100 + 500; // wt1/README.md + wt1/feature.rs
+
+        let reported = directory_size_bytes_best_effort(&main_repo);
+
+        // BUG: currently reports main_own_bytes + wt_bytes (900) instead of main_own_bytes (300).
+        assert_eq!(
+            reported, main_own_bytes,
+            "main worktree size must exclude nested .worktrees/ directory; \
+             got {reported} (includes {wt_bytes} bytes from nested worktree)"
+        );
+    }
 
     /// Acceptance: parser maps branch and detached HEAD rows from a fixed fixture.
     #[test]

@@ -3,21 +3,22 @@
 
 pub mod graph;
 pub mod hooks;
+pub(crate) mod hooks_common;
 pub mod interview;
 pub mod plan_task;
-mod session_dir_resolve;
+pub(crate) mod session_dir_resolve;
 
 pub use hooks::TddWorkflowHooks;
 pub use plan_task::PlanTask;
 mod acceptance_tests;
 mod demo;
 mod evaluate;
-mod green;
+pub(crate) mod green;
 mod plain_cli_output;
 mod planning;
-mod red;
-mod refactor;
-mod update_docs;
+pub mod red;
+pub(crate) mod refactor;
+pub(crate) mod update_docs;
 mod validate_subagents;
 
 use std::collections::BTreeMap;

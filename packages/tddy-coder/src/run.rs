@@ -332,7 +332,7 @@ pub struct CoderArgs {
     pub config: Option<PathBuf>,
 
     /// Goal to execute: plan / reproduce (recipe start), acceptance-tests, red, green, … Omit to run full workflow.
-    #[arg(long, value_parser = ["plan", "reproduce", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
+    #[arg(long, value_parser = ["plan", "reproduce", "acceptance-tests", "red", "green", "post-green-review", "demo", "evaluate", "validate", "refactor", "update-docs"])]
     pub goal: Option<String>,
 
     /// Session directory for plan artifacts (default: `{TDDY_SESSIONS_DIR}/sessions/<session_id>/`). Optional override (e.g. tests).
@@ -478,7 +478,7 @@ pub struct DemoArgs {
     pub config: Option<PathBuf>,
 
     /// Goal to execute: plan / reproduce, acceptance-tests, … Omit to run full workflow.
-    #[arg(long, value_parser = ["plan", "reproduce", "acceptance-tests", "red", "green", "demo", "evaluate", "validate", "refactor", "update-docs"])]
+    #[arg(long, value_parser = ["plan", "reproduce", "acceptance-tests", "red", "green", "post-green-review", "demo", "evaluate", "validate", "refactor", "update-docs"])]
     pub goal: Option<String>,
 
     /// Session directory for plan artifacts (default: `{TDDY_SESSIONS_DIR}/sessions/<session_id>/`). Optional override (e.g. tests).
@@ -1496,7 +1496,7 @@ fn merge_session_coder_config_from_dir(args: &mut Args, session_dir: &Path) -> a
 }
 
 /// Session or global `coder-config.yaml` may set `goal: plan` from a TDD-oriented template.
-/// When the selected recipe uses another start goal (e.g. bugfix → `reproduce`), that stale `goal`
+/// When the selected recipe uses another start goal (e.g. bugfix → `analyze`), that stale `goal`
 /// forces single-goal routing and fails before any task runs (`unsupported goal`).
 ///
 /// Clears [`Args::goal`] when it is neither the recipe start goal nor one of [`WorkflowRecipe::goal_ids`].

@@ -14,7 +14,8 @@ fn recipe_resolve_accepts_free_prompting_and_rejects_unknown() {
         err.contains("tdd")
             && err.contains("bugfix")
             && err.contains("free-prompting")
-            && err.contains("grill-me"),
+            && err.contains("grill-me")
+            && err.contains("tdd-small"),
         "unknown recipe errors must list every supported workflow recipe: {}",
         err
     );
@@ -66,4 +67,13 @@ fn grill_me_recipe_resolves_and_reports_grill_me_state() {
             == Some("grill-me-brief.md"),
         "manifest must register grill-me-brief.md under grill_brief key"
     );
+}
+
+/// PRD: `tdd-small` resolves to a distinct recipe + manifest; `recipe.name()` is `tdd-small`.
+#[test]
+fn resolve_tdd_small_recipe() {
+    let resolved = workflow_recipe_and_manifest_from_cli_name("tdd-small");
+    let (recipe, _manifest) =
+        resolved.expect("tdd-small must resolve via workflow_recipe_and_manifest_from_cli_name");
+    assert_eq!(recipe.name(), "tdd-small");
 }

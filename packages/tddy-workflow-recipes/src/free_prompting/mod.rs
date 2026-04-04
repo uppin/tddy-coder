@@ -32,10 +32,11 @@ impl WorkflowRecipe for FreePromptingRecipe {
         log::info!(
             "FreePromptingRecipe::build_graph: single prompting (backend invoke, no end edge)"
         );
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
         let prompting = Arc::new(BackendInvokeTask::from_recipe(
             "prompting",
             GoalId::new("prompting"),
-            self,
+            recipe,
             backend,
         ));
 

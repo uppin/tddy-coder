@@ -1,5 +1,6 @@
-//! Bug-fix workflow: **Reproduce** with clarification questions (demo-ready recipe).
+//! Bug-fix workflow: **analyze** → **reproduce** with clarification questions (demo-ready recipe).
 
+mod analyze;
 mod hooks;
 
 use std::collections::BTreeMap;
@@ -17,7 +18,7 @@ use tddy_core::workflow::task::{BackendInvokeTask, EndTask};
 
 use crate::SessionArtifactManifest;
 
-/// Bug-fix recipe: invokes the backend for `reproduce` with agent output and clarification questions.
+/// Bug-fix recipe: **`analyze`** then **`reproduce`** with agent output and clarification questions.
 #[derive(Clone, Copy, Default, Debug)]
 pub struct BugfixRecipe;
 
@@ -27,17 +28,27 @@ impl WorkflowRecipe for BugfixRecipe {
     }
 
     fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
+        log::debug!("[bugfix recipe] build_graph: analyze → reproduce → end");
+        let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
+        let analyze = Arc::new(BackendInvokeTask::from_recipe(
+            "analyze",
+            GoalId::new("analyze"),
+            recipe.clone(),
+            backend.clone(),
+        ));
         let reproduce = Arc::new(BackendInvokeTask::from_recipe(
             "reproduce",
             GoalId::new("reproduce"),
-            self,
+            recipe,
             backend,
         ));
         let end = Arc::new(EndTask::new("end"));
 
         GraphBuilder::new("bugfix")
+            .add_task(analyze)
             .add_task(reproduce)
             .add_task(end)
+            .add_edge("analyze", "reproduce")
             .add_edge("reproduce", "end")
             .build()
     }
@@ -48,6 +59,18 @@ impl WorkflowRecipe for BugfixRecipe {
 
     fn goal_hints(&self, goal_id: &GoalId) -> Option<GoalHints> {
         match goal_id.as_str() {
+            "analyze" => {
+                log::debug!("[bugfix recipe] goal_hints(analyze)");
+                Some(GoalHints {
+                    display_name: "Analyze".to_string(),
+                    permission: PermissionHint::ReadOnly,
+                    allowed_tools: vec![],
+                    default_model: None,
+                    agent_output: true,
+                    agent_cli_plan_mode: false,
+                    claude_nonzero_exit_ok_if_structured_response: false,
+                })
+            }
             "reproduce" => Some(GoalHints {
                 display_name: "Reproduce".to_string(),
                 permission: PermissionHint::ReadOnly,
@@ -62,24 +85,32 @@ impl WorkflowRecipe for BugfixRecipe {
     }
 
     fn goal_ids(&self) -> Vec<GoalId> {
-        vec![GoalId::new("reproduce")]
+        vec![GoalId::new("analyze"), GoalId::new("reproduce")]
     }
 
     fn submit_key(&self, goal_id: &GoalId) -> GoalId {
         goal_id.clone()
     }
 
+    /// Resume goal for persisted [`WorkflowState`].
+    ///
+    /// **`Reproducing`** means analyze completed successfully (changeset updated to that state);
+    /// the next runnable goal is **`reproduce`**. Any other non-**`Failed`** state—including
+    /// **`Init`**, **`Analyzing`**, or legacy/unknown strings—maps to **`analyze`** so partial or
+    /// upgraded sessions still land on the first step unless we are clearly in the reproduce phase.
     fn next_goal_for_state(&self, state: &WorkflowState) -> Option<GoalId> {
         match state.as_str() {
-            "Init" | "Reproducing" => Some(GoalId::new("reproduce")),
             "Failed" => None,
-            _ => Some(GoalId::new("reproduce")),
+            "Reproducing" => Some(GoalId::new("reproduce")),
+            _ => Some(GoalId::new("analyze")),
         }
     }
 
     fn status_for_state(&self, state: &WorkflowState) -> &'static str {
         match state.as_str() {
             "Failed" => "Failed",
+            "Analyzing" => "Analyzing",
+            "Reproducing" => "Reproducing",
             _ => "Active",
         }
     }
@@ -89,7 +120,8 @@ impl WorkflowRecipe for BugfixRecipe {
     }
 
     fn start_goal(&self) -> GoalId {
-        GoalId::new("reproduce")
+        log::debug!("[bugfix recipe] start_goal = analyze");
+        GoalId::new("analyze")
     }
 
     fn default_models(&self) -> BTreeMap<GoalId, String> {
@@ -110,7 +142,7 @@ impl WorkflowRecipe for BugfixRecipe {
     }
 
     fn goal_requires_tddy_tools_submit(&self, goal_id: &GoalId) -> bool {
-        goal_id.as_str() != "reproduce"
+        matches!(goal_id.as_str(), "analyze")
     }
 
     fn plain_goal_cli_output(
@@ -146,14 +178,53 @@ impl SessionArtifactManifest for BugfixRecipe {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use tddy_core::backend::StubBackend;
+    use tddy_core::workflow::context::Context;
+    use tddy_core::workflow::ids::WorkflowState;
     use tddy_core::WorkflowRecipe;
+
+    /// Acceptance: graph must be `analyze` → `reproduce` → `end` (task ids match goal ids).
+    #[test]
+    fn bugfix_graph_orders_analyze_before_reproduce() {
+        let backend = Arc::new(StubBackend::new());
+        let recipe = BugfixRecipe;
+        let graph = recipe.build_graph(backend);
+        let ctx = Context::new();
+        assert_eq!(
+            graph.next_task_id("analyze", &ctx),
+            Some("reproduce".to_string()),
+            "edge analyze → reproduce"
+        );
+        assert_eq!(
+            graph.next_task_id("reproduce", &ctx),
+            Some("end".to_string()),
+            "edge reproduce → end"
+        );
+        assert_eq!(
+            recipe.status_for_state(&WorkflowState::new("Analyzing")),
+            "Analyzing",
+            "PRD: presenter distinguishes analyzing vs reproducing"
+        );
+    }
 
     #[test]
     fn bugfix_recipe_is_valid_plugin() {
         let r: std::sync::Arc<dyn WorkflowRecipe> = std::sync::Arc::new(BugfixRecipe);
         assert_eq!(r.name(), "bugfix");
-        assert_eq!(r.start_goal().as_str(), "reproduce");
-        assert_eq!(r.goal_ids().len(), 1);
+        assert_eq!(r.start_goal().as_str(), "analyze");
+        let goal_ids = r.goal_ids();
+        let ids: Vec<&str> = goal_ids.iter().map(|g| g.as_str()).collect();
+        assert!(
+            ids.contains(&"analyze") && ids.contains(&"reproduce"),
+            "goal_ids must include analyze and reproduce: {:?}",
+            ids
+        );
+        assert_eq!(
+            r.status_for_state(&WorkflowState::new("Reproducing")),
+            "Reproducing",
+            "PRD: status_for_state must label reproduce phase"
+        );
     }
 
     #[test]

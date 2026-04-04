@@ -18,7 +18,7 @@ use tddy_core::output::create_session_dir_in;
 use tddy_core::workflow::graph::{ExecutionResult, ExecutionStatus};
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::{GoalId, SharedBackend, WorkflowEngine, WorkflowRecipe};
-use tddy_workflow_recipes::{SessionArtifactManifest, TddRecipe};
+use tddy_workflow_recipes::{BugfixRecipe, SessionArtifactManifest, TddRecipe};
 
 #[ctor::ctor]
 fn ensure_test_tddy_data_dir_yaml_and_override() {
@@ -49,6 +49,11 @@ pub fn tdd_recipe() -> Arc<dyn WorkflowRecipe> {
     Arc::new(TddRecipe)
 }
 
+/// Bugfix workflow recipe for integration tests (same behavior as tddy-coder).
+pub fn bugfix_recipe() -> Arc<dyn WorkflowRecipe> {
+    Arc::new(BugfixRecipe)
+}
+
 /// Session artifact manifest paired with [`tdd_recipe`] (same [`TddRecipe`] instance semantics).
 pub fn tdd_manifest() -> Arc<dyn SessionArtifactManifest> {
     Arc::new(TddRecipe)
@@ -66,6 +71,36 @@ pub fn stub_invoke_request(prompt: impl Into<String>, goal_id: &str) -> InvokeRe
     let recipe = tdd_recipe();
     let gid = GoalId::new(goal_id);
     let hints = recipe.goal_hints(&gid).expect("TddRecipe hints");
+    let submit_key = recipe.submit_key(&gid);
+    InvokeRequest {
+        prompt: prompt.into(),
+        system_prompt: None,
+        system_prompt_path: None,
+        goal_id: gid,
+        submit_key,
+        hints,
+        model: None,
+        session: None,
+        working_dir: None,
+        debug: false,
+        agent_output: false,
+        agent_output_sink: None,
+        progress_sink: None,
+        conversation_output_path: None,
+        inherit_stdin: false,
+        extra_allowed_tools: None,
+        socket_path: None,
+        session_dir: None,
+    }
+}
+
+/// Build an [`InvokeRequest`] using Bugfix recipe hints (for bugfix backend integration tests).
+pub fn bugfix_stub_invoke_request(prompt: impl Into<String>, goal_id: &str) -> InvokeRequest {
+    let recipe = bugfix_recipe();
+    let gid = GoalId::new(goal_id);
+    let hints = recipe
+        .goal_hints(&gid)
+        .unwrap_or_else(|| panic!("BugfixRecipe must provide goal_hints for {}", goal_id));
     let submit_key = recipe.submit_key(&gid);
     InvokeRequest {
         prompt: prompt.into(),
