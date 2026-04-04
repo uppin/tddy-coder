@@ -2,6 +2,12 @@
 
 Release note history for the Web product area.
 
+## 2026-04-04 — Terminal font zoom (pitch in / out)
+
+- **tddy-web**: **`terminalZoom`** / **`terminalZoomBridge`** (bounds, bridge + sync events, validated **`CustomEvent`** detail); **`TerminalZoomToolbar`**; **`GhosttyTerminal`** applies **`options.fontSize`**, **`FitAddon.fit()`**, **`data-terminal-font-size`**; **`ConnectionTerminalChrome`** **`terminalBaselineFontSize`**; **`GhosttyTerminalLiveKit`** **`fontSize`** prop aligned with toolbar baseline; document keyboard shortcuts (**Ctrl**/**⌘** +/-/0) when focus is on the terminal or toolbar; optional **`VITE_TERMINAL_ZOOM_DEBUG`**. Bun tests and Cypress **`TerminalZoomAcceptance.cy.tsx`** cover zoom and resize OSC behavior.
+- **Feature docs**: [web-terminal.md](web-terminal.md) (Font zoom).
+- **Repo**: **`.tddy-red-test-output.txt`** is gitignored for local red-phase captures.
+
 ## 2026-04-03 — Interrupt: TUI Stop pane; web Stop button removed
 
 - **tddy-web**: **`ConnectionTerminalChrome`** no longer renders a bottom-right **Stop** button or **`onStopInterrupt`**. Interrupt is the ratatui **Stop** pane (red **U+25A0**) beside the Enter strip; the browser forwards SGR mouse to the virtual TUI (same **0x03** path as **Ctrl+C**).

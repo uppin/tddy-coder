@@ -1,11 +1,25 @@
 import React, {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
   useState,
 } from "react";
 import { init, Terminal, FitAddon } from "ghostty-web";
+import {
+  clampTerminalFontSize,
+  pitchInFontSize,
+  pitchOutFontSize,
+  DEFAULT_TERMINAL_FONT_MAX,
+  DEFAULT_TERMINAL_FONT_MIN,
+} from "../lib/terminalZoom";
+import {
+  dispatchTerminalFontSizeSync,
+  isTerminalZoomDebugEnabled,
+  parseTerminalZoomBridgeDetail,
+  TERMINAL_ZOOM_BRIDGE_EVENT,
+} from "../lib/terminalZoomBridge";
 
 export interface GhosttyTerminalTheme {
   background?: string;
@@ -17,6 +31,8 @@ export interface GhosttyTerminalProps {
   cols?: number;
   rows?: number;
   fontSize?: number;
+  minFontSize?: number;
+  maxFontSize?: number;
   fontFamily?: string;
   theme?: GhosttyTerminalTheme;
   onData?: (data: string) => void;
@@ -46,6 +62,8 @@ export interface GhosttyTerminalHandle {
   getBufferText?(): string;
   /** Return per-line text + attribute info from the active buffer. */
   getBufferLines?(): BufferLineInfo[];
+  /** Apply font size to the live terminal and refit (Green phase). */
+  setTerminalFontSize?(px: number): void;
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
@@ -55,6 +73,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       cols = 80,
       rows = 24,
       fontSize = 14,
+      minFontSize = DEFAULT_TERMINAL_FONT_MIN,
+      maxFontSize = DEFAULT_TERMINAL_FONT_MAX,
       fontFamily,
       theme,
       onData,
@@ -71,12 +91,48 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const log = debugLogging
       ? (...args: unknown[]) => console.log("[GhosttyTerminal]", ...args)
       : () => {};
+    const zoomVerbose = debugLogging || isTerminalZoomDebugEnabled();
     const containerRef = useRef<HTMLDivElement>(null);
     const termRef = useRef<Terminal | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
     const [ready, setReady] = useState(false);
+    const [displayFontSize, setDisplayFontSize] = useState(fontSize);
 
     const disposablesRef = useRef<{ dispose: () => void }[]>([]);
+
+    const applyFontSizePx = useCallback(
+      (px: number, bounds?: { min: number; max: number }) => {
+        if (!Number.isFinite(px)) return;
+        const min = bounds?.min ?? minFontSize;
+        const max = bounds?.max ?? maxFontSize;
+        const clamped = clampTerminalFontSize(px, min, max);
+        const term = termRef.current;
+        const fit = fitAddonRef.current;
+        if (zoomVerbose) {
+          console.info("[tddy][GhosttyTerminal] applyFontSizePx", {
+            requested: px,
+            clamped,
+            hasTerm: !!term,
+            colsBefore: term?.cols,
+            rowsBefore: term?.rows,
+          });
+        }
+        if (term) {
+          term.options.fontSize = clamped;
+          fit?.fit();
+          if (zoomVerbose) {
+            console.debug("[tddy][GhosttyTerminal] after fitAddon.fit", {
+              cols: term.cols,
+              rows: term.rows,
+              fontSize: term.options.fontSize,
+            });
+          }
+        }
+        setDisplayFontSize(clamped);
+        dispatchTerminalFontSizeSync(clamped);
+      },
+      [minFontSize, maxFontSize, zoomVerbose]
+    );
 
     useEffect(() => {
       let isMounted = true;
@@ -159,6 +215,53 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         termRef.current.write(initialContent);
       }
     }, [initialContent, ready]);
+
+    useEffect(() => {
+      if (!ready || !termRef.current) return;
+      applyFontSizePx(fontSize, { min: minFontSize, max: maxFontSize });
+    }, [ready, fontSize, minFontSize, maxFontSize, applyFontSizePx]);
+
+    useEffect(() => {
+      const onBridge = (ev: Event) => {
+        const ce = ev as CustomEvent<unknown>;
+        const parsed = parseTerminalZoomBridgeDetail(ce.detail);
+        if (!parsed) return;
+        const d = parsed;
+        const merged = {
+          min: d.opts?.min ?? minFontSize,
+          max: d.opts?.max ?? maxFontSize,
+        };
+        const term = termRef.current;
+        if (zoomVerbose) {
+          console.debug("[tddy][GhosttyTerminal] terminal zoom bridge", {
+            action: d.action,
+            merged,
+            hasTerm: !!term,
+          });
+        }
+        if (!term) {
+          if (zoomVerbose) {
+            console.info("[tddy][GhosttyTerminal] zoom bridge ignored — terminal not ready");
+          }
+          return;
+        }
+        const current = term.options.fontSize;
+        if (d.action === "reset") {
+          applyFontSizePx(d.baselineFontSize, merged);
+          return;
+        }
+        if (d.action === "pitch-in") {
+          applyFontSizePx(pitchInFontSize(current, merged), merged);
+          return;
+        }
+        if (d.action === "pitch-out") {
+          applyFontSizePx(pitchOutFontSize(current, merged), merged);
+        }
+      };
+      window.addEventListener(TERMINAL_ZOOM_BRIDGE_EVENT, onBridge as EventListener);
+      return () =>
+        window.removeEventListener(TERMINAL_ZOOM_BRIDGE_EVENT, onBridge as EventListener);
+    }, [minFontSize, maxFontSize, applyFontSizePx, zoomVerbose]);
 
     useEffect(() => {
       if (!ready || !termRef.current?.textarea) return;
@@ -314,7 +417,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // Note: onData is registered once in the setup useEffect above (line 97-104).
     // Do NOT re-register here — that would cause duplicate events for each keystroke.
 
-    useImperativeHandle(ref, () => ({
+    useImperativeHandle(
+      ref,
+      () => ({
+        setTerminalFontSize(px: number) {
+          if (!Number.isFinite(px)) return;
+          if (zoomVerbose) {
+            console.info("[tddy][GhosttyTerminal] setTerminalFontSize (imperative)", { px });
+          }
+          applyFontSizePx(px, { min: minFontSize, max: maxFontSize });
+        },
       write(data: string | Uint8Array) {
         const len = typeof data === "string" ? data.length : data.length;
         log("dataflow: write", len, "bytes", typeof data === "string" ? JSON.stringify(data.slice(0, 40)) : "(Uint8Array)");
@@ -369,11 +481,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           return [];
         }
       },
-    }));
+      }),
+      [applyFontSizePx, minFontSize, maxFontSize, zoomVerbose]
+    );
 
     return (
       <div
         data-testid="ghostty-terminal"
+        data-terminal-font-size={String(displayFontSize)}
         data-session-active={sessionActive ? "true" : "false"}
         aria-disabled={sessionActive ? undefined : true}
         ref={containerRef}

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { TerminalZoomToolbar } from "../terminal/TerminalZoomToolbar";
 import {
   exitDocumentFullscreen,
   isTargetInActiveFullscreen,
@@ -49,6 +50,8 @@ export interface ConnectionTerminalChromeProps {
   onTerminate?: () => void;
   /** Element to pass to the Fullscreen API (connected terminal subtree). */
   fullscreenTargetRef?: React.RefObject<HTMLElement | null>;
+  /** Initial terminal font size for zoom reset (matches GhosttyTerminal `fontSize`). */
+  terminalBaselineFontSize?: number;
 }
 
 /**
@@ -60,6 +63,7 @@ export function ConnectionTerminalChrome({
   onDisconnect,
   onTerminate,
   fullscreenTargetRef,
+  terminalBaselineFontSize = 14,
 }: ConnectionTerminalChromeProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [fullscreenActive, setFullscreenActive] = useState(false);
@@ -205,6 +209,7 @@ export function ConnectionTerminalChrome({
           {buildId}
         </span>
       )}
+      <TerminalZoomToolbar baselineFontSize={terminalBaselineFontSize} />
       <button
         ref={dotRef}
         type="button"
