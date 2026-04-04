@@ -5,9 +5,9 @@
 pub fn supported_workflow_recipe_cli_names() -> &'static [&'static str] {
     log::debug!(
         "approval_policy::supported_workflow_recipe_cli_names: {:?}",
-        &["tdd", "bugfix", "free-prompting", "grill-me"]
+        &["tdd", "bugfix", "free-prompting", "grill-me", "tdd-small",]
     );
-    &["tdd", "bugfix", "free-prompting", "grill-me"]
+    &["tdd", "bugfix", "free-prompting", "grill-me", "tdd-small"]
 }
 
 /// Whether the recipe skips primary session document approval entirely (e.g. free-prompting).

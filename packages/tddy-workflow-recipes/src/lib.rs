@@ -10,6 +10,7 @@ pub mod recipe_resolve;
 pub mod schema_pipeline;
 pub mod session_artifact_manifest;
 pub mod tdd;
+pub mod tdd_small;
 pub mod writer;
 
 pub use bugfix::BugfixRecipe;
@@ -37,6 +38,10 @@ pub use recipe_resolve::{
 };
 pub use session_artifact_manifest::SessionArtifactManifest;
 pub use tdd::{PlanTask, TddRecipe, TddWorkflowHooks};
+pub use tdd_small::{
+    build_tdd_small_workflow_graph, merged_red_system_prompt, parse_post_green_review_response,
+    PostGreenReviewOutput, TddSmallRecipe, TddSmallWorkflowHooks,
+};
 pub use writer::{
     create_session_dir_in, create_session_dir_under, create_session_dir_with_id,
     read_impl_session_file, read_session_file, slugify_directory_name, tddy_data_dir_path,

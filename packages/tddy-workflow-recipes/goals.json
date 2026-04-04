@@ -9,6 +9,11 @@
     { "name": "red", "schema": "red.schema.json", "proto": "red.proto" },
     { "name": "green", "schema": "green.schema.json", "proto": "green.proto" },
     {
+      "name": "post-green-review",
+      "schema": "post-green-review.schema.json",
+      "proto": "post_green_review.proto"
+    },
+    {
       "name": "evaluate-changes",
       "schema": "evaluate.schema.json",
       "proto": "evaluate_changes.proto"
