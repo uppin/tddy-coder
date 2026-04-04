@@ -30,6 +30,62 @@ use tddy_workflow_recipes::{
 
 use common::{bugfix_recipe, bugfix_stub_invoke_request, stub_invoke_request};
 
+/// Acceptance (PRD): minimal TDD graph lists **interview** before **plan**; **plan → acceptance-tests** unchanged.
+#[tokio::test]
+async fn tdd_graph_interview_precedes_plan() {
+    let backend = Arc::new(StubBackend::new());
+    let graph = build_tdd_workflow_graph(backend, common::tdd_recipe());
+
+    assert!(
+        graph.get_task("interview").is_some(),
+        "minimal TDD graph must include interview task"
+    );
+    let ctx = Context::new();
+    assert_eq!(
+        graph.next_task_id("interview", &ctx),
+        Some("plan".to_string())
+    );
+    assert_eq!(
+        graph.next_task_id("plan", &ctx),
+        Some("acceptance-tests".to_string())
+    );
+    assert_eq!(
+        tddy_workflow_recipes::tdd::graph::TDD_INTERVIEW_GRAPH_HANDOFF_VERSION,
+        2,
+        "handoff version must be bumped when interview→plan relay is complete"
+    );
+}
+
+/// Acceptance (PRD): full TDD graph lists **interview** before **plan**; downstream edges unchanged.
+#[tokio::test]
+async fn tdd_full_graph_interview_precedes_plan() {
+    let backend = Arc::new(StubBackend::new());
+    let graph = build_full_tdd_workflow_graph(backend, common::tdd_recipe());
+
+    assert!(
+        graph.get_task("interview").is_some(),
+        "full TDD graph must include interview task"
+    );
+    let ctx = Context::new();
+    assert_eq!(
+        graph.next_task_id("interview", &ctx),
+        Some("plan".to_string())
+    );
+    assert_eq!(
+        graph.next_task_id("plan", &ctx),
+        Some("acceptance-tests".to_string())
+    );
+    assert_eq!(
+        graph.next_task_id("acceptance-tests", &ctx),
+        Some("red".to_string())
+    );
+    assert_eq!(
+        tddy_workflow_recipes::tdd::graph::TDD_INTERVIEW_GRAPH_HANDOFF_VERSION,
+        2,
+        "handoff version must be bumped when interview→plan relay is complete"
+    );
+}
+
 /// Graph topology: build_tdd_workflow_graph creates correct edges.
 #[tokio::test]
 async fn graph_topology_plan_to_refactor_edges() {
@@ -472,7 +528,7 @@ async fn flow_runner_tdd_full_sequence_completes() {
     let session = Session::new_from_task(
         "full1".to_string(),
         "tdd_workflow".to_string(),
-        "plan".to_string(),
+        "interview".to_string(),
     );
     session
         .context

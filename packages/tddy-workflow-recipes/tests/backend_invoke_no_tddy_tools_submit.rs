@@ -8,7 +8,7 @@ use tddy_core::backend::{CodingBackend, InvokeRequest, InvokeResponse};
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::task::{BackendInvokeTask, NextAction, Task};
 use tddy_core::{BackendError, GoalId, WorkflowRecipe};
-use tddy_workflow_recipes::{FreePromptingRecipe, GrillMeRecipe};
+use tddy_workflow_recipes::{FreePromptingRecipe, GrillMeRecipe, TddRecipe};
 
 /// Backend that returns successful invoke output and never supplies `tddy-tools submit`.
 struct OutputOnlyBackend;
@@ -83,6 +83,30 @@ async fn grill_me_backend_invoke_continues_when_grill_ask_answers_file_present()
 }
 
 #[tokio::test]
+async fn tdd_interview_backend_invoke_completes_without_tddy_tools_submit() {
+    let recipe = TddRecipe;
+    let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
+    let task = BackendInvokeTask::from_recipe(
+        "interview",
+        GoalId::new("interview"),
+        Arc::new(recipe),
+        backend,
+    );
+
+    let ctx = Context::new();
+    ctx.set_sync("feature_input", "hello");
+    ctx.set_sync("prompt", "elicitation turn");
+    ctx.set_sync("output_dir", std::env::temp_dir());
+
+    let result = task
+        .run(ctx)
+        .await
+        .expect("interview task should succeed without submit");
+    assert_eq!(result.response, "agent reply without submit");
+    assert!(matches!(result.next_action, NextAction::Continue));
+}
+
+#[tokio::test]
 async fn free_prompting_backend_invoke_completes_without_tddy_tools_submit() {
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(FreePromptingRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
@@ -125,5 +149,14 @@ fn tdd_plan_goal_still_requires_tddy_tools_submit() {
     assert!(
         recipe.goal_requires_tddy_tools_submit(&GoalId::new("plan")),
         "TDD plan must keep structured submit contract"
+    );
+}
+
+#[test]
+fn tdd_interview_goal_opted_out_of_tddy_tools_submit() {
+    let recipe = TddRecipe;
+    assert!(
+        !recipe.goal_requires_tddy_tools_submit(&GoalId::new("interview")),
+        "interview is elicitation: recipe must not require structured submit (grill-me parity)"
     );
 }

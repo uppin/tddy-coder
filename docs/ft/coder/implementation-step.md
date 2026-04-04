@@ -2,11 +2,11 @@
 
 **Product Area**: Coder
 **Status**: Complete
-**Updated**: 2026-03-29
+**Updated**: 2026-04-04
 
 ## Summary
 
-The Implementation Step is the TDD Red-Green phase of the tddy-coder workflow. The **red** goal reads PRD.md and acceptance-tests.md from the session directory, creates skeleton production code and failing lower-level tests, and persists its session to `changeset.yaml`. The **green** goal resumes the red session via `changeset.yaml`, reads progress.md (required) plus PRD.md and acceptance-tests.md (optional for context), implements production-grade code to make all failing tests pass, updates progress.md and acceptance-tests.md with results, and verifies completion by running both unit and acceptance tests. In the full TDD graph, the path after green uses session context key **`run_optional_step_x`** (via **`tddy-tools set-session-context`**) to select demo or evaluate. The **demo** goal executes the demo plan from `demo-plan.md` when that path runs. The **evaluate** goal analyzes git changes for risks and produces `evaluation-report.md`.
+The Implementation Step is the TDD Red-Green phase of the tddy-coder workflow. The full TDD pipeline begins with **interview** and **plan** (see [Planning step](planning-step.md)); this document covers **red** onward. The **red** goal reads PRD.md and acceptance-tests.md from the session directory, creates skeleton production code and failing lower-level tests, and persists its session to `changeset.yaml`. The **green** goal resumes the red session via `changeset.yaml`, reads progress.md (required) plus PRD.md and acceptance-tests.md (optional for context), implements production-grade code to make all failing tests pass, updates progress.md and acceptance-tests.md with results, and verifies completion by running both unit and acceptance tests. In the full TDD graph, the path after green uses session context key **`run_optional_step_x`** (via **`tddy-tools set-session-context`**) to select demo or evaluate. The **demo** goal executes the demo plan from `demo-plan.md` when that path runs. The **evaluate** goal analyzes git changes for risks and produces `evaluation-report.md`.
 
 ## Background
 

@@ -319,3 +319,48 @@ async fn bugfix_demo_asks_two_questions_after_first_prompt() {
     tk.shutdown();
     shutdown.store(true, Ordering::Relaxed);
 }
+
+/// Full TDD recipe: interview clarification → plan clarification → plan approval menu (stub).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tdd_full_workflow_interview_through_plan_approval() {
+    let _ = env_logger::builder().is_test(true).try_init();
+    let (_handle, factory, shutdown) = spawn_stub_presenter(None);
+    let session = start_virtual_tui_session(&*factory, false).expect("session");
+    let tk = TuiTestkit::new(session, 120, 30);
+
+    tk.wait_for_text("feature description", Duration::from_secs(5))
+        .await
+        .expect("prompt visible");
+
+    tk.type_text("Add user profile API with validation")
+        .await
+        .unwrap();
+    tk.press_enter().await.unwrap();
+
+    tk.wait_for_text("Feature scope", Duration::from_secs(10))
+        .await
+        .expect("first interview question should appear");
+    tk.press_enter().await.unwrap();
+
+    tk.wait_for_text("Constraints", Duration::from_secs(10))
+        .await
+        .expect("second interview question should appear");
+    tk.press_enter().await.unwrap();
+
+    // Interview handoff is merged into plan context as answers, so the first plan invoke skips
+    // stub plan clarification and submits the PRD — user goes straight to plan approval.
+    tk.wait_for_text("Plan generated", Duration::from_secs(30))
+        .await
+        .expect("plan approval menu should appear after interview completes and plan runs");
+
+    let screen = tk.screen_contents().await;
+    log::info!("Screen at plan approval:\n{}", screen);
+    assert!(
+        screen.contains("View") && screen.contains("Approve") && screen.contains("Refine"),
+        "expected plan approval options on screen, got:\n{}",
+        screen
+    );
+
+    tk.shutdown();
+    shutdown.store(true, Ordering::Relaxed);
+}

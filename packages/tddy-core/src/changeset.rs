@@ -205,10 +205,11 @@ pub fn write_changeset(session_dir: &Path, changeset: &Changeset) -> Result<(), 
 /// transition whose [`WorkflowRecipe::next_goal_for_state`] is `Some` and **not** equal to
 /// [`WorkflowRecipe::start_goal`].
 ///
-/// Skipping `start_goal` avoids a common bad ordering: a full workflow restart writes `Planning`
-/// immediately before `Failed`, while an earlier transition (e.g. `GreenImplementing`) still
-/// reflects the real phase to retry. If every candidate maps to `start_goal` or to `None`, falls
-/// back to [`WorkflowRecipe::start_goal`].
+/// Skipping transitions per [`WorkflowRecipe::skip_failed_resume_transition`] avoids a common bad
+/// ordering: a full workflow restart writes `Planning` immediately before `Failed`, while an earlier
+/// transition (e.g. `GreenImplementing`) still reflects the real phase to retry. If every candidate
+/// is skipped or `None`, falls back to [`WorkflowRecipe::start_goal`], with a TDD-specific fallback
+/// to **`plan`** when only trailing `Planning` → `plan` entries were skipped (failed during plan).
 ///
 /// When the **last** history entry is `Failed`, the same walk is used even if [`ChangesetState::current`]
 /// was left stale (e.g. still `Planning` after a manual `changeset.yaml` edit that fixed `history`
@@ -226,15 +227,27 @@ pub fn start_goal_for_session_continue(recipe: &dyn WorkflowRecipe, cs: &Changes
             .next_goal_for_state(&cs.state.current)
             .unwrap_or_else(|| start.clone());
     }
+    let mut tdd_skipped_trailing_planning = false;
     for transition in cs.state.history.iter().rev() {
         if transition.state.as_str() == "Failed" {
             continue;
         }
         match recipe.next_goal_for_state(&transition.state) {
             None => continue,
-            Some(g) if g == start => continue,
+            Some(g) if recipe.skip_failed_resume_transition(&transition.state, &g) => {
+                if recipe.name() == "tdd"
+                    && transition.state.as_str() == "Planning"
+                    && g.as_str() == "plan"
+                {
+                    tdd_skipped_trailing_planning = true;
+                }
+                continue;
+            }
             Some(g) => return g,
         }
+    }
+    if recipe.name() == "tdd" && tdd_skipped_trailing_planning {
+        return GoalId::new("plan");
     }
     start
 }

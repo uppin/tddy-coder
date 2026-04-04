@@ -4,6 +4,7 @@
 pub mod graph;
 pub mod hooks;
 pub(crate) mod hooks_common;
+pub mod interview;
 pub mod plan_task;
 pub(crate) mod session_dir_resolve;
 
@@ -39,6 +40,7 @@ impl TddRecipe {
     /// Human-readable goal label (matches former `Goal` display / CLI UX).
     fn display_name_for_goal(goal_id: &str) -> &'static str {
         match goal_id {
+            "interview" => "Interview",
             "plan" => "Plan",
             "acceptance-tests" => "Acceptance tests",
             "red" => "Red",
@@ -56,6 +58,10 @@ impl TddRecipe {
         let tools = |f: fn() -> Vec<String>| f();
         let is_plan = goal_id.as_str() == "plan";
         let (permission, allowed_tools) = match goal_id.as_str() {
+            "interview" => (
+                PermissionHint::ReadOnly,
+                tools(crate::permissions::plan_allowlist),
+            ),
             "plan" => (
                 PermissionHint::ReadOnly,
                 tools(crate::permissions::plan_allowlist),
@@ -93,7 +99,7 @@ impl TddRecipe {
             default_model: None,
             agent_output: matches!(
                 goal_id.as_str(),
-                "green" | "red" | "acceptance-tests" | "demo"
+                "interview" | "green" | "red" | "acceptance-tests" | "demo"
             ),
             agent_cli_plan_mode: is_plan,
             claude_nonzero_exit_ok_if_structured_response: is_plan,
@@ -102,7 +108,8 @@ impl TddRecipe {
 
     fn next_goal_for_state_inner(&self, state: &WorkflowState) -> Option<GoalId> {
         match state.as_str() {
-            "Init" | "Planning" => Some(GoalId::new("plan")),
+            "Init" | "Interview" | "Interviewing" => Some(GoalId::new("interview")),
+            "Interviewed" | "Planning" => Some(GoalId::new("plan")),
             "Planned" | "AcceptanceTesting" => Some(GoalId::new("acceptance-tests")),
             "AcceptanceTestsReady" | "RedTesting" => Some(GoalId::new("red")),
             "RedTestsReady" | "GreenImplementing" => Some(GoalId::new("green")),
@@ -114,13 +121,13 @@ impl TddRecipe {
             }
             "RefactorComplete" | "UpdatingDocs" => Some(GoalId::new("update-docs")),
             "DocsUpdated" | "Failed" => None,
-            _ => Some(GoalId::new("plan")),
+            _ => Some(GoalId::new("interview")),
         }
     }
 
     fn status_for_state_inner(&self, state: &WorkflowState) -> &'static str {
         match state.as_str() {
-            "Init" | "Planned" | "AcceptanceTestsReady" | "RedTestsReady" => "Active",
+            "Init" | "Interview" | "Planned" | "AcceptanceTestsReady" | "RedTestsReady" => "Active",
             "GreenComplete"
             | "DemoComplete"
             | "Evaluated"
@@ -158,6 +165,7 @@ impl WorkflowRecipe for TddRecipe {
 
     fn goal_ids(&self) -> Vec<GoalId> {
         [
+            "interview",
             "plan",
             "acceptance-tests",
             "red",
@@ -190,20 +198,40 @@ impl WorkflowRecipe for TddRecipe {
     }
 
     fn initial_state(&self) -> WorkflowState {
-        WorkflowState::new("Init")
+        WorkflowState::new("Interview")
     }
 
     fn start_goal(&self) -> GoalId {
+        GoalId::new("interview")
+    }
+
+    fn plan_refinement_goal(&self) -> GoalId {
         GoalId::new("plan")
     }
 
     fn default_models(&self) -> BTreeMap<GoalId, String> {
         let mut m = BTreeMap::new();
+        m.insert(GoalId::new("interview"), "sonnet".to_string());
         m.insert(GoalId::new("plan"), "opus".to_string());
         for g in ["acceptance-tests", "red", "green", "demo"] {
             m.insert(GoalId::new(g), "sonnet".to_string());
         }
         m
+    }
+
+    fn goal_requires_tddy_tools_submit(&self, goal_id: &GoalId) -> bool {
+        !matches!(goal_id.as_str(), "interview")
+    }
+
+    fn skip_failed_resume_transition(
+        &self,
+        transition_state: &WorkflowState,
+        next_goal: &GoalId,
+    ) -> bool {
+        if next_goal == &self.start_goal() {
+            return true;
+        }
+        transition_state.as_str() == "Planning" && next_goal.as_str() == "plan"
     }
 
     fn uses_primary_session_document(&self) -> bool {
@@ -311,5 +339,18 @@ mod planning_intent_tests {
                 .unwrap()
                 .agent_cli_plan_mode
         );
+        assert!(
+            !r.goal_hints(&GoalId::new("interview"))
+                .unwrap()
+                .agent_cli_plan_mode
+        );
+    }
+
+    /// Plan refinement (PRD feedback) must target **`plan`**, not the entry **`interview`** step.
+    #[test]
+    fn plan_refinement_goal_is_plan_not_interview() {
+        let r = TddRecipe;
+        assert_eq!(r.plan_refinement_goal(), GoalId::new("plan"));
+        assert_ne!(r.plan_refinement_goal(), r.start_goal());
     }
 }

@@ -21,6 +21,16 @@ use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 /// Plan output as JSON (tddy-tools submit format).
 const PLANNING_OUTPUT: &str = r##"{"goal":"plan","name":"Auth Feature","prd":"# PRD\n## Summary\nAuth.\n\n## TODO\n\n- [ ] Task 1","discovery":{"toolchain":{"rust":"1.78.0"},"scripts":{"test":"cargo test"},"doc_locations":["docs/"]}}"##;
 
+/// Mock outputs for `run_full_workflow` (TddRecipe uses full graph: interview → … → update-docs).
+const ACCEPTANCE_TESTS_JSON_OUTPUT: &str = r#"{"goal":"acceptance-tests","summary":"Created 2 acceptance tests.","tests":[{"name":"t1","file":"a.rs","line":1,"status":"failing"},{"name":"t2","file":"a.rs","line":2,"status":"failing"}]}"#;
+const RED_OUTPUT_FULL: &str = r#"{"goal":"red","summary":"Red.","tests":[{"name":"t1","file":"a.rs","line":1,"status":"failing"}],"skeletons":[]}"#;
+const GREEN_OUTPUT_FULL: &str = r#"{"goal":"green","summary":"Done.","tests":[{"name":"t1","file":"a.rs","line":1,"status":"passing"}],"implementations":[],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test"}"#;
+const EVALUATE_OUTPUT_FULL: &str = r#"{"goal":"evaluate-changes","summary":"OK.","risk_level":"low","build_results":[],"issues":[],"changeset_sync":{"status":"synced","items_updated":0,"items_added":0},"files_analyzed":[],"test_impact":{"tests_affected":0,"new_tests_needed":0},"changed_files":[],"affected_tests":[],"validity_assessment":"OK"}"#;
+const VALIDATE_OUTPUT_FULL: &str = r#"{"goal":"validate","summary":"OK.","tests_report_written":true,"prod_ready_report_written":true,"clean_code_report_written":true,"refactoring_plan_written":true}"#;
+const REFACTOR_OUTPUT_FULL: &str =
+    r#"{"goal":"refactor","summary":"OK.","tasks_completed":1,"tests_passing":true}"#;
+const UPDATE_DOCS_OUTPUT_FULL: &str = r#"{"goal":"update-docs","summary":"OK.","docs_updated":1}"#;
+
 /// Startup session id (UUID v7-shaped) bound before plan — directory name must match.
 const STARTUP_SESSION_ID: &str = "019d357e-48ee-7c11-bd44-a967873f58b2";
 
@@ -245,6 +255,7 @@ async fn before_plan_does_not_allocate_second_dir_when_session_id_bound() {
 #[tokio::test]
 async fn workflow_runner_avoids_new_session_dir_fallback_after_successful_plan() {
     let backend = Arc::new(MockBackend::new());
+    backend.push_ok_without_submit("interview turn complete");
     backend.push_response(Ok(InvokeResponse {
         output: PLANNING_OUTPUT.to_string(),
         exit_code: 0,
@@ -253,6 +264,13 @@ async fn workflow_runner_avoids_new_session_dir_fallback_after_successful_plan()
         raw_stream: None,
         stderr: None,
     }));
+    backend.push_ok(ACCEPTANCE_TESTS_JSON_OUTPUT);
+    backend.push_ok(RED_OUTPUT_FULL);
+    backend.push_ok(GREEN_OUTPUT_FULL);
+    backend.push_ok(EVALUATE_OUTPUT_FULL);
+    backend.push_ok(VALIDATE_OUTPUT_FULL);
+    backend.push_ok(REFACTOR_OUTPUT_FULL);
+    backend.push_ok(UPDATE_DOCS_OUTPUT_FULL);
 
     let base = std::env::temp_dir().join(format!("tddy-wf-runner-fallback-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);

@@ -2,11 +2,11 @@
 
 **Product Area**: Coder
 **Status**: Draft
-**Updated**: 2026-03-29
+**Updated**: 2026-04-04
 
 ## Summary
 
-The Planning Step is the first phase of the tddy-coder workflow. When `--goal` is omitted, tddy-coder runs the full workflow (plan → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs) in a single invocation, with auto-resume from `changeset.yaml` state. When a specific goal is given, it executes that step only. The **plan** goal accepts a user's goal description via stdin or `--prompt`, invokes the selected LLM backend (`--agent`: claude, claude-acp, cursor, codex, or stub) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, creates a fresh session (no plan resume), creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
+The planning phase of the tddy-coder workflow includes an optional **interview** step (TDD recipe) and the **plan** step. When `--goal` is omitted, tddy-coder runs the full workflow (**interview** → **plan** → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs) in a single invocation, with auto-resume from `changeset.yaml` state. When a specific goal is given, it executes that step only. The **interview** goal elicits clarification before PRD work; the **plan** goal accepts a user's goal description via stdin or `--prompt`, invokes the selected LLM backend (`--agent`: claude, claude-acp, cursor, codex, or stub) in plan mode, and produces a structured planning output: a named directory containing a `PRD.md` (Product Requirements Document), `TODO.md` (implementation task list), and `changeset.yaml` (unified manifest with session ID, workflow state, discovery, and models). The **acceptance-tests** goal reads a completed plan from `changeset.yaml`, creates a fresh session (no plan resume), creates failing acceptance tests, writes `acceptance-tests.md`, and verifies they fail.
 
 ## Background
 
@@ -19,20 +19,21 @@ The tool treats the LLM as a subordinate: it instructs the LLM what to analyze, 
 ### CLI Interface (Updated: 2026-03-07)
 
 1. Binary name: `tddy-coder`
-2. When `--goal` is omitted, runs the full workflow (plan → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs) with auto-resume from `changeset.yaml` state
-3. Accepts `--goal plan` to trigger the planning step
-4. Accepts `--goal acceptance-tests` to create failing acceptance tests from a completed plan
-5. Accepts `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, and `--goal update-docs` for the implementation and evaluation phases
-6. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
-7. Accepts `--session-dir <path>`: path to plan output directory; required when `--goal acceptance-tests`, `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, or `--goal update-docs`; used for resume when running full workflow
-8. Planning output always goes to `$HOME/.tddy/sessions/{uuid}/` (stable session directory)
-9. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
-10. Accepts `--conversation-output <path>` to log the entire agent conversation in raw bytes to a file (Updated: 2026-03-07)
-11. Accepts `--log-level <level>` to override default log level (e.g. `--log-level debug`)
-12. Accepts `--agent <name>` to select backend: `claude` (default), `claude-acp`, `cursor`, `codex`, or `stub`
-13. Reads the feature description from stdin (supports piped input and interactive prompt), or from `--prompt <text>` when provided
-14. **TUI mode**: When both stdin and stderr are TTY, runs full TUI (activity log, inbox when Running, status bar, prompt bar). Agent output is always visible. During Running mode, users can queue prompts in the inbox; queued items are displayed, navigable (Up/Down), editable (E), and deletable (D); on workflow completion with non-empty inbox the first item is auto-dequeued and sent; when inbox is empty, mode transitions to FeatureInput so the user can start a new workflow without restarting. Piped/non-TTY uses plain linear output.
-15. *Deferred*: `--list-models` to list available models (not needed for current scope)
+2. When `--goal` is omitted, runs the full workflow (**interview** → **plan** → acceptance-tests → red → green → demo-prompt → evaluate → validate → refactor → update-docs) with auto-resume from `changeset.yaml` state
+3. Accepts `--goal interview` to run the TDD interview step only (elicitation before **plan**)
+4. Accepts `--goal plan` to trigger the planning step
+5. Accepts `--goal acceptance-tests` to create failing acceptance tests from a completed plan
+6. Accepts `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, and `--goal update-docs` for the implementation and evaluation phases
+7. Accepts `--allowed-tools <tools>` (comma-separated) to add extra tools to the goal's allowlist (e.g. `Bash(npm install)`)
+8. Accepts `--session-dir <path>`: path to plan output directory; required when `--goal acceptance-tests`, `--goal red`, `--goal green`, `--goal demo`, `--goal evaluate`, or `--goal update-docs`; used for resume when running full workflow
+9. Planning output always goes to `$HOME/.tddy/sessions/{uuid}/` (stable session directory)
+10. Accepts `--model <name>` (or `-m <name>`) to select the LLM model (e.g. `opus`, `sonnet`, `haiku`)
+11. Accepts `--conversation-output <path>` to log the entire agent conversation in raw bytes to a file (Updated: 2026-03-07)
+12. Accepts `--log-level <level>` to override default log level (e.g. `--log-level debug`)
+13. Accepts `--agent <name>` to select backend: `claude` (default), `claude-acp`, `cursor`, `codex`, or `stub`
+14. Reads the feature description from stdin (supports piped input and interactive prompt), or from `--prompt <text>` when provided
+15. **TUI mode**: When both stdin and stderr are TTY, runs full TUI (activity log, inbox when Running, status bar, prompt bar). Agent output is always visible. During Running mode, users can queue prompts in the inbox; queued items are displayed, navigable (Up/Down), editable (E), and deletable (D); on workflow completion with non-empty inbox the first item is auto-dequeued and sent; when inbox is empty, mode transitions to FeatureInput so the user can start a new workflow without restarting. Piped/non-TTY uses plain linear output.
+16. *Deferred*: `--list-models` to list available models (not needed for current scope)
 
 ### Planning Workflow (Updated: 2026-03-07)
 

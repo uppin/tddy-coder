@@ -1,9 +1,13 @@
 //! Acceptance tests: gRPC terminal reconnect must receive a full TUI render on the second
 //! `stream_terminal_io` attachment (same running presenter). See PRD Testing Plan.
 //!
-//! Uses view-local selection (Select mode): after moving highlight to "OAuth", a new stream
-//! must rebuild TuiView from authoritative presenter/view sync so the **same** option stays
-//! selected — a plain `PresenterState` snapshot without view replay is insufficient (PRD).
+//! Uses view-local selection (Select mode): after moving highlight to **No** on the
+//! acceptance-tests permission prompt, a new stream must rebuild TuiView from authoritative
+//! presenter/view sync so the **same** option stays selected — a plain `PresenterState`
+//! snapshot without view replay is insufficient (PRD).
+//!
+//! (Plan-phase clarify is skipped when the interview handoff supplies answers — stub treats that
+//! as `HERE ARE THE USER'S ANSWERS` — so we assert on the next Select: acceptance-tests permission.)
 //!
 //! PRD `virtual_tui_attach_forces_full_frame_once` (clear/home + full composited frame on new
 //! attach) is covered by the reconnect burst assertions in
@@ -12,7 +16,13 @@
 use std::time::Duration;
 
 use strip_ansi_escapes::strip;
-use tddy_e2e::{connect_terminal_grpc, spawn_presenter_with_terminal_service};
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::Request;
+
+use tddy_e2e::{connect_grpc, connect_terminal_grpc, spawn_presenter_with_terminal_service};
+use tddy_service::gen::app_mode_proto;
+use tddy_service::gen::server_message;
+use tddy_service::gen::{client_message, ApproveSessionDocument, ClientMessage};
 use tddy_service::proto::terminal::TerminalInput;
 use tddy_tui_testkit::ScreenParser;
 
@@ -50,9 +60,51 @@ async fn collect_output_window(
 /// `connect_view` snapshots include the current option.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Result<()> {
+    std::env::set_var("TDDY_DISABLE_ANIMATIONS", "1");
     let _ = env_logger::builder().is_test(true).try_init();
+    // SKIP_QUESTIONS: skip stub interview clarification so this test reaches acceptance-tests
+    // permission Select without driving interview Select/MultiSelect over the terminal stream.
     let (_handle, port, shutdown) =
-        spawn_presenter_with_terminal_service(Some("Build auth".to_string()));
+        spawn_presenter_with_terminal_service(Some("SKIP_QUESTIONS Build auth".to_string()));
+
+    // PRD approval is a gRPC `DocumentReview` mode; approve so the stub run reaches acceptance-tests.
+    let port_doc = port;
+    let _doc_approve = tokio::spawn(async move {
+        let Ok(mut grpc_client) = connect_grpc(port_doc).await else {
+            return;
+        };
+        let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(8);
+        let request_stream = ReceiverStream::new(rx);
+        let Ok(resp) = grpc_client.stream(Request::new(request_stream)).await else {
+            return;
+        };
+        let mut stream = resp.into_inner();
+        for _ in 0..600 {
+            match tokio::time::timeout(Duration::from_millis(50), stream.message()).await {
+                Ok(Ok(Some(msg))) => {
+                    if let Some(server_message::Event::ModeChanged(mc)) = msg.event {
+                        if let Some(mode) = &mc.mode {
+                            if let Some(app_mode_proto::Variant::DocumentReview(_)) = &mode.variant
+                            {
+                                let _ = tx
+                                    .send(ClientMessage {
+                                        intent: Some(
+                                            client_message::Intent::ApproveSessionDocument(
+                                                ApproveSessionDocument {},
+                                            ),
+                                        ),
+                                    })
+                                    .await;
+                                break;
+                            }
+                        }
+                    }
+                }
+                Ok(Ok(None)) => break,
+                _ => {}
+            }
+        }
+    });
 
     let mut client = connect_terminal_grpc(port).await?;
 
@@ -65,19 +117,28 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
         .into_inner();
 
     input_tx1.send(TerminalInput { data: vec![] }).await?;
-    let stream1_output = collect_output_window(&mut stream1, Duration::from_millis(700)).await?;
+    let mut stream1_output = Vec::new();
+    for _ in 0..50 {
+        let chunk = collect_output_window(&mut stream1, Duration::from_millis(200)).await?;
+        stream1_output.extend_from_slice(&chunk);
+        let t = ansi_to_text(&stream1_output);
+        if t.contains("Permission") && t.contains("> Yes") {
+            break;
+        }
+    }
     let initial_text = ansi_to_text(&stream1_output);
+    let preview: String = initial_text.chars().take(400).collect();
     assert!(
-        initial_text.contains("Email/password") || initial_text.contains("Scope"),
-        "Should reach Select mode with authentication question; got: {:?}",
-        &initial_text[..initial_text.len().min(300)]
+        initial_text.contains("Permission") || initial_text.contains("Allow creating"),
+        "Should reach acceptance-tests permission Select; got: {:?}",
+        preview
     );
 
     let mut parser1 = ScreenParser::new(24, 80);
     parser1.feed(&stream1_output);
     let before = parser1.contents();
     assert!(
-        before.contains("> Email/password"),
+        before.contains("> Yes"),
         "Initially first option should be selected; screen:\n{}",
         before
     );
@@ -95,12 +156,12 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
     parser_after.feed(&full_out);
     let reference_screen = parser_after.contents();
     assert!(
-        reference_screen.contains("> OAuth"),
-        "Stream1: Down should select OAuth; screen:\n{}",
+        reference_screen.contains("> No"),
+        "Stream1: Down should select No; screen:\n{}",
         reference_screen
     );
     assert!(
-        !reference_screen.contains("> Email/password"),
+        !reference_screen.contains("> Yes"),
         "Stream1: first option must not stay selected after Down; screen:\n{}",
         reference_screen
     );
@@ -144,13 +205,13 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
     let reconnect_screen = p2.contents();
 
     assert!(
-        reconnect_screen.contains("> OAuth"),
-        "Reconnect must preserve Select highlight on OAuth (view-local state + presenter sync). \
+        reconnect_screen.contains("> No"),
+        "Reconnect must preserve Select highlight on No (view-local state + presenter sync). \
          Got screen:\n{}",
         reconnect_screen
     );
     assert!(
-        !reconnect_screen.contains("> Email/password"),
+        !reconnect_screen.contains("> Yes"),
         "Reconnect must not reset selection to the first option. Screen:\n{}",
         reconnect_screen
     );

@@ -22,12 +22,12 @@ fn cli_recipe_bugfix_start_goal_is_analyze() {
     );
 }
 
-/// CLI default `tdd` must match legacy TddRecipe (`plan` start goal).
+/// CLI default `tdd` uses **interview** as the first workflow goal (then **plan**).
 #[test]
 fn cli_recipe_tdd_defaults_match_legacy() {
     let r = WorkflowRecipeResolver::from_cli_name("tdd").expect("resolve tdd recipe");
     assert_eq!(r.name(), "tdd");
-    assert_eq!(r.start_goal().as_str(), "plan");
+    assert_eq!(r.start_goal().as_str(), "interview");
 }
 
 /// `--recipe grill-me` resolves to GrillMeRecipe (`grill-me` name, `grill` start goal).
