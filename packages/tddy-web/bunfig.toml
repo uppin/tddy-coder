@@ -1,0 +1,4 @@
+# Bun discovers `*.spec.ts` as tests. Playwright specs under `playwright/` must be run with
+# Playwright (`bun run playwright:concurrent` / `npx playwright test`), not `bun test`.
+[test]
+root = "src"

@@ -1,6 +1,46 @@
 /**
  * Terminal presentation state for reconnect overlay / mini / full (PRD: terminal-reconnect-overlay).
+ *
+ * Tunable overlay dimensions: `config.ts`.
  */
+
+import {
+  TERMINAL_OVERLAY_PANE_MIN_HEIGHT_PX,
+  TERMINAL_OVERLAY_PANE_MIN_WIDTH_PX,
+} from "./config";
+
+export {
+  TERMINAL_OVERLAY_COLS,
+  TERMINAL_OVERLAY_FONT_MIN_PX,
+  TERMINAL_OVERLAY_PANE_HEIGHT_PX,
+  TERMINAL_OVERLAY_PANE_MAX_DEFAULT_WIDTH_PX,
+  TERMINAL_OVERLAY_PANE_MIN_HEIGHT_PX,
+  TERMINAL_OVERLAY_PANE_MIN_WIDTH_PX,
+  TERMINAL_OVERLAY_PANE_WIDTH_PX,
+  TERMINAL_OVERLAY_ROWS,
+} from "./config";
+
+/**
+ * Clamp overlay terminal pane size for drag resize (min defaults, caller supplies viewport max).
+ */
+export function clampTerminalOverlayPaneSize(
+  width: number,
+  height: number,
+  maxWidth: number,
+  maxHeight: number,
+): { width: number; height: number } {
+  const effMaxW = Math.max(TERMINAL_OVERLAY_PANE_MIN_WIDTH_PX, maxWidth);
+  const effMaxH = Math.max(TERMINAL_OVERLAY_PANE_MIN_HEIGHT_PX, maxHeight);
+  const w = Math.min(
+    effMaxW,
+    Math.max(TERMINAL_OVERLAY_PANE_MIN_WIDTH_PX, Math.round(width)),
+  );
+  const h = Math.min(
+    effMaxH,
+    Math.max(TERMINAL_OVERLAY_PANE_MIN_HEIGHT_PX, Math.round(height)),
+  );
+  return { width: w, height: h };
+}
 
 export type TerminalPresentation = "hidden" | "overlay" | "mini" | "full";
 
@@ -38,13 +78,12 @@ export function nextPresentationFromAttach(
   kind: TerminalAttachKind,
 ): { presentation: TerminalPresentation; shouldPushTerminalRoute: boolean } {
   if (kind === "new") {
-    const shouldPushTerminalRoute = prev !== "full";
     tpDebug("nextPresentationFromAttach: new attach", {
       prev,
-      presentation: "full",
-      shouldPushTerminalRoute,
+      presentation: "overlay",
+      shouldPushTerminalRoute: false,
     });
-    return { presentation: "full", shouldPushTerminalRoute };
+    return { presentation: "overlay", shouldPushTerminalRoute: false };
   }
   tpDebug("nextPresentationFromAttach: reconnect attach", { prev, presentation: "overlay" });
   return { presentation: "overlay", shouldPushTerminalRoute: false };

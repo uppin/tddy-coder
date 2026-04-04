@@ -1122,7 +1122,7 @@ describe("ConnectionScreen — reconnect vs new-session presentation", () => {
     cy.get("@historyPush").should("not.have.been.called");
   });
 
-  it("Connect active session still navigates to full terminal (history push)", () => {
+  it("Connect active session opens floating overlay without pushing /terminal onto history", () => {
     window.localStorage.setItem("tddy_session_token", "fake-token");
     interceptAllRpcs([ACTIVE_SESSION]);
     interceptConnectSessionSuccess();
@@ -1134,7 +1134,8 @@ describe("ConnectionScreen — reconnect vs new-session presentation", () => {
     });
     cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
     cy.wait("@connectSession");
+    cy.get("[data-testid='terminal-reconnect-overlay-root']", { timeout: 15000 }).should("be.visible");
     cy.get("[data-testid='connected-terminal-container']", { timeout: 15000 }).should("exist");
-    cy.get("@historyPush").should("have.been.called");
+    cy.get("@historyPush").should("not.have.been.called");
   });
 });

@@ -3,21 +3,55 @@ import {
   applyDedicatedTerminalBackToMini,
   applyOverlayPreviewClickToFull,
   attachKindForSessionControl,
+  clampTerminalOverlayPaneSize,
   defaultTerminalMiniOverlayPlacement,
   nextPresentationFromAttach,
   reconcileReconnectOverlayInstances,
+  TERMINAL_OVERLAY_COLS,
+  TERMINAL_OVERLAY_PANE_HEIGHT_PX,
+  TERMINAL_OVERLAY_PANE_MIN_HEIGHT_PX,
+  TERMINAL_OVERLAY_PANE_MIN_WIDTH_PX,
+  TERMINAL_OVERLAY_PANE_WIDTH_PX,
+  TERMINAL_OVERLAY_ROWS,
 } from "./terminalPresentation";
 
-describe("acceptance: presentation state — new session selects full, reconnect selects overlay", () => {
-  it("new attach → full presentation and push to terminal route", () => {
-    const r = nextPresentationFromAttach("hidden", "new");
-    expect(r.presentation).toBe("full");
-    expect(r.shouldPushTerminalRoute).toBe(true);
+describe("overlay pane: default size & fixed 80×24 font scaling (header excluded)", () => {
+  it("uses explicit default height and capped width (taller pane without matching width growth)", () => {
+    expect(TERMINAL_OVERLAY_COLS).toBe(80);
+    expect(TERMINAL_OVERLAY_ROWS).toBe(24);
+    expect(TERMINAL_OVERLAY_PANE_WIDTH_PX).toBe(320);
+    expect(TERMINAL_OVERLAY_PANE_HEIGHT_PX).toBe(180);
+    expect(TERMINAL_OVERLAY_PANE_WIDTH_PX / TERMINAL_OVERLAY_PANE_HEIGHT_PX).not.toBeCloseTo(80 / 24, 5);
+  });
+});
+
+describe("clampTerminalOverlayPaneSize", () => {
+  it("clamps to min and max", () => {
+    const a = clampTerminalOverlayPaneSize(50, 20, 800, 600);
+    expect(a.width).toBe(TERMINAL_OVERLAY_PANE_MIN_WIDTH_PX);
+    expect(a.height).toBe(TERMINAL_OVERLAY_PANE_MIN_HEIGHT_PX);
+    const b = clampTerminalOverlayPaneSize(2000, 2000, 400, 300);
+    expect(b.width).toBe(400);
+    expect(b.height).toBe(300);
   });
 
-  it("new attach while already full does not request redundant route push", () => {
+  it("when max is below min width, effective max is at least min", () => {
+    const c = clampTerminalOverlayPaneSize(100, 40, 100, 40);
+    expect(c.width).toBe(TERMINAL_OVERLAY_PANE_MIN_WIDTH_PX);
+    expect(c.height).toBe(TERMINAL_OVERLAY_PANE_MIN_HEIGHT_PX);
+  });
+});
+
+describe("acceptance: presentation state — new session opens overlay, reconnect selects overlay", () => {
+  it("new attach → overlay and no push to /terminal/:id (Connect opens pane, not dedicated screen)", () => {
+    const r = nextPresentationFromAttach("hidden", "new");
+    expect(r.presentation).toBe("overlay");
+    expect(r.shouldPushTerminalRoute).toBe(false);
+  });
+
+  it("new attach from any prior presentation still uses overlay without route push", () => {
     const r = nextPresentationFromAttach("full", "new");
-    expect(r.presentation).toBe("full");
+    expect(r.presentation).toBe("overlay");
     expect(r.shouldPushTerminalRoute).toBe(false);
   });
 

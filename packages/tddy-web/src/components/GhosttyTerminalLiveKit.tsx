@@ -7,7 +7,9 @@ import {
   TerminalInputSchema,
 } from "tddy-livekit-web";
 import { create } from "@bufbuild/protobuf";
+import { isCancelledLiveKitConnectionError } from "../lib/liveKitConnectionErrors";
 import { shouldShowVisibleLiveKitStatusStrip } from "../lib/liveKitStatusPresentation";
+import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 
@@ -77,6 +79,26 @@ export interface GhosttyTerminalLiveKitProps {
   fullscreenTargetRef?: React.RefObject<HTMLElement | null>;
   /** Initial terminal font size (session baseline for Ctrl/⌘+0 reset). Default 14. */
   fontSize?: number;
+  /** Bounds for zoom / pinch; default min 8, max 32. Overlay may pass a lower min (e.g. 2px). */
+  minFontSize?: number;
+  maxFontSize?: number;
+  /**
+   * `floating` — status dot + menu over the terminal (default when `connectionOverlay` is set).
+   * `none` — do not render floating chrome (e.g. parent shows the same controls in a pane header).
+   */
+  connectionChromePlacement?: "floating" | "none";
+  /** Fired when LiveKit connection status changes (for header chrome when floating chrome is suppressed). */
+  onConnectionStatusChange?: (status: "connecting" | "connected" | "error") => void;
+  /** Passed to GhosttyTerminal — use `0` for fixed-height overlay panes (default 200px min is too tall). */
+  terminalContainerMinHeightPx?: number;
+  /** Fixed logical grid; font scales with container (floating overlay). */
+  fixedViewportGrid?: { cols: number; rows: number };
+  /**
+   * Fired once when the remote terminal session ends: LiveKit **server participant** disconnects
+   * (daemon/coder left the room) or the **terminal RPC stream** completes — i.e. underlying process
+   * / session teardown, not the user choosing Disconnect in the menu.
+   */
+  onRemoteSessionEnded?: () => void;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -96,6 +118,13 @@ export function GhosttyTerminalLiveKit({
   connectionOverlay,
   fullscreenTargetRef: fullscreenTargetRefProp,
   fontSize = 14,
+  minFontSize = DEFAULT_TERMINAL_FONT_MIN,
+  maxFontSize = DEFAULT_TERMINAL_FONT_MAX,
+  connectionChromePlacement = "floating",
+  onConnectionStatusChange,
+  terminalContainerMinHeightPx,
+  fixedViewportGrid,
+  onRemoteSessionEnded,
 }: GhosttyTerminalLiveKitProps) {
   const log = debugLogging
     ? (...args: unknown[]) => console.log("[GhosttyLiveKit]", ...args)
@@ -121,6 +150,16 @@ export function GhosttyTerminalLiveKit({
   const [highlightedLine, setHighlightedLine] = useState("");
   const [coderSessionActive, setCoderSessionActive] = useState(true);
   const coderAvailableRef = useRef(true);
+  const onRemoteSessionEndedRef = useRef(onRemoteSessionEnded);
+  const remoteSessionEndedEmittedRef = useRef(false);
+
+  useEffect(() => {
+    onRemoteSessionEndedRef.current = onRemoteSessionEnded;
+  }, [onRemoteSessionEnded]);
+
+  useEffect(() => {
+    onConnectionStatusChange?.(status);
+  }, [status, onConnectionStatusChange]);
 
   useEffect(() => {
     let room: Room | null = null;
@@ -128,6 +167,15 @@ export function GhosttyTerminalLiveKit({
     let cancelled = false;
 
     const run = async () => {
+      remoteSessionEndedEmittedRef.current = false;
+
+      const emitRemoteSessionEnded = () => {
+        if (cancelled) return;
+        if (remoteSessionEndedEmittedRef.current) return;
+        remoteSessionEndedEmittedRef.current = true;
+        onRemoteSessionEndedRef.current?.();
+      };
+
       try {
         coderAvailableRef.current = true;
         setCoderSessionActive(true);
@@ -213,6 +261,7 @@ export function GhosttyTerminalLiveKit({
           );
           coderAvailableRef.current = false;
           setCoderSessionActive(false);
+          emitRemoteSessionEnded();
         });
 
         log("lifecycle: connecting to room");
@@ -327,6 +376,7 @@ export function GhosttyTerminalLiveKit({
             }
             log("lifecycle: stream ended");
             console.warn("[GhosttyTerminalLiveKit] output stream ended after", count, "chunks — terminal will no longer receive updates");
+            emitRemoteSessionEnded();
           } catch (e) {
             log("lifecycle: stream error", e);
             console.error("[GhosttyTerminalLiveKit] output stream error after", count, "chunks:", e);
@@ -351,6 +401,8 @@ export function GhosttyTerminalLiveKit({
           }, 200);
         }
       } catch (e) {
+        if (cancelled) return;
+        if (isCancelledLiveKitConnectionError(e)) return;
         const err = e instanceof Error ? e : new Error(String(e));
         setErrorMsg(err.message);
         setStatus("error");
@@ -465,7 +517,16 @@ export function GhosttyTerminalLiveKit({
   });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        width: "100%",
+        minWidth: 0,
+        minHeight: 0,
+        height: "100%",
+      }}
+    >
       {connectionOverlay && !showLiveKitStatusStrip ? (
         <div data-testid="livekit-status" hidden aria-hidden="true">
           {status}
@@ -473,10 +534,32 @@ export function GhosttyTerminalLiveKit({
       ) : (
         <div data-testid="livekit-status">{status}</div>
       )}
-      {status === "error" && (
-        <div data-testid="livekit-error">{errorMsg}</div>
-      )}
-      <div ref={internalFullscreenTargetRef} style={{ flex: 1, minHeight: 0, position: "relative" }}>
+      <div
+        ref={internalFullscreenTargetRef}
+        style={{ flex: 1, minHeight: 0, minWidth: 0, width: "100%", position: "relative" }}
+      >
+        {status === "error" && errorMsg ? (
+          <div
+            data-testid="livekit-error"
+            role="alert"
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 48,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+              backgroundColor: "rgba(0,0,0,0.55)",
+              color: "#e0e0e0",
+              fontSize: 14,
+              textAlign: "center",
+              pointerEvents: "auto",
+            }}
+          >
+            {errorMsg}
+          </div>
+        ) : null}
         {!coderSessionActive && (
           <div
             data-testid="terminal-coder-unavailable"
@@ -510,6 +593,10 @@ export function GhosttyTerminalLiveKit({
           <GhosttyTerminal
             ref={termRef}
             fontSize={fontSize}
+            minFontSize={minFontSize}
+            maxFontSize={maxFontSize}
+            containerMinHeightPx={terminalContainerMinHeightPx}
+            fixedViewportGrid={fixedViewportGrid}
             sessionActive={coderSessionActive}
             debugLogging={debugLogging}
             preventFocusOnTap={preventFocusOnTap}
@@ -538,7 +625,7 @@ export function GhosttyTerminalLiveKit({
             }}
           />
         )}
-        {connectionOverlay && (
+        {connectionOverlay && connectionChromePlacement !== "none" && (
           <ConnectionTerminalChrome
             overlayStatus={status}
             buildId={connectionOverlay.buildId}

@@ -12,6 +12,6 @@ describe("ConnectionScreen — terminal presentation import contract", () => {
   it("exposes expected attach → presentation mapping used by ConnectionScreen handlers", () => {
     expect(attachKindForSessionControl("resumeSession")).toBe("reconnect");
     expect(nextPresentationFromAttach("hidden", "reconnect").presentation).toBe("overlay");
-    expect(nextPresentationFromAttach("hidden", "new").shouldPushTerminalRoute).toBe(true);
+    expect(nextPresentationFromAttach("hidden", "new").shouldPushTerminalRoute).toBe(false);
   });
 });
