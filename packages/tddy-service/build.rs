@@ -6,7 +6,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .build_server(true)
         .build_client(true)
-        .compile_protos(&["proto/tddy/v1/remote.proto"], &["proto"])?;
+        .compile_protos(
+            &["proto/tddy/v1/remote.proto", "proto/tddy/v1/observer.proto"],
+            &["proto"],
+        )?;
 
     // Echo service (async trait + RpcService server for LiveKit/tddy-rpc)
     prost_build::Config::new()

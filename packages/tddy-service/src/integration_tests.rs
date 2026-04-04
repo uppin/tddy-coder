@@ -884,6 +884,52 @@ mod daemon_tests {
 
         let _ = fs::remove_dir_all(&base);
     }
+
+    #[tokio::test]
+    async fn presenter_observer_streams_without_bidi_intents() {
+        use std::time::Duration;
+
+        use tokio::sync::broadcast;
+        use tonic::transport::Server;
+        use tonic::Request;
+
+        use crate::gen::presenter_observer_client::PresenterObserverClient;
+        use crate::gen::presenter_observer_server::PresenterObserverServer;
+        use crate::gen::{server_message, ObserveRequest};
+        use crate::test_util::spawn_server;
+        use crate::PresenterObserverService;
+        use tddy_core::PresenterEvent;
+
+        let (event_tx, _) = broadcast::channel(256);
+        let service = PresenterObserverService::new(event_tx.clone());
+        let router = Server::builder().add_service(PresenterObserverServer::new(service));
+        let (endpoint, _handle) = spawn_server(router).await;
+        let mut client = PresenterObserverClient::connect(endpoint).await.unwrap();
+
+        let mut stream = client
+            .observe_events(Request::new(ObserveRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let _ = event_tx.send(PresenterEvent::GoalStarted("unit-test-goal".into()));
+        tokio::task::yield_now().await;
+
+        let msg = tokio::time::timeout(Duration::from_secs(2), stream.message())
+            .await
+            .expect("timeout")
+            .expect("stream error")
+            .expect("end");
+
+        assert!(
+            matches!(
+                msg.event,
+                Some(server_message::Event::GoalStarted(ref g)) if g.goal == "unit-test-goal"
+            ),
+            "unexpected message: {:?}",
+            msg.event
+        );
+    }
 }
 
 /// Acceptance: daemon service must not hard-code PRD filenames; workflow recipe owns primary artifacts.

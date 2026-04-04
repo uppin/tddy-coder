@@ -393,6 +393,10 @@ pub fn workflow_recipe_selection_question() -> ClarificationQuestion {
                 label: "Free prompting".to_string(),
                 description: "Open-ended agent loop without PRD/TDD gates".to_string(),
             },
+            QuestionOption {
+                label: "Grill me".to_string(),
+                description: "Grill (questions) then Create plan (grill-me-brief.md)".to_string(),
+            },
         ],
         multi_select: false,
         allow_other: false,
@@ -406,6 +410,7 @@ pub fn recipe_cli_name_from_selection_label(label: &str) -> Option<&'static str>
         "TDD" => Some("tdd"),
         "Bugfix" => Some("bugfix"),
         "Free prompting" => Some("free-prompting"),
+        "Grill me" => Some("grill-me"),
         _ => None,
     }
 }

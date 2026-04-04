@@ -318,7 +318,7 @@ pub struct Args {
     pub cursor_agent_path: Option<PathBuf>,
     /// Path to the Codex CLI. When set, overrides `TDDY_CODEX_CLI` and the default `codex` on `PATH`.
     pub codex_cli_path: Option<PathBuf>,
-    /// Workflow recipe name (`tdd`, `bugfix`, or `free-prompting`). `None` means default `tdd` or recipe from changeset on resume.
+    /// Workflow recipe name (`tdd`, `bugfix`, `free-prompting`, or `grill-me`). `None` means default `tdd` or recipe from changeset on resume.
     pub recipe: Option<String>,
 }
 
@@ -455,8 +455,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default), `bugfix`, or `free-prompting`. Must match [`WorkflowRecipe::name`].
-    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting"])]
+    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, or `grill-me`. Must match [`WorkflowRecipe::name`].
+    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me"])]
     pub recipe: Option<String>,
 
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
@@ -601,8 +601,8 @@ pub struct DemoArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default), `bugfix`, or `free-prompting`.
-    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting"])]
+    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, or `grill-me`.
+    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me"])]
     pub recipe: Option<String>,
 }
 
@@ -1088,99 +1088,102 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         && args.livekit_identity.is_some();
 
     let service = tddy_service::DaemonService::new(tddy_data_dir.clone(), backend.clone());
-    let view_factory: Option<Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>> =
-        if livekit_enabled {
-            let (event_tx, _) = tokio::sync::broadcast::channel(256);
-            let (intent_tx, intent_rx) = std::sync::mpsc::channel();
-            let mut presenter = Presenter::new(
-                agent_str,
-                args.model
-                    .as_deref()
-                    .unwrap_or_else(|| default_model_for_agent(agent_str)),
-                recipe_arc_for_args(args)?,
-            )
-            .with_broadcast(event_tx)
-            .with_intent_sender(intent_tx)
-            .with_recipe_resolver(Arc::new(|name: &str| {
-                crate::resolve_workflow_recipe_from_cli_name(name.trim())
-            }));
-            let (agent_working_dir, session_artifact_dir, session_dir) =
-                livekit_daemon_workflow_paths(
-                    &tddy_data_dir,
-                    args.resume_from.as_deref(),
-                    args.session_id.as_deref(),
-                );
-            let _ = std::fs::create_dir_all(&session_artifact_dir);
-            let logs = session_artifact_dir.join("logs");
-            let _ = std::fs::create_dir_all(&logs);
-            tddy_core::toolcall::set_toolcall_log_dir(&logs);
+    #[allow(clippy::type_complexity)]
+    let (view_factory, presenter_observer): (
+        Option<Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>>,
+        Option<tddy_service::PresenterObserverService>,
+    ) = if livekit_enabled {
+        let (event_tx, _) = tokio::sync::broadcast::channel(256);
+        let presenter_observer = tddy_service::PresenterObserverService::new(event_tx.clone());
+        let (intent_tx, intent_rx) = std::sync::mpsc::channel();
+        let mut presenter = Presenter::new(
+            agent_str,
+            args.model
+                .as_deref()
+                .unwrap_or_else(|| default_model_for_agent(agent_str)),
+            recipe_arc_for_args(args)?,
+        )
+        .with_broadcast(event_tx)
+        .with_intent_sender(intent_tx)
+        .with_recipe_resolver(Arc::new(|name: &str| {
+            crate::resolve_workflow_recipe_from_cli_name(name.trim())
+        }));
+        let (agent_working_dir, session_artifact_dir, session_dir) = livekit_daemon_workflow_paths(
+            &tddy_data_dir,
+            args.resume_from.as_deref(),
+            args.session_id.as_deref(),
+        );
+        let _ = std::fs::create_dir_all(&session_artifact_dir);
+        let logs = session_artifact_dir.join("logs");
+        let _ = std::fs::create_dir_all(&logs);
+        tddy_core::toolcall::set_toolcall_log_dir(&logs);
 
-            let (toolcall_socket_path, tool_call_rx) =
-                match tddy_core::toolcall::start_toolcall_listener() {
-                    Ok((path, rx)) => (Some(path), Some(rx)),
-                    Err(_) => (None, None),
-                };
+        let (toolcall_socket_path, tool_call_rx) =
+            match tddy_core::toolcall::start_toolcall_listener() {
+                Ok((path, rx)) => (Some(path), Some(rx)),
+                Err(_) => (None, None),
+            };
 
-            tddy_core::write_initial_tool_session_metadata(
-                &session_artifact_dir,
-                tddy_core::InitialToolSessionMetadataOpts {
-                    project_id: args.project_id.clone().unwrap_or_default(),
-                    repo_path: std::env::current_dir()
-                        .ok()
-                        .map(|p| p.display().to_string()),
-                    pid: Some(std::process::id()),
-                    tool: Some("tddy-coder".to_string()),
-                    livekit_room: args.livekit_room.clone(),
-                },
-            )
-            .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
-            // New daemon sessions must not use a placeholder prompt: stdin is /dev/null from the
-            // parent spawner, so the workflow must block on `answer_rx` until the user submits
-            // feature text via Virtual TUI / LiveKit (SubmitFeatureInput). A placeholder skips
-            // that and jumps straight into plan / first clarification.
-            let initial_prompt = None;
-            presenter.start_workflow(
-                backend,
-                agent_working_dir,
-                session_dir,
-                initial_prompt,
-                None,
-                None,
-                false,
-                args.session_id.clone(),
-                toolcall_socket_path,
-                tool_call_rx,
-            );
-            let presenter = Arc::new(Mutex::new(presenter));
-            let presenter_for_factory = presenter.clone();
-            let factory: Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync> =
-                Arc::new(move || {
-                    presenter_for_factory
-                        .lock()
-                        .ok()
-                        .and_then(|p| p.connect_view())
-                });
-            let shutdown_for_thread = shutdown.clone();
-            let presenter_for_thread = presenter.clone();
-            std::thread::spawn(move || loop {
-                if shutdown_for_thread.load(Ordering::Relaxed) {
-                    break;
-                }
-                while let Ok(intent) = intent_rx.try_recv() {
-                    if let Ok(mut p) = presenter_for_thread.lock() {
-                        p.handle_intent(intent);
-                    }
-                }
-                if let Ok(mut p) = presenter_for_thread.lock() {
-                    p.poll_tool_calls();
-                    p.poll_workflow();
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
+        tddy_core::write_initial_tool_session_metadata(
+            &session_artifact_dir,
+            tddy_core::InitialToolSessionMetadataOpts {
+                project_id: args.project_id.clone().unwrap_or_default(),
+                repo_path: std::env::current_dir()
+                    .ok()
+                    .map(|p| p.display().to_string()),
+                pid: Some(std::process::id()),
+                tool: Some("tddy-coder".to_string()),
+                livekit_room: args.livekit_room.clone(),
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
+        // New daemon sessions must not use a placeholder prompt: stdin is /dev/null from the
+        // parent spawner, so the workflow must block on `answer_rx` until the user submits
+        // feature text via Virtual TUI / LiveKit (SubmitFeatureInput). A placeholder skips
+        // that and jumps straight into plan / first clarification.
+        let initial_prompt = None;
+        presenter.start_workflow(
+            backend,
+            agent_working_dir,
+            session_dir,
+            initial_prompt,
+            None,
+            None,
+            false,
+            args.session_id.clone(),
+            toolcall_socket_path,
+            tool_call_rx,
+        );
+        let presenter = Arc::new(Mutex::new(presenter));
+        let presenter_for_factory = presenter.clone();
+        let factory: Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync> =
+            Arc::new(move || {
+                presenter_for_factory
+                    .lock()
+                    .ok()
+                    .and_then(|p| p.connect_view())
             });
-            Some(factory)
-        } else {
-            None
-        };
+        let shutdown_for_thread = shutdown.clone();
+        let presenter_for_thread = presenter.clone();
+        std::thread::spawn(move || loop {
+            if shutdown_for_thread.load(Ordering::Relaxed) {
+                break;
+            }
+            while let Ok(intent) = intent_rx.try_recv() {
+                if let Ok(mut p) = presenter_for_thread.lock() {
+                    p.handle_intent(intent);
+                }
+            }
+            if let Ok(mut p) = presenter_for_thread.lock() {
+                p.poll_tool_calls();
+                p.poll_workflow();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        });
+        (Some(factory), Some(presenter_observer))
+    } else {
+        (None, None)
+    };
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -1196,6 +1199,13 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
 
         let mut grpc_router = tonic::transport::Server::builder()
             .add_service(tddy_service::gen::tddy_remote_server::TddyRemoteServer::new(service));
+        if let Some(observer) = presenter_observer {
+            grpc_router = grpc_router.add_service(
+                tddy_service::gen::presenter_observer_server::PresenterObserverServer::new(
+                    observer,
+                ),
+            );
+        }
         if let Some(ref factory) = view_factory {
             grpc_router = grpc_router.add_service(
                 tddy_service::tonic_terminal::terminal_service_server::TerminalServiceServer::new(

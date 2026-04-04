@@ -8,7 +8,7 @@ use tddy_core::backend::{CodingBackend, InvokeRequest, InvokeResponse};
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::task::{BackendInvokeTask, NextAction, Task};
 use tddy_core::{BackendError, GoalId, WorkflowRecipe};
-use tddy_workflow_recipes::FreePromptingRecipe;
+use tddy_workflow_recipes::{FreePromptingRecipe, GrillMeRecipe};
 
 /// Backend that returns successful invoke output and never supplies `tddy-tools submit`.
 struct OutputOnlyBackend;
@@ -36,6 +36,24 @@ impl CodingBackend for OutputOnlyBackend {
 }
 
 #[tokio::test]
+async fn grill_me_backend_invoke_completes_without_tddy_tools_submit() {
+    let recipe = GrillMeRecipe;
+    let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
+    let task = BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), &recipe, backend);
+
+    let ctx = Context::new();
+    ctx.set_sync("feature_input", "hello");
+    ctx.set_sync("output_dir", std::env::temp_dir());
+
+    let result = task
+        .run(ctx)
+        .await
+        .expect("task should succeed without submit");
+    assert_eq!(result.response, "agent reply without submit");
+    assert!(matches!(result.next_action, NextAction::Continue));
+}
+
+#[tokio::test]
 async fn free_prompting_backend_invoke_completes_without_tddy_tools_submit() {
     let recipe = FreePromptingRecipe;
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
@@ -60,6 +78,15 @@ fn free_prompting_prompting_goal_opted_out_of_tddy_tools_submit() {
     assert!(
         !recipe.goal_requires_tddy_tools_submit(&GoalId::new("prompting")),
         "prompting is open chat: recipe must not require structured submit"
+    );
+}
+
+#[test]
+fn grill_me_goal_opted_out_of_tddy_tools_submit() {
+    let recipe = GrillMeRecipe;
+    assert!(
+        !recipe.goal_requires_tddy_tools_submit(&GoalId::new("grill")),
+        "grill goal must not require structured submit"
     );
 }
 

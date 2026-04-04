@@ -33,7 +33,14 @@ fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> Connecti
             None
         }
     });
-    ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None)
+    ConnectionServiceImpl::new(
+        config,
+        sessions_base_resolver,
+        user_resolver,
+        None,
+        None,
+        None,
+    )
 }
 
 /// **daemon_config_allowed_agents_deserializes**: YAML `allowed_agents` yields expected ids/labels;

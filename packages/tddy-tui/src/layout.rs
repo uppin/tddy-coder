@@ -84,6 +84,18 @@ pub fn prompt_height(text_len: u16, area_width: u16, max_height: u16) -> u16 {
     result
 }
 
+/// Whether clarification / text-input prompts should be pinned to the **top** of the terminal.
+///
+/// Default layout places the dynamic strip between the activity log and the status bar; long agent
+/// output makes that easy to miss. For interactive elicitation we put questions first so they stay
+/// visible.
+pub fn clarification_questions_top(mode: &AppMode) -> bool {
+    matches!(
+        mode,
+        AppMode::Select { .. } | AppMode::MultiSelect { .. } | AppMode::TextInput { .. }
+    ) && question_height(mode) > 0
+}
+
 /// Split the terminal area into **eight** regions: activity, spacer, dynamic (inbox), status,
 /// **empty row** (gap between status and prompt), debug log, prompt, and **footer** (PRD: exactly one
 /// footer row below the prompt block).
@@ -124,6 +136,52 @@ pub fn layout_chunks_with_inbox(
     );
     (
         chunks[0], chunks[1], chunks[2], chunks[3], chunks[4], chunks[5], prompt_bar, footer_bar,
+    )
+}
+
+/// Same regions as [`layout_chunks_with_inbox`], but when `questions_top` is true and
+/// `dynamic_h > 0`, the dynamic strip (questions / inbox / slash menu height) is placed at the
+/// **top** of the frame, above the activity log.
+pub fn layout_chunks_with_inbox_maybe_top(
+    area: Rect,
+    dynamic_h: u16,
+    debug_log_h: u16,
+    prompt_h: u16,
+    questions_top: bool,
+) -> (Rect, Rect, Rect, Rect, Rect, Rect, Rect, Rect) {
+    if !questions_top || dynamic_h == 0 {
+        return layout_chunks_with_inbox(area, dynamic_h, debug_log_h, prompt_h);
+    }
+    log::trace!(
+        "layout_chunks_with_inbox_maybe_top: area={area:?} dynamic_h={dynamic_h} debug_log_h={debug_log_h} prompt_h={prompt_h}"
+    );
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(dynamic_h),
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(debug_log_h),
+            Constraint::Length(prompt_h),
+            Constraint::Length(1),
+        ])
+        .split(area);
+    let reserve = crate::mouse_map::right_chrome_reserve_cols(area.width);
+    let inner_w = area.width.saturating_sub(reserve);
+    let mut prompt_bar = chunks[6];
+    let mut footer_bar = chunks[7];
+    prompt_bar.width = inner_w.min(prompt_bar.width);
+    footer_bar.width = inner_w.min(footer_bar.width);
+    (
+        chunks[2], // activity_log
+        chunks[1], // spacer
+        chunks[0], // dynamic_area
+        chunks[3], // status_bar
+        chunks[4], // gap between status and prompt region
+        chunks[5], // debug_log
+        prompt_bar, footer_bar,
     )
 }
 
@@ -286,6 +344,43 @@ mod tests {
             "prompt must be below status and the one-row gap"
         );
         assert!(activity.height > 0, "non-zero activity on 24×80");
+    }
+
+    #[test]
+    fn clarification_questions_top_is_true_for_select_with_height() {
+        let q = ClarificationQuestion {
+            header: "H".to_string(),
+            question: "Q?".to_string(),
+            options: vec![QuestionOption {
+                label: "a".to_string(),
+                description: "".to_string(),
+            }],
+            multi_select: false,
+            allow_other: false,
+        };
+        let mode = AppMode::Select {
+            question: q,
+            question_index: 0,
+            total_questions: 1,
+            initial_selected: 0,
+        };
+        assert!(clarification_questions_top(&mode));
+    }
+
+    #[test]
+    fn questions_top_layout_places_dynamic_strip_at_top() {
+        let area = Rect::new(0, 0, 80, 24);
+        let dynamic_h = 7u16;
+        let (activity, _spacer, dynamic, status, _gap, _debug, prompt, _footer) =
+            layout_chunks_with_inbox_maybe_top(area, dynamic_h, 0, 1, true);
+        assert_eq!(dynamic.y, 0);
+        assert!(
+            activity.y > dynamic.y,
+            "activity log must sit below the elicitation strip"
+        );
+        assert_eq!(dynamic.height, dynamic_h);
+        assert_eq!(status.height, 1);
+        assert_eq!(prompt.height, 1);
     }
 
     /// PRD AC2: footer adds exactly one row to bottom chrome (status + prompt + **footer**).
