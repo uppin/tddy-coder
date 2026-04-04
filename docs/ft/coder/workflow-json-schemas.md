@@ -12,9 +12,9 @@ Structured outputs for workflow goals (plan, red, green, acceptance-tests, **pos
 | Location | Role |
 |----------|------|
 | `packages/tddy-workflow-recipes/goals.json` | Registry: `name`, `schema`, `proto` per workflow goal |
-| `packages/tddy-workflow-recipes/schemas/` | Authoritative JSON Schema files (including `common/`) |
+| `packages/tddy-workflow-recipes/generated/{recipe}/` | JSON Schema files per goal (e.g. `generated/tdd/post-green-review.schema.json`) plus `common/` refs |
 | `packages/tddy-workflow-recipes/proto/` | Protocol Buffer messages documenting the same contracts at the IDL layer |
-| `packages/tddy-workflow-recipes/generated/` | Build output: copied schemas, `schema-manifest.json`, generated Rust snippets for proto basenames |
+| `packages/tddy-workflow-recipes/generated/` | `schema-manifest.json`, `proto_basenames.rs`, and embedded schema tree consumed by **`tddy-tools`** |
 
 ## tddy-tools behavior
 
