@@ -58,7 +58,7 @@ export interface GhosttyTerminalLiveKitProps {
   debugLogging?: boolean;
   /** Called with a function to focus the terminal. Used by mobile keyboard button. */
   onRegisterFocus?: (focus: () => void) => void;
-  /** When set, show connection chrome (status dot menu, Stop); Stop uses the same RPC input path as keyboard. */
+  /** When set, show connection chrome (status dot menu). Interrupt is the TUI Stop pane (SGR mouse → 0x03). */
   connectionOverlay?: {
     onDisconnect: () => void;
     buildId?: string;
@@ -541,9 +541,6 @@ export function GhosttyTerminalLiveKit({
             onDisconnect={connectionOverlay.onDisconnect}
             onTerminate={connectionOverlay.onTerminate}
             fullscreenTargetRef={fullscreenTargetRef}
-            onStopInterrupt={() => {
-              enqueueTerminalInput(new Uint8Array([0x03]));
-            }}
           />
         )}
       </div>

@@ -88,6 +88,7 @@ pub fn run_event_loop(
             prompt_bar: ratatui::layout::Rect::default(),
             footer_bar: ratatui::layout::Rect::default(),
             enter_pane: ratatui::layout::Rect::default(),
+            stop_pane: ratatui::layout::Rect::default(),
         };
         terminal.draw(|f| {
             draw(
@@ -115,7 +116,7 @@ pub fn run_event_loop(
             match event::read() {
                 Ok(Event::Key(key)) => {
                     if key_is_ctrl_c_press(&key) {
-                        ctrl_c_interrupt_session(shutdown);
+                        ctrl_c_interrupt_session();
                         continue;
                     }
 
@@ -165,7 +166,11 @@ pub fn run_event_loop(
                         &layout_areas,
                         state.inbox.len(),
                     ) {
-                        let _ = intent_tx.send(intent);
+                        if intent == UserIntent::Interrupt {
+                            ctrl_c_interrupt_session();
+                        } else {
+                            let _ = intent_tx.send(intent);
+                        }
                     }
                     if matches!(state.mode, tddy_core::AppMode::Select { .. }) {
                         let idx = view.view_state().select_selected;

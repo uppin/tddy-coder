@@ -13,7 +13,9 @@ use crate::layout::{
     debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_chunk_height_including_rule,
     question_height,
 };
-use crate::mouse_map::{enter_button_rect, LayoutAreas, ENTER_BUTTON_COLS};
+use crate::mouse_map::{
+    enter_button_rect, stop_button_rect, LayoutAreas, ENTER_BUTTON_COLS, STOP_BUTTON_COLS,
+};
 use crate::status_bar_activity::{
     activity_prefix_char_for_draw, display_elapsed_for_goal_row, status_activity_is_agent_active,
 };
@@ -593,6 +595,122 @@ fn paint_enter_affordance(frame: &mut Frame, areas: &LayoutAreas) {
     );
 }
 
+/// Paints the Stop affordance (red U+25A0) to the right of Enter (see [`stop_button_rect`]).
+/// Same geometry rules as [`paint_enter_affordance`]; skipped under `TDDY_E2E_NO_ENTER_AFFORDANCE`.
+fn paint_stop_affordance(frame: &mut Frame, areas: &LayoutAreas) {
+    if std::env::var_os("TDDY_E2E_NO_ENTER_AFFORDANCE").is_some() {
+        log::trace!("paint_stop_affordance: skipped (TDDY_E2E_NO_ENTER_AFFORDANCE)");
+        return;
+    }
+    let r = stop_button_rect(areas);
+    if r.width == 0 || r.height == 0 {
+        return;
+    }
+    let frame_area = frame.area();
+    if r.x.saturating_add(r.width) > frame_area.width
+        || r.y.saturating_add(r.height) > frame_area.height
+    {
+        log::debug!("paint_stop_affordance: rect outside frame, skip");
+        return;
+    }
+    let buf = frame.buffer_mut();
+    const STOP_SYMBOL: &str = "■";
+    const BOX_H: &str = "─";
+    const BOX_V: &str = "│";
+    const BOX_TL: &str = "┌";
+    const BOX_TR: &str = "┐";
+    const BOX_BL: &str = "└";
+    const BOX_BR: &str = "┘";
+    let stop_style = Style::default().fg(Color::Red);
+    let sb = areas.status_bar;
+    let pb = areas.prompt_bar;
+    let above_prompt = if sb.height > 0 {
+        pb.y.saturating_sub(sb.y.saturating_add(sb.height))
+    } else {
+        0
+    };
+    let use_separator_top = above_prompt >= 1;
+    let h = r.height;
+    for dy in 0..h {
+        for dx in 0..STOP_BUTTON_COLS {
+            let sym: &str = if h == 1 {
+                match dx {
+                    0 => BOX_TL,
+                    1 => STOP_SYMBOL,
+                    2 => BOX_TR,
+                    _ => " ",
+                }
+            } else if use_separator_top {
+                if dy == 0 {
+                    match dx {
+                        0 => BOX_TL,
+                        1 => BOX_H,
+                        2 => BOX_TR,
+                        _ => " ",
+                    }
+                } else if dy == h - 1 {
+                    match dx {
+                        0 => BOX_BL,
+                        1 => {
+                            if h == 2 {
+                                STOP_SYMBOL
+                            } else {
+                                BOX_H
+                            }
+                        }
+                        2 => BOX_BR,
+                        _ => " ",
+                    }
+                } else if dx == 0 || dx == 2 {
+                    BOX_V
+                } else if dy == above_prompt {
+                    STOP_SYMBOL
+                } else {
+                    " "
+                }
+            } else if dy == 0 {
+                match dx {
+                    0 => BOX_TL,
+                    1 => {
+                        if h == 2 {
+                            STOP_SYMBOL
+                        } else {
+                            BOX_H
+                        }
+                    }
+                    2 => BOX_TR,
+                    _ => " ",
+                }
+            } else if dy == h - 1 {
+                match dx {
+                    0 => BOX_BL,
+                    1 => BOX_H,
+                    2 => BOX_BR,
+                    _ => " ",
+                }
+            } else if dx == 0 || dx == 2 {
+                BOX_V
+            } else if dy == 1 && h >= 3 {
+                STOP_SYMBOL
+            } else {
+                " "
+            };
+            let x = r.x + dx;
+            let y = r.y + dy;
+            if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                cell.set_symbol(sym);
+                cell.set_style(stop_style);
+            }
+        }
+    }
+    log::trace!(
+        "paint_stop_affordance: painted {}×{} overlay at y={}",
+        r.width,
+        r.height,
+        r.y
+    );
+}
+
 /// Draw the TUI. When `layout_areas` is Some, stores the layout rects for mouse hit-testing.
 pub fn draw(
     frame: &mut Frame,
@@ -635,14 +753,17 @@ pub fn draw(
 
     log::debug!("draw: layout status={status_bar:?} prompt={prompt_bar:?} footer={footer_bar:?}");
 
-    let enter_hit = enter_button_rect(&LayoutAreas {
+    let base_for_chrome = LayoutAreas {
         activity_log,
         dynamic_area,
         status_bar,
         prompt_bar,
         footer_bar,
         enter_pane: ratatui::layout::Rect::default(),
-    });
+        stop_pane: ratatui::layout::Rect::default(),
+    };
+    let enter_hit = enter_button_rect(&base_for_chrome);
+    let stop_hit = stop_button_rect(&base_for_chrome);
 
     if let Some(areas) = layout_areas {
         *areas = LayoutAreas {
@@ -652,6 +773,7 @@ pub fn draw(
             prompt_bar,
             footer_bar,
             enter_pane: enter_hit,
+            stop_pane: stop_hit,
         };
     }
 
@@ -880,6 +1002,19 @@ pub fn draw(
             prompt_bar,
             footer_bar,
             enter_pane: enter_hit,
+            stop_pane: stop_hit,
+        },
+    );
+    paint_stop_affordance(
+        frame,
+        &LayoutAreas {
+            activity_log,
+            dynamic_area,
+            status_bar,
+            prompt_bar,
+            footer_bar,
+            enter_pane: enter_hit,
+            stop_pane: stop_hit,
         },
     );
 
@@ -1239,7 +1374,7 @@ mod tests {
         ActivityEntry, ActivityKind, AppMode, ClarificationQuestion, PresenterState, QuestionOption,
     };
 
-    use crate::mouse_map::{enter_button_rect, LayoutAreas};
+    use crate::mouse_map::{enter_button_rect, stop_button_rect, LayoutAreas};
     use ratatui::buffer::Buffer;
     use ratatui::layout::{Position, Rect};
     use ratatui::style::Color;
@@ -1294,6 +1429,7 @@ mod tests {
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         terminal
             .draw(|f| {
@@ -1398,6 +1534,7 @@ mod tests {
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1450,6 +1587,7 @@ mod tests {
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1470,6 +1608,7 @@ mod tests {
         let r = enter_button_rect(&areas);
         let buf = terminal.backend().buffer();
         const RETURN_SYMBOL: &str = "\u{23CE}";
+        const STOP_SYMBOL: &str = "\u{25A0}";
         for y in r.y..r.y.saturating_add(r.height) {
             for x in r.x..r.x.saturating_add(r.width) {
                 let sym = buf
@@ -1480,8 +1619,22 @@ mod tests {
                     sym != "+"
                         && sym != "|"
                         && !sym.contains(RETURN_SYMBOL)
+                        && !sym.contains(STOP_SYMBOL)
                         && !(sym == "-" && x >= r.x && x < r.x + r.width),
                     "Enter overlay symbols must not be written when TDDY_E2E_NO_ENTER_AFFORDANCE is set; got {sym:?} at ({x},{y})"
+                );
+            }
+        }
+        let sr = stop_button_rect(&areas);
+        for y in sr.y..sr.y.saturating_add(sr.height) {
+            for x in sr.x..sr.x.saturating_add(sr.width) {
+                let sym = buf
+                    .cell(Position::new(x, y))
+                    .map(|c| c.symbol())
+                    .unwrap_or_default();
+                assert!(
+                    !sym.contains(RETURN_SYMBOL) && !sym.contains(STOP_SYMBOL),
+                    "Stop overlay symbols must not be written when TDDY_E2E_NO_ENTER_AFFORDANCE is set; got {sym:?} at ({x},{y})"
                 );
             }
         }
@@ -1504,6 +1657,7 @@ mod tests {
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1519,6 +1673,15 @@ mod tests {
             "enter_pane must equal enter_button_rect for hit-test and paint alignment"
         );
         assert!(areas.enter_pane.width > 0, "enter_pane must be allocated");
+        let stop_hit = stop_button_rect(&areas);
+        assert_eq!(
+            areas.stop_pane, stop_hit,
+            "stop_pane must equal stop_button_rect for hit-test and paint alignment"
+        );
+        assert!(
+            areas.stop_pane.width > 0,
+            "stop_pane must be allocated on wide terminal"
+        );
     }
 
     /// Bottom row of the prompt pane is filled with U+2500 light horizontal box-drawing characters.
@@ -1538,6 +1701,7 @@ mod tests {
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1740,6 +1904,7 @@ mod tests {
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
 
         vs.feature_edit.set_plain_text("abcdef");
@@ -1880,6 +2045,7 @@ mod tests {
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         terminal
             .draw(|f| {
@@ -1922,6 +2088,7 @@ mod tests {
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         terminal
             .draw(|f| {
@@ -1973,6 +2140,7 @@ mod tests {
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         terminal
             .draw(|f| {
@@ -2011,6 +2179,7 @@ mod tests {
             prompt_bar: Rect::default(),
             footer_bar: Rect::default(),
             enter_pane: Rect::default(),
+            stop_pane: Rect::default(),
         };
         terminal
             .draw(|f| {
