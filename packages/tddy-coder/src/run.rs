@@ -318,7 +318,7 @@ pub struct Args {
     pub cursor_agent_path: Option<PathBuf>,
     /// Path to the Codex CLI. When set, overrides `TDDY_CODEX_CLI` and the default `codex` on `PATH`.
     pub codex_cli_path: Option<PathBuf>,
-    /// Workflow recipe name (`tdd`, `bugfix`, or `free-prompting`). `None` means default `tdd` or recipe from changeset on resume.
+    /// Workflow recipe name (`tdd`, `bugfix`, `free-prompting`, or `grill-me`). `None` means default `tdd` or recipe from changeset on resume.
     pub recipe: Option<String>,
 }
 
@@ -455,8 +455,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default), `bugfix`, or `free-prompting`. Must match [`WorkflowRecipe::name`].
-    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting"])]
+    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, or `grill-me`. Must match [`WorkflowRecipe::name`].
+    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me"])]
     pub recipe: Option<String>,
 
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
@@ -601,8 +601,8 @@ pub struct DemoArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default), `bugfix`, or `free-prompting`.
-    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting"])]
+    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, or `grill-me`.
+    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me"])]
     pub recipe: Option<String>,
 }
 

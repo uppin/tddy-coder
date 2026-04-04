@@ -84,7 +84,7 @@ function createTokenClient() {
 type ProjectSessionForm = {
   toolPath: string;
   agent: string;
-  /** Workflow recipe: `tdd` or `bugfix` (matches `WorkflowRecipe::name()`). */
+  /** Workflow recipe: `tdd`, `bugfix`, `free-prompting`, or `grill-me` (matches `WorkflowRecipe::name()`). */
   recipe: string;
   debugLogging: boolean;
   daemonInstanceId: string;
@@ -212,6 +212,8 @@ function ProjectSessionOptions({
           >
             <option value="tdd">TDD (plan → implement)</option>
             <option value="bugfix">Bugfix (reproduce → fix)</option>
+            <option value="free-prompting">Free prompting (open-ended)</option>
+            <option value="grill-me">Grill me (Grill → Create plan)</option>
           </select>
         </div>
         <label

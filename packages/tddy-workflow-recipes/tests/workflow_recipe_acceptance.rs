@@ -11,8 +11,11 @@ use tddy_workflow_recipes::{
 fn recipe_resolve_accepts_free_prompting_and_rejects_unknown() {
     let err = unknown_workflow_recipe_error("totally-unknown-recipe");
     assert!(
-        err.contains("tdd") && err.contains("bugfix") && err.contains("free-prompting"),
-        "unknown recipe errors must list every supported workflow recipe (including free-prompting): {}",
+        err.contains("tdd")
+            && err.contains("bugfix")
+            && err.contains("free-prompting")
+            && err.contains("grill-me"),
+        "unknown recipe errors must list every supported workflow recipe: {}",
         err
     );
     assert!(
@@ -41,5 +44,26 @@ fn free_prompting_recipe_resolves_and_reports_prompting_state() {
         recipe.initial_state().as_str(),
         "Prompting",
         "free-prompting must expose Prompting as the initial workflow state string"
+    );
+}
+
+#[test]
+fn grill_me_recipe_resolves_and_reports_grill_me_state() {
+    let (recipe, manifest) =
+        workflow_recipe_and_manifest_from_cli_name("grill-me").expect("grill-me must resolve");
+    assert_eq!(recipe.name(), "grill-me");
+    assert_eq!(recipe.start_goal().as_str(), "grill");
+    assert_eq!(recipe.initial_state().as_str(), "Grill");
+    assert!(
+        !recipe.uses_primary_session_document(),
+        "grill-me v1 skips primary session document approval gate"
+    );
+    assert!(
+        manifest
+            .default_artifacts()
+            .get("grill_brief")
+            .map(|s| s.as_str())
+            == Some("grill-me-brief.md"),
+        "manifest must register grill-me-brief.md under grill_brief key"
     );
 }

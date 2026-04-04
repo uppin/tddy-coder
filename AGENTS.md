@@ -168,3 +168,4 @@ When a feature includes a demo (e.g. `demo-plan.md`), the demo must run **via a 
 - `docs/ft/` — Product requirements (WHAT) by product area
 - `docs/dev/1-WIP/` — Active changesets (cross-package deltas)
 - `docs/dev/guides/` — Cross-cutting technical guides
+- **`plans/`** (repo root, optional) — Persisted **grill-me** **Create plan** output (the brief: problem, Q&A, analysis, preliminary plan) for version control in the working copy. Use a descriptive basename, e.g. **`plans/<feature-slug>-grill-me-brief.md`**. If a feature PRD or guide in **`docs/ft/`** specifies a different path under the repo, use that instead. If nothing is specified, default to **`plans/<SOME-PLAN-NAME>.md`** (replace `<SOME-PLAN-NAME>` with a stable, human-readable label for the effort). Session-scoped **`artifacts/grill-me-brief.md`** remains the runtime path during the session; **`plans/`** is the documented convention for copying or checking in the same content for the team repo.

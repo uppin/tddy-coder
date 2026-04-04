@@ -10,8 +10,8 @@ use tddy_core::{ActivityEntry, AppMode, PresenterState};
 
 use crate::feature_input_buffer::FeaturePromptSegment;
 use crate::layout::{
-    debug_log_height, inbox_height, layout_chunks_with_inbox, prompt_chunk_height_including_rule,
-    question_height,
+    clarification_questions_top, debug_log_height, inbox_height,
+    layout_chunks_with_inbox_maybe_top, prompt_chunk_height_including_rule, question_height,
 };
 use crate::mouse_map::{
     enter_button_rect, stop_button_rect, LayoutAreas, ENTER_BUTTON_COLS, STOP_BUTTON_COLS,
@@ -740,6 +740,7 @@ pub fn draw(
     let text_len = prompt_text_str.chars().count().min(u16::MAX as usize) as u16;
     let prompt_h = prompt_chunk_height_including_rule(text_len, area.width, area.height);
 
+    let questions_top = clarification_questions_top(&state.mode);
     let (
         activity_log,
         _status_spacer,
@@ -749,7 +750,7 @@ pub fn draw(
         debug_log,
         prompt_bar,
         footer_bar,
-    ) = layout_chunks_with_inbox(area, dynamic_h, debug_h, prompt_h);
+    ) = layout_chunks_with_inbox_maybe_top(area, dynamic_h, debug_h, prompt_h, questions_top);
 
     log::debug!("draw: layout status={status_bar:?} prompt={prompt_bar:?} footer={footer_bar:?}");
 
