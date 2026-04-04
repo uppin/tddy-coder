@@ -2,10 +2,11 @@
 
 Release note history for the Web product area.
 
-## 2026-04-04 — Worktrees manager (library + UI shell)
+## 2026-04-04 — Worktrees manager (library + RPC + UI)
 
-- **`tddy-daemon`**: **`worktrees`** module — **`git worktree list`** parsing, **`WorktreeStatsCache`** with JSON persistence under **`TDDY_PROJECTS_STATS_ROOT`** (default **`~/.tddy/projects`**), lexical path policy, **`git worktree remove`** for non-primary trees listed by Git. Covered by unit tests and **`tests/worktrees_acceptance`** (requires **`git`**).
-- **`tddy-web`**: **`WorktreesScreen`** table component (path, branch, size, changed files, +/- lines, delete confirmation); Cypress **`WorktreesScreen.cy.tsx`** with mocked rows. **ConnectionService** worktree RPCs, shell navigation, and daemon host wiring for this screen are follow-up work.
+- **`tddy-daemon`**: **`worktrees`** module — **`git worktree list`** parsing, **`WorktreeStatsCache`** with JSON persistence under **`TDDY_PROJECTS_STATS_ROOT`** (default **`~/.tddy/projects`**), lexical path policy, **`git worktree remove`** for non-primary trees listed by Git. **ConnectionService** exposes **`ListWorktreesForProject`** and **`RemoveWorktree`** (tests **`worktrees_acceptance`**, **`worktrees_rpc`**).
+- **`tddy-service` / proto**: **`WorktreeRow`**, **`ListWorktreesForProject`**, **`RemoveWorktree`** on **`ConnectionService`**.
+- **`tddy-web`**: **`WorktreesAppPage`** loads projects/daemons, **Refresh stats**, table rows, and delete via Connect; **`WorktreesScreen`** (stale hint, empty state). Cypress **`WorktreesScreen.cy.tsx`** (mocked rows).
 - **Feature docs**: [worktrees.md](worktrees.md); [web-terminal.md](web-terminal.md#worktrees-manager-scaffolding). Package: [worktrees.md](../../../packages/tddy-daemon/docs/worktrees.md).
 
 ## 2026-04-03 — Interrupt: TUI Stop pane; web Stop button removed

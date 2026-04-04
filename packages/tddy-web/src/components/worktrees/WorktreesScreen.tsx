@@ -14,18 +14,22 @@ export interface WorktreesScreenMockRow {
   changedFiles: number;
   linesAdded: number;
   linesRemoved: number;
+  /** When true, stats may be outdated until Refresh is used. */
+  stale?: boolean;
 }
 
 export interface WorktreesScreenProps {
   worktrees: WorktreesScreenMockRow[];
   onConfirmDelete?: (path: string) => void;
+  /** Shown when the list is empty (e.g. pick Refresh stats). */
+  emptyHint?: string;
 }
 
 /**
  * Project worktrees table (daemon-backed stats when wired to RPC).
  */
 export function WorktreesScreen(props: WorktreesScreenProps) {
-  const { worktrees, onConfirmDelete } = props;
+  const { worktrees, onConfirmDelete, emptyHint } = props;
   const [pendingDeletePath, setPendingDeletePath] = useState<string | null>(
     null,
   );
@@ -46,10 +50,22 @@ export function WorktreesScreen(props: WorktreesScreenProps) {
           </tr>
         </thead>
         <tbody>
+          {worktrees.length === 0 && emptyHint ? (
+            <tr>
+              <td colSpan={6} className="text-muted-foreground">
+                {emptyHint}
+              </td>
+            </tr>
+          ) : null}
           {worktrees.map((row) => (
             <tr key={row.path} data-testid="worktrees-row">
               <td>{row.path}</td>
-              <td>{row.branch}</td>
+              <td>
+                {row.branch}
+                {row.stale ? (
+                  <span className="ml-1 text-xs text-muted-foreground">(stale)</span>
+                ) : null}
+              </td>
               <td>{row.sizeLabel}</td>
               <td>{row.changedFiles}</td>
               <td>

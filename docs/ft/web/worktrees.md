@@ -17,11 +17,13 @@ The **`worktrees`** module provides:
 - **`list_cached_stats`**: reads the last persisted snapshot from disk without running diff on the hot path.
 - **`remove_worktree_under_repo`**: requires the target path to appear in **`git worktree list`**, refuses removal of the primary (first-listed) worktree, runs **`git worktree remove`**. Secondary worktrees may live outside the main repo directory (sibling paths); membership in Git’s list is the gate.
 
-**ConnectionService** exposes no worktree-specific RPCs yet; call sites are expected to use this library from future handlers.
+**ConnectionService** (local daemon) exposes **`ListWorktreesForProject`** and **`RemoveWorktree`** (see [daemon changelog](../daemon/changelog.md)). Handlers use a shared **`WorktreeStatsCache`** rooted at **`projects_stats_cache_root()`**; **`refresh`** on the list RPC runs **`refresh_stats_for_project`** so ordinary polling can use **`refresh: false`** and stay on the cache-only path.
 
 ### Web UI (`tddy-web`)
 
-**`WorktreesScreen`** renders a table with path, branch, size label, changed files, +/- lines, and a two-step **Delete** → **Confirm delete** action. Component tests mount the screen with mocked rows; production wiring to **`ListEligibleDaemons`**, project lists, and daemon RPCs is out of scope for the current library-first milestone.
+In **daemon mode**, the shell **hamburger menu** (top left) includes **Worktrees**, navigating to **`/worktrees`** (client-side routing; use the Vite dev URL from **`./web-dev`**). **`WorktreesAppPage`** loads **`ListProjects`** and **`ListEligibleDaemons`**, lets the user pick a **project** and a **host** (informational; worktree RPCs always hit the local daemon today), **Refresh stats** (**`ListWorktreesForProject`** with **`refresh: true`**), and lists rows via **`ListWorktreesForProject`** (**`refresh: false`** on load). **Delete** calls **`RemoveWorktree`** then reloads the list.
+
+**`WorktreesScreen`** renders a table with path, branch (with optional **(stale)**), size label, changed files, +/- lines, and a two-step **Delete** → **Confirm delete** action. Component tests mount the screen with mocked rows.
 
 ## Operator references
 
@@ -29,7 +31,7 @@ The **`worktrees`** module provides:
 |-------|--------|
 | Stats baseline | Per-worktree **`git diff --numstat HEAD`** (working tree vs **`HEAD`**). |
 | Cache location | **`TDDY_PROJECTS_STATS_ROOT`** or default **`~/.tddy/projects`** / **`{project_id}/worktree_stats.json`**. |
-| Tests | **`cargo test -p tddy-daemon --no-fail-fast`** (includes **`worktrees_acceptance`**); Cypress **`cypress/component/WorktreesScreen.cy.tsx`**. |
+| Tests | **`cargo test -p tddy-daemon`** — **`worktrees_acceptance`**, **`worktrees_rpc`**; Cypress **`cypress/component/WorktreesScreen.cy.tsx`**. |
 
 ## Related documentation
 

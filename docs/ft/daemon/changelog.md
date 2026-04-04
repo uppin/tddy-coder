@@ -1,9 +1,10 @@
 # Daemon product area changelog
 
-## 2026-04-04 — Worktrees library module
+## 2026-04-04 — Worktrees library + ConnectionService RPCs
 
-- **`tddy_daemon::worktrees`**: Parses **`git worktree list`** output; **`WorktreeStatsCache`** persists per-project snapshots under **`TDDY_PROJECTS_STATS_ROOT`** (default **`~/.tddy/projects`**); **`validate_worktree_path_within_repo_root`** (lexical containment); **`remove_worktree_under_repo`** (membership in **`git worktree list`**, refuses primary worktree). Intended for future **ConnectionService** handlers; no worktree RPCs on the wire yet. Tests: **`worktrees`** unit tests, **`worktrees_acceptance`** integration (requires **`git`**).
-- **Package doc**: [worktrees.md](../../packages/tddy-daemon/docs/worktrees.md). Web feature: [worktrees.md](../web/worktrees.md).
+- **`tddy_daemon::worktrees`**: Parses **`git worktree list`** output; **`WorktreeStatsCache`** persists per-project snapshots under **`TDDY_PROJECTS_STATS_ROOT`** (default **`~/.tddy/projects`**); **`validate_worktree_path_within_repo_root`** (lexical containment); **`remove_worktree_under_repo`** (membership in **`git worktree list`**, refuses primary worktree).
+- **ConnectionService**: **`ListWorktreesForProject`** (optional **`refresh`** → **`refresh_stats_for_project`** in **`spawn_blocking`**), **`RemoveWorktree`** (invalidates cache on success). Project path via **`main_repo_path_for_host`** and local **`daemon_instance_id`** (remote daemon routing for these RPCs is out of scope). Tests: **`worktrees`**, **`worktrees_acceptance`**, **`worktrees_rpc`** (requires **`git`**, **`USER`** for registry tests).
+- **Package doc**: [worktrees.md](../../packages/tddy-daemon/docs/worktrees.md), [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md). Web feature: [worktrees.md](../web/worktrees.md).
 
 ## 2026-04-03 — ConnectionService: workflow files, session base path, delete
 

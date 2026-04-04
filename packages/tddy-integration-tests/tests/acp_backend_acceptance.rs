@@ -144,7 +144,11 @@ async fn acp_raw_pipe_initialize() {
             break;
         }
     }
-    assert!(acc.contains("jsonrpc"), "expected JSON-RPC in stdout, got: {:?}", acc);
+    assert!(
+        acc.contains("jsonrpc"),
+        "expected JSON-RPC in stdout, got: {:?}",
+        acc
+    );
     assert!(acc.contains("result"));
     let _ = child.kill().await;
 }
