@@ -6,7 +6,7 @@
   },
   "scripts": {
     "build": "bun run --filter tddy-web build",
-    "storybook": "bun run --filter tddy-web storybook",
+    "storybook": "./storybook",
     "test": "bun run --filter tddy-rust-typescript-tests test && bun run --filter tddy-web cypress:component && bun run --filter tddy-livekit-web cypress:component",
     "cypress:component": "bun run --filter tddy-web cypress:component",
     "cypress:e2e": "bun run --filter tddy-web cypress:e2e"

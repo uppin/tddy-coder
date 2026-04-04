@@ -1,6 +1,7 @@
 import React from "react";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { ConnectionScreen } from "../../src/components/ConnectionScreen";
+import { SESSION_TABLE_HEADER_TESTIDS_IN_TABLE_ORDER } from "../../src/components/connection/sessionTableColumns";
 import {
   ListToolsResponseSchema,
   ToolInfoSchema,
@@ -1077,5 +1078,113 @@ describe("ConnectionScreen multi-host daemon selection", () => {
     cy.wait("@getAuthStatus");
     cy.get(`[data-testid="host-select-${PROJECT.projectId}"]`, { timeout: 5000 }).should("exist");
     cy.get(`[data-testid="host-select-${PROJECT.projectId}"] option`).should("have.length", 1);
+  });
+});
+
+/** Project + orphan rows with workflow columns so Model/Agent cells render with stable test ids. */
+const RESPONSIVE_PARITY_SESSION_PROJECT: MockSessionRow = {
+  ...STATUS_PARITY_SESSION_V1,
+};
+
+const RESPONSIVE_PARITY_SESSION_ORPHAN: MockSessionRow = {
+  sessionId: "orphan-responsive-parity-1",
+  createdAt: "2026-03-21T11:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/orphan",
+  pid: 88801,
+  isActive: true,
+  projectId: "unknown-project-id",
+  daemonInstanceId: "local",
+  workflowGoal: "orphan-goal",
+  workflowState: "Idle",
+  elapsedDisplay: "9s",
+  agent: "stub",
+  model: "gpt-4",
+};
+
+describe("ConnectionScreen session table responsive columns (acceptance)", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("connection_screen_narrow_viewport_hides_model_before_status_and_actions", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([RESPONSIVE_PARITY_SESSION_PROJECT, RESPONSIVE_PARITY_SESSION_ORPHAN]);
+    cy.viewport(375, 812);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    const projTable = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
+    const sid = RESPONSIVE_PARITY_SESSION_PROJECT.sessionId;
+    cy.get(projTable, { timeout: 8000 }).should("exist");
+    cy.get(`${projTable} [data-testid="session-row-model-${sid}"]`).should("not.be.visible");
+    cy.get(`${projTable} [data-testid="session-row-agent-${sid}"]`).should("not.be.visible");
+    cy.get(`${projTable} tbody tr`).first().find("td").eq(0).should("contain.text", "session");
+    cy.get(`${projTable} tbody tr`).first().find("td").eq(2).should("contain.text", "active");
+    cy.get(`[data-testid="connect-${sid}"]`).should("be.visible");
+    cy.get(`[data-testid="delete-session-${sid}"]`).should("be.visible");
+  });
+
+  it("connection_screen_wide_viewport_shows_full_session_table_headers", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([RESPONSIVE_PARITY_SESSION_PROJECT, RESPONSIVE_PARITY_SESSION_ORPHAN]);
+    cy.viewport(1440, 900);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    const assertFullHeaderRow = (tableTestId: string) => {
+      cy.get(`[data-testid="${tableTestId}"]`, { timeout: 8000 }).should("exist");
+      SESSION_TABLE_HEADER_TESTIDS_IN_TABLE_ORDER.forEach((testId, index) => {
+        cy.get(`[data-testid="${tableTestId}"] thead tr th`)
+          .eq(index)
+          .should("have.attr", "data-testid", testId);
+      });
+    };
+    assertFullHeaderRow(`sessions-table-${PROJECT.projectId}`);
+    assertFullHeaderRow("sessions-table-orphan");
+  });
+
+  it("connection_screen_hides_model_when_table_container_is_narrow_even_if_window_is_wide", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([RESPONSIVE_PARITY_SESSION_PROJECT, RESPONSIVE_PARITY_SESSION_ORPHAN]);
+    cy.viewport(1440, 900);
+    cy.mount(
+      <div style={{ width: 360, maxWidth: "100%", overflow: "hidden" }}>
+        <ConnectionScreen />
+      </div>,
+    );
+    cy.wait("@getAuthStatus");
+    const projTable = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
+    cy.get(projTable, { timeout: 8000 }).should("exist");
+    cy.get(`${projTable} thead [data-testid="session-table-col-header-model"]`).should(
+      "not.be.visible",
+    );
+  });
+
+  it("connection_screen_orphan_table_column_visibility_matches_project_table", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([RESPONSIVE_PARITY_SESSION_PROJECT, RESPONSIVE_PARITY_SESSION_ORPHAN]);
+    cy.viewport(900, 800);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="sessions-table-${PROJECT.projectId}"]`, { timeout: 8000 }).should("exist");
+    cy.get('[data-testid="sessions-table-orphan"]').should("exist");
+    const visibleHeaderTestIds = (tableSelector: string) =>
+      cy.get(tableSelector).then(($table) => {
+        const ids = $table
+          .find(`thead [data-testid^="session-table-col-header-"]`)
+          .filter((_i, el) => Cypress.$(el).is(":visible"))
+          .map((_i, el) => el.getAttribute("data-testid") ?? "")
+          .get();
+        return ids;
+      });
+    visibleHeaderTestIds(`[data-testid="sessions-table-${PROJECT.projectId}"]`).then((proj) => {
+      visibleHeaderTestIds('[data-testid="sessions-table-orphan"]').then((orph) => {
+        expect(
+          proj.length,
+          "project table must expose session-table-col-header-* on each column header",
+        ).to.be.greaterThan(0);
+        expect(orph, "orphan table visible headers must match project table").to.deep.equal(proj);
+      });
+    });
   });
 });

@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import type { SessionEntry } from "../gen/connection_pb";
 import { TableCell } from "@/components/ui/table";
 
@@ -16,25 +15,23 @@ export function SessionWorkflowStatusCells({ session }: { session: SessionEntry 
   const agent = displayOrDash(session.agent);
   const model = displayOrDash(session.model);
 
-  useEffect(() => {
-    if (import.meta.env?.DEV) {
-      console.debug("[SessionWorkflowStatusCells]", sessionId, {
-        workflowGoal: goal,
-        workflowState: state,
-        elapsedDisplay: elapsed,
-        agent,
-        model,
-      });
-    }
-  }, [sessionId, goal, state, elapsed, agent, model]);
-
   return (
     <>
-      <TableCell data-testid={`session-row-workflow-goal-${sessionId}`}>{goal}</TableCell>
-      <TableCell data-testid={`session-row-workflow-state-${sessionId}`}>{state}</TableCell>
-      <TableCell data-testid={`session-row-elapsed-${sessionId}`}>{elapsed}</TableCell>
-      <TableCell data-testid={`session-row-agent-${sessionId}`}>{agent}</TableCell>
-      <TableCell data-testid={`session-row-model-${sessionId}`}>{model}</TableCell>
+      <TableCell data-session-col="goal" data-testid={`session-row-workflow-goal-${sessionId}`}>
+        {goal}
+      </TableCell>
+      <TableCell data-session-col="workflow" data-testid={`session-row-workflow-state-${sessionId}`}>
+        {state}
+      </TableCell>
+      <TableCell data-session-col="elapsed" data-testid={`session-row-elapsed-${sessionId}`}>
+        {elapsed}
+      </TableCell>
+      <TableCell data-session-col="agent" data-testid={`session-row-agent-${sessionId}`}>
+        {agent}
+      </TableCell>
+      <TableCell data-session-col="model" data-testid={`session-row-model-${sessionId}`}>
+        {model}
+      </TableCell>
     </>
   );
 }
