@@ -98,7 +98,7 @@ Each project’s session table and the **Other sessions** table list rows in thi
 2. Within the active group and within the inactive group, rows follow **`createdAt`** descending (newer timestamps first), using ISO-8601 strings parsed with the browser **`Date`** implementation.
 3. When two rows share the same comparable time, or when **`createdAt`** does not parse to a finite time, order follows **`sessionId`** lexicographically (deterministic tie-break).
 
-The client applies **`sortSessionsForDisplay`** (`packages/tddy-web/src/utils/sessionSort.ts`) to the session array already held in React state after **`ListSessions`**—no additional RPC for ordering. In Vite development builds, optional **`console.debug`** / **`console.info`** traces run when **`import.meta.env.DEV`** is true.
+The client applies **`sortSessionsForDisplay`** (`packages/tddy-web/src/utils/sessionSort.ts`) to the session array already held in React state after **`ListSessions`**—no additional RPC for ordering.
 
 ### Session workflow status (TUI parity)
 
@@ -129,6 +129,17 @@ While the session list includes at least one row with **`isActive`**, the client
 - **Delete** (trash): Available for **active** and **inactive** rows. Confirm explains that a running tool process is stopped first, then on-disk data is removed. On success, **`ListSessions`** is refreshed; errors use the shared connection error area.
 - **Inactive rows** also show **Resume**; **active** rows show **Connect** and **Signal** (dropdown) alongside **Delete**.
 - **Orphan** table follows the same actions pattern as project session tables.
+
+#### Per-table selection and bulk delete
+
+- Each project session table and the **Other sessions** table keeps its own selection: a set of **`sessionId`** values independent of other tables.
+- Row checkboxes and a header **select all** control use stable **`data-testid`** values scoped by table (**`session-table-select-all-{projectId}`** or **`session-table-select-all-orphan`**, row **`session-row-select-{sessionId}`**). The header checkbox is **checked** when every row in that table is selected, **indeterminate** when at least one but not all rows are selected, and **unchecked** when none are selected (including empty tables: unchecked, not indeterminate).
+- **Delete selected** sits in the table toolbar, disabled when the selection is empty. Choosing it opens a single **`window.confirm`** whose text includes the number of sessions to delete and the same stop-then-delete explanation as single-row delete.
+- The client sends one **`DeleteSession`** request per selected id in order, awaits each response, then calls **`ListSessions`** and clears that table’s selection when every **`DeleteSession`** succeeds.
+- If a **`DeleteSession`** call fails after earlier calls in the same bulk operation have succeeded, the shared connection error area shows the error, **`ListSessions`** runs again, and the table’s selection retains only ids that appear in the refreshed list.
+- Dismissing the confirmation dialog does not invoke **`DeleteSession`**.
+
+Pure selection helpers live in **`packages/tddy-web/src/utils/sessionSelection.ts`** (Bun **`sessionSelection.test.ts`**). **`ConnectionScreen`** bulk-path logging is limited to Vite development builds (**`import.meta.env.DEV`**); the **`sessionSelection`** helpers do not emit **`console`** calls in production bundles.
 
 The daemon **`DeleteSession`** uses the same GitHub user → OS user → **`sessions_base`** resolution as **`ListSessions`**, terminates a live **`metadata.pid`** when needed, then removes **`{sessions_base}/sessions/{session_id}/`**. See [daemon changelog](../daemon/changelog.md) and [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md).
 

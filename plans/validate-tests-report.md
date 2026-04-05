@@ -1,73 +1,53 @@
-# Validate-tests report: TDD interview branch
+# Validate Tests Report — Session Bulk Select / Refactor Validation
 
-**Date:** 2026-04-04
+## Date / toolchain
 
-**Command run:** `./test` from repository root  
-`/var/tddy/Code/tddy-coder/.worktrees/tdd-interview`
+- **Date:** 2026-04-05  
+- **Environment:** Linux; tests run from repo root via **`./dev`** (nix dev shell: rustc, cargo, rustfmt, clippy, bun, node as printed by the shell).  
+- **Output:** Full Rust workspace test log for **`./dev ./verify`** is in **`.verify-result.txt`** at the repository root.
 
-**What `./test` does (for traceability):** enters nix dev shell (`nix develop --profile ./.nix-profile`), builds `tddy-coder`, `tddy-tools`, `tddy-livekit`, and `tddy-acp-stub` (`--examples --bins`), then `cargo test --workspace -- --test-threads=1` with output tee’d to `.verify-result.txt`.
+## Commands run (exit codes)
 
-**Overall result:** **PASS** — exit code `0`. Wall-clock **~229 s** (~3.8 min). No fallback was required (`./dev cargo test --workspace` not used).
+| Command | Exit | Notes |
+|--------|------|--------|
+| `./verify` (without `./dev`) | **127** | `cargo: command not found` — **must** run Cargo through the dev shell or `nix develop`. |
+| `./dev cargo test -q` | **101** | Failed in **`tddy-integration-tests`** (`acp_backend_acceptance`): *"tddy-acp-stub not built. Run: cargo build -p tddy-acp-stub"* — 6 tests failed; 2 passed in that binary before abort. |
+| `./dev ./verify` | **0** | Runs `cargo build -p tddy-acp-stub` then `cargo test -- --test-threads=1` with output tee’d to `.verify-result.txt`. |
+| `./dev sh -c 'cd packages/tddy-web && bun test src/utils/sessionSelection.test.ts'` | **0** | Equivalent to running the unit file from `packages/tddy-web` with Bun’s test runner (not `bun run test`, which executes the package `test` script). |
+| `./dev sh -c 'cd packages/tddy-web && bun run cypress:component -- --spec cypress/component/ConnectionScreen.cy.tsx'` | **0** | Single-spec Cypress component run. |
 
-**Aggregate counts (from parsing `test result:` lines in the run log):**
+**Note:** The literal form `./dev bun --cwd packages/tddy-web test <file>` was not used here; `bun test <file>` from `packages/tddy-web` is the reliable way to run only `sessionSelection.test.ts` without triggering the composite `npm run test` pipeline (`bun test src/routing && …`).
 
-- **~1003** individual `passed` assertions summed across all test harness result lines (workspace-wide; each binary/harness reports its own totals).
-- **144** separate `test result: ok.` summaries (library tests, integration tests, doc-tests, etc.).
-- **0** failed tests in any harness line (`N failed` was always `0`).
+## Rust workspace tests — pass/fail
 
----
+- **Status:** **Pass** when using **`./dev ./verify`** (exit **0**).  
+- **Caveat:** A plain **`./dev cargo test -q`** without first building **`tddy-acp-stub`** **fails** integration tests that spawn the stub (documented failure above). This is an **order-of-operations / prerequisite** issue, not a regression in the session bulk-select web code.
 
-## Failing tests
+## `sessionSelection` unit tests — pass/fail
 
-**None.** No `FAILED`, panics, or non-zero `failed` counts appeared in the captured output.
+- **Status:** **Pass** (exit **0**).  
+- **Result:** **6** tests, **0** failures, **6** `expect()` calls in `src/utils/sessionSelection.test.ts`.
 
----
+## `ConnectionScreen.cy.tsx` component tests — pass/fail
 
-## Passing highlights relevant to interview
+- **Status:** **Pass** (exit **0**).  
+- **Result:** **32** passing tests in **~17s** (only this spec file; includes “ConnectionScreen bulk session selection and delete (acceptance)” and the rest of the ConnectionScreen suite).
 
-| Area | Notes |
-|------|--------|
-| **Workflow recipes — acceptance** | `tdd_recipe_start_goal_is_interview`, `tdd_interview_goal_hints_and_submit_policy`, `tdd_interview_handoff_populates_plan_context` — `packages/tddy-workflow-recipes/tests/tdd_interview_acceptance.rs` |
-| **Relay helpers — unit** | `persist_interview_handoff_writes_relay_file`, `apply_staged_interview_handoff_sets_answers_on_context` — `packages/tddy-workflow-recipes/tests/tdd_interview_handoff_unit.rs` |
-| **Graph ordering** | `tdd_graph_interview_precedes_plan`, `tdd_full_graph_interview_precedes_plan` — `packages/tddy-integration-tests/tests/workflow_graph.rs` |
-| **CLI default goal** | TDD recipe starts at `interview` — `packages/tddy-coder/tests/cli_recipe.rs` |
-| **Full workflow / session** | Mock stack includes interview turn without submit — `packages/tddy-integration-tests/tests/single_session_lifecycle_acceptance.rs` |
-| **E2E / gRPC / PTY** | Workflow graphs and presenters updated for interview-before-plan — e.g. `packages/tddy-e2e/tests/grpc_full_workflow.rs`, `grpc_terminal_rpc.rs`, `grpc_concurrent_resize.rs`, `pty_full_workflow.rs`, `grpc_reconnect_acceptance.rs` |
-| **Integration — start goal** | `full_workflow_integration.rs` expectations for `GoalId::new("interview")` — `packages/tddy-integration-tests/tests/full_workflow_integration.rs` |
-| **Submit policy matrix** | `TddRecipe` still requires submit for `plan` — `packages/tddy-workflow-recipes/tests/backend_invoke_no_tddy_tools_submit.rs` (`tdd_plan_goal_still_requires_tddy_tools_submit`) |
+## Missing coverage — session bulk-select feature
 
----
+- **Partial bulk-delete failure:** No automated test for **mid-sequence RPC failure** (some deletes succeed, later one throws); evaluation report notes stale selection / UX gap.  
+- **E2E:** No **Cypress e2e** (or Playwright) path against a **real or stubbed full app flow** for bulk delete; coverage is **component + unit** only.  
+- **listSessions / race timing:** Limited coverage for **refresh during bulk delete** or **interleaved updates** to session lists.  
+- **Edge cases:** **Empty tables** (no rows), **single row**, **very large selection counts**, and **accessibility** (keyboard-only select-all / bulk delete) are not explicitly called out in the validation run.  
+- **Error surfaces:** **Delete RPC error** for bulk flow (not just happy path) may need explicit assertions if not already covered in the new CT cases.
 
-## Coverage gaps / recommendations
+## Recommendations
 
-1. **`BackendInvokeTask` without `tddy-tools` submit for `interview`**  
-   `packages/tddy-workflow-recipes/tests/backend_invoke_no_tddy_tools_submit.rs` exercises **GrillMe** and **FreePrompting** with an output-only backend, and asserts **plan** still requires submit. There is **no parallel async test** that builds `BackendInvokeTask::from_recipe("interview", …, &TddRecipe, …)` and proves completion when the backend never supplies submit (the policy is covered in `tdd_interview_goal_hints_and_submit_policy`, but not the same integration shape as grill/free_prompting).
-
-2. **Relay edge cases (`apply_staged_interview_handoff_to_plan_context`)**  
-   Implementation treats **missing** file and **empty** (whitespace-only) file as success with no `answers` set (`packages/tddy-workflow-recipes/src/tdd/interview.rs`). Current unit tests cover happy path and non-empty content; **no test** asserts the deliberate no-op when the file is absent or trimmed-empty (guards regressions if someone later turns those into errors).
-
-3. **Resume / restart paths**  
-   E2E and integration tests touch full flows; **explicit** acceptance tests for “resume session with partial interview” or “restart at `plan` with stale handoff” are thin compared to the main happy path. Worth a focused scenario if session/store semantics keep evolving.
-
-4. **Hooks-level contract**  
-   `before_interview` / `after_interview` in `packages/tddy-workflow-recipes/src/tdd/hooks.rs` are exercised indirectly via flow tests; a **narrow** test that runs only interview hooks and asserts relay file + context fields could shorten debug time when hooks change.
-
-5. **Daemon / ACP / stub parity**  
-   If production paths differ from `MockBackend` for submit detection, add a **single** contract test aligned with existing `green_submit_remediation`-style tests but scoped to **interview** output-only completion (only if product requires it).
+1. **CI / local habit:** Prefer **`./dev ./verify`** (or document **`cargo build -p tddy-acp-stub`** before **`cargo test`**) so integration tests do not fail spuriously.  
+2. **Bun:** For **single-file** unit tests, use **`bun test <path>`** inside `packages/tddy-web`; avoid **`bun run test`** when only `sessionSelection` is intended (that script runs routing tests + full Cypress).  
+3. **Product hardening:** Add a **targeted test** (unit or CT) for **bulk delete partial failure** and consider **pruning selection** after `listSessions` refresh or on error, as in the evaluation report.  
+4. **Optional:** One **e2e** or **smoke** scenario for bulk delete if the feature is user-critical and regressions must be caught outside Storybook.
 
 ---
 
-## Key test file references (`packages/`)
-
-- `tddy-workflow-recipes/tests/tdd_interview_acceptance.rs` — recipe metadata, hints, handoff → plan context  
-- `tddy-workflow-recipes/tests/tdd_interview_handoff_unit.rs` — relay persistence and merge  
-- `tddy-workflow-recipes/tests/backend_invoke_no_tddy_tools_submit.rs` — output-only invoke pattern (extend for TDD interview)  
-- `tddy-integration-tests/tests/workflow_graph.rs` — interview before plan, handoff version  
-- `tddy-integration-tests/tests/single_session_lifecycle_acceptance.rs` — full TDD graph with interview mock turn  
-- `tddy-integration-tests/tests/full_workflow_integration.rs` — start goal interview  
-- `tddy-coder/tests/cli_recipe.rs` — CLI default `interview`  
-- `tddy-e2e/tests/grpc_full_workflow.rs`, `grpc_terminal_rpc.rs`, `pty_full_workflow.rs`, `grpc_reconnect_acceptance.rs`, `grpc_concurrent_resize.rs` — end-to-end workflow and UI markers  
-
----
-
-*Generated by validate-tests subagent run.*
+*Generated for refactor validation; aligns with `plans/evaluation-report.md` context.*

@@ -252,6 +252,10 @@ cargo test -- --ignored
 cargo test && cargo test -- --ignored
 ```
 
+## Rust workspace: `./verify` vs plain `cargo test`
+
+From the repository root, prefer **`./dev ./verify`** (or **`./test`**, which follows the same pattern) when you need results that match CI and agent workflows: the dev shell provides `cargo` on `PATH`, and **`./verify`** builds prerequisite binaries such as **`tddy-acp-stub`** before running the full workspace test suite (output is also written to **`.verify-result.txt`**). Running **`cargo test`** or **`cargo test -q`** **without** that prerequisite build can fail integration tests that expect the stub. For a quick compile-only check, use **`./dev cargo check`**.
+
 ## LiveKit and gRPC terminal RPC E2E
 
 End-to-end tests for `StreamTerminalIO`, `VirtualTui`, and Ghostty live in `packages/tddy-e2e`. For protocol behavior, assertion strategies, flaky-test notes, and source references, see [livekit-terminal-rpc-e2e.md](./livekit-terminal-rpc-e2e.md).
