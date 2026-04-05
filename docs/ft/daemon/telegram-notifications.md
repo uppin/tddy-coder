@@ -46,7 +46,11 @@ Secrets: full bot tokens do not belong in log lines; helpers return **masked** r
 
 ## Integration surface
 
-When the daemon spawns a **`tddy-coder --daemon`** session, it connects to the child’s gRPC **`PresenterObserver.ObserveEvents`** stream (see **`tddy-service`** proto) and maps **`ServerMessage`** events to Telegram text (state transitions, workflow completion, goal started, backend selected). Daemon startup and graceful shutdown also send short lifecycle messages when Telegram is enabled.
+When the daemon spawns a **`tddy-coder --daemon`** session, it connects to the child’s gRPC **`PresenterObserver.ObserveEvents`** stream (see **`tddy-service`** proto) and maps **`ServerMessage`** events to Telegram text (state transitions, workflow completion, goal started, backend selected, and presenter **`ModeChanged`** when the mode requires user input or approval—see **Presenter stream: elicitation** below). Daemon startup and graceful shutdown also send short lifecycle messages when Telegram is enabled.
+
+## Presenter stream: elicitation (`ModeChanged`)
+
+With Telegram enabled, **`TelegramSessionWatcher::on_server_message`** classifies **`ServerMessage`** **`ModeChanged`** payloads from **`PresenterObserver.ObserveEvents`**. Modes that require a human gate—document review, markdown viewer, feature input, clarification (**`Select`** / **`MultiSelect`**), and free-text **`TextInput`**—produce a single plain-text line per qualifying event: the message includes the short session label and explicit **approval** or **input** wording. Autonomous modes **`Running`** and **`Done`** do not produce elicitation Telegram lines. Identical **`ModeChanged`** signatures per session id dedupe repeat sends so stream replays do not flood configured chats. Message bodies avoid embedding document bodies, prompts, or secrets. Module **`tddy_daemon::elicitation`** centralizes classification, dedupe key material, and line templates; **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)** records the public hooks.
 
 Callers that read **`.session.yaml`** (or equivalent) on an interval can still use **`TelegramSessionWatcher::on_metadata_tick`** with **`session_id`**, **`status`**, **`is_active`**, **`DaemonConfig`**, and **`TelegramSender`**. Technical detail lives in **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)**.
 

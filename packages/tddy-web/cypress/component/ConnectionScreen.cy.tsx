@@ -41,6 +41,20 @@ const ACTIVE_SESSION = {
   projectId: "proj-1",
 };
 
+/** Same project as ACTIVE_SESSION — `pending_elicitation` true (acceptance: row exposes indicator). */
+const SESSION_PENDING_ELICITATION = {
+  ...ACTIVE_SESSION,
+  sessionId: "session-elicitation-pending-1",
+  pendingElicitation: true,
+};
+
+/** Control row — elicitation explicitly false. */
+const SESSION_WITHOUT_ELICITATION = {
+  ...ACTIVE_SESSION,
+  sessionId: "session-no-elicit-1",
+  pendingElicitation: false,
+};
+
 const INACTIVE_SESSION = {
   sessionId: "session-inactive-1",
   createdAt: "2026-03-20T10:00:00Z",
@@ -212,13 +226,19 @@ type MockSessionRow = {
   elapsedDisplay?: string;
   agent?: string;
   model?: string;
+  pendingElicitation?: boolean;
 };
 
 function mockListSessionsResponse(sessions: MockSessionRow[]) {
   return toBinary(
     ListSessionsResponseSchema,
     create(ListSessionsResponseSchema, {
-      sessions: sessions.map((s) => create(SessionEntrySchema, s)),
+      sessions: sessions.map((s) =>
+        create(SessionEntrySchema, {
+          ...s,
+          pendingElicitation: s.pendingElicitation ?? false,
+        }),
+      ),
     }),
   );
 }
@@ -1137,5 +1157,33 @@ describe("ConnectionScreen — reconnect vs new-session presentation", () => {
     cy.get("[data-testid='terminal-reconnect-overlay-root']", { timeout: 15000 }).should("be.visible");
     cy.get("[data-testid='connected-terminal-container']", { timeout: 15000 }).should("exist");
     cy.get("@historyPush").should("not.have.been.called");
+  });
+});
+
+describe("ConnectionScreen — pending elicitation indicator", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("ConnectionScreen_shows_elicitation_indicator_when_pending_elicitation_true", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([SESSION_PENDING_ELICITATION]);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="sessions-table-${PROJECT.projectId}"]`, { timeout: 5000 }).should("exist");
+    cy.get(`[data-testid="connect-${SESSION_PENDING_ELICITATION.sessionId}"]`)
+      .closest("tr")
+      .should("have.attr", "data-pending-elicitation", "true");
+  });
+
+  it("ConnectionScreen_hides_elicitation_indicator_when_pending_elicitation_false", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([SESSION_WITHOUT_ELICITATION]);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="connect-${SESSION_WITHOUT_ELICITATION.sessionId}"]`)
+      .closest("tr")
+      .should("have.attr", "data-pending-elicitation", "false");
   });
 });

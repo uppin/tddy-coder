@@ -64,6 +64,7 @@ fn write_session_yaml(session_dir: &std::path::Path, session_id: &str, pid: u32)
         pid: Some(pid),
         tool: Some("test-tool".to_string()),
         livekit_room: Some("test-room".to_string()),
+        pending_elicitation: false,
     };
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }

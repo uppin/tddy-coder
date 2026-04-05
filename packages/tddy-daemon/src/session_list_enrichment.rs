@@ -196,6 +196,8 @@ pub fn apply_session_list_status_to_proto(
     entry.elapsed_display = status.elapsed_display;
     entry.agent = status.agent;
     entry.model = status.model;
+    entry.pending_elicitation =
+        crate::elicitation::pending_elicitation_for_session_dir(session_dir);
     Ok(())
 }
 
@@ -375,6 +377,7 @@ state:
             elapsed_display: String::new(),
             agent: String::new(),
             model: String::new(),
+            pending_elicitation: false,
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -382,5 +385,30 @@ state:
         assert_eq!(proto.agent, "claude");
         assert_eq!(proto.model, "sonnet-4");
         assert_ne!(proto.elapsed_display, "—");
+    }
+
+    #[test]
+    fn pending_elicitation_for_session_dir_reads_metadata_flag() {
+        use tddy_core::SessionMetadata;
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path().join("sess-pe-unit-1");
+        fs::create_dir_all(&session_dir).unwrap();
+        let metadata = SessionMetadata {
+            session_id: "sess-pe-unit-1".to_string(),
+            project_id: "proj-1".to_string(),
+            created_at: "2026-03-28T10:00:00Z".to_string(),
+            updated_at: "2026-03-28T12:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: None,
+            pid: None,
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: true,
+        };
+        tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
+        assert!(
+            crate::elicitation::pending_elicitation_for_session_dir(&session_dir),
+            "pending_elicitation in .session.yaml must map to the Connection list flag"
+        );
     }
 }

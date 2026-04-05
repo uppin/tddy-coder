@@ -65,6 +65,7 @@ async fn list_sessions_includes_workflow_fields_from_changeset() {
         pid: Some(0),
         tool: None,
         livekit_room: None,
+        pending_elicitation: false,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -108,4 +109,46 @@ state:
     assert_eq!(s.model, "sonnet-4");
     assert!(!s.elapsed_display.is_empty());
     assert_ne!(s.elapsed_display, "—");
+}
+
+/// Acceptance: `SessionEntry.pending_elicitation` must match `pending_elicitation` in `.session.yaml`.
+#[tokio::test]
+async fn list_sessions_sets_pending_elicitation_from_session_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let sessions_base = temp.path().to_path_buf();
+    let session_dir = sessions_base
+        .join(SESSIONS_SUBDIR)
+        .join("elicitation-metadata-1");
+    std::fs::create_dir_all(&session_dir).unwrap();
+
+    let metadata = SessionMetadata {
+        session_id: "elicitation-metadata-1".to_string(),
+        project_id: "proj-1".to_string(),
+        created_at: "2026-03-28T10:00:00Z".to_string(),
+        updated_at: "2026-03-28T12:00:00Z".to_string(),
+        status: "active".to_string(),
+        repo_path: Some("/tmp/repo".to_string()),
+        pid: Some(0),
+        tool: None,
+        livekit_room: None,
+        pending_elicitation: true,
+    };
+    tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
+
+    let service = test_service(sessions_base);
+    let response = service
+        .list_sessions(Request::new(ListSessionsRequest {
+            session_token: "valid-token".to_string(),
+        }))
+        .await
+        .expect("ListSessions RPC should succeed");
+    let sessions = response.into_inner().sessions;
+    let s = sessions
+        .iter()
+        .find(|e| e.session_id == "elicitation-metadata-1")
+        .expect("session from fixture");
+    assert!(
+        s.pending_elicitation,
+        "ListSessions must set pending_elicitation from authoritative session metadata"
+    );
 }

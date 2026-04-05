@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file tddy/v1/remote.proto.
  */
 export const file_tddy_v1_remote: GenFile = /*@__PURE__*/
-  fileDesc("ChR0ZGR5L3YxL3JlbW90ZS5wcm90bxIHdGRkeS52MSKPBgoNQ2xpZW50TWVzc2FnZRI7ChRzdWJtaXRfZmVhdHVyZV9pbnB1dBgBIAEoCzIbLnRkZHkudjEuU3VibWl0RmVhdHVyZUlucHV0SAASLgoNYW5zd2VyX3NlbGVjdBgCIAEoCzIVLnRkZHkudjEuQW5zd2VyU2VsZWN0SAASLAoMYW5zd2VyX290aGVyGAMgASgLMhQudGRkeS52MS5BbnN3ZXJPdGhlckgAEjkKE2Fuc3dlcl9tdWx0aV9zZWxlY3QYBCABKAsyGi50ZGR5LnYxLkFuc3dlck11bHRpU2VsZWN0SAASKgoLYW5zd2VyX3RleHQYBSABKAsyEy50ZGR5LnYxLkFuc3dlclRleHRIABIsCgxxdWV1ZV9wcm9tcHQYBiABKAsyFC50ZGR5LnYxLlF1ZXVlUHJvbXB0SAASMQoPZWRpdF9pbmJveF9pdGVtGAcgASgLMhYudGRkeS52MS5FZGl0SW5ib3hJdGVtSAASNQoRZGVsZXRlX2luYm94X2l0ZW0YCCABKAsyGC50ZGR5LnYxLkRlbGV0ZUluYm94SXRlbUgAEiEKBnNjcm9sbBgKIAEoCzIPLnRkZHkudjEuU2Nyb2xsSAASHQoEcXVpdBgLIAEoCzINLnRkZHkudjEuUXVpdEgAEiwKDGFwcHJvdmVfcGxhbhgMIAEoCzIULnRkZHkudjEuQXBwcm92ZVBsYW5IABImCgl2aWV3X3BsYW4YDSABKAsyES50ZGR5LnYxLlZpZXdQbGFuSAASKgoLcmVmaW5lX3BsYW4YDiABKAsyEy50ZGR5LnYxLlJlZmluZVBsYW5IABIwCg5kaXNtaXNzX3ZpZXdlchgPIAEoCzIWLnRkZHkudjEuRGlzbWlzc1ZpZXdlckgAEi4KDXN0YXJ0X3Nlc3Npb24YECABKAsyFS50ZGR5LnYxLlN0YXJ0U2Vzc2lvbkgAEjQKEGNvbmZpcm1fd29ya3RyZWUYESABKAsyGC50ZGR5LnYxLkNvbmZpcm1Xb3JrdHJlZUgAQggKBmludGVudCIxCgxTdGFydFNlc3Npb24SDgoGcHJvbXB0GAEgASgJEhEKCXJlcG9fcm9vdBgCIAEoCSI4Cg9Db25maXJtV29ya3RyZWUSDgoGYnJhbmNoGAEgASgJEhUKDXdvcmt0cmVlX25hbWUYAiABKAkiDQoLQXBwcm92ZVBsYW4iCgoIVmlld1BsYW4iDAoKUmVmaW5lUGxhbiIPCg1EaXNtaXNzVmlld2VyIiIKElN1Ym1pdEZlYXR1cmVJbnB1dBIMCgR0ZXh0GAEgASgJIh0KDEFuc3dlclNlbGVjdBINCgVpbmRleBgBIAEoDSIbCgtBbnN3ZXJPdGhlchIMCgR0ZXh0GAEgASgJIjMKEUFuc3dlck11bHRpU2VsZWN0Eg8KB2luZGljZXMYASADKA0SDQoFb3RoZXIYAiABKAkiGgoKQW5zd2VyVGV4dBIMCgR0ZXh0GAEgASgJIhsKC1F1ZXVlUHJvbXB0EgwKBHRleHQYASABKAkiLAoNRWRpdEluYm94SXRlbRINCgVpbmRleBgBIAEoDRIMCgR0ZXh0GAIgASgJIiAKD0RlbGV0ZUluYm94SXRlbRINCgVpbmRleBgBIAEoDSIXCgZTY3JvbGwSDQoFZGVsdGEYASABKAUiBgoEUXVpdCLVBAoNU2VydmVyTWVzc2FnZRIsCgxtb2RlX2NoYW5nZWQYASABKAsyFC50ZGR5LnYxLk1vZGVDaGFuZ2VkSAASMgoPYWN0aXZpdHlfbG9nZ2VkGAIgASgLMhcudGRkeS52MS5BY3Rpdml0eUxvZ2dlZEgAEiwKDGdvYWxfc3RhcnRlZBgDIAEoCzIULnRkZHkudjEuR29hbFN0YXJ0ZWRIABIuCg1zdGF0ZV9jaGFuZ2VkGAQgASgLMhUudGRkeS52MS5TdGF0ZUNoYW5nZWRIABI2ChF3b3JrZmxvd19jb21wbGV0ZRgFIAEoCzIZLnRkZHkudjEuV29ya2Zsb3dDb21wbGV0ZUgAEiwKDGFnZW50X291dHB1dBgGIAEoCzIULnRkZHkudjEuQWdlbnRPdXRwdXRIABIuCg1pbmJveF9jaGFuZ2VkGAcgASgLMhUudGRkeS52MS5JbmJveENoYW5nZWRIABIyCg9pbnRlbnRfcmVjZWl2ZWQYCCABKAsyFy50ZGR5LnYxLkludGVudFJlY2VpdmVkSAASMgoPc2Vzc2lvbl9jcmVhdGVkGAkgASgLMhcudGRkeS52MS5TZXNzaW9uQ3JlYXRlZEgAEjwKFHdvcmt0cmVlX2VsaWNpdGF0aW9uGAogASgLMhwudGRkeS52MS5Xb3JrdHJlZUVsaWNpdGF0aW9uSAASPwoWc2Vzc2lvbl9zdGF0dXNfY2hhbmdlZBgLIAEoCzIdLnRkZHkudjEuU2Vzc2lvblN0YXR1c0NoYW5nZWRIAEIHCgVldmVudCIkCg5TZXNzaW9uQ3JlYXRlZBISCgpzZXNzaW9uX2lkGAEgASgJIksKE1dvcmt0cmVlRWxpY2l0YXRpb24SGAoQc3VnZ2VzdGVkX2JyYW5jaBgBIAEoCRIaChJzdWdnZXN0ZWRfd29ya3RyZWUYAiABKAkiOgoUU2Vzc2lvblN0YXR1c0NoYW5nZWQSEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZzdGF0dXMYAiABKAkiJwoRR2V0U2Vzc2lvblJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCSI7ChJHZXRTZXNzaW9uUmVzcG9uc2USJQoHc2Vzc2lvbhgBIAEoCzIULnRkZHkudjEuU2Vzc2lvbkluZm8iKAoTTGlzdFNlc3Npb25zUmVxdWVzdBIRCglyZXBvX3Jvb3QYASABKAkiPgoUTGlzdFNlc3Npb25zUmVzcG9uc2USJgoIc2Vzc2lvbnMYASADKAsyFC50ZGR5LnYxLlNlc3Npb25JbmZvImgKC1Nlc3Npb25JbmZvEhIKCnNlc3Npb25faWQYASABKAkSDgoGc3RhdHVzGAIgASgJEhMKC3Nlc3Npb25fZGlyGAMgASgJEhAKCHdvcmt0cmVlGAQgASgJEg4KBmJyYW5jaBgFIAEoCSIyCgtNb2RlQ2hhbmdlZBIjCgRtb2RlGAEgASgLMhUudGRkeS52MS5BcHBNb2RlUHJvdG8ioAMKDEFwcE1vZGVQcm90bxI1Cg1mZWF0dXJlX2lucHV0GAEgASgLMhwudGRkeS52MS5BcHBNb2RlRmVhdHVyZUlucHV0SAASKgoHcnVubmluZxgCIAEoCzIXLnRkZHkudjEuQXBwTW9kZVJ1bm5pbmdIABIoCgZzZWxlY3QYAyABKAsyFi50ZGR5LnYxLkFwcE1vZGVTZWxlY3RIABIzCgxtdWx0aV9zZWxlY3QYBCABKAsyGy50ZGR5LnYxLkFwcE1vZGVNdWx0aVNlbGVjdEgAEi8KCnRleHRfaW5wdXQYBSABKAsyGS50ZGR5LnYxLkFwcE1vZGVUZXh0SW5wdXRIABIkCgRkb25lGAcgASgLMhQudGRkeS52MS5BcHBNb2RlRG9uZUgAEjEKC3BsYW5fcmV2aWV3GAggASgLMhoudGRkeS52MS5BcHBNb2RlUGxhblJldmlld0gAEjkKD21hcmtkb3duX3ZpZXdlchgJIAEoCzIeLnRkZHkudjEuQXBwTW9kZU1hcmtkb3duVmlld2VySABCCQoHdmFyaWFudCIoChFBcHBNb2RlUGxhblJldmlldxITCgtwcmRfY29udGVudBgBIAEoCSIoChVBcHBNb2RlTWFya2Rvd25WaWV3ZXISDwoHY29udGVudBgBIAEoCSIVChNBcHBNb2RlRmVhdHVyZUlucHV0IhAKDkFwcE1vZGVSdW5uaW5nIpEBCg1BcHBNb2RlU2VsZWN0EjUKCHF1ZXN0aW9uGAEgASgLMiMudGRkeS52MS5DbGFyaWZpY2F0aW9uUXVlc3Rpb25Qcm90bxIWCg5xdWVzdGlvbl9pbmRleBgCIAEoDRIXCg90b3RhbF9xdWVzdGlvbnMYAyABKA0SGAoQaW5pdGlhbF9zZWxlY3RlZBgEIAEoDSJ8ChJBcHBNb2RlTXVsdGlTZWxlY3QSNQoIcXVlc3Rpb24YASABKAsyIy50ZGR5LnYxLkNsYXJpZmljYXRpb25RdWVzdGlvblByb3RvEhYKDnF1ZXN0aW9uX2luZGV4GAIgASgNEhcKD3RvdGFsX3F1ZXN0aW9ucxgDIAEoDSIiChBBcHBNb2RlVGV4dElucHV0Eg4KBnByb21wdBgBIAEoCSINCgtBcHBNb2RlRG9uZSKDAQoaQ2xhcmlmaWNhdGlvblF1ZXN0aW9uUHJvdG8SDgoGaGVhZGVyGAEgASgJEhAKCHF1ZXN0aW9uGAIgASgJEi0KB29wdGlvbnMYAyADKAsyHC50ZGR5LnYxLlF1ZXN0aW9uT3B0aW9uUHJvdG8SFAoMbXVsdGlfc2VsZWN0GAQgASgIIjkKE1F1ZXN0aW9uT3B0aW9uUHJvdG8SDQoFbGFiZWwYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkiLAoOQWN0aXZpdHlMb2dnZWQSDAoEdGV4dBgBIAEoCRIMCgRraW5kGAIgASgJIhsKC0dvYWxTdGFydGVkEgwKBGdvYWwYASABKAkiKAoMU3RhdGVDaGFuZ2VkEgwKBGZyb20YASABKAkSCgoCdG8YAiABKAkiLwoQV29ya2Zsb3dDb21wbGV0ZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIhsKC0FnZW50T3V0cHV0EgwKBHRleHQYASABKAkiHQoMSW5ib3hDaGFuZ2VkEg0KBWl0ZW1zGAEgAygJIjgKDkludGVudFJlY2VpdmVkEiYKBmludGVudBgBIAEoCzIWLnRkZHkudjEuQ2xpZW50TWVzc2FnZTLeAQoKVGRkeVJlbW90ZRI8CgZTdHJlYW0SFi50ZGR5LnYxLkNsaWVudE1lc3NhZ2UaFi50ZGR5LnYxLlNlcnZlck1lc3NhZ2UoATABEkUKCkdldFNlc3Npb24SGi50ZGR5LnYxLkdldFNlc3Npb25SZXF1ZXN0GhsudGRkeS52MS5HZXRTZXNzaW9uUmVzcG9uc2USSwoMTGlzdFNlc3Npb25zEhwudGRkeS52MS5MaXN0U2Vzc2lvbnNSZXF1ZXN0Gh0udGRkeS52MS5MaXN0U2Vzc2lvbnNSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("ChR0ZGR5L3YxL3JlbW90ZS5wcm90bxIHdGRkeS52MSLUBgoNQ2xpZW50TWVzc2FnZRI7ChRzdWJtaXRfZmVhdHVyZV9pbnB1dBgBIAEoCzIbLnRkZHkudjEuU3VibWl0RmVhdHVyZUlucHV0SAASLgoNYW5zd2VyX3NlbGVjdBgCIAEoCzIVLnRkZHkudjEuQW5zd2VyU2VsZWN0SAASLAoMYW5zd2VyX290aGVyGAMgASgLMhQudGRkeS52MS5BbnN3ZXJPdGhlckgAEjkKE2Fuc3dlcl9tdWx0aV9zZWxlY3QYBCABKAsyGi50ZGR5LnYxLkFuc3dlck11bHRpU2VsZWN0SAASKgoLYW5zd2VyX3RleHQYBSABKAsyEy50ZGR5LnYxLkFuc3dlclRleHRIABIsCgxxdWV1ZV9wcm9tcHQYBiABKAsyFC50ZGR5LnYxLlF1ZXVlUHJvbXB0SAASMQoPZWRpdF9pbmJveF9pdGVtGAcgASgLMhYudGRkeS52MS5FZGl0SW5ib3hJdGVtSAASNQoRZGVsZXRlX2luYm94X2l0ZW0YCCABKAsyGC50ZGR5LnYxLkRlbGV0ZUluYm94SXRlbUgAEiEKBnNjcm9sbBgKIAEoCzIPLnRkZHkudjEuU2Nyb2xsSAASHQoEcXVpdBgLIAEoCzINLnRkZHkudjEuUXVpdEgAEkMKGGFwcHJvdmVfc2Vzc2lvbl9kb2N1bWVudBgMIAEoCzIfLnRkZHkudjEuQXBwcm92ZVNlc3Npb25Eb2N1bWVudEgAEj0KFXZpZXdfc2Vzc2lvbl9kb2N1bWVudBgNIAEoCzIcLnRkZHkudjEuVmlld1Nlc3Npb25Eb2N1bWVudEgAEkEKF3JlZmluZV9zZXNzaW9uX2RvY3VtZW50GA4gASgLMh4udGRkeS52MS5SZWZpbmVTZXNzaW9uRG9jdW1lbnRIABIwCg5kaXNtaXNzX3ZpZXdlchgPIAEoCzIWLnRkZHkudjEuRGlzbWlzc1ZpZXdlckgAEi4KDXN0YXJ0X3Nlc3Npb24YECABKAsyFS50ZGR5LnYxLlN0YXJ0U2Vzc2lvbkgAEjQKEGNvbmZpcm1fd29ya3RyZWUYESABKAsyGC50ZGR5LnYxLkNvbmZpcm1Xb3JrdHJlZUgAQggKBmludGVudCJBCgxTdGFydFNlc3Npb24SDgoGcHJvbXB0GAEgASgJEhEKCXJlcG9fcm9vdBgCIAEoCRIOCgZyZWNpcGUYAyABKAkiOAoPQ29uZmlybVdvcmt0cmVlEg4KBmJyYW5jaBgBIAEoCRIVCg13b3JrdHJlZV9uYW1lGAIgASgJIhgKFkFwcHJvdmVTZXNzaW9uRG9jdW1lbnQiFQoTVmlld1Nlc3Npb25Eb2N1bWVudCIXChVSZWZpbmVTZXNzaW9uRG9jdW1lbnQiDwoNRGlzbWlzc1ZpZXdlciIiChJTdWJtaXRGZWF0dXJlSW5wdXQSDAoEdGV4dBgBIAEoCSIdCgxBbnN3ZXJTZWxlY3QSDQoFaW5kZXgYASABKA0iGwoLQW5zd2VyT3RoZXISDAoEdGV4dBgBIAEoCSIzChFBbnN3ZXJNdWx0aVNlbGVjdBIPCgdpbmRpY2VzGAEgAygNEg0KBW90aGVyGAIgASgJIhoKCkFuc3dlclRleHQSDAoEdGV4dBgBIAEoCSIbCgtRdWV1ZVByb21wdBIMCgR0ZXh0GAEgASgJIiwKDUVkaXRJbmJveEl0ZW0SDQoFaW5kZXgYASABKA0SDAoEdGV4dBgCIAEoCSIgCg9EZWxldGVJbmJveEl0ZW0SDQoFaW5kZXgYASABKA0iFwoGU2Nyb2xsEg0KBWRlbHRhGAEgASgFIgYKBFF1aXQiiwUKDVNlcnZlck1lc3NhZ2USLAoMbW9kZV9jaGFuZ2VkGAEgASgLMhQudGRkeS52MS5Nb2RlQ2hhbmdlZEgAEjIKD2FjdGl2aXR5X2xvZ2dlZBgCIAEoCzIXLnRkZHkudjEuQWN0aXZpdHlMb2dnZWRIABIsCgxnb2FsX3N0YXJ0ZWQYAyABKAsyFC50ZGR5LnYxLkdvYWxTdGFydGVkSAASLgoNc3RhdGVfY2hhbmdlZBgEIAEoCzIVLnRkZHkudjEuU3RhdGVDaGFuZ2VkSAASNgoRd29ya2Zsb3dfY29tcGxldGUYBSABKAsyGS50ZGR5LnYxLldvcmtmbG93Q29tcGxldGVIABIsCgxhZ2VudF9vdXRwdXQYBiABKAsyFC50ZGR5LnYxLkFnZW50T3V0cHV0SAASLgoNaW5ib3hfY2hhbmdlZBgHIAEoCzIVLnRkZHkudjEuSW5ib3hDaGFuZ2VkSAASMgoPaW50ZW50X3JlY2VpdmVkGAggASgLMhcudGRkeS52MS5JbnRlbnRSZWNlaXZlZEgAEjIKD3Nlc3Npb25fY3JlYXRlZBgJIAEoCzIXLnRkZHkudjEuU2Vzc2lvbkNyZWF0ZWRIABI8ChR3b3JrdHJlZV9lbGljaXRhdGlvbhgKIAEoCzIcLnRkZHkudjEuV29ya3RyZWVFbGljaXRhdGlvbkgAEj8KFnNlc3Npb25fc3RhdHVzX2NoYW5nZWQYCyABKAsyHS50ZGR5LnYxLlNlc3Npb25TdGF0dXNDaGFuZ2VkSAASNAoQYmFja2VuZF9zZWxlY3RlZBgMIAEoCzIYLnRkZHkudjEuQmFja2VuZFNlbGVjdGVkSABCBwoFZXZlbnQiJAoOU2Vzc2lvbkNyZWF0ZWQSEgoKc2Vzc2lvbl9pZBgBIAEoCSJLChNXb3JrdHJlZUVsaWNpdGF0aW9uEhgKEHN1Z2dlc3RlZF9icmFuY2gYASABKAkSGgoSc3VnZ2VzdGVkX3dvcmt0cmVlGAIgASgJIjoKFFNlc3Npb25TdGF0dXNDaGFuZ2VkEhIKCnNlc3Npb25faWQYASABKAkSDgoGc3RhdHVzGAIgASgJIicKEUdldFNlc3Npb25SZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkiOwoSR2V0U2Vzc2lvblJlc3BvbnNlEiUKB3Nlc3Npb24YASABKAsyFC50ZGR5LnYxLlNlc3Npb25JbmZvIigKE0xpc3RTZXNzaW9uc1JlcXVlc3QSEQoJcmVwb19yb290GAEgASgJIj4KFExpc3RTZXNzaW9uc1Jlc3BvbnNlEiYKCHNlc3Npb25zGAEgAygLMhQudGRkeS52MS5TZXNzaW9uSW5mbyJoCgtTZXNzaW9uSW5mbxISCgpzZXNzaW9uX2lkGAEgASgJEg4KBnN0YXR1cxgCIAEoCRITCgtzZXNzaW9uX2RpchgDIAEoCRIQCgh3b3JrdHJlZRgEIAEoCRIOCgZicmFuY2gYBSABKAkiMgoLTW9kZUNoYW5nZWQSIwoEbW9kZRgBIAEoCzIVLnRkZHkudjEuQXBwTW9kZVByb3RvIqgDCgxBcHBNb2RlUHJvdG8SNQoNZmVhdHVyZV9pbnB1dBgBIAEoCzIcLnRkZHkudjEuQXBwTW9kZUZlYXR1cmVJbnB1dEgAEioKB3J1bm5pbmcYAiABKAsyFy50ZGR5LnYxLkFwcE1vZGVSdW5uaW5nSAASKAoGc2VsZWN0GAMgASgLMhYudGRkeS52MS5BcHBNb2RlU2VsZWN0SAASMwoMbXVsdGlfc2VsZWN0GAQgASgLMhsudGRkeS52MS5BcHBNb2RlTXVsdGlTZWxlY3RIABIvCgp0ZXh0X2lucHV0GAUgASgLMhkudGRkeS52MS5BcHBNb2RlVGV4dElucHV0SAASJAoEZG9uZRgHIAEoCzIULnRkZHkudjEuQXBwTW9kZURvbmVIABI5Cg9kb2N1bWVudF9yZXZpZXcYCCABKAsyHi50ZGR5LnYxLkFwcE1vZGVEb2N1bWVudFJldmlld0gAEjkKD21hcmtkb3duX3ZpZXdlchgJIAEoCzIeLnRkZHkudjEuQXBwTW9kZU1hcmtkb3duVmlld2VySABCCQoHdmFyaWFudCIoChVBcHBNb2RlRG9jdW1lbnRSZXZpZXcSDwoHY29udGVudBgBIAEoCSIoChVBcHBNb2RlTWFya2Rvd25WaWV3ZXISDwoHY29udGVudBgBIAEoCSIVChNBcHBNb2RlRmVhdHVyZUlucHV0IhAKDkFwcE1vZGVSdW5uaW5nIpEBCg1BcHBNb2RlU2VsZWN0EjUKCHF1ZXN0aW9uGAEgASgLMiMudGRkeS52MS5DbGFyaWZpY2F0aW9uUXVlc3Rpb25Qcm90bxIWCg5xdWVzdGlvbl9pbmRleBgCIAEoDRIXCg90b3RhbF9xdWVzdGlvbnMYAyABKA0SGAoQaW5pdGlhbF9zZWxlY3RlZBgEIAEoDSJ8ChJBcHBNb2RlTXVsdGlTZWxlY3QSNQoIcXVlc3Rpb24YASABKAsyIy50ZGR5LnYxLkNsYXJpZmljYXRpb25RdWVzdGlvblByb3RvEhYKDnF1ZXN0aW9uX2luZGV4GAIgASgNEhcKD3RvdGFsX3F1ZXN0aW9ucxgDIAEoDSIiChBBcHBNb2RlVGV4dElucHV0Eg4KBnByb21wdBgBIAEoCSINCgtBcHBNb2RlRG9uZSKDAQoaQ2xhcmlmaWNhdGlvblF1ZXN0aW9uUHJvdG8SDgoGaGVhZGVyGAEgASgJEhAKCHF1ZXN0aW9uGAIgASgJEi0KB29wdGlvbnMYAyADKAsyHC50ZGR5LnYxLlF1ZXN0aW9uT3B0aW9uUHJvdG8SFAoMbXVsdGlfc2VsZWN0GAQgASgIIjkKE1F1ZXN0aW9uT3B0aW9uUHJvdG8SDQoFbGFiZWwYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkiLAoOQWN0aXZpdHlMb2dnZWQSDAoEdGV4dBgBIAEoCRIMCgRraW5kGAIgASgJIhsKC0dvYWxTdGFydGVkEgwKBGdvYWwYASABKAkiLwoPQmFja2VuZFNlbGVjdGVkEg0KBWFnZW50GAEgASgJEg0KBW1vZGVsGAIgASgJIigKDFN0YXRlQ2hhbmdlZBIMCgRmcm9tGAEgASgJEgoKAnRvGAIgASgJIi8KEFdvcmtmbG93Q29tcGxldGUSCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSIbCgtBZ2VudE91dHB1dBIMCgR0ZXh0GAEgASgJIh0KDEluYm94Q2hhbmdlZBINCgVpdGVtcxgBIAMoCSI4Cg5JbnRlbnRSZWNlaXZlZBImCgZpbnRlbnQYASABKAsyFi50ZGR5LnYxLkNsaWVudE1lc3NhZ2Uy3gEKClRkZHlSZW1vdGUSPAoGU3RyZWFtEhYudGRkeS52MS5DbGllbnRNZXNzYWdlGhYudGRkeS52MS5TZXJ2ZXJNZXNzYWdlKAEwARJFCgpHZXRTZXNzaW9uEhoudGRkeS52MS5HZXRTZXNzaW9uUmVxdWVzdBobLnRkZHkudjEuR2V0U2Vzc2lvblJlc3BvbnNlEksKDExpc3RTZXNzaW9ucxIcLnRkZHkudjEuTGlzdFNlc3Npb25zUmVxdWVzdBodLnRkZHkudjEuTGlzdFNlc3Npb25zUmVzcG9uc2ViBnByb3RvMw");
 
 /**
  * @generated from message tddy.v1.ClientMessage
@@ -81,22 +81,22 @@ export type ClientMessage = Message<"tddy.v1.ClientMessage"> & {
     case: "quit";
   } | {
     /**
-     * @generated from field: tddy.v1.ApprovePlan approve_plan = 12;
+     * @generated from field: tddy.v1.ApproveSessionDocument approve_session_document = 12;
      */
-    value: ApprovePlan;
-    case: "approvePlan";
+    value: ApproveSessionDocument;
+    case: "approveSessionDocument";
   } | {
     /**
-     * @generated from field: tddy.v1.ViewPlan view_plan = 13;
+     * @generated from field: tddy.v1.ViewSessionDocument view_session_document = 13;
      */
-    value: ViewPlan;
-    case: "viewPlan";
+    value: ViewSessionDocument;
+    case: "viewSessionDocument";
   } | {
     /**
-     * @generated from field: tddy.v1.RefinePlan refine_plan = 14;
+     * @generated from field: tddy.v1.RefineSessionDocument refine_session_document = 14;
      */
-    value: RefinePlan;
-    case: "refinePlan";
+    value: RefineSessionDocument;
+    case: "refineSessionDocument";
   } | {
     /**
      * @generated from field: tddy.v1.DismissViewer dismiss_viewer = 15;
@@ -135,11 +135,18 @@ export type StartSession = Message<"tddy.v1.StartSession"> & {
   prompt: string;
 
   /**
-   * Path to git repo root
+   * Required: absolute path to the git repository root (workflow git/worktree use this path).
    *
    * @generated from field: string repo_root = 2;
    */
   repoRoot: string;
+
+  /**
+   * Workflow recipe: "tdd" (default) or "bugfix". Must match WorkflowRecipe::name().
+   *
+   * @generated from field: string recipe = 3;
+   */
+  recipe: string;
 };
 
 /**
@@ -172,42 +179,42 @@ export const ConfirmWorktreeSchema: GenMessage<ConfirmWorktree> = /*@__PURE__*/
   messageDesc(file_tddy_v1_remote, 2);
 
 /**
- * @generated from message tddy.v1.ApprovePlan
+ * @generated from message tddy.v1.ApproveSessionDocument
  */
-export type ApprovePlan = Message<"tddy.v1.ApprovePlan"> & {
+export type ApproveSessionDocument = Message<"tddy.v1.ApproveSessionDocument"> & {
 };
 
 /**
- * Describes the message tddy.v1.ApprovePlan.
- * Use `create(ApprovePlanSchema)` to create a new message.
+ * Describes the message tddy.v1.ApproveSessionDocument.
+ * Use `create(ApproveSessionDocumentSchema)` to create a new message.
  */
-export const ApprovePlanSchema: GenMessage<ApprovePlan> = /*@__PURE__*/
+export const ApproveSessionDocumentSchema: GenMessage<ApproveSessionDocument> = /*@__PURE__*/
   messageDesc(file_tddy_v1_remote, 3);
 
 /**
- * @generated from message tddy.v1.ViewPlan
+ * @generated from message tddy.v1.ViewSessionDocument
  */
-export type ViewPlan = Message<"tddy.v1.ViewPlan"> & {
+export type ViewSessionDocument = Message<"tddy.v1.ViewSessionDocument"> & {
 };
 
 /**
- * Describes the message tddy.v1.ViewPlan.
- * Use `create(ViewPlanSchema)` to create a new message.
+ * Describes the message tddy.v1.ViewSessionDocument.
+ * Use `create(ViewSessionDocumentSchema)` to create a new message.
  */
-export const ViewPlanSchema: GenMessage<ViewPlan> = /*@__PURE__*/
+export const ViewSessionDocumentSchema: GenMessage<ViewSessionDocument> = /*@__PURE__*/
   messageDesc(file_tddy_v1_remote, 4);
 
 /**
- * @generated from message tddy.v1.RefinePlan
+ * @generated from message tddy.v1.RefineSessionDocument
  */
-export type RefinePlan = Message<"tddy.v1.RefinePlan"> & {
+export type RefineSessionDocument = Message<"tddy.v1.RefineSessionDocument"> & {
 };
 
 /**
- * Describes the message tddy.v1.RefinePlan.
- * Use `create(RefinePlanSchema)` to create a new message.
+ * Describes the message tddy.v1.RefineSessionDocument.
+ * Use `create(RefineSessionDocumentSchema)` to create a new message.
  */
-export const RefinePlanSchema: GenMessage<RefinePlan> = /*@__PURE__*/
+export const RefineSessionDocumentSchema: GenMessage<RefineSessionDocument> = /*@__PURE__*/
   messageDesc(file_tddy_v1_remote, 5);
 
 /**
@@ -472,6 +479,12 @@ export type ServerMessage = Message<"tddy.v1.ServerMessage"> & {
      */
     value: SessionStatusChanged;
     case: "sessionStatusChanged";
+  } | {
+    /**
+     * @generated from field: tddy.v1.BackendSelected backend_selected = 12;
+     */
+    value: BackendSelected;
+    case: "backendSelected";
   } | { case: undefined; value?: undefined };
 };
 
@@ -714,10 +727,10 @@ export type AppModeProto = Message<"tddy.v1.AppModeProto"> & {
     case: "done";
   } | {
     /**
-     * @generated from field: tddy.v1.AppModePlanReview plan_review = 8;
+     * @generated from field: tddy.v1.AppModeDocumentReview document_review = 8;
      */
-    value: AppModePlanReview;
-    case: "planReview";
+    value: AppModeDocumentReview;
+    case: "documentReview";
   } | {
     /**
      * @generated from field: tddy.v1.AppModeMarkdownViewer markdown_viewer = 9;
@@ -735,20 +748,20 @@ export const AppModeProtoSchema: GenMessage<AppModeProto> = /*@__PURE__*/
   messageDesc(file_tddy_v1_remote, 27);
 
 /**
- * @generated from message tddy.v1.AppModePlanReview
+ * @generated from message tddy.v1.AppModeDocumentReview
  */
-export type AppModePlanReview = Message<"tddy.v1.AppModePlanReview"> & {
+export type AppModeDocumentReview = Message<"tddy.v1.AppModeDocumentReview"> & {
   /**
-   * @generated from field: string prd_content = 1;
+   * @generated from field: string content = 1;
    */
-  prdContent: string;
+  content: string;
 };
 
 /**
- * Describes the message tddy.v1.AppModePlanReview.
- * Use `create(AppModePlanReviewSchema)` to create a new message.
+ * Describes the message tddy.v1.AppModeDocumentReview.
+ * Use `create(AppModeDocumentReviewSchema)` to create a new message.
  */
-export const AppModePlanReviewSchema: GenMessage<AppModePlanReview> = /*@__PURE__*/
+export const AppModeDocumentReviewSchema: GenMessage<AppModeDocumentReview> = /*@__PURE__*/
   messageDesc(file_tddy_v1_remote, 28);
 
 /**
@@ -947,7 +960,7 @@ export type ActivityLogged = Message<"tddy.v1.ActivityLogged"> & {
   text: string;
 
   /**
-   * ToolUse, TaskStarted, TaskProgress, StateChange, Info, AgentOutput
+   * ToolUse, TaskStarted, TaskProgress, StateChange, Info, UserPrompt, AgentOutput
    *
    * @generated from field: string kind = 2;
    */
@@ -979,6 +992,28 @@ export const GoalStartedSchema: GenMessage<GoalStarted> = /*@__PURE__*/
   messageDesc(file_tddy_v1_remote, 39);
 
 /**
+ * @generated from message tddy.v1.BackendSelected
+ */
+export type BackendSelected = Message<"tddy.v1.BackendSelected"> & {
+  /**
+   * @generated from field: string agent = 1;
+   */
+  agent: string;
+
+  /**
+   * @generated from field: string model = 2;
+   */
+  model: string;
+};
+
+/**
+ * Describes the message tddy.v1.BackendSelected.
+ * Use `create(BackendSelectedSchema)` to create a new message.
+ */
+export const BackendSelectedSchema: GenMessage<BackendSelected> = /*@__PURE__*/
+  messageDesc(file_tddy_v1_remote, 40);
+
+/**
  * @generated from message tddy.v1.StateChanged
  */
 export type StateChanged = Message<"tddy.v1.StateChanged"> & {
@@ -998,7 +1033,7 @@ export type StateChanged = Message<"tddy.v1.StateChanged"> & {
  * Use `create(StateChangedSchema)` to create a new message.
  */
 export const StateChangedSchema: GenMessage<StateChanged> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 40);
+  messageDesc(file_tddy_v1_remote, 41);
 
 /**
  * @generated from message tddy.v1.WorkflowComplete
@@ -1022,7 +1057,7 @@ export type WorkflowComplete = Message<"tddy.v1.WorkflowComplete"> & {
  * Use `create(WorkflowCompleteSchema)` to create a new message.
  */
 export const WorkflowCompleteSchema: GenMessage<WorkflowComplete> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 41);
+  messageDesc(file_tddy_v1_remote, 42);
 
 /**
  * @generated from message tddy.v1.AgentOutput
@@ -1039,7 +1074,7 @@ export type AgentOutput = Message<"tddy.v1.AgentOutput"> & {
  * Use `create(AgentOutputSchema)` to create a new message.
  */
 export const AgentOutputSchema: GenMessage<AgentOutput> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 42);
+  messageDesc(file_tddy_v1_remote, 43);
 
 /**
  * @generated from message tddy.v1.InboxChanged
@@ -1056,7 +1091,7 @@ export type InboxChanged = Message<"tddy.v1.InboxChanged"> & {
  * Use `create(InboxChangedSchema)` to create a new message.
  */
 export const InboxChangedSchema: GenMessage<InboxChanged> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 43);
+  messageDesc(file_tddy_v1_remote, 44);
 
 /**
  * @generated from message tddy.v1.IntentReceived
@@ -1075,7 +1110,7 @@ export type IntentReceived = Message<"tddy.v1.IntentReceived"> & {
  * Use `create(IntentReceivedSchema)` to create a new message.
  */
 export const IntentReceivedSchema: GenMessage<IntentReceived> = /*@__PURE__*/
-  messageDesc(file_tddy_v1_remote, 44);
+  messageDesc(file_tddy_v1_remote, 45);
 
 /**
  * TddyRemote: bidirectional streaming for programmatic control of tddy-coder.

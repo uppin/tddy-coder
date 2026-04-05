@@ -210,6 +210,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         elapsed_display: String::new(),
                         agent: String::new(),
                         model: String::new(),
+                        pending_elicitation: false,
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,
@@ -1023,6 +1024,7 @@ mod signal_session_unit_tests {
             pid: Some(pid),
             tool: None,
             livekit_room: None,
+            pending_elicitation: false,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }

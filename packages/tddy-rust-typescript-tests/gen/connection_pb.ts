@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file connection.proto.
  */
 export const file_connection: GenFile = /*@__PURE__*/
-  fileDesc("ChBjb25uZWN0aW9uLnByb3RvEgpjb25uZWN0aW9uIhIKEExpc3RUb29sc1JlcXVlc3QiOAoRTGlzdFRvb2xzUmVzcG9uc2USIwoFdG9vbHMYASADKAsyFC5jb25uZWN0aW9uLlRvb2xJbmZvIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkiLAoTTGlzdFNlc3Npb25zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIkIKFExpc3RTZXNzaW9uc1Jlc3BvbnNlEioKCHNlc3Npb25zGAEgAygLMhguY29ubmVjdGlvbi5TZXNzaW9uRW50cnkijQEKDFNlc3Npb25FbnRyeRISCgpzZXNzaW9uX2lkGAEgASgJEhIKCmNyZWF0ZWRfYXQYAiABKAkSDgoGc3RhdHVzGAMgASgJEhEKCXJlcG9fcGF0aBgEIAEoCRILCgNwaWQYBSABKA0SEQoJaXNfYWN0aXZlGAYgASgIEhIKCnByb2plY3RfaWQYByABKAkiWQoMUHJvamVjdEVudHJ5EhIKCnByb2plY3RfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhYKDm1haW5fcmVwb19wYXRoGAQgASgJIiwKE0xpc3RQcm9qZWN0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJCChRMaXN0UHJvamVjdHNSZXNwb25zZRIqCghwcm9qZWN0cxgBIAMoCzIYLmNvbm5lY3Rpb24uUHJvamVjdEVudHJ5ImgKFENyZWF0ZVByb2plY3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhoKEnVzZXJfcmVsYXRpdmVfcGF0aBgEIAEoCSJCChVDcmVhdGVQcm9qZWN0UmVzcG9uc2USKQoHcHJvamVjdBgBIAEoCzIYLmNvbm5lY3Rpb24uUHJvamVjdEVudHJ5ImIKE1N0YXJ0U2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIRCgl0b29sX3BhdGgYAiABKAkSEgoKcHJvamVjdF9pZBgDIAEoCRINCgVhZ2VudBgEIAEoCSJ2ChRTdGFydFNlc3Npb25SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGxpdmVraXRfcm9vbRgCIAEoCRITCgtsaXZla2l0X3VybBgDIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgEIAEoCSJCChVDb25uZWN0U2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJImQKFkNvbm5lY3RTZXNzaW9uUmVzcG9uc2USFAoMbGl2ZWtpdF9yb29tGAEgASgJEhMKC2xpdmVraXRfdXJsGAIgASgJEh8KF2xpdmVraXRfc2VydmVyX2lkZW50aXR5GAMgASgJIkEKFFJlc3VtZVNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJ3ChVSZXN1bWVTZXNzaW9uUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIUCgxsaXZla2l0X3Jvb20YAiABKAkSEwoLbGl2ZWtpdF91cmwYAyABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYBCABKAkiUQoUU2lnbmFsU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBnNpZ25hbBgDIAEoBSI0ChVTaWduYWxTZXNzaW9uUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSpDCgZTaWduYWwSEQoNU0lHTkFMX1NJR0lOVBAAEhIKDlNJR05BTF9TSUdURVJNEAESEgoOU0lHTkFMX1NJR0tJTEwQAjKxBQoRQ29ubmVjdGlvblNlcnZpY2USSAoJTGlzdFRvb2xzEhwuY29ubmVjdGlvbi5MaXN0VG9vbHNSZXF1ZXN0Gh0uY29ubmVjdGlvbi5MaXN0VG9vbHNSZXNwb25zZRJRCgxMaXN0U2Vzc2lvbnMSHy5jb25uZWN0aW9uLkxpc3RTZXNzaW9uc1JlcXVlc3QaIC5jb25uZWN0aW9uLkxpc3RTZXNzaW9uc1Jlc3BvbnNlElEKDExpc3RQcm9qZWN0cxIfLmNvbm5lY3Rpb24uTGlzdFByb2plY3RzUmVxdWVzdBogLmNvbm5lY3Rpb24uTGlzdFByb2plY3RzUmVzcG9uc2USVAoNQ3JlYXRlUHJvamVjdBIgLmNvbm5lY3Rpb24uQ3JlYXRlUHJvamVjdFJlcXVlc3QaIS5jb25uZWN0aW9uLkNyZWF0ZVByb2plY3RSZXNwb25zZRJRCgxTdGFydFNlc3Npb24SHy5jb25uZWN0aW9uLlN0YXJ0U2Vzc2lvblJlcXVlc3QaIC5jb25uZWN0aW9uLlN0YXJ0U2Vzc2lvblJlc3BvbnNlElcKDkNvbm5lY3RTZXNzaW9uEiEuY29ubmVjdGlvbi5Db25uZWN0U2Vzc2lvblJlcXVlc3QaIi5jb25uZWN0aW9uLkNvbm5lY3RTZXNzaW9uUmVzcG9uc2USVAoNUmVzdW1lU2Vzc2lvbhIgLmNvbm5lY3Rpb24uUmVzdW1lU2Vzc2lvblJlcXVlc3QaIS5jb25uZWN0aW9uLlJlc3VtZVNlc3Npb25SZXNwb25zZRJUCg1TaWduYWxTZXNzaW9uEiAuY29ubmVjdGlvbi5TaWduYWxTZXNzaW9uUmVxdWVzdBohLmNvbm5lY3Rpb24uU2lnbmFsU2Vzc2lvblJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("ChBjb25uZWN0aW9uLnByb3RvEgpjb25uZWN0aW9uIhIKEExpc3RUb29sc1JlcXVlc3QiOAoRTGlzdFRvb2xzUmVzcG9uc2USIwoFdG9vbHMYASADKAsyFC5jb25uZWN0aW9uLlRvb2xJbmZvIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkiEwoRTGlzdEFnZW50c1JlcXVlc3QiOwoSTGlzdEFnZW50c1Jlc3BvbnNlEiUKBmFnZW50cxgBIAMoCzIVLmNvbm5lY3Rpb24uQWdlbnRJbmZvIiYKCUFnZW50SW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSIsChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiQgoUTGlzdFNlc3Npb25zUmVzcG9uc2USKgoIc2Vzc2lvbnMYASADKAsyGC5jb25uZWN0aW9uLlNlc3Npb25FbnRyeSKsAgoMU2Vzc2lvbkVudHJ5EhIKCnNlc3Npb25faWQYASABKAkSEgoKY3JlYXRlZF9hdBgCIAEoCRIOCgZzdGF0dXMYAyABKAkSEQoJcmVwb19wYXRoGAQgASgJEgsKA3BpZBgFIAEoDRIRCglpc19hY3RpdmUYBiABKAgSEgoKcHJvamVjdF9pZBgHIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYCCABKAkSFQoNd29ya2Zsb3dfZ29hbBgJIAEoCRIWCg53b3JrZmxvd19zdGF0ZRgKIAEoCRIXCg9lbGFwc2VkX2Rpc3BsYXkYCyABKAkSDQoFYWdlbnQYDCABKAkSDQoFbW9kZWwYDSABKAkSGwoTcGVuZGluZ19lbGljaXRhdGlvbhgOIAEoCCJZCgxQcm9qZWN0RW50cnkSEgoKcHJvamVjdF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg8KB2dpdF91cmwYAyABKAkSFgoObWFpbl9yZXBvX3BhdGgYBCABKAkiLAoTTGlzdFByb2plY3RzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIkIKFExpc3RQcm9qZWN0c1Jlc3BvbnNlEioKCHByb2plY3RzGAEgAygLMhguY29ubmVjdGlvbi5Qcm9qZWN0RW50cnkiaAoUQ3JlYXRlUHJvamVjdFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJEg8KB2dpdF91cmwYAyABKAkSGgoSdXNlcl9yZWxhdGl2ZV9wYXRoGAQgASgJIkIKFUNyZWF0ZVByb2plY3RSZXNwb25zZRIpCgdwcm9qZWN0GAEgASgLMhguY29ubmVjdGlvbi5Qcm9qZWN0RW50cnkijgEKE1N0YXJ0U2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIRCgl0b29sX3BhdGgYAiABKAkSEgoKcHJvamVjdF9pZBgDIAEoCRINCgVhZ2VudBgEIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYBSABKAkSDgoGcmVjaXBlGAYgASgJInYKFFN0YXJ0U2Vzc2lvblJlc3BvbnNlEhIKCnNlc3Npb25faWQYASABKAkSFAoMbGl2ZWtpdF9yb29tGAIgASgJEhMKC2xpdmVraXRfdXJsGAMgASgJEh8KF2xpdmVraXRfc2VydmVyX2lkZW50aXR5GAQgASgJIkIKFUNvbm5lY3RTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiZAoWQ29ubmVjdFNlc3Npb25SZXNwb25zZRIUCgxsaXZla2l0X3Jvb20YASABKAkSEwoLbGl2ZWtpdF91cmwYAiABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYAyABKAkiQQoUUmVzdW1lU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIncKFVJlc3VtZVNlc3Npb25SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGxpdmVraXRfcm9vbRgCIAEoCRITCgtsaXZla2l0X3VybBgDIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgEIAEoCSJRChRTaWduYWxTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGc2lnbmFsGAMgASgFIjQKFVNpZ25hbFNlc3Npb25SZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIkEKFERlbGV0ZVNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIjChVEZWxldGVTZXNzaW9uUmVzcG9uc2USCgoCb2sYASABKAgiMwoaTGlzdEVsaWdpYmxlRGFlbW9uc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJLChNFbGlnaWJsZURhZW1vbkVudHJ5EhMKC2luc3RhbmNlX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEhAKCGlzX2xvY2FsGAMgASgIIk8KG0xpc3RFbGlnaWJsZURhZW1vbnNSZXNwb25zZRIwCgdkYWVtb25zGAEgAygLMh8uY29ubmVjdGlvbi5FbGlnaWJsZURhZW1vbkVudHJ5IkwKH0xpc3RTZXNzaW9uV29ya2Zsb3dGaWxlc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIiUKEVdvcmtmbG93RmlsZUVudHJ5EhAKCGJhc2VuYW1lGAEgASgJIlAKIExpc3RTZXNzaW9uV29ya2Zsb3dGaWxlc1Jlc3BvbnNlEiwKBWZpbGVzGAEgAygLMh0uY29ubmVjdGlvbi5Xb3JrZmxvd0ZpbGVFbnRyeSJdCh5SZWFkU2Vzc2lvbldvcmtmbG93RmlsZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhAKCGJhc2VuYW1lGAMgASgJIjcKH1JlYWRTZXNzaW9uV29ya2Zsb3dGaWxlUmVzcG9uc2USFAoMY29udGVudF91dGY4GAEgASgJIrMBCgtXb3JrdHJlZVJvdxIMCgRwYXRoGAEgASgJEhQKDGJyYW5jaF9sYWJlbBgCIAEoCRISCgpkaXNrX2J5dGVzGAMgASgEEhUKDWNoYW5nZWRfZmlsZXMYBCABKA0SEwoLbGluZXNfYWRkZWQYBSABKAMSFQoNbGluZXNfcmVtb3ZlZBgGIAEoAxIaChJ1cGRhdGVkX2F0X3VuaXhfbXMYByABKAMSDQoFc3RhbGUYCCABKAgiXAoeTGlzdFdvcmt0cmVlc0ZvclByb2plY3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIPCgdyZWZyZXNoGAMgASgIIk0KH0xpc3RXb3JrdHJlZXNGb3JQcm9qZWN0UmVzcG9uc2USKgoJd29ya3RyZWVzGAEgAygLMhcuY29ubmVjdGlvbi5Xb3JrdHJlZVJvdyJZChVSZW1vdmVXb3JrdHJlZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhUKDXdvcmt0cmVlX3BhdGgYAyABKAkiNQoWUmVtb3ZlV29ya3RyZWVSZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJKkMKBlNpZ25hbBIRCg1TSUdOQUxfU0lHSU5UEAASEgoOU0lHTkFMX1NJR1RFUk0QARISCg5TSUdOQUxfU0lHS0lMTBACMvQKChFDb25uZWN0aW9uU2VydmljZRJICglMaXN0VG9vbHMSHC5jb25uZWN0aW9uLkxpc3RUb29sc1JlcXVlc3QaHS5jb25uZWN0aW9uLkxpc3RUb29sc1Jlc3BvbnNlEksKCkxpc3RBZ2VudHMSHS5jb25uZWN0aW9uLkxpc3RBZ2VudHNSZXF1ZXN0Gh4uY29ubmVjdGlvbi5MaXN0QWdlbnRzUmVzcG9uc2USUQoMTGlzdFNlc3Npb25zEh8uY29ubmVjdGlvbi5MaXN0U2Vzc2lvbnNSZXF1ZXN0GiAuY29ubmVjdGlvbi5MaXN0U2Vzc2lvbnNSZXNwb25zZRJRCgxMaXN0UHJvamVjdHMSHy5jb25uZWN0aW9uLkxpc3RQcm9qZWN0c1JlcXVlc3QaIC5jb25uZWN0aW9uLkxpc3RQcm9qZWN0c1Jlc3BvbnNlElQKDUNyZWF0ZVByb2plY3QSIC5jb25uZWN0aW9uLkNyZWF0ZVByb2plY3RSZXF1ZXN0GiEuY29ubmVjdGlvbi5DcmVhdGVQcm9qZWN0UmVzcG9uc2USUQoMU3RhcnRTZXNzaW9uEh8uY29ubmVjdGlvbi5TdGFydFNlc3Npb25SZXF1ZXN0GiAuY29ubmVjdGlvbi5TdGFydFNlc3Npb25SZXNwb25zZRJXCg5Db25uZWN0U2Vzc2lvbhIhLmNvbm5lY3Rpb24uQ29ubmVjdFNlc3Npb25SZXF1ZXN0GiIuY29ubmVjdGlvbi5Db25uZWN0U2Vzc2lvblJlc3BvbnNlElQKDVJlc3VtZVNlc3Npb24SIC5jb25uZWN0aW9uLlJlc3VtZVNlc3Npb25SZXF1ZXN0GiEuY29ubmVjdGlvbi5SZXN1bWVTZXNzaW9uUmVzcG9uc2USVAoNU2lnbmFsU2Vzc2lvbhIgLmNvbm5lY3Rpb24uU2lnbmFsU2Vzc2lvblJlcXVlc3QaIS5jb25uZWN0aW9uLlNpZ25hbFNlc3Npb25SZXNwb25zZRJUCg1EZWxldGVTZXNzaW9uEiAuY29ubmVjdGlvbi5EZWxldGVTZXNzaW9uUmVxdWVzdBohLmNvbm5lY3Rpb24uRGVsZXRlU2Vzc2lvblJlc3BvbnNlEmYKE0xpc3RFbGlnaWJsZURhZW1vbnMSJi5jb25uZWN0aW9uLkxpc3RFbGlnaWJsZURhZW1vbnNSZXF1ZXN0GicuY29ubmVjdGlvbi5MaXN0RWxpZ2libGVEYWVtb25zUmVzcG9uc2USdQoYTGlzdFNlc3Npb25Xb3JrZmxvd0ZpbGVzEisuY29ubmVjdGlvbi5MaXN0U2Vzc2lvbldvcmtmbG93RmlsZXNSZXF1ZXN0GiwuY29ubmVjdGlvbi5MaXN0U2Vzc2lvbldvcmtmbG93RmlsZXNSZXNwb25zZRJyChdSZWFkU2Vzc2lvbldvcmtmbG93RmlsZRIqLmNvbm5lY3Rpb24uUmVhZFNlc3Npb25Xb3JrZmxvd0ZpbGVSZXF1ZXN0GisuY29ubmVjdGlvbi5SZWFkU2Vzc2lvbldvcmtmbG93RmlsZVJlc3BvbnNlEnIKF0xpc3RXb3JrdHJlZXNGb3JQcm9qZWN0EiouY29ubmVjdGlvbi5MaXN0V29ya3RyZWVzRm9yUHJvamVjdFJlcXVlc3QaKy5jb25uZWN0aW9uLkxpc3RXb3JrdHJlZXNGb3JQcm9qZWN0UmVzcG9uc2USVwoOUmVtb3ZlV29ya3RyZWUSIS5jb25uZWN0aW9uLlJlbW92ZVdvcmt0cmVlUmVxdWVzdBoiLmNvbm5lY3Rpb24uUmVtb3ZlV29ya3RyZWVSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message connection.ListToolsRequest
@@ -65,6 +65,58 @@ export const ToolInfoSchema: GenMessage<ToolInfo> = /*@__PURE__*/
   messageDesc(file_connection, 2);
 
 /**
+ * @generated from message connection.ListAgentsRequest
+ */
+export type ListAgentsRequest = Message<"connection.ListAgentsRequest"> & {
+};
+
+/**
+ * Describes the message connection.ListAgentsRequest.
+ * Use `create(ListAgentsRequestSchema)` to create a new message.
+ */
+export const ListAgentsRequestSchema: GenMessage<ListAgentsRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 3);
+
+/**
+ * @generated from message connection.ListAgentsResponse
+ */
+export type ListAgentsResponse = Message<"connection.ListAgentsResponse"> & {
+  /**
+   * @generated from field: repeated connection.AgentInfo agents = 1;
+   */
+  agents: AgentInfo[];
+};
+
+/**
+ * Describes the message connection.ListAgentsResponse.
+ * Use `create(ListAgentsResponseSchema)` to create a new message.
+ */
+export const ListAgentsResponseSchema: GenMessage<ListAgentsResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 4);
+
+/**
+ * @generated from message connection.AgentInfo
+ */
+export type AgentInfo = Message<"connection.AgentInfo"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string label = 2;
+   */
+  label: string;
+};
+
+/**
+ * Describes the message connection.AgentInfo.
+ * Use `create(AgentInfoSchema)` to create a new message.
+ */
+export const AgentInfoSchema: GenMessage<AgentInfo> = /*@__PURE__*/
+  messageDesc(file_connection, 5);
+
+/**
  * @generated from message connection.ListSessionsRequest
  */
 export type ListSessionsRequest = Message<"connection.ListSessionsRequest"> & {
@@ -79,7 +131,7 @@ export type ListSessionsRequest = Message<"connection.ListSessionsRequest"> & {
  * Use `create(ListSessionsRequestSchema)` to create a new message.
  */
 export const ListSessionsRequestSchema: GenMessage<ListSessionsRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 3);
+  messageDesc(file_connection, 6);
 
 /**
  * @generated from message connection.ListSessionsResponse
@@ -96,7 +148,7 @@ export type ListSessionsResponse = Message<"connection.ListSessionsResponse"> & 
  * Use `create(ListSessionsResponseSchema)` to create a new message.
  */
 export const ListSessionsResponseSchema: GenMessage<ListSessionsResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 4);
+  messageDesc(file_connection, 7);
 
 /**
  * @generated from message connection.SessionEntry
@@ -136,6 +188,49 @@ export type SessionEntry = Message<"connection.SessionEntry"> & {
    * @generated from field: string project_id = 7;
    */
   projectId: string;
+
+  /**
+   * Owning daemon instance for multi-host selection (local id for sessions on this daemon).
+   *
+   * @generated from field: string daemon_instance_id = 8;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * Workflow / TUI parity (from .session.yaml + changeset.yaml enrichment).
+   *
+   * @generated from field: string workflow_goal = 9;
+   */
+  workflowGoal: string;
+
+  /**
+   * @generated from field: string workflow_state = 10;
+   */
+  workflowState: string;
+
+  /**
+   * Human-readable elapsed for the active goal/step, or persisted timestamp display.
+   *
+   * @generated from field: string elapsed_display = 11;
+   */
+  elapsedDisplay: string;
+
+  /**
+   * @generated from field: string agent = 12;
+   */
+  agent: string;
+
+  /**
+   * @generated from field: string model = 13;
+   */
+  model: string;
+
+  /**
+   * True when the session is blocked waiting for human input (elicitation).
+   *
+   * @generated from field: bool pending_elicitation = 14;
+   */
+  pendingElicitation: boolean;
 };
 
 /**
@@ -143,7 +238,7 @@ export type SessionEntry = Message<"connection.SessionEntry"> & {
  * Use `create(SessionEntrySchema)` to create a new message.
  */
 export const SessionEntrySchema: GenMessage<SessionEntry> = /*@__PURE__*/
-  messageDesc(file_connection, 5);
+  messageDesc(file_connection, 8);
 
 /**
  * @generated from message connection.ProjectEntry
@@ -175,7 +270,7 @@ export type ProjectEntry = Message<"connection.ProjectEntry"> & {
  * Use `create(ProjectEntrySchema)` to create a new message.
  */
 export const ProjectEntrySchema: GenMessage<ProjectEntry> = /*@__PURE__*/
-  messageDesc(file_connection, 6);
+  messageDesc(file_connection, 9);
 
 /**
  * @generated from message connection.ListProjectsRequest
@@ -192,7 +287,7 @@ export type ListProjectsRequest = Message<"connection.ListProjectsRequest"> & {
  * Use `create(ListProjectsRequestSchema)` to create a new message.
  */
 export const ListProjectsRequestSchema: GenMessage<ListProjectsRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 7);
+  messageDesc(file_connection, 10);
 
 /**
  * @generated from message connection.ListProjectsResponse
@@ -209,7 +304,7 @@ export type ListProjectsResponse = Message<"connection.ListProjectsResponse"> & 
  * Use `create(ListProjectsResponseSchema)` to create a new message.
  */
 export const ListProjectsResponseSchema: GenMessage<ListProjectsResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 8);
+  messageDesc(file_connection, 11);
 
 /**
  * @generated from message connection.CreateProjectRequest
@@ -244,7 +339,7 @@ export type CreateProjectRequest = Message<"connection.CreateProjectRequest"> & 
  * Use `create(CreateProjectRequestSchema)` to create a new message.
  */
 export const CreateProjectRequestSchema: GenMessage<CreateProjectRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 9);
+  messageDesc(file_connection, 12);
 
 /**
  * @generated from message connection.CreateProjectResponse
@@ -261,7 +356,7 @@ export type CreateProjectResponse = Message<"connection.CreateProjectResponse"> 
  * Use `create(CreateProjectResponseSchema)` to create a new message.
  */
 export const CreateProjectResponseSchema: GenMessage<CreateProjectResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 10);
+  messageDesc(file_connection, 13);
 
 /**
  * @generated from message connection.StartSessionRequest
@@ -290,6 +385,20 @@ export type StartSessionRequest = Message<"connection.StartSessionRequest"> & {
    * @generated from field: string agent = 4;
    */
   agent: string;
+
+  /**
+   * Target daemon instance to run this session on. Empty or matching local instance = spawn locally.
+   *
+   * @generated from field: string daemon_instance_id = 5;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * Workflow recipe for the new session ("tdd" or "bugfix"). Empty means default (tdd).
+   *
+   * @generated from field: string recipe = 6;
+   */
+  recipe: string;
 };
 
 /**
@@ -297,7 +406,7 @@ export type StartSessionRequest = Message<"connection.StartSessionRequest"> & {
  * Use `create(StartSessionRequestSchema)` to create a new message.
  */
 export const StartSessionRequestSchema: GenMessage<StartSessionRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 11);
+  messageDesc(file_connection, 14);
 
 /**
  * @generated from message connection.StartSessionResponse
@@ -329,7 +438,7 @@ export type StartSessionResponse = Message<"connection.StartSessionResponse"> & 
  * Use `create(StartSessionResponseSchema)` to create a new message.
  */
 export const StartSessionResponseSchema: GenMessage<StartSessionResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 12);
+  messageDesc(file_connection, 15);
 
 /**
  * @generated from message connection.ConnectSessionRequest
@@ -351,7 +460,7 @@ export type ConnectSessionRequest = Message<"connection.ConnectSessionRequest"> 
  * Use `create(ConnectSessionRequestSchema)` to create a new message.
  */
 export const ConnectSessionRequestSchema: GenMessage<ConnectSessionRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 13);
+  messageDesc(file_connection, 16);
 
 /**
  * @generated from message connection.ConnectSessionResponse
@@ -378,7 +487,7 @@ export type ConnectSessionResponse = Message<"connection.ConnectSessionResponse"
  * Use `create(ConnectSessionResponseSchema)` to create a new message.
  */
 export const ConnectSessionResponseSchema: GenMessage<ConnectSessionResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 14);
+  messageDesc(file_connection, 17);
 
 /**
  * @generated from message connection.ResumeSessionRequest
@@ -400,7 +509,7 @@ export type ResumeSessionRequest = Message<"connection.ResumeSessionRequest"> & 
  * Use `create(ResumeSessionRequestSchema)` to create a new message.
  */
 export const ResumeSessionRequestSchema: GenMessage<ResumeSessionRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 15);
+  messageDesc(file_connection, 18);
 
 /**
  * @generated from message connection.ResumeSessionResponse
@@ -432,7 +541,7 @@ export type ResumeSessionResponse = Message<"connection.ResumeSessionResponse"> 
  * Use `create(ResumeSessionResponseSchema)` to create a new message.
  */
 export const ResumeSessionResponseSchema: GenMessage<ResumeSessionResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 16);
+  messageDesc(file_connection, 19);
 
 /**
  * @generated from message connection.SignalSessionRequest
@@ -459,7 +568,7 @@ export type SignalSessionRequest = Message<"connection.SignalSessionRequest"> & 
  * Use `create(SignalSessionRequestSchema)` to create a new message.
  */
 export const SignalSessionRequestSchema: GenMessage<SignalSessionRequest> = /*@__PURE__*/
-  messageDesc(file_connection, 17);
+  messageDesc(file_connection, 20);
 
 /**
  * @generated from message connection.SignalSessionResponse
@@ -481,7 +590,358 @@ export type SignalSessionResponse = Message<"connection.SignalSessionResponse"> 
  * Use `create(SignalSessionResponseSchema)` to create a new message.
  */
 export const SignalSessionResponseSchema: GenMessage<SignalSessionResponse> = /*@__PURE__*/
-  messageDesc(file_connection, 18);
+  messageDesc(file_connection, 21);
+
+/**
+ * @generated from message connection.DeleteSessionRequest
+ */
+export type DeleteSessionRequest = Message<"connection.DeleteSessionRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message connection.DeleteSessionRequest.
+ * Use `create(DeleteSessionRequestSchema)` to create a new message.
+ */
+export const DeleteSessionRequestSchema: GenMessage<DeleteSessionRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 22);
+
+/**
+ * @generated from message connection.DeleteSessionResponse
+ */
+export type DeleteSessionResponse = Message<"connection.DeleteSessionResponse"> & {
+  /**
+   * @generated from field: bool ok = 1;
+   */
+  ok: boolean;
+};
+
+/**
+ * Describes the message connection.DeleteSessionResponse.
+ * Use `create(DeleteSessionResponseSchema)` to create a new message.
+ */
+export const DeleteSessionResponseSchema: GenMessage<DeleteSessionResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 23);
+
+/**
+ * @generated from message connection.ListEligibleDaemonsRequest
+ */
+export type ListEligibleDaemonsRequest = Message<"connection.ListEligibleDaemonsRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+};
+
+/**
+ * Describes the message connection.ListEligibleDaemonsRequest.
+ * Use `create(ListEligibleDaemonsRequestSchema)` to create a new message.
+ */
+export const ListEligibleDaemonsRequestSchema: GenMessage<ListEligibleDaemonsRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 24);
+
+/**
+ * @generated from message connection.EligibleDaemonEntry
+ */
+export type EligibleDaemonEntry = Message<"connection.EligibleDaemonEntry"> & {
+  /**
+   * @generated from field: string instance_id = 1;
+   */
+  instanceId: string;
+
+  /**
+   * @generated from field: string label = 2;
+   */
+  label: string;
+
+  /**
+   * @generated from field: bool is_local = 3;
+   */
+  isLocal: boolean;
+};
+
+/**
+ * Describes the message connection.EligibleDaemonEntry.
+ * Use `create(EligibleDaemonEntrySchema)` to create a new message.
+ */
+export const EligibleDaemonEntrySchema: GenMessage<EligibleDaemonEntry> = /*@__PURE__*/
+  messageDesc(file_connection, 25);
+
+/**
+ * @generated from message connection.ListEligibleDaemonsResponse
+ */
+export type ListEligibleDaemonsResponse = Message<"connection.ListEligibleDaemonsResponse"> & {
+  /**
+   * @generated from field: repeated connection.EligibleDaemonEntry daemons = 1;
+   */
+  daemons: EligibleDaemonEntry[];
+};
+
+/**
+ * Describes the message connection.ListEligibleDaemonsResponse.
+ * Use `create(ListEligibleDaemonsResponseSchema)` to create a new message.
+ */
+export const ListEligibleDaemonsResponseSchema: GenMessage<ListEligibleDaemonsResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 26);
+
+/**
+ * @generated from message connection.ListSessionWorkflowFilesRequest
+ */
+export type ListSessionWorkflowFilesRequest = Message<"connection.ListSessionWorkflowFilesRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message connection.ListSessionWorkflowFilesRequest.
+ * Use `create(ListSessionWorkflowFilesRequestSchema)` to create a new message.
+ */
+export const ListSessionWorkflowFilesRequestSchema: GenMessage<ListSessionWorkflowFilesRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 27);
+
+/**
+ * @generated from message connection.WorkflowFileEntry
+ */
+export type WorkflowFileEntry = Message<"connection.WorkflowFileEntry"> & {
+  /**
+   * @generated from field: string basename = 1;
+   */
+  basename: string;
+};
+
+/**
+ * Describes the message connection.WorkflowFileEntry.
+ * Use `create(WorkflowFileEntrySchema)` to create a new message.
+ */
+export const WorkflowFileEntrySchema: GenMessage<WorkflowFileEntry> = /*@__PURE__*/
+  messageDesc(file_connection, 28);
+
+/**
+ * @generated from message connection.ListSessionWorkflowFilesResponse
+ */
+export type ListSessionWorkflowFilesResponse = Message<"connection.ListSessionWorkflowFilesResponse"> & {
+  /**
+   * @generated from field: repeated connection.WorkflowFileEntry files = 1;
+   */
+  files: WorkflowFileEntry[];
+};
+
+/**
+ * Describes the message connection.ListSessionWorkflowFilesResponse.
+ * Use `create(ListSessionWorkflowFilesResponseSchema)` to create a new message.
+ */
+export const ListSessionWorkflowFilesResponseSchema: GenMessage<ListSessionWorkflowFilesResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 29);
+
+/**
+ * @generated from message connection.ReadSessionWorkflowFileRequest
+ */
+export type ReadSessionWorkflowFileRequest = Message<"connection.ReadSessionWorkflowFileRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * Allowlisted workflow file basename (server resolves under session dir only).
+   *
+   * @generated from field: string basename = 3;
+   */
+  basename: string;
+};
+
+/**
+ * Describes the message connection.ReadSessionWorkflowFileRequest.
+ * Use `create(ReadSessionWorkflowFileRequestSchema)` to create a new message.
+ */
+export const ReadSessionWorkflowFileRequestSchema: GenMessage<ReadSessionWorkflowFileRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 30);
+
+/**
+ * @generated from message connection.ReadSessionWorkflowFileResponse
+ */
+export type ReadSessionWorkflowFileResponse = Message<"connection.ReadSessionWorkflowFileResponse"> & {
+  /**
+   * @generated from field: string content_utf8 = 1;
+   */
+  contentUtf8: string;
+};
+
+/**
+ * Describes the message connection.ReadSessionWorkflowFileResponse.
+ * Use `create(ReadSessionWorkflowFileResponseSchema)` to create a new message.
+ */
+export const ReadSessionWorkflowFileResponseSchema: GenMessage<ReadSessionWorkflowFileResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 31);
+
+/**
+ * @generated from message connection.WorktreeRow
+ */
+export type WorktreeRow = Message<"connection.WorktreeRow"> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * @generated from field: string branch_label = 2;
+   */
+  branchLabel: string;
+
+  /**
+   * @generated from field: uint64 disk_bytes = 3;
+   */
+  diskBytes: bigint;
+
+  /**
+   * @generated from field: uint32 changed_files = 4;
+   */
+  changedFiles: number;
+
+  /**
+   * @generated from field: int64 lines_added = 5;
+   */
+  linesAdded: bigint;
+
+  /**
+   * @generated from field: int64 lines_removed = 6;
+   */
+  linesRemoved: bigint;
+
+  /**
+   * @generated from field: int64 updated_at_unix_ms = 7;
+   */
+  updatedAtUnixMs: bigint;
+
+  /**
+   * @generated from field: bool stale = 8;
+   */
+  stale: boolean;
+};
+
+/**
+ * Describes the message connection.WorktreeRow.
+ * Use `create(WorktreeRowSchema)` to create a new message.
+ */
+export const WorktreeRowSchema: GenMessage<WorktreeRow> = /*@__PURE__*/
+  messageDesc(file_connection, 32);
+
+/**
+ * @generated from message connection.ListWorktreesForProjectRequest
+ */
+export type ListWorktreesForProjectRequest = Message<"connection.ListWorktreesForProjectRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * When true, runs git/diff/stat refresh for this project before returning cached rows.
+   *
+   * @generated from field: bool refresh = 3;
+   */
+  refresh: boolean;
+};
+
+/**
+ * Describes the message connection.ListWorktreesForProjectRequest.
+ * Use `create(ListWorktreesForProjectRequestSchema)` to create a new message.
+ */
+export const ListWorktreesForProjectRequestSchema: GenMessage<ListWorktreesForProjectRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 33);
+
+/**
+ * @generated from message connection.ListWorktreesForProjectResponse
+ */
+export type ListWorktreesForProjectResponse = Message<"connection.ListWorktreesForProjectResponse"> & {
+  /**
+   * @generated from field: repeated connection.WorktreeRow worktrees = 1;
+   */
+  worktrees: WorktreeRow[];
+};
+
+/**
+ * Describes the message connection.ListWorktreesForProjectResponse.
+ * Use `create(ListWorktreesForProjectResponseSchema)` to create a new message.
+ */
+export const ListWorktreesForProjectResponseSchema: GenMessage<ListWorktreesForProjectResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 34);
+
+/**
+ * @generated from message connection.RemoveWorktreeRequest
+ */
+export type RemoveWorktreeRequest = Message<"connection.RemoveWorktreeRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * Absolute or repo-relative path as accepted by server validation (must appear in git worktree list).
+   *
+   * @generated from field: string worktree_path = 3;
+   */
+  worktreePath: string;
+};
+
+/**
+ * Describes the message connection.RemoveWorktreeRequest.
+ * Use `create(RemoveWorktreeRequestSchema)` to create a new message.
+ */
+export const RemoveWorktreeRequestSchema: GenMessage<RemoveWorktreeRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 35);
+
+/**
+ * @generated from message connection.RemoveWorktreeResponse
+ */
+export type RemoveWorktreeResponse = Message<"connection.RemoveWorktreeResponse"> & {
+  /**
+   * @generated from field: bool ok = 1;
+   */
+  ok: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+};
+
+/**
+ * Describes the message connection.RemoveWorktreeResponse.
+ * Use `create(RemoveWorktreeResponseSchema)` to create a new message.
+ */
+export const RemoveWorktreeResponseSchema: GenMessage<RemoveWorktreeResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 36);
 
 /**
  * @generated from enum connection.Signal
@@ -520,6 +980,14 @@ export const ConnectionService: GenService<{
     methodKind: "unary";
     input: typeof ListToolsRequestSchema;
     output: typeof ListToolsResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.ListAgents
+   */
+  listAgents: {
+    methodKind: "unary";
+    input: typeof ListAgentsRequestSchema;
+    output: typeof ListAgentsResponseSchema;
   },
   /**
    * @generated from rpc connection.ConnectionService.ListSessions
@@ -576,6 +1044,54 @@ export const ConnectionService: GenService<{
     methodKind: "unary";
     input: typeof SignalSessionRequestSchema;
     output: typeof SignalSessionResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.DeleteSession
+   */
+  deleteSession: {
+    methodKind: "unary";
+    input: typeof DeleteSessionRequestSchema;
+    output: typeof DeleteSessionResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.ListEligibleDaemons
+   */
+  listEligibleDaemons: {
+    methodKind: "unary";
+    input: typeof ListEligibleDaemonsRequestSchema;
+    output: typeof ListEligibleDaemonsResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.ListSessionWorkflowFiles
+   */
+  listSessionWorkflowFiles: {
+    methodKind: "unary";
+    input: typeof ListSessionWorkflowFilesRequestSchema;
+    output: typeof ListSessionWorkflowFilesResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.ReadSessionWorkflowFile
+   */
+  readSessionWorkflowFile: {
+    methodKind: "unary";
+    input: typeof ReadSessionWorkflowFileRequestSchema;
+    output: typeof ReadSessionWorkflowFileResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.ListWorktreesForProject
+   */
+  listWorktreesForProject: {
+    methodKind: "unary";
+    input: typeof ListWorktreesForProjectRequestSchema;
+    output: typeof ListWorktreesForProjectResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.RemoveWorktree
+   */
+  removeWorktree: {
+    methodKind: "unary";
+    input: typeof RemoveWorktreeRequestSchema;
+    output: typeof RemoveWorktreeResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_connection, 0);

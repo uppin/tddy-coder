@@ -62,6 +62,7 @@ fn write_exited_session(session_dir: &std::path::Path, session_id: &str, pid: u3
         pid: Some(pid),
         tool: Some("tddy-coder".to_string()),
         livekit_room: Some("room".to_string()),
+        pending_elicitation: false,
     };
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }

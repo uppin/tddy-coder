@@ -200,6 +200,8 @@ pub struct TelegramSessionWatcher {
     last_workflow: HashMap<String, (bool, String)>,
     last_goal: HashMap<String, String>,
     last_backend: HashMap<String, (String, String)>,
+    /// Last serialized [`ModeChanged`] signature per session (elicitation Telegram dedupe).
+    last_elicitation_signature: HashMap<String, String>,
 }
 
 impl TelegramSessionWatcher {
@@ -215,6 +217,7 @@ impl TelegramSessionWatcher {
             last_workflow: HashMap::new(),
             last_goal: HashMap::new(),
             last_backend: HashMap::new(),
+            last_elicitation_signature: HashMap::new(),
         }
     }
 
@@ -324,8 +327,9 @@ impl TelegramSessionWatcher {
 
     /// Handle a gRPC [`ServerMessage`] from the child `tddy-coder` Presenter observer stream.
     ///
-    /// Maps `StateChanged`, `WorkflowComplete`, `GoalStarted`, and `BackendSelected`; deduplicates
-    /// repeated identical payloads per session so Telegram is not spammed.
+    /// Maps `StateChanged`, `WorkflowComplete`, `GoalStarted`, `BackendSelected`, and
+    /// `ModeChanged` (elicitation); deduplicates repeated identical payloads per session so Telegram
+    /// is not spammed.
     pub async fn on_server_message<S: TelegramSender + ?Sized>(
         &mut self,
         config: &DaemonConfig,
@@ -383,6 +387,42 @@ impl TelegramSessionWatcher {
                 }
                 self.last_backend.insert(session_id.to_string(), key);
                 Some(format!("Session {label}: using {} ({})", b.agent, b.model))
+            }
+            Event::ModeChanged(mc) => {
+                log::debug!(
+                    target: "tddy_daemon::telegram",
+                    "on_server_message: ModeChanged for session_id={} (elicitation path)",
+                    session_id
+                );
+                let sig = crate::elicitation::elicitation_signature_for_mode_changed(mc);
+                if self.last_elicitation_signature.get(session_id) == Some(&sig) {
+                    log::debug!(
+                        target: "tddy_daemon::telegram",
+                        "on_server_message: duplicate elicitation ModeChanged signature — skip send session_id={}",
+                        session_id
+                    );
+                    return Ok(());
+                }
+                let line =
+                    crate::elicitation::telegram_elicitation_line_for_mode_changed(&label, mc);
+                if let Some(t) = line {
+                    log::info!(
+                        target: "tddy_daemon::telegram",
+                        "on_server_message: elicitation Telegram line ready session_id={} sig_len={}",
+                        session_id,
+                        sig.len()
+                    );
+                    self.last_elicitation_signature
+                        .insert(session_id.to_string(), sig);
+                    Some(t)
+                } else {
+                    log::debug!(
+                        target: "tddy_daemon::telegram",
+                        "on_server_message: ModeChanged not classified as user elicitation — no Telegram session_id={}",
+                        session_id
+                    );
+                    None
+                }
             }
             _ => None,
         };
@@ -515,6 +555,70 @@ mod acceptance_unit_tests {
             mock.calls(),
             0,
             "inactive sessions must not trigger Telegram sends"
+        );
+    }
+
+    /// Acceptance: `ModeChanged` with document approval (user-input mode) must emit a Telegram
+    /// line that clearly indicates approval or input is required (plus session label).
+    #[tokio::test]
+    async fn telegram_notifier_sends_elicitation_message_on_mode_changed_to_user_input() {
+        let mut watcher = TelegramSessionWatcher::new();
+        let mut cfg = DaemonConfig::default();
+        cfg.telegram = Some(crate::config::TelegramConfig {
+            enabled: true,
+            bot_token: "x".to_string(),
+            chat_ids: vec![42],
+        });
+        let mem = InMemoryTelegramSender::new();
+        let sid = "018f1234-5678-7abc-8def-123456789abc";
+        let msg = tddy_service::convert::session_document_approval_to_server_message(
+            "doc-preview".to_string(),
+        );
+        watcher
+            .on_server_message(&cfg, &mem, sid, &msg)
+            .await
+            .unwrap();
+        let recorded = mem.recorded();
+        assert_eq!(
+            recorded.len(),
+            1,
+            "document-approval ModeChanged must produce exactly one Telegram message"
+        );
+        let text = &recorded[0].1;
+        let lower = text.to_lowercase();
+        assert!(
+            lower.contains("input") || lower.contains("approval"),
+            "elicitation Telegram text must mention input or approval; got {text:?}"
+        );
+    }
+
+    /// Acceptance: identical `ModeChanged` payloads must not increase send count (dedupe).
+    #[tokio::test]
+    async fn telegram_notifier_dedupes_repeated_identical_elicitation_signals() {
+        let mut watcher = TelegramSessionWatcher::new();
+        let mut cfg = DaemonConfig::default();
+        cfg.telegram = Some(crate::config::TelegramConfig {
+            enabled: true,
+            bot_token: "x".to_string(),
+            chat_ids: vec![42],
+        });
+        let mem = InMemoryTelegramSender::new();
+        let sid = "018faaaa-1111-7abc-8def-123456789abc";
+        let msg = tddy_service::convert::session_document_approval_to_server_message(
+            "same-doc".to_string(),
+        );
+        watcher
+            .on_server_message(&cfg, &mem, sid, &msg)
+            .await
+            .unwrap();
+        watcher
+            .on_server_message(&cfg, &mem, sid, &msg)
+            .await
+            .unwrap();
+        assert_eq!(
+            mem.len(),
+            1,
+            "duplicate identical elicitation ModeChanged must not spam Telegram"
         );
     }
 }

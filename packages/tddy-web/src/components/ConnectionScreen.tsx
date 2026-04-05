@@ -1669,9 +1669,27 @@ export function ConnectionScreen({
                   <TableBody>
                     {projectSessions.map((s) => {
                       const sessionAction = primaryFloatingSessionAction(s.sessionId);
+                      const pendingElicitation = s.pendingElicitation === true;
                       return (
-                      <TableRow key={s.sessionId}>
-                        <TableCell>{sessionIdFirstSegment(s.sessionId)}</TableCell>
+                      <TableRow
+                        key={s.sessionId}
+                        data-pending-elicitation={pendingElicitation ? "true" : "false"}
+                      >
+                        <TableCell>
+                          <span className="inline-flex flex-wrap items-center gap-2">
+                            <span>{sessionIdFirstSegment(s.sessionId)}</span>
+                            {pendingElicitation ? (
+                              <span
+                                role="status"
+                                className="inline-flex shrink-0 items-center rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-950"
+                                aria-label="Session needs your input or approval"
+                                data-testid={`elicitation-indicator-${s.sessionId}`}
+                              >
+                                Input needed
+                              </span>
+                            ) : null}
+                          </span>
+                        </TableCell>
                         <TableCell>{formatSessionCreatedAt(s.createdAt)}</TableCell>
                         <TableCell>{s.status}</TableCell>
                         <TableCell>{s.daemonInstanceId || "—"}</TableCell>
@@ -1758,9 +1776,27 @@ export function ConnectionScreen({
             <TableBody>
               {orphanSessions.map((s) => {
                 const orphanSessionAction = primaryFloatingSessionAction(s.sessionId);
+                const pendingElicitation = s.pendingElicitation === true;
                 return (
-                <TableRow key={s.sessionId}>
-                  <TableCell>{sessionIdFirstSegment(s.sessionId)}</TableCell>
+                <TableRow
+                  key={s.sessionId}
+                  data-pending-elicitation={pendingElicitation ? "true" : "false"}
+                >
+                  <TableCell>
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      <span>{sessionIdFirstSegment(s.sessionId)}</span>
+                      {pendingElicitation ? (
+                        <span
+                          role="status"
+                          className="inline-flex shrink-0 items-center rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-950"
+                          aria-label="Session needs your input or approval"
+                          data-testid={`elicitation-indicator-${s.sessionId}`}
+                        >
+                          Input needed
+                        </span>
+                      ) : null}
+                    </span>
+                  </TableCell>
                   <TableCell>{formatSessionCreatedAt(s.createdAt)}</TableCell>
                   <TableCell>{s.status}</TableCell>
                   <TableCell>{s.daemonInstanceId || "—"}</TableCell>

@@ -188,6 +188,7 @@ mod tests {
             pid: Some(pid),
             tool: None,
             livekit_room: None,
+            pending_elicitation: false,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }
