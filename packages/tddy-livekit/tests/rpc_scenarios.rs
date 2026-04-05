@@ -821,6 +821,71 @@ async fn rpc_scenarios() -> Result<()> {
     }
 
     // -----------------------------------------------------------------------
+    // Bidi input ordering: rapid sequential sends must not reorder on the server
+    // (regression: per-packet tokio::spawn could complete input_tx.send out of arrival order).
+    // -----------------------------------------------------------------------
+    {
+        let harness = CountingHarness::start(&livekit, "bidi-input-order").await?;
+
+        {
+            log::debug!("scenario: bidi stream preserves message order under rapid send");
+            const N: usize = 64;
+            let (mut sender, mut rx) = harness
+                .rpc_client
+                .start_bidi_stream("test.EchoService", "EchoBidiStream")
+                .map_err(|e| anyhow::anyhow!("start bidi stream: {}", e))?;
+
+            for i in 0..N {
+                let msg = format!("m{:03}", i);
+                sender
+                    .send(
+                        EchoRequest {
+                            message: msg,
+                        }
+                        .encode_to_vec(),
+                        i == N - 1,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("send {}: {}", i, e))?;
+            }
+
+            let mut responses = Vec::new();
+            while let Some(chunk) = rx.recv().await {
+                let bytes = chunk.map_err(|e| anyhow::anyhow!("bidi chunk: {}", e))?;
+                if bytes.is_empty() {
+                    continue;
+                }
+                let response = EchoResponse::decode(&bytes[..])?;
+                responses.push(response.message);
+            }
+
+            assert_eq!(
+                responses.len(),
+                N,
+                "expected {} echo responses; handler_count={}",
+                N,
+                harness.handler_count.load(Ordering::SeqCst)
+            );
+            for i in 0..N {
+                let expected = format!("handler=1 seq={} msg=m{:03}", i + 1, i);
+                assert_eq!(
+                    responses[i], expected,
+                    "response index {} should match sequential handler output",
+                    i
+                );
+            }
+        }
+
+        assert_eq!(
+            harness.handler_count.load(Ordering::SeqCst),
+            1,
+            "exactly one bidi handler for the stream"
+        );
+
+        harness.teardown();
+    }
+
+    // -----------------------------------------------------------------------
     // Duplicate identity: second client with same identity disconnects first
     // -----------------------------------------------------------------------
     //

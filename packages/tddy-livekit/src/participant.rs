@@ -366,31 +366,26 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                         event_participant,
                         payload.len()
                     );
-                    let bridge = self.bridge.clone();
-                    let local = self.room.local_participant();
-                    let active_streams = self.active_streams.clone();
-                    let active_bidi = self.active_bidi.clone();
-                    let active_bidi_sessions = self.active_bidi_sessions.clone();
-                    let shared_publisher = self.shared_publisher.clone();
                     let payload = Arc::try_unwrap(payload).unwrap_or_else(|a| (*a).clone());
 
-                    tokio::spawn(async move {
-                        if let Err(e) = Self::handle_incoming(
-                            &payload,
-                            event_participant,
-                            &remote_identities,
-                            &bridge,
-                            &local,
-                            &active_streams,
-                            &active_bidi,
-                            &active_bidi_sessions,
-                            &shared_publisher,
-                        )
-                        .await
-                        {
-                            log::error!("RPC handle error: {}", e);
-                        }
-                    });
+                    // Must not `spawn` per packet: bidi input is forwarded with `input_tx.send` inside
+                    // `handle_incoming`. Concurrent tasks can complete sends out of arrival order,
+                    // reordering keystrokes on `StreamTerminalIO` (and any other bidi stream).
+                    if let Err(e) = Self::handle_incoming(
+                        &payload,
+                        event_participant,
+                        &remote_identities,
+                        &self.bridge,
+                        &self.room.local_participant(),
+                        &self.active_streams,
+                        &self.active_bidi,
+                        &self.active_bidi_sessions,
+                        &self.shared_publisher,
+                    )
+                    .await
+                    {
+                        log::error!("RPC handle error: {}", e);
+                    }
                 }
                 RoomEvent::ParticipantDisconnected(remote) => {
                     log::info!("[LiveKit] ParticipantDisconnected {:?}", remote.identity());
