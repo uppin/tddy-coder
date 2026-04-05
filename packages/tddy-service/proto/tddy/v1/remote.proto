@@ -28,6 +28,7 @@ message ClientMessage {
     ViewSessionDocument view_session_document = 13;
     RefineSessionDocument refine_session_document = 14;
     DismissViewer dismiss_viewer = 15;
+    RejectSessionDocument reject_session_document = 18;
     StartSession start_session = 16;
     ConfirmWorktree confirm_worktree = 17;
   }
@@ -50,6 +51,7 @@ message ApproveSessionDocument {}
 message ViewSessionDocument {}
 message RefineSessionDocument {}
 message DismissViewer {}
+message RejectSessionDocument {}
 
 message SubmitFeatureInput {
   string text = 1;

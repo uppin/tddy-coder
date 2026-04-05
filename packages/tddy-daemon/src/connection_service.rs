@@ -435,6 +435,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &livekit,
                     SpawnOptions {
                         resume_session_id: None,
+                        new_session_id: None,
                         project_id: pid,
                         agent,
                         mouse: spawn_mouse,
@@ -450,6 +451,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &livekit,
                     SpawnOptions {
                         resume_session_id: None,
+                        new_session_id: None,
                         project_id: pid,
                         agent,
                         mouse: spawn_mouse,
@@ -572,6 +574,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &livekit,
                     SpawnOptions {
                         resume_session_id: Some(session_id.as_str()),
+                        new_session_id: None,
                         project_id: pid,
                         agent: None,
                         mouse: spawn_mouse,
@@ -587,6 +590,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &livekit,
                     SpawnOptions {
                         resume_session_id: Some(session_id.as_str()),
+                        new_session_id: None,
                         project_id: pid,
                         agent: None,
                         mouse: spawn_mouse,

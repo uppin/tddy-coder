@@ -109,19 +109,24 @@ pub fn telegram_elicitation_line_for_mode_changed(
     use app_mode_proto::Variant;
     let line = match v {
         Variant::DocumentReview(_) => format!(
-            "Session {session_label}: approval needed — review the session document before continuing"
+            "Session {session_label}: approval needed — review the session document above, then use the buttons below (Approve / Reject / Refine), or the web / LiveKit UI."
         ),
         Variant::MarkdownViewer(_) => format!(
-            "Session {session_label}: input needed — review the document in the UI before continuing"
+            "Session {session_label}: review the plan document. Use the buttons below (same as the terminal UI: Approve, Refine, Back)."
         ),
         Variant::FeatureInput(_) => format!(
-            "Session {session_label}: input needed — feature input is required to continue"
+            "Session {session_label}: describe the feature to implement.\n\
+Send: /submit-feature {session_label} <your description>\n\
+Or use the web / LiveKit UI."
         ),
-        Variant::Select(_) | Variant::MultiSelect(_) => format!(
-            "Session {session_label}: input needed — answer the clarification prompt to continue"
+        Variant::Select(_) => format!(
+            "Session {session_label}: clarification — tap an option below, or use the web / LiveKit UI."
+        ),
+        Variant::MultiSelect(_) => format!(
+            "Session {session_label}: clarification — send /answer-multi {session_label} with comma-separated indices (see message above), or use the web / LiveKit UI."
         ),
         Variant::TextInput(_) => format!(
-            "Session {session_label}: input needed — provide text input to continue"
+            "Session {session_label}: send /answer-text {session_label} <your reply>, or use the web / LiveKit UI."
         ),
         Variant::Running(_) | Variant::Done(_) => {
             log::debug!(

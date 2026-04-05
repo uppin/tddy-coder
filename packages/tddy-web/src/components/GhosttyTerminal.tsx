@@ -26,6 +26,7 @@ import {
   TERMINAL_ZOOM_BRIDGE_EVENT,
 } from "../lib/terminalZoomBridge";
 import { TERMINAL_OVERLAY_FIXED_GRID_CHAR_WIDTH_EM } from "./connection/config";
+import { clientPointToTerminalCell } from "../lib/terminalMouseCellCoords";
 
 /** Finger separation change (px) required before applying one font step during touch pinch. */
 const PINCH_FONT_STEP_SPAN_PX = 22;
@@ -516,16 +517,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const term = termRef.current;
       console.log("[GhosttyTerminal] mouse listeners attached to container", { ready, hasContainer: !!container, hasTerm: !!term });
 
-      const toCellCoords = (offsetX: number, offsetY: number): { col: number; row: number } | null => {
-        const rect = container.getBoundingClientRect();
-        const c = term.cols;
-        const r = term.rows;
-        if (c <= 0 || r <= 0) return null;
-        const cellW = rect.width / c;
-        const cellH = rect.height / r;
-        const col = Math.floor(offsetX / cellW) + 1;
-        const row = Math.floor(offsetY / cellH) + 1;
-        return { col: Math.max(1, Math.min(col, c)), row: Math.max(1, Math.min(row, r)) };
+      const canvasGridRect = () => {
+        const canvas = term.element?.querySelector("canvas");
+        if (!canvas) return null;
+        const r = canvas.getBoundingClientRect();
+        return { left: r.left, top: r.top, width: r.width, height: r.height };
+      };
+
+      const toCellCoords = (clientX: number, clientY: number): { col: number; row: number } | null => {
+        const grid = canvasGridRect();
+        if (!grid) return null;
+        return clientPointToTerminalCell(clientX, clientY, grid, term.cols, term.rows);
       };
 
       const sendSgr = (pb: number, col: number, row: number, release: boolean) => {
@@ -534,7 +536,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       };
 
       const onMouseDown = (e: MouseEvent) => {
-        const coords = toCellCoords(e.offsetX, e.offsetY);
+        const coords = toCellCoords(e.clientX, e.clientY);
         const tracking = term.hasMouseTracking?.() ?? false;
         console.log("[GhosttyTerminal] mousedown", { col: coords?.col, row: coords?.row, offsetX: e.offsetX, offsetY: e.offsetY, hasMouseTracking: tracking });
         if (!tracking) return;
@@ -544,7 +546,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
       };
       const onMouseUp = (e: MouseEvent) => {
-        const coords = toCellCoords(e.offsetX, e.offsetY);
+        const coords = toCellCoords(e.clientX, e.clientY);
         const tracking = term.hasMouseTracking?.() ?? false;
         console.log("[GhosttyTerminal] mouseup", { col: coords?.col, row: coords?.row, hasMouseTracking: tracking });
         if (!tracking) return;
@@ -560,10 +562,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
         wheelPinchAccumRef.current = 0;
 
-        const rect = container.getBoundingClientRect();
-        const offsetX = e.clientX - rect.left;
-        const offsetY = e.clientY - rect.top;
-        const coords = toCellCoords(offsetX, offsetY);
+        const coords = toCellCoords(e.clientX, e.clientY);
         const tracking = term.hasMouseTracking?.() ?? false;
         console.log("[GhosttyTerminal] wheel", { col: coords?.col, row: coords?.row, deltaY: e.deltaY, hasMouseTracking: tracking });
         if (!tracking) return;
@@ -580,10 +579,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         if (e.touches.length > 1) return;
         if (e.changedTouches.length === 0) return;
         const t = e.changedTouches[0];
-        const rect = container.getBoundingClientRect();
-        const offsetX = t.clientX - rect.left;
-        const offsetY = t.clientY - rect.top;
-        const coords = toCellCoords(offsetX, offsetY);
+        const coords = toCellCoords(t.clientX, t.clientY);
         const tracking = term.hasMouseTracking?.() ?? false;
         if (tracking && coords) {
           sendSgr(0, coords.col, coords.row, false);
@@ -594,10 +590,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         // Another finger still on the surface — skip release (pinch / multi-touch).
         if (e.touches.length > 0) return;
         const t = e.changedTouches[0];
-        const rect = container.getBoundingClientRect();
-        const offsetX = t.clientX - rect.left;
-        const offsetY = t.clientY - rect.top;
-        const coords = toCellCoords(offsetX, offsetY);
+        const coords = toCellCoords(t.clientX, t.clientY);
         const tracking = term.hasMouseTracking?.() ?? false;
         if (tracking && coords) {
           sendSgr(0, coords.col, coords.row, true);
