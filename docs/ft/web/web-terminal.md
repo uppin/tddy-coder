@@ -37,16 +37,27 @@ When the terminal connects and renders, it supports:
 
 ### Connection chrome (LiveKit overlay)
 
-When **`GhosttyTerminalLiveKit`** is mounted with **`connectionOverlay`**, the shell includes:
+When **`GhosttyTerminalLiveKit`** is mounted with **`connectionOverlay`**, connection controls render in a dedicated top row (**`TerminalConnectionStatusBar`**, `data-testid="terminal-connection-status-bar"`) above the Ghostty terminal area. The row uses **`role="toolbar"`** and **`aria-label="Terminal connection"`**. **`ConnectionTerminalChrome`** supplies the interactive content; supported layouts are **`corner`** (controls over the terminal canvas), **`paneHeader`** (compact dot + menu for floating toolbars), and **`statusBar`** (horizontal toolbar: build id, status dot, fullscreen; no overlay on the grid). **`GhosttyTerminalLiveKit`**, **`ConnectionScreen`**, and the standalone connected view use **`chromeLayout="statusBar"`** inside the status bar wrapper.
 
-- **Build ID**: Shown top-left when provided (`data-testid="build-id"`).
-- **Status dot**: Fixed top-right (`data-testid="connection-status-dot"`). Attribute **`data-connection-status`** reads **`connecting`**, **`connected`**, or **`error`** for the LiveKit / token phase. While **`connecting`**, the dot uses a pulse animation; steady colors distinguish **`connected`** and **`error`**. Users who prefer reduced motion receive a non-animated connecting state via **`prefers-reduced-motion`**.
+**Placement modes** (**`connectionChromePlacement`** on **`GhosttyTerminalLiveKit`**, default **`floating`**):
+
+- **`floating`**: Full status bar — build id, status dot, fullscreen control, and an optional trailing slot for the mobile keyboard affordance when **`showMobileKeyboard`** applies.
+- **`none`**: Compact status bar — status dot and menu (and optional mobile keyboard slot); build id and fullscreen controls are omitted so overlay / mini terminal presentations stay unobstructed.
+
+The shell includes:
+
+- **Build ID**: Shown in the status bar row when provided (`data-testid="build-id"`) whenever the placement mode includes it.
+- **Status dot**: **`data-testid="connection-status-dot"`**. Attribute **`data-connection-status`** reads **`connecting`**, **`connected`**, or **`error`** for the LiveKit / token phase. While **`connecting`**, the dot uses a pulse animation; steady colors distinguish **`connected`** and **`error`**. Users who prefer reduced motion receive a non-animated connecting state via **`prefers-reduced-motion`**.
 - **LiveKit status strip**: With the overlay enabled, the plain **`livekit-status`** row does not occupy layout during **`connecting`** or **`connected`**; the dot carries those phases. Token, room, and stream failures surface through **`data-testid="livekit-error"`** and related error UI.
-- **Fullscreen**: A dedicated control (`data-testid="terminal-fullscreen-button"`, top-right beside the dot) enters or exits document fullscreen on the connected terminal subtree. The implementation uses the standard Fullscreen API with vendor-prefixed fallbacks (`packages/tddy-web/src/lib/browserFullscreen.ts`). The parent passes **`fullscreenTargetRef`** to select the element; when absent, chrome supplies an internal fullscreen target wrapper (`data-testid="connection-chrome-fullscreen-fallback-target"`). **`fullscreenchange`** and **`webkitfullscreenchange`** on **`document`** keep the control label in sync with the active element.
+- **Fullscreen**: A dedicated control (`data-testid="terminal-fullscreen-button"`, in the status bar row when placement is **`floating`**) enters or exits document fullscreen on the connected terminal subtree. The implementation uses the standard Fullscreen API with vendor-prefixed fallbacks (`packages/tddy-web/src/lib/browserFullscreen.ts`). The parent passes **`fullscreenTargetRef`** to select the element; when absent, chrome supplies an internal fullscreen target wrapper (`data-testid="connection-chrome-fullscreen-fallback-target"`). **`fullscreenchange`** and **`webkitfullscreenchange`** on **`document`** keep the control label in sync with the active element.
 - **Menu**: Activating the dot opens a menu with **Disconnect** (`data-testid="connection-menu-disconnect"`) and **Terminate** (`data-testid="connection-menu-terminate"`) when the host passes **`onTerminate`** (daemon flows with session context). The standalone GitHub connect flow omits **Terminate** when no session-backed handler exists. **Terminate** runs a native **`window.confirm`** dialog; **`onTerminate`** runs only after the user confirms. The menu closes on **Escape** or an outside pointer press.
 - **Interrupt (Stop)**: There is no web **Stop** button; interrupt is the TUI **Stop** pane (red **U+25A0**), to the right of the Enter strip. Clicks are SGR mouse bytes to the virtual TUI, same path as keyboard **Ctrl+C** (byte **0x03**).
 
+**Layout acceptance (tests)**: Pure geometry helpers in **`terminalStatusBarLayout.ts`** express rules such as “status bar bottom meets or above terminal top” and “control centers lie outside the terminal canvas.” Bun tests cover **`terminalStatusBarLayout`**; Cypress **`GhosttyTerminalLiveKit.cy.tsx`** imports the same helpers so assertions stay aligned with the library.
+
 **ConnectedTerminal** wrappers (**App** after connect and **ConnectionScreen** after session connect) render the fullscreen **`connected-terminal-container`** with this chrome during JWT acquisition so the status dot reflects the loading phase while **`livekit-status`** text stays suppressed for normal overlay states.
+
+Implementation reference: [terminal-connection-chrome.md](../../../packages/tddy-web/docs/terminal-connection-chrome.md).
 
 ### Mobile UX
 
