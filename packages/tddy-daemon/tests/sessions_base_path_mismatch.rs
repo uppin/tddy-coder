@@ -54,7 +54,7 @@ fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
             None
         }
     });
-    ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None)
+    ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None, None)
 }
 
 #[tokio::test]
@@ -79,6 +79,7 @@ async fn daemon_finds_sessions_created_by_tddy_coder() {
         pid: Some(99999),
         tool: Some("tddy-coder".to_string()),
         livekit_room: None,
+        pending_elicitation: false,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
