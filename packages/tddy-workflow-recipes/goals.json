@@ -15,6 +15,11 @@
       "proto": "post_green_review.proto"
     },
     {
+      "name": "branch-review",
+      "schema": "branch-review.schema.json",
+      "proto": "branch_review.proto"
+    },
+    {
       "name": "evaluate-changes",
       "schema": "evaluate.schema.json",
       "proto": "evaluate_changes.proto"

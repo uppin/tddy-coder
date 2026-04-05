@@ -1,5 +1,14 @@
 import React from "react";
+import {
+  plannedChromeCentersClearTerminalCanvas,
+  statusBarBottomMeetsOrAboveTerminalTop,
+  type ViewRect,
+} from "../../src/lib/terminalStatusBarLayout";
 import { GhosttyTerminalLiveKit } from "../../src/components/GhosttyTerminalLiveKit";
+
+function domRectToViewRect(r: DOMRect): ViewRect {
+  return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+}
 
 describe("GhosttyTerminalLiveKit", () => {
   const getToken = () => Promise.resolve({ token: "fake-token", ttlSeconds: BigInt(600) });
@@ -193,6 +202,142 @@ describe("GhosttyTerminalLiveKit", () => {
           msg.toLowerCase().includes("process"),
         "confirmation copy should mention stopping the session or process",
       ).to.be.true;
+    });
+  });
+});
+
+/**
+ * PRD Testing Plan — terminal status bar (chrome not over Ghostty canvas).
+ * These tests expect `data-testid="terminal-connection-status-bar"` and layout where the bar
+ * precedes `[data-testid="ghostty-terminal"]` with no control centers intersecting the terminal rect.
+ */
+describe("Terminal status bar acceptance (PRD)", () => {
+  const getToken = () => Promise.resolve({ token: "fake-token", ttlSeconds: BigInt(600) });
+
+  function assertControlCentersNotInsideTerminalCanvas() {
+    cy.get("[data-testid='ghostty-terminal']").then(($term) => {
+      const termRect = domRectToViewRect($term[0].getBoundingClientRect());
+      const doc = $term[0].ownerDocument;
+      const selectors = [
+        "[data-testid='connection-status-dot']",
+        "[data-testid='terminal-fullscreen-button']",
+        "[data-testid='build-id']",
+        "[data-testid='mobile-keyboard-button']",
+      ];
+      const controlRects: ViewRect[] = [];
+      for (const sel of selectors) {
+        const el = doc.querySelector(sel);
+        if (!el) {
+          throw new Error(`expected ${sel} to exist for geometry assertion`);
+        }
+        controlRects.push(domRectToViewRect(el.getBoundingClientRect()));
+      }
+      expect(
+        plannedChromeCentersClearTerminalCanvas(termRect, controlRects),
+        "control centers must not lie inside ghostty-terminal rect (shared layout helper)",
+      ).to.be.true;
+    });
+  }
+
+  it("ghostty_livekit_chrome_lives_in_status_bar_not_over_canvas", () => {
+    const onDisconnect = cy.stub();
+    cy.mount(
+      <div data-testid="ghostty-livekit-acceptance-host" style={{ height: 420, width: 640, position: "relative" }}>
+        <GhosttyTerminalLiveKit
+          url="ws://localhost:9999"
+          token="fake-token"
+          getToken={getToken}
+          ttlSeconds={BigInt(600)}
+          connectionOverlay={{ onDisconnect, buildId: "acceptance-build" }}
+          showMobileKeyboard
+        />
+      </div>,
+    );
+    cy.get("[data-testid='terminal-connection-status-bar']", { timeout: 20000 }).should("exist");
+    cy.get("[data-testid='terminal-connection-status-bar']").within(() => {
+      cy.get("[data-testid='connection-status-dot']").should("exist");
+      cy.get("[data-testid='build-id']").should("contain.text", "acceptance-build");
+      cy.get("[data-testid='terminal-fullscreen-button']").should("exist");
+      cy.get("[data-testid='mobile-keyboard-button']").should("exist");
+    });
+    cy.get("[data-testid='ghostty-terminal']", { timeout: 20000 }).should("exist");
+    cy.get("[data-testid='terminal-connection-status-bar']").then(($bar) => {
+      cy.get("[data-testid='ghostty-terminal']").then(($term) => {
+        const bar = $bar[0];
+        const term = $term[0];
+        expect(
+          bar.compareDocumentPosition(term) & Node.DOCUMENT_POSITION_FOLLOWING,
+          "status bar must precede ghostty-terminal in document order",
+        ).to.be.ok;
+        expect(
+          statusBarBottomMeetsOrAboveTerminalTop(
+            domRectToViewRect(bar.getBoundingClientRect()),
+            domRectToViewRect(term.getBoundingClientRect()),
+          ),
+          "status bar bottom must meet or be above terminal top",
+        ).to.be.true;
+      });
+    });
+    assertControlCentersNotInsideTerminalCanvas();
+  });
+
+  it("connection_menu_and_fullscreen_still_functional", () => {
+    const onDisconnect = cy.stub().as("onDisconnect");
+    cy.mount(
+      <div style={{ height: 420, width: 640, position: "relative" }}>
+        <GhosttyTerminalLiveKit
+          url="ws://localhost:9999"
+          token="fake-token"
+          getToken={getToken}
+          ttlSeconds={BigInt(600)}
+          connectionOverlay={{ onDisconnect, buildId: "menu-build" }}
+        />
+      </div>,
+    );
+    cy.window().then((win) => {
+      cy.stub(win.Element.prototype, "requestFullscreen").as("requestFullscreenStub").resolves();
+    });
+    cy.get("[data-testid='terminal-connection-status-bar'] [data-testid='connection-status-dot']", { timeout: 20000 })
+      .should("be.visible")
+      .click();
+    cy.get("[data-testid='connection-menu-disconnect']", { timeout: 5000 }).should("be.visible");
+    cy.get("[data-testid='connection-menu-disconnect']").click();
+    cy.get("@onDisconnect").should("have.been.calledOnce");
+    cy.get("[data-testid='terminal-connection-status-bar'] [data-testid='terminal-fullscreen-button']", {
+      timeout: 20000,
+    })
+      .should("be.visible")
+      .click();
+    cy.get("@requestFullscreenStub").should("have.been.calledOnce");
+  });
+
+  it("mobile_keyboard_affordance_in_status_bar", () => {
+    cy.mount(
+      <div style={{ height: 420, width: 640, position: "relative" }}>
+        <GhosttyTerminalLiveKit
+          url="ws://localhost:9999"
+          token="fake-token"
+          getToken={getToken}
+          ttlSeconds={BigInt(600)}
+          connectionOverlay={{ onDisconnect: () => {} }}
+          showMobileKeyboard
+          preventFocusOnTap={false}
+        />
+      </div>,
+    );
+    cy.get("[data-testid='terminal-connection-status-bar'] [data-testid='mobile-keyboard-button']", { timeout: 20000 })
+      .should("exist")
+      .and("contain.text", "Keyboard");
+    cy.get("[data-testid='terminal-connection-status-bar']").then(($bar) => {
+      cy.get("[data-testid='ghostty-terminal']").then(($term) => {
+        expect(
+          statusBarBottomMeetsOrAboveTerminalTop(
+            domRectToViewRect($bar[0].getBoundingClientRect()),
+            domRectToViewRect($term[0].getBoundingClientRect()),
+          ),
+          "mobile keyboard row must sit above the terminal canvas",
+        ).to.be.true;
+      });
     });
   });
 });

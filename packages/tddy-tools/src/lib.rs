@@ -6,6 +6,7 @@
 //! - [`schema`] — embedded JSON Schemas, [`validate_output`], `get-schema` payload.
 //! - [`schema_manifest`] — goal registry from `schema-manifest.json` (`list-schemas`).
 
+pub mod review_persist;
 pub mod schema;
 pub mod schema_manifest;
 pub mod session_context;

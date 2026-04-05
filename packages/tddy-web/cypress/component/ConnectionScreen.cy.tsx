@@ -15,6 +15,7 @@ import {
   StartSessionRequestSchema,
   ConnectSessionResponseSchema,
   ResumeSessionResponseSchema,
+  DeleteSessionRequestSchema,
 } from "../../src/gen/connection_pb";
 import {
   GetAuthStatusResponseSchema,
@@ -30,6 +31,27 @@ const toArrayBuffer = (u8: Uint8Array) => {
   new Uint8Array(buf).set(u8);
   return buf;
 };
+
+/** Binary request body from `cy.intercept` (ArrayBuffer, Buffer, Uint8Array, or binary string). */
+function connectRequestBodyToUint8(body: unknown): Uint8Array {
+  if (body instanceof Uint8Array) {
+    return body;
+  }
+  if (body instanceof ArrayBuffer) {
+    return new Uint8Array(body);
+  }
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(body)) {
+    return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+  }
+  if (typeof body === "string") {
+    const out = new Uint8Array(body.length);
+    for (let i = 0; i < body.length; i++) {
+      out[i] = body.charCodeAt(i) & 0xff;
+    }
+    return out;
+  }
+  throw new Error(`Unsupported request body: ${Object.prototype.toString.call(body)}`);
+}
 
 const ACTIVE_SESSION = {
   sessionId: "session-active-1",
@@ -704,6 +726,219 @@ describe("ConnectionScreen Delete session", () => {
     cy.wait("@deleteSession").then((interception) => {
       expect(interception.request.url).to.include("DeleteSession");
     });
+  });
+});
+
+/** Bulk selection / delete acceptance: same RPC wiring as `interceptAllRpcs` but tracks DeleteSession bodies. */
+function interceptAllRpcsWithTrackedDelete(
+  sessions: MockSessionRow[],
+  options?: { captureDeleteSessionIds?: string[] },
+) {
+  const authBody = mockAuthAuthenticated();
+  cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(authBody),
+    });
+  }).as("getAuthStatus");
+
+  const toolsBody = mockListToolsResponse();
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(toolsBody),
+    });
+  }).as("listTools");
+
+  const agentsBody = mockListAgentsResponse(MOCK_DEFAULT_LIST_AGENTS);
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(agentsBody),
+    });
+  }).as("listAgents");
+
+  const daemonsBody = mockListEligibleDaemonsDefaultResponse();
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListEligibleDaemons", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(daemonsBody),
+    });
+  }).as("listEligibleDaemons");
+
+  const sessionsBody = mockListSessionsResponse(sessions);
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(sessionsBody),
+    });
+  }).as("listSessions");
+
+  const projectsBody = mockListProjectsResponse();
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(projectsBody),
+    });
+  }).as("listProjects");
+
+  const okDelete = new Uint8Array([0x08, 0x01]);
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/DeleteSession", (req) => {
+    const u8 = connectRequestBodyToUint8(req.body);
+    const decoded = fromBinary(DeleteSessionRequestSchema, u8);
+    options?.captureDeleteSessionIds?.push(decoded.sessionId);
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(okDelete),
+    });
+  }).as("deleteSession");
+}
+
+describe("ConnectionScreen bulk session selection and delete (acceptance)", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("header select all checks every row checkbox in a project session table", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    const tableSel = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
+    cy.get(`${tableSel} [data-testid="session-table-select-all-${PROJECT.projectId}"]`, {
+      timeout: 5000,
+    }).click();
+    cy.get(`${tableSel} [data-testid="session-row-select-${ACTIVE_SESSION.sessionId}"]`).should(
+      "be.checked",
+    );
+    cy.get(`${tableSel} [data-testid="session-row-select-${INACTIVE_SESSION.sessionId}"]`).should(
+      "be.checked",
+    );
+    cy.get(`${tableSel} [data-testid="session-table-select-all-${PROJECT.projectId}"]`).should(
+      "be.checked",
+    );
+  });
+
+  it("header checkbox shows indeterminate when selection is partial", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    const tableSel = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
+    cy.get(`${tableSel} [data-testid="session-row-select-${ACTIVE_SESSION.sessionId}"]`, {
+      timeout: 5000,
+    }).click();
+    cy.get(`${tableSel} [data-testid="session-row-select-${INACTIVE_SESSION.sessionId}"]`).should(
+      "not.be.checked",
+    );
+    cy.get(`${tableSel} [data-testid="session-table-select-all-${PROJECT.projectId}"]`).should(
+      ($el) => {
+        const el = $el.get(0) as HTMLInputElement;
+        expect(el.indeterminate, "header checkbox indeterminate when partial").to.be.true;
+      },
+    );
+  });
+
+  it("bulk delete confirms once and calls deleteSession once per selected id", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    const capturedDeleteSessionIds: string[] = [];
+    interceptAllRpcsWithTrackedDelete([ACTIVE_SESSION, INACTIVE_SESSION], {
+      captureDeleteSessionIds: capturedDeleteSessionIds,
+    });
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    const tableSel = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
+    cy.get(`${tableSel} [data-testid="session-table-select-all-${PROJECT.projectId}"]`, {
+      timeout: 5000,
+    }).click();
+    cy.window().then((win) => {
+      cy.stub(win, "confirm")
+        .callsFake((msg: string) => {
+          expect(msg).to.include("2");
+          expect(msg.toLowerCase()).to.include("delete");
+          return true;
+        })
+        .as("bulkDeleteConfirm");
+    });
+    cy.get(`${tableSel} [data-testid="bulk-delete-selected-${PROJECT.projectId}"]`).click();
+    cy.get("@bulkDeleteConfirm").should("have.been.calledOnce");
+    cy.wait("@deleteSession");
+    cy.wait("@deleteSession");
+    cy.then(() => {
+      expect(capturedDeleteSessionIds.slice().sort()).to.deep.equal(
+        [ACTIVE_SESSION.sessionId, INACTIVE_SESSION.sessionId].sort(),
+      );
+    });
+    cy.get("@listSessions.all").should("have.length.at.least", 2);
+  });
+
+  it("bulk delete does not call DeleteSession when user cancels confirm", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+    let deleteSessionRequests = 0;
+    const okDelete = new Uint8Array([0x08, 0x01]);
+    cy.intercept("POST", "**/rpc/connection.ConnectionService/DeleteSession", (req) => {
+      deleteSessionRequests += 1;
+      req.reply({
+        statusCode: 200,
+        headers: { "Content-Type": "application/proto" },
+        body: toArrayBuffer(okDelete),
+      });
+    });
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    const tableSel = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
+    cy.get(`${tableSel} [data-testid="session-table-select-all-${PROJECT.projectId}"]`, {
+      timeout: 5000,
+    }).click();
+    cy.window().then((win) => {
+      cy.stub(win, "confirm").returns(false);
+    });
+    cy.get(`${tableSel} [data-testid="bulk-delete-selected-${PROJECT.projectId}"]`).click();
+    cy.then(() => {
+      expect(deleteSessionRequests, "cancelled bulk delete must not call DeleteSession").to.equal(0);
+    });
+  });
+
+  it("Delete selected is disabled when no rows are selected", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="bulk-delete-selected-${PROJECT.projectId}"]`, { timeout: 5000 }).should(
+      "be.disabled",
+    );
+  });
+
+  it("orphan table bulk selection does not clear project table selection", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION, INACTIVE_SESSION, ORPHAN_ACTIVE_SESSION]);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    const projTable = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
+    const orphanTable = `[data-testid="sessions-table-orphan"]`;
+    cy.get(`${projTable} [data-testid="session-table-select-all-${PROJECT.projectId}"]`, {
+      timeout: 5000,
+    }).click();
+    cy.get(`${orphanTable} [data-testid="session-row-select-${ORPHAN_ACTIVE_SESSION.sessionId}"]`)
+      .click();
+    cy.get(`${projTable} [data-testid="session-row-select-${ACTIVE_SESSION.sessionId}"]`).should(
+      "be.checked",
+    );
+    cy.get(`${projTable} [data-testid="session-row-select-${INACTIVE_SESSION.sessionId}"]`).should(
+      "be.checked",
+    );
+    cy.get(`${orphanTable} [data-testid="session-row-select-${ORPHAN_ACTIVE_SESSION.sessionId}"]`).should(
+      "be.checked",
+    );
   });
 });
 
