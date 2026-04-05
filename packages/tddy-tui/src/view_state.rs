@@ -172,6 +172,18 @@ fn status_bar_mode_identity_key(mode: &AppMode) -> u64 {
     h.finish()
 }
 
+/// User is blocked on input (clarification, plan review, markdown review): frozen goal elapsed, ~1 Hz idle dot, slower VirtualTui cadence.
+pub(crate) fn mode_is_user_wait_for_status_bar(mode: &AppMode) -> bool {
+    matches!(
+        mode,
+        AppMode::Select { .. }
+            | AppMode::MultiSelect { .. }
+            | AppMode::TextInput { .. }
+            | AppMode::DocumentReview { .. }
+            | AppMode::MarkdownViewer { .. }
+    )
+}
+
 impl ViewState {
     pub fn new() -> Self {
         Self::default()
@@ -188,17 +200,14 @@ impl ViewState {
                 Some(key)
             );
             self.status_bar_mode_identity_cache = Some(key);
-            let user_wait = matches!(
-                &state.mode,
-                AppMode::Select { .. } | AppMode::MultiSelect { .. } | AppMode::TextInput { .. }
-            );
+            let user_wait = mode_is_user_wait_for_status_bar(&state.mode);
             let active_goal_row = state.current_goal.is_some() && state.current_state.is_some();
             if user_wait && active_goal_row {
                 let elapsed = state.goal_start_time.elapsed();
                 self.frozen_goal_elapsed_for_status_bar = Some(elapsed);
                 self.idle_dot_animation_anchor = Some(Instant::now());
                 log::info!(
-                    "status bar: clarification wait — froze goal elapsed display at {:?}, idle dot anchor set",
+                    "status bar: user wait — froze goal elapsed display at {:?}, idle dot anchor set",
                     elapsed
                 );
             } else {

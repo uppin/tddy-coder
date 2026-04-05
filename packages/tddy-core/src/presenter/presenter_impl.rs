@@ -1458,6 +1458,7 @@ impl Presenter {
 mod tests {
     use super::*;
     use crate::presenter::state::AppMode;
+    use crate::{ClarificationQuestion, QuestionOption};
 
     fn make_presenter() -> Presenter {
         Presenter::new(
@@ -1852,6 +1853,37 @@ mod tests {
         p.show_backend_selection(q, 0);
         assert!(matches!(p.state().mode, AppMode::Select { .. }));
         assert!(p.is_backend_selection_pending());
+    }
+
+    /// Regression: workflow may show plan review first, then `tddy-tools ask` clarification.
+    /// Presenter must leave DocumentReview and enter Select when clarification arrives.
+    #[test]
+    fn clarification_needed_after_document_review_enters_select_mode() {
+        let mut p = make_presenter();
+        p.state.mode = AppMode::DocumentReview {
+            content: "# Plan".to_string(),
+        };
+        inject_workflow_event(
+            &mut p,
+            WorkflowEvent::ClarificationNeeded {
+                questions: vec![ClarificationQuestion {
+                    header: "Scope".to_string(),
+                    question: "Follow-up?".to_string(),
+                    options: vec![QuestionOption {
+                        label: "Yes".to_string(),
+                        description: String::new(),
+                    }],
+                    multi_select: false,
+                    allow_other: false,
+                }],
+            },
+        );
+        p.poll_workflow();
+        assert!(
+            matches!(p.state().mode, AppMode::Select { .. }),
+            "expected Select after ClarificationNeeded; got {:?}",
+            p.state().mode
+        );
     }
 
     #[test]

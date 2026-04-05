@@ -6,13 +6,13 @@ use std::time::Duration;
 
 use tddy_core::{AppMode, PresenterState};
 
-use crate::view_state::ViewState;
+use crate::view_state::{mode_is_user_wait_for_status_bar, ViewState};
 
 /// `true` when the workflow should show the **fast spinner** and **live** goal elapsed.
 ///
-/// Agent-active is [`AppMode::Running`]. Clarification waits (`Select` / `MultiSelect` / `TextInput`)
-/// use a frozen clock and 1 Hz idle dot. Other modes (FeatureInput, DocumentReview, …) follow product
-/// alignment in a later phase; they are not `Running`, so they use the idle status treatment.
+/// Agent-active is [`AppMode::Running`]. User-wait modes (clarification, document review, markdown viewer)
+/// use a frozen clock and 1 Hz idle dot via [`mode_is_user_wait_for_status_bar`]. Other non-`Running` modes
+/// use the idle status treatment without that snapshot.
 pub fn status_activity_is_agent_active(mode: &AppMode) -> bool {
     let active = matches!(mode, AppMode::Running);
     log::trace!(
@@ -25,10 +25,7 @@ pub fn status_activity_is_agent_active(mode: &AppMode) -> bool {
 
 /// Elapsed duration shown in the `Goal:` row (third `│` segment).
 pub fn display_elapsed_for_goal_row(state: &PresenterState, view_state: &ViewState) -> Duration {
-    let user_wait = matches!(
-        &state.mode,
-        AppMode::Select { .. } | AppMode::MultiSelect { .. } | AppMode::TextInput { .. }
-    );
+    let user_wait = mode_is_user_wait_for_status_bar(&state.mode);
     if user_wait {
         if let Some(frozen) = view_state.frozen_goal_elapsed_for_status_bar {
             log::trace!(
@@ -92,15 +89,10 @@ pub fn activity_prefix_char_for_draw(
     c
 }
 
-/// VirtualTui autonomous re-render interval: fast while agent-active animations run; ~1 Hz in clarification wait.
+/// VirtualTui autonomous re-render interval: fast while agent-active animations run; ~1 Hz in user-wait modes.
 pub fn virtual_tui_periodic_render_interval(mode: &AppMode) -> Duration {
-    if matches!(
-        mode,
-        AppMode::Select { .. } | AppMode::MultiSelect { .. } | AppMode::TextInput { .. }
-    ) {
-        log::trace!(
-            "status_bar_activity: VirtualTui periodic interval 1000ms (clarification wait)"
-        );
+    if mode_is_user_wait_for_status_bar(mode) {
+        log::trace!("status_bar_activity: VirtualTui periodic interval 1000ms (user wait)");
         Duration::from_secs(1)
     } else {
         log::trace!("status_bar_activity: VirtualTui periodic interval 200ms (agent-active)");
@@ -149,6 +141,26 @@ mod tests {
         assert!(
             virtual_tui_periodic_render_interval(&select_mode()) >= Duration::from_millis(900),
             "idle clarification wait should use ~1s periodic tick"
+        );
+    }
+
+    #[test]
+    fn user_blocking_document_modes_match_clarification_virtual_tui_interval() {
+        let doc_review = AppMode::DocumentReview {
+            content: "# PRD".to_string(),
+        };
+        let md_viewer = AppMode::MarkdownViewer {
+            content: "# PRD".to_string(),
+        };
+        assert!(
+            virtual_tui_periodic_render_interval(&doc_review) >= Duration::from_millis(900),
+            "DocumentReview (plan approval) should use clarification-interval VirtualTui cadence; got {:?}",
+            virtual_tui_periodic_render_interval(&doc_review)
+        );
+        assert!(
+            virtual_tui_periodic_render_interval(&md_viewer) >= Duration::from_millis(900),
+            "MarkdownViewer during user-facing review should use clarification-interval cadence; got {:?}",
+            virtual_tui_periodic_render_interval(&md_viewer)
         );
     }
 
