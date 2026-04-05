@@ -1,14 +1,16 @@
 /**
- * Dev/test trace: one-line JSON on stderr so Cypress or shell captures can grep `tddy`.
- * Not gated on environment — same behavior as production builds (per project rules).
+ * Structured markers for TDD tracing (grep logs for `"tddy":`). **Development only** — no-ops in
+ * production so error aggregators are not flooded.
  */
 export function emitTddyMarker(
-  markerId: string,
+  marker_id: string,
   scope: string,
   data: Record<string, unknown> = {},
 ): void {
-  const payload = { tddy: { marker_id: markerId, scope, data } };
-  console.debug("[tddy][marker]", markerId, scope, data);
-  console.info("[tddy][marker]", markerId, scope);
-  console.error(JSON.stringify(payload));
+  if (!import.meta.env.DEV) return;
+  console.debug(
+    JSON.stringify({
+      tddy: { marker_id, scope, data },
+    }),
+  );
 }
