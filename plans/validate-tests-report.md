@@ -1,73 +1,89 @@
-# Validate-tests report: TDD interview branch
+# Validate-tests report: Telegram session control (`tddy-daemon`)
 
-**Date:** 2026-04-04
+**Date:** 2026-04-05
 
-**Command run:** `./test` from repository root  
-`/var/tddy/Code/tddy-coder/.worktrees/tdd-interview`
+## Commands run
 
-**What `./test` does (for traceability):** enters nix dev shell (`nix develop --profile ./.nix-profile`), builds `tddy-coder`, `tddy-tools`, `tddy-livekit`, and `tddy-acp-stub` (`--examples --bins`), then `cargo test --workspace -- --test-threads=1` with output tee’d to `.verify-result.txt`.
+| Command | Environment |
+|--------|----------------|
+| `export TMPDIR=/var/tddy/tmp-tddy-cargo` | Writable temp base (created if missing). |
+| `cd /var/tddy/Code/tddy-coder/.worktrees/telegram-session-control && ./dev cargo test -p tddy-daemon 2>&1` | Primary validation. |
+| `./dev cargo check --workspace 2>&1` | Broader workspace compile smoke test (dev profile). |
+| `./dev cargo test --workspace --no-run` | **Optional** — started but not run to completion in this session (long-running); terminated after extended wait. Use locally if you need test-binary compilation for every crate. |
 
-**Overall result:** **PASS** — exit code `0`. Wall-clock **~229 s** (~3.8 min). No fallback was required (`./dev cargo test --workspace` not used).
+## Overall result
 
-**Aggregate counts (from parsing `test result:` lines in the run log):**
+- **`cargo test -p tddy-daemon`:** **PASS** — exit code **0**.
+- **`cargo check --workspace`:** **PASS** — exit code **0** (`Finished` in ~4 minutes).
 
-- **~1003** individual `passed` assertions summed across all test harness result lines (workspace-wide; each binary/harness reports its own totals).
-- **144** separate `test result: ok.` summaries (library tests, integration tests, doc-tests, etc.).
-- **0** failed tests in any harness line (`N failed` was always `0`).
+## Passing summary (`tddy-daemon`)
 
----
+| Suite | Passed |
+|-------|--------|
+| Library unit tests (`src/lib.rs`) | 58 |
+| Binary unit tests (`src/main.rs`) | 0 |
+| `tests/acceptance_daemon.rs` | 8 |
+| `tests/delete_session.rs` | 2 |
+| `tests/grpc_spawn_contract.rs` | 1 |
+| `tests/list_agents_allowlist_acceptance.rs` | 4 |
+| `tests/list_sessions_enriched.rs` | 2 |
+| `tests/multi_host_acceptance.rs` | 5 |
+| `tests/session_workflow_files_rpc.rs` | 3 |
+| `tests/signal_session.rs` | 3 |
+| `tests/telegram_notifier.rs` | 3 |
+| `tests/telegram_session_control_integration.rs` | 5 |
+| `tests/worktrees_acceptance.rs` | 2 |
+| `tests/worktrees_rpc.rs` | 4 |
+| Doc-tests | 0 |
+| **Total** | **100** |
+
+**Telegram-focused tests in this run**
+
+- **Unit (`telegram_session_control`):** 4 tests — `parse_start_workflow_extracts_prompt`, `chunk_telegram_text_respects_limit_and_continuation_markers`, `parse_callback_payload_recognizes_recipe_selection`, `map_elicitation_callback_to_presenter_input_matches_web_encoding`.
+- **Integration (`telegram_session_control_integration`):** 5 tests — start workflow + keyboard, recipe + demo_options persistence, plan review chunking + transition, elicitation byte mapping, unauthorized chat denial.
 
 ## Failing tests
 
-**None.** No `FAILED`, panics, or non-zero `failed` counts appeared in the captured output.
+**None.** All 100 `tddy-daemon` tests passed.
 
----
+*(Note: `packages/tddy-daemon/telegram_session_control_red_test_output.txt` captures an older red-phase / marker-driven failure log; it is not the result of the current successful run.)*
 
-## Passing highlights relevant to interview
+## Coverage gaps
 
-| Area | Notes |
+### `telegram_session_control.rs` (unit)
+
+- **Covered well:** `parse_start_workflow_prompt`, `chunk_telegram_text`, `parse_callback_payload` (recipe branch), `map_elicitation_callback_to_presenter_input` (one multi-select case).
+- **Gaps / light coverage:**
+  - **`parse_callback_payload`:** Returns `None` for non-`recipe:` payloads; no explicit test for elicitation-only or mixed strings beyond the integration layer.
+  - **`chunk_telegram_text`:** Edge cases (`max_utf8_bytes == 0`, empty string, very small max vs continuation suffix) are partially implied but not all enumerated in unit tests.
+  - **`parse_demo_options_value`:** Exercised indirectly via integration (`demo_options:{run:true}`), not isolated unit tests for JSON vs YAML normalization failures.
+  - **`read_changeset_routing_snapshot`:** Used in integration; no dedicated unit test for malformed YAML or missing file errors.
+  - **`TelegramSessionControlHarness`:** Handler behavior is mostly integration-tested; `handle_plan_review_phase` discards `approval_callback` (no assertion that callback data drives workflow server-side — aligns with “harness” scope).
+  - **`WorkflowTransitionKind::ElicitationSubmitted`:** Not referenced in current tests (only `PlanReviewApproved` appears in the plan-review test).
+
+### `telegram_notifier` — `InMemoryTelegramSender` keyboard paths
+
+- **`send_message_with_inline_keyboard` and `recorded_with_keyboards`:** Exercised through **session control integration tests** and `drain_outbound_messages`, not through **`telegram_notifier`**’s own `acceptance_unit_tests` (those use `InMemoryTelegramSender` for plain `send_message` / watcher behavior).
+- **Gap:** No focused unit test in `telegram_notifier.rs` that asserts `recorded_with_keyboards()` row/column structure after `send_message_with_inline_keyboard`, or that `recorded()` strips keyboards as documented.
+
+### Gaps vs product / architecture (inbound bot, RPC, config)
+
+Aligned with the stated evaluation context (**medium risk; full bot/RPC not wired**):
+
+| Area | Status |
 |------|--------|
-| **Workflow recipes — acceptance** | `tdd_recipe_start_goal_is_interview`, `tdd_interview_goal_hints_and_submit_policy`, `tdd_interview_handoff_populates_plan_context` — `packages/tddy-workflow-recipes/tests/tdd_interview_acceptance.rs` |
-| **Relay helpers — unit** | `persist_interview_handoff_writes_relay_file`, `apply_staged_interview_handoff_sets_answers_on_context` — `packages/tddy-workflow-recipes/tests/tdd_interview_handoff_unit.rs` |
-| **Graph ordering** | `tdd_graph_interview_precedes_plan`, `tdd_full_graph_interview_precedes_plan` — `packages/tddy-integration-tests/tests/workflow_graph.rs` |
-| **CLI default goal** | TDD recipe starts at `interview` — `packages/tddy-coder/tests/cli_recipe.rs` |
-| **Full workflow / session** | Mock stack includes interview turn without submit — `packages/tddy-integration-tests/tests/single_session_lifecycle_acceptance.rs` |
-| **E2E / gRPC / PTY** | Workflow graphs and presenters updated for interview-before-plan — e.g. `packages/tddy-e2e/tests/grpc_full_workflow.rs`, `grpc_terminal_rpc.rs`, `grpc_concurrent_resize.rs`, `pty_full_workflow.rs`, `grpc_reconnect_acceptance.rs` |
-| **Integration — start goal** | `full_workflow_integration.rs` expectations for `GoalId::new("interview")` — `packages/tddy-integration-tests/tests/full_workflow_integration.rs` |
-| **Submit policy matrix** | `TddRecipe` still requires submit for `plan` — `packages/tddy-workflow-recipes/tests/backend_invoke_no_tddy_tools_submit.rs` (`tdd_plan_goal_still_requires_tddy_tools_submit`) |
+| **Inbound Telegram bot (teloxide update loop)** | `telegram_session_control` is a **library harness + helpers**; module docs state the live loop should call these helpers — **no end-to-end daemon process test** receiving real Telegram updates. |
+| **RPC** | Outbound **`PresenterObserver`** / **`TelegramDaemonHooks`** exists for notifications; **no RPC surface** for interactive Telegram session control (plan approval, recipe selection) in `ConnectionService` or similar — integration tests use the harness directly, not gRPC. |
+| **Config** | Existing **`telegram`** block (`enabled`, `bot_token`, `chat_ids`) supports **notifications**; there is **no separate config schema** documented for “session control allowlist” beyond reusing allowed chat ids in harness tests (`Vec<i64>` in code). |
+| **PRD / `docs/ft/`** | **[telegram-notifications.md](../docs/ft/daemon/telegram-notifications.md)** describes **outbound** session notifications and Presenter stream elicitation — **not** an inbound command-and-control PRD for `/start-workflow`. Product docs for interactive Telegram-driven TDD workflow control would need to be added or cross-linked when the feature is wired. |
+
+## Recommendations
+
+1. **Before production wiring:** Add a **small unit test module** next to `InMemoryTelegramSender` verifying `send_message_with_inline_keyboard` + `recorded_with_keyboards` + `recorded()` invariants (so keyboard regressions surface without running full integration tests).
+2. **Extend `telegram_session_control` unit tests** for `parse_demo_options_value` error paths and `chunk_telegram_text` boundary cases if you tighten behavior.
+3. **Integration:** When the teloxide inbound loop lands, add **one** narrow daemon-level or black-box test (or documented manual checklist) that proves authorized chat id config matches harness assumptions.
+4. **Optional CI:** Run `./dev cargo test --workspace --no-run` periodically or in CI if you need guaranteed compilation of all test targets across the workspace (this run used `cargo check --workspace` instead for a faster smoke test).
 
 ---
 
-## Coverage gaps / recommendations
-
-1. **`BackendInvokeTask` without `tddy-tools` submit for `interview`**  
-   `packages/tddy-workflow-recipes/tests/backend_invoke_no_tddy_tools_submit.rs` exercises **GrillMe** and **FreePrompting** with an output-only backend, and asserts **plan** still requires submit. There is **no parallel async test** that builds `BackendInvokeTask::from_recipe("interview", …, &TddRecipe, …)` and proves completion when the backend never supplies submit (the policy is covered in `tdd_interview_goal_hints_and_submit_policy`, but not the same integration shape as grill/free_prompting).
-
-2. **Relay edge cases (`apply_staged_interview_handoff_to_plan_context`)**  
-   Implementation treats **missing** file and **empty** (whitespace-only) file as success with no `answers` set (`packages/tddy-workflow-recipes/src/tdd/interview.rs`). Current unit tests cover happy path and non-empty content; **no test** asserts the deliberate no-op when the file is absent or trimmed-empty (guards regressions if someone later turns those into errors).
-
-3. **Resume / restart paths**  
-   E2E and integration tests touch full flows; **explicit** acceptance tests for “resume session with partial interview” or “restart at `plan` with stale handoff” are thin compared to the main happy path. Worth a focused scenario if session/store semantics keep evolving.
-
-4. **Hooks-level contract**  
-   `before_interview` / `after_interview` in `packages/tddy-workflow-recipes/src/tdd/hooks.rs` are exercised indirectly via flow tests; a **narrow** test that runs only interview hooks and asserts relay file + context fields could shorten debug time when hooks change.
-
-5. **Daemon / ACP / stub parity**  
-   If production paths differ from `MockBackend` for submit detection, add a **single** contract test aligned with existing `green_submit_remediation`-style tests but scoped to **interview** output-only completion (only if product requires it).
-
----
-
-## Key test file references (`packages/`)
-
-- `tddy-workflow-recipes/tests/tdd_interview_acceptance.rs` — recipe metadata, hints, handoff → plan context  
-- `tddy-workflow-recipes/tests/tdd_interview_handoff_unit.rs` — relay persistence and merge  
-- `tddy-workflow-recipes/tests/backend_invoke_no_tddy_tools_submit.rs` — output-only invoke pattern (extend for TDD interview)  
-- `tddy-integration-tests/tests/workflow_graph.rs` — interview before plan, handoff version  
-- `tddy-integration-tests/tests/single_session_lifecycle_acceptance.rs` — full TDD graph with interview mock turn  
-- `tddy-integration-tests/tests/full_workflow_integration.rs` — start goal interview  
-- `tddy-coder/tests/cli_recipe.rs` — CLI default `interview`  
-- `tddy-e2e/tests/grpc_full_workflow.rs`, `grpc_terminal_rpc.rs`, `pty_full_workflow.rs`, `grpc_reconnect_acceptance.rs`, `grpc_concurrent_resize.rs` — end-to-end workflow and UI markers  
-
----
-
-*Generated by validate-tests subagent run.*
+*Generated by validate-tests subagent for refactor validation.*

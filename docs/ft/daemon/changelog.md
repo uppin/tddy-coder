@@ -1,5 +1,10 @@
 # Daemon product area changelog
 
+## 2026-04-05 — Telegram session control (library harness)
+
+- **`tddy-daemon`**: Module **`telegram_session_control`** — **`parse_start_workflow_prompt`**, **`parse_callback_payload`**, **`chunk_telegram_text`**, **`map_elicitation_callback_to_presenter_input`**, **`TelegramSessionControlHarness`** (session directory under a base path, inline recipe keyboard, **`changeset.yaml`** merge for recipe and **`demo_options`**, plan review sends via **`TelegramSender`**, unauthorized chat denial); **`InMemoryTelegramSender`** stores optional inline keyboard rows (**`recorded_with_keyboards`**). Tests: **`telegram_session_control_integration`**, in-module unit tests.
+- **Feature docs**: **[telegram-session-control.md](telegram-session-control.md)**; **[telegram-notifications.md](telegram-notifications.md)** (library harness section). Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**, WIP **[docs/dev/1-WIP/2026-04-05-changeset-telegram-session-control.md](../../dev/1-WIP/2026-04-05-changeset-telegram-session-control.md)**.
+
 ## 2026-04-04 — Session elicitation: Telegram `ModeChanged` + `ListSessions` flag
 
 - **`connection.proto`**: **`SessionEntry.pending_elicitation`** (field **14**).

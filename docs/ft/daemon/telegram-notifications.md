@@ -58,6 +58,10 @@ Callers that read **`.session.yaml`** (or equivalent) on an interval can still u
 
 Automated coverage includes unit tests for labels, terminal-status classification, token masking, and integration tests with a mock sender (no live Telegram network in CI).
 
+## Telegram session control (library harness)
+
+The **`tddy_daemon::telegram_session_control`** module implements parsing, chunking, **`changeset.yaml`** routing writes, presenter input bytes, and a **`TelegramSessionControlHarness`** for tests and future inbound integration. **`InMemoryTelegramSender`** stores optional inline keyboard labels for those tests. Inbound teloxide wiring and **`DaemonConfig`** flags for interactive control ship with the daemon binary when that path exists. Product reference: **[telegram-session-control.md](telegram-session-control.md)**.
+
 ## Related documentation
 
 - **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)** — implementation reference (`tddy-daemon`).

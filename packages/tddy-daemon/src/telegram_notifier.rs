@@ -127,9 +127,11 @@ impl TelegramSender for TeloxideSender {
 }
 
 /// Test-only sender that records `(chat_id, text)` for assertions (no network I/O).
+///
+/// Optional inline keyboard labels per row are stored for session-control harness tests.
 #[derive(Clone)]
 pub struct InMemoryTelegramSender {
-    messages: Arc<Mutex<Vec<(i64, String)>>>,
+    messages: Arc<Mutex<Vec<(i64, String, Vec<Vec<String>>)>>>,
 }
 
 impl Default for InMemoryTelegramSender {
@@ -145,11 +147,42 @@ impl InMemoryTelegramSender {
         }
     }
 
+    /// Backward-compatible view: chat id and text only (ignores inline keyboards).
     pub fn recorded(&self) -> Vec<(i64, String)> {
         self.messages
             .lock()
             .expect("InMemoryTelegramSender mutex")
+            .iter()
+            .map(|(id, text, _)| (*id, text.clone()))
+            .collect()
+    }
+
+    /// Full recording including inline keyboard button labels (row-major).
+    pub fn recorded_with_keyboards(&self) -> Vec<(i64, String, Vec<Vec<String>>)> {
+        self.messages
+            .lock()
+            .expect("InMemoryTelegramSender mutex")
             .clone()
+    }
+
+    pub async fn send_message_with_inline_keyboard(
+        &self,
+        chat_id: i64,
+        text: &str,
+        inline_keyboard_labels: Vec<Vec<String>>,
+    ) -> anyhow::Result<()> {
+        log::debug!(
+            target: "tddy_daemon::telegram",
+            "InMemoryTelegramSender: send_message_with_inline_keyboard chat_id={} text_len={} keyboard_rows={}",
+            chat_id,
+            text.len(),
+            inline_keyboard_labels.len()
+        );
+        self.messages
+            .lock()
+            .expect("InMemoryTelegramSender mutex")
+            .push((chat_id, text.to_string(), inline_keyboard_labels));
+        Ok(())
     }
 
     pub fn len(&self) -> usize {
@@ -170,7 +203,7 @@ impl TelegramSender for InMemoryTelegramSender {
         self.messages
             .lock()
             .expect("InMemoryTelegramSender mutex")
-            .push((chat_id, text.to_string()));
+            .push((chat_id, text.to_string(), Vec::new()));
         Ok(())
     }
 }

@@ -1,62 +1,94 @@
-# Validate prod-ready: TDD interview changeset
+# Production readiness: Telegram session control
 
-**Scope:** Interview-before-plan flow, relay handoff, `session_id` behavior in `before_interview` / `before_acceptance_tests` / `before_red`, `changeset` resume logic (`skip_failed_resume_transition`, `start_goal_for_session_continue`), graph and CLI (`run.rs`).
-
-**Sources reviewed:**  
-`packages/tddy-workflow-recipes/src/tdd/interview.rs`, `hooks.rs`, `mod.rs`, `graph.rs`;  
-`packages/tddy-core/src/changeset.rs`, `workflow/recipe.rs`;  
-`packages/tddy-coder/src/run.rs` (relevant sections).
-
----
+**Scope:** `packages/tddy-daemon/src/telegram_session_control.rs`, `InMemoryTelegramSender` changes in `telegram_notifier.rs`, `tests/telegram_session_control_integration.rs`  
+**Review date:** 2026-04-05
 
 ## Executive summary
 
-The interview step is wired consistently: a single relay file under the session directory bridges interview output into **plan** after hooks clear context, and logging uses `log::` (not `println!`) in the new interview module. Session identity is preserved where the hooks explicitly keep an existing non-empty `session_id`, and new IDs are allocated only when missing—aligning with the “plan-mode Fresh vs resume” contract for later steps.
+The new code establishes a **testable contract** for Telegram-driven workflow control (parsing, chunking, presenter byte encoding, and a **`TelegramSessionControlHarness`** with chat allowlisting). Logging uses explicit `log` targets and generally avoids sensitive content (lengths and paths, not prompts or tokens).
 
-Main production concerns: (1) **plan refinement** in `run.rs` still resolves the goal via `recipe.start_goal()`, which is now **`interview`**, so “refinement” may re-run interview instead of **plan**—likely a behavioral regression for post-PRD feedback flows; (2) **ignored `write_changeset` failures** remain a pattern in hooks (pre-existing style but still a durability gap); (3) **relay file content** is user/agent text—same confidentiality model as other session artifacts, but **`log::info!` lines log byte counts and paths** (`interview.rs:46–50`, `83–86`), which can be noisy or sensitive in centralized logs.
+**Production readiness is not met** for an end-to-end Telegram control plane: the harness is **not wired** into the daemon’s teloxide inbound path or `DaemonConfig` in `main.rs`—only outbound notifications (`TelegramSessionWatcher` / `TelegramDaemonHooks`) are. Several behaviors are **explicitly test-scoped** (e.g. plan chunk size `CHUNK_MAX = 24`), and authorization is **chat-only** with no binding between Telegram identity and session directories for callbacks.
 
-Overall the graph change is a **linear extra node** (`graph.rs:133–145`)—negligible runtime overhead; handoff adds **bounded extra I/O** (one write after interview, one read in `before_plan` when the file exists).
+**Overall risk level:** **Medium–High** until inbound integration, config alignment, production chunk limits, and session–chat binding are addressed.
+
+## Risk level
+
+| Area | Level | Note |
+|------|--------|------|
+| Security (authz, session binding) | **High** | Allowlist exists; no user verification; callbacks not tied to owning session/chat. |
+| Configuration / feature flags | **High** | No `DaemonConfig` fields or flags for inbound control; harness uses ad-hoc `Vec<i64>`. |
+| Error handling / data integrity | **Medium** | Silent empty `changeset.yaml`; YAML parse failures propagate; some parsers are loose. |
+| Logging / secrets | **Low** | Targets and length-based fields are sound; tokens not present in this module. |
+| Performance | **Low–Medium** | Acceptable for expected scale; chunking allocates; sequential sends. |
+
+## Checklist
+
+| Criterion | Status | Notes |
+|-----------|--------|--------|
+| Errors surfaced with `anyhow` / `Result` on I/O and YAML | **Pass** | `handle_*` and `read_changeset_routing_snapshot` return `anyhow::Result`. |
+| Edge cases: empty input, UTF-8 boundaries | **Partial** | `chunk_telegram_text` handles empty and char boundaries; `max_utf8_bytes == 0` returns full string (documented). |
+| Edge cases: missing/malformed `changeset.yaml` on recipe callback | **Fail** | `read_to_string` + `unwrap_or_default()` treats missing file as empty mapping—risk of silent overwrite. |
+| Logging: `log` crate, stable targets | **Pass** | `tddy_daemon::telegram_session_control` and `tddy_daemon::telegram` for in-memory sender. |
+| No secrets in logs (tokens, prompts) | **Pass** | Lengths, `chat_id`, path display; no bot token logging in scoped files. |
+| Configuration: `DaemonConfig` / YAML for control plane | **Fail** | Harness takes constructor args; not loaded from `TelegramConfig`; no separate inbound flag. |
+| Security: chat allowlist | **Partial** | `ensure_authorized` for `chat_id`; `user_id` on commands is logged but **not** checked. |
+| Security: session scoping for callbacks | **Fail** | `handle_recipe_callback` accepts any `session_dir` without proving it belongs to the chat/session. |
+| Production Telegram message limits | **Fail** | `handle_plan_review_phase` uses `CHUNK_MAX = 24` (test forcing); not ~4096 UTF-16/codepoint policy. |
+| Async: no blocking in wrong places | **Pass** | Harness methods are `async`; I/O is sync in async fns (acceptable at small scale; see recommendations). |
+| Integration tests cover critical paths | **Partial** | Start workflow, recipe write, plan chunks, unauthorized message, elicitation bytes; no negative paths for YAML/recipe. |
+
+## Findings
+
+### Error handling (`anyhow`, edge cases)
+
+- **Strengths:** I/O and YAML errors propagate from `handle_recipe_callback`, `handle_start_workflow`, and `read_changeset_routing_snapshot`.
+- **`handle_recipe_callback`:** `std::fs::read_to_string(&path).unwrap_or_default()` collapses “file missing” into an empty document, then writes—can **create or replace** content without an explicit decision. Prefer `read_to_string` and map `NotFound` to a clear error, or require an existing file for updates.
+- **`parse_callback_payload`:** Returns `Some` only when the string contains the substring `"recipe:"`—brittle and not a structured parse.
+- **`map_elicitation_callback_to_presenter_input`:** If the payload lacks the `elicitation:` prefix, the code still encodes using `unwrap_or(callback_data)`—risk of **mis-encoding** arbitrary strings as presenter input.
+- **`parse_demo_options_value`:** Heuristic `:true`/`:false` spacing fix is fragile for real YAML edge cases.
+
+### Logging (`log`, targets, secrets)
+
+- **Strengths:** Consistent `target: "tddy_daemon::telegram_session_control"` for the control module; debug/info mix; `InMemoryTelegramSender::send_message_with_inline_keyboard` logs `chat_id`, `text_len`, `keyboard_rows` only.
+- **Note:** `handle_start_workflow` logs `user_id` (not secret, but PII-adjacent)—acceptable for ops if retention policies allow.
+
+### Configuration (`DaemonConfig`, feature flags)
+
+- **`TelegramConfig`** (`config.rs`) exposes `enabled`, `bot_token`, `chat_ids` for **notifications**, not for labeling this inbound harness.
+- **Gap:** No field such as `telegram_session_control_enabled`, no reuse of `chat_ids` as the allowlist for the harness, and no documented merge rule if notification chats differ from control chats.
+- **Integration:** `main.rs` only constructs `TelegramDaemonHooks` (outbound presenter observer). **`TelegramSessionControlHarness` is not registered**—inbound control is **not production-active**.
+
+### Security (authorization, allowlist, tokens)
+
+- **Allowlist:** `ensure_authorized` checks `chat_id` against `allowed_chat_ids`.
+- **Gaps:**
+  - **`user_id` is not authorized**—any member of an allowed group chat could act; no admin vs member distinction.
+  - **Callback path safety:** `handle_recipe_callback(&session_dir, cb)` does not validate that `session_dir` is the one associated with this chat’s prior `handle_start_workflow`—callers must enforce; the API does not.
+  - **Token logging:** Not applicable in these files; production teloxide path should continue using patterns like `mask_bot_token_for_logs` elsewhere (already present in `telegram_notifier.rs`).
+
+### Performance (allocations, chunk sizes, async)
+
+- **`chunk_telegram_text`:** Per-chunk `format!` / `to_string` allocations; acceptable for typical plan sizes.
+- **`handle_plan_review_phase`:** Sequential `send_message` in a loop—appropriate for Telegram rate limits; consider batching only if API allows and limits are configured.
+- **`CHUNK_MAX = 24`:** Favors integration tests (forced continuation markers), **not** production limits—must be config-driven and aligned with Telegram’s limits (and encoding: UTF-16 length for Bot API in some cases).
+- **`InMemoryTelegramSender::recorded_with_keyboards`:** Full `clone()` of stored messages—fine for tests; unbounded growth if used as a long-lived fake without clearing.
+
+### Tests (`telegram_session_control_integration.rs`)
+
+- **Strengths:** Covers keyboard on start, changeset persistence, chunked plan delivery, unauthorized denial, elicitation byte mapping.
+- **Gaps:** No test for corrupt `changeset.yaml`, missing file behavior on recipe callback, or unauthorized `handle_recipe_callback` / `handle_plan_review_phase` (only unauthorized entry path via `handle_start_workflow_unauthorized`).
+
+## Recommendations for follow-up
+
+1. **Wire inbound teloxide updates** to shared helpers (not only the harness), with a single place that enforces allowlist + session correlation.
+2. **Add `DaemonConfig` (or nested) options:** inbound enable flag, allowlist (or explicit reuse of `telegram.chat_ids` with documented semantics), and **production chunk size** (bytes or policy enum).
+3. **Replace `CHUNK_MAX = 24`** with a constant or config default matching Telegram limits; keep test-only small values only in tests via injected limits.
+4. **Harden `handle_recipe_callback`:** fail closed on missing `changeset.yaml` if updates are not intended to create; or document “create if absent” and add tests.
+5. **Tighten `map_elicitation_callback_to_presenter_input`:** require `elicitation:` prefix or return `Result` / explicit enum instead of silent fallback.
+6. **Session–chat binding:** persist mapping `(session_id, chat_id)` and validate on every callback referencing `session_dir` or `session_id`.
+7. **Optional:** consider `user_id` checks if the bot only serves private chats with a known operator set.
+8. **Async I/O:** for large files or high concurrency, move blocking `std::fs` off the runtime with `spawn_blocking` or use async fs (project-wide convention permitting).
 
 ---
 
-## Strengths
-
-- **Clear handoff contract:** Constant path `INTERVIEW_HANDOFF_RELATIVE` (`.workflow/tdd_interview_handoff.txt`) and documented purpose in `interview.rs:1–4`, `40–41`, `57–58`.
-- **TUI-safe logging in interview:** `interview.rs` uses only `log::debug!` / `log::info!` with an explicit `target:`—no raw stdout in this module.
-- **Errors propagate where it matters:** `persist_interview_handoff_for_plan` returns `std::io::Result` (`interview.rs:41–55`); `apply_staged_interview_handoff_to_plan_context` maps read errors to a boxed error string (`interview.rs:72–73`).
-- **PRD approval gate unchanged in intent:** `elicitation_after_task` still runs only after **`plan`**, not after interview (`hooks.rs:1075–1078`).
-- **Resume semantics:** `TddRecipe::skip_failed_resume_transition` special-cases trailing `Planning` → `plan` noise (`mod.rs:221–229`); `start_goal_for_session_continue` documents failed-resume walk and TDD fallback to **`plan`** when appropriate (`changeset.rs:199–252`).
-- **Graph topology:** One additional task and edge (`graph.rs:76–81`, `145–145`); `TDD_INTERVIEW_GRAPH_HANDOFF_VERSION` documents the handoff milestone (`graph.rs:13–14`).
-- **Interview without mandatory tool submit:** `goal_requires_tddy_tools_submit` is `false` for interview (`mod.rs:217–218`)—appropriate for conversational elicitation.
-- **CLI escape hatch:** New TDD sessions allow `--goal plan` to skip interview (`run.rs:952–966`).
-
----
-
-## Risks and findings
-
-| Area | Finding | Location |
-|------|---------|----------|
-| **CLI / UX regression** | `run_plan_refinement` builds `plan_gid` from `recipe.start_goal()` and runs that goal (`run.rs:2496–2498`). For TDD, `start_goal` is now **`interview`**, not **`plan`**, so post-approval “plan refinement” may execute the **interview** goal instead of regenerating the PRD from `refinement_feedback`. Variable name suggests **plan**; behavior no longer matches. | `run.rs:2496–2498` |
-| **Durability** | Multiple `let _ = write_changeset(...)` / `let _ = write_changeset` on init paths—failures to persist state are silent. Interview-related examples: `before_interview` state update (`hooks.rs:229–231`), `after_interview` (`hooks.rs:251–253`), `before_plan` init (`hooks.rs:159–173`). | `hooks.rs` (throughout) |
-| **Logging sensitivity** | `log::info!` logs full relay path and byte length when writing/loading handoff. Useful for ops; may be undesirable if session paths or sizes are considered sensitive in shared logs. | `interview.rs:46–50`, `83–86` |
-| **Relay file security** | Handoff stores full agent/user clarification text under `session_dir/.workflow/`. Same trust boundary as `PRD.md` and other session files; not world-readable by default beyond OS permissions on the session directory. No encryption—consistent with rest of workflow artifacts. | `interview.rs:11–15`, `41–55` |
-| **Error handling: interview** | `after_interview` uses `handoff_snapshot` or `result.response` (`hooks.rs:246–249`); empty handoff still writes a file (possibly empty after trim in downstream—`persist` writes raw `text`). Empty relay is handled on plan load (`interview.rs:75–81`). | `hooks.rs:236–255`, `interview.rs:75–81` |
-| **Mixed log styles** | `hooks.rs` mixes structured `target:` logs with legacy `"[tdd hooks]"` / `"[tddy-core]"` prefixes—operational consistency only, not a functional bug. | e.g. `hooks.rs:60`, `873`, `1095–1096` |
-| **Performance** | Extra graph node and one file read/write on the interview→plan boundary; repeated `read_changeset` in hooks during transitions (existing pattern). No unbounded in-memory graph growth. | `graph.rs`, `hooks.rs` |
-
----
-
-## Recommendations
-
-1. **Fix or document plan refinement goal:** For `run_plan_refinement`, either run `GoalId::new("plan")` explicitly when the intent is to refine the PRD from `refinement_feedback`, or split “interview follow-up” vs “plan regeneration” and document which goal runs. At minimum, rename `plan_gid` and add a comment if `start_goal` is intentionally used for refinement (`run.rs:2496–2498`).
-2. **Consider surfacing changeset write failures:** Replace silent `let _ = write_changeset` with logged errors (at least `log::warn!` / `log::error!`) on interview and plan transitions, without changing success semantics—improves debuggability in production.
-3. **Tune log levels for handoff:** Downgrade path/byte `log::info!` in `interview.rs` to `debug` in production-hardening passes if log volume or sensitivity is a concern; keep one concise info line if audit trails require it.
-4. **Operational:** Ensure backup and access policies for `~/.tddy/sessions/...` (or configured session root) cover `.workflow/tdd_interview_handoff.txt` like other session artifacts.
-
----
-
-## Confirmation
-
-Report written to:
-
-`/var/tddy/Code/tddy-coder/.worktrees/tdd-interview/plans/validate-prod-ready-report.md`
+*This review is limited to the files listed in the request; production behavior also depends on future teloxide wiring and `ConnectionService` integration not fully covered here.*
