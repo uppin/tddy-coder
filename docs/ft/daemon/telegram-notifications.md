@@ -48,11 +48,11 @@ Secrets: full bot tokens do not belong in log lines; helpers return **masked** r
 
 When the daemon spawns a **`tddy-coder --daemon`** session, it connects to the child’s gRPC **`PresenterObserver.ObserveEvents`** stream (see **`tddy-service`** proto) and maps **`ServerMessage`** events to Telegram text (state transitions, workflow completion, goal started, backend selected, and presenter **`ModeChanged`** when the mode requires user input or approval—see **Presenter stream: elicitation** below). Daemon startup and graceful shutdown also send short lifecycle messages when Telegram is enabled.
 
-## Presenter stream: elicitation (`ModeChanged`) (Updated: 2026-04-05)
+## Presenter stream: elicitation (`ModeChanged`)
 
 With Telegram enabled, **`TelegramSessionWatcher::on_server_message`** classifies **`ServerMessage`** **`ModeChanged`** payloads from **`PresenterObserver.ObserveEvents`**. Modes that require a human gate—document review, markdown viewer, feature input, clarification (**`Select`** / **`MultiSelect`**), and free-text **`TextInput`**—produce Telegram traffic per qualifying event. Autonomous modes **`Running`** and **`Done`** do not produce elicitation Telegram lines. Identical **`ModeChanged`** signatures per session id dedupe repeat sends so stream replays do not flood configured chats. Module **`tddy_daemon::elicitation`** centralizes classification, dedupe key material, and line templates; **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)** records the public hooks.
 
-### Document review and markdown viewer (Updated: 2026-04-05)
+### Document review and markdown viewer
 
 When the presenter asks the operator to **review / approve / reject** a document (document-review or markdown-viewer modes), Telegram must deliver:
 
@@ -63,9 +63,13 @@ Formatting: adapt session markdown to what Telegram can render. The Bot API acce
 
 **Security:** Do not paste unrelated secrets into chat; the requirement is to transmit the **review artifact** (plan/PRD text the workflow is asking the human to approve), not arbitrary environment or credential dumps.
 
+### Clarification select (`Select`)
+
+For **`Select`** clarification, the notification includes the usual short action line plus a **multi-line listing**: one line per option (full label; optional description on the same line). Inline keyboard buttons use **numeric labels** (1, 2, …) so the full text lives in the message body. After the operator chooses, the inbound Telegram path sends a **confirmation** message that repeats the **full** selected option text (label; description on a following line when present). The daemon keeps the per-option strings in a small in-memory cache keyed by session id so the confirmation matches the presenter without stuffing long text into **`callback_data`** (64-byte limit).
+
 ### Other elicitation modes
 
-For modes that are **not** full-document review (feature input, clarification **`Select`** / **`MultiSelect`**, free-text **`TextInput`**), messages remain short hints: short session label and explicit **approval** or **input** wording. Those message bodies avoid embedding large prompts or unrelated secrets unless the product explicitly extends them.
+For modes that are **not** full-document review (feature input, clarification **`MultiSelect`**, free-text **`TextInput`**), messages remain short hints: short session label and explicit **approval** or **input** wording, except where **`Select`** adds the extended listing above. Message bodies avoid embedding unrelated secrets unless the product explicitly extends them.
 
 Callers that read **`.session.yaml`** (or equivalent) on an interval can still use **`TelegramSessionWatcher::on_metadata_tick`** with **`session_id`**, **`status`**, **`is_active`**, **`DaemonConfig`**, and **`TelegramSender`**. Technical detail lives in **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)**.
 
