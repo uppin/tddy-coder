@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use tddy_core::backend::{
     ClarificationQuestion, CodingBackend, MockBackend, QuestionOption, StubBackend,
 };
-use tddy_core::changeset::{write_changeset, Changeset};
+use tddy_core::changeset::{merge_persisted_workflow_into_context, write_changeset, Changeset};
 use tddy_core::output::create_session_dir_in;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::{ExecutionStatus, GraphBuilder};
@@ -195,6 +195,39 @@ async fn full_graph_conditional_demo_edge() {
         graph.next_task_id("update-docs", &ctx_default),
         Some("end".to_string())
     );
+}
+
+/// Acceptance (PRD): green → demo vs evaluate follows persisted changeset workflow intent (merged into Context).
+#[tokio::test]
+async fn full_graph_green_routes_per_changeset_demo_intent() {
+    let backend = Arc::new(StubBackend::new());
+    let graph = build_full_tdd_workflow_graph(backend, common::tdd_recipe());
+
+    let dir = std::env::temp_dir().join(format!(
+        "tddy-full-graph-demo-intent-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir");
+
+    write_changeset(&dir, &Changeset::default()).expect("seed");
+    let path = dir.join("changeset.yaml");
+    let mut doc: serde_yaml::Value =
+        serde_yaml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("yaml");
+    doc["workflow"] =
+        serde_yaml::from_str("run_optional_step_x: true\ndemo_options: []\n").expect("workflow");
+    std::fs::write(&path, serde_yaml::to_string(&doc).expect("to")).expect("write");
+
+    let ctx = Context::new();
+    merge_persisted_workflow_into_context(&dir, &ctx).expect("merge");
+
+    assert_eq!(
+        graph.next_task_id("green", &ctx),
+        Some("demo".to_string()),
+        "when changeset persists demo intent, green must route to demo"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// StubBackend returns valid plan output via tool executor (parseable from take_submit_result).

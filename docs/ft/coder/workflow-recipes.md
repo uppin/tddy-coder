@@ -24,7 +24,7 @@ Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**
 
 - **Start goal:** **`interview`** (upfront elicitation before structured planning).
 - **Pipeline (minimal graph):** **`interview` → `plan` → acceptance-tests → red → green → end**. **Full graph:** **`interview` → `plan` → acceptance-tests → red → green →** (optional **`demo`**) **→ evaluate → validate → refactor → update-docs → end**.
-- **Handoff:** Interview output is written to **`.workflow/tdd_interview_handoff.txt`** under the session directory; **`before_plan`** loads it into context as **`answers`** so **`PlanTask`** can build a follow-up prompt (same relay idea as grill-me’s persisted answers).
+- **Handoff:** Interview output is written to **`.workflow/tdd_interview_handoff.txt`** under the session directory; **`before_plan`** loads it into context as **`answers`** so **`PlanTask`** can build a follow-up prompt (same relay idea as grill-me’s persisted answers). Demo participation and options belong in **`changeset.yaml`** under **`workflow`** (see **Changeset workflow block** in **TDD (`tdd`)** under **Developer reference (shipped recipes)** below).
 - **Structured submit:** **`WorkflowRecipe::goal_requires_tddy_tools_submit`** is **`false`** for **`interview`** (elicitation turns complete without **`tddy-tools submit`**); **`plan`** and later structured goals keep the submit contract.
 - **Plan refinement (PRD feedback):** **`WorkflowRecipe::plan_refinement_goal()`** selects the planning goal for refinement flows. For **`TddRecipe`** the value is **`plan`** (not **`interview`**). **`GrillMeRecipe`** uses **`create-plan`** (not **`grill`**). Recipes without a separate elicitation step inherit the default (**`start_goal()`**).
 - **Primary session document:** **`prd`** → **`PRD.md`** under the session artifact layout (see **`SessionArtifactManifest`**).
@@ -116,12 +116,8 @@ This section records how the shipped recipes map to the same product philosophy 
 - **Default** when **`--recipe`** is omitted or **`changeset.yaml`** has no **`recipe`** field.
 - **Start goal:** **`interview`** — clarification before PRD/plan; **`plan`** follows with PRD/TODO-style artifacts; full graph continues with acceptance-tests → red → green → ….
 - **Spirit:** Discovery-style elicitation (interview), then structured planning, then tests and implementation.
-
-### TDD-small (`tdd-small`)
-
-- **Start goal:** **`plan`** — same planning and PRD-style artifacts as full TDD.
-- **Pipeline:** **`plan` → `red` → `green` → `post-green-review` → `refactor` → `update-docs`** — a linear graph without standalone acceptance-tests, demo, evaluate, or validate tasks; **`post-green-review`** carries merged reporting concerns in one **`tddy-tools submit`** payload.
-- **Spirit:** Smaller session surface for teams that want TDD discipline without the full optional branches (demo routing, separate evaluate/validate invocations).
+- **Changeset workflow block:** **`changeset.yaml`** includes an optional **`workflow`** object: **`run_optional_step_x`** (boolean for the post-green branch), **`demo_options`** (strings describing how to run an optional **demo** goal), and optional **`tool_schema_id`** (URN tying the block to the **`changeset-workflow`** JSON Schema). **`tddy-tools persist-changeset-workflow`** validates a JSON payload against that schema and replaces the **`workflow`** section using an atomic write. **`tddy_core::changeset::merge_persisted_workflow_into_context`** copies persisted values into the engine **`Context`** so graph **`goal_conditions`** (e.g. **`run_optional_step_x`**) match the manifest; call sites pass the plan session directory.
+- **Interview:** System and user prompts require **`tddy-tools ask`** for whether the **demo** goal runs after **green**, for demo execution options, and for persisting **`run_optional_step_x`** / **`demo_options`** (via **`persist-changeset-workflow`**) into **`changeset.yaml`** before PRD-driven planning completes.
 
 ### TDD-small (`tdd-small`)
 
@@ -158,6 +154,8 @@ This section records how the shipped recipes map to the same product philosophy 
 ## Session context and conditional transitions
 
 Workflow transitions read **boolean conditions** from the engine `Context` (declarative `goal_conditions` on `WorkflowTransition`). The TDD recipe supplies keys such as **`run_optional_step_x`** so the full graph branches after green without presenter-specific branching for demo vs evaluate.
+
+**Changeset workflow:** Persisted **`workflow`** fields in **`changeset.yaml`** are the durable record of demo routing intent. **`merge_persisted_workflow_into_context`** applies **`run_optional_step_x`** and non-empty **`demo_options`** into **`Context`** for the same keys the graph reads. Empty **`workflow`** blocks leave those context keys unset; behavior matches an uninitialized context for post-green routing.
 
 **Session storage:** **`tddy-tools set-session-context`** merges JSON into **`.workflow/<session-id>.session.json`** under the session directory (`TDDY_SESSION_DIR`, `TDDY_WORKFLOW_SESSION_ID`). Values sync into the workflow engine context via **`Context::merge_json_object_sync`** before transition evaluation.
 

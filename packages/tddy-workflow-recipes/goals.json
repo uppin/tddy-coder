@@ -30,6 +30,11 @@
       "schema": "update-docs.schema.json",
       "proto": "update_docs.proto"
     },
-    { "name": "demo", "schema": "demo.schema.json", "proto": "demo.proto" }
+    { "name": "demo", "schema": "demo.schema.json", "proto": "demo.proto" },
+    {
+      "name": "changeset-workflow",
+      "schema": "changeset-workflow.schema.json",
+      "proto": "changeset_workflow.proto"
+    }
   ]
 }

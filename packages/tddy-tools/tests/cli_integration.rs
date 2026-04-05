@@ -18,6 +18,7 @@ const REGISTERED_GOALS: &[&str] = &[
     "refactor",
     "update-docs",
     "demo",
+    "changeset-workflow",
 ];
 
 /// Expected `$id` for each CLI goal (differs from the CLI name where the URN uses a shorter id).
@@ -34,6 +35,7 @@ fn expected_schema_id_for_goal(goal: &str) -> &'static str {
         "refactor" => "urn:tddy:goal/refactor",
         "update-docs" => "urn:tddy:goal/update-docs",
         "demo" => "urn:tddy:goal/demo",
+        "changeset-workflow" => "urn:tddy:tool/changeset-workflow",
         _ => panic!("unexpected goal: {goal}"),
     }
 }

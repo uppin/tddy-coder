@@ -35,10 +35,11 @@ pub use backend::{
     ToolExecutor, WorkflowRecipe,
 };
 pub use changeset::{
-    append_session_and_update_state, get_session_for_tag, read_changeset,
-    resolve_agent_from_changeset, resolve_model, start_goal_for_session_continue, update_state,
-    write_changeset, Changeset, ChangesetState, ClarificationQa, ClarificationQuestionForQa,
-    DiscoveryData, QuestionOptionForQa, SessionEntry, StateTransition,
+    append_session_and_update_state, get_session_for_tag, merge_persisted_workflow_into_context,
+    read_changeset, resolve_agent_from_changeset, resolve_model, start_goal_for_session_continue,
+    update_state, write_changeset, write_changeset_atomic, Changeset, ChangesetState,
+    ChangesetWorkflow, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
+    QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use elapsed_format::format_elapsed_compact;
 pub use error::{BackendError, ParseError, WorkflowError};

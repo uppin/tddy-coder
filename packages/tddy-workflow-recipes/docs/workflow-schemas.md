@@ -12,7 +12,7 @@ Each entry contains:
 - **`schema`** — File under `generated/{recipe}/` (e.g. `evaluate.schema.json`).
 - **`proto`** — File under `proto/` (e.g. `evaluate_changes.proto`).
 
-Session utilities such as **`tddy-tools set-session-context`** are **not** listed here; they have no embedded JSON Schema in the manifest.
+Session utilities such as **`tddy-tools set-session-context`** are **not** listed here; they have no embedded JSON Schema in the manifest. The **`changeset-workflow`** goal is listed here: it validates JSON for **`tddy-tools persist-changeset-workflow`** (changeset **`workflow`** block), not for a workflow engine goal id in the graph.
 
 The build script validates that every referenced schema and proto file exists under `generated/{recipe}/`, writes **`generated/schema-manifest.json`** (includes `proto` per goal), and emits **`generated/proto_basenames.rs`** for `schema_pipeline::expected_proto_basenames()`.
 
