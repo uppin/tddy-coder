@@ -543,6 +543,57 @@ fn slugify_for_worktree(name: &str) -> String {
     slugify_for_branch(name)
 }
 
+/// Lists remote-tracking branches under `origin/`, most recent commit first, up to `limit` entries.
+///
+/// Uses `git branch -r --sort=-committerdate`. Excludes `origin/HEAD` and any ref that is not under
+/// `origin/`. Entries that fail [`validate_chain_pr_integration_base_ref`] are skipped.
+pub fn list_recent_remote_branches(repo_root: &Path, limit: usize) -> Result<Vec<String>, String> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let output = Command::new("git")
+        .args([
+            "branch",
+            "-r",
+            "--sort=-committerdate",
+            "--format=%(refname:short)",
+        ])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git branch -r: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git branch -r failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut out: Vec<String> = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line == "origin/HEAD" {
+            continue;
+        }
+        if !line.starts_with("origin/") {
+            continue;
+        }
+        if validate_chain_pr_integration_base_ref(line).is_err() {
+            continue;
+        }
+        if out.iter().any(|e| e == line) {
+            continue;
+        }
+        out.push(line.to_string());
+        if out.len() >= limit {
+            break;
+        }
+    }
+    Ok(out)
+}
+
 /// Info about an existing worktree.
 #[derive(Debug, Clone)]
 pub struct WorktreeInfo {
@@ -777,6 +828,95 @@ mod chain_pr_red_tests {
             "origin/feature/pr-base",
             "resume must return the canonical persisted effective ref"
         );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+}
+
+#[cfg(test)]
+mod list_recent_remote_branches_tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+
+    #[test]
+    fn list_recent_remote_branches_lists_origin_refs() {
+        let base = std::env::temp_dir().join("tddy-core-list-recent-remote-branches");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "t@t.com"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "T"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        fs::write(repo.join("f"), "x").unwrap();
+        Command::new("git")
+            .args(["add", "f"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "c"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["remote", "add", "origin", repo.to_str().unwrap()])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["push", "-u", "origin", "main"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["checkout", "-b", "feature/a"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        fs::write(repo.join("g"), "y").unwrap();
+        Command::new("git")
+            .args(["add", "g"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "c2"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["push", "-u", "origin", "feature/a"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        let list = list_recent_remote_branches(&repo, 10).unwrap();
+        assert!(
+            list.iter()
+                .any(|r| r == "origin/main" || r == "origin/feature/a"),
+            "expected origin/main or origin/feature/a in {:?}",
+            list
+        );
+        assert!(!list.contains(&"origin/HEAD".to_string()));
 
         let _ = fs::remove_dir_all(&base);
     }

@@ -61,9 +61,13 @@ Follow-up work can branch from an open remote branch (a **chain PR**) instead of
 
 ### Limitations
 
-- Entry points that call only **`setup_worktree_for_session`** (no optional argument) do not pass a chain base; product wiring must thread **`setup_worktree_for_session_with_optional_chain_base`** where chain PR selection exists.
+- Entry points that call only **`setup_worktree_for_session`** (no optional argument) do not pass a chain base; product wiring must thread **`setup_worktree_for_session_with_optional_chain_base`** where chain PR selection exists. **Exception (Updated: 2026-04-05):** **`tddy-workflow-recipes`** **`ensure_worktree_for_session`** and **`tddy-service`** session document approval now call **`setup_worktree_for_session_with_optional_chain_base`**, passing **`None`** or the persisted **`changeset.yaml`** **`worktree_integration_base_ref`** so Telegram (and any client that pre-writes that field) can opt into a chain base without a separate CLI flag.
 - **`setup_worktree_for_session_with_integration_base`** (explicit single-segment ref) does not write **`effective_worktree_integration_base_ref`** / **`worktree_integration_base_ref`**; observability for that path differs from the optional-chain API unless aligned in a follow-up.
+
+### Telegram inbound (Updated: 2026-04-05)
+
+- After recipe and project selection, **`telegram_session_control`** offers **Default** or a **recent remote branch** list; non-default choices set **`worktree_integration_base_ref`** before **`tddy-coder`** is spawned. See **[telegram-session-control.md](../daemon/telegram-session-control.md)** (**Integration base branch**).
 
 ## Call-site behavior
 
-**`setup_worktree_for_session(repo_root, session_dir)`** resolves the integration base inside **tddy-core** using the default remote branch rules above. Registry helpers (**`effective_integration_base_ref_for_project`**) apply when a caller has loaded **`ProjectData`**; those callers pass the explicit ref into **`setup_worktree_for_session_with_integration_base`**. Layers that only supply repository root and session directory rely on default resolution.
+**`setup_worktree_for_session(repo_root, session_dir)`** resolves the integration base inside **tddy-core** using the default remote branch rules above. Registry helpers (**`effective_integration_base_ref_for_project`**) apply when a caller has loaded **`ProjectData`**; those callers pass the explicit ref into **`setup_worktree_for_session_with_integration_base`**. Layers that only supply repository root and session directory rely on default resolution. Workflow hooks that create worktrees after plan approval should prefer **`setup_worktree_for_session_with_optional_chain_base`** when **`changeset.yaml`** may carry **`worktree_integration_base_ref`** (Telegram chain selection, future RPC fields).
