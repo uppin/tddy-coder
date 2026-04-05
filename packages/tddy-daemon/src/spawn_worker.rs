@@ -28,6 +28,9 @@ pub struct SpawnRequest {
     pub livekit_api_key: String,
     pub livekit_api_secret: String,
     pub resume_session_id: Option<String>,
+    /// New session with a fixed id (mutually exclusive with `resume_session_id` in the spawner).
+    #[serde(default)]
+    pub new_session_id: Option<String>,
     #[serde(default)]
     pub project_id: Option<String>,
     /// Passed to spawned tddy-coder as --agent when non-empty.
@@ -77,6 +80,7 @@ pub enum WorkerResponse {
 }
 
 /// Client for sending spawn requests to the worker. Used by the async daemon.
+#[derive(Clone)]
 pub struct SpawnClient {
     request_tx: Arc<std::sync::Mutex<std::fs::File>>,
     response_rx: Arc<std::sync::Mutex<BufReader<std::fs::File>>>,
@@ -86,7 +90,10 @@ fn worker_request_label(req: &WorkerRequest) -> String {
     match req {
         WorkerRequest::Spawn(s) => format!(
             "op=spawn session={} repo={}",
-            s.resume_session_id.as_deref().unwrap_or("new"),
+            s.resume_session_id
+                .as_deref()
+                .or(s.new_session_id.as_deref())
+                .unwrap_or("new"),
             s.repo_path
         ),
         WorkerRequest::Clone(c) => format!("op=clone dest={} os_user={}", c.destination, c.os_user),
@@ -252,7 +259,10 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                 };
                 log::info!(
                     "spawn_worker: calling spawn_as_user session_id={} repo={}",
-                    req.resume_session_id.as_deref().unwrap_or("new"),
+                    req.resume_session_id
+                        .as_deref()
+                        .or(req.new_session_id.as_deref())
+                        .unwrap_or("new"),
                     req.repo_path
                 );
                 let result = spawner::spawn_as_user(
@@ -262,6 +272,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                     &livekit,
                     SpawnOptions {
                         resume_session_id: req.resume_session_id.as_deref(),
+                        new_session_id: req.new_session_id.as_deref(),
                         project_id: req.project_id.as_deref(),
                         agent: req.agent.as_deref(),
                         mouse: req.mouse,
@@ -270,13 +281,19 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                 );
                 log::info!(
                     "spawn_worker: spawn_as_user returned session_id={}",
-                    req.resume_session_id.as_deref().unwrap_or("new")
+                    req.resume_session_id
+                        .as_deref()
+                        .or(req.new_session_id.as_deref())
+                        .unwrap_or("new")
                 );
                 match &result {
                     Ok(_) => {}
                     Err(e) => log::warn!(
                         "spawn_worker: spawn_as_user err session_id={} err={}",
-                        req.resume_session_id.as_deref().unwrap_or("new"),
+                        req.resume_session_id
+                            .as_deref()
+                            .or(req.new_session_id.as_deref())
+                            .unwrap_or("new"),
                         e
                     ),
                 }
@@ -338,6 +355,7 @@ pub fn build_spawn_request(
         livekit_api_key: livekit.api_key.clone(),
         livekit_api_secret: livekit.api_secret.clone(),
         resume_session_id: opts.resume_session_id.map(String::from),
+        new_session_id: opts.new_session_id.map(String::from),
         project_id: opts.project_id.map(String::from),
         agent: opts.agent.map(String::from),
         mouse: opts.mouse,

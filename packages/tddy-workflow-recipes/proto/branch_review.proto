@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Structured output for the **branch-review** goal (review recipe); persists session `review.md`.
+message BranchReviewOutput {
+  string goal = 1;
+  string summary = 2;
+  string validity_assessment = 3;
+  string review_body_markdown = 4;
+}

@@ -22,6 +22,10 @@ The library embeds workflow JSON Schemas from **`tddy-workflow-recipes/generated
 | `set-session-context` | Merges JSON into `.workflow/<id>.session.json` (`TDDY_SESSION_DIR`, `TDDY_WORKFLOW_SESSION_ID`); not listed in `goals.json` |
 | `persist-changeset-workflow` | `--session-dir`, `--data` — validates JSON against **`changeset-workflow`**, writes **`workflow`** on **`changeset.yaml`** atomically; listed in `goals.json` for schema embedding |
 
+### `branch-review` and `review.md`
+
+For goal **`branch-review`**, after JSON Schema validation succeeds, **`submit`** writes **`review.md`** under **`TDDY_SESSION_DIR`** when that environment variable is present (agent subprocesses set it). When the variable is absent, validation and relay behavior are unchanged; the file write is skipped.
+
 ## Logging
 
 `env_logger` initializes at startup (default level **warn**; use `RUST_LOG` for `info` / `debug`). Validation and schema resolution use scoped `log` targets under `tddy_tools::schema` and `tddy_tools::schema_manifest`.

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tddy:goal/branch-review",
+  "title": "Branch review output",
+  "description": "Structured submit for branch-oriented code review (review workflow recipe).",
+  "type": "object",
+  "required": ["goal", "summary", "validity_assessment", "review_body_markdown"],
+  "properties": {
+    "goal": {
+      "type": "string",
+      "const": "branch-review"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "validity_assessment": {
+      "type": "string",
+      "minLength": 1
+    },
+    "review_body_markdown": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

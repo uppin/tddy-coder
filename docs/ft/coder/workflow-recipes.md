@@ -1,24 +1,24 @@
 # Workflow recipes (pluggable workflows)
 
 **Product area:** Coder  
-**Updated:** 2026-04-04
+**Updated:** 2026-04-05
 
 ## Summary
 
 Workflow behavior is defined by **recipes** in the **`tddy-workflow-recipes`** crate. **`tddy-core`** implements a recipe-agnostic engine (`WorkflowRecipe`, `WorkflowEngine`, graph execution, `CodingBackend`). Goals, states, transitions, hooks, backend hints, and permissions are **recipe-provided strings and metadata**, not a fixed enum in core.
 
-The shipped recipes are **`TddRecipe`** (default), **`TddSmallRecipe`**, **`BugfixRecipe`**, **`FreePromptingRecipe`**, and **`GrillMeRecipe`**. Recipe selection uses a single resolution path in **`tddy-workflow-recipes::recipe_resolve`**: `workflow_recipe_and_manifest_from_cli_name` and `resolve_workflow_recipe_from_cli_name` return the active `WorkflowRecipe` (and, where needed, the paired **`SessionArtifactManifest`** on the same concrete type).
+The shipped recipes are **`TddRecipe`** (default), **`TddSmallRecipe`**, **`BugfixRecipe`**, **`FreePromptingRecipe`**, **`GrillMeRecipe`**, and **`ReviewRecipe`**. Recipe selection uses a single resolution path in **`tddy-workflow-recipes::recipe_resolve`**: `workflow_recipe_and_manifest_from_cli_name` and `resolve_workflow_recipe_from_cli_name` return the active `WorkflowRecipe` (and, where needed, the paired **`SessionArtifactManifest`** on the same concrete type).
 
 ## Selecting a recipe
 
 | Surface | Mechanism |
 |---------|-----------|
-| **tddy-coder** | `--recipe tdd`, `--recipe tdd-small`, `--recipe bugfix`, `--recipe free-prompting`, or `--recipe grill-me`; optional YAML `recipe:` (CLI overrides). |
+| **tddy-coder** | `--recipe tdd`, `--recipe tdd-small`, `--recipe bugfix`, `--recipe free-prompting`, `--recipe grill-me`, or `--recipe review`; optional YAML `recipe:` (CLI overrides). |
 | **changeset.yaml** | Optional `recipe:` records the workflow for resume and session lists; empty or absent values behave like **`tdd`**. Initial session creation (presenter bootstrap and matching CLI paths) persists **`recipe`** on the written **`changeset.yaml`** so resume and tooling read the same recipe name as **`StartSession`**. |
 | **tddy-daemon** | Spawns **`tddy-coder`** with `--recipe` when set; **`ConnectionService` `StartSessionRequest`** and **`TddyRemote` `StartSession`** carry a **`recipe`** string. |
 | **tddy-web** | **ConnectionScreen** exposes a **Workflow recipe** control per **Start New Session**; the value is sent on **`StartSession`**. |
 
-Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, and **`grill-me`** (aligned with **`WorkflowRecipe::name()`**). Invalid names fail on the CLI with a clear error; daemon streams report failure via **`WorkflowComplete`** with a descriptive message that lists supported names.
+Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**, and **`review`** (aligned with **`WorkflowRecipe::name()`**). Invalid names fail on the CLI with a clear error; daemon streams report failure via **`WorkflowComplete`** with a descriptive message that lists supported names.
 
 ## TddRecipe
 
@@ -66,6 +66,16 @@ Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**
 - **Repo persistence:** For the **working copy**, persist the same brief content under a repo path per **[AGENTS.md](../../../AGENTS.md)** (**Documentation Hierarchy** → **`plans/`**): use a path specified in **`docs/ft/`** for the feature when present; otherwise **`plans/<SOME-PLAN-NAME>.md`** at the repository root (descriptive basename, e.g. **`<feature-slug>-grill-me-brief.md`**).
 - **Primary session document:** **`GrillMeRecipe::uses_primary_session_document`** is **`false`**; policy skips session-document approval alongside **free-prompting**.
 
+## ReviewRecipe
+
+- **CLI / recipe name:** **`review`** (**`WorkflowRecipe::name()`**).
+- **Start goal:** **`inspect`** — read-only branch scope with elicitation; **initial workflow state string:** **`Inspect`**.
+- **Pipeline:** **`inspect` → `branch-review` → `end`**. **`inspect`** completes without structured **`tddy-tools submit`** (**`goal_requires_tddy_tools_submit`** **`false`**). **`branch-review`** requires a validated **`tddy-tools submit --goal branch-review`** payload (JSON Schema **`branch-review`** in **`goals.json`**). The session directory stores **`review.md`** (manifest maps artifact key **`review`** → basename **`review.md`**).
+- **Git context:** **`ReviewWorkflowHooks`** prepend deterministic merge-base resolution and bounded **`git diff --stat` / `git diff`** text to the system prompt for **`inspect`** and **`branch-review`**. Merge-base candidates follow a fixed order: **`origin/HEAD`**, **`origin/main`**, **`origin/master`**, **`main`**, **`master`**, then **`git rev-parse HEAD`** when no shared base exists; diff scope is **`git diff <merge_base>..HEAD`** from the resolved repository root (**`worktree_dir`** / **`output_dir`** / **`session_dir`** walk-up to **`.git`**).
+- **Structured submit:** **`branch-review`** only. **`tddy-tools`** validates JSON, writes **`review.md`** under **`TDDY_SESSION_DIR`** when that variable is set, then relays to **`tddy-coder`** when **`TDDY_SOCKET`** is set.
+- **Primary session document:** **`uses_primary_session_document`** **`false`**. **`approval_policy::recipe_should_skip_session_document_approval`** includes **`review`** with **free-prompting** and **grill-me**.
+- **Plan refinement:** **`plan_refinement_goal()`** returns **`branch-review`** so refinement targets the structured review step.
+
 ## Key types
 
 | Concept | Role |
@@ -77,13 +87,14 @@ Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**
 | **`BugfixRecipe`** | Bugfix workflow graph (**`analyze` → `reproduce` → `end`**) hooks, and artifact manifest for **`analyze`**, **`reproduce`**, and fix-plan. |
 | **`FreePromptingRecipe`** | Minimal graph and hooks for the **Prompting** loop without TDD gates. |
 | **`GrillMeRecipe`** | Two goals (**`grill`** → **`create-plan`**); session **`artifacts/grill-me-brief.md`**; repo copy per **AGENTS.md** / **`plans/`** default. |
+| **`ReviewRecipe`** | **`inspect` → `branch-review` → `end`**; **`ReviewWorkflowHooks`**; session **`review.md`**; JSON goal **`branch-review`**. |
 | **`approval_policy`** | Supported CLI name list and skip rules aligned with **`recipe_resolve`** and acceptance tests. |
 | **`recipe_resolve`** | **`workflow_recipe_and_manifest_from_cli_name`**, **`resolve_workflow_recipe_from_cli_name`**, **`unknown_workflow_recipe_error`**, **`WorkflowRecipeAndManifest`**. |
 
 ## CLI and services
 
 - **`--goal`** accepted values come from the active recipe’s declared goals (no hard-coded enum in the CLI).
-- **gRPC / daemon** use string goals and states; **`DaemonService`** loads the selected recipe via **`workflow_recipe_and_manifest_from_cli_name`** when handling **`StartSession`** (including **`free-prompting`** and **`grill-me`** when requested).
+- **gRPC / daemon** use string goals and states; **`DaemonService`** loads the selected recipe via **`workflow_recipe_and_manifest_from_cli_name`** when handling **`StartSession`** (including **`free-prompting`**, **`grill-me`**, and **`review`** when requested).
 
 ## Packages
 
@@ -103,7 +114,7 @@ JSON Schemas for workflow goals (`plan`, `red`, `green`, etc.) live in **`tddy-w
 
 - **`tddy-core`** exposes **`WorkflowRecipe::uses_primary_session_document`** and **`read_primary_session_document_utf8`** for approval gates, plain CLI, and daemon flows.
 - **`tddy-workflow`** provides **`artifact_paths`** helpers (`session_dir/artifacts/`, legacy `sessions/<uuid>/` layouts, resolution order).
-- **TDD** uses **`prd` → `PRD.md`** in its manifest; **Bugfix** registers **`fix_plan` / `fix-plan.md`** with **`uses_primary_session_document`** **`false`** (no automatic document-approval gate on that path); **Free prompting** does not define a primary planning basename for that approval path; **Grill me** registers **`grill_brief` → `grill-me-brief.md`** without using it for the primary-document approval gate in v1; long-lived copy in the repo follows **AGENTS.md** (**`plans/`** or a **`docs/ft/`**-specified path).
+- **TDD** uses **`prd` → `PRD.md`** in its manifest; **Bugfix** registers **`fix_plan` / `fix-plan.md`** with **`uses_primary_session_document`** **`false`** (no automatic document-approval gate on that path); **Free prompting** does not define a primary planning basename for that approval path; **Grill me** registers **`grill_brief` → `grill-me-brief.md`** without using it for the primary-document approval gate in v1; long-lived copy in the repo follows **AGENTS.md** (**`plans/`** or a **`docs/ft/`**-specified path); **Review** registers **`review` → `review.md`** for tooling and UI discovery.
 
 Custom recipes **declare** artifact keys in manifest; there is no silent core fallback string for the primary planning basename.
 
@@ -145,6 +156,13 @@ This section records how the shipped recipes map to the same product philosophy 
 - **Artifacts:** **`grill-me-brief.md`** registered on the manifest for tooling/context; v1 does not use the PRD-style primary-document approval gate.
 - **Repo copy:** Persist the brief in the target repo per **[AGENTS.md](../../../AGENTS.md)**; default **`plans/<SOME-PLAN-NAME>.md`** when no feature doc path applies.
 - **Spirit:** Structured discovery before implementation (interview-style elicitation, then a single planning artifact checked in for the team).
+
+### Review (`review`)
+
+- **Start goal:** **`inspect`** — branch diff context and elicitation without structured **`tddy-tools submit`** on that step.
+- **Next goal:** **`branch-review`** — produces **`review.md`** in the session directory via **`tddy-tools submit --goal branch-review`** (schema-validated JSON with **`review_body_markdown`**).
+- **Artifacts:** **`review.md`** on the manifest for session file lists and previews.
+- **Spirit:** Branch-oriented code review with operator elicitation, then a single persisted markdown review aligned with the same merge-base scope as **`inspect`**.
 
 ### Tests
 
