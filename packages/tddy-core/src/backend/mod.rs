@@ -147,7 +147,7 @@ pub(crate) fn format_command_for_log(
         let s = if arg.len() > max_arg_len {
             format!(
                 "{}... ({} chars total)",
-                &arg[..arg.len().min(max_arg_len)],
+                &arg[..arg.floor_char_boundary(max_arg_len)],
                 arg.len()
             )
         } else {

@@ -340,7 +340,7 @@ async fn evaluate_workflow_includes_session_dir_context_when_provided() {
             || req.prompt.contains("PRD")
             || req.prompt.contains("changeset"),
         "prompt must include plan context (PRD/changeset) when session_dir is provided, got prompt start: {}",
-        &req.prompt[..req.prompt.len().min(200)]
+        &req.prompt[..req.prompt.floor_char_boundary(200)]
     );
 
     let _ = std::fs::remove_dir_all(&working_dir);

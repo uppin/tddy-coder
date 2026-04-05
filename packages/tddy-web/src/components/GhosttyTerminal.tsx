@@ -141,6 +141,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const disposablesRef = useRef<{ dispose: () => void }[]>([]);
     /** Accumulates `deltaY` for trackpad pinch (Ctrl+wheel); touch pinch uses separate logic. */
     const wheelPinchAccumRef = useRef(0);
+    const onDataRef = useRef(onData);
+    onDataRef.current = onData;
 
     const applyFontSizePx = useCallback(
       (px: number, bounds?: { min: number; max: number }) => {
@@ -655,6 +657,31 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         textarea.removeAttribute("readonly");
       }
     }, [ready, preventFocusOnTap]);
+
+    /**
+     * ghostty-web ignores keydown while IME/composition is active (`isComposing`, `keyCode === 229`).
+     * Typing `/` can start composition in some locales; Escape then cancels IME but never reaches the
+     * terminal. Capture Escape on the hidden textarea and forward `\x1b` when the library would drop it.
+     */
+    useEffect(() => {
+      if (!ready || !sessionActive) return;
+      const container = containerRef.current;
+      if (!container) return;
+
+      const onEscapeDuringIme = (e: KeyboardEvent) => {
+        if (e.key !== "Escape") return;
+        const ta = termRef.current?.textarea;
+        if (!ta || e.target !== ta) return;
+        if (!e.isComposing && e.keyCode !== 229) return;
+        const send = onDataRef.current;
+        if (!send) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        send("\x1b");
+      };
+      container.addEventListener("keydown", onEscapeDuringIme, true);
+      return () => container.removeEventListener("keydown", onEscapeDuringIme, true);
+    }, [ready, sessionActive]);
 
     // Note: onData is registered once in the setup useEffect above (line 97-104).
     // Do NOT re-register here — that would cause duplicate events for each keystroke.

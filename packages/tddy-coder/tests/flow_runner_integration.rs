@@ -67,7 +67,7 @@ fn run_plan_via_flow_runner_produces_session_directory() {
     assert!(
         prd_content.contains("- [ ]") || prd_content.contains("## TODO"),
         "PRD.md should contain TODO content (as last section); got: {}",
-        &prd_content[..prd_content.len().min(500)]
+        &prd_content[..prd_content.floor_char_boundary(500)]
     );
 
     let _ = std::fs::remove_dir_all(&sessions_base);
