@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { create } from "@bufbuild/protobuf";
 import { GripVertical, Minus, Trash2 } from "lucide-react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
   ConnectionService,
+  DeleteSessionRequestSchema,
   Signal,
   type AgentInfo,
   type ProjectEntry,
@@ -36,6 +38,11 @@ import {
   projectForUnscopedSession,
   sortedSessionsForProjectTable,
 } from "../utils/sessionProjectTable";
+import {
+  computeHeaderCheckboxState,
+  toggleRowInTableSelection,
+  toggleSelectAllForTable,
+} from "../utils/sessionSelection";
 import { sortSessionsForDisplay } from "../utils/sessionSort";
 import { SessionWorkflowStatusCells } from "./SessionWorkflowStatusCells";
 import { SessionMoreActionsMenu } from "./session/SessionMoreActionsMenu";
@@ -417,6 +424,42 @@ function InactiveSessionActions({
       </Button>
       <SessionDeleteButton sessionId={sessionId} onDelete={onDelete} />
     </span>
+  );
+}
+
+/** Per-table header "select all" — `indeterminate` set from `computeHeaderCheckboxState`. */
+function SessionTableSelectAllCheckbox({
+  selectedCount,
+  totalRows,
+  dataTestId,
+  ariaLabel,
+  onToggle,
+}: {
+  selectedCount: number;
+  totalRows: number;
+  dataTestId: string;
+  ariaLabel: string;
+  onToggle: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const { checked, indeterminate } = computeHeaderCheckboxState(selectedCount, totalRows);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) {
+      el.indeterminate = indeterminate;
+    }
+  }, [checked, indeterminate]);
+
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      data-testid={dataTestId}
+      aria-label={ariaLabel}
+      checked={checked}
+      onChange={() => onToggle()}
+      className="size-4 shrink-0 rounded border border-input accent-primary"
+    />
   );
 }
 
@@ -945,6 +988,10 @@ export function ConnectionScreen({
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [projectForms, setProjectForms] = useState<Record<string, ProjectSessionForm>>({});
   const [orphanSessionDebug, setOrphanSessionDebug] = useState(false);
+  /** Per project / orphan table: selected session ids for bulk actions (independent per table). */
+  const [tableSessionSelections, setTableSessionSelections] = useState<Record<string, Set<string>>>(
+    {},
+  );
   const [workflowFilesSessionId, setWorkflowFilesSessionId] = useState<string | null>(null);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
@@ -1149,6 +1196,13 @@ export function ConnectionScreen({
   const orphanSessions = useMemo(
     () => sortSessionsForDisplay(sessions.filter((s) => isSessionOrphan(s, projects))),
     [sessions, projects]
+  );
+
+  const orphanTableKey = "orphan";
+  const orphanSelectedSet = tableSessionSelections[orphanTableKey] ?? new Set<string>();
+  const orphanAllSessionIds = useMemo(
+    () => orphanSessions.map((s) => s.sessionId),
+    [orphanSessions],
   );
 
   const debugForSessionId = useCallback(
@@ -1414,13 +1468,85 @@ export function ConnectionScreen({
     }
     setError(null);
     try {
-      await client.deleteSession({ sessionToken, sessionId });
+      await client.deleteSession(
+        create(DeleteSessionRequestSchema, { sessionToken, sessionId }),
+      );
       const res = await client.listSessions({ sessionToken });
       setSessions(res.sessions);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to delete session");
     }
   };
+
+  const handleBulkDeleteSelectedSessions = useCallback(
+    async (tableKey: string, selectedIds: string[]) => {
+      if (!sessionToken || selectedIds.length === 0) {
+        if (import.meta.env.DEV) {
+          console.debug("[ConnectionScreen] bulk delete skipped", {
+            tableKey,
+            hasToken: Boolean(sessionToken),
+            count: selectedIds.length,
+          });
+        }
+        return;
+      }
+      const count = selectedIds.length;
+      const msg = `Delete ${count} selected session${count === 1 ? "" : "s"}? If the tool process is still running, it will be stopped first, then on-disk session data will be removed. This cannot be undone.`;
+      if (import.meta.env.DEV) {
+        console.info("[ConnectionScreen] bulk delete confirm prompt", { tableKey, count });
+      }
+      if (!window.confirm(msg)) {
+        if (import.meta.env.DEV) {
+          console.debug("[ConnectionScreen] bulk delete cancelled");
+        }
+        return;
+      }
+      setError(null);
+      try {
+        for (let i = 0; i < selectedIds.length; i++) {
+          const sessionId = selectedIds[i]!;
+          if (import.meta.env.DEV) {
+            console.debug("[ConnectionScreen] bulk deleteSession", {
+              tableKey,
+              index: i + 1,
+              total: selectedIds.length,
+            });
+          }
+          await client.deleteSession(
+            create(DeleteSessionRequestSchema, { sessionToken, sessionId }),
+          );
+        }
+        const res = await client.listSessions({ sessionToken });
+        if (import.meta.env.DEV) {
+          console.info("[ConnectionScreen] bulk delete listSessions refresh", {
+            tableKey,
+            listed: res.sessions.length,
+          });
+        }
+        setSessions(res.sessions);
+        setTableSessionSelections((prev) => ({ ...prev, [tableKey]: new Set() }));
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Failed to delete selected sessions";
+        if (import.meta.env.DEV) {
+          console.info("[ConnectionScreen] bulk delete failed", { tableKey, message });
+        }
+        setError(message);
+        try {
+          const res = await client.listSessions({ sessionToken });
+          setSessions(res.sessions);
+          const existingIds = new Set(res.sessions.map((s) => s.sessionId));
+          setTableSessionSelections((prev) => {
+            const current = prev[tableKey] ?? new Set<string>();
+            const pruned = new Set([...current].filter((id) => existingIds.has(id)));
+            return { ...prev, [tableKey]: pruned };
+          });
+        } catch {
+          /* ignore secondary failure */
+        }
+      }
+    },
+    [client, sessionToken],
+  );
 
   const primaryFloatingSessionAction = (sessionId: string) => {
     const docked =
@@ -1609,6 +1735,9 @@ export function ConnectionScreen({
       ) : (
         projects.map((p) => {
           const projectSessions = sortedSessionsForProjectTable(sessions, p, projects);
+          const tableKey = p.projectId;
+          const selectedSet = tableSessionSelections[tableKey] ?? new Set<string>();
+          const allProjectSessionIds = projectSessions.map((s) => s.sessionId);
           return (
             <details
               key={p.projectId}
@@ -1650,9 +1779,40 @@ export function ConnectionScreen({
               {projectSessions.length === 0 ? (
                 <p style={{ fontSize: 14, color: "#666" }}>No sessions for this project.</p>
               ) : (
-                <Table className="mt-3 w-full min-w-0" data-testid={`sessions-table-${p.projectId}`}>
+                <>
+                  <div
+                    className="mt-3 w-full min-w-0"
+                    data-testid={`sessions-table-${p.projectId}`}
+                  >
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        disabled={selectedSet.size === 0}
+                        data-testid={`bulk-delete-selected-${tableKey}`}
+                        onClick={() =>
+                          void handleBulkDeleteSelectedSessions(tableKey, Array.from(selectedSet))
+                        }
+                      >
+                        Delete selected
+                      </Button>
+                    </div>
+                    <Table className="mt-3 w-full min-w-0">
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-10">
+                        <SessionTableSelectAllCheckbox
+                          selectedCount={selectedSet.size}
+                          totalRows={projectSessions.length}
+                          dataTestId={`session-table-select-all-${tableKey}`}
+                          ariaLabel="Select all sessions in this table"
+                          onToggle={() => {
+                            const next = toggleSelectAllForTable(allProjectSessionIds, selectedSet);
+                            setTableSessionSelections((prev) => ({ ...prev, [tableKey]: next }));
+                          }}
+                        />
+                      </TableHead>
                       <TableHead>ID</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead>Status</TableHead>
@@ -1675,6 +1835,19 @@ export function ConnectionScreen({
                         key={s.sessionId}
                         data-pending-elicitation={pendingElicitation ? "true" : "false"}
                       >
+                        <TableCell className="w-10 align-middle">
+                          <input
+                            type="checkbox"
+                            data-testid={`session-row-select-${s.sessionId}`}
+                            aria-label={`Select session ${s.sessionId}`}
+                            checked={selectedSet.has(s.sessionId)}
+                            onChange={() => {
+                              const next = toggleRowInTableSelection(selectedSet, s.sessionId);
+                              setTableSessionSelections((prev) => ({ ...prev, [tableKey]: next }));
+                            }}
+                            className="size-4 shrink-0 rounded border border-input accent-primary"
+                          />
+                        </TableCell>
                         <TableCell>
                           <span className="inline-flex flex-wrap items-center gap-2">
                             <span>{sessionIdFirstSegment(s.sessionId)}</span>
@@ -1734,6 +1907,8 @@ export function ConnectionScreen({
                     })}
                   </TableBody>
                 </Table>
+                  </div>
+                </>
               )}
             </details>
           );
@@ -1757,9 +1932,36 @@ export function ConnectionScreen({
             />
             Debug logging (browser terminal, Connect / Resume below)
           </label>
-          <Table className="mt-3 w-full min-w-0" data-testid="sessions-table-orphan">
+          <div className="mt-3 w-full min-w-0" data-testid="sessions-table-orphan">
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={orphanSelectedSet.size === 0}
+                data-testid={`bulk-delete-selected-${orphanTableKey}`}
+                onClick={() =>
+                  void handleBulkDeleteSelectedSessions(orphanTableKey, Array.from(orphanSelectedSet))
+                }
+              >
+                Delete selected
+              </Button>
+            </div>
+            <Table className="mt-3 w-full min-w-0">
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <SessionTableSelectAllCheckbox
+                    selectedCount={orphanSelectedSet.size}
+                    totalRows={orphanSessions.length}
+                    dataTestId={`session-table-select-all-${orphanTableKey}`}
+                    ariaLabel="Select all sessions in the other sessions table"
+                    onToggle={() => {
+                      const next = toggleSelectAllForTable(orphanAllSessionIds, orphanSelectedSet);
+                      setTableSessionSelections((prev) => ({ ...prev, [orphanTableKey]: next }));
+                    }}
+                  />
+                </TableHead>
                 <TableHead>ID</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Status</TableHead>
@@ -1782,6 +1984,19 @@ export function ConnectionScreen({
                   key={s.sessionId}
                   data-pending-elicitation={pendingElicitation ? "true" : "false"}
                 >
+                  <TableCell className="w-10 align-middle">
+                    <input
+                      type="checkbox"
+                      data-testid={`session-row-select-${s.sessionId}`}
+                      aria-label={`Select session ${s.sessionId}`}
+                      checked={orphanSelectedSet.has(s.sessionId)}
+                      onChange={() => {
+                        const next = toggleRowInTableSelection(orphanSelectedSet, s.sessionId);
+                        setTableSessionSelections((prev) => ({ ...prev, [orphanTableKey]: next }));
+                      }}
+                      className="size-4 shrink-0 rounded border border-input accent-primary"
+                    />
+                  </TableCell>
                   <TableCell>
                     <span className="inline-flex flex-wrap items-center gap-2">
                       <span>{sessionIdFirstSegment(s.sessionId)}</span>
@@ -1841,6 +2056,7 @@ export function ConnectionScreen({
               })}
             </TableBody>
           </Table>
+          </div>
         </>
       )}
 
