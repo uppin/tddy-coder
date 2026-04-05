@@ -1,53 +1,61 @@
-# Validate Tests Report — Session Bulk Select / Refactor Validation
+# Validate-tests report: default free-prompting + `/start-*` helpers
 
-## Date / toolchain
+**Date:** 2026-04-05
 
-- **Date:** 2026-04-05  
-- **Environment:** Linux; tests run from repo root via **`./dev`** (nix dev shell: rustc, cargo, rustfmt, clippy, bun, node as printed by the shell).  
-- **Output:** Full Rust workspace test log for **`./dev ./verify`** is in **`.verify-result.txt`** at the repository root.
+## Commands run
 
-## Commands run (exit codes)
+```bash
+export TMPDIR=/var/tmp
+cd /var/tddy/Code/tddy-coder/.worktrees/default-free-prompt-start-slash
+./test
+```
 
-| Command | Exit | Notes |
-|--------|------|--------|
-| `./verify` (without `./dev`) | **127** | `cargo: command not found` — **must** run Cargo through the dev shell or `nix develop`. |
-| `./dev cargo test -q` | **101** | Failed in **`tddy-integration-tests`** (`acp_backend_acceptance`): *"tddy-acp-stub not built. Run: cargo build -p tddy-acp-stub"* — 6 tests failed; 2 passed in that binary before abort. |
-| `./dev ./verify` | **0** | Runs `cargo build -p tddy-acp-stub` then `cargo test -- --test-threads=1` with output tee’d to `.verify-result.txt`. |
-| `./dev sh -c 'cd packages/tddy-web && bun test src/utils/sessionSelection.test.ts'` | **0** | Equivalent to running the unit file from `packages/tddy-web` with Bun’s test runner (not `bun run test`, which executes the package `test` script). |
-| `./dev sh -c 'cd packages/tddy-web && bun run cypress:component -- --spec cypress/component/ConnectionScreen.cy.tsx'` | **0** | Single-spec Cypress component run. |
+`./test` runs (via nix dev shell) `cargo build -p tddy-coder -p tddy-tools -p tddy-livekit -p tddy-acp-stub --examples --bins` then `cargo test` with `--test-threads=1`, teeing full output to `.verify-result.txt`.
 
-**Note:** The literal form `./dev bun --cwd packages/tddy-web test <file>` was not used here; `bun test <file>` from `packages/tddy-web` is the reliable way to run only `sessionSelection.test.ts` without triggering the composite `npm run test` pipeline (`bun test src/routing && …`).
+**Note:** Full run wall time was ~33–34 minutes in this environment (cold compile + full workspace tests). No lighter fallback was required after `./test` completed.
 
-## Rust workspace tests — pass/fail
+## Overall pass/fail
 
-- **Status:** **Pass** when using **`./dev ./verify`** (exit **0**).  
-- **Caveat:** A plain **`./dev cargo test -q`** without first building **`tddy-acp-stub`** **fails** integration tests that spawn the stub (documented failure above). This is an **order-of-operations / prerequisite** issue, not a regression in the session bulk-select web code.
+**PASS** — shell wrapper exited with code **0** (see session terminal metadata: `exit_code: 0`).
 
-## `sessionSelection` unit tests — pass/fail
+`.verify-result.txt` contains only `test result: ok` lines for executed suites; no `error: test failed`, `failures:`, or `FAILED` entries were found in that log.
 
-- **Status:** **Pass** (exit **0**).  
-- **Result:** **6** tests, **0** failures, **6** `expect()` calls in `src/utils/sessionSelection.test.ts`.
+## Failing tests
 
-## `ConnectionScreen.cy.tsx` component tests — pass/fail
+None observed in `.verify-result.txt` for this run.
 
-- **Status:** **Pass** (exit **0**).  
-- **Result:** **32** passing tests in **~17s** (only this spec file; includes “ConnectionScreen bulk session selection and delete (acceptance)” and the rest of the ConnectionScreen suite).
+## Passing highlights for this feature area
 
-## Missing coverage — session bulk-select feature
+- **`packages/tddy-coder/tests/default_free_prompt_start_slash_acceptance.rs`** — all 5 tests passed, including:
+  - default unspecified recipe CLI name is `free-prompting`
+  - `/start-bugfix` parses to recipe name `bugfix`
+  - `feature_slash_menu_start_command_labels()` covers every `supported_workflow_recipe_cli_names()` entry as `/start-<name>`
+  - post–structured-workflow completion constant returns `free-prompting`
+  - invalid `/start-…` yields an error string listing supported names (e.g. contains `tdd` and `bugfix`)
+- **`packages/tddy-workflow-recipes/src/feature_start_slash.rs`** — unit tests in the same module passed under `cargo test` (parse, menu labels, invalid suffix, next-session recipe).
+- **`packages/tddy-workflow-recipes`** — existing `tdd-small` acceptance/policy tests (`workflow_recipe_acceptance`, `tdd_small_acceptance`, `recipe_policy_red`, etc.) ran as part of the workspace test pass.
+- **CLI / integration** — `cli_recipe`, `cli_integration`, `flow_runner_integration`, and related `tddy-coder` integration tests passed (including `--recipe tdd` flows where exercised).
 
-- **Partial bulk-delete failure:** No automated test for **mid-sequence RPC failure** (some deletes succeed, later one throws); evaluation report notes stale selection / UX gap.  
-- **E2E:** No **Cypress e2e** (or Playwright) path against a **real or stubbed full app flow** for bulk delete; coverage is **component + unit** only.  
-- **listSessions / race timing:** Limited coverage for **refresh during bulk delete** or **interleaved updates** to session lists.  
-- **Edge cases:** **Empty tables** (no rows), **single row**, **very large selection counts**, and **accessibility** (keyboard-only select-all / bulk delete) are not explicitly called out in the validation run.  
-- **Error surfaces:** **Delete RPC error** for bulk flow (not just happy path) may need explicit assertions if not already covered in the new CT cases.
+## Coverage gaps / missing tests
 
-## Recommendations
+1. **End-to-end presenter / `SubmitFeatureInput`**  
+   `parse_feature_start_slash_line`, `feature_slash_menu_start_command_labels`, and `next_session_recipe_cli_name_after_start_slash_structured_workflow_complete` are exercised in **library + acceptance tests** and `tddy-workflow-recipes` unit tests. A repo-wide search shows **no production import** of these symbols in `tddy-coder` / presenter paths yet—so there are **no presenter_integration (or similar) tests** that submit a line like `/start-tdd` and assert recipe selection, session recipe after `WorkflowComplete`, or user-visible errors for bad `/start-` input.
 
-1. **CI / local habit:** Prefer **`./dev ./verify`** (or document **`cargo build -p tddy-acp-stub`** before **`cargo test`**) so integration tests do not fail spuriously.  
-2. **Bun:** For **single-file** unit tests, use **`bun test <path>`** inside `packages/tddy-web`; avoid **`bun run test`** when only `sessionSelection` is intended (that script runs routing tests + full Cypress).  
-3. **Product hardening:** Add a **targeted test** (unit or CT) for **bulk delete partial failure** and consider **pruning selection** after `listSessions` refresh or on error, as in the evaluation report.  
-4. **Optional:** One **e2e** or **smoke** scenario for bulk delete if the feature is user-critical and regressions must be caught outside Storybook.
+2. **TUI slash menu vs `/start-*` labels**  
+   The TUI still builds the feature slash menu from `tddy_core::slash_menu_entries` (builtin recipe + skills). **Unit tests** in `tddy-tui` assert `BuiltinRecipe` appears, not `/start-<recipe>` strings from `feature_slash_menu_start_command_labels`. There is **no integration test** tying TUI completion to the new workflow-recipes labels.
+
+3. **CLI `--recipe` parity with supported names**  
+   `Args` / `DemoArgs` use `value_parser = ["tdd", "bugfix", "free-prompting", "grill-me"]` and **omit `tdd-small`**, while `approval_policy::supported_workflow_recipe_cli_names` includes `tdd-small` and `/start-tdd-small` appears in slash-menu label tests. **Gap:** CLI cannot pass `--recipe tdd-small` even though the resolver and `/start-*` helpers know that name—**no CLI test** asserts `tdd-small` on the flag (and adding it would require extending the parser list).
+
+4. **Explicit `/start-tdd-small` in acceptance**  
+   `default_free_prompt_start_slash_acceptance` uses `/start-bugfix` as the happy path; **`/start-tdd-small`** is not explicitly asserted there (only covered indirectly via the “all supported names in menu labels” loop).
+
+5. **Empty `/start-` suffix**  
+   `parse_feature_start_slash_line` handles empty suffix with a dedicated error; there is **no dedicated unit/acceptance test** for `"/start-"` / `"/start-   "` in the same style as other cases (only implied by implementation).
+
+6. **Web `ConnectionScreen`**  
+   Cypress/component coverage exists for `ConnectionScreen` generally, but **this branch did not add** tests for default recipe, daemon recipe flags, or `/start-*` behavior in the web UI—appropriate if the feature is CLI/TUI-only for now; call out as **out-of-scope** unless product expects web parity.
 
 ---
 
-*Generated for refactor validation; aligns with `plans/evaluation-report.md` context.*
+*Generated by validate-tests subagent; evidence: `.verify-result.txt` and `./test` exit code 0.*

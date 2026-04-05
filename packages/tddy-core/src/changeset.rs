@@ -76,7 +76,7 @@ pub struct Changeset {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub repo_path: Option<String>,
-    /// Active workflow recipe name (e.g. "tdd", "bugfix"). Omitted in legacy changesets → default tdd at read time.
+    /// Active workflow recipe name (e.g. "tdd", "bugfix"). Omitted in legacy changesets → resolved using the same default as new sessions (**`free-prompting`**) at read time when no explicit recipe is supplied.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub recipe: Option<String>,

@@ -1188,6 +1188,10 @@ fn render_feature_slash_menu(frame: &mut Frame, view_state: &ViewState, area: Re
                 "/recipe".to_string(),
                 "Switch workflow recipe (TDD / bugfix)".to_string(),
             ),
+            SlashMenuEntry::StartRecipe { label: start_label } => (
+                start_label.clone(),
+                "Start structured workflow for this session".to_string(),
+            ),
             SlashMenuEntry::Skill { name, description } => {
                 (format!("/{name}"), description.clone())
             }

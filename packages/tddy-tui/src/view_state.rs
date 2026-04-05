@@ -546,6 +546,12 @@ impl ViewState {
                         self.close_feature_slash_menu_clear();
                         self.pending_feature_slash_builtin_recipe_intent = true;
                     }
+                    tddy_core::SlashMenuEntry::StartRecipe { label } => {
+                        let trigger = self.feature_slash_trigger_byte;
+                        let label = label.clone();
+                        self.feature_edit.accept_slash_menu_literal(&label, trigger);
+                        self.close_feature_slash_menu_clear();
+                    }
                     tddy_core::SlashMenuEntry::Skill { name, .. } => {
                         let name = name.clone();
                         self.accept_feature_slash_skill(&name, root);

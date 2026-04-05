@@ -27,6 +27,8 @@ fn tddy_demo_sigint_prints_session_info_to_stderr() {
         .args([
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "plan",
             "--prompt",
