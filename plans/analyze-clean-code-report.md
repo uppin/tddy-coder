@@ -1,47 +1,50 @@
-# Clean-code analysis: session bulk selection & delete
+# Analyze Clean Code Report
 
-Analysis scope: `sessionSelection.ts`, `sessionSelection.test.ts`, and bulk-selection-related sections of `ConnectionScreen.tsx` (header checkbox component, `tableSessionSelections`, `handleBulkDeleteSelectedSessions`, table UI). Cross-read with `plans/evaluation-report.md`.
+## Overall assessment
 
-## Summary score table (subjective)
-
-| Area                         | Score (1–5) | Notes |
-|-----------------------------|-------------|-------|
-| Naming & API clarity        | 4           | Helpers and state names read well; `tableKey` aligns with project id / orphan key. |
-| Complexity & control flow   | 3           | Pure helpers are simple; `toggleSelectAllForTable` “all selected” predicate is non-obvious; verbose branching in `computeHeaderCheckboxState`. |
-| Duplication                 | 3           | Two near-identical session tables (project vs orphan); acceptable for now, extractable later. |
-| SOLID / testability         | 4           | Selection logic isolated and unit-tested; bulk delete stays in screen (RPC/UI) — reasonable split. |
-| Docs & comments             | 4           | JSDoc on exports and key state; no excessive inline noise except logs. |
-| Consistency with ConnectionScreen | 3     | Patterns match existing confirm/delete/listSessions flow; new console volume is heavier than the one-off list load debug line. |
-
-**Overall:** ~3.5 / 5 — solid structure with clear extraction of pure logic; main quality debt is **logging inside “pure” helpers** and **UI duplication** between tables.
+The new **review** workflow code is **coherent and aligned** with existing recipe patterns (notably **grill-me**): a small `mod.rs` recipe surface, dedicated `hooks` / `prompt` modules, and focused helpers for git context, parsing, and persistence. Modules are **appropriately scoped** for a single workflow. The main gaps are **localized duplication** in hooks, **light test coverage** next to grill-me’s hook tests, and **documentation drift risk** between merge-base behavior in `prompt.rs` vs `git_context.rs`. Overall quality is **good for a first vertical slice**, with clear, prioritized improvements.
 
 ## Strengths
 
-- **Pure selection module** — `computeHeaderCheckboxState`, `toggleSelectAllForTable`, and `toggleRowInTableSelection` are side-effect-free apart from logging, easy to reason about, and imported explicitly at the top of `ConnectionScreen.tsx` alongside other `../utils/*` helpers (`sessionDisplay`, `sessionProjectTable`, `sessionSort`), which matches existing organization.
-- **Header checkbox encapsulation** — `SessionTableSelectAllCheckbox` centralizes the React quirk of `indeterminate` via `useRef` + `useEffect`, keeps `ConnectionScreen` JSX focused on wiring counts and `onToggle`.
-- **Per-table selection model** — `Record<string, Set<string>>` with a documented comment matches the product rule (independent selection per project table and orphan table). `toggleSelectAllForTable`’s predicate (all rows selected *and* no stray ids outside the table) is a thoughtful guard against stale selection after list changes.
-- **Bulk delete mirrors single delete** — `handleBulkDeleteSelectedSessions` follows the same mental model as `handleDeleteSession`: confirm → RPC → `listSessions` → `setSessions`, with `setError` on failure. `useCallback` dependencies `[client, sessionToken]` are minimal and correct.
-- **Tests** — Core behaviors (partial vs all header state, select-all toggle, row toggle) are covered with direct assertions; fast `bun:test` unit tests align with the repo’s TDD posture.
+- **Naming and layout**: `ReviewRecipe`, `ReviewWorkflowHooks`, `inspect` / `branch-review` goals, `REVIEW_MD_BASENAME`, and file names match the rest of `tddy-workflow-recipes` (compare `GrillMeRecipe`, `GrillMeWorkflowHooks`, `GRILL_ME_BRIEF_BASENAME`).
+- **Separation of concerns**: `parse.rs` owns schema-shaped validation; `persist.rs` owns I/O; `git_context.rs` owns git subprocess details; `prompt.rs` owns operator/agent-facing text. This is a **solid Single-Responsibility** split.
+- **Recipe module (`mod.rs`)**: Mirrors grill-me’s structure (graph build, hooks factory, goal hints, manifest). **`SessionArtifactManifest`** is implemented consistently with a single known artifact.
+- **Structured submit path**: `BranchReviewOutput` with `#[serde(deny_unknown_fields)]` plus explicit `goal` and `review_body_markdown` checks keeps invalid payloads out early.
+- **Daemon touchpoint**: `telegram_session_control.rs` is minimal and **correctly documented** as aligning CLI normalization; adding `"review"` to the extended keyboard list is consistent with product naming.
 
-## Issues
+## Issues / improvements (prioritized)
 
-1. **Side effects in “pure” utilities** — `sessionSelection.ts` uses `console.debug` / `console.info` on every path. That contradicts the file’s stated purpose (“Pure selection helpers”), adds noise in tests and production, and duplicates the evaluation report’s observability warning for `ConnectionScreen`.
-2. **Repetitive branches in `computeHeaderCheckboxState`** — Early returns repeat the same logging pattern; a single computation of `{ checked, indeterminate }` plus one optional log (or none) would shrink the function and reduce mistake surface.
-3. **`SessionTableSelectAllCheckbox` effect logging** — `useEffect` runs when checkbox-derived state changes and logs every time; on large lists this is lower risk than per-row logging but still spams when selection changes frequently.
-4. **Test coverage gaps** — No cases for `totalRows === 0`, “partial select-all” (some but not all rows), or `toggleSelectAllForTable` when selection contains ids not in `allSessionIds` (the intentional stale-selection behavior). The describe title “(granular)” is vague.
-5. **Structural duplication in JSX** — Project and orphan tables duplicate the bulk-delete bar, `SessionTableSelectAllCheckbox`, column headers, and row checkbox wiring. Not wrong, but increases drift risk if columns or actions change later.
-6. **Bulk partial failure (already in evaluation report)** — Sequential deletes + catch without clearing selection is a correctness/UX concern, not a style issue, but it interacts with selection state quality.
+1. **Duplication in `hooks.rs` (`before_task`)**  
+   The `"inspect"` and `"branch-review"` arms both: resolve `repo_root`, build `git_block`, append the same section header `"## Branch changes (deterministic scope)\n\n"`, and set `system_prompt`. Extracting something like `fn build_system_prompt_for_task(task_id: &str) -> String` (or building `git_block` once and passing into shared `fn append_branch_scope(prompt_fn, git_block)`) would **reduce drift** if one arm later diverges by mistake.
 
-## Refactor suggestions (small, actionable)
+2. **Merge-base story split across two modules**  
+   `prompt::merge_base_strategy_documentation()` and `git_context::merge_base_commit_for_review()` must stay in sync. Today they agree (ordered refs, then `HEAD`), but **future edits** could diverge silently. Options: reference one canonical doc string from the other, or move the strategy description next to the implementation and have the prompt import/surface it (single source of truth).
 
-| Priority | Suggestion |
-|----------|------------|
-| High | Remove or gate all `console.*` calls from `sessionSelection.ts` (and trim redundant logs in `SessionTableSelectAllCheckbox` / bulk handler once stable). If debug is needed temporarily, use a single module-level `DEBUG_SESSION_SELECTION` constant marked `// FIXME: remove before release` per project rules, or a shared dev-only logger — **ask before introducing a new dependency**. |
-| Medium | Refactor `computeHeaderCheckboxState` to compute `checked` / `indeterminate` once, then return (no duplicated per-branch logs). |
-| Medium | Add 2–4 unit tests: empty table header state; partial row selection toggling to “select all”; `toggleSelectAllForTable` when `selected` has extra ids not in `allSessionIds`. Rename describe to something concrete, e.g. `sessionSelection helpers`. |
-| Low | Extract a presentational `SessionsBulkTable` (or similar) that accepts `tableKey`, rows, `selectedSet`, and callbacks to reduce duplicate table markup between project and orphan sections — only if upcoming changes touch both tables. |
-| Low | Consider `onChange={onToggle}` instead of `onChange={() => onToggle()}` on the header checkbox for a tiny clarity win (optional). |
+3. **`git_context.rs`: helper inconsistency**  
+   `git_output()` exists for strict success paths, but `format_diff_context_for_prompt` uses raw `Command` and **treats non-success as soft errors** in the prompt (parenthetical messages). That is intentional for UX, but the split means **two styles** of git invocation. Consider a small internal `fn git_output_relaxed(...)` or a comment block explaining why stat/diff intentionally differ from `git_output`.
 
-## Conclusion
+4. **Tests vs grill-me**  
+   `grill_me/hooks.rs` includes **unit tests** for hook behavior (`after_task` file relay). `review/hooks.rs` has **no corresponding tests** for deterministic prompt assembly or repo resolution edge cases. Adding focused tests (even with mocked/minimal paths) would match project TDD expectations and guard regressions.
 
-The bulk-selection work is **architecturally sound**: logic is separated for testing, naming matches surrounding patterns, and the screen component stays the integration point for RPC and confirmation dialogs. The main clean-code gap is **observability leaking into pure functions and frequent render-adjacent logging**, plus **test and DRY gaps** that are easy to close without redesign.
+5. **Stringly goal IDs**  
+   `"inspect"` and `"branch-review"` appear many times across `mod.rs` and `hooks.rs`. **Private `const` goal name strings** (or a tiny enum used only at boundaries) would reduce typo risk and ease refactors.
+
+6. **`persist.rs` logging**  
+   The log line uses `out.review_body_markdown.len()` while the file is normalized with `trim_end_matches` and a trailing newline; **character length vs UTF-8 byte length** can differ from “bytes written”. Prefer logging after write, or use `std::fs::metadata` if exact size matters.
+
+7. **`tddy-tools/src/review_persist.rs`**  
+   This is a **thin wrapper** over `persist_review_md_to_session_dir` with an extra log target. Acceptable as a **stable API boundary** for the tools binary, but if it never grows, consider documenting that intent (one line) so it is not mistaken for duplication to delete hastily.
+
+## Suggestions
+
+- **Extract shared prompt assembly** in `hooks.rs` to remove the duplicate inspect/branch-review block and keep event emission in one place.
+- **Single source of truth** for merge-base documentation: either generate operator text from the same list used in `merge_base_commit_for_review`, or centralize a `const MERGE_BASE_CANDIDATE_REFS: &[&str]` used by both docs and loop.
+- **Add hook tests** at least for: context key `system_prompt` contains the git section header when a fake temp repo is used, or pure string composition tests without git if easier.
+- **Use `const` goal names** in `review` module for readability and consistency with other recipes as they evolve.
+- **`telegram_session_control.rs`**: No change required for clean code; keep the file’s comment in sync when CLI recipe lists change elsewhere.
+
+---
+
+**Path written:** `plans/analyze-clean-code-report.md`
+
+**Top 3 issues (one line):** (1) Duplicate `inspect`/`branch-review` prompt assembly in `hooks.rs` — extract helper; (2) Merge-base behavior documented in `prompt.rs` and implemented in `git_context.rs` — consolidate single source of truth; (3) Review hooks lack unit tests compared to grill-me — add coverage for prompt/context behavior.

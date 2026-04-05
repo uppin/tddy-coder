@@ -2,6 +2,11 @@
 
 Release note history for the Web product area.
 
+## 2026-04-05 — Workflow recipe control: `review`
+
+- **ConnectionScreen**: The **Workflow recipe** options include **`review`** alongside existing recipe names; the value is sent on **`StartSession`** as for other recipes.
+- **Reference**: [workflow-recipes.md](../coder/workflow-recipes.md) (**ReviewRecipe**, **Selecting a recipe**).
+
 ## 2026-04-05 — Terminal connection status bar (chrome layouts)
 
 - **tddy-web**: **`TerminalConnectionStatusBar`** hosts **`ConnectionTerminalChrome`** with **`chromeLayout="statusBar"`** above **`GhosttyTerminal`** in **`GhosttyTerminalLiveKit`**, **`ConnectionScreen`**, and standalone connect. **`connectionChromePlacement`** **`floating`** | **`none`** selects full vs compact bar (build id + fullscreen vs dot-focused chrome for overlay / mini). **`terminalStatusBarLayout`** geometry helpers with Bun tests; Cypress **`GhosttyTerminalLiveKit.cy.tsx`** shares those helpers. **`connectionTerminalChromeDotStyles`** centralizes dot animation styles.

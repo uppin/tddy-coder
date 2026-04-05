@@ -1,78 +1,70 @@
-# Validate prod-ready — Session bulk select / delete
+# Validate Production Readiness Report
 
-**Scope:** Review of `ConnectionScreen.tsx` (bulk delete, selection state, logging), `sessionSelection.ts`, and Cypress `ConnectionScreen.cy.tsx` (test harness quality only).  
-**Aligned with:** `plans/evaluation-report.md` (medium risk; build passes).
+## Summary verdict
 
----
-
-## Executive summary
-
-The feature implements per-table multi-select, indeterminate header checkboxes, and bulk delete via sequential `DeleteSession` RPCs with a single `window.confirm` that includes the count. Core behavior matches the PRD and tests cover selection semantics and delete payloads. **Before a production release, remove or gate verbose `console.*` usage** in both the screen and the pure `sessionSelection` helpers—helpers currently log on routine toggles and will add noise and minor overhead in production. **Treat partial bulk-delete failure as a product concern:** earlier deletes may succeed while a later RPC fails; selection is not cleared and the list may be stale until the next poll, which can confuse operators. Security posture for this slice is acceptable (no session tokens in logs; React text rendering). Cypress additions are solid: protobuf-backed intercepts and explicit delete-body decoding improve harness fidelity.
+**Needs work** — The review recipe core (graph, hooks, merge-base strategy docs, JSON parsing, and `review.md` writer) is implemented with consistent `log::` usage and no `println!` in the reviewed Rust modules. However, **`persist_review_md_from_branch_review_json` / `persist_review_md_to_session_dir` are not referenced from the live `tddy-tools submit` relay or `tddy-core` toolcall listener path** (only library exports and tests). Until the presenter or engine invokes persistence on `branch-review` submit with a resolved `session_dir`, **`review.md` will not appear in real sessions** despite successful structured submit. Additionally, diff truncation uses a raw byte slice that can **panic on UTF-8 boundaries**, and **`git diff --stat` is not size-capped** (large repos → large prompt material / memory).
 
 ---
 
-## Checklist
+## Findings by category
 
-| Area | Status | Notes |
-|------|--------|--------|
-| Error handling — bulk delete failure | **Concern** | `setError(message)`; selection retained; no `listSessions` refresh on failure → possible inconsistent UI vs server. |
-| Error handling — single delete | **Pass** | Same pattern as existing app behavior. |
-| Logging — volume / prod fit | **Concern** | `console.debug` / `console.info` in hot paths (`sessionSelection`, header checkbox effect, bulk loop). |
-| Logging — secrets | **Pass** | `sessionToken` not logged; only `hasToken` boolean in skip path. |
-| Logging — identifiers | **Concern** | `sessionId` logged in bulk delete debug lines — session identifiers in client logs may be sensitive for some deployments. |
-| Security — XSS | **Pass** | No `dangerouslySetInnerHTML`; confirm strings are template literals with count + static text. |
-| Security — confirm UX | **Pass** | Blocking `window.confirm` for destructive bulk action; count included. |
-| Performance — Set in state | **Pass** | Updates clone via `new Set(...)` / helpers return new `Set`; no in-place mutation of stored sets. |
-| Performance — re-renders | **Concern** | `?? new Set()` for missing table keys allocates each render; minor. Header checkbox `useEffect` + console on relevant deps. |
-| Performance — sequential deletes | **Pass** | Intentional ordering; acceptable for typical N; no parallel storm. |
-| Configuration | **Pass** | No new env toggles required; uses existing RPC client. |
-| Accessibility — checkboxes | **Pass** | `aria-label` on row and header controls; indeterminate set in effect. |
-| Accessibility — bulk button | **Concern** | Relies on visible “Delete selected” text; no extra `aria-label` (acceptable if button text remains unique). |
-| Cypress harness | **Pass** | Tracked delete intercept decodes `DeleteSessionRequest`; shared body helpers; clear test IDs. |
+### Error handling
 
-**Legend:** Pass = acceptable for release with noted minor items; Concern = should address or explicitly accept before release; Fail = blocker.
+| Finding | Location | Notes |
+|--------|----------|--------|
+| **Structured JSON errors propagate** | `packages/tddy-workflow-recipes/src/review/parse.rs:16–28` | `serde_json::from_str` and goal/body validation return `Result<_, String>` with clear messages. |
+| **Filesystem errors propagate** | `packages/tddy-workflow-recipes/src/review/persist.rs:16–22` | `create_dir_all` and `write` map errors to strings including path display. |
+| **`tddy-tools` wrapper surfaces same errors** | `packages/tddy-tools/src/review_persist.rs:8–17` | Thin wrapper; failures from `persist_review_md_to_session_dir` bubble as `Result<(), String>`. |
+| **Hooks swallow git “soft” failures in prompt** | `packages/tddy-workflow-recipes/src/review/git_context.rs:87–120`, `hooks.rs:54–64` | `format_diff_context_for_prompt` embeds stderr/error text in the prompt instead of failing `before_task`. Workflow continues; operator sees degraded context. **By design** but worth knowing for support. |
+| **`merge_base_commit_for_review` silent candidates** | `packages/tddy-workflow-recipes/src/review/git_context.rs:34–48,56–82` | Failed `merge-base` attempts return `None` and try the next ref; eventual fallback to `rev-parse HEAD` or literal `"HEAD"` with `log::warn!` only if even `rev-parse` fails (`81–82`). No hard error to the user. |
+| **No integration error path for missing `review.md` write** | *Gap* | Persistence API exists; **no caller** in `packages/tddy-coder` / `packages/tddy-core` grep for `persist_review_md` or `review_persist`. Submit flow stores JSON via `store_submit_result` (`packages/tddy-core/src/toolcall/listener.rs:118–127`) without writing `review.md`. |
 
----
+### Logging
 
-## Prioritized findings
+| Finding | Location | Notes |
+|--------|----------|--------|
+| **Uses `log` crate, not stdout** | `packages/tddy-workflow-recipes/src/review/*.rs` | `log::debug!`, `log::info!`, `log::warn!` throughout `mod.rs`, `git_context.rs`, `hooks.rs`, `persist.rs`. **No `println!` / `eprintln!`** in these files (verified by search). |
+| **Targeted logging in `tddy-tools`** | `packages/tddy-tools/src/review_persist.rs:12–16` | `log::info!(target: "tddy_tools::review_persist", ...)`. |
+| **Potential log volume** | `packages/tddy-workflow-recipes/src/review/mod.rs:144–151` | `plain_goal_cli_output` logs full agent output at `info` level when present — large outputs could flood logs (recipe-wide concern). |
 
-### P1 — Logging in production paths
+### Configuration
 
-- **`sessionSelection.ts`:** Pure helpers call `console.debug` / `console.info` on normal operations (every toggle, header state computation paths). This runs in production bundles unless stripped by tooling (often not stripped for `console.*`).
-- **`ConnectionScreen.tsx`:** `SessionTableSelectAllCheckbox` logs on effect runs; `handleBulkDeleteSelectedSessions` logs per session id and list refresh metadata; initial load logs tool/agent counts.
+| Finding | Location | Notes |
+|--------|----------|--------|
+| **Merge-base strategy is code-defined, not env-driven** | `packages/tddy-workflow-recipes/src/review/git_context.rs:58–72`, `prompt.rs:6–16` | Fixed candidate order: `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`, then HEAD fallback. **No env vars** in `review/` for override. |
+| **Operator documentation string** | `packages/tddy-workflow-recipes/src/review/prompt.rs:13–16` | `merge_base_strategy_documentation()` matches implementation intent (deterministic order, empty diff vs hard fail). |
+| **CLI session env elsewhere** | `packages/tddy-tools/src/cli.rs:400–404` | `set-session-context` uses `TDDY_SESSION_DIR` / `TDDY_WORKFLOW_SESSION_ID` — not specific to review, but session dir for artifacts is environment-established, not chosen by review JSON. |
 
-**Impact:** Console noise, possible performance micro-cost, session ids in debug logs.
+### Security
 
-### P2 — Partial failure after sequential bulk delete
+| Finding | Location | Notes |
+|--------|----------|--------|
+| **No shell when invoking git** | `packages/tddy-workflow-recipes/src/review/git_context.rs:18–32,101–103` | `Command::new("git")` with argument array; **no** `sh -c`. Injects via malformed ref are constrained: merge-base refs are fixed literals; `merge_base` output comes from git or `"HEAD"`. |
+| **Path traversal from submit JSON** | `packages/tddy-workflow-recipes/src/review/persist.rs:17–18` | Output path is `session_dir.join(REVIEW_MD_BASENAME)` with constant `review.md` (`prompt.rs:4`). **No user-controlled path segments** from JSON for the file path. |
+| **Secrets in logs** | `hooks.rs`, `persist.rs`, `git_context.rs` | Logs include repo path, merge-base commit, session dir, byte counts — **not** submit JSON body by default in persist (only sizes/paths). Full output logging risk in `mod.rs:149–151` if agent pastes secrets. |
+| **Schema rejects extra fields** | `packages/tddy-workflow-recipes/src/review/parse.rs:7–17`, `generated/tdd/branch-review.schema.json` | `deny_unknown_fields` + `additionalProperties: false` reduces surprise keys in structured submit. |
 
-- Loop `await`s each `deleteSession`. If delete 1..k succeed and k+1 throws, **earlier deletes are not rolled back** (expected without transactions), **`listSessions` is not called** in the catch path, and **selection is not cleared**. User sees an error but UI may still show selected rows that no longer exist (until refresh/poll).
+### Performance
 
-**Impact:** Confusing UX and risk of retrying duplicate deletes (server should ideally no-op).
-
-### P3 — Ephemeral `new Set()` for empty selection
-
-- `tableSessionSelections[tableKey] ?? new Set<string>()` allocates a new empty `Set` each render when the key is absent. Low severity; could use a module-level frozen empty set or store explicit empty sets in state updates for referential stability if profiling shows issues.
-
-### P4 — Cypress / repo hygiene (out of prod code)
-
-- `interceptAllRpcsWithTrackedDelete` duplicates much of `interceptAllRpcs` — higher maintenance cost when RPC mocks change (not a runtime defect).
-
----
-
-## Recommendations for release
-
-1. **Strip or gate logging:** Remove `console.*` from `sessionSelection.ts` entirely, or move diagnostics behind an explicit dev-only flag (avoid silent “production vs test” behavior branches without team agreement—prefer removal or a documented debug toggle). Trim `ConnectionScreen` bulk-delete and header-checkbox logs before release.
-2. **On bulk delete failure:** Call `listSessions` in the `catch` path (or always after partial completion) and **prune** `tableSessionSelections[tableKey]` to ids still present in the refreshed list—or clear selection for that table and show a message that lists completed vs failed if the API supports it later.
-3. **Optional UX:** Add an `aria-label` on the bulk delete button that includes the selected count for screen readers (e.g. “Delete 3 selected sessions”).
-4. **Release note:** Document that bulk delete is best-effort sequential RPCs; operators should retry after errors if the list looks stale.
+| Finding | Location | Notes |
+|--------|----------|--------|
+| **Diff body truncated to 48k bytes** | `packages/tddy-workflow-recipes/src/review/git_context.rs:106–113` | Caps agent prompt size for the unified diff section. |
+| **`git diff --stat` not truncated** | `packages/tddy-workflow-recipes/src/review/git_context.rs:88–98` | Entire stat output embedded in prompt — very large histories can produce **large strings** and memory use. |
+| **Full stdout loaded before truncate** | `packages/tddy-workflow-recipes/src/review/git_context.rs:101–113` | `git diff` output is fully read into memory, then truncated — **peak memory** equals full diff size. |
+| **UTF-8 hazard on truncation** | `packages/tddy-workflow-recipes/src/review/git_context.rs:109–110` | `&s[..MAX]` on `str` **panics** if `MAX` splits a multibyte character. Rare for ASCII diffs, but not impossible for binary paths / non-UTF-8 (lossy conversion can still yield long UTF-8). Prefer `s.floor_char_boundary(MAX)` or truncate by char. |
 
 ---
 
-## Test harness (Cypress) — brief
+## Residual risks
 
-- **Strengths:** `connectRequestBodyToUint8` handles multiple body shapes; bulk delete tests decode protobuf request bodies to assert `sessionId` order/content; confirms single `window.confirm` with message assertions.
-- **Watch:** Intercept helper duplication; consider extracting shared RPC wiring to reduce drift.
+1. **Presenter / engine wiring for `review.md`** — `tddy_tools::review_persist::persist_review_md_from_branch_review_json` must be called with the active workflow `session_dir` and the validated submit JSON when the goal is `branch-review`. Until that exists in the same place other goals persist artifacts, the feature is **incomplete for end-to-end production use** despite unit/acceptance tests that call `persist_review_md_to_session_dir` directly (`packages/tddy-workflow-recipes/tests/review_recipe_artifact_acceptance.rs`).
+
+2. **Submit path without `TDDY_SOCKET`** — `packages/tddy-tools/src/cli.rs:161–165`: if `TDDY_SOCKET` is unset, `run_submit` prints success **without** relaying; persistence is not invoked here either. Operators relying on offline validation still would not get `review.md` unless separately wired.
+
+3. **Deterministic merge-base may not match team’s integration branch** — No env override; forks using unusual default branches rely on elicitation or may see empty/surprising diffs when fallbacks apply (`git_context.rs:74–82`).
+
+4. **Binary / encoding edge cases** — Lossy UTF-8 from `from_utf8_lossy` plus byte slicing truncation (see performance) — potential panic or garbled truncation.
 
 ---
 
-*Report generated for validate-prod-ready subagent review.*
+*Validation method: direct read of `packages/tddy-workflow-recipes/src/review/*.rs`, `packages/tddy-tools/src/review_persist.rs`, and cross-package grep for call sites / logging patterns.*

@@ -1,5 +1,8 @@
 //! Integration tests for JSON Schema validation of structured agent output.
 
+use assert_cmd::cargo::cargo_bin_cmd;
+use assert_cmd::Command;
+
 use tddy_tools::schema::{format_validation_errors, get_schema, validate_output, SchemaError};
 
 /// plan.schema.json must not contain the `plan_dir_suggestion` property.
@@ -20,6 +23,7 @@ const VALID_GOALS: &[&str] = &[
     "red",
     "green",
     "post-green-review",
+    "branch-review",
     "evaluate-changes",
     "validate",
     "refactor",
@@ -103,6 +107,58 @@ fn valid_demo_passes_schema_validation() {
 fn valid_post_green_review_passes_schema_validation() {
     let json = r#"{"goal":"post-green-review","summary":"s","risk_level":"low","validity_assessment":"ok","tests_report_written":true,"prod_ready_report_written":false,"clean_code_report_written":true}"#;
     assert!(validate_output("post-green-review", json).is_ok());
+}
+
+/// PRD: `list-schemas` / `get-schema` include **branch-review**; minimal payload validates (post-green-review-style fields).
+#[test]
+fn tddy_tools_lists_branch_review_goal() {
+    fn tddy_tools_bin() -> Command {
+        let mut cmd = cargo_bin_cmd!("tddy-tools");
+        cmd.env_remove("TDDY_SOCKET");
+        cmd
+    }
+
+    let mut cmd = tddy_tools_bin();
+    cmd.args(["list-schemas"]);
+    let out = cmd.output().expect("list-schemas");
+    assert!(
+        out.status.success(),
+        "list-schemas must exit 0; stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("list-schemas stdout must be JSON");
+    let goals = v
+        .get("goals")
+        .and_then(|g| g.as_array())
+        .expect("goals array");
+    assert!(
+        goals
+            .iter()
+            .filter_map(|x| x.as_str())
+            .any(|n| n == "branch-review"),
+        "list-schemas must include branch-review; got {:?}",
+        goals
+    );
+
+    let schema = get_schema("branch-review").expect("branch-review schema must be embedded");
+    let snippet: String = schema.chars().take(220).collect();
+    assert!(
+        schema.contains("branch-review") || schema.contains("Branch"),
+        "branch-review schema should describe the goal; got snippet: {}",
+        snippet
+    );
+    let minimal = serde_json::json!({
+        "goal": "branch-review",
+        "summary": "Branch review complete.",
+        "validity_assessment": "ok",
+        "review_body_markdown": "# Branch review\n\n## Findings\n- Observed issue in module X."
+    })
+    .to_string();
+    assert!(
+        validate_output("branch-review", &minimal).is_ok(),
+        "minimal branch-review payload must validate; implement schema aligned with post-green-review-style conventions"
+    );
 }
 
 #[test]

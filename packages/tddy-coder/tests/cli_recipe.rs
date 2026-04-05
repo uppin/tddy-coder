@@ -37,3 +37,20 @@ fn cli_recipe_grill_me_selects_grill_me_recipe() {
     assert_eq!(r.name(), "grill-me");
     assert_eq!(r.start_goal().as_str(), "grill");
 }
+
+/// `--recipe review` resolves to ReviewRecipe (`review` name).
+#[test]
+fn cli_recipe_review_selects_review_recipe() {
+    let r = WorkflowRecipeResolver::from_cli_name("review").expect("resolve review recipe");
+    assert_eq!(r.name(), "review");
+    assert_eq!(
+        r.start_goal().as_str(),
+        "inspect",
+        "review workflow starts at inspect (branch diff + elicitation)"
+    );
+    assert_eq!(
+        r.plan_refinement_goal().as_str(),
+        "branch-review",
+        "after inspect, structured submit step is branch-review → review.md"
+    );
+}

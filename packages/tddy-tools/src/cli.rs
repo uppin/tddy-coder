@@ -12,6 +12,7 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 use tddy_core::changeset::{read_changeset, write_changeset_atomic, ChangesetWorkflow};
 
+use tddy_tools::review_persist;
 use tddy_tools::schema;
 use tddy_tools::schema_manifest;
 use tddy_tools::session_context;
@@ -158,6 +159,10 @@ pub fn run_submit(args: SubmitArgs) -> Result<()> {
         }
     }
 
+    if let Err(e) = maybe_persist_branch_review_artifact(validation_goal, &json_str) {
+        output_error(&e.to_string(), 1);
+    }
+
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
         relay_submit(std::path::Path::new(&socket_path), &goal, &data)?;
     } else {
@@ -165,6 +170,30 @@ pub fn run_submit(args: SubmitArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// After schema validation, write `review.md` under [`TDDY_SESSION_DIR`] for **`branch-review`** submits.
+///
+/// Backends set `TDDY_SESSION_DIR` for agent subprocesses; when unset (e.g. local CLI-only use), persistence is skipped.
+fn maybe_persist_branch_review_artifact(validation_goal: &str, json_str: &str) -> Result<()> {
+    if validation_goal != "branch-review" {
+        return Ok(());
+    }
+    let Some(dir) = std::env::var_os("TDDY_SESSION_DIR") else {
+        debug!(
+            target: "tddy_tools::cli",
+            "branch-review submit: TDDY_SESSION_DIR unset; skip review.md persist"
+        );
+        return Ok(());
+    };
+    let session_dir = std::path::Path::new(&dir);
+    review_persist::persist_review_md_from_branch_review_json(session_dir, json_str).map_err(|e| {
+        anyhow::anyhow!(
+            "failed to persist review.md under {}: {}",
+            session_dir.display(),
+            e
+        )
+    })
 }
 
 fn read_input(data_arg: &Option<String>, data_stdin: bool) -> Result<String> {
