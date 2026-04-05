@@ -42,6 +42,31 @@ describe("GhosttyTerminal", () => {
     cy.get("@onData").should("have.been.called");
   });
 
+  it("forwards Escape to onData when keydown is during IME/composition (ghostty-web would otherwise drop it)", () => {
+    const onData = cy.stub().as("onData");
+    cy.mount(<GhosttyTerminal onData={onData} sessionActive />);
+    cy.get("[data-testid='ghostty-terminal']", { timeout: 10000 }).should("exist");
+    cy.get("[data-testid='ghostty-terminal']").find("textarea").should("exist");
+    // Flush useEffect that registers the capture listener (runs after paint).
+    cy.wrap(null).then(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    cy.get("[data-testid='ghostty-terminal']").find("textarea").then(($ta) => {
+      const ta = $ta[0];
+      const ev = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      Object.defineProperty(ev, "isComposing", {
+        configurable: true,
+        get: () => true,
+      });
+      Object.defineProperty(ev, "keyCode", { value: 229, configurable: true });
+      ta.dispatchEvent(ev);
+    });
+    cy.get("@onData").should("have.been.calledWith", "\x1b");
+  });
+
   it("fires onResize when terminal dimensions change (FitAddon)", () => {
     const onResize = cy.stub().as("onResize");
     cy.mount(<GhosttyTerminal onResize={onResize} />);

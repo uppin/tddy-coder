@@ -23,6 +23,10 @@ packages/tddy-workflow-recipes/.tdd-small-red-test-output.txt
 # Build artifacts
 target/
 
+# tddy-web agent scratch logs (do not commit)
+packages/tddy-web/.tddy-red-*.txt
+packages/tddy-web/.green-cypress-out.txt
+
 # Web workspace
 node_modules/
 dist/

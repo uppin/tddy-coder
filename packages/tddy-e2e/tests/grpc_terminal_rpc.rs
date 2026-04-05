@@ -477,7 +477,7 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
         stub_workflow_progressed(&visible),
         "Keyboard inputs should advance the workflow; stripped text (len {}): {:?}",
         visible.len(),
-        &visible[..visible.len().min(500)]
+        &visible[..visible.floor_char_boundary(500)]
     );
 
     Ok(())

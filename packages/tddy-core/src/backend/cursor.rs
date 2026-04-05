@@ -186,13 +186,13 @@ impl CursorBackend {
         log::debug!(
             "[tddy-coder] prompt ({} bytes): {}",
             request.prompt.len(),
-            &request.prompt[..request.prompt.len().min(500)]
+            &request.prompt[..request.prompt.floor_char_boundary(500)]
         );
         if let Some(ref sys) = system_content {
             log::debug!(
                 "[tddy-coder] system_prompt ({} bytes): {}",
                 sys.len(),
-                &sys[..sys.len().min(500)]
+                &sys[..sys.floor_char_boundary(500)]
             );
         }
 

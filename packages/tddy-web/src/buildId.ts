@@ -1,2 +1,2 @@
 // Auto-generated at build time by scripts/gen-build-id.mjs
-export const BUILD_ID = "2026-04-04T12-49-42";
+export const BUILD_ID = "2026-04-05T06-17-01";

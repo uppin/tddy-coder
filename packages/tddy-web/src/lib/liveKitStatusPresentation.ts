@@ -1,8 +1,7 @@
-import { emitTddyMarker } from "./tddyMarker";
-
 export type LiveKitChromeStatus = "connecting" | "connected" | "error";
 
 function logDebug(...args: unknown[]): void {
+  if (!import.meta.env.DEV) return;
   console.debug("[tddy][liveKitStatusPresentation]", ...args);
 }
 
@@ -14,10 +13,6 @@ export function shouldShowVisibleLiveKitStatusStrip(args: {
   connectionOverlayEnabled: boolean;
   status: LiveKitChromeStatus;
 }): boolean {
-  emitTddyMarker("M003", "liveKitStatusPresentation::shouldShowVisibleLiveKitStatusStrip", {
-    connectionOverlayEnabled: args.connectionOverlayEnabled,
-    status: args.status,
-  });
   logDebug("shouldShowVisibleLiveKitStatusStrip", args);
   if (args.connectionOverlayEnabled) {
     return false;
