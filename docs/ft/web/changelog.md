@@ -2,6 +2,11 @@
 
 Release note history for the Web product area.
 
+## 2026-04-05 — Connection screen: workflow recipe control
+
+- **`ConnectionScreen`**: **Workflow recipe** lists **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, and **`grill-me`**; the default selection for **Start New Session** is **`free-prompting`**. **`StartSession.recipe`** sends the selected CLI name to the daemon.
+- **Feature doc**: [web-terminal.md](web-terminal.md) (Projects — collapsible sections). Package **[tddy-web](../../packages/tddy-web/docs/changesets.md)**.
+
 ## 2026-04-04 — Connection screen: pending elicitation indicator
 
 - **`SessionEntry`**: **`pending_elicitation`** on **`ListSessions`** (proto field **14**); generated clients expose **`pendingElicitation`**.
