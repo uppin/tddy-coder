@@ -1,70 +1,94 @@
-# Validate Production Readiness Report
+# Production readiness: Telegram session control
 
-## Summary verdict
+**Scope:** `packages/tddy-daemon/src/telegram_session_control.rs`, `InMemoryTelegramSender` changes in `telegram_notifier.rs`, `tests/telegram_session_control_integration.rs`  
+**Review date:** 2026-04-05
 
-**Needs work** — The review recipe core (graph, hooks, merge-base strategy docs, JSON parsing, and `review.md` writer) is implemented with consistent `log::` usage and no `println!` in the reviewed Rust modules. However, **`persist_review_md_from_branch_review_json` / `persist_review_md_to_session_dir` are not referenced from the live `tddy-tools submit` relay or `tddy-core` toolcall listener path** (only library exports and tests). Until the presenter or engine invokes persistence on `branch-review` submit with a resolved `session_dir`, **`review.md` will not appear in real sessions** despite successful structured submit. Additionally, diff truncation uses a raw byte slice that can **panic on UTF-8 boundaries**, and **`git diff --stat` is not size-capped** (large repos → large prompt material / memory).
+## Executive summary
+
+The new code establishes a **testable contract** for Telegram-driven workflow control (parsing, chunking, presenter byte encoding, and a **`TelegramSessionControlHarness`** with chat allowlisting). Logging uses explicit `log` targets and generally avoids sensitive content (lengths and paths, not prompts or tokens).
+
+**Production readiness is not met** for an end-to-end Telegram control plane: the harness is **not wired** into the daemon’s teloxide inbound path or `DaemonConfig` in `main.rs`—only outbound notifications (`TelegramSessionWatcher` / `TelegramDaemonHooks`) are. Several behaviors are **explicitly test-scoped** (e.g. plan chunk size `CHUNK_MAX = 24`), and authorization is **chat-only** with no binding between Telegram identity and session directories for callbacks.
+
+**Overall risk level:** **Medium–High** until inbound integration, config alignment, production chunk limits, and session–chat binding are addressed.
+
+## Risk level
+
+| Area | Level | Note |
+|------|--------|------|
+| Security (authz, session binding) | **High** | Allowlist exists; no user verification; callbacks not tied to owning session/chat. |
+| Configuration / feature flags | **High** | No `DaemonConfig` fields or flags for inbound control; harness uses ad-hoc `Vec<i64>`. |
+| Error handling / data integrity | **Medium** | Silent empty `changeset.yaml`; YAML parse failures propagate; some parsers are loose. |
+| Logging / secrets | **Low** | Targets and length-based fields are sound; tokens not present in this module. |
+| Performance | **Low–Medium** | Acceptable for expected scale; chunking allocates; sequential sends. |
+
+## Checklist
+
+| Criterion | Status | Notes |
+|-----------|--------|--------|
+| Errors surfaced with `anyhow` / `Result` on I/O and YAML | **Pass** | `handle_*` and `read_changeset_routing_snapshot` return `anyhow::Result`. |
+| Edge cases: empty input, UTF-8 boundaries | **Partial** | `chunk_telegram_text` handles empty and char boundaries; `max_utf8_bytes == 0` returns full string (documented). |
+| Edge cases: missing/malformed `changeset.yaml` on recipe callback | **Fail** | `read_to_string` + `unwrap_or_default()` treats missing file as empty mapping—risk of silent overwrite. |
+| Logging: `log` crate, stable targets | **Pass** | `tddy_daemon::telegram_session_control` and `tddy_daemon::telegram` for in-memory sender. |
+| No secrets in logs (tokens, prompts) | **Pass** | Lengths, `chat_id`, path display; no bot token logging in scoped files. |
+| Configuration: `DaemonConfig` / YAML for control plane | **Fail** | Harness takes constructor args; not loaded from `TelegramConfig`; no separate inbound flag. |
+| Security: chat allowlist | **Partial** | `ensure_authorized` for `chat_id`; `user_id` on commands is logged but **not** checked. |
+| Security: session scoping for callbacks | **Fail** | `handle_recipe_callback` accepts any `session_dir` without proving it belongs to the chat/session. |
+| Production Telegram message limits | **Fail** | `handle_plan_review_phase` uses `CHUNK_MAX = 24` (test forcing); not ~4096 UTF-16/codepoint policy. |
+| Async: no blocking in wrong places | **Pass** | Harness methods are `async`; I/O is sync in async fns (acceptable at small scale; see recommendations). |
+| Integration tests cover critical paths | **Partial** | Start workflow, recipe write, plan chunks, unauthorized message, elicitation bytes; no negative paths for YAML/recipe. |
+
+## Findings
+
+### Error handling (`anyhow`, edge cases)
+
+- **Strengths:** I/O and YAML errors propagate from `handle_recipe_callback`, `handle_start_workflow`, and `read_changeset_routing_snapshot`.
+- **`handle_recipe_callback`:** `std::fs::read_to_string(&path).unwrap_or_default()` collapses “file missing” into an empty document, then writes—can **create or replace** content without an explicit decision. Prefer `read_to_string` and map `NotFound` to a clear error, or require an existing file for updates.
+- **`parse_callback_payload`:** Returns `Some` only when the string contains the substring `"recipe:"`—brittle and not a structured parse.
+- **`map_elicitation_callback_to_presenter_input`:** If the payload lacks the `elicitation:` prefix, the code still encodes using `unwrap_or(callback_data)`—risk of **mis-encoding** arbitrary strings as presenter input.
+- **`parse_demo_options_value`:** Heuristic `:true`/`:false` spacing fix is fragile for real YAML edge cases.
+
+### Logging (`log`, targets, secrets)
+
+- **Strengths:** Consistent `target: "tddy_daemon::telegram_session_control"` for the control module; debug/info mix; `InMemoryTelegramSender::send_message_with_inline_keyboard` logs `chat_id`, `text_len`, `keyboard_rows` only.
+- **Note:** `handle_start_workflow` logs `user_id` (not secret, but PII-adjacent)—acceptable for ops if retention policies allow.
+
+### Configuration (`DaemonConfig`, feature flags)
+
+- **`TelegramConfig`** (`config.rs`) exposes `enabled`, `bot_token`, `chat_ids` for **notifications**, not for labeling this inbound harness.
+- **Gap:** No field such as `telegram_session_control_enabled`, no reuse of `chat_ids` as the allowlist for the harness, and no documented merge rule if notification chats differ from control chats.
+- **Integration:** `main.rs` only constructs `TelegramDaemonHooks` (outbound presenter observer). **`TelegramSessionControlHarness` is not registered**—inbound control is **not production-active**.
+
+### Security (authorization, allowlist, tokens)
+
+- **Allowlist:** `ensure_authorized` checks `chat_id` against `allowed_chat_ids`.
+- **Gaps:**
+  - **`user_id` is not authorized**—any member of an allowed group chat could act; no admin vs member distinction.
+  - **Callback path safety:** `handle_recipe_callback(&session_dir, cb)` does not validate that `session_dir` is the one associated with this chat’s prior `handle_start_workflow`—callers must enforce; the API does not.
+  - **Token logging:** Not applicable in these files; production teloxide path should continue using patterns like `mask_bot_token_for_logs` elsewhere (already present in `telegram_notifier.rs`).
+
+### Performance (allocations, chunk sizes, async)
+
+- **`chunk_telegram_text`:** Per-chunk `format!` / `to_string` allocations; acceptable for typical plan sizes.
+- **`handle_plan_review_phase`:** Sequential `send_message` in a loop—appropriate for Telegram rate limits; consider batching only if API allows and limits are configured.
+- **`CHUNK_MAX = 24`:** Favors integration tests (forced continuation markers), **not** production limits—must be config-driven and aligned with Telegram’s limits (and encoding: UTF-16 length for Bot API in some cases).
+- **`InMemoryTelegramSender::recorded_with_keyboards`:** Full `clone()` of stored messages—fine for tests; unbounded growth if used as a long-lived fake without clearing.
+
+### Tests (`telegram_session_control_integration.rs`)
+
+- **Strengths:** Covers keyboard on start, changeset persistence, chunked plan delivery, unauthorized denial, elicitation byte mapping.
+- **Gaps:** No test for corrupt `changeset.yaml`, missing file behavior on recipe callback, or unauthorized `handle_recipe_callback` / `handle_plan_review_phase` (only unauthorized entry path via `handle_start_workflow_unauthorized`).
+
+## Recommendations for follow-up
+
+1. **Wire inbound teloxide updates** to shared helpers (not only the harness), with a single place that enforces allowlist + session correlation.
+2. **Add `DaemonConfig` (or nested) options:** inbound enable flag, allowlist (or explicit reuse of `telegram.chat_ids` with documented semantics), and **production chunk size** (bytes or policy enum).
+3. **Replace `CHUNK_MAX = 24`** with a constant or config default matching Telegram limits; keep test-only small values only in tests via injected limits.
+4. **Harden `handle_recipe_callback`:** fail closed on missing `changeset.yaml` if updates are not intended to create; or document “create if absent” and add tests.
+5. **Tighten `map_elicitation_callback_to_presenter_input`:** require `elicitation:` prefix or return `Result` / explicit enum instead of silent fallback.
+6. **Session–chat binding:** persist mapping `(session_id, chat_id)` and validate on every callback referencing `session_dir` or `session_id`.
+7. **Optional:** consider `user_id` checks if the bot only serves private chats with a known operator set.
+8. **Async I/O:** for large files or high concurrency, move blocking `std::fs` off the runtime with `spawn_blocking` or use async fs (project-wide convention permitting).
 
 ---
 
-## Findings by category
-
-### Error handling
-
-| Finding | Location | Notes |
-|--------|----------|--------|
-| **Structured JSON errors propagate** | `packages/tddy-workflow-recipes/src/review/parse.rs:16–28` | `serde_json::from_str` and goal/body validation return `Result<_, String>` with clear messages. |
-| **Filesystem errors propagate** | `packages/tddy-workflow-recipes/src/review/persist.rs:16–22` | `create_dir_all` and `write` map errors to strings including path display. |
-| **`tddy-tools` wrapper surfaces same errors** | `packages/tddy-tools/src/review_persist.rs:8–17` | Thin wrapper; failures from `persist_review_md_to_session_dir` bubble as `Result<(), String>`. |
-| **Hooks swallow git “soft” failures in prompt** | `packages/tddy-workflow-recipes/src/review/git_context.rs:87–120`, `hooks.rs:54–64` | `format_diff_context_for_prompt` embeds stderr/error text in the prompt instead of failing `before_task`. Workflow continues; operator sees degraded context. **By design** but worth knowing for support. |
-| **`merge_base_commit_for_review` silent candidates** | `packages/tddy-workflow-recipes/src/review/git_context.rs:34–48,56–82` | Failed `merge-base` attempts return `None` and try the next ref; eventual fallback to `rev-parse HEAD` or literal `"HEAD"` with `log::warn!` only if even `rev-parse` fails (`81–82`). No hard error to the user. |
-| **No integration error path for missing `review.md` write** | *Gap* | Persistence API exists; **no caller** in `packages/tddy-coder` / `packages/tddy-core` grep for `persist_review_md` or `review_persist`. Submit flow stores JSON via `store_submit_result` (`packages/tddy-core/src/toolcall/listener.rs:118–127`) without writing `review.md`. |
-
-### Logging
-
-| Finding | Location | Notes |
-|--------|----------|--------|
-| **Uses `log` crate, not stdout** | `packages/tddy-workflow-recipes/src/review/*.rs` | `log::debug!`, `log::info!`, `log::warn!` throughout `mod.rs`, `git_context.rs`, `hooks.rs`, `persist.rs`. **No `println!` / `eprintln!`** in these files (verified by search). |
-| **Targeted logging in `tddy-tools`** | `packages/tddy-tools/src/review_persist.rs:12–16` | `log::info!(target: "tddy_tools::review_persist", ...)`. |
-| **Potential log volume** | `packages/tddy-workflow-recipes/src/review/mod.rs:144–151` | `plain_goal_cli_output` logs full agent output at `info` level when present — large outputs could flood logs (recipe-wide concern). |
-
-### Configuration
-
-| Finding | Location | Notes |
-|--------|----------|--------|
-| **Merge-base strategy is code-defined, not env-driven** | `packages/tddy-workflow-recipes/src/review/git_context.rs:58–72`, `prompt.rs:6–16` | Fixed candidate order: `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`, then HEAD fallback. **No env vars** in `review/` for override. |
-| **Operator documentation string** | `packages/tddy-workflow-recipes/src/review/prompt.rs:13–16` | `merge_base_strategy_documentation()` matches implementation intent (deterministic order, empty diff vs hard fail). |
-| **CLI session env elsewhere** | `packages/tddy-tools/src/cli.rs:400–404` | `set-session-context` uses `TDDY_SESSION_DIR` / `TDDY_WORKFLOW_SESSION_ID` — not specific to review, but session dir for artifacts is environment-established, not chosen by review JSON. |
-
-### Security
-
-| Finding | Location | Notes |
-|--------|----------|--------|
-| **No shell when invoking git** | `packages/tddy-workflow-recipes/src/review/git_context.rs:18–32,101–103` | `Command::new("git")` with argument array; **no** `sh -c`. Injects via malformed ref are constrained: merge-base refs are fixed literals; `merge_base` output comes from git or `"HEAD"`. |
-| **Path traversal from submit JSON** | `packages/tddy-workflow-recipes/src/review/persist.rs:17–18` | Output path is `session_dir.join(REVIEW_MD_BASENAME)` with constant `review.md` (`prompt.rs:4`). **No user-controlled path segments** from JSON for the file path. |
-| **Secrets in logs** | `hooks.rs`, `persist.rs`, `git_context.rs` | Logs include repo path, merge-base commit, session dir, byte counts — **not** submit JSON body by default in persist (only sizes/paths). Full output logging risk in `mod.rs:149–151` if agent pastes secrets. |
-| **Schema rejects extra fields** | `packages/tddy-workflow-recipes/src/review/parse.rs:7–17`, `generated/tdd/branch-review.schema.json` | `deny_unknown_fields` + `additionalProperties: false` reduces surprise keys in structured submit. |
-
-### Performance
-
-| Finding | Location | Notes |
-|--------|----------|--------|
-| **Diff body truncated to 48k bytes** | `packages/tddy-workflow-recipes/src/review/git_context.rs:106–113` | Caps agent prompt size for the unified diff section. |
-| **`git diff --stat` not truncated** | `packages/tddy-workflow-recipes/src/review/git_context.rs:88–98` | Entire stat output embedded in prompt — very large histories can produce **large strings** and memory use. |
-| **Full stdout loaded before truncate** | `packages/tddy-workflow-recipes/src/review/git_context.rs:101–113` | `git diff` output is fully read into memory, then truncated — **peak memory** equals full diff size. |
-| **UTF-8 hazard on truncation** | `packages/tddy-workflow-recipes/src/review/git_context.rs:109–110` | `&s[..MAX]` on `str` **panics** if `MAX` splits a multibyte character. Rare for ASCII diffs, but not impossible for binary paths / non-UTF-8 (lossy conversion can still yield long UTF-8). Prefer `s.floor_char_boundary(MAX)` or truncate by char. |
-
----
-
-## Residual risks
-
-1. **Presenter / engine wiring for `review.md`** — `tddy_tools::review_persist::persist_review_md_from_branch_review_json` must be called with the active workflow `session_dir` and the validated submit JSON when the goal is `branch-review`. Until that exists in the same place other goals persist artifacts, the feature is **incomplete for end-to-end production use** despite unit/acceptance tests that call `persist_review_md_to_session_dir` directly (`packages/tddy-workflow-recipes/tests/review_recipe_artifact_acceptance.rs`).
-
-2. **Submit path without `TDDY_SOCKET`** — `packages/tddy-tools/src/cli.rs:161–165`: if `TDDY_SOCKET` is unset, `run_submit` prints success **without** relaying; persistence is not invoked here either. Operators relying on offline validation still would not get `review.md` unless separately wired.
-
-3. **Deterministic merge-base may not match team’s integration branch** — No env override; forks using unusual default branches rely on elicitation or may see empty/surprising diffs when fallbacks apply (`git_context.rs:74–82`).
-
-4. **Binary / encoding edge cases** — Lossy UTF-8 from `from_utf8_lossy` plus byte slicing truncation (see performance) — potential panic or garbled truncation.
-
----
-
-*Validation method: direct read of `packages/tddy-workflow-recipes/src/review/*.rs`, `packages/tddy-tools/src/review_persist.rs`, and cross-package grep for call sites / logging patterns.*
+*This review is limited to the files listed in the request; production behavior also depends on future teloxide wiring and `ConnectionService` integration not fully covered here.*

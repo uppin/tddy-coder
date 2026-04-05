@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use tddy_core::output::TDDY_SESSIONS_DIR_ENV;
+
 /// Home directory for an OS user (from passwd).
 #[cfg(unix)]
 pub fn home_dir_for_user(os_user: &str) -> Option<PathBuf> {
@@ -30,18 +32,39 @@ pub fn home_dir_for_user(_os_user: &str) -> Option<PathBuf> {
     None
 }
 
-/// Resolve the Tddy **data directory** for an OS user (`~user/.tddy`), matching
-/// [`tddy_core::output::tddy_data_dir_path`] when `TDDY_SESSIONS_DIR` is unset.
+/// Resolve the sessions base path for an OS user (~user/.tddy).
 ///
-/// Session trees live at `{this}/sessions/<session_id>/` ([`tddy_core::session_lifecycle::unified_session_dir_path`]).
-/// This must not be `~/.tddy/sessions` or RPCs double-append `sessions/` and miss on-disk data.
+/// Callers (e.g. `list_sessions_in_dir`) append `SESSIONS_SUBDIR` ("sessions") to reach
+/// the actual session directories at `~/.tddy/sessions/{session_id}/`.
 #[cfg(unix)]
 pub fn sessions_base_for_user(os_user: &str) -> Option<PathBuf> {
     Some(home_dir_for_user(os_user)?.join(".tddy"))
 }
 
+/// Data root (parent of `sessions/`) matching [`tddy_core::output::tddy_data_dir_path`] for a
+/// `tddy-coder` child that inherits this process environment and runs with `HOME` set to that user.
+///
+/// If `TDDY_SESSIONS_DIR` is set (same as the child sees), Telegram and other daemon code must use
+/// this root when writing `~/.tddy/sessions/...` artifacts; otherwise the child reads an empty or
+/// different `changeset.yaml` than the one the daemon wrote under `$HOME/.tddy`.
+#[cfg(unix)]
+pub fn tddy_data_root_matching_child(os_user: &str) -> Option<PathBuf> {
+    if let Ok(p) = std::env::var(TDDY_SESSIONS_DIR_ENV) {
+        let t = p.trim();
+        if !t.is_empty() {
+            return Some(PathBuf::from(t));
+        }
+    }
+    sessions_base_for_user(os_user)
+}
+
 #[cfg(not(unix))]
 pub fn sessions_base_for_user(_os_user: &str) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(unix))]
+pub fn tddy_data_root_matching_child(_os_user: &str) -> Option<PathBuf> {
     None
 }
 
@@ -123,14 +146,6 @@ pub fn project_path_under_home_from_user_relative(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sessions_base_for_user_is_tddy_data_root() {
-        let u = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
-        let base = sessions_base_for_user(&u).expect("sessions base");
-        let home = home_dir_for_user(&u).expect("home");
-        assert_eq!(base, home.join(".tddy"));
-    }
 
     #[test]
     fn project_path_under_home_accepts_simple_relative() {

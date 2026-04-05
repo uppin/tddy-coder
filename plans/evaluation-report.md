@@ -2,7 +2,7 @@
 
 ## Summary
 
-Web-only feature: per-table session multi-select, indeterminate header, bulk delete via repeated DeleteSession + listSessions. Pure helpers unit-tested; ConnectionScreen CT extended. Workspace cargo check and tddy-web Vite build pass. Risks: verbose console logging pending cleanup; bulk partial-failure UX; do not commit untracked .red-phase-* artifacts under packages/tddy-web.
+Evaluated working tree: new Telegram session control module + tests, InMemoryTelegramSender keyboard recording, lib.rs export. cargo check -p tddy-daemon passes. Risk medium: harness is not full inbound bot/RPC; stray red test output file should not ship.
 
 ## Risk Level
 
@@ -10,32 +10,34 @@ medium
 
 ## Changed Files
 
-- packages/tddy-web/src/components/ConnectionScreen.tsx (modified, +197/−3)
-- packages/tddy-web/cypress/component/ConnectionScreen.cy.tsx (modified, +207/−0)
-- packages/tddy-web/src/utils/sessionSelection.ts (added, +84/−0)
-- packages/tddy-web/src/utils/sessionSelection.test.ts (added, +34/−0)
+- packages/tddy-daemon/src/lib.rs (modified, +1/−0)
+- packages/tddy-daemon/src/telegram_notifier.rs (modified, +35/−2)
+- packages/tddy-daemon/src/telegram_session_control.rs (added, +511/−0)
+- packages/tddy-daemon/tests/telegram_session_control_integration.rs (added, +169/−0)
+- packages/tddy-daemon/telegram_session_control_red_test_output.txt (added, +558/−0)
 
 ## Affected Tests
 
-- packages/tddy-web/src/utils/sessionSelection.test.ts: created
-  New file: six unit tests for session selection helpers
-- packages/tddy-web/cypress/component/ConnectionScreen.cy.tsx: updated
-  Five new acceptance tests under ConnectionScreen bulk session selection and delete; intercept helpers added
+- packages/tddy-daemon/tests/telegram_session_control_integration.rs: created
+  Five async integration tests (start workflow, recipe/changeset, plan chunks, elicitation bytes, unauthorized).
+- packages/tddy-daemon/src/telegram_session_control.rs: created
+  Four unit tests in unit_tests module.
+- packages/tddy-daemon/src/telegram_notifier.rs: verified
+  Existing notifier tests; recorded() API preserved.
 
 ## Validity Assessment
 
-The changes address the PRD: per-project and orphan tables get row and header selection controls with independent state; header indeterminate when partially selected; bulk Delete selected disabled with no selection; one confirmation including count; repeated DeleteSession calls and listSessions refresh; selection cleared after full success. No new daemon RPC. Cypress correctly asserts delete payloads by decoding in the intercept handler. Remaining concerns are operational (logging noise, partial bulk failure UX) rather than missing core behavior.
+The change set validly implements a tested harness and utilities toward Telegram session control (parsing, chunking, changeset writes, presenter encoding) and is a sound incremental step. It does not complete the full PRD (inbound bot, config, RPC, registry, production chunk sizes). Remove the accidental test output artifact before merging.
 
 ## Build Results
 
-- workspace: pass (./dev cargo check -q completed successfully)
-- tddy-web: pass (./dev bun run build in packages/tddy-web (vite production build))
+- tddy-daemon: pass (./dev cargo check -p tddy-daemon (TMPDIR on /var))
 
 ## Issues
 
-- [warning/observability] packages/tddy-web/src/components/ConnectionScreen.tsx:0: console.debug/console.info on selection and bulk-delete flows; trim or gate before production release.
-  Suggestion: Remove or replace with a debug flag / structured logger in a later phase.
-- [warning/correctness] packages/tddy-web/src/components/ConnectionScreen.tsx:0: Sequential bulk delete: first RPCs may succeed before a later deleteSession throws; selection is not cleared and user sees error—possible stale selected ids for already-removed sessions.
-  Suggestion: Consider refreshing listSessions after failure or pruning selection against returned session list.
-- [info/repository_hygiene] packages/tddy-web:0: Untracked local files (.red-phase-*.txt, .green-submit.json, etc.) should be gitignored or deleted before merge.
-  Suggestion: Add patterns to .gitignore or remove artifacts.
+- [medium/scope] packages/tddy-daemon/src/telegram_session_control.rs: Harness does not wire /start-workflow prompt to start_session or maintain durable chat↔session registry; full PRD control plane still outstanding.
+  Suggestion: Follow up with teloxide inbound dispatcher, DaemonConfig, and connection_service integration.
+- [low/correctness] packages/tddy-daemon/src/telegram_session_control.rs: demo_options parsing uses naive ':true'→': true' replacement; edge-case collision possible.
+  Suggestion: Prefer strict JSON for demo_options segments or a dedicated mini-parser.
+- [low/maintainability] packages/tddy-daemon/telegram_session_control_red_test_output.txt: Untracked captured test stderr log should not be committed.
+  Suggestion: Delete or add to .gitignore.

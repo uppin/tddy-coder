@@ -1,33 +1,61 @@
-# Fix: tddy-web terminal keystrokes arrive out of order
+# Fix: Web plan preview / approval (embedded terminal)
 
 ## Symptom
 
-Keystrokes from the embedded terminal (tddy-web → LiveKit → daemon PTY) can appear **out of sequence** when typing quickly or editing a line, breaking shells and TUIs.
+In **tddy-web**, when the session TUI shows the plan in **Markdown viewer** mode (Approve/Reject in the activity area, shortcuts in the prompt bar), users report:
 
-## Investigation notes
+1. **Mouse**: Approve / Reject clicks do nothing.
+2. **Enter**: Pressing Enter on an “empty” prompt should approve (expected UX).
+3. **Esc**: Should close the plan viewer and return to the user-question / activity flow (`DismissViewer`).
+4. **Alt+A / Alt+R**: Shown in the prompt bar but do not work when using the embedded terminal (including when the outer environment is **Ghostty**).
 
-- **Web client (`GhosttyTerminalLiveKit`)**: `onData` enqueues bytes in order; `inputGen` drains the queue with `splice(0)` and concatenates chunks in FIFO order before each yield. Batching is not expected to reorder.
-- **Connect transport (`tddy-livekit-web`)**: `handleBidiStreaming` publishes each client chunk in `for await` order; no intentional reorder.
-- **Server (`tddy-livekit`)**: Each `RoomEvent::DataReceived` previously ran `handle_incoming` inside **`tokio::spawn`**. Independent tasks could reach `input_tx.send` for the same bidirectional RPC session in a different order than packets arrived, so the terminal service saw **scrambled input bytes**.
+The live session is still **crossterm/ratatui in the daemon PTY**; the web UI is **ghostty-web** + LiveKit forwarding bytes. There is no separate HTML Approve button—clicks are **SGR mouse sequences**, and keys go through the terminal’s **keydown → onData** path.
 
-## Root cause
+## Investigation
 
-**Parallel dispatch of `DataReceived` handlers** allowed bidirectional stream chunks to be forwarded to the RPC bridge **out of order**.
+### 1) Mouse clicks (tddy-web) — **fixed in this changeset**
 
-## Fix
+`GhosttyTerminal` forwards SGR mouse (`\x1b[<…`) only when `term.hasMouseTracking?.()` is true (TUI must enable mouse reporting).
 
-Process each RPC payload **sequentially** in the room event loop: `await Self::handle_incoming(...)` for `DataReceived` (same as already done for buffered `pending_data` on `ParticipantConnected`).
+Cell coordinates for that forwarding were computed using the **outer container** width/height while pointer math mixed **canvas-local** offsets with that box. The ghostty-web **canvas** is sized to `cols × cell metrics`; the wrapper `div` can differ. That skewed **column/row** indices so the TUI’s `plan_approval_activity_footer_click` / `mouse_map` rarely matched **Approve/Reject**.
 
-## Tests
+**Fix**: derive the grid from the **`canvas` `getBoundingClientRect()`** and map **`clientX` / `clientY`** with a small pure helper (`clientPointToTerminalCell` in `src/lib/terminalMouseCellCoords.ts`). Unit tests lock the geometry.
 
-- **Rust** (`packages/tddy-livekit/tests/rpc_scenarios.rs`): rapid sequential `BidiStreamSender::send` of many numbered payloads; assert `CountingEchoService` responses have `seq` and `msg` in strict order (guards regression).
+### 2) Enter on “empty prompt” (tddy-tui)
+
+In `packages/tddy-tui/src/key_map.rs`, `markdown_viewer_key`:
+
+- **Enter → Approve/Reject** only when `view_state.markdown_at_end` is true (user has scrolled to the end). If the prompt still says “read to the end for Approve / Reject”, Enter intentionally does nothing.
+- **Refinement pending**: Enter submits non-empty refinement text; **empty Enter does not** map to approve.
+
+If product intent is “empty Enter means approve” for a specific prompt state, that is a **TUI behavior change** (and tests in `key_map` / presenter), not a web-only fix.
+
+### 3) Esc
+
+TUI maps `Esc` → `UserIntent::DismissViewer` in markdown viewer (`key_map.rs`). The web stack should send **`\x1b`** for Escape; `ghostty-web`’s `InputHandler` does so for the focused terminal textarea. If Esc still fails, check **focus** (another element focused) or **IME** (there is already an IME Escape workaround in `GhosttyTerminal`).
+
+### 4) Alt+A / Alt+R (and “Ghostty”)
+
+Shortcuts are handled in `plan_view_approve_reject_shortcuts` (requires **Alt** + `a`/`r`). The embedded terminal relies on **ghostty-web**’s key encoder for modified keys; browsers and OS-level terminal settings may **eat or remap Alt** before it reaches the page. **Ghostty** (the terminal emulator) may use Alt for its own UI when the “browser” runs inside it—**verify focus is on the page/canvas**, not the terminal chrome. Remedies often include: alternate bindings without Alt (TUI), or documenting OS/terminal settings.
+
+## Tests added
+
+- `src/lib/terminalMouseCellCoords.test.ts` — **bun** unit tests for `clientPointToTerminalCell`.
 
 ## Verification
 
 ```bash
-./dev cargo test -p tddy-livekit --test rpc_scenarios
+cd packages/tddy-web && bun test src/lib/terminalMouseCellCoords.test.ts
 ```
 
-Full workspace: `./test` or `./verify` per AGENTS.md.
+Full web unit suite (per `package.json`):
 
-**Note:** Run the above when the build environment has sufficient disk space; the ordering scenario is the `bidi-input-order` room block (64 rapid bidi sends).
+```bash
+bun run test:unit
+```
+
+## Follow-up (optional)
+
+- Cypress component test with a stub `Terminal` that forces `hasMouseTracking() === true` and asserts `onData` receives SGR for a synthetic click at a known cell (heavier setup).
+- Product decision + TDD change if **empty Enter** should approve in a defined markdown-viewer state.
+- If Alt shortcuts remain unreliable in the field, add **non-Alt** shortcuts in the TUI (parallel bindings) after UX sign-off.

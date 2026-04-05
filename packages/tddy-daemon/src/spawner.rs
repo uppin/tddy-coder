@@ -156,6 +156,9 @@ fn create_child_log_config_and_streams(
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SpawnOptions<'a> {
     pub resume_session_id: Option<&'a str>,
+    /// When starting a new session (no `resume_session_id`), use this id instead of generating one
+    /// (e.g. Telegram pre-created `~/.tddy/sessions/<id>`).
+    pub new_session_id: Option<&'a str>,
     pub project_id: Option<&'a str>,
     pub agent: Option<&'a str>,
     pub mouse: bool,
@@ -371,9 +374,13 @@ pub fn spawn_as_user(
     }
     let pw_name = unsafe { std::ffi::CStr::from_ptr(passwd.pw_name).to_owned() };
 
+    if opts.resume_session_id.is_some() && opts.new_session_id.is_some() {
+        anyhow::bail!("resume_session_id and new_session_id are mutually exclusive");
+    }
     let session_id = opts
         .resume_session_id
         .map(String::from)
+        .or_else(|| opts.new_session_id.map(String::from))
         .unwrap_or_else(|| Uuid::now_v7().to_string());
     let livekit_room = resolve_livekit_room_name(livekit.common_room.as_deref(), &session_id);
     let instance = livekit

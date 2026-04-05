@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-service.
 
+- **2026-04-05** [Feature] **`PresenterIntent` service** — **`presenter_intent.proto`**: localhost gRPC from **`tddy-daemon`** to **`tddy-coder`** for clarification answers, document review actions, **`SubmitFeatureText`**. Implemented in **`presenter_intent_service.rs`**; **`build.rs`** / **`lib.rs`** register the service with the child’s gRPC server. Feature docs: [telegram-session-control.md](../../../docs/ft/daemon/telegram-session-control.md), [daemon changelog](../../../docs/ft/daemon/changelog.md). (tddy-service, tddy-coder, tddy-daemon)
 - **2026-04-04** [Feature] **`SessionEntry.pending_elicitation`** — **`connection.proto`** field **14** on **`SessionEntry`**; TS/Rust bindings regenerated. Feature docs: [web-terminal.md](../../../docs/ft/web/web-terminal.md), [daemon changelog](../../../docs/ft/daemon/changelog.md). (tddy-service, tddy-web)
 - **2026-04-04** [Feature] ActivityLogged kind **`UserPrompt`** — `convert::activity_kind_to_str` emits **`UserPrompt`** for `ActivityKind::UserPrompt`; `remote.proto` activity `kind` comment lists it. Feature doc [activity-log-streaming.md](../../../docs/ft/coder/activity-log-streaming.md). (tddy-service)
 - **2026-04-03** [Feature] **`intent_to_client_message`**: **`UserIntent::Interrupt`** returns **`None`** (handled only in TUI / not sent over RPC). (tddy-service)
