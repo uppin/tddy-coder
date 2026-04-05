@@ -58,6 +58,14 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **read_changeset / write_changeset**: Load and persist changeset.yaml.
 - **append_session_and_update_state**: Add session (agent from backend.name(), id, tag, system_prompt_file); update workflow state.
 
+### Session semantic search (`session_semantic_search.rs`)
+
+- **Storage**: SQLite file **`session_search_index.sqlite3`** at **`session_search_index_path(data_root)`** (same **`data_root`** as **`unified_session_dir_path`**’s parent: **`{data_root}/sessions/{session_id}/`**). **`PRAGMA user_version`** gates schema migration (**`SESSION_SEARCH_INDEX_SCHEMA_VERSION`**).
+- **Embeddings**: Deterministic hash-trick vectors (**`SESSION_SEARCH_EMBEDDING_DIM`** **256**, model id **`SESSION_SEARCH_EMBEDDING_MODEL_ID`** **`tddy-hash-trick-v1-dim256`**); no network calls.
+- **Indexing**: **`index_session_for_search`** loads **`changeset.yaml`**, merges labels via **`merge_*`**, builds **`document_text`**, upserts one row per session id.
+- **Search**: **`search_sessions_semantic`** scores rows (cosine similarity on embeddings plus lexical overlap); returns **`Vec<SessionSearchHit>`**. Missing index file yields an empty vector.
+- **Errors**: **`WorkflowError::SessionSearchIndex`** wraps SQLite failures from the index path.
+
 ### Toolcall (`toolcall/`)
 
 - **store_submit_result / take_submit_result_for_goal**: Shared storage for submit results. Presenter writes via tool executor; workflow reads. Key: goal name; Value: JSON string.

@@ -40,6 +40,9 @@ pub enum WorkflowError {
     #[error("changeset.yaml invalid: {0}")]
     ChangesetInvalid(String),
 
+    #[error("session search index: {0}")]
+    SessionSearchIndex(String),
+
     /// Clarification questions from the LLM; caller should display and re-invoke with answers.
     #[error("clarification needed: {questions:?}")]
     ClarificationNeeded {

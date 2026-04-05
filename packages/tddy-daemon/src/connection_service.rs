@@ -18,9 +18,10 @@ use tddy_service::proto::connection::{
     ListToolsResponse, ListWorktreesForProjectRequest, ListWorktreesForProjectResponse,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
     ReadSessionWorkflowFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SessionEntry as ProtoSessionEntry, Signal,
-    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
-    ToolInfo, WorkflowFileEntry, WorktreeRow,
+    ResumeSessionRequest, ResumeSessionResponse, SearchSessionHit, SearchSessionsRequest,
+    SearchSessionsResponse, SessionEntry as ProtoSessionEntry, Signal, SignalSessionRequest,
+    SignalSessionResponse, StartSessionRequest, StartSessionResponse, ToolInfo, WorkflowFileEntry,
+    WorktreeRow,
 };
 use uuid::Uuid;
 
@@ -955,6 +956,50 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 timeout.as_secs()
             ))),
         }
+    }
+
+    async fn search_sessions(
+        &self,
+        request: Request<SearchSessionsRequest>,
+    ) -> Result<Response<SearchSessionsResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let sessions_base = (self.sessions_base_for_user)(os_user)
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+
+        let query = req.query.trim();
+        if query.is_empty() {
+            return Ok(Response::new(SearchSessionsResponse { hits: vec![] }));
+        }
+
+        log::debug!(
+            target: "tddy_daemon::connection_service",
+            "SearchSessions: query_len={} user={}",
+            query.len(),
+            github_user
+        );
+
+        let hits =
+            tddy_core::session_semantic_search::search_sessions_semantic(&sessions_base, query)
+                .map_err(|e| Status::internal(format!("{}", e)))?;
+
+        let proto_hits: Vec<SearchSessionHit> = hits
+            .into_iter()
+            .map(|h| SearchSessionHit {
+                session_id: h.session_id,
+                initial_prompt: h.initial_prompt,
+                relevance_score: h.relevance_score,
+                worktree_label: h.worktree_label,
+                branch_label: h.branch_label,
+            })
+            .collect();
+
+        Ok(Response::new(SearchSessionsResponse { hits: proto_hits }))
     }
 }
 

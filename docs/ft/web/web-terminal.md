@@ -111,6 +111,10 @@ Each project’s session table and the **Other sessions** table list rows in thi
 
 The client applies **`sortSessionsForDisplay`** (`packages/tddy-web/src/utils/sessionSort.ts`) to the session array already held in React state after **`ListSessions`**—no additional RPC for ordering.
 
+### Semantic session search
+
+**`ConnectionScreen`** renders **`SessionSearchInput`**, which debounces keystrokes and calls **`SearchSessions`** with the trimmed query string. Hit rows surface **`session_id`**, labels, and **`relevance_score`** from the RPC response. The local SQLite index file, embedding model id, and ranking behavior are described in [semantic-session-search.md](semantic-session-search.md); the daemon RPC contract is in [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md#searchsessions).
+
 ### Session workflow status (TUI parity)
 
 Project session tables and the **Other sessions** table include five additional columns—**Goal**, **Workflow**, **Elapsed**, **Agent**, and **Model**—alongside ID, Date, Status, Repo, PID, and Actions. The UI renders the string fields on each **`SessionEntry`** returned by **`ListSessions`**: **`workflow_goal`**, **`workflow_state`**, **`elapsed_display`**, **`agent`**, and **`model`**. Empty or whitespace-only values display an em dash (`—`).

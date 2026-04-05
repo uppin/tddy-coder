@@ -9,6 +9,7 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | `ListTools` | Allowed `tddy-*` binaries from config (`allowed_tools`) |
 | `ListAgents` | Allowed coding backends from config (`allowed_agents`): each entry has `id` (value for `StartSession.agent` / `tddy-coder --agent`) and `label` (display string; optional YAML `label` trimmed; blank or whitespace-only falls back to `id`) |
 | `ListSessions` | Lists directories under `{sessions_base}/sessions/` that contain `.session.yaml` (includes `project_id` and `daemon_instance_id` for the owning daemon); each entry includes workflow fields populated from **`changeset.yaml`** when present (see below). **`sessions_base`** is the Tddy data directory for the mapped OS user (typically `~/.tddy`), so session trees are **`{sessions_base}/sessions/{session_id}/`**. |
+| `SearchSessions` | Ranked search over indexed workflow sessions using **`tddy_core::session_semantic_search`** against **`{sessions_base}/session_search_index.sqlite3`**. Authenticates like **`ListSessions`** (**`session_token`** → GitHub user → mapped OS user → **`sessions_base`**). Trims **`query`**; empty or whitespace-only queries return **`hits: []`**. Maps core **`SessionSearchHit`** to **`SearchSessionHit`**. See [SearchSessions](#searchsessions). |
 | `ListProjects` | Projects from `~/.tddy/projects/projects.yaml` |
 | `CreateProject` | Clone (or adopt existing path) + append registry |
 | `ListEligibleDaemons` | Eligible daemon instances for host selection (`instance_id`, `label`, `is_local`); sourced from `EligibleDaemonSource` |
@@ -34,6 +35,14 @@ If the changeset is missing, unreadable, or has no matching session row, the cor
 The directory listing and enrichment execute inside **`spawn_blocking_with_timeout`** so the async RPC handler does not block the Tokio runtime on disk I/O.
 
 Session **status** strings in metadata drive workflow display; optional Telegram notifications keyed on status transitions are documented in **[telegram-notifier.md](./telegram-notifier.md)** (product context: **[telegram-notifications.md](../../../docs/ft/daemon/telegram-notifications.md)**).
+
+## SearchSessions
+
+- **Auth**: Same **`session_token`** → GitHub user → **`os_user_for_github`** → **`sessions_base_for_user`** as **`ListSessions`**. Invalid or expired tokens → **unauthenticated**; unmapped users → **permission denied**; failure to resolve **`sessions_base`** → **internal**.
+- **Query**: **`SearchSessionsRequest.query`** is trimmed; if the result is empty, the handler returns **`SearchSessionsResponse`** with **`hits: []`** (no SQLite open).
+- **Search**: **`search_sessions_semantic(&sessions_base, query)`** reads **`session_search_index.sqlite3`** next to the session tree root (same directory as **`sessions/`**). If the file is missing, the core layer returns an empty hit list. Index schema and embedding model id are defined in **`tddy_core::session_semantic_search`**.
+- **Errors**: SQLite or schema failures from the search path map to **`INTERNAL`** with a generic message; details are logged server-side.
+- **Product**: [semantic-session-search.md](../../../docs/ft/web/semantic-session-search.md).
 
 ## Session workflow file RPCs
 

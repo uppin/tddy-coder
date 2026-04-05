@@ -1,78 +1,141 @@
-# Validate prod-ready — Session bulk select / delete
+# Validate prod-ready — Semantic session search
 
-**Scope:** Review of `ConnectionScreen.tsx` (bulk delete, selection state, logging), `sessionSelection.ts`, and Cypress `ConnectionScreen.cy.tsx` (test harness quality only).  
-**Aligned with:** `plans/evaluation-report.md` (medium risk; build passes).
+**Scope:** `session_semantic_search.rs`, `connection_service.rs` (`SearchSessions` RPC), `error.rs` (`SessionSearchIndex`), `SessionSearchInput.tsx`, `connection.proto` (`SearchSessions`), and call sites of `index_session_for_search`.  
+**Date:** 2026-04-05
 
 ---
 
 ## Executive summary
 
-The feature implements per-table multi-select, indeterminate header checkboxes, and bulk delete via sequential `DeleteSession` RPCs with a single `window.confirm` that includes the count. Core behavior matches the PRD and tests cover selection semantics and delete payloads. **Before a production release, remove or gate verbose `console.*` usage** in both the screen and the pure `sessionSelection` helpers—helpers currently log on routine toggles and will add noise and minor overhead in production. **Treat partial bulk-delete failure as a product concern:** earlier deletes may succeed while a later RPC fails; selection is not cleared and the list may be stale until the next poll, which can confuse operators. Security posture for this slice is acceptable (no session tokens in logs; React text rendering). Cypress additions are solid: protobuf-backed intercepts and explicit delete-body decoding improve harness fidelity.
+The stack implements **local** semantic search over a SQLite index (`session_search_index.sqlite3` under the Tddy sessions data root), deterministic on-device “hash-trick” embeddings (no network), and a gated **`SearchSessions`** RPC that scopes results by authenticated user → OS user → `sessions_base`. Core library behavior is documented for **migrations and recovery** (delete bad DB; re-index from each session’s `changeset.yaml`).
+
+**Blocking operational gap:** `index_session_for_search` is **not invoked from any production code path**—only from tests and the library itself. Unless another process manually builds the index, **`SearchSessions` will usually return no hits** (missing DB) or **stale** data if the file was populated out of band. That matches a typical “evaluate” finding: **the index is never populated in normal prod flows.**
+
+Secondary concerns: search runs **synchronously inside an `async` RPC** (no `spawn_blocking`), **full-table scan + in-memory sort** with no server-side cap on result size, and **no index row removal** when sessions are deleted.
+
+**Overall rating: partial — not production-ready** for end users expecting search to work out of the box. The RPC/UI/embeddings layer is a reasonable **beta** of the retrieval path *if* indexing is wired and ops expectations are clear; until then it is **feature-incomplete**, not merely “rough.”
 
 ---
 
-## Checklist
+## `index_session_for_search` — production vs tests
 
-| Area | Status | Notes |
-|------|--------|--------|
-| Error handling — bulk delete failure | **Concern** | `setError(message)`; selection retained; no `listSessions` refresh on failure → possible inconsistent UI vs server. |
-| Error handling — single delete | **Pass** | Same pattern as existing app behavior. |
-| Logging — volume / prod fit | **Concern** | `console.debug` / `console.info` in hot paths (`sessionSelection`, header checkbox effect, bulk loop). |
-| Logging — secrets | **Pass** | `sessionToken` not logged; only `hasToken` boolean in skip path. |
-| Logging — identifiers | **Concern** | `sessionId` logged in bulk delete debug lines — session identifiers in client logs may be sensitive for some deployments. |
-| Security — XSS | **Pass** | No `dangerouslySetInnerHTML`; confirm strings are template literals with count + static text. |
-| Security — confirm UX | **Pass** | Blocking `window.confirm` for destructive bulk action; count included. |
-| Performance — Set in state | **Pass** | Updates clone via `new Set(...)` / helpers return new `Set`; no in-place mutation of stored sets. |
-| Performance — re-renders | **Concern** | `?? new Set()` for missing table keys allocates each render; minor. Header checkbox `useEffect` + console on relevant deps. |
-| Performance — sequential deletes | **Pass** | Intentional ordering; acceptable for typical N; no parallel storm. |
-| Configuration | **Pass** | No new env toggles required; uses existing RPC client. |
-| Accessibility — checkboxes | **Pass** | `aria-label` on row and header controls; indeterminate set in effect. |
-| Accessibility — bulk button | **Concern** | Relies on visible “Delete selected” text; no extra `aria-label` (acceptable if button text remains unique). |
-| Cypress harness | **Pass** | Tracked delete intercept decodes `DeleteSessionRequest`; shared body helpers; clear test IDs. |
+| Location | Role |
+|----------|------|
+| `packages/tddy-core/src/session_semantic_search.rs` | Definition (`pub fn index_session_for_search`) |
+| `packages/tddy-integration-tests/tests/semantic_session_search_acceptance.rs` | Calls in acceptance tests |
+| `packages/tddy-daemon/tests/semantic_search_sessions_rpc.rs` | Calls to seed index before RPC assertions |
 
-**Legend:** Pass = acceptable for release with noted minor items; Concern = should address or explicitly accept before release; Fail = blocker.
+**Production crates (daemon, coder, tools, etc.):** no references that call `index_session_for_search`. The daemon only calls `search_sessions_semantic`.
 
 ---
 
-## Prioritized findings
+## Error handling
 
-### P1 — Logging in production paths
+| Layer | Behavior |
+|-------|----------|
+| **tddy-core** | SQLite and validation issues map to `WorkflowError::SessionSearchIndex(String)` (`error.rs`). `read_changeset` during indexing can surface `ChangesetMissing` / `ChangesetInvalid` etc. from the changeset module. |
+| **Missing index file** | `search_sessions_semantic` returns **`Ok(vec![])`** — not an error (see `session_semantic_search.rs`). |
+| **Empty / whitespace query** | `Ok(vec![])` after trim. |
+| **Per-row embedding issues** | Wrong dimension: row **skipped** with `log::warn!`, search continues. Model id mismatch: **warn**, row still scored. |
+| **Daemon RPC** | Non-OK paths from `search_sessions_semantic` map to **`Status::internal`** with `format!("{}", e)` — generic internal error for clients; no structured code for “corrupt DB” vs “permission denied.” |
 
-- **`sessionSelection.ts`:** Pure helpers call `console.debug` / `console.info` on normal operations (every toggle, header state computation paths). This runs in production bundles unless stripped by tooling (often not stripped for `console.*`).
-- **`ConnectionScreen.tsx`:** `SessionTableSelectAllCheckbox` logs on effect runs; `handleBulkDeleteSelectedSessions` logs per session id and list refresh metadata; initial load logs tool/agent counts.
-
-**Impact:** Console noise, possible performance micro-cost, session ids in debug logs.
-
-### P2 — Partial failure after sequential bulk delete
-
-- Loop `await`s each `deleteSession`. If delete 1..k succeed and k+1 throws, **earlier deletes are not rolled back** (expected without transactions), **`listSessions` is not called** in the catch path, and **selection is not cleared**. User sees an error but UI may still show selected rows that no longer exist (until refresh/poll).
-
-**Impact:** Confusing UX and risk of retrying duplicate deletes (server should ideally no-op).
-
-### P3 — Ephemeral `new Set()` for empty selection
-
-- `tableSessionSelections[tableKey] ?? new Set<string>()` allocates a new empty `Set` each render when the key is absent. Low severity; could use a module-level frozen empty set or store explicit empty sets in state updates for referential stability if profiling shows issues.
-
-### P4 — Cypress / repo hygiene (out of prod code)
-
-- `interceptAllRpcsWithTrackedDelete` duplicates much of `interceptAllRpcs` — higher maintenance cost when RPC mocks change (not a runtime defect).
+**Assessment:** Acceptable for a local tool; **differentiation of failure modes** (corrupt DB vs I/O) is weak at the RPC boundary. Empty results are ambiguous (no index vs weak query vs below score floor).
 
 ---
 
-## Recommendations for release
+## Logging (levels and sensitivity)
 
-1. **Strip or gate logging:** Remove `console.*` from `sessionSelection.ts` entirely, or move diagnostics behind an explicit dev-only flag (avoid silent “production vs test” behavior branches without team agreement—prefer removal or a documented debug toggle). Trim `ConnectionScreen` bulk-delete and header-checkbox logs before release.
-2. **On bulk delete failure:** Call `listSessions` in the `catch` path (or always after partial completion) and **prune** `tableSessionSelections[tableKey]` to ids still present in the refreshed list—or clear selection for that table and show a message that lists completed vs failed if the API supports it later.
-3. **Optional UX:** Add an `aria-label` on the bulk delete button that includes the selected count for screen readers (e.g. “Delete 3 selected sessions”).
-4. **Release note:** Document that bulk delete is best-effort sequential RPCs; operators should retry after errors if the list looks stale.
+| Event | Level | Notes |
+|-------|-------|--------|
+| Schema `user_version` | `debug` | Appropriate. |
+| Migration to schema v1 | `info` | Reasonable once per process/DB. |
+| `index_session_for_search` start | `info` | Logs **session_id** and **full `session_dir` path** — useful for ops, noisy if indexing were high-frequency. |
+| Index doc field lengths | `debug` | Appropriate. |
+| Search: query length, missing DB, score floor | `debug` | Appropriate. |
+| Search: hit count | `info` | Can be chatty on every keystroke-driven RPC unless the client debounces well. |
+| Model / dim mismatch | `warn` | Appropriate. |
+| **Daemon `SearchSessions`** | `debug` | Logs **`query_len` and `github_user`** — user identity in logs may be undesirable in strict privacy deployments; query content is not logged here. |
+
+**Assessment:** Levels are mostly sane; **`info` on every index call** and **`info` hit counts on every successful search** may be heavy under load. Consider **`debug`** for per-request search summaries if log volume matters.
 
 ---
 
-## Test harness (Cypress) — brief
+## Configuration and environment
 
-- **Strengths:** `connectRequestBodyToUint8` handles multiple body shapes; bulk delete tests decode protobuf request bodies to assert `sessionId` order/content; confirms single `window.confirm` with message assertions.
-- **Watch:** Intercept helper duplication; consider extracting shared RPC wiring to reduce drift.
+- **No dedicated env vars** for semantic search: index path is **`{sessions_base}/session_search_index.sqlite3`** (`session_search_index_path`), where `sessions_base` comes from the same resolver used for other session RPCs (`connection_service.rs`).
+- **Embedding model id and dimension** are **compile-time constants** (`SESSION_SEARCH_EMBEDDING_MODEL_ID`, `SESSION_SEARCH_EMBEDDING_DIM`, `SESSION_SEARCH_INDEX_SCHEMA_VERSION`) — good for reproducibility; changing them requires code + migration strategy.
 
 ---
 
-*Report generated for validate-prod-ready subagent review.*
+## Security
+
+| Topic | Assessment |
+|-------|------------|
+| **Data locality** | Index and session dirs live under the authenticated user’s Tddy data tree; **no cloud embedding calls** in v1 (hash-trick only). |
+| **Authorization** | Same pattern as `ListSessions`: `session_token` → GitHub user → OS user → `sessions_base`. **No path traversal via search query** — query is text for embedding/scoring only. |
+| **Exposure** | Hits include `initial_prompt`, worktree/branch labels — **sensitive local dev content**, but consistent with “search my sessions” and same trust domain as reading `changeset.yaml` on disk. |
+| **Cross-tenant** | Relies on correct `sessions_base` resolution; if that is wrong, impact is broader than search — **inherited from daemon session path model**. |
+
+---
+
+## Performance
+
+| Issue | Detail |
+|-------|--------|
+| **Full table scan** | `SELECT session_id, ... FROM session_search_index` — every row loaded and scored. **O(n)** sessions per query. |
+| **No SQL `LIMIT`** | All rows collected, then sorted in memory; **unbounded** result vector size before client receives (filtering is score-based + `MIN_BEST_SCORE` floor, not top-k). |
+| **Async handler** | `search_sessions` **does not** use `spawn_blocking` (contrast `list_sessions`). SQLite + CPU work can **block the Tokio worker** during the call. |
+| **SQLite** | `SQLITE_OPEN_FULL_MUTEX` — safe for concurrent access from multiple threads; still **one writer** typical for SQLite. |
+
+**Assessment:** Acceptable for **small to moderate** session counts on a workstation; **risk** grows with index size and concurrent searches without a blocking pool or limits.
+
+---
+
+## Operational gaps
+
+1. **Index never populated in prod** — `index_session_for_search` has **no production caller**; search is effectively **empty or manually maintained**.
+2. **No incremental updates** when `changeset.yaml` changes during a workflow (no hook from tddy-coder/daemon).
+3. **DeleteSession** does not remove rows from `session_search_index` — **orphan rows** if indexing is ever automated.
+4. **No documented operator command** in-repo (beyond module comments) to **backfill** or **rebuild** the index in production.
+
+---
+
+## Migrations and corruption recovery (as coded)
+
+- **Module docs** (`session_semantic_search.rs`): incompatible or corrupt DB files **may be deleted**; sessions **re-index** from each session dir’s `changeset.yaml` via `index_session_for_search`.
+- **`ensure_schema`:** If `user_version < SESSION_SEARCH_INDEX_SCHEMA_VERSION`, runs `CREATE TABLE IF NOT EXISTS` and bumps `user_version`. **First-time create** is covered; **future schema upgrades** will need explicit migration steps (current logic is minimal).
+- **Partial corruption:** Bad embedding length → row skipped; **bad DB file** may still cause `open`/`query` errors → **internal** to clients.
+
+---
+
+## Web UI (`SessionSearchInput.tsx`)
+
+- **Debounced** `onSearchQuery` (default 300 ms) to avoid RPC spam — good client-side hygiene.
+- Component does **not** implement RPC itself; **parent must wire** `SearchSessions` — no extra security surface in this file.
+- **No loading/error UI** in the component — product behavior depends on parent.
+
+---
+
+## Proto (`connection.proto`)
+
+- **`SearchSessionsRequest`:** `session_token`, `query`.
+- **`SearchSessionHit`:** `session_id`, `initial_prompt`, `relevance_score`, `worktree_label`, `branch_label`.
+- **No pagination or `max_results`** — large hit lists possible if many sessions score above the internal floor.
+
+---
+
+## Overall production readiness
+
+| Rating | **Partial — not production-ready** (end-to-end feature). |
+|--------|----------------------------------------------------------|
+| **Rationale** | Retrieval and auth wiring exist and are test-covered, but **without a production indexing lifecycle** the feature does not deliver value. Additional gaps: **blocking RPC**, **unbounded scans/results**, **no deletion sync**, **limited RPC error semantics**. |
+| **“Good for beta”?** | **Only** if beta explicitly means “try RPC + UI with manually seeded index” or indexing is added before release. Otherwise treat as **incomplete**. |
+
+---
+
+## Suggested priorities before “prod ready”
+
+1. **Wire `index_session_for_search`** (or a batch backfill) from real lifecycle events (session create/update, or periodic reconciliation), and **remove index rows on session delete**.
+2. Run search work in **`spawn_blocking`** (or dedicated pool) with a **timeout** aligned with other daemon blocking ops.
+3. Consider **top-k / cap** on returned hits and/or score threshold configurability for large deployments.
+4. Tighten **logging** (reduce `info` noise; avoid user identifiers in logs if policy requires).

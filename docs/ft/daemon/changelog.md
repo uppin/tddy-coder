@@ -1,5 +1,12 @@
 # Daemon product area changelog
 
+## 2026-04-05 — ConnectionService: `SearchSessions` (semantic session search)
+
+- **`connection.proto`**: **`SearchSessions`**, **`SearchSessionsRequest`** (**`query`**), **`SearchSessionsResponse`**, **`SearchSessionHit`** (**`session_id`**, **`initial_prompt`**, **`worktree_label`**, **`branch_label`**, **`relevance_score`**).
+- **`tddy-daemon`**: **`ConnectionService`** implements **`search_sessions`**: session token resolution matches **`ListSessions`**; **`search_sessions_semantic`** reads **`{data_root}/session_search_index.sqlite3`**. Invalid tokens → **unauthenticated**; empty / whitespace-only **`query`** → empty **`hits`**. Tests: **`semantic_search_sessions_rpc`**.
+- **`tddy-core`**: Module **`session_semantic_search`** — SQLite schema, **`index_session_for_search`**, **`search_sessions_semantic`**, deterministic embeddings. Integration: **`semantic_session_search_acceptance`** (uses **`&base`** for index path).
+- **Feature docs**: [semantic-session-search.md](../web/semantic-session-search.md), [web-terminal.md](../web/web-terminal.md). Package: [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md#searchsessions), [changesets.md](../../packages/tddy-daemon/docs/changesets.md). Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-04-04 — Session elicitation: Telegram `ModeChanged` + `ListSessions` flag
 
 - **`connection.proto`**: **`SessionEntry.pending_elicitation`** (field **14**).

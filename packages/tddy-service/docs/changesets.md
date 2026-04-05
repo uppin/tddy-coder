@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-service.
 
+- **2026-04-05** [Feature] **`SearchSessions` RPC** — **`connection.proto`**: **`SearchSessions`**, **`SearchSessionsRequest`**, **`SearchSessionsResponse`**, **`SearchSessionHit`** on **`ConnectionService`**. Feature **[semantic-session-search.md](../../../docs/ft/web/semantic-session-search.md)**. (tddy-service, tddy-daemon, tddy-web)
 - **2026-04-04** [Feature] **`SessionEntry.pending_elicitation`** — **`connection.proto`** field **14** on **`SessionEntry`**; TS/Rust bindings regenerated. Feature docs: [web-terminal.md](../../../docs/ft/web/web-terminal.md), [daemon changelog](../../../docs/ft/daemon/changelog.md). (tddy-service, tddy-web)
 - **2026-04-04** [Feature] ActivityLogged kind **`UserPrompt`** — `convert::activity_kind_to_str` emits **`UserPrompt`** for `ActivityKind::UserPrompt`; `remote.proto` activity `kind` comment lists it. Feature doc [activity-log-streaming.md](../../../docs/ft/coder/activity-log-streaming.md). (tddy-service)
 - **2026-04-03** [Feature] **`intent_to_client_message`**: **`UserIntent::Interrupt`** returns **`None`** (handled only in TUI / not sent over RPC). (tddy-service)

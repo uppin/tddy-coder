@@ -838,13 +838,7 @@ async fn rpc_scenarios() -> Result<()> {
             for i in 0..N {
                 let msg = format!("m{:03}", i);
                 sender
-                    .send(
-                        EchoRequest {
-                            message: msg,
-                        }
-                        .encode_to_vec(),
-                        i == N - 1,
-                    )
+                    .send(EchoRequest { message: msg }.encode_to_vec(), i == N - 1)
                     .await
                     .map_err(|e| anyhow::anyhow!("send {}: {}", i, e))?;
             }

@@ -18,6 +18,7 @@ service ConnectionService {
   rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
   rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
   rpc RemoveWorktree(RemoveWorktreeRequest) returns (RemoveWorktreeResponse);
+  rpc SearchSessions(SearchSessionsRequest) returns (SearchSessionsResponse);
 }
 
 message ListToolsRequest {}
@@ -227,4 +228,23 @@ message RemoveWorktreeRequest {
 message RemoveWorktreeResponse {
   bool ok = 1;
   string message = 2;
+}
+
+// --- Semantic session search (local SQLite + embeddings; see PRD semantic session search) ---
+
+message SearchSessionsRequest {
+  string session_token = 1;
+  string query = 2;
+}
+
+message SearchSessionHit {
+  string session_id = 1;
+  string initial_prompt = 2;
+  float relevance_score = 3;
+  string worktree_label = 4;
+  string branch_label = 5;
+}
+
+message SearchSessionsResponse {
+  repeated SearchSessionHit hits = 1;
 }

@@ -2,6 +2,14 @@
 
 Release note history for the Web product area.
 
+## 2026-04-05 — Semantic session search (local index + RPC + UI)
+
+- **`tddy-core`**: Local SQLite index **`session_search_index.sqlite3`** at the Tddy data root; deterministic hash-trick embeddings (**`tddy-hash-trick-v1-dim256`**, dimension **256**); **`index_session_for_search`**, **`search_sessions_semantic`**. **`WorkflowError::SessionSearchIndex`** for index failures.
+- **`tddy-service` / `connection.proto`**: **`SearchSessions`**, **`SearchSessionsRequest`**, **`SearchSessionsResponse`**, **`SearchSessionHit`** on **`ConnectionService`**.
+- **`tddy-daemon`**: **`ConnectionService::search_sessions`** delegates to **`search_sessions_semantic`**; invalid tokens yield **unauthenticated** errors; whitespace-only queries return empty hit lists. Tests: **`semantic_search_sessions_rpc`**.
+- **`tddy-web`**: **`SessionSearchInput`** debounces input before **`SearchSessions`**; Cypress **`SessionSearchInput.cy.tsx`**. **`ConnectionScreen`** wires search to the RPC client.
+- **Feature doc**: [semantic-session-search.md](semantic-session-search.md). Daemon RPC: [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md#searchsessions). Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**; packages: **[tddy-core](../../../packages/tddy-core/docs/changesets.md)**, **[tddy-daemon](../../../packages/tddy-daemon/docs/changesets.md)**, **[tddy-service](../../../packages/tddy-service/docs/changesets.md)**, **[tddy-web](../../../packages/tddy-web/docs/changesets.md)**. WIP: **[2026-04-05-changeset-semantic-session-search.md](../../dev/1-WIP/2026-04-05-changeset-semantic-session-search.md)**.
+
 ## 2026-04-05 — Terminal connection status bar (chrome layouts)
 
 - **tddy-web**: **`TerminalConnectionStatusBar`** hosts **`ConnectionTerminalChrome`** with **`chromeLayout="statusBar"`** above **`GhosttyTerminal`** in **`GhosttyTerminalLiveKit`**, **`ConnectionScreen`**, and standalone connect. **`connectionChromePlacement`** **`floating`** | **`none`** selects full vs compact bar (build id + fullscreen vs dot-focused chrome for overlay / mini). **`terminalStatusBarLayout`** geometry helpers with Bun tests; Cypress **`GhosttyTerminalLiveKit.cy.tsx`** shares those helpers. **`connectionTerminalChromeDotStyles`** centralizes dot animation styles.

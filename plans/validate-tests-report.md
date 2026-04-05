@@ -1,53 +1,68 @@
-# Validate Tests Report — Session Bulk Select / Refactor Validation
+# Validate-tests report: semantic session search
 
-## Date / toolchain
+**Repository:** `/var/tddy/Code/tddy-coder/.worktrees/semantic-session-search`  
+**Run window:** started `2026-04-05T11:52:41Z` (UTC), commands executed sequentially in this subagent environment.
 
-- **Date:** 2026-04-05  
-- **Environment:** Linux; tests run from repo root via **`./dev`** (nix dev shell: rustc, cargo, rustfmt, clippy, bun, node as printed by the shell).  
-- **Output:** Full Rust workspace test log for **`./dev ./verify`** is in **`.verify-result.txt`** at the repository root.
+## Commands run
 
-## Commands run (exit codes)
+All commands were run from repo root: `/var/tddy/Code/tddy-coder/.worktrees/semantic-session-search`.
 
-| Command | Exit | Notes |
-|--------|------|--------|
-| `./verify` (without `./dev`) | **127** | `cargo: command not found` — **must** run Cargo through the dev shell or `nix develop`. |
-| `./dev cargo test -q` | **101** | Failed in **`tddy-integration-tests`** (`acp_backend_acceptance`): *"tddy-acp-stub not built. Run: cargo build -p tddy-acp-stub"* — 6 tests failed; 2 passed in that binary before abort. |
-| `./dev ./verify` | **0** | Runs `cargo build -p tddy-acp-stub` then `cargo test -- --test-threads=1` with output tee’d to `.verify-result.txt`. |
-| `./dev sh -c 'cd packages/tddy-web && bun test src/utils/sessionSelection.test.ts'` | **0** | Equivalent to running the unit file from `packages/tddy-web` with Bun’s test runner (not `bun run test`, which executes the package `test` script). |
-| `./dev sh -c 'cd packages/tddy-web && bun run cypress:component -- --spec cypress/component/ConnectionScreen.cy.tsx'` | **0** | Single-spec Cypress component run. |
+| # | Command | Result |
+|---|---------|--------|
+| 1 | `/var/tddy/Code/tddy-coder/.worktrees/semantic-session-search/./dev cargo test -p tddy-core --test session_semantic_search_unit` | **PASS** — 6 tests |
+| 2 | `/var/tddy/Code/tddy-coder/.worktrees/semantic-session-search/./dev cargo test -p tddy-integration-tests --test semantic_session_search_acceptance` | **PASS** — 3 tests |
+| 3 | `/var/tddy/Code/tddy-coder/.worktrees/semantic-session-search/./dev cargo test -p tddy-daemon --test semantic_search_sessions_rpc` | **PASS** — 1 test |
+| 4 | `/var/tddy/Code/tddy-coder/.worktrees/semantic-session-search/./dev bun run --filter tddy-web cypress:component -- --spec cypress/component/SessionSearchInput.cy.tsx` | **PASS** — 1 spec, 1 passing test (`web_search_input_triggers_query_debounced`) |
+| 5 (optional) | `/var/tddy/Code/tddy-coder/.worktrees/semantic-session-search/./dev cargo test -q -p tddy-core -p tddy-daemon 2>&1 \| tail -30` | **FAIL** (compile) — see below |
+| 6 (follow-up) | `/var/tddy/Code/tddy-coder/.worktrees/semantic-session-search/./dev cargo test -q -p tddy-core` | **PASS** — full `tddy-core` package tests |
 
-**Note:** The literal form `./dev bun --cwd packages/tddy-web test <file>` was not used here; `bun test <file>` from `packages/tddy-web` is the reliable way to run only `sessionSelection.test.ts` without triggering the composite `npm run test` pipeline (`bun test src/routing && …`).
+### Failure excerpt (command 5)
 
-## Rust workspace tests — pass/fail
+`cargo test -p tddy-core -p tddy-daemon` did not complete: `tddy-daemon` test target `sessions_base_path_mismatch` fails to compile:
 
-- **Status:** **Pass** when using **`./dev ./verify`** (exit **0**).  
-- **Caveat:** A plain **`./dev cargo test -q`** without first building **`tddy-acp-stub`** **fails** integration tests that spawn the stub (documented failure above). This is an **order-of-operations / prerequisite** issue, not a regression in the session bulk-select web code.
+```text
+error[E0061]: this function takes 6 arguments but 5 arguments were supplied
+  --> packages/tddy-daemon/tests/sessions_base_path_mismatch.rs:57:5
+...
+ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None)
+...
+help: provide the argument ... Option<Arc<TelegramDaemonHooks>>
 
-## `sessionSelection` unit tests — pass/fail
+error[E0063]: missing field `pending_elicitation` in initializer of `SessionMetadata`
+  --> packages/tddy-daemon/tests/sessions_base_path_mismatch.rs:72:20
+```
 
-- **Status:** **Pass** (exit **0**).  
-- **Result:** **6** tests, **0** failures, **6** `expect()` calls in `src/utils/sessionSelection.test.ts`.
+**Note:** Full `./test` was not run; focused semantic-search commands and optional broader `tddy-core`/`tddy-daemon` sweep were used instead.
 
-## `ConnectionScreen.cy.tsx` component tests — pass/fail
+### Cypress noise (non-fatal)
 
-- **Status:** **Pass** (exit **0**).  
-- **Result:** **32** passing tests in **~17s** (only this spec file; includes “ConnectionScreen bulk session selection and delete (acceptance)” and the rest of the ConnectionScreen suite).
-
-## Missing coverage — session bulk-select feature
-
-- **Partial bulk-delete failure:** No automated test for **mid-sequence RPC failure** (some deletes succeed, later one throws); evaluation report notes stale selection / UX gap.  
-- **E2E:** No **Cypress e2e** (or Playwright) path against a **real or stubbed full app flow** for bulk delete; coverage is **component + unit** only.  
-- **listSessions / race timing:** Limited coverage for **refresh during bulk delete** or **interleaved updates** to session lists.  
-- **Edge cases:** **Empty tables** (no rows), **single row**, **very large selection counts**, and **accessibility** (keyboard-only select-all / bulk delete) are not explicitly called out in the validation run.  
-- **Error surfaces:** **Delete RPC error** for bulk flow (not just happy path) may need explicit assertions if not already covered in the new CT cases.
-
-## Recommendations
-
-1. **CI / local habit:** Prefer **`./dev ./verify`** (or document **`cargo build -p tddy-acp-stub`** before **`cargo test`**) so integration tests do not fail spuriously.  
-2. **Bun:** For **single-file** unit tests, use **`bun test <path>`** inside `packages/tddy-web`; avoid **`bun run test`** when only `sessionSelection` is intended (that script runs routing tests + full Cypress).  
-3. **Product hardening:** Add a **targeted test** (unit or CT) for **bulk delete partial failure** and consider **pruning selection** after `listSessions` refresh or on error, as in the evaluation report.  
-4. **Optional:** One **e2e** or **smoke** scenario for bulk delete if the feature is user-critical and regressions must be caught outside Storybook.
+The component run logged DBus/`resize` warnings and port fallback (5173→5175); exit code was 0 and the spec passed.
 
 ---
 
-*Generated for refactor validation; aligns with `plans/evaluation-report.md` context.*
+## Missing coverage: PRD / product intent vs tests
+
+Inferred from test module comments (`semantic_session_search_acceptance.rs` references a “PRD Testing Plan”), module docs in `/var/tddy/Code/tddy-coder/.worktrees/semantic-session-search/packages/tddy-core/src/session_semantic_search.rs`, and code search.
+
+| Area | What tests cover today | Gap |
+|------|------------------------|-----|
+| **Index schema / embedding metadata** | Unit tests assert published model id and schema version (`session_semantic_search_unit`). | Low gap for constants; migration stress not covered beyond version constant. |
+| **Indexing + ranking + incremental refresh** | Integration acceptance: persist index path, semantic ranking, re-index after changeset update (`semantic_session_search_acceptance`). | Indexing is invoked **explicitly in tests**; production daemon code paths do not call `index_session_for_search` (grep shows usage only in `tddy-core` + tests). **Search** is wired in `connection_service.rs` via `search_sessions_semantic`; **automatic re-index on session/changeset updates** is not verified in production code by these tests. |
+| **RPC / API contract** | Daemon test seeds index via `index_session_for_search`, then asserts `SearchSessions` behavior and stable schema (`semantic_search_sessions_rpc`). | Does not cover auth edge cases beyond what the single test asserts; no live Connect-RPC E2E against a running daemon in CI described here. |
+| **Web UI** | Cypress **component** test debounced query behavior (`SessionSearchInput.cy.tsx`). | No Cypress **e2e** (full app + `/rpc` proxy + real daemon) for search; no visual regression for search results list. |
+| **Load / performance** | None in this run. | No load tests for large session counts, index size, or concurrent searches. |
+| **Indexer hooks in prod** | N/A in strict sense — tests prove library + manual indexing. | **Gap:** ensure every production write path that updates searchable session state (e.g. changeset save, session lifecycle) calls `index_session_for_search` or equivalent batch job; otherwise search results drift from disk. |
+
+---
+
+## Recommendations
+
+1. **Fix `sessions_base_path_mismatch` test compile errors** in `/var/tddy/Code/tddy-coder/.worktrees/semantic-session-search/packages/tddy-daemon/tests/sessions_base_path_mismatch.rs`: pass the sixth `ConnectionServiceImpl::new` argument and populate `SessionMetadata.pending_elicitation` so `./dev cargo test -p tddy-daemon` (and combined `-p tddy-core -p tddy-daemon`) is green again.
+2. **Define and implement production indexing hooks** (or a documented background reindex job) and add an integration test that exercises the **same code path** the daemon uses after a changeset update, not only direct `index_session_for_search` calls from tests.
+3. **Add an E2E or daemon-level test** that starts the stack (or minimal gRPC server) and validates `SearchSessions` against a persisted index after a simulated workflow write, if product requires parity with local dev (`web-dev`).
+4. **Optional:** performance smoke test (e.g. N sessions, query latency bound) once indexing is production-bound.
+5. **Re-run** `/var/tddy/Code/tddy-coder/.worktrees/semantic-session-search/./verify` or `./test` after fixing daemon tests for full-workspace confidence.
+
+---
+
+*Generated by validate-tests subagent; absolute paths preserved as requested.*
