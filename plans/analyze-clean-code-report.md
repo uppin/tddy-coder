@@ -1,47 +1,47 @@
-# Clean-code analysis: session bulk selection & delete
+# Chain PR — Clean Code Analysis
 
-Analysis scope: `sessionSelection.ts`, `sessionSelection.test.ts`, and bulk-selection-related sections of `ConnectionScreen.tsx` (header checkbox component, `tableSessionSelections`, `handleBulkDeleteSelectedSessions`, table UI). Cross-read with `plans/evaluation-report.md`.
-
-## Summary score table (subjective)
-
-| Area                         | Score (1–5) | Notes |
-|-----------------------------|-------------|-------|
-| Naming & API clarity        | 4           | Helpers and state names read well; `tableKey` aligns with project id / orphan key. |
-| Complexity & control flow   | 3           | Pure helpers are simple; `toggleSelectAllForTable` “all selected” predicate is non-obvious; verbose branching in `computeHeaderCheckboxState`. |
-| Duplication                 | 3           | Two near-identical session tables (project vs orphan); acceptable for now, extractable later. |
-| SOLID / testability         | 4           | Selection logic isolated and unit-tested; bulk delete stays in screen (RPC/UI) — reasonable split. |
-| Docs & comments             | 4           | JSDoc on exports and key state; no excessive inline noise except logs. |
-| Consistency with ConnectionScreen | 3     | Patterns match existing confirm/delete/listSessions flow; new console volume is heavier than the one-off list load debug line. |
-
-**Overall:** ~3.5 / 5 — solid structure with clear extraction of pure logic; main quality debt is **logging inside “pure” helpers** and **UI duplication** between tables.
+Analysis of Chain PR–related changes in `tddy-core` (worktree integration base, changeset persistence, crate exports), plus incidental noise elsewhere.
 
 ## Strengths
 
-- **Pure selection module** — `computeHeaderCheckboxState`, `toggleSelectAllForTable`, and `toggleRowInTableSelection` are side-effect-free apart from logging, easy to reason about, and imported explicitly at the top of `ConnectionScreen.tsx` alongside other `../utils/*` helpers (`sessionDisplay`, `sessionProjectTable`, `sessionSort`), which matches existing organization.
-- **Header checkbox encapsulation** — `SessionTableSelectAllCheckbox` centralizes the React quirk of `indeterminate` via `useRef` + `useEffect`, keeps `ConnectionScreen` JSX focused on wiring counts and `onToggle`.
-- **Per-table selection model** — `Record<string, Set<string>>` with a documented comment matches the product rule (independent selection per project table and orphan table). `toggleSelectAllForTable`’s predicate (all rows selected *and* no stray ids outside the table) is a thoughtful guard against stale selection after list changes.
-- **Bulk delete mirrors single delete** — `handleBulkDeleteSelectedSessions` follows the same mental model as `handleDeleteSession`: confirm → RPC → `listSessions` → `setSessions`, with `setError` on failure. `useCallback` dependencies `[client, sessionToken]` are minimal and correct.
-- **Tests** — Core behaviors (partial vs all header state, select-all toggle, row toggle) are covered with direct assertions; fast `bun:test` unit tests align with the repo’s TDD posture.
+- **Clear security model split**: `validate_integration_base_ref` enforces a strict single-segment `origin/<branch>` contract for legacy/project defaults; `validate_chain_pr_integration_base_ref` deliberately allows multi-segment paths with extra guards (`..`, empty segments). The two validators are documented and aligned with different product rules.
+- **Fetch symmetry**: `fetch_chain_pr_integration_base` mirrors `fetch_integration_base` (validate → `git fetch origin <path>` → log on failure). Behavior is easy to follow and audit.
+- **Persistence model**: `Changeset::effective_worktree_integration_base_ref` vs `worktree_integration_base_ref` is explained in field-level comments—effective = what was used to create the worktree; the latter = user opt-in chain base when present.
+- **Public API documentation**: `setup_worktree_for_session_with_optional_chain_base` and `resolve_persisted_worktree_integration_base_for_session` have substantial `///` docs describing `None` vs `Some` and resume order.
+- **`lib.rs` exports**: New symbols are grouped with existing worktree re-exports; naming is consistent with the module (`validate_chain_pr_integration_base_ref`, `setup_worktree_for_session_with_optional_chain_base`, etc.).
+- **Resume ordering**: `resolve_persisted_worktree_integration_base_for_session` prefers persisted effective ref first, which matches the stated contract for deterministic resume.
 
-## Issues
+## Issues (by severity)
 
-1. **Side effects in “pure” utilities** — `sessionSelection.ts` uses `console.debug` / `console.info` on every path. That contradicts the file’s stated purpose (“Pure selection helpers”), adds noise in tests and production, and duplicates the evaluation report’s observability warning for `ConnectionScreen`.
-2. **Repetitive branches in `computeHeaderCheckboxState`** — Early returns repeat the same logging pattern; a single computation of `{ checked, indeterminate }` plus one optional log (or none) would shrink the function and reduce mistake surface.
-3. **`SessionTableSelectAllCheckbox` effect logging** — `useEffect` runs when checkbox-derived state changes and logs every time; on large lists this is lower risk than per-row logging but still spams when selection changes frequently.
-4. **Test coverage gaps** — No cases for `totalRows === 0`, “partial select-all” (some but not all rows), or `toggleSelectAllForTable` when selection contains ids not in `allSessionIds` (the intentional stale-selection behavior). The describe title “(granular)” is vague.
-5. **Structural duplication in JSX** — Project and orphan tables duplicate the bulk-delete bar, `SessionTableSelectAllCheckbox`, column headers, and row checkbox wiring. Not wrong, but increases drift risk if columns or actions change later.
-6. **Bulk partial failure (already in evaluation report)** — Sequential deletes + catch without clearing selection is a correctness/UX concern, not a style issue, but it interacts with selection state quality.
+### Medium
 
-## Refactor suggestions (small, actionable)
+- **Duplication vs `validate_integration_base_ref` / `fetch_integration_base`**: Shared logic (trim, `origin/`, forbidden shell-ish characters, `--`, whitespace) is copy-pasted between the two validators. The two fetch helpers differ only by which validator runs and the label for the ref tail (`branch` vs `branch_path`). Risk: future rule changes updated in one path only.
+- **Duplication in setup paths**: `setup_worktree_for_session_with_integration_base` and `setup_worktree_for_session_with_optional_chain_base` both repeat branch/worktree name resolution from the changeset, `create_worktree_with_retry`, and the same three assignments (`worktree`, `branch`, `repo_path`). The optional-chain variant adds resolution/fetch branching and extra fields. This increases the surface area for drift if one path is fixed and the other is not.
+- **Misleading test module and names**: `chain_pr_red_tests` and the module comment (`RED: ... must fail until Green implements behavior`) describe a red-phase harness, but the tests now assert success (`is_ok()`, `GREEN` in messages). Same pattern in `integration_base_red_tests` (e.g. `fetch_integration_base_succeeds_for_valid_origin_main_red`, `setup_worktree_with_integration_base_completes_red`). **Severity**: maintainability and onboarding—readers will doubt whether failures are expected.
+- **Doc redundancy**: `setup_worktree_for_session_with_optional_chain_base` repeats the `None` vs `Some` story across two doc paragraphs; could be tightened into one behavioral block.
 
-| Priority | Suggestion |
-|----------|------------|
-| High | Remove or gate all `console.*` calls from `sessionSelection.ts` (and trim redundant logs in `SessionTableSelectAllCheckbox` / bulk handler once stable). If debug is needed temporarily, use a single module-level `DEBUG_SESSION_SELECTION` constant marked `// FIXME: remove before release` per project rules, or a shared dev-only logger — **ask before introducing a new dependency**. |
-| Medium | Refactor `computeHeaderCheckboxState` to compute `checked` / `indeterminate` once, then return (no duplicated per-branch logs). |
-| Medium | Add 2–4 unit tests: empty table header state; partial row selection toggling to “select all”; `toggleSelectAllForTable` when `selected` has extra ids not in `allSessionIds`. Rename describe to something concrete, e.g. `sessionSelection helpers`. |
-| Low | Extract a presentational `SessionsBulkTable` (or similar) that accepts `tableKey`, rows, `selectedSet`, and callbacks to reduce duplicate table markup between project and orphan sections — only if upcoming changes touch both tables. |
-| Low | Consider `onChange={onToggle}` instead of `onChange={() => onToggle()}` on the header checkbox for a tiny clarity win (optional). |
+### Low
 
-## Conclusion
+- **`setup_worktree_for_session_with_optional_chain_base` size**: One function handles resolution/validation, conditional fetch strategy, worktree creation, and changeset writes (~80 lines). Cyclomatic complexity is moderate (one `match`, one `if` on fetch). Acceptable for now but not ideal for single-responsibility purists.
+- **Naming overlap**: `worktree_integration_base_ref` reads like “the” worktree base; only the comment disambiguates from `effective_worktree_integration_base_ref`. A more explicit name (e.g. `user_chain_pr_integration_base_ref`) would reduce confusion—would be a breaking serde field rename unless aliased.
 
-The bulk-selection work is **architecturally sound**: logic is separated for testing, naming matches surrounding patterns, and the screen component stays the integration point for RPC and confirmation dialogs. The main clean-code gap is **observability leaking into pure functions and frequent render-adjacent logging**, plus **test and DRY gaps** that are easy to close without redesign.
+### Informational (noise)
+
+- **`packages/tddy-livekit/tests/rpc_scenarios.rs`**: Diff is formatting-only (multi-line `EchoRequest` collapsed to one line). No behavior change—safe to treat as unrelated churn in review or revert to shrink the PR.
+
+## Refactoring suggestions
+
+1. **Extract shared validation helpers** (private): e.g. `fn validate_origin_prefixed_ref_common(rest: &str, label: &str) -> Result<(), String>` for whitespace, forbidden chars, `--`, and optionally compose single-segment vs multi-segment rules on top. Keeps error messages specific per public API while deduplicating the mechanical checks.
+2. **Unify fetch**: Single internal `fetch_origin_integration_base_ref(repo_root, ref_str, mode: IntegrationBaseRefKind)` where `Kind` selects validator, or pass a validated tail and a flag—avoid two nearly identical `Command::new("git")` blocks.
+3. **Extract “apply worktree session to changeset”**: A small private helper taking `(session_dir, worktree_path, actual_branch, integration_base_ref, Option<user_chain_ref>)` could perform the shared field writes and optional `effective_*` / `worktree_integration_base_ref` updates, so the two setup functions only differ in how they obtain `integration_base_ref` and which fetch they call.
+4. **Rename test modules** after green: e.g. `chain_pr_integration_base_tests` or `worktree_integration_base_tests`, and drop `_red` from test function names unless you intentionally keep “red” as historical artifact (not recommended).
+
+## Optional small follow-ups
+
+- Add a one-line `///` on `fetch_chain_pr_integration_base` noting it is the chain-PR counterpart to public `fetch_integration_base` (same operational semantics, different validation).
+- Consider shortening the first paragraph of `setup_worktree_for_session_with_optional_chain_base` docs to remove duplication with the second.
+- If the PR should stay minimal, **exclude** `rpc_scenarios.rs` from the same commit as functional Chain PR work to keep blame and review focused.
+
+---
+
+**Artifacts**: Report generated for workspace `/var/tddy/Code/tddy-coder/.worktrees/chain-pr-base-branch`.

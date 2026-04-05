@@ -83,6 +83,13 @@ pub struct Changeset {
     /// Demo routing and options for the TDD graph (merged into session Context at bootstrap / resume).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow: Option<ChangesetWorkflow>,
+    /// Effective remote-tracking ref used to create the session worktree (default or resolved base).
+    /// Persisted for observability and resume parity (chain PRs).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub effective_worktree_integration_base_ref: Option<String>,
+    /// User-selected chain-PR base ref (`origin/...`) when opted in; omitted when using default resolution only.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub worktree_integration_base_ref: Option<String>,
 }
 
 /// A single session entry (plan, acceptance-tests, or impl).
@@ -186,6 +193,8 @@ impl Default for Changeset {
             repo_path: None,
             recipe: None,
             workflow: None,
+            effective_worktree_integration_base_ref: None,
+            worktree_integration_base_ref: None,
         }
     }
 }

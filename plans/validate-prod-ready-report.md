@@ -1,13 +1,10 @@
-# Validate prod-ready — Session bulk select / delete
-
-**Scope:** Review of `ConnectionScreen.tsx` (bulk delete, selection state, logging), `sessionSelection.ts`, and Cypress `ConnectionScreen.cy.tsx` (test harness quality only).  
-**Aligned with:** `plans/evaluation-report.md` (medium risk; build passes).
-
----
+# Chain PR integration base — production readiness validation
 
 ## Executive summary
 
-The feature implements per-table multi-select, indeterminate header checkboxes, and bulk delete via sequential `DeleteSession` RPCs with a single `window.confirm` that includes the count. Core behavior matches the PRD and tests cover selection semantics and delete payloads. **Before a production release, remove or gate verbose `console.*` usage** in both the screen and the pure `sessionSelection` helpers—helpers currently log on routine toggles and will add noise and minor overhead in production. **Treat partial bulk-delete failure as a product concern:** earlier deletes may succeed while a later RPC fails; selection is not cleared and the list may be stale until the next poll, which can confuse operators. Security posture for this slice is acceptable (no session tokens in logs; React text rendering). Cypress additions are solid: protobuf-backed intercepts and explicit delete-body decoding improve harness fidelity.
+`tddy-core` implements chain-PR integration base handling in `worktree.rs`: strict validation (`validate_chain_pr_integration_base_ref`), scoped fetch (`fetch_chain_pr_integration_base`), session setup with optional user base (`setup_worktree_for_session_with_optional_chain_base`), and resume resolution (`resolve_persisted_worktree_integration_base_for_session`). `changeset.rs` persists `effective_worktree_integration_base_ref` and `worktree_integration_base_ref` with appropriate serde defaults.
+
+The library layer is directionally sound for production use (validation before `git`, no shell interpolation). **Gaps for “prod-ready” end-to-end behavior:** (1) the legacy helper `setup_worktree_for_session_with_integration_base` does **not** persist effective/user integration-base fields, so observability and resume parity differ from the optional-chain API; (2) **no product entry point** (`tddy-service` daemon, `tddy-workflow-recipes` hooks) calls `setup_worktree_for_session_with_optional_chain_base` or threads a chain-base parameter from RPC/UI—production paths still use `setup_worktree_for_session` only; (3) default-path setup performs **redundant fetches** (`git fetch origin` inside default resolution, then `git fetch origin <branch>`). Address wiring and persistence parity before treating chain PR base as a shipped feature.
 
 ---
 
@@ -15,64 +12,76 @@ The feature implements per-table multi-select, indeterminate header checkboxes, 
 
 | Area | Status | Notes |
 |------|--------|--------|
-| Error handling — bulk delete failure | **Concern** | `setError(message)`; selection retained; no `listSessions` refresh on failure → possible inconsistent UI vs server. |
-| Error handling — single delete | **Pass** | Same pattern as existing app behavior. |
-| Logging — volume / prod fit | **Concern** | `console.debug` / `console.info` in hot paths (`sessionSelection`, header checkbox effect, bulk loop). |
-| Logging — secrets | **Pass** | `sessionToken` not logged; only `hasToken` boolean in skip path. |
-| Logging — identifiers | **Concern** | `sessionId` logged in bulk delete debug lines — session identifiers in client logs may be sensitive for some deployments. |
-| Security — XSS | **Pass** | No `dangerouslySetInnerHTML`; confirm strings are template literals with count + static text. |
-| Security — confirm UX | **Pass** | Blocking `window.confirm` for destructive bulk action; count included. |
-| Performance — Set in state | **Pass** | Updates clone via `new Set(...)` / helpers return new `Set`; no in-place mutation of stored sets. |
-| Performance — re-renders | **Concern** | `?? new Set()` for missing table keys allocates each render; minor. Header checkbox `useEffect` + console on relevant deps. |
-| Performance — sequential deletes | **Pass** | Intentional ordering; acceptable for typical N; no parallel storm. |
-| Configuration | **Pass** | No new env toggles required; uses existing RPC client. |
-| Accessibility — checkboxes | **Pass** | `aria-label` on row and header controls; indeterminate set in effect. |
-| Accessibility — bulk button | **Concern** | Relies on visible “Delete selected” text; no extra `aria-label` (acceptable if button text remains unique). |
-| Cypress harness | **Pass** | Tracked delete intercept decodes `DeleteSessionRequest`; shared body helpers; clear test IDs. |
-
-**Legend:** Pass = acceptable for release with noted minor items; Concern = should address or explicitly accept before release; Fail = blocker.
+| Ref validation (injection / unsafe args) | **Pass** | `origin/` prefix, segment rules, forbids `..`, `--`, whitespace, common shell metacharacters; args passed via `Command::args` (no shell). |
+| Git invocation safety | **Pass** | Literal argv; validated ref fragments only. |
+| Error typing / user vs internal | **Partial** | Uniform `Result<_, String>`; useful messages but no structured error type or stable codes for UI. |
+| Logging level & content | **Partial** | `info` for operations and paths; `debug` for outcomes and fetch stderr snippets. Ref names logged at info—usually acceptable; no obvious token leakage. |
+| Configuration | **Partial** | Remote is hardcoded `origin`; no env/config override (consistent with existing integration-base helpers). |
+| Serialization / schema | **Pass** | Optional fields, `skip_serializing_if`, `Default` in `Changeset`. |
+| Persistence parity (legacy vs new API) | **Fail** | `setup_worktree_for_session_with_integration_base` omits `effective_worktree_integration_base_ref` / `worktree_integration_base_ref`. |
+| Performance (fetch) | **Partial** | Redundant `fetch origin` + `fetch origin <branch>` on default optional-chain path. |
+| Operational / resume | **Partial** | `resolve_persisted_*` prefers persisted effective ref; does not re-validate ref shape on read (trust on-disk YAML). |
+| Daemon / CLI / RPC integration | **Fail** | Daemon and recipe hooks use `setup_worktree_for_session` only—optional chain base not exposed. |
 
 ---
 
-## Prioritized findings
+## Findings
 
-### P1 — Logging in production paths
+### 1. Validation and security
 
-- **`sessionSelection.ts`:** Pure helpers call `console.debug` / `console.info` on normal operations (every toggle, header state computation paths). This runs in production bundles unless stripped by tooling (often not stripped for `console.*`).
-- **`ConnectionScreen.tsx`:** `SessionTableSelectAllCheckbox` logs on effect runs; `handleBulkDeleteSelectedSessions` logs per session id and list refresh metadata; initial load logs tool/agent counts.
+- **`validate_chain_pr_integration_base_ref`** allows multi-segment paths under `origin/` and rejects empty segments, `..`, `--`, whitespace, and a set of shell-oriented characters. This aligns with passing a single refspec fragment to `git fetch origin <branch_path>` without shell interpretation.
+- **Residual edge cases:** Ref names may still include characters Git treats specially in other commands (not covered here). Narrowing to a Git ref-name charset (e.g. rejecting `*`, `?`, `[`, `@` where inappropriate) would reduce surprise if these strings are ever forwarded to broader git plumbing. Not blocking for the current `fetch` argv usage.
+- **`validate_integration_base_ref`** (single segment) remains the gate for non-chain `fetch_integration_base`; chain path uses the separate validator—clear separation.
 
-**Impact:** Console noise, possible performance micro-cost, session ids in debug logs.
+### 2. Error handling
 
-### P2 — Partial failure after sequential bulk delete
+- Public APIs return **`Result<_, String>`**. Callers (e.g. daemon) surface the string to workflow completion. There is no distinction between “user fixable” (bad ref) and infrastructure (git missing, disk). Acceptable for an internal library; product layer may want typed errors later.
+- Failure paths attach **full `git` stderr** to the returned `Err` in several places—appropriate for operators; ensure UI does not echo raw stderr to untrusted telemetry without scrubbing if that becomes a requirement.
 
-- Loop `await`s each `deleteSession`. If delete 1..k succeed and k+1 throws, **earlier deletes are not rolled back** (expected without transactions), **`listSessions` is not called** in the catch path, and **selection is not cleared**. User sees an error but UI may still show selected rows that no longer exist (until refresh/poll).
+### 3. Logging
 
-**Impact:** Confusing UX and risk of retrying duplicate deletes (server should ideally no-op).
+- **`log::info`** records repo root, session dir, integration ref strings, and boolean opt-in. Paths and branch/ref names are operational data, not credentials.
+- **`log::debug`** records fetch stderr on failure—reasonable; avoids noisy logs on success paths.
+- User-selected chain base is logged at **info** when `Some`—intentional audit trail; confirm product privacy expectations for branch names in shared logs.
 
-### P3 — Ephemeral `new Set()` for empty selection
+### 4. Configuration
 
-- `tableSessionSelections[tableKey] ?? new Set<string>()` allocates a new empty `Set` each render when the key is absent. Low severity; could use a module-level frozen empty set or store explicit empty sets in state updates for referential stability if profiling shows issues.
+- **`origin`** is fixed in all fetch helpers. Multi-remote repos cannot select a remote via config—consistent with existing design, not a regression for this feature.
 
-### P4 — Cypress / repo hygiene (out of prod code)
+### 5. Performance and operations
 
-- `interceptAllRpcsWithTrackedDelete` duplicates much of `interceptAllRpcs` — higher maintenance cost when RPC mocks change (not a runtime defect).
+- **`setup_worktree_for_session_with_optional_chain_base(None)`** calls **`resolve_default_integration_base_ref`**, which runs **`git fetch origin`** (no refspec), then **`fetch_integration_base`**, which runs **`git fetch origin <single-branch>`**. The second fetch is often redundant immediately after a full origin fetch. Consider deduplicating (e.g. resolve without implicit fetch, or pass “already fetched” state)—operational efficiency, not correctness.
+- **`resolve_persisted_worktree_integration_base_for_session`** may call **`resolve_default_integration_base_ref`** when no persisted base exists—another full `git fetch origin`. Callers should avoid hammering this in tight loops.
+
+### 6. Persistence and legacy API (cross-check)
+
+- **`setup_worktree_for_session_with_optional_chain_base`** sets **`cs.effective_worktree_integration_base_ref`** always and **`cs.worktree_integration_base_ref`** only when the user supplied a chain base (`Some`). Matches documented intent.
+- **`setup_worktree_for_session_with_integration_base`** updates worktree/branch/repo_path but **does not** set `effective_worktree_integration_base_ref` or `worktree_integration_base_ref`. Any session created through this path (or through **`setup_worktree_for_session`**, which delegates to it) will **not** record the effective base in the changeset. Resume and observability for those sessions lag the optional-chain API unless callers are updated or the legacy function gains the same writes.
+
+### 7. RPC / product wiring (cross-check)
+
+- **`packages/tddy-service/src/daemon_service.rs`** uses **`setup_worktree_for_session`** after planning—no parameter for chain PR base, no call to **`setup_worktree_for_session_with_optional_chain_base`**.
+- **`packages/tddy-workflow-recipes/src/tdd/hooks_common.rs`** (`ensure_worktree` path) also calls **`setup_worktree_for_session`** only.
+- No grep hits for the optional-chain API outside **`tddy-core`** and **integration tests**. End users cannot select a chain base through current daemon/workflow entry points until RPC/session context carries that field and the worktree hook reads it.
 
 ---
 
-## Recommendations for release
+## Prioritized recommendations
 
-1. **Strip or gate logging:** Remove `console.*` from `sessionSelection.ts` entirely, or move diagnostics behind an explicit dev-only flag (avoid silent “production vs test” behavior branches without team agreement—prefer removal or a documented debug toggle). Trim `ConnectionScreen` bulk-delete and header-checkbox logs before release.
-2. **On bulk delete failure:** Call `listSessions` in the `catch` path (or always after partial completion) and **prune** `tableSessionSelections[tableKey]` to ids still present in the refreshed list—or clear selection for that table and show a message that lists completed vs failed if the API supports it later.
-3. **Optional UX:** Add an `aria-label` on the bulk delete button that includes the selected count for screen readers (e.g. “Delete 3 selected sessions”).
-4. **Release note:** Document that bulk delete is best-effort sequential RPCs; operators should retry after errors if the list looks stale.
+1. **P0 — Wire product entry points:** Extend session/RPC/context (where workflow receives user intent) with an optional chain PR base ref; call **`setup_worktree_for_session_with_optional_chain_base`** from the same places that create worktrees today when that value is present. Until then, the feature exists only for direct library/test callers.
 
----
+2. **P0 — Persistence parity for legacy path:** In **`setup_worktree_for_session_with_integration_base`**, set **`effective_worktree_integration_base_ref`** to the explicit ref used (and **`worktree_integration_base_ref`** only if you later distinguish “user selected” vs “caller supplied”). Alternatively, document that only the optional-chain API persists these fields and accept inconsistent changesets—less desirable for resume tooling.
 
-## Test harness (Cypress) — brief
+3. **P1 — Reduce redundant fetches:** After **`resolve_default_integration_base_ref`**, skip **`fetch_integration_base`** if the default resolution already performed an equivalent fetch, or split “resolve ref name” from “fetch” so hooks can fetch once.
 
-- **Strengths:** `connectRequestBodyToUint8` handles multiple body shapes; bulk delete tests decode protobuf request bodies to assert `sessionId` order/content; confirms single `window.confirm` with message assertions.
-- **Watch:** Intercept helper duplication; consider extracting shared RPC wiring to reduce drift.
+4. **P2 — Optional validation on read:** When loading persisted refs for downstream git use, re-run **`validate_chain_pr_integration_base_ref`** / **`validate_integration_base_ref`** so tampered `changeset.yaml` fails fast with a clear error.
+
+5. **P2 — Error taxonomy:** Introduce a small enum or structured error for worktree/git failures if the web/UI must map to specific user messages.
 
 ---
 
-*Report generated for validate-prod-ready subagent review.*
+## Return to parent
+
+- **File written:** yes  
+- **Path:** `/var/tddy/Code/tddy-coder/.worktrees/chain-pr-base-branch/plans/validate-prod-ready-report.md`  
+- **One-line summary:** Core validation and optional-chain setup are solid, but legacy setup omits persisted effective ref, default path double-fetches, and daemon/workflow still only call `setup_worktree_for_session`—chain PR base is not wired for production.

@@ -1,53 +1,72 @@
-# Validate Tests Report — Session Bulk Select / Refactor Validation
+# Chain PR base branch — validate-tests report
 
-## Date / toolchain
+**Date:** 2026-04-05
 
-- **Date:** 2026-04-05  
-- **Environment:** Linux; tests run from repo root via **`./dev`** (nix dev shell: rustc, cargo, rustfmt, clippy, bun, node as printed by the shell).  
-- **Output:** Full Rust workspace test log for **`./dev ./verify`** is in **`.verify-result.txt`** at the repository root.
+## Commands run
 
-## Commands run (exit codes)
+| Command | Purpose |
+|--------|---------|
+| `./dev cargo test -p tddy-core -- worktree::` | Filtered `worktree::` tests (chain PR + integration base RED tests) |
+| `./dev cargo test -p tddy-integration-tests --test chain_pr_base_acceptance` | Acceptance tests for optional chain base |
+| `./dev cargo test -p tddy-core` | Full `tddy-core` unit + integration tests |
+| `./dev cargo test` | Full workspace (attempted) |
 
-| Command | Exit | Notes |
-|--------|------|--------|
-| `./verify` (without `./dev`) | **127** | `cargo: command not found` — **must** run Cargo through the dev shell or `nix develop`. |
-| `./dev cargo test -q` | **101** | Failed in **`tddy-integration-tests`** (`acp_backend_acceptance`): *"tddy-acp-stub not built. Run: cargo build -p tddy-acp-stub"* — 6 tests failed; 2 passed in that binary before abort. |
-| `./dev ./verify` | **0** | Runs `cargo build -p tddy-acp-stub` then `cargo test -- --test-threads=1` with output tee’d to `.verify-result.txt`. |
-| `./dev sh -c 'cd packages/tddy-web && bun test src/utils/sessionSelection.test.ts'` | **0** | Equivalent to running the unit file from `packages/tddy-web` with Bun’s test runner (not `bun run test`, which executes the package `test` script). |
-| `./dev sh -c 'cd packages/tddy-web && bun run cypress:component -- --spec cypress/component/ConnectionScreen.cy.tsx'` | **0** | Single-spec Cypress component run. |
+## Results table
 
-**Note:** The literal form `./dev bun --cwd packages/tddy-web test <file>` was not used here; `bun test <file>` from `packages/tddy-web` is the reliable way to run only `sessionSelection.test.ts` without triggering the composite `npm run test` pipeline (`bun test src/routing && …`).
+| Scope | Passed | Failed | Ignored | Notes |
+|-------|--------|--------|---------|-------|
+| `tddy-core` with filter `worktree::` | 5 | 0 | 0 | 114 tests filtered out in lib tests; 2 filtered in `changeset_demo_workflow_acceptance` |
+| `tddy-integration-tests` `chain_pr_base_acceptance` | 5 | 0 | 0 | — |
+| `tddy-core` (full package) | 121 | 0 | 0 | 119 lib + 2 `changeset_demo_workflow_acceptance` |
+| Full workspace `./dev cargo test` | — | **compile error** | — | See failures |
 
-## Rust workspace tests — pass/fail
+## Failures
 
-- **Status:** **Pass** when using **`./dev ./verify`** (exit **0**).  
-- **Caveat:** A plain **`./dev cargo test -q`** without first building **`tddy-acp-stub`** **fails** integration tests that spawn the stub (documented failure above). This is an **order-of-operations / prerequisite** issue, not a regression in the session bulk-select web code.
+### Feature-scoped runs
 
-## `sessionSelection` unit tests — pass/fail
+No failures. All chain-PR–focused and `tddy-core` tests **passed**.
 
-- **Status:** **Pass** (exit **0**).  
-- **Result:** **6** tests, **0** failures, **6** `expect()` calls in `src/utils/sessionSelection.test.ts`.
+### Full workspace `./dev cargo test`
 
-## `ConnectionScreen.cy.tsx` component tests — pass/fail
+Build failed before tests ran:
 
-- **Status:** **Pass** (exit **0**).  
-- **Result:** **32** passing tests in **~17s** (only this spec file; includes “ConnectionScreen bulk session selection and delete (acceptance)” and the rest of the ConnectionScreen suite).
+- **Crate:** `tddy-e2e`
+- **Target:** test `grpc_reconnect_acceptance`
+- **File:** `packages/tddy-e2e/tests/grpc_reconnect_acceptance.rs` (approx. line 191)
+- **Reason:** `E0599` — `floor_char_boundary` called on `Vec<u8>`; method not found (likely Rust version / API mismatch: `floor_char_boundary` is on `str`, not `Vec<u8>`).
 
-## Missing coverage — session bulk-select feature
+This failure appears **unrelated** to chain PR / worktree integration base work (`worktree.rs`, `changeset.rs`, `chain_pr_base_acceptance.rs`).
 
-- **Partial bulk-delete failure:** No automated test for **mid-sequence RPC failure** (some deletes succeed, later one throws); evaluation report notes stale selection / UX gap.  
-- **E2E:** No **Cypress e2e** (or Playwright) path against a **real or stubbed full app flow** for bulk delete; coverage is **component + unit** only.  
-- **listSessions / race timing:** Limited coverage for **refresh during bulk delete** or **interleaved updates** to session lists.  
-- **Edge cases:** **Empty tables** (no rows), **single row**, **very large selection counts**, and **accessibility** (keyboard-only select-all / bulk delete) are not explicitly called out in the validation run.  
-- **Error surfaces:** **Delete RPC error** for bulk flow (not just happy path) may need explicit assertions if not already covered in the new CT cases.
+## Coverage gaps
+
+The following areas are **not** covered (or only lightly covered) by current tests for chain PR optional base behavior:
+
+1. **`validate_chain_pr_integration_base_ref` negative cases**  
+   Unit tests cover empty string and a valid multi-segment ref. Not exercised in tests: rejection of `..`, `--`, shell/forbidden characters, missing `origin/` prefix, empty path segments, whitespace in segments (logic exists in `worktree.rs`).
+
+2. **`fetch_chain_pr_integration_base` / `git fetch` failures**  
+   No automated test asserts behavior when fetch fails (e.g. ref does not exist on remote, network error). Success paths are covered indirectly via acceptance tests with a real repo.
+
+3. **RPC / daemon / LiveKit wiring**  
+   Grep shows no chain-PR-specific handling in `packages/tddy-livekit`. Daemon `project_storage` uses `validate_integration_base_ref` (single-segment `origin/<branch>`), not `validate_chain_pr_integration_base_ref`. End-to-end or RPC scenarios that pass an optional chain base from UI/agent through daemon are **not** present in the reviewed test set.
+
+4. **`resolve_persisted_worktree_integration_base_for_session` precedence**  
+   RED test checks resolution when both effective and user refs are set to the same value. Gaps: differing `effective_*` vs `worktree_integration_base_ref`, missing/invalid YAML, or only one field set — should match documented preference order.
+
+5. **Resume + worktree recreation**  
+   `chain_pr_resume_uses_persisted_base` compares resolved ref to default; it does **not** run `setup_worktree_for_session_with_optional_chain_base` again after resume to prove the worktree is created from the persisted base.
+
+6. **Cross-package regression**  
+   `tddy-livekit` tests (`rpc_scenarios.rs` etc.) were not run as part of the minimum command set; full workspace compile currently blocks a clean full run.
 
 ## Recommendations
 
-1. **CI / local habit:** Prefer **`./dev ./verify`** (or document **`cargo build -p tddy-acp-stub`** before **`cargo test`**) so integration tests do not fail spuriously.  
-2. **Bun:** For **single-file** unit tests, use **`bun test <path>`** inside `packages/tddy-web`; avoid **`bun run test`** when only `sessionSelection` is intended (that script runs routing tests + full Cypress).  
-3. **Product hardening:** Add a **targeted test** (unit or CT) for **bulk delete partial failure** and consider **pruning selection** after `listSessions` refresh or on error, as in the evaluation report.  
-4. **Optional:** One **e2e** or **smoke** scenario for bulk delete if the feature is user-critical and regressions must be caught outside Storybook.
+1. Add **unit tests** for `validate_chain_pr_integration_base_ref` covering each documented rejection (`..`, `--`, `origin` without branch, empty segment, forbidden chars).
+2. Add a **controlled failure test** for fetch (e.g. temporary repo with no `origin` remote or nonexistent ref) if the project accepts maintaining such a fixture.
+3. If the product exposes chain base via **daemon/RPC**, add an integration or RPC scenario test that mirrors the production call path (request field → `setup_worktree_for_session_with_optional_chain_base` or equivalent).
+4. Extend **resume** acceptance to call setup twice or assert worktree HEAD after a simulated resume using persisted `changeset.yaml`.
+5. **Fix `tddy-e2e` compile error** (`grpc_reconnect_acceptance.rs`) so full-workspace `cargo test` can run for regression signal; track separately from chain PR scope if it predates this branch.
 
 ---
 
-*Generated for refactor validation; aligns with `plans/evaluation-report.md` context.*
+*Generated by validate-tests subagent for workspace `chain-pr-base-branch`.*

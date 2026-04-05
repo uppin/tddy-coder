@@ -49,6 +49,84 @@ pub fn validate_integration_base_ref(s: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Validates a chain-PR integration base ref: `origin/<branch-path>` where `<branch-path>` may
+/// contain `/` (e.g. `origin/feature/foo`). Rejects empty strings, shell metacharacters, and `..`.
+pub fn validate_chain_pr_integration_base_ref(s: &str) -> Result<(), String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("chain PR integration base ref must not be empty".to_string());
+    }
+    let rest = s
+        .strip_prefix("origin/")
+        .ok_or_else(|| "chain PR integration base ref must start with origin/".to_string())?;
+    if rest.is_empty() {
+        return Err("chain PR integration base ref must be origin/<branch-path>".to_string());
+    }
+    if rest.contains("..") {
+        return Err("chain PR integration base ref must not contain `..`".to_string());
+    }
+    if rest.contains("--") {
+        return Err("chain PR integration base ref must not contain `--`".to_string());
+    }
+    if rest.chars().any(|c| c.is_whitespace()) {
+        return Err("chain PR integration base ref must not contain whitespace".to_string());
+    }
+    for forbidden in [';', '|', '&', '$', '`', '\n', '\r'] {
+        if rest.contains(forbidden) {
+            return Err(format!(
+                "chain PR integration base ref contains forbidden character: {:?}",
+                forbidden
+            ));
+        }
+    }
+    for segment in rest.split('/') {
+        if segment.is_empty() {
+            return Err(
+                "chain PR integration base ref must not contain empty path segments".to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Fetches a remote-tracking ref for chain PRs (multi-segment `origin/...` allowed).
+fn fetch_chain_pr_integration_base(
+    repo_root: &Path,
+    integration_base_ref: &str,
+) -> Result<(), String> {
+    validate_chain_pr_integration_base_ref(integration_base_ref)?;
+    let branch_path = integration_base_ref
+        .strip_prefix("origin/")
+        .expect("validate_chain_pr_integration_base_ref ensures origin/ prefix");
+    log::info!(
+        "fetch_chain_pr_integration_base: repo={} integration_base_ref={}",
+        repo_root.display(),
+        integration_base_ref
+    );
+    let output = Command::new("git")
+        .args(["fetch", "origin", branch_path])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git fetch origin {}: {}", branch_path, e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::debug!(
+            "fetch_chain_pr_integration_base: git fetch failed stderr={}",
+            stderr.trim()
+        );
+        return Err(format!(
+            "git fetch origin {} failed: {}",
+            branch_path, stderr
+        ));
+    }
+    log::debug!(
+        "fetch_chain_pr_integration_base: fetch completed for {}",
+        integration_base_ref
+    );
+    Ok(())
+}
+
 /// Path to the worktrees directory under repo root.
 pub fn worktree_dir(repo_root: &Path) -> PathBuf {
     repo_root.join(".worktrees")
@@ -296,6 +374,132 @@ pub fn setup_worktree_for_session(repo_root: &Path, session_dir: &Path) -> Resul
     setup_worktree_for_session_with_integration_base(repo_root, session_dir, &integration_base_ref)
 }
 
+/// Starts session worktree setup with an optional chain-PR base ref (`origin/...`).
+///
+/// When `optional_chain_base_ref` is `None`, behavior must match [`setup_worktree_for_session`]
+/// (default integration base resolution). When `Some`, the worktree branch is created from that
+/// ref after fetch, and the choice is persisted to `changeset.yaml` for resume.
+///
+/// When `optional_chain_base_ref` is `None`, resolves the default integration base (same as
+/// [`setup_worktree_for_session`]), persists [`Changeset::effective_worktree_integration_base_ref`],
+/// and leaves [`Changeset::worktree_integration_base_ref`] unset. When `Some`, validates and fetches
+/// the multi-segment ref, creates the worktree from that tip, and persists both fields.
+pub fn setup_worktree_for_session_with_optional_chain_base(
+    repo_root: &Path,
+    session_dir: &Path,
+    optional_chain_base_ref: Option<&str>,
+) -> Result<PathBuf, String> {
+    log::info!(
+        "setup_worktree_for_session_with_optional_chain_base: repo={} session_dir={} chain_opt_in={}",
+        repo_root.display(),
+        session_dir.display(),
+        optional_chain_base_ref.is_some()
+    );
+
+    let (integration_base_ref, user_chain_ref): (String, Option<&str>) =
+        match optional_chain_base_ref {
+            None => {
+                let resolved = resolve_default_integration_base_ref(repo_root)?;
+                log::debug!(
+                    "setup_worktree_for_session_with_optional_chain_base: no chain base; resolved effective ref={}",
+                    resolved
+                );
+                (resolved, None)
+            }
+            Some(r) => {
+                validate_chain_pr_integration_base_ref(r)?;
+                log::info!(
+                    "setup_worktree_for_session_with_optional_chain_base: user-selected chain base ref={}",
+                    r
+                );
+                (r.to_string(), Some(r))
+            }
+        };
+
+    let mut cs = read_changeset(session_dir).map_err(|e| e.to_string())?;
+
+    let branch = cs
+        .branch_suggestion
+        .clone()
+        .or(cs.branch.clone())
+        .or_else(|| {
+            cs.name
+                .as_ref()
+                .map(|n| format!("feature/{}", slugify_for_branch(n)))
+        })
+        .ok_or("no branch suggestion or name for worktree")?;
+
+    let worktree_name = cs
+        .worktree_suggestion
+        .clone()
+        .or_else(|| cs.name.as_ref().map(|n| slugify_for_worktree(n)))
+        .ok_or("no worktree suggestion or name for worktree")?;
+
+    if user_chain_ref.is_some() {
+        fetch_chain_pr_integration_base(repo_root, &integration_base_ref)?;
+    } else {
+        fetch_integration_base(repo_root, &integration_base_ref)?;
+    }
+
+    let (worktree_path, actual_branch) = create_worktree_with_retry(
+        repo_root,
+        &worktree_name,
+        &branch,
+        Some(integration_base_ref.as_str()),
+    )?;
+
+    cs.worktree = Some(worktree_path.to_string_lossy().to_string());
+    cs.branch = Some(actual_branch);
+    cs.repo_path = Some(worktree_path.to_string_lossy().to_string());
+    cs.effective_worktree_integration_base_ref = Some(integration_base_ref.clone());
+    cs.worktree_integration_base_ref = user_chain_ref.map(|s| s.to_string());
+
+    write_changeset(session_dir, &cs).map_err(|e| e.to_string())?;
+
+    log::debug!(
+        "setup_worktree_for_session_with_optional_chain_base: worktree_path={} effective_base={}",
+        worktree_path.display(),
+        integration_base_ref
+    );
+    Ok(worktree_path)
+}
+
+/// Resolves which integration base ref resume / follow-up worktree operations must use for this session.
+///
+/// Prefers persisted [`Changeset::effective_worktree_integration_base_ref`], then
+/// [`Changeset::worktree_integration_base_ref`], otherwise [`resolve_default_integration_base_ref`].
+pub fn resolve_persisted_worktree_integration_base_for_session(
+    session_dir: &Path,
+    repo_root: &Path,
+) -> Result<String, String> {
+    log::info!(
+        "resolve_persisted_worktree_integration_base_for_session: session_dir={} repo={}",
+        session_dir.display(),
+        repo_root.display()
+    );
+    let cs = read_changeset(session_dir).map_err(|e| e.to_string())?;
+    if let Some(ref eff) = cs.effective_worktree_integration_base_ref {
+        log::debug!(
+            "resolve_persisted_worktree_integration_base_for_session: using persisted effective ref={}",
+            eff
+        );
+        return Ok(eff.clone());
+    }
+    if let Some(ref user) = cs.worktree_integration_base_ref {
+        log::debug!(
+            "resolve_persisted_worktree_integration_base_for_session: using persisted user chain ref={}",
+            user
+        );
+        return Ok(user.clone());
+    }
+    let resolved = resolve_default_integration_base_ref(repo_root)?;
+    log::debug!(
+        "resolve_persisted_worktree_integration_base_for_session: no persisted base; resolved default={}",
+        resolved
+    );
+    Ok(resolved)
+}
+
 /// Remove an existing worktree. Uses `git worktree remove --force`.
 pub fn remove_worktree(repo_root: &Path, worktree_path: &Path) -> Result<(), String> {
     let output = Command::new("git")
@@ -513,5 +717,67 @@ mod integration_base_red_tests {
             "GREEN: must create worktree from origin/main; got {:?}",
             r.err()
         );
+    }
+}
+
+/// RED: chain-PR validation and resume helpers (must fail until Green implements behavior).
+#[cfg(test)]
+mod chain_pr_red_tests {
+    use super::*;
+    use std::fs;
+
+    /// Lower-level RED: multi-segment `origin/feature/foo` must validate once rules land.
+    #[test]
+    fn chain_pr_validate_accepts_multi_segment_origin_ref_red() {
+        let r = validate_chain_pr_integration_base_ref("origin/feature/foo");
+        assert!(
+            r.is_ok(),
+            "expected validate_chain_pr_integration_base_ref to accept safe multi-segment refs; got {:?}",
+            r
+        );
+    }
+
+    /// Lower-level RED: empty ref rejected with controlled error (distinct from \"not implemented\").
+    #[test]
+    fn chain_pr_validate_rejects_empty_red() {
+        let r = validate_chain_pr_integration_base_ref("");
+        assert!(r.is_err(), "expected empty ref to be rejected; got {:?}", r);
+        let msg = r.unwrap_err();
+        assert!(
+            !msg.contains("not implemented"),
+            "empty ref should fail with a real validation error, not stub; got {:?}",
+            msg
+        );
+    }
+
+    /// Lower-level RED: resolve must read persisted `changeset.yaml` and return stored effective ref.
+    #[test]
+    fn chain_pr_resolve_persisted_reads_changeset_red() {
+        let base = std::env::temp_dir().join("tddy-core-chain-pr-resolve-red");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        let session_dir = base.join("session");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let mut cs = crate::changeset::Changeset::default();
+        cs.effective_worktree_integration_base_ref = Some("origin/feature/pr-base".to_string());
+        cs.worktree_integration_base_ref = Some("origin/feature/pr-base".to_string());
+        crate::changeset::write_changeset(&session_dir, &cs).unwrap();
+
+        let resolved = resolve_persisted_worktree_integration_base_for_session(&session_dir, &repo);
+        assert!(
+            resolved.is_ok(),
+            "expected resolve to return persisted base; got {:?}",
+            resolved
+        );
+        assert_eq!(
+            resolved.unwrap(),
+            "origin/feature/pr-base",
+            "resume must return the canonical persisted effective ref"
+        );
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

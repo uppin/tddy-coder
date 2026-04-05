@@ -81,9 +81,11 @@ pub use workflow::{
 };
 pub use worktree::{
     create_worktree, fetch_integration_base, fetch_origin_master, list_worktrees, remove_worktree,
-    resolve_default_integration_base_ref, setup_worktree_for_session,
-    setup_worktree_for_session_with_integration_base, validate_integration_base_ref, worktree_dir,
-    WorktreeInfo, DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF,
+    resolve_default_integration_base_ref, resolve_persisted_worktree_integration_base_for_session,
+    setup_worktree_for_session, setup_worktree_for_session_with_integration_base,
+    setup_worktree_for_session_with_optional_chain_base, validate_chain_pr_integration_base_ref,
+    validate_integration_base_ref, worktree_dir, WorktreeInfo,
+    DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF,
 };
 
 #[cfg(test)]
