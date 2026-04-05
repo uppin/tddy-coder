@@ -7,6 +7,7 @@ pub mod grill_me;
 pub mod parser;
 pub mod permissions;
 pub mod recipe_resolve;
+pub mod review;
 pub mod schema_pipeline;
 pub mod session_artifact_manifest;
 pub mod tdd;
@@ -37,6 +38,7 @@ pub use recipe_resolve::{
     resolve_workflow_recipe_from_cli_name, unknown_workflow_recipe_error,
     workflow_recipe_and_manifest_from_cli_name, WorkflowRecipeAndManifest,
 };
+pub use review::ReviewRecipe;
 pub use session_artifact_manifest::SessionArtifactManifest;
 pub use tdd::{PlanTask, TddRecipe, TddWorkflowHooks};
 pub use tdd_small::{

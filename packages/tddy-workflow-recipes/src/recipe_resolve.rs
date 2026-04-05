@@ -8,8 +8,8 @@ use std::sync::Arc;
 use tddy_core::WorkflowRecipe;
 
 use crate::{
-    approval_policy, BugfixRecipe, FreePromptingRecipe, GrillMeRecipe, SessionArtifactManifest,
-    TddRecipe, TddSmallRecipe,
+    approval_policy, BugfixRecipe, FreePromptingRecipe, GrillMeRecipe, ReviewRecipe,
+    SessionArtifactManifest, TddRecipe, TddSmallRecipe,
 };
 
 /// Resolved workflow recipe plus its session-artifact manifest (same concrete type implements both).
@@ -86,6 +86,14 @@ pub fn workflow_recipe_and_manifest_from_cli_name(
         "tdd-small" => {
             log::info!("workflow recipe resolved: tdd-small (TddSmallRecipe)");
             let r: Arc<TddSmallRecipe> = Arc::new(TddSmallRecipe);
+            Ok((
+                r.clone() as Arc<dyn WorkflowRecipe>,
+                r as Arc<dyn SessionArtifactManifest>,
+            ))
+        }
+        "review" => {
+            log::info!("workflow recipe resolved: review (ReviewRecipe)");
+            let r: Arc<ReviewRecipe> = Arc::new(ReviewRecipe);
             Ok((
                 r.clone() as Arc<dyn WorkflowRecipe>,
                 r as Arc<dyn SessionArtifactManifest>,

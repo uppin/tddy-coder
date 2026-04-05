@@ -1,53 +1,53 @@
-# Validate Tests Report — Session Bulk Select / Refactor Validation
+# Validate Tests Report
 
-## Date / toolchain
+**Date:** 2026-04-05  
+**Workspace:** `/var/tddy/Code/tddy-coder/.worktrees/workflow-review-recipe`
 
-- **Date:** 2026-04-05  
-- **Environment:** Linux; tests run from repo root via **`./dev`** (nix dev shell: rustc, cargo, rustfmt, clippy, bun, node as printed by the shell).  
-- **Output:** Full Rust workspace test log for **`./dev ./verify`** is in **`.verify-result.txt`** at the repository root.
+## Executive summary
 
-## Commands run (exit codes)
+- **Overall:** **PASS** — `./verify` completed with **exit code 0**.
+- **Evidence:** `.verify-result.txt` contains **156** `test result: ok` lines; **no** lines matching `[1-9]+ failed` (no failing test binaries).
+- **Runner:** `verify` runs `cargo build -p tddy-acp-stub` then `cargo test -- --test-threads=1` (see repo `verify` script), with `TDDY_SESSIONS_DIR` set for isolation.
+- **Build:** Test profile build finished successfully (~1m 06s compile phase per log header).
 
-| Command | Exit | Notes |
-|--------|------|--------|
-| `./verify` (without `./dev`) | **127** | `cargo: command not found` — **must** run Cargo through the dev shell or `nix develop`. |
-| `./dev cargo test -q` | **101** | Failed in **`tddy-integration-tests`** (`acp_backend_acceptance`): *"tddy-acp-stub not built. Run: cargo build -p tddy-acp-stub"* — 6 tests failed; 2 passed in that binary before abort. |
-| `./dev ./verify` | **0** | Runs `cargo build -p tddy-acp-stub` then `cargo test -- --test-threads=1` with output tee’d to `.verify-result.txt`. |
-| `./dev sh -c 'cd packages/tddy-web && bun test src/utils/sessionSelection.test.ts'` | **0** | Equivalent to running the unit file from `packages/tddy-web` with Bun’s test runner (not `bun run test`, which executes the package `test` script). |
-| `./dev sh -c 'cd packages/tddy-web && bun run cypress:component -- --spec cypress/component/ConnectionScreen.cy.tsx'` | **0** | Single-spec Cypress component run. |
+## Failing tests
 
-**Note:** The literal form `./dev bun --cwd packages/tddy-web test <file>` was not used here; `bun test <file>` from `packages/tddy-web` is the reliable way to run only `sessionSelection.test.ts` without triggering the composite `npm run test` pipeline (`bun test src/routing && …`).
+**None.** No failures recorded in `.verify-result.txt`.
 
-## Rust workspace tests — pass/fail
+## Passing highlights (review / branch-review area)
 
-- **Status:** **Pass** when using **`./dev ./verify`** (exit **0**).  
-- **Caveat:** A plain **`./dev cargo test -q`** without first building **`tddy-acp-stub`** **fails** integration tests that spawn the stub (documented failure above). This is an **order-of-operations / prerequisite** issue, not a regression in the session bulk-select web code.
+| Area | Evidence (from `.verify-result.txt`) |
+|------|--------------------------------------|
+| **tddy-coder CLI** | `cli_accepts_recipe_review`, `cli_recipe_review_selects_review_recipe` — ok |
+| **tddy-tools** | `branch_review_persist_red` (`persist_review_md_from_submit_accepts_minimal_valid_json`), `tddy_tools_lists_branch_review_goal`, schema validation for branch-review — ok |
+| **tddy-workflow-recipes** | `workflow_recipe_resolves_review`, `review_recipe_elicitation_parity_with_grill_me`, `review_recipe_persists_review_md`, `review_recipe_*` unit tests — ok |
+| **tddy-daemon / Telegram** | `telegram_recipe_more_includes_review` — ok |
+| **Policy registry** | `recipe_policy_red` includes `review` in supported CLI names assertion — ok |
 
-## `sessionSelection` unit tests — pass/fail
+## Coverage / test gaps (review recipe PRD)
 
-- **Status:** **Pass** (exit **0**).  
-- **Result:** **6** tests, **0** failures, **6** `expect()` calls in `src/utils/sessionSelection.test.ts`.
+The following are **not** failures; they are **possible follow-ups** for stronger assurance:
 
-## `ConnectionScreen.cy.tsx` component tests — pass/fail
+1. **End-to-end session path** — `review_recipe_artifact_acceptance` exercises `persist_review_md_to_session_dir` in-process. There is **no** `tddy-e2e` (or similar) test that drives a full daemon/coder session and asserts `review.md` on disk after a real submit path.
+2. **`approval_policy` for `review`** — `recipe_should_skip_session_document_approval` includes `"review"` in code, but **there is no dedicated test** analogous to `free_prompting_skips_session_document_approval_per_policy_table` / `grill_me_skips_session_document_approval_per_policy_table` asserting `recipe_should_skip_session_document_approval("review") == true`.
+3. **Telegram** — Coverage is a **unit/integration** check that the extended recipe page list contains `review`. It does **not** validate a full Telegram RPC or keyboard UX flow.
+4. **Negative / validation paths for `branch-review` JSON** — Unit tests emphasize **happy-path** parsing; broader rejection cases (wrong `goal`, empty markdown, etc.) could be expanded to mirror patterns used for `post-green-review` parsers.
+5. **Hooks + real git** — `ReviewWorkflowHooks` / merge-base documentation is covered; **automated tests against a real git repo** for diff/merge-base injection are not evident in the focused review tests (smoke-level coverage only).
 
-- **Status:** **Pass** (exit **0**).  
-- **Result:** **32** passing tests in **~17s** (only this spec file; includes “ConnectionScreen bulk session selection and delete (acceptance)” and the rest of the ConnectionScreen suite).
+## Commands run
 
-## Missing coverage — session bulk-select feature
+```bash
+cd /var/tddy/Code/tddy-coder/.worktrees/workflow-review-recipe
+./verify
+```
 
-- **Partial bulk-delete failure:** No automated test for **mid-sequence RPC failure** (some deletes succeed, later one throws); evaluation report notes stale selection / UX gap.  
-- **E2E:** No **Cypress e2e** (or Playwright) path against a **real or stubbed full app flow** for bulk delete; coverage is **component + unit** only.  
-- **listSessions / race timing:** Limited coverage for **refresh during bulk delete** or **interleaved updates** to session lists.  
-- **Edge cases:** **Empty tables** (no rows), **single row**, **very large selection counts**, and **accessibility** (keyboard-only select-all / bulk delete) are not explicitly called out in the validation run.  
-- **Error surfaces:** **Delete RPC error** for bulk flow (not just happy path) may need explicit assertions if not already covered in the new CT cases.
+**Optional focused re-runs** (not required for this report; full suite already green):
 
-## Recommendations
+```bash
+./dev cargo test -p tddy-workflow-recipes -p tddy-tools -p tddy-coder -p tddy-daemon -- --test-threads=1
+```
 
-1. **CI / local habit:** Prefer **`./dev ./verify`** (or document **`cargo build -p tddy-acp-stub`** before **`cargo test`**) so integration tests do not fail spuriously.  
-2. **Bun:** For **single-file** unit tests, use **`bun test <path>`** inside `packages/tddy-web`; avoid **`bun run test`** when only `sessionSelection` is intended (that script runs routing tests + full Cypress).  
-3. **Product hardening:** Add a **targeted test** (unit or CT) for **bulk delete partial failure** and consider **pruning selection** after `listSessions` refresh or on error, as in the evaluation report.  
-4. **Optional:** One **e2e** or **smoke** scenario for bulk delete if the feature is user-critical and regressions must be caught outside Storybook.
+## Source artifacts
 
----
-
-*Generated for refactor validation; aligns with `plans/evaluation-report.md` context.*
+- Full log: `.verify-result.txt` (repo root)
+- This report: `plans/validate-tests-report.md`
