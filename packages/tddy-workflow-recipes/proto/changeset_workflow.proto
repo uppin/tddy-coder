@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Payload for persisting TDD demo routing into changeset.yaml. JSON Schema: changeset-workflow.schema.json.
+message ChangesetWorkflowPayload {
+  optional bool run_optional_step_x = 1;
+  repeated string demo_options = 2;
+  optional string tool_schema_id = 3;
+}

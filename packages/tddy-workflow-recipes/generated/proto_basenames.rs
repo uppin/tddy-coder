@@ -11,4 +11,5 @@ pub const EXPECTED_PROTO_BASENAMES: &[&str] = &[
     "refactor.proto",
     "update_docs.proto",
     "demo.proto",
+    "changeset_workflow.proto",
 ];

@@ -20,6 +20,7 @@ The library embeds workflow JSON Schemas from **`tddy-workflow-recipes/generated
 | `list-schemas` | Prints `{"goals":[...]}` |
 | `ask` | Clarification relay (separate JSON schema) |
 | `set-session-context` | Merges JSON into `.workflow/<id>.session.json` (`TDDY_SESSION_DIR`, `TDDY_WORKFLOW_SESSION_ID`); not listed in `goals.json` |
+| `persist-changeset-workflow` | `--session-dir`, `--data` — validates JSON against **`changeset-workflow`**, writes **`workflow`** on **`changeset.yaml`** atomically; listed in `goals.json` for schema embedding |
 
 ## Logging
 

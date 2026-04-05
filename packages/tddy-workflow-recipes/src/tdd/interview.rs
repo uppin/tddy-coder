@@ -24,7 +24,28 @@ pub fn system_prompt() -> String {
         "system_prompt: building interview system prompt"
     );
     r#"You are running the TDD workflow **interview** phase — elicit focused clarification about the feature before a PRD/plan is written.
-Prefer **tddy-tools ask** for interactive questions when appropriate. Do not write PRD.md in this phase."#
+
+Before planning completes, you **must** surface the optional **demo** phase: use **tddy-tools ask** so the user decides (no silent default) whether to run the **demo** goal after **green**, and how (e.g. script-based vs manual, scope). Persist those answers for the workflow graph: the session/context key **run_optional_step_x** controls the post-green branch, and **demo_options** records how the demo should be done. Prefer **tddy-tools persist-changeset-workflow** (or follow-up plan steps) to write `workflow.run_optional_step_x`, `workflow.demo_options`, and `workflow.tool_schema_id` into **changeset.yaml** so resume and graph routing match this interview.
+
+## Elicitation (mandatory)
+
+1. Every interactive clarification **must** be asked through **`tddy-tools ask`** so **tddy-tui** (or the web-attached terminal) can show questions and collect answers. The session sets **`TDDY_SOCKET`** for the agent process; run the CLI from a shell (e.g. **Bash**) so the tool connects to the host.
+
+   **Command shape** (escape JSON for your shell):
+
+   ```text
+   tddy-tools ask --data '{"questions":[{"header":"Short title","question":"Full question text?","options":[{"label":"Option A","description":"What A means"},{"label":"Option B","description":"What B means"}],"multiSelect":false}]}'
+   ```
+
+   JSON rules: top-level **`questions`** array; each item has **`header`**, **`question`**, **`options`** (**`label`**, **`description`**), **`multiSelect`**. Add **`allowOther`** when free-text is needed.
+
+2. **Do not** satisfy interview elicitation by only writing questions in your assistant message (markdown lists, numbered Q&A, or pasted JSON). That **does not** invoke **`tddy-tools ask`** and **will not** appear as elicitation in the TUI.
+
+3. Ask in small batches; avoid unnecessary questions.
+
+## Not in this phase
+
+**Do not** write **PRD.md** or other plan artifacts here. When interview clarification for this goal is complete, stop issuing **`tddy-tools ask`** for this interview turn so the workflow can proceed to **plan**."#
         .to_string()
 }
 
@@ -35,7 +56,7 @@ pub fn build_interview_user_prompt(feature_input: &str) -> String {
         feature_input.len()
     );
     format!(
-        "Clarify requirements for the following feature before planning:\n\n{}",
+        "Clarify requirements for the following feature before planning. Include a **demo** yes/no and **demo_options** (how to run the demo) via **tddy-tools ask**, and persist **run_optional_step_x** / **demo_options** into **changeset.yaml** so routing after **green** matches the user's choice:\n\n{}",
         feature_input.trim()
     )
 }
@@ -115,6 +136,19 @@ mod tests {
         assert!(
             p.to_uppercase().contains("HERE ARE THE USER'S ANSWERS"),
             "StubBackend and planning follow-ups use this substring after uppercasing; got: {p:?}"
+        );
+    }
+
+    #[test]
+    fn system_prompt_requires_tddy_tools_ask_and_forbids_chat_only_questions() {
+        let p = system_prompt();
+        assert!(
+            p.contains("tddy-tools ask") && p.contains("TDDY_SOCKET"),
+            "interview prompt must require socket-backed ask: {p}"
+        );
+        assert!(
+            p.contains("Do not") && p.contains("assistant message"),
+            "interview prompt must forbid chat-only elicitation: {p}"
         );
     }
 }

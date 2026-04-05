@@ -5,7 +5,7 @@
 
 ## Summary
 
-Structured outputs for workflow goals (including **`analyze`** for the bugfix recipe, plus plan, red, green, acceptance-tests, **post-green-review**, evaluate-changes, validate, refactor, update-docs, demo) are defined as **JSON Schema** artifacts under **`generated/{recipe}/`** in **`tddy-workflow-recipes`**, registered in **`goals.json`**. The **`tddy-tools`** binary embeds those schemas, validates `submit` payloads, exposes **`get-schema <goal>`**, and lists registered goals via **`list-schemas`**. Each registry entry lists the CLI goal name, schema filename, and Protocol Buffer filename so registry drift is testable.
+Structured outputs for workflow goals (including **`analyze`** for the bugfix recipe, plus plan, red, green, acceptance-tests, **post-green-review**, evaluate-changes, validate, refactor, update-docs, demo, and **`changeset-workflow`** for changeset-scoped workflow JSON) are defined as **JSON Schema** artifacts under **`generated/{recipe}/`** in **`tddy-workflow-recipes`**, registered in **`goals.json`**. The **`tddy-tools`** binary embeds those schemas, validates `submit` payloads, exposes **`get-schema <goal>`**, and lists registered goals via **`list-schemas`**. Each registry entry lists the CLI goal name, schema filename, and Protocol Buffer filename so registry drift is testable.
 
 ## Source layout
 
@@ -33,6 +33,10 @@ Workflow **behavior** (graphs, hooks, parsers) lives in **`tddy-workflow-recipes
 **`tddy-tools set-session-context`** merges a JSON object into the workflow session file (`.workflow/<id>.session.json`). Environment: **`TDDY_SESSION_DIR`** (session root), **`TDDY_WORKFLOW_SESSION_ID`** (session id). The merge aligns with the workflow engine: values feed **`Context::merge_json_object_sync`** so **`goal_conditions`** on transitions evaluate against the same key/value map.
 
 This command is **not** listed in **`goals.json`**; it is a session utility, not a JSON-schema-backed planning goal. See **`packages/tddy-tools/docs/json-schema.md`** for the CLI table.
+
+## Changeset workflow (`persist-changeset-workflow`)
+
+**`tddy-tools persist-changeset-workflow`** takes **`--session-dir`** (directory containing **`changeset.yaml`**) and **`--data`** (JSON object). Payloads validate against the **`changeset-workflow`** schema (**`$id`**: **`urn:tddy:tool/changeset-workflow`**), then merge into **`changeset.yaml`** under **`workflow`** with an atomic replace. This goal is listed in **`goals.json`** alongside workflow goals so **`get-schema changeset-workflow`** and **`list-schemas`** include it. It complements **`set-session-context`**: the latter updates ephemeral session JSON; **`persist-changeset-workflow`** updates the durable changeset manifest.
 
 ## Related
 

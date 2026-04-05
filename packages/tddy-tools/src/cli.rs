@@ -1,14 +1,16 @@
-//! CLI subcommands: `submit`, `ask`, `get-schema`, `list-schemas`, `set-session-context`.
+//! CLI subcommands: `submit`, `ask`, `get-schema`, `list-schemas`, `set-session-context`,
+//! `persist-changeset-workflow`.
 //!
 //! Workflow goal names and schema filenames are defined in `packages/tddy-workflow-recipes/goals.json`
 //! (see [`tddy_tools::schema`] and [`tddy_tools::schema_manifest`]).
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use log::info;
+use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
 use std::path::PathBuf;
+use tddy_core::changeset::{read_changeset, write_changeset_atomic, ChangesetWorkflow};
 
 use tddy_tools::schema;
 use tddy_tools::schema_manifest;
@@ -55,6 +57,18 @@ pub struct SetSessionContextArgs {
     /// JSON object to merge into session context (same size limits as submit).
     #[arg(long)]
     pub data: Option<String>,
+}
+
+/// Merge workflow/demo JSON into `changeset.yaml` for the given plan session directory.
+#[derive(Parser)]
+#[command(name = "persist-changeset-workflow")]
+pub struct PersistChangesetWorkflowArgs {
+    /// Directory containing `changeset.yaml` (plan / session tree).
+    #[arg(long)]
+    pub session_dir: PathBuf,
+    /// JSON object: `run_optional_step_x`, `demo_options`, `tool_schema_id` (schema: changeset-workflow).
+    #[arg(long)]
+    pub data: String,
 }
 
 /// Get JSON schema for a goal.
@@ -390,6 +404,45 @@ pub fn run_set_session_context(args: SetSessionContextArgs) -> Result<()> {
     })?;
     let workflow_dir = PathBuf::from(session_dir).join(".workflow");
     session_context::apply_session_context_merge(&workflow_dir, &session_id, &patch)
+}
+
+/// Read `changeset.yaml`, merge validated workflow JSON, atomically replace the file.
+pub fn run_persist_changeset_workflow(args: PersistChangesetWorkflowArgs) -> Result<()> {
+    info!(
+        target: "tddy_tools::cli",
+        "persist-changeset-workflow: session_dir={}",
+        args.session_dir.display()
+    );
+    if let Err(errors) = schema::validate_output("changeset-workflow", &args.data) {
+        let tip = schema::validation_error_tip("changeset-workflow");
+        output_validation_error_with_tip(&errors, &tip);
+        std::process::exit(3);
+    }
+    let workflow: ChangesetWorkflow = serde_json::from_str(&args.data).unwrap_or_else(|e| {
+        output_error(&format!("invalid JSON after validation: {e}"), 1);
+        unreachable!()
+    });
+    debug!(
+        target: "tddy_tools::cli",
+        "persist-changeset-workflow: parsed workflow run_optional_step_x={:?} demo_options_len={}",
+        workflow.run_optional_step_x,
+        workflow.demo_options.len()
+    );
+
+    let mut cs = read_changeset(&args.session_dir).unwrap_or_else(|e| {
+        output_error(&e.to_string(), 1);
+        unreachable!()
+    });
+    cs.workflow = Some(workflow);
+    write_changeset_atomic(&args.session_dir, &cs).unwrap_or_else(|e| {
+        output_error(&e.to_string(), 1);
+        unreachable!()
+    });
+    info!(
+        target: "tddy_tools::cli",
+        "persist-changeset-workflow: wrote changeset.yaml atomically"
+    );
+    Ok(())
 }
 
 pub fn run_get_schema(args: GetSchemaArgs) -> Result<()> {
