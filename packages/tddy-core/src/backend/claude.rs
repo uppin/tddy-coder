@@ -374,13 +374,13 @@ impl ClaudeCodeBackend {
         log::debug!(
             "[tddy-coder] prompt ({} bytes): {}",
             request.prompt.len(),
-            &request.prompt[..request.prompt.len().min(500)]
+            &request.prompt[..request.prompt.floor_char_boundary(500)]
         );
         if let Some(ref sp) = request.system_prompt {
             log::debug!(
                 "[tddy-coder] system_prompt ({} bytes): {}",
                 sp.len(),
-                &sp[..sp.len().min(500)]
+                &sp[..sp.floor_char_boundary(500)]
             );
         }
         if let Some(ref sp_path) = request.system_prompt_path {
