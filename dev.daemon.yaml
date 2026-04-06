@@ -36,6 +36,9 @@ users:
 # When true (default), pass --mouse to spawned tddy-* (browser / touch terminals).
 spawn_mouse: true
 
+# Inbound session control (/sessions, /delete, /start-workflow) uses teloxide long-polling when
+# enabled: true, bot_token is valid, and chat_ids match your Telegram chat. Sessions are read from
+# ~/.tddy/sessions/ for USER (see web-dev substitution for users.os_user).
 telegram:
   enabled: false
   bot_token: "<token>"

@@ -159,6 +159,12 @@ fn handle_elicitation(
                 if answer.eq_ignore_ascii_case("approve") {
                     return true;
                 }
+                if answer.eq_ignore_ascii_case("reject") {
+                    let _ = ctx.event_tx.send(WorkflowEvent::WorkflowComplete(Err(
+                        "Session document rejected by operator".to_string(),
+                    )));
+                    return false;
+                }
                 let feature_input = read_changeset(session_dir)
                     .ok()
                     .and_then(|c| c.initial_prompt.clone())

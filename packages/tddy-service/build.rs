@@ -7,7 +7,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(true)
         .build_client(true)
         .compile_protos(
-            &["proto/tddy/v1/remote.proto", "proto/tddy/v1/observer.proto"],
+            &[
+                "proto/tddy/v1/remote.proto",
+                "proto/tddy/v1/observer.proto",
+                "proto/tddy/v1/presenter_intent.proto",
+            ],
             &["proto"],
         )?;
 

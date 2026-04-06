@@ -13,6 +13,8 @@ pub enum UserIntent {
     ViewSessionDocument,
     /// User wants to refine the session document (document review mode).
     RefineSessionDocument,
+    /// User rejected the session document (document review / markdown viewer) without approving.
+    RejectSessionDocument,
     /// User dismissed the markdown viewer (MarkdownViewer mode).
     DismissViewer,
     /// User moved the highlight in Select mode (Up/Down / mouse). Keeps presenter state in sync for

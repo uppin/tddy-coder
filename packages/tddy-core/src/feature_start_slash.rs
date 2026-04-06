@@ -8,8 +8,15 @@ pub const DEFAULT_UNSPECIFIED_WORKFLOW_RECIPE_CLI_NAME: &str = "free-prompting";
 
 /// Shipped workflow recipe CLI names — **keep in sync** with
 /// `tddy_workflow_recipes::approval_policy::supported_workflow_recipe_cli_names`.
-pub const SHIPPED_WORKFLOW_RECIPE_CLI_NAMES: &[&str] =
-    &["tdd", "bugfix", "free-prompting", "grill-me", "tdd-small"];
+pub const SHIPPED_WORKFLOW_RECIPE_CLI_NAMES: &[&str] = &[
+    "tdd",
+    "bugfix",
+    "free-prompting",
+    "grill-me",
+    "tdd-small",
+    "review",
+    "merge-pr",
+];
 
 fn unknown_workflow_recipe_error(name: &str) -> String {
     let expected = SHIPPED_WORKFLOW_RECIPE_CLI_NAMES

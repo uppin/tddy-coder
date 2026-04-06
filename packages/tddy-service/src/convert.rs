@@ -9,7 +9,8 @@ use crate::gen::{
     AppModeTextInput, ApproveSessionDocument, BackendSelected, ClarificationQuestionProto,
     ClientMessage, DeleteInboxItem, DismissViewer, EditInboxItem, GoalStarted, InboxChanged,
     IntentReceived, ModeChanged, QuestionOptionProto, QueuePrompt, Quit, RefineSessionDocument,
-    Scroll, ServerMessage, StateChanged, SubmitFeatureInput, ViewSessionDocument, WorkflowComplete,
+    RejectSessionDocument, Scroll, ServerMessage, StateChanged, SubmitFeatureInput,
+    ViewSessionDocument, WorkflowComplete,
 };
 
 /// Convert ClientMessage to UserIntent. Returns None if the message has no intent.
@@ -51,6 +52,9 @@ pub fn client_message_to_intent(msg: ClientMessage) -> Option<UserIntent> {
             Some(UserIntent::RefineSessionDocument)
         }
         Intent::DismissViewer(DismissViewer {}) => Some(UserIntent::DismissViewer),
+        Intent::RejectSessionDocument(RejectSessionDocument {}) => {
+            Some(UserIntent::RejectSessionDocument)
+        }
         Intent::StartSession(_) | Intent::ConfirmWorktree(_) => None, // Daemon-only, not UserIntent
     }
 }
@@ -219,6 +223,7 @@ fn clarification_to_proto(q: &tddy_core::ClarificationQuestion) -> Clarification
             })
             .collect(),
         multi_select: q.multi_select,
+        allow_other: q.allow_other,
     }
 }
 
@@ -267,6 +272,9 @@ fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
             Intent::RefineSessionDocument(RefineSessionDocument {})
         }
         UserIntent::DismissViewer => Intent::DismissViewer(DismissViewer {}),
+        UserIntent::RejectSessionDocument => {
+            Intent::RejectSessionDocument(RejectSessionDocument {})
+        }
         // skeleton: ResumeFromError has no proto message yet
         UserIntent::ResumeFromError => return None,
         // skeleton: ContinueWithAgent has no proto message yet

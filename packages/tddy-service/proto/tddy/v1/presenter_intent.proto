@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package tddy.v1;
+
+// Unary RPC: inject feature text into the LiveKit presenter (same process as PresenterObserver).
+// Used when the operator is on Telegram instead of the web Virtual TUI.
+service PresenterIntent {
+  rpc SubmitFeatureText(SubmitFeatureTextRequest) returns (SubmitFeatureTextResponse);
+  rpc ApproveSessionDocument(EmptyPresenterIntent) returns (SubmitFeatureTextResponse);
+  rpc RefineSessionDocument(EmptyPresenterIntent) returns (SubmitFeatureTextResponse);
+  rpc ViewSessionDocument(EmptyPresenterIntent) returns (SubmitFeatureTextResponse);
+  rpc DismissViewer(EmptyPresenterIntent) returns (SubmitFeatureTextResponse);
+  rpc RejectSessionDocument(EmptyPresenterIntent) returns (SubmitFeatureTextResponse);
+  rpc AnswerClarificationSelect(AnswerClarificationSelectRequest) returns (SubmitFeatureTextResponse);
+  rpc AnswerClarificationMultiSelect(AnswerClarificationMultiSelectRequest) returns (SubmitFeatureTextResponse);
+  rpc AnswerClarificationText(AnswerClarificationTextRequest) returns (SubmitFeatureTextResponse);
+}
+
+message EmptyPresenterIntent {}
+
+message SubmitFeatureTextRequest {
+  string text = 1;
+}
+
+message SubmitFeatureTextResponse {}
+
+message AnswerClarificationSelectRequest {
+  uint32 option_index = 1;
+}
+
+message AnswerClarificationMultiSelectRequest {
+  repeated uint32 indices = 1;
+  string other = 2;
+}
+
+message AnswerClarificationTextRequest {
+  string text = 1;
+}

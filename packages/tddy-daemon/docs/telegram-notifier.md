@@ -21,7 +21,8 @@ The **`telegram_notifier`** module implements session status notifications using
 | **`mask_bot_token_for_logs(token)`** | Returns a fixed-format string that does not embed the token (length-only metadata). |
 | **`send_telegram_via_teloxide(bot, chat_id, text)`** | **`Requester::send_message`**; maps teloxide errors to **`anyhow::Error`**. |
 | **`TelegramSender`** | Async trait: **`send_message(chat_id: i64, text: &str)`**. |
-| **`TelegramSessionWatcher`** | Holds **`last_status`**, transition dedupe maps for stream events, and **`last_elicitation_signature`** for **`ModeChanged`** dedupe. **`on_metadata_tick`** implements the baseline / transition / inactive rules; **`on_server_message`** maps **`ServerMessage`** variants including presenter **`ModeChanged`** via **`tddy_daemon::elicitation`**. |
+| **`TelegramSessionWatcher`** | Holds **`last_status`**, transition dedupe maps for stream events, and **`last_elicitation_signature`** for **`ModeChanged`** dedupe. **`on_metadata_tick`** implements the baseline / transition / inactive rules; **`on_server_message`** maps **`ServerMessage`** variants including presenter **`ModeChanged`** via **`tddy_daemon::elicitation`**. For **`Select`** modes, registers full per-option confirmation strings in **`elicitation_select_options`** (shared with **`telegram_session_control`** for inbound confirmations). |
+| **`ElicitationSelectOptionsCache`** | **`Arc<Mutex<HashMap<session_id, Vec<String>>>>`** — one confirmation string per option index for **`Select`** elicitation. |
 
 ## Elicitation (`tddy_daemon::elicitation`)
 

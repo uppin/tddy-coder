@@ -492,6 +492,17 @@ impl Presenter {
                     self.broadcast_mode_changed();
                 }
             }
+            UserIntent::RejectSessionDocument => {
+                if matches!(
+                    self.state.mode,
+                    AppMode::DocumentReview { .. } | AppMode::MarkdownViewer { .. }
+                ) {
+                    self.state.plan_refinement_pending = false;
+                    if let Some(ref tx) = self.answer_tx {
+                        let _ = tx.send("reject".to_string());
+                    }
+                }
+            }
             UserIntent::RefineSessionDocument => {
                 log::info!("RefineSessionDocument: mode={:?}", self.state.mode);
                 self.state.plan_refinement_pending = true;

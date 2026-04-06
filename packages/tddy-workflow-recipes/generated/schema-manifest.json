@@ -31,6 +31,11 @@
       "schema": "post-green-review.schema.json"
     },
     {
+      "name": "branch-review",
+      "proto": "branch_review.proto",
+      "schema": "branch-review.schema.json"
+    },
+    {
       "name": "evaluate-changes",
       "proto": "evaluate_changes.proto",
       "schema": "evaluate.schema.json"
@@ -59,6 +64,16 @@
       "name": "changeset-workflow",
       "proto": "changeset_workflow.proto",
       "schema": "changeset-workflow.schema.json"
+    },
+    {
+      "name": "merge-pr-report",
+      "proto": "merge_pr_report.proto",
+      "schema": "merge-pr-report.schema.json"
+    },
+    {
+      "name": "merge-pr-analyze",
+      "proto": "merge_pr_analyze.proto",
+      "schema": "merge-pr-analyze.schema.json"
     }
   ],
   "version": 1

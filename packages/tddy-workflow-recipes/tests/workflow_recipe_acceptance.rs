@@ -3,6 +3,7 @@
 //! These tests are expected to fail until `free-prompting` is registered and `unknown_workflow_recipe_error`
 //! lists every supported CLI recipe name.
 
+use tddy_core::GoalId;
 use tddy_workflow_recipes::{
     unknown_workflow_recipe_error, workflow_recipe_and_manifest_from_cli_name,
 };
@@ -15,7 +16,9 @@ fn recipe_resolve_accepts_free_prompting_and_rejects_unknown() {
             && err.contains("bugfix")
             && err.contains("free-prompting")
             && err.contains("grill-me")
-            && err.contains("tdd-small"),
+            && err.contains("tdd-small")
+            && err.contains("review")
+            && err.contains("merge-pr"),
         "unknown recipe errors must list every supported workflow recipe: {}",
         err
     );
@@ -76,4 +79,39 @@ fn resolve_tdd_small_recipe() {
     let (recipe, _manifest) =
         resolved.expect("tdd-small must resolve via workflow_recipe_and_manifest_from_cli_name");
     assert_eq!(recipe.name(), "tdd-small");
+}
+
+/// PRD: `workflow_recipe_and_manifest_from_cli_name("review")` succeeds; `ReviewRecipe` contract for name, manifest, elicitation vs submit.
+#[test]
+fn workflow_recipe_resolves_review() {
+    let (recipe, manifest) =
+        workflow_recipe_and_manifest_from_cli_name("review").expect("review must resolve");
+    assert_eq!(recipe.name(), "review");
+    assert!(
+        !recipe.start_goal().as_str().is_empty(),
+        "ReviewRecipe must expose a non-empty start goal id"
+    );
+    assert_eq!(
+        manifest
+            .default_artifacts()
+            .get("review")
+            .map(|s| s.as_str()),
+        Some("review.md"),
+        "SessionArtifactManifest must map review → review.md for discovery / UI"
+    );
+}
+
+/// PRD: first turn is elicitation (no structured submit), like grill-me **Grill**; completion uses `branch-review` submit.
+#[test]
+fn review_recipe_elicitation_parity_with_grill_me() {
+    let (recipe, _) =
+        workflow_recipe_and_manifest_from_cli_name("review").expect("review must resolve");
+    assert!(
+        !recipe.goal_requires_tddy_tools_submit(&recipe.start_goal()),
+        "review start goal must allow elicitation without structured submit (grill-me parity)"
+    );
+    assert!(
+        recipe.goal_requires_tddy_tools_submit(&GoalId::new("branch-review")),
+        "branch-review goal must require tddy-tools submit to persist review.md"
+    );
 }

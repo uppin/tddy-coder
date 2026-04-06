@@ -13,8 +13,10 @@ fn supported_cli_names_includes_free_prompting_and_grill_me() {
     assert!(
         names.contains(&"free-prompting")
             && names.contains(&"grill-me")
-            && names.contains(&"tdd-small"),
-        "F5: supported CLI names must include free-prompting, grill-me, and tdd-small for resolver/daemon parity: {:?}",
+            && names.contains(&"tdd-small")
+            && names.contains(&"review")
+            && names.contains(&"merge-pr"),
+        "F5: supported CLI names must include free-prompting, grill-me, tdd-small, review, and merge-pr for resolver/daemon parity: {:?}",
         names
     );
 }
@@ -32,6 +34,14 @@ fn grill_me_skips_session_document_approval_per_policy_table() {
     assert!(
         approval_policy::recipe_should_skip_session_document_approval("grill-me"),
         "grill-me v1 must skip session document approval (same class as free-prompting)"
+    );
+}
+
+#[test]
+fn review_skips_session_document_approval_per_policy_table() {
+    assert!(
+        approval_policy::recipe_should_skip_session_document_approval("review"),
+        "review must skip primary session document approval (grill-me class)"
     );
 }
 

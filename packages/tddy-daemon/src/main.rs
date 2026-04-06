@@ -3,10 +3,12 @@
 //! Runs as root process. Handles GitHub auth, user mapping, session discovery,
 //! and spawns tddy-* processes as the target OS user.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use clap::Parser;
+use teloxide::prelude::Bot;
 use tokio::sync::Mutex;
 
 /// Apply environment variable overrides to config (e.g. from .env loaded by web-dev).
@@ -151,25 +153,79 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    let mut telegram_inbound: Option<(
+        Bot,
+        Arc<
+            Mutex<
+                tddy_daemon::telegram_session_control::TelegramSessionControlHarness<
+                    tddy_daemon::telegram_notifier::TeloxideSender,
+                >,
+            >,
+        >,
+    )> = None;
+
     let telegram_hooks: Option<Arc<tddy_daemon::telegram_session_subscriber::TelegramDaemonHooks>> =
         match config.telegram.as_ref() {
             Some(tg) if tg.enabled && !tg.bot_token.is_empty() => {
+                let bot = Bot::new(tg.bot_token.clone());
+                let teloxide_sender = Arc::new(
+                    tddy_daemon::telegram_notifier::TeloxideSender::new(bot.clone()),
+                );
+                let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
                 let sender: Arc<dyn tddy_daemon::telegram_notifier::TelegramSender + Send + Sync> =
-                    Arc::new(
-                        tddy_daemon::telegram_notifier::TeloxideSender::from_bot_token(
-                            tg.bot_token.clone(),
-                        ),
-                    );
+                    teloxide_sender.clone();
+                let elicitation_select_options: tddy_daemon::telegram_notifier::ElicitationSelectOptionsCache =
+                    Arc::new(StdMutex::new(HashMap::new()));
                 let watcher = Arc::new(Mutex::new(
-                    tddy_daemon::telegram_notifier::TelegramSessionWatcher::new(),
+                    tddy_daemon::telegram_notifier::TelegramSessionWatcher::with_elicitation_select_options(
+                        elicitation_select_options.clone(),
+                    ),
                 ));
-                Some(Arc::new(
+                let hooks = Arc::new(
                     tddy_daemon::telegram_session_subscriber::TelegramDaemonHooks {
                         config: config.clone(),
                         sender: sender.clone(),
                         watcher,
                     },
-                ))
+                );
+                if let Some(sessions_base) =
+                    tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user)
+                {
+                    #[cfg(unix)]
+                    let spawn_for_tg = spawn_client.as_ref().map(|(c, _)| Arc::new(c.clone()));
+                    #[cfg(not(unix))]
+                    let spawn_for_tg: Option<
+                        Arc<tddy_daemon::spawn_worker::SpawnClient>,
+                    > = None;
+
+                    let workflow_spawn = Some(Arc::new(
+                        tddy_daemon::telegram_session_control::TelegramWorkflowSpawn {
+                            config: Arc::new(config.clone()),
+                            spawn_client: spawn_for_tg,
+                            os_user: user.clone(),
+                            projects_dir_override: None,
+                            telegram_hooks: Some(hooks.clone()),
+                            child_grpc_by_session: Arc::new(StdMutex::new(HashMap::new())),
+                            elicitation_select_options: elicitation_select_options.clone(),
+                            pending_elicitation_other: Arc::new(StdMutex::new(HashMap::new())),
+                        },
+                    ));
+                    let harness = Arc::new(Mutex::new(
+                        tddy_daemon::telegram_session_control::TelegramSessionControlHarness::with_workflow_spawn(
+                            tg.chat_ids.clone(),
+                            sessions_base,
+                            teloxide_sender,
+                            workflow_spawn,
+                        ),
+                    ));
+                    telegram_inbound = Some((bot.clone(), harness));
+                } else {
+                    log::warn!(
+                        target: "tddy_daemon",
+                        "telegram inbound session control disabled: could not resolve sessions base for USER={user}"
+                    );
+                }
+                Some(hooks)
             }
             _ => None,
         };
@@ -200,13 +256,34 @@ fn main() -> anyhow::Result<()> {
                 as Arc<dyn tddy_daemon::telegram_notifier::TelegramSender + Send + Sync>,
         )
     });
-    rt.block_on(tddy_daemon::server::run_server(
-        host,
-        port,
-        bundle_path,
-        rpc_entries,
-        livekit_url,
-        common_room,
-        lifecycle_telegram,
-    ))
+    rt.block_on(async {
+        let inbound_task = if let Some((bot, harness)) = telegram_inbound {
+            Some(tokio::spawn(async move {
+                if let Err(e) = tddy_daemon::telegram_bot::run_telegram_bot(bot, harness).await {
+                    log::warn!(
+                        target: "tddy_daemon::telegram_bot",
+                        "inbound dispatcher ended: {e:#}"
+                    );
+                }
+            }))
+        } else {
+            None
+        };
+
+        let res = tddy_daemon::server::run_server(
+            host,
+            port,
+            bundle_path,
+            rpc_entries,
+            livekit_url,
+            common_room,
+            lifecycle_telegram,
+        )
+        .await;
+
+        if let Some(t) = inbound_task {
+            t.abort();
+        }
+        res
+    })
 }
