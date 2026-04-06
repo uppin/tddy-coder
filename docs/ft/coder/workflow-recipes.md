@@ -37,6 +37,7 @@ Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**
 - **Pipeline:** **`plan` → `red` → `green` → `post-green-review` → `refactor` → `update-docs` → `end`**. There are no separate graph nodes for **`acceptance-tests`**, **`demo`**, **`evaluate-changes`**, or **`validate`**; the **`red`** step uses merged red/evaluate-style prompt text, and **`post-green-review`** is a single structured submit that covers evaluate- and validate-style reporting (see **`tddy-tools get-schema post-green-review`**).
 - **Primary session document:** **`prd`** → **`PRD.md`** (same manifest pattern as full TDD); **`TddSmallRecipe::uses_primary_session_document`** is **`true`** so the plan approval gate applies after **`plan`**.
 - **Structured submit:** Goals follow the same JSON Schema registry as full TDD where applicable; **`post-green-review`** has a dedicated schema and parser (**`parse_post_green_review_response`**) in **`tddy-workflow-recipes`**.
+- **Merged red prompt:** The **`red`** system prompt includes a **GitHub PR tools** subsection when **`GITHUB_TOKEN`** or **`GH_TOKEN`** is set (non-empty), matching merge-pr hook gating for GitHub-aware guidance. See [GitHub pull request tools (tddy-tools MCP)](github-pr-tools-mcp.md).
 
 ## BugfixRecipe
 
@@ -151,6 +152,7 @@ This section records how the shipped recipes map to the same product philosophy 
 
 - **Start goal:** **`plan`** — same planning and PRD-style artifacts as full TDD.
 - **Pipeline:** **`plan` → `red` → `green` → `post-green-review` → `refactor` → `update-docs`** — a linear graph without standalone acceptance-tests, demo, evaluate, or validate tasks; **`post-green-review`** carries merged reporting concerns in one **`tddy-tools submit`** payload.
+- **GitHub PR awareness in red:** The merged **`red`** prompt surfaces MCP GitHub PR tool names and usage guidance when a GitHub token is present in the environment; without a token, that block is omitted. See [GitHub pull request tools (tddy-tools MCP)](github-pr-tools-mcp.md).
 - **Spirit:** Smaller session surface for teams that want TDD discipline without the full optional branches (demo routing, separate evaluate/validate invocations).
 
 ### Bugfix (`bugfix`)

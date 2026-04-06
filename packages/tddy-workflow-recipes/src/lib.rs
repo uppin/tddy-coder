@@ -3,6 +3,7 @@
 pub mod approval_policy;
 pub mod bugfix;
 pub mod free_prompting;
+pub mod github_rest_common;
 pub mod grill_me;
 pub mod merge_pr;
 pub mod parser;
@@ -17,7 +18,12 @@ pub mod writer;
 
 pub use bugfix::BugfixRecipe;
 pub use free_prompting::FreePromptingRecipe;
+pub use github_rest_common::{
+    github_env_token_present, github_token_from_env, GITHUB_ACCEPT, GITHUB_API_VERSION,
+    USER_AGENT_MERGE_PR, USER_AGENT_TDDY_TOOLS,
+};
 pub use grill_me::GrillMeRecipe;
+pub use merge_pr::merge_pr_github_tools_awareness_line;
 pub use merge_pr::MergePrRecipe;
 pub use parser::{
     parse_acceptance_tests_response, parse_analyze_response, parse_demo_response,
@@ -45,7 +51,8 @@ pub use session_artifact_manifest::SessionArtifactManifest;
 pub use tdd::{PlanTask, TddRecipe, TddWorkflowHooks};
 pub use tdd_small::{
     build_tdd_small_workflow_graph, merged_red_system_prompt, parse_post_green_review_response,
-    PostGreenReviewOutput, TddSmallRecipe, TddSmallWorkflowHooks,
+    tdd_small_github_pr_tools_awareness_sentence, PostGreenReviewOutput, TddSmallRecipe,
+    TddSmallWorkflowHooks,
 };
 pub use writer::{
     create_session_dir_in, create_session_dir_under, create_session_dir_with_id,

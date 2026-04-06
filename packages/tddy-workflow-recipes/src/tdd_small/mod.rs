@@ -10,5 +10,5 @@ pub mod submit;
 pub use graph::build_tdd_small_workflow_graph;
 pub use hooks::TddSmallWorkflowHooks;
 pub use recipe::TddSmallRecipe;
-pub use red::merged_red_system_prompt;
+pub use red::{merged_red_system_prompt, tdd_small_github_pr_tools_awareness_sentence};
 pub use submit::{parse_post_green_review_response, PostGreenReviewOutput};

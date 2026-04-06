@@ -20,4 +20,5 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "p
 uuid = { version = "1", features = ["v7"] }
 
 [dev-dependencies]
+serial_test = "3"
 tempfile = "3"

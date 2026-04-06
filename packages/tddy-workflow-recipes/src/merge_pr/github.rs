@@ -1,11 +1,14 @@
 //! GitHub REST merge for **merge-pr** (token detection, PR lookup, merge API).
 
-use std::env;
 use std::fs;
 use std::process::Command;
 
 use serde_json::Value;
 use uuid::Uuid;
+
+use crate::github_rest_common::{
+    github_token_from_env, GITHUB_ACCEPT, GITHUB_API_VERSION, USER_AGENT_MERGE_PR,
+};
 
 /// Parameters for merging the open PR for the current branch.
 #[derive(Debug, Clone, Default)]
@@ -15,15 +18,8 @@ pub struct MergePrGithubParams {
     pub branch: String,
 }
 
-fn github_token_from_env() -> Option<String> {
-    env::var("GITHUB_TOKEN")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| env::var("GH_TOKEN").ok().filter(|s| !s.trim().is_empty()))
-}
-
 fn temp_response_path(prefix: &str) -> std::path::PathBuf {
-    env::temp_dir().join(format!("{prefix}-{}.json", Uuid::new_v4()))
+    std::env::temp_dir().join(format!("{prefix}-{}.json", Uuid::new_v4()))
 }
 
 /// Find open PR for `head={owner}:{branch}`, then merge via REST; returns merge commit SHA.
@@ -134,11 +130,11 @@ fn curl_github_get_with_query(
     cmd.arg("-H")
         .arg(format!("Authorization: Bearer {token}"))
         .arg("-H")
-        .arg("Accept: application/vnd.github+json")
+        .arg(format!("Accept: {GITHUB_ACCEPT}"))
         .arg("-H")
-        .arg("User-Agent: tddy-coder-workflow-recipes")
+        .arg(format!("User-Agent: {USER_AGENT_MERGE_PR}"))
         .arg("-H")
-        .arg("X-GitHub-Api-Version: 2022-11-28");
+        .arg(format!("X-GitHub-Api-Version: {GITHUB_API_VERSION}"));
 
     let out = cmd
         .output()
@@ -174,13 +170,13 @@ fn curl_github_put_json(
         .arg("-H")
         .arg(format!("Authorization: Bearer {token}"))
         .arg("-H")
-        .arg("Accept: application/vnd.github+json")
+        .arg(format!("Accept: {GITHUB_ACCEPT}"))
         .arg("-H")
         .arg("Content-Type: application/json")
         .arg("-H")
-        .arg("User-Agent: tddy-coder-workflow-recipes")
+        .arg(format!("User-Agent: {USER_AGENT_MERGE_PR}"))
         .arg("-H")
-        .arg("X-GitHub-Api-Version: 2022-11-28")
+        .arg(format!("X-GitHub-Api-Version: {GITHUB_API_VERSION}"))
         .arg("--data-binary")
         .arg(format!("@{}", json_body_path.display()))
         .arg(url)
