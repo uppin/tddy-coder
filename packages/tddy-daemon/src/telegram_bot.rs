@@ -16,8 +16,8 @@ use crate::telegram_session_control::{
     parse_elicitation_select_callback, parse_recipe_callback_session_dir,
     parse_session_control_callback, parse_sessions_command, parse_start_workflow_prompt,
     parse_submit_feature_command, parse_telegram_agent_callback, parse_telegram_branch_callback,
-    parse_telegram_project_callback, SessionControlCallback, StartWorkflowCommand,
-    TelegramCallback, TelegramSessionControlHarness,
+    parse_telegram_intent_callback, parse_telegram_project_callback, SessionControlCallback,
+    StartWorkflowCommand, TelegramCallback, TelegramSessionControlHarness,
 };
 
 type Harness = Arc<Mutex<TelegramSessionControlHarness<TeloxideSender>>>;
@@ -196,6 +196,33 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
             }
         }
         bot.answer_callback_query(qid).await?;
+        return Ok(());
+    }
+
+    if let Some((intent, session_id)) = parse_telegram_intent_callback(&data) {
+        {
+            let h = harness.lock().await;
+            if !h.is_authorized(chat_id) {
+                drop(h);
+                let _ = bot.answer_callback_query(qid.clone()).await;
+                return Ok(());
+            }
+        }
+        let _ = bot.answer_callback_query(qid.clone()).await;
+        let h = harness.lock().await;
+        match h
+            .handle_telegram_intent_callback(chat_id, intent, &session_id)
+            .await
+        {
+            Ok(()) => {}
+            Err(e) => {
+                bot.send_message(
+                    ChatId(chat_id),
+                    telegram_workflow_error_message(format!("{e:#}")),
+                )
+                .await?;
+            }
+        }
         return Ok(());
     }
 
@@ -388,12 +415,11 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
                         .unwrap_or("")
                         .to_string();
                     if !session_id.is_empty() {
-                        if let Err(e) = h.send_project_pick_after_recipe(chat_id, &session_id).await
-                        {
+                        if let Err(e) = h.send_intent_pick_keyboard(chat_id, &session_id).await {
                             bot.send_message(
                                 ChatId(chat_id),
                                 format!(
-                                    "Recipe saved, but project selection could not be shown:\n{e:#}"
+                                    "Recipe saved, but intent selection could not be shown:\n{e:#}"
                                 ),
                             )
                             .await?;

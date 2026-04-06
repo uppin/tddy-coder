@@ -203,6 +203,7 @@ fn main() -> anyhow::Result<()> {
                             config: Arc::new(config.clone()),
                             spawn_client: spawn_for_tg,
                             os_user: user.clone(),
+                            projects_dir_override: None,
                             telegram_hooks: Some(hooks.clone()),
                             child_grpc_by_session: Arc::new(StdMutex::new(HashMap::new())),
                             elicitation_select_options: elicitation_select_options.clone(),
