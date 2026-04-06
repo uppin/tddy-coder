@@ -1,5 +1,10 @@
 # Daemon product area changelog
 
+## 2026-04-06 — Codex OAuth relay library (`codex_oauth_relay`)
+
+- **tddy-daemon**: **`codex_oauth_relay`** — **`validate_codex_oauth_authorize_url`** (**`https`**, host allowlist, session correlation), **`dispatch_browser_open_capture`** (argv → **`CodexOAuthAuthorizeCapture`**), **`relay_oauth_callback_to_registered_listener`** (callback URL query → **`CodexOAuthCallbackDelivery`**). Logging target **`tddy_daemon::codex_oauth`**. Integration tests **`codex_oauth_web_relay_acceptance`**.
+- **Docs**: **[codex-oauth-relay.md](codex-oauth-relay.md)** (product); **[codex-oauth-relay.md](../../../packages/tddy-daemon/docs/codex-oauth-relay.md)** (package). Web feature: **[codex-oauth-web-relay.md](../web/codex-oauth-web-relay.md)**. Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**; **[packages/tddy-daemon/docs/changesets.md](../../../packages/tddy-daemon/docs/changesets.md)**.
+
 ## 2026-04-05 — Telegram: inbound session control, PresenterIntent, elicitation UX
 
 - **Inbound control**: Daemon runs **`telegram_bot`** (teloxide long-polling) when Telegram is configured and **`sessions_base`** resolves. Commands include **`/start-workflow`**, **`/sessions`**, **`/delete`**, **`/submit-feature`**, **`/answer-text`**, **`/answer-multi`**; callbacks cover session list, recipe/project/agent picks, document review (**`doc:`**), and elicitation select (**`eli:s:`**). **`TelegramSessionControlHarness`** and integration tests exercise the library; production uses **`TeloxideSender`** with the same bot as outbound notifications.

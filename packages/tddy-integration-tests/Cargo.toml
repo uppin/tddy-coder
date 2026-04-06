@@ -20,3 +20,5 @@ uuid = { version = "1", features = ["v7"] }
 tddy-core = { path = "../tddy-core" }
 tddy-workflow = { path = "../tddy-workflow" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+tddy-daemon = { path = "../tddy-daemon" }
+url = "2"

@@ -2,6 +2,7 @@
 
 pub mod agent_list_mapping;
 pub mod auth;
+pub mod codex_oauth_relay;
 pub mod config;
 pub mod connection_service;
 pub mod elicitation;

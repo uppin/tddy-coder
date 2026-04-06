@@ -5858,6 +5858,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tonic 0.12.3",
+ "url",
  "uuid",
 ]
 
@@ -5933,10 +5934,12 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tddy-core",
+ "tddy-daemon",
  "tddy-workflow",
  "tddy-workflow-recipes",
  "tokio",
  "tokio-util",
+ "url",
  "uuid",
 ]
 
