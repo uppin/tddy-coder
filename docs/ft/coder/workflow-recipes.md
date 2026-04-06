@@ -1,7 +1,7 @@
 # Workflow recipes (pluggable workflows)
 
 **Product area:** Coder  
-**Updated:** 2026-04-05
+**Updated:** 2026-04-06
 
 ## Summary
 
@@ -25,6 +25,7 @@ Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**
 - **Start goal:** **`interview`** (upfront elicitation before structured planning).
 - **Pipeline (minimal graph):** **`interview` → `plan` → acceptance-tests → red → green → end**. **Full graph:** **`interview` → `plan` → acceptance-tests → red → green →** (optional **`demo`**) **→ evaluate → validate → refactor → update-docs → end**.
 - **Handoff:** Interview output is written to **`.workflow/tdd_interview_handoff.txt`** under the session directory; **`before_plan`** loads it into context as **`answers`** so **`PlanTask`** can build a follow-up prompt (same relay idea as grill-me’s persisted answers). Demo participation and options belong in **`changeset.yaml`** under **`workflow`** (see **Changeset workflow block** in **TDD (`tdd`)** under **Developer reference (shipped recipes)** below).
+- **Unanswered elicitation recovery:** When the model asks clarification in prose only (for example numbered markdown lists) and **`InvokeResponse.questions`** is empty, **`tddy_core::workflow::interview_recovery`** applies deterministic rules; **`TddRecipe::host_clarification_gate_after_no_submit_turn`** surfaces a single consolidated **`tddy-tools ask`**-shaped **`ClarificationQuestion`** batch via **`BackendInvokeTask`** (**`WaitForInput`**, **`pending_questions`**). The graph remains on **`interview`** until the user answers. Helpers **`merge_interview_recovery_answers_into_handoff`** and **`persist_interview_recovery_workflow_fields`** merge text into the handoff relay and reconcile **`changeset.yaml`** **`workflow`** fields (**`run_optional_step_x`**, **`demo_options`**, **`tool_schema_id`**). Context key **`interview_recovery_ask_count`** records **`0`** after a clean interview completion (no recovery round) for observability.
 - **Structured submit:** **`WorkflowRecipe::goal_requires_tddy_tools_submit`** is **`false`** for **`interview`** (elicitation turns complete without **`tddy-tools submit`**); **`plan`** and later structured goals keep the submit contract.
 - **Plan refinement (PRD feedback):** **`WorkflowRecipe::plan_refinement_goal()`** selects the planning goal for refinement flows. For **`TddRecipe`** the value is **`plan`** (not **`interview`**). **`GrillMeRecipe`** uses **`create-plan`** (not **`grill`**). Recipes without a separate elicitation step inherit the default (**`start_goal()`**).
 - **Primary session document:** **`prd`** → **`PRD.md`** under the session artifact layout (see **`SessionArtifactManifest`**).
@@ -128,7 +129,7 @@ This section records how the shipped recipes map to the same product philosophy 
 - **Start goal:** **`interview`** — clarification before PRD/plan; **`plan`** follows with PRD/TODO-style artifacts; full graph continues with acceptance-tests → red → green → ….
 - **Spirit:** Discovery-style elicitation (interview), then structured planning, then tests and implementation.
 - **Changeset workflow block:** **`changeset.yaml`** includes an optional **`workflow`** object: **`run_optional_step_x`** (boolean for the post-green branch), **`demo_options`** (strings describing how to run an optional **demo** goal), and optional **`tool_schema_id`** (URN tying the block to the **`changeset-workflow`** JSON Schema). **`tddy-tools persist-changeset-workflow`** validates a JSON payload against that schema and replaces the **`workflow`** section using an atomic write. **`tddy_core::changeset::merge_persisted_workflow_into_context`** copies persisted values into the engine **`Context`** so graph **`goal_conditions`** (e.g. **`run_optional_step_x`**) match the manifest; call sites pass the plan session directory.
-- **Interview:** System and user prompts require **`tddy-tools ask`** for whether the **demo** goal runs after **green**, for demo execution options, and for persisting **`run_optional_step_x`** / **`demo_options`** (via **`persist-changeset-workflow`**) into **`changeset.yaml`** before PRD-driven planning completes.
+- **Interview:** System and user prompts require **`tddy-tools ask`** for whether the **demo** goal runs after **green**, for demo execution options, and for persisting **`run_optional_step_x`** / **`demo_options`** (via **`persist-changeset-workflow`**) into **`changeset.yaml`** before PRD-driven planning completes. If the model emits clarification only in assistant text without **`tddy-tools ask`**, the recipe host gate (after **`output`** is staged on **`Context`**) can block with **`WaitForInput`** until the operator answers the recovery batch; answers merge into **`.workflow/tdd_interview_handoff.txt`** and **`changeset.yaml`** **`workflow`** through the same helpers the interview phase uses for structured recovery.
 
 ### TDD-small (`tdd-small`)
 
