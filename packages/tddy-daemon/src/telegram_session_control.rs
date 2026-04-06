@@ -356,7 +356,7 @@ fn session_list_status_or_placeholders(session_dir: &Path) -> SessionListStatusD
 
 /// Extra recipes shown after **More recipes…** (compact `mr:` callbacks — see [`parse_recipe_mr_callback`]).
 /// Names must match `tddy-coder --recipe` / [`normalize_recipe_name_for_tddy_coder_cli`].
-pub const RECIPE_MORE_PAGE: &[&str] = &["tdd", "bugfix", "free-prompting", "grill-me"];
+pub const RECIPE_MORE_PAGE: &[&str] = &["tdd", "bugfix", "free-prompting", "grill-me", "merge-pr"];
 
 /// Default recipe on the first keyboard row; must be a valid `tddy-coder --recipe` value.
 pub const TELEGRAM_DEFAULT_RECIPE_CLI: &str = "tdd";

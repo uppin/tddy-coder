@@ -64,6 +64,11 @@
       "name": "changeset-workflow",
       "proto": "changeset_workflow.proto",
       "schema": "changeset-workflow.schema.json"
+    },
+    {
+      "name": "merge-pr-report",
+      "proto": "merge_pr_report.proto",
+      "schema": "merge-pr-report.schema.json"
     }
   ],
   "version": 1

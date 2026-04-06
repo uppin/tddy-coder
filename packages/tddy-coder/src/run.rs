@@ -455,8 +455,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, `grill-me`, `tdd-small`, `review`. Must match [`WorkflowRecipe::name`].
-    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me", "tdd-small", "review"])]
+    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, `grill-me`, `tdd-small`, `review`, `merge-pr`. Must match [`WorkflowRecipe::name`].
+    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me", "tdd-small", "review", "merge-pr"])]
     pub recipe: Option<String>,
 
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
@@ -601,8 +601,8 @@ pub struct DemoArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, `grill-me`, `tdd-small`, `review`.
-    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me", "tdd-small", "review"])]
+    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, `grill-me`, `tdd-small`, `review`, `merge-pr`.
+    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me", "tdd-small", "review", "merge-pr"])]
     pub recipe: Option<String>,
 }
 
