@@ -28,9 +28,6 @@ impl RunnerHooks for MergePrWorkflowHooks {
         task_id: &str,
         _context: &Context,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        eprintln!(
-            "{{\"tddy\":{{\"marker_id\":\"M002\",\"scope\":\"merge_pr::hooks::MergePrWorkflowHooks::before_task\",\"data\":{{\"task_id\":\"{task_id}\"}}}}}}"
-        );
         if matches!(task_id, TASK_SYNC_MAIN | TASK_FINALIZE) {
             log::debug!("[merge-pr hooks] before_task task_id={task_id}");
         }

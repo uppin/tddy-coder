@@ -10,7 +10,5 @@ pub struct MergePrGithubParams {
 
 /// RED skeleton: no HTTP yet.
 pub fn merge_open_pr_for_branch(_params: MergePrGithubParams) -> Result<String, String> {
-    let marker = r#"{"tddy":{"marker_id":"M004","scope":"merge_pr::github::merge_open_pr_for_branch","data":{}}}"#;
-    eprintln!("{marker}");
     Err("merge-pr RED skeleton: GitHub merge not implemented".to_string())
 }

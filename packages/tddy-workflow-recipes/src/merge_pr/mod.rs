@@ -40,8 +40,6 @@ impl WorkflowRecipe for MergePrRecipe {
     }
 
     fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
-        let marker = r#"{"tddy":{"marker_id":"M001","scope":"merge_pr::MergePrRecipe::build_graph","data":{}}}"#;
-        eprintln!("{marker}");
         log::info!("MergePrRecipe::build_graph: sync-main -> finalize -> end");
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
         let sync = Arc::new(BackendInvokeTask::from_recipe(
