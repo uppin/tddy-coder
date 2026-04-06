@@ -6,6 +6,7 @@ pub mod branch_worktree_intent;
 pub mod changeset;
 pub mod elapsed_format;
 pub mod error;
+pub mod feature_start_slash;
 pub mod log_backend;
 pub mod output;
 pub mod presenter;
@@ -44,6 +45,12 @@ pub use changeset::{
 };
 pub use elapsed_format::format_elapsed_compact;
 pub use error::{BackendError, ParseError, WorkflowError};
+pub use feature_start_slash::{
+    feature_slash_menu_start_command_labels,
+    next_session_recipe_cli_name_after_start_slash_structured_workflow_complete,
+    parse_feature_start_slash_line, remainder_after_start_slash_line,
+    DEFAULT_UNSPECIFIED_WORKFLOW_RECIPE_CLI_NAME, SHIPPED_WORKFLOW_RECIPE_CLI_NAMES,
+};
 pub use log_backend::{
     config_has_file_output, default_log_config, find_matching_policy, get_buffered_logs,
     init_tddy_logger, init_tddy_logger_legacy, matches_selector, redirect_debug_output,

@@ -416,6 +416,16 @@ impl FeatureInputBuffer {
         self.cursor = self.display().len();
         self.snap_cursor();
     }
+
+    /// After `/start-*` menu confirm: drop partial `/…`, insert literal (e.g. `/start-tdd`).
+    pub fn accept_slash_menu_literal(&mut self, literal: &str, trigger_flat: usize) {
+        self.truncate_at_slash_trigger(trigger_flat);
+        self.chunks
+            .push(FeatureInputChunk::Text(literal.to_string()));
+        self.merge_adjacent_text();
+        self.cursor = self.display().len();
+        self.snap_cursor();
+    }
 }
 
 fn prev_char_boundary(s: &str, idx: usize) -> usize {

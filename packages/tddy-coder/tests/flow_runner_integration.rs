@@ -31,6 +31,8 @@ fn run_plan_via_flow_runner_produces_session_directory() {
         .args([
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "plan",
             "--prompt",

@@ -2,6 +2,7 @@
 
 pub mod approval_policy;
 pub mod bugfix;
+pub mod feature_start_slash;
 pub mod free_prompting;
 pub mod grill_me;
 pub mod merge_pr;
@@ -16,6 +17,11 @@ pub mod tdd_small;
 pub mod writer;
 
 pub use bugfix::BugfixRecipe;
+pub use feature_start_slash::{
+    feature_slash_menu_start_command_labels,
+    next_session_recipe_cli_name_after_start_slash_structured_workflow_complete,
+    parse_feature_start_slash_line,
+};
 pub use free_prompting::FreePromptingRecipe;
 pub use grill_me::GrillMeRecipe;
 pub use merge_pr::MergePrRecipe;
