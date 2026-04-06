@@ -2,6 +2,7 @@
 
 pub mod agent_skills;
 pub mod backend;
+pub mod branch_worktree_intent;
 pub mod changeset;
 pub mod elapsed_format;
 pub mod error;
@@ -37,8 +38,8 @@ pub use backend::{
 pub use changeset::{
     append_session_and_update_state, get_session_for_tag, merge_persisted_workflow_into_context,
     read_changeset, resolve_agent_from_changeset, resolve_model, start_goal_for_session_continue,
-    update_state, write_changeset, write_changeset_atomic, Changeset, ChangesetState,
-    ChangesetWorkflow, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
+    update_state, write_changeset, write_changeset_atomic, BranchWorktreeIntent, Changeset,
+    ChangesetState, ChangesetWorkflow, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
     QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use elapsed_format::format_elapsed_compact;

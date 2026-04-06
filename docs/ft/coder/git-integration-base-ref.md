@@ -38,6 +38,7 @@ Integration base strings must match `origin/<one segment>` with no shell metacha
 - [Project concept](../daemon/project-concept.md) — projects registry and session `project_id`.
 - **tddy-core** `worktree` module — `fetch_integration_base`, `setup_worktree_for_session_with_integration_base`, `resolve_default_integration_base_ref`, `setup_worktree_for_session`.
 - **tddy-daemon** `project_storage` — `effective_integration_base_ref_for_project`, `add_project`.
+- **Changeset workflow** — When **`changeset.yaml`** **`workflow`** includes **`branch_worktree_intent`** (**`new_branch_from_base`** or **`work_on_selected_branch`**), worktree creation follows that intent together with **`selected_integration_base_ref`**, **`new_branch_name`**, and **`selected_branch_to_work_on`** as validated by the **`changeset-workflow`** schema. See [Workflow JSON schemas — Changeset workflow](workflow-json-schemas.md#changeset-workflow-persist-changeset-workflow) and [Workflow recipes — TDD](workflow-recipes.md#developer-reference-shipped-recipes).
 
 ## Chain PR optional base (multi-segment `origin/...`)
 

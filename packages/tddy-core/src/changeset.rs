@@ -151,6 +151,24 @@ pub struct TestInfrastructure {
     pub conventions: String,
 }
 
+/// Branch vs worktree intent after base selection (persisted under `workflow` in `changeset.yaml`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BranchWorktreeIntent {
+    NewBranchFromBase,
+    WorkOnSelectedBranch,
+}
+
+impl BranchWorktreeIntent {
+    /// Stable string for [`Context`] keys and RPC (matches serde `snake_case`).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NewBranchFromBase => "new_branch_from_base",
+            Self::WorkOnSelectedBranch => "work_on_selected_branch",
+        }
+    }
+}
+
 /// Workflow routing flags and demo options persisted in `changeset.yaml` (PRD: graph predicates, resume).
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct ChangesetWorkflow {
@@ -162,6 +180,37 @@ pub struct ChangesetWorkflow {
     /// Schema id for `tddy-tools` validation when writing this block (`goals.json` / JSON Schema).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_schema_id: Option<String>,
+    /// Explicit branch/worktree mode for setup and post-green routing (PRD).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_worktree_intent: Option<BranchWorktreeIntent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_integration_base_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_branch_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_branch_to_work_on: Option<String>,
+}
+
+impl Changeset {
+    /// Directory basename under `.worktrees/<basename>/` (matches [`crate::worktree`] conventions).
+    pub fn worktree_directory_basename(&self) -> Option<String> {
+        self.worktree_suggestion.clone().or_else(|| {
+            self.name
+                .as_ref()
+                .map(|n| slugify_changeset_segment_for_worktree(n))
+        })
+    }
+}
+
+fn slugify_changeset_segment_for_worktree(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 impl Default for Changeset {
@@ -296,6 +345,7 @@ pub fn merge_persisted_workflow_into_context(
             id.len()
         );
     }
+    crate::branch_worktree_intent::merge_branch_worktree_intent_into_context(wf, context);
     Ok(())
 }
 
