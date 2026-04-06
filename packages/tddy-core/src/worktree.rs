@@ -5,7 +5,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::changeset::{read_changeset, write_changeset};
+use crate::branch_worktree_intent;
+use crate::changeset::{read_changeset, write_changeset, BranchWorktreeIntent};
 
 /// Default remote-tracking ref used for integration worktrees when a project does not specify
 /// `main_branch_ref` in the daemon project registry (legacy YAML rows).
@@ -127,6 +128,25 @@ fn fetch_chain_pr_integration_base(
     Ok(())
 }
 
+/// Fetches a remote ref whether it is a single-segment integration base or a multi-segment chain ref.
+fn fetch_ref_for_workflow(repo_root: &Path, start_ref: &str) -> Result<(), String> {
+    log::debug!(
+        "fetch_ref_for_workflow: repo={} ref={}",
+        repo_root.display(),
+        start_ref
+    );
+    if validate_integration_base_ref(start_ref).is_ok() {
+        fetch_integration_base(repo_root, start_ref)
+    } else if validate_chain_pr_integration_base_ref(start_ref).is_ok() {
+        fetch_chain_pr_integration_base(repo_root, start_ref)
+    } else {
+        Err(format!(
+            "invalid workflow integration base ref for fetch: {}",
+            start_ref
+        ))
+    }
+}
+
 /// Path to the worktrees directory under repo root.
 pub fn worktree_dir(repo_root: &Path) -> PathBuf {
     repo_root.join(".worktrees")
@@ -180,13 +200,20 @@ pub fn create_worktree(
     branch: &str,
     start_point: Option<&str>,
 ) -> Result<PathBuf, String> {
+    log::debug!(
+        "create_worktree: repo={} name={} branch={} start_point={:?}",
+        repo_root.display(),
+        name,
+        branch,
+        start_point
+    );
     let worktrees = worktree_dir(repo_root);
     std::fs::create_dir_all(&worktrees).map_err(|e| format!("create worktrees dir: {}", e))?;
 
     let worktree_path = worktrees.join(name);
     if worktree_path.exists() {
         return Err(format!(
-            "worktree already exists: {}",
+            "worktree path already exists at {} — reuse the existing worktree or confirm before proceeding",
             worktree_path.display()
         ));
     }
@@ -211,6 +238,111 @@ pub fn create_worktree(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git worktree add failed: {}", stderr));
+    }
+
+    Ok(worktree_path.canonicalize().unwrap_or(worktree_path))
+}
+
+/// Add a linked worktree at `.worktrees/<name>` checked out to an **existing** local branch.
+///
+/// Uses `git worktree add <path> <branch>` when the branch is not already checked out in another
+/// worktree. If Git refuses because the branch is in use (common when the primary repo already
+/// has `main` checked out), falls back to `worktree add --detach` at the branch tip, then
+/// `git switch --ignore-other-worktrees <branch>` in the new worktree so `branch --show-current`
+/// matches the selected branch (PRD: work on selected branch).
+///
+/// When the path already exists, the error instructs the user to confirm reuse (PRD).
+pub fn add_worktree_for_existing_branch(
+    repo_root: &Path,
+    name: &str,
+    branch: &str,
+) -> Result<PathBuf, String> {
+    log::info!(
+        "add_worktree_for_existing_branch: repo={} worktree_name={} branch={}",
+        repo_root.display(),
+        name,
+        branch
+    );
+    let worktrees = worktree_dir(repo_root);
+    std::fs::create_dir_all(&worktrees).map_err(|e| format!("create worktrees dir: {}", e))?;
+    let worktree_path = worktrees.join(name);
+    if worktree_path.exists() {
+        return Err(format!(
+            "worktree path already exists at {} — reuse the existing worktree or confirm before proceeding",
+            worktree_path.display()
+        ));
+    }
+
+    let try_direct = Command::new("git")
+        .args(["worktree", "add", worktree_path.to_str().unwrap(), branch])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git worktree add: {}", e))?;
+
+    if try_direct.status.success() {
+        return Ok(worktree_path.canonicalize().unwrap_or(worktree_path));
+    }
+
+    let stderr = String::from_utf8_lossy(&try_direct.stderr);
+    log::debug!(
+        "add_worktree_for_existing_branch: direct add failed stderr={}",
+        stderr.trim()
+    );
+
+    let branch_in_use = stderr.contains("already used")
+        || stderr.contains("is already checked out")
+        || stderr.to_lowercase().contains("already");
+
+    if !branch_in_use {
+        return Err(format!("git worktree add failed: {}", stderr));
+    }
+
+    log::info!(
+        "add_worktree_for_existing_branch: using detach+switch fallback for branch {}",
+        branch
+    );
+
+    let rev_out = Command::new("git")
+        .args(["rev-parse", "--verify", &format!("refs/heads/{branch}")])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git rev-parse: {}", e))?;
+    if !rev_out.status.success() {
+        let rev_stderr = String::from_utf8_lossy(&rev_out.stderr);
+        return Err(format!(
+            "git rev-parse refs/heads/{branch} failed: {}",
+            rev_stderr
+        ));
+    }
+    let rev = String::from_utf8_lossy(&rev_out.stdout).trim().to_string();
+
+    let detach = Command::new("git")
+        .args([
+            "worktree",
+            "add",
+            "--detach",
+            worktree_path.to_str().unwrap(),
+            &rev,
+        ])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git worktree add --detach: {}", e))?;
+    if !detach.status.success() {
+        let e = String::from_utf8_lossy(&detach.stderr);
+        return Err(format!("git worktree add --detach failed: {}", e));
+    }
+
+    let sw = Command::new("git")
+        .args(["switch", "--ignore-other-worktrees", branch])
+        .current_dir(&worktree_path)
+        .output()
+        .map_err(|e| format!("git switch: {}", e))?;
+    if !sw.status.success() {
+        let e = String::from_utf8_lossy(&sw.stderr);
+        return Err(format!(
+            "git switch --ignore-other-worktrees {branch} failed: {}",
+            e
+        ));
     }
 
     Ok(worktree_path.canonicalize().unwrap_or(worktree_path))
@@ -261,6 +393,73 @@ pub fn setup_worktree_for_session_with_integration_base(
     );
     let mut cs = read_changeset(session_dir).map_err(|e| e.to_string())?;
 
+    branch_worktree_intent::validate_workflow_branch_intent(&cs)?;
+
+    if let Some(ref wf) = cs.workflow {
+        if let Some(intent) = wf.branch_worktree_intent {
+            match intent {
+                BranchWorktreeIntent::NewBranchFromBase => {
+                    let new_name = wf.new_branch_name.clone().ok_or_else(|| {
+                        "workflow.new_branch_name required for new_branch_from_base".to_string()
+                    })?;
+                    let start = wf
+                        .selected_integration_base_ref
+                        .as_deref()
+                        .unwrap_or(integration_base_ref);
+                    log::info!(
+                        "setup_worktree_for_session_with_integration_base: intent=new_branch_from_base new_branch={} start_ref={}",
+                        new_name,
+                        start
+                    );
+                    fetch_ref_for_workflow(repo_root, start)?;
+                    let worktree_name = cs
+                        .worktree_directory_basename()
+                        .ok_or_else(|| "no worktree suggestion or name for worktree".to_string())?;
+                    let (worktree_path, actual_branch) = create_worktree_with_retry(
+                        repo_root,
+                        &worktree_name,
+                        &new_name,
+                        Some(start),
+                    )?;
+                    cs.worktree = Some(worktree_path.to_string_lossy().to_string());
+                    cs.branch = Some(actual_branch);
+                    cs.repo_path = Some(worktree_path.to_string_lossy().to_string());
+                    write_changeset(session_dir, &cs).map_err(|e| e.to_string())?;
+                    log::debug!(
+                        "setup_worktree_for_session_with_integration_base: worktree_path={}",
+                        worktree_path.display()
+                    );
+                    return Ok(worktree_path);
+                }
+                BranchWorktreeIntent::WorkOnSelectedBranch => {
+                    let branch_name = wf.selected_branch_to_work_on.clone().ok_or_else(|| {
+                        "workflow.selected_branch_to_work_on required for work_on_selected_branch"
+                            .to_string()
+                    })?;
+                    log::info!(
+                        "setup_worktree_for_session_with_integration_base: intent=work_on_selected_branch branch={}",
+                        branch_name
+                    );
+                    fetch_integration_base(repo_root, integration_base_ref)?;
+                    let worktree_name = cs
+                        .worktree_directory_basename()
+                        .ok_or_else(|| "no worktree suggestion or name for worktree".to_string())?;
+                    let worktree_path =
+                        add_worktree_for_existing_branch(repo_root, &worktree_name, &branch_name)?;
+                    cs.worktree = Some(worktree_path.to_string_lossy().to_string());
+                    cs.branch = Some(branch_name.clone());
+                    cs.repo_path = Some(worktree_path.to_string_lossy().to_string());
+                    write_changeset(session_dir, &cs).map_err(|e| e.to_string())?;
+                    log::debug!(
+                        "setup_worktree_for_session_with_integration_base: worktree_path={}",
+                        worktree_path.display()
+                    );
+                    return Ok(worktree_path);
+                }
+            }
+        }
+    }
+
     let branch = cs
         .branch_suggestion
         .clone()
@@ -273,10 +472,8 @@ pub fn setup_worktree_for_session_with_integration_base(
         .ok_or("no branch suggestion or name for worktree")?;
 
     let worktree_name = cs
-        .worktree_suggestion
-        .clone()
-        .or_else(|| cs.name.as_ref().map(|n| slugify_for_worktree(n)))
-        .ok_or("no worktree suggestion or name for worktree")?;
+        .worktree_directory_basename()
+        .ok_or_else(|| "no worktree suggestion or name for worktree".to_string())?;
 
     fetch_integration_base(repo_root, integration_base_ref)?;
 
@@ -418,6 +615,83 @@ pub fn setup_worktree_for_session_with_optional_chain_base(
 
     let mut cs = read_changeset(session_dir).map_err(|e| e.to_string())?;
 
+    branch_worktree_intent::validate_workflow_branch_intent(&cs)?;
+
+    if let Some(ref wf) = cs.workflow {
+        if let Some(intent) = wf.branch_worktree_intent {
+            match intent {
+                BranchWorktreeIntent::NewBranchFromBase => {
+                    let new_name = wf.new_branch_name.clone().ok_or_else(|| {
+                        "workflow.new_branch_name required for new_branch_from_base".to_string()
+                    })?;
+                    let start = wf
+                        .selected_integration_base_ref
+                        .as_deref()
+                        .unwrap_or(integration_base_ref.as_str());
+                    log::info!(
+                        "setup_worktree_for_session_with_optional_chain_base: intent=new_branch_from_base new_branch={} start_ref={}",
+                        new_name,
+                        start
+                    );
+                    fetch_ref_for_workflow(repo_root, start)?;
+                    let worktree_name = cs
+                        .worktree_directory_basename()
+                        .ok_or_else(|| "no worktree suggestion or name for worktree".to_string())?;
+                    let (worktree_path, actual_branch) = create_worktree_with_retry(
+                        repo_root,
+                        &worktree_name,
+                        &new_name,
+                        Some(start),
+                    )?;
+                    cs.worktree = Some(worktree_path.to_string_lossy().to_string());
+                    cs.branch = Some(actual_branch);
+                    cs.repo_path = Some(worktree_path.to_string_lossy().to_string());
+                    cs.effective_worktree_integration_base_ref = Some(integration_base_ref.clone());
+                    cs.worktree_integration_base_ref = user_chain_ref.map(|s| s.to_string());
+                    write_changeset(session_dir, &cs).map_err(|e| e.to_string())?;
+                    log::debug!(
+                        "setup_worktree_for_session_with_optional_chain_base: worktree_path={} effective_base={}",
+                        worktree_path.display(),
+                        integration_base_ref
+                    );
+                    return Ok(worktree_path);
+                }
+                BranchWorktreeIntent::WorkOnSelectedBranch => {
+                    let branch_name = wf.selected_branch_to_work_on.clone().ok_or_else(|| {
+                        "workflow.selected_branch_to_work_on required for work_on_selected_branch"
+                            .to_string()
+                    })?;
+                    log::info!(
+                        "setup_worktree_for_session_with_optional_chain_base: intent=work_on_selected_branch branch={}",
+                        branch_name
+                    );
+                    if user_chain_ref.is_some() {
+                        fetch_chain_pr_integration_base(repo_root, &integration_base_ref)?;
+                    } else {
+                        fetch_integration_base(repo_root, &integration_base_ref)?;
+                    }
+                    let worktree_name = cs
+                        .worktree_directory_basename()
+                        .ok_or_else(|| "no worktree suggestion or name for worktree".to_string())?;
+                    let worktree_path =
+                        add_worktree_for_existing_branch(repo_root, &worktree_name, &branch_name)?;
+                    cs.worktree = Some(worktree_path.to_string_lossy().to_string());
+                    cs.branch = Some(branch_name.clone());
+                    cs.repo_path = Some(worktree_path.to_string_lossy().to_string());
+                    cs.effective_worktree_integration_base_ref = Some(integration_base_ref.clone());
+                    cs.worktree_integration_base_ref = user_chain_ref.map(|s| s.to_string());
+                    write_changeset(session_dir, &cs).map_err(|e| e.to_string())?;
+                    log::debug!(
+                        "setup_worktree_for_session_with_optional_chain_base: worktree_path={} effective_base={}",
+                        worktree_path.display(),
+                        integration_base_ref
+                    );
+                    return Ok(worktree_path);
+                }
+            }
+        }
+    }
+
     let branch = cs
         .branch_suggestion
         .clone()
@@ -430,10 +704,8 @@ pub fn setup_worktree_for_session_with_optional_chain_base(
         .ok_or("no branch suggestion or name for worktree")?;
 
     let worktree_name = cs
-        .worktree_suggestion
-        .clone()
-        .or_else(|| cs.name.as_ref().map(|n| slugify_for_worktree(n)))
-        .ok_or("no worktree suggestion or name for worktree")?;
+        .worktree_directory_basename()
+        .ok_or_else(|| "no worktree suggestion or name for worktree".to_string())?;
 
     if user_chain_ref.is_some() {
         fetch_chain_pr_integration_base(repo_root, &integration_base_ref)?;
@@ -537,10 +809,6 @@ fn slugify_for_branch(name: &str) -> String {
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("-")
-}
-
-fn slugify_for_worktree(name: &str) -> String {
-    slugify_for_branch(name)
 }
 
 /// Lists remote-tracking branches under `origin/`, most recent commit first, up to `limit` entries.

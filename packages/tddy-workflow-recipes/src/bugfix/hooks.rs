@@ -8,6 +8,7 @@ use super::analyze::{
     apply_analyze_submit_to_changeset, reproduce_system_prompt, seed_bugfix_changeset_if_missing,
     system_prompt,
 };
+use crate::tdd::hooks_common;
 use tddy_core::backend::AgentOutputSink;
 use tddy_core::changeset::{read_changeset, update_state, write_changeset};
 use tddy_core::presenter::WorkflowEvent;
@@ -107,6 +108,14 @@ impl RunnerHooks for BugfixWorkflowHooks {
                 context.set_sync("system_prompt", reproduce_system_prompt());
                 if let Some(ref session_dir) = context.get_sync::<PathBuf>("session_dir") {
                     merge_analyze_summary_into_prompt(context, session_dir.as_path());
+                    // Align with TDD `acceptance-tests`: create session worktree after triage names exist
+                    // in `changeset.yaml` (from `analyze` submit), so reproduce runs against isolated tree.
+                    hooks_common::ensure_worktree_for_session(
+                        session_dir.as_path(),
+                        context,
+                        self.event_tx.as_ref(),
+                        "[bugfix hooks] reproduce",
+                    )?;
                 }
             }
             _ => {}
