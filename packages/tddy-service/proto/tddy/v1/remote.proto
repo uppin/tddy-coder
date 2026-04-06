@@ -197,6 +197,8 @@ message ClarificationQuestionProto {
   string question = 2;
   repeated QuestionOptionProto options = 3;
   bool multi_select = 4;
+  // When true, Telegram shows an "Other" control; the user may send a custom answer (see daemon).
+  bool allow_other = 5;
 }
 
 message QuestionOptionProto {

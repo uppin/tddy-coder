@@ -263,6 +263,15 @@ pub fn parse_elicitation_select_callback(callback_data: &str) -> Option<(String,
     Some((sid.to_string(), idx))
 }
 
+/// `eli:o:<session_id>` — user chose "Other"; next plain chat message is the custom answer.
+pub fn parse_elicitation_other_callback(callback_data: &str) -> Option<String> {
+    let sid = callback_data.strip_prefix("eli:o:")?.trim();
+    if sid.is_empty() {
+        return None;
+    }
+    Some(sid.to_string())
+}
+
 /// Free-text answer for clarification / text-input mode: `/answer-text <session> <text…>`
 pub const ANSWER_TEXT_CMD: &str = "/answer-text";
 
@@ -615,6 +624,8 @@ pub struct TelegramWorkflowSpawn {
     pub child_grpc_by_session: Arc<Mutex<HashMap<String, u16>>>,
     /// Same cache as [`crate::telegram_notifier::TelegramSessionWatcher`] — full strings for select confirmations.
     pub elicitation_select_options: ElicitationSelectOptionsCache,
+    /// Chat id → session id (full) when the user tapped "Other" and we await a free-text follow-up message.
+    pub pending_elicitation_other: Arc<Mutex<HashMap<i64, String>>>,
 }
 
 impl TelegramWorkflowSpawn {
@@ -1102,6 +1113,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             .workflow_spawn
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?;
+        if let Ok(mut g) = deps.pending_elicitation_other.lock() {
+            g.remove(&chat_id);
+        }
         let (session_id, port) = {
             let map = deps
                 .child_grpc_by_session
@@ -1129,6 +1143,95 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         Ok(())
     }
 
+    /// User tapped **Other** on a single-select clarification keyboard — next plain message is the answer.
+    pub async fn handle_elicitation_other(
+        &self,
+        chat_id: i64,
+        session_key: &str,
+    ) -> anyhow::Result<()> {
+        self.ensure_authorized(chat_id)?;
+        let deps = self
+            .workflow_spawn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?;
+        let (_session_id, _port) = {
+            let map = deps
+                .child_grpc_by_session
+                .lock()
+                .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
+            resolve_child_grpc_port(&map, session_key)?
+        };
+        deps.pending_elicitation_other
+            .lock()
+            .map_err(|e| anyhow::anyhow!("pending elicitation other lock: {e}"))?
+            .insert(chat_id, session_key.to_string());
+        self.sender
+            .send_message(
+                chat_id,
+                "Send your custom answer as your next message in this chat.",
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// If this chat is awaiting an "Other" free-text answer, consume `body` and forward to the presenter.
+    ///
+    /// Returns `Ok(true)` when the message was handled (including presenter errors surfaced to the user).
+    pub async fn handle_elicitation_other_followup_plain_message(
+        &self,
+        chat_id: i64,
+        body: &str,
+    ) -> anyhow::Result<bool> {
+        if !self.is_authorized(chat_id) {
+            return Ok(false);
+        }
+        let Some(ref deps) = self.workflow_spawn else {
+            return Ok(false);
+        };
+        let session_key = {
+            let mut g = deps
+                .pending_elicitation_other
+                .lock()
+                .map_err(|e| anyhow::anyhow!("pending elicitation other lock: {e}"))?;
+            match g.remove(&chat_id) {
+                Some(s) => s,
+                None => return Ok(false),
+            }
+        };
+        let trimmed = body.trim();
+        if trimmed.is_empty() {
+            self.sender
+                .send_message(
+                    chat_id,
+                    "That message was empty — send your custom answer as text, or pick an option on the question.",
+                )
+                .await?;
+            deps.pending_elicitation_other
+                .lock()
+                .map_err(|e| anyhow::anyhow!("pending elicitation other lock: {e}"))?
+                .insert(chat_id, session_key);
+            return Ok(true);
+        }
+        let (_session_id, port) = {
+            let map = deps
+                .child_grpc_by_session
+                .lock()
+                .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
+            resolve_child_grpc_port(&map, &session_key)?
+        };
+        if let Err(e) =
+            presenter_intent_client::answer_clarification_text_localhost(port, trimmed).await
+        {
+            if let Ok(mut g) = deps.pending_elicitation_other.lock() {
+                g.insert(chat_id, session_key);
+            }
+            return Err(e);
+        }
+        let text = format!("You selected:\n{trimmed}");
+        self.sender.send_message(chat_id, &text).await?;
+        Ok(true)
+    }
+
     /// Free-text clarification ([`PresenterIntent::AnswerClarificationText`]).
     pub async fn handle_answer_text_command(
         &self,
@@ -1141,6 +1244,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             .workflow_spawn
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?;
+        if let Ok(mut g) = deps.pending_elicitation_other.lock() {
+            g.remove(&chat_id);
+        }
         let (_session_id, port) = {
             let map = deps
                 .child_grpc_by_session
@@ -1584,7 +1690,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         })
     }
 
-    /// Unauthorized chat must not create sessions or open control streams.
+    /// Unauthorized chat: no session creation and no outbound message.
+    ///
+    /// The inbound [`crate::telegram_bot`] path does not call this for disallowed chats (silent
+    /// ignore for multi-daemon deployments). Kept for tests and any caller that needs the same
+    /// contract without sending Telegram noise to unrelated channels.
     pub async fn handle_start_workflow_unauthorized(
         &self,
         cmd: StartWorkflowCommand,
@@ -1602,13 +1712,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             return Ok(None);
         }
 
-        let text = "Access denied: this chat is not authorized to control workflows.";
-        self.sender.send_message(cmd.chat_id, text).await?;
-        Ok(Some(CapturedTelegramMessage {
-            chat_id: cmd.chat_id,
-            text: text.to_string(),
-            inline_keyboard: Vec::new(),
-        }))
+        log::debug!(
+            target: "tddy_daemon::telegram_session_control",
+            "handle_start_workflow_unauthorized: ignoring chat not in allowlist"
+        );
+        Ok(None)
     }
 }
 
@@ -1729,6 +1837,17 @@ mod unit_tests {
             Some((sid.to_string(), 2))
         );
         assert_eq!(parse_elicitation_select_callback("eli:s:bad"), None);
+    }
+
+    #[test]
+    fn parse_elicitation_other_callback_round_trip() {
+        let sid = "018f1234-5678-7abc-8def-123456789abc";
+        assert_eq!(
+            parse_elicitation_other_callback(&format!("eli:o:{sid}")),
+            Some(sid.to_string())
+        );
+        assert_eq!(parse_elicitation_other_callback("eli:o:"), None);
+        assert_eq!(parse_elicitation_other_callback("eli:s:x:1"), None);
     }
 
     #[test]
