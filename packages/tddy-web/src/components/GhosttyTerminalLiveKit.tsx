@@ -8,10 +8,12 @@ import {
 } from "tddy-livekit-web";
 import { create } from "@bufbuild/protobuf";
 import { isCancelledLiveKitConnectionError } from "../lib/liveKitConnectionErrors";
+import { tddyDevDebug } from "../lib/tddyDevLog";
 import { shouldShowVisibleLiveKitStatusStrip } from "../lib/liveKitStatusPresentation";
 import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
+import { TerminalConnectionStatusBar } from "./connection/TerminalConnectionStatusBar";
 
 /** Human-readable description of a terminal input byte sequence. */
 function describeKey(bytes: Uint8Array): string {
@@ -83,8 +85,12 @@ export interface GhosttyTerminalLiveKitProps {
   minFontSize?: number;
   maxFontSize?: number;
   /**
-   * `floating` — status dot + menu over the terminal (default when `connectionOverlay` is set).
-   * `none` — do not render floating chrome (e.g. parent shows the same controls in a pane header).
+   * Maps to `ConnectionTerminalChrome` `chromeLayout="statusBar"` inside `GhosttyTerminalLiveKit`:
+   *
+   * | `connectionChromePlacement` | Effect on status bar |
+   * |------------------------------|----------------------|
+   * | `"floating"` (default)       | Full bar: build id, dot, fullscreen, optional mobile keyboard slot |
+   * | `"none"`                     | Compact bar: dot + menu (+ mobile keyboard); no build id / fullscreen (overlay panes) |
    */
   connectionChromePlacement?: "floating" | "none";
   /** Fired when LiveKit connection status changes (for header chrome when floating chrome is suppressed). */
@@ -220,11 +226,11 @@ export function GhosttyTerminalLiveKit({
 
         room.on(RoomEvent.Connected, () => {
           log("lifecycle: RoomEvent.Connected");
-          console.log("[LiveKit] RoomEvent.Connected");
+          log("livekit: RoomEvent.Connected");
         });
         room.on(RoomEvent.Disconnected, async (reason) => {
           log("lifecycle: RoomEvent.Disconnected", reason);
-          console.log("[LiveKit] RoomEvent.Disconnected", reason);
+          log("livekit: RoomEvent.Disconnected", reason);
           if (cancelled) return;
           if (getToken && latestTokenRef.current) {
             try {
@@ -246,17 +252,17 @@ export function GhosttyTerminalLiveKit({
           setStatus("error");
         });
         room.on(RoomEvent.ConnectionStateChanged, (state) =>
-          console.log("[LiveKit] ConnectionStateChanged", state)
+          log("livekit: ConnectionStateChanged", state)
         );
         room.on(RoomEvent.ParticipantConnected, (participant) =>
-          console.log("[LiveKit] ParticipantConnected", participant.identity)
+          log("livekit: ParticipantConnected", participant.identity)
         );
         room.on(RoomEvent.ParticipantDisconnected, (participant) => {
-          console.log("[LiveKit] ParticipantDisconnected", participant.identity);
+          log("livekit: ParticipantDisconnected", participant.identity);
           if (participant.identity !== serverIdentity) return;
           if (cancelled) return;
-          console.warn(
-            "[GhosttyTerminalLiveKit] server participant disconnected — terminal session marked inactive",
+          log(
+            "livekit: server participant disconnected — terminal session marked inactive",
             { serverIdentity, participantIdentity: participant.identity },
           );
           coderAvailableRef.current = false;
@@ -275,15 +281,15 @@ export function GhosttyTerminalLiveKit({
             (p) => p.identity === serverIdentity
           );
 
-        console.log(
-          "[LiveKit] Waiting for server participant",
-          { lookingFor: serverIdentity, currentParticipants: participantIdentities() }
-        );
+        log("livekit: Waiting for server participant", {
+          lookingFor: serverIdentity,
+          currentParticipants: participantIdentities(),
+        });
 
         await new Promise<void>((resolve) => {
           if (hasServer()) return resolve();
           const handler = (participant: { identity: string }) => {
-            console.log("[LiveKit] ParticipantConnected", participant.identity, {
+            log("livekit: ParticipantConnected (wait loop)", participant.identity, {
               lookingFor: serverIdentity,
               currentParticipants: participantIdentities(),
             });
@@ -427,27 +433,14 @@ export function GhosttyTerminalLiveKit({
     }
   }, [onRegisterFocus]);
 
-  const mobileKeyboardOverlayStyle: React.CSSProperties = {
-    position: "absolute",
-    bottom: 16,
-    left: "50%",
-    transform: "translateX(-50%)",
-    padding: "10px 20px",
-    fontSize: 14,
-    cursor: "pointer",
-    backgroundColor: "rgba(0,0,0,0.7)",
-    color: "#fff",
-    border: "1px solid #555",
-    borderRadius: 8,
-    zIndex: 10,
-  };
-
-  /** Single path to the LiveKit input stream (same queue as Ghostty `onData`). Always logs `[terminal→server]` like keyboard. */
+  /** Single path to the LiveKit input stream (same queue as Ghostty `onData`). */
   const enqueueTerminalInput = (encoded: Uint8Array) => {
     if (!coderAvailableRef.current) return;
     inputQueueRef.current.push(encoded);
-    const keyName = describeKey(encoded);
-    console.log("[terminal→server]", keyName, `(${encoded.length} bytes)`, Array.from(encoded));
+    if (debugLogging) {
+      const keyName = describeKey(encoded);
+      console.log("[terminal→server]", keyName, `(${encoded.length} bytes)`, Array.from(encoded));
+    }
   };
 
   const pushInput = (data: string | Uint8Array) => {
@@ -516,6 +509,36 @@ export function GhosttyTerminalLiveKit({
     status,
   });
 
+  const statusBarCompact = connectionChromePlacement === "none";
+
+  const mobileKeyboardAffordance = showMobileKeyboard ? (
+    <label
+      data-testid="mobile-keyboard-button"
+      className="relative inline-flex shrink-0 cursor-pointer items-center rounded border border-input bg-background px-3 py-1 text-xs text-foreground"
+    >
+      <input
+        type="text"
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        aria-label="Open keyboard for terminal input"
+        className="absolute inset-0 h-full w-full opacity-0"
+        style={{ margin: 0, border: "none", fontSize: 1 }}
+        onKeyDown={handleMobileKeyDown}
+        onInput={handleMobileInput}
+      />
+      <span className="pointer-events-none">Keyboard</span>
+    </label>
+  ) : null;
+
+  tddyDevDebug("[GhosttyTerminalLiveKit] render chrome", {
+    hasConnectionOverlay: !!connectionOverlay,
+    statusBarCompact,
+    showMobileKeyboard,
+    status,
+  });
+
   return (
     <div
       style={{
@@ -534,6 +557,25 @@ export function GhosttyTerminalLiveKit({
       ) : (
         <div data-testid="livekit-status">{status}</div>
       )}
+      {connectionOverlay ? (
+        <TerminalConnectionStatusBar className="border-b border-border bg-muted">
+          <ConnectionTerminalChrome
+            chromeLayout="statusBar"
+            overlayStatus={status}
+            buildId={connectionOverlay.buildId}
+            onDisconnect={connectionOverlay.onDisconnect}
+            onTerminate={connectionOverlay.onTerminate}
+            fullscreenTargetRef={fullscreenTargetRef}
+            statusBarShowFullscreen={!statusBarCompact}
+            statusBarShowBuildId={!statusBarCompact}
+            statusBarEndSlot={mobileKeyboardAffordance}
+          />
+        </TerminalConnectionStatusBar>
+      ) : showMobileKeyboard ? (
+        <TerminalConnectionStatusBar className="border-b border-border bg-muted">
+          <div className="flex w-full justify-end px-2 py-1">{mobileKeyboardAffordance}</div>
+        </TerminalConnectionStatusBar>
+      ) : null}
       <div
         ref={internalFullscreenTargetRef}
         style={{ flex: 1, minHeight: 0, minWidth: 0, width: "100%", position: "relative" }}
@@ -625,47 +667,9 @@ export function GhosttyTerminalLiveKit({
             }}
           />
         )}
-        {connectionOverlay && connectionChromePlacement !== "none" && (
-          <ConnectionTerminalChrome
-            overlayStatus={status}
-            buildId={connectionOverlay.buildId}
-            onDisconnect={connectionOverlay.onDisconnect}
-            onTerminate={connectionOverlay.onTerminate}
-            fullscreenTargetRef={fullscreenTargetRef}
-          />
-        )}
       </div>
       {firstOutputReceived && (
         <div data-testid="first-output-received" style={{ display: "none" }} aria-hidden />
-      )}
-      {showMobileKeyboard && (
-        <label
-          data-testid="mobile-keyboard-button"
-          style={mobileKeyboardOverlayStyle}
-        >
-          <input
-            type="text"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            aria-label="Open keyboard for terminal input"
-            style={{
-              position: "absolute",
-              inset: 0,
-              opacity: 0,
-              width: "100%",
-              height: "100%",
-              margin: 0,
-              padding: 0,
-              border: "none",
-              fontSize: 1,
-            }}
-            onKeyDown={handleMobileKeyDown}
-            onInput={handleMobileInput}
-          />
-          Keyboard
-        </label>
       )}
       {showBufferTextForTest && (
         <>

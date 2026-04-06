@@ -4,8 +4,10 @@ import {
   isTargetInActiveFullscreen,
   requestFullscreenForConnectedTerminal,
 } from "../../lib/browserFullscreen";
+import { tddyDevDebug } from "../../lib/tddyDevLog";
 import { confirmRemoteSessionTermination } from "../../lib/remoteTerminateConfirm";
 import { dataConnectionStatusValue } from "./connectionChromeStatus";
+import { CONNECTION_TERMINAL_DOT_STYLES } from "./connectionTerminalChromeDotStyles";
 
 const TERMINATE_CONFIRM_COPY =
   "This will stop the remote session and end the process on the host. Continue?";
@@ -35,13 +37,48 @@ const MENU_BTN: React.CSSProperties = {
   fontSize: 14,
 };
 
-function dotClassForStatus(overlayStatus: "connecting" | "connected" | "error"): string {
-  if (overlayStatus === "connecting") return "tddy-connection-dot-inner tddy-connection-dot--connecting";
-  if (overlayStatus === "connected") return "tddy-connection-dot-inner tddy-connection-dot--connected";
-  return "tddy-connection-dot-inner tddy-connection-dot--error";
+const MENU_DROPDOWN_BELOW: React.CSSProperties = {
+  position: "absolute",
+  top: "100%",
+  right: 0,
+  marginTop: 4,
+  zIndex: 200,
+  backgroundColor: "rgba(0,0,0,0.92)",
+  border: "1px solid #555",
+  borderRadius: 4,
+  minWidth: 180,
+  padding: 4,
+};
+
+const MENU_DROPDOWN_CORNER: React.CSSProperties = {
+  position: "absolute",
+  top: 52,
+  right: 8,
+  zIndex: 101,
+  backgroundColor: "rgba(0,0,0,0.92)",
+  border: "1px solid #555",
+  borderRadius: 4,
+  minWidth: 180,
+  padding: 4,
+};
+
+function dotClassForStatus(
+  overlayStatus: "connecting" | "connected" | "error",
+  compact?: boolean,
+): string {
+  const state =
+    overlayStatus === "connecting"
+      ? "tddy-connection-dot--connecting"
+      : overlayStatus === "connected"
+        ? "tddy-connection-dot--connected"
+        : "tddy-connection-dot--error";
+  const inner = compact
+    ? "tddy-connection-dot-inner tddy-connection-dot-inner--compact"
+    : "tddy-connection-dot-inner";
+  return `${inner} ${state}`;
 }
 
-export type ConnectionTerminalChromeLayout = "corner" | "paneHeader";
+export type ConnectionTerminalChromeLayout = "corner" | "paneHeader" | "statusBar";
 
 export interface ConnectionTerminalChromeProps {
   overlayStatus: "connecting" | "connected" | "error";
@@ -52,14 +89,21 @@ export interface ConnectionTerminalChromeProps {
   /** Element to pass to the Fullscreen API (connected terminal subtree). */
   fullscreenTargetRef?: React.RefObject<HTMLElement | null>;
   /**
-   * `corner` — status dot + fullscreen over the terminal canvas (default).
+   * `corner` — status dot + fullscreen over the terminal canvas (legacy overlay).
    * `paneHeader` — compact inline dot + menu for floating pane toolbars (no fullscreen/build id here).
+   * `statusBar` — horizontal toolbar row (PRD): build id, dot, fullscreen; no overlay on the grid.
    */
   chromeLayout?: ConnectionTerminalChromeLayout;
+  /** When `chromeLayout` is `statusBar`, show fullscreen control. Default true. */
+  statusBarShowFullscreen?: boolean;
+  /** When `chromeLayout` is `statusBar`, show build id. Default true. */
+  statusBarShowBuildId?: boolean;
+  /** Trailing controls in the status bar row (e.g. mobile keyboard affordance). */
+  statusBarEndSlot?: React.ReactNode;
 }
 
 /**
- * Top-right status dot (with menu: Disconnect / optional Terminate). Interrupt (Stop) is the TUI Stop pane.
+ * Connection status dot (menu: Disconnect / optional Terminate) and optional fullscreen.
  */
 export function ConnectionTerminalChrome({
   overlayStatus,
@@ -68,6 +112,9 @@ export function ConnectionTerminalChrome({
   onTerminate,
   fullscreenTargetRef,
   chromeLayout = "corner",
+  statusBarShowFullscreen = true,
+  statusBarShowBuildId = true,
+  statusBarEndSlot,
 }: ConnectionTerminalChromeProps) {
   const menuDomId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -78,10 +125,14 @@ export function ConnectionTerminalChrome({
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    tddyDevDebug("[ConnectionTerminalChrome] mount", { chromeLayout, overlayStatus });
+  }, [chromeLayout, overlayStatus]);
+
+  useEffect(() => {
     const sync = () => {
       const target = resolvedFullscreenTargetRef.current ?? null;
       const active = isTargetInActiveFullscreen(target);
-      console.debug("[tddy][ConnectionTerminalChrome] fullscreenchange", { active, hasTarget: target !== null });
+      tddyDevDebug("[ConnectionTerminalChrome] fullscreenchange", { active, hasTarget: target !== null });
       setFullscreenActive(active);
     };
     sync();
@@ -126,12 +177,12 @@ export function ConnectionTerminalChrome({
   const handleTerminateClick = () => {
     setMenuOpen(false);
     if (!onTerminate) return;
-    console.debug("[tddy][ConnectionTerminalChrome] Terminate menu action");
+    tddyDevDebug("[ConnectionTerminalChrome] Terminate menu action");
     if (!confirmRemoteSessionTermination(TERMINATE_CONFIRM_COPY)) {
-      console.info("[tddy][ConnectionTerminalChrome] Terminate cancelled by user");
+      tddyDevDebug("[ConnectionTerminalChrome] Terminate cancelled by user");
       return;
     }
-    console.info("[tddy][ConnectionTerminalChrome] Terminate confirmed, invoking onTerminate");
+    tddyDevDebug("[ConnectionTerminalChrome] Terminate confirmed, invoking onTerminate");
     onTerminate();
   };
 
@@ -139,9 +190,10 @@ export function ConnectionTerminalChrome({
     ev.preventDefault();
     ev.stopPropagation();
     const target = resolvedFullscreenTargetRef.current ?? null;
-    console.info("[tddy][ConnectionTerminalChrome] fullscreen button", {
+    tddyDevDebug("[ConnectionTerminalChrome] fullscreen button", {
       fullscreenActive,
       hasTarget: target !== null,
+      chromeLayout,
     });
     if (fullscreenActive) {
       void exitDocumentFullscreen();
@@ -152,38 +204,16 @@ export function ConnectionTerminalChrome({
 
   const statusAttr = dataConnectionStatusValue(overlayStatus);
 
+  const menuDropdownStyle: React.CSSProperties =
+    chromeLayout === "paneHeader" || chromeLayout === "statusBar" ? MENU_DROPDOWN_BELOW : MENU_DROPDOWN_CORNER;
+
   const menuPanel = menuOpen ? (
     <div
       ref={menuRef}
       id={menuDomId}
       role="menu"
       aria-label="Connection actions"
-      style={
-        chromeLayout === "paneHeader"
-          ? {
-              position: "absolute",
-              top: "100%",
-              right: 0,
-              marginTop: 4,
-              zIndex: 200,
-              backgroundColor: "rgba(0,0,0,0.92)",
-              border: "1px solid #555",
-              borderRadius: 4,
-              minWidth: 180,
-              padding: 4,
-            }
-          : {
-              position: "absolute",
-              top: 52,
-              right: 8,
-              zIndex: 101,
-              backgroundColor: "rgba(0,0,0,0.92)",
-              border: "1px solid #555",
-              borderRadius: 4,
-              minWidth: 180,
-              padding: 4,
-            }
-      }
+      style={menuDropdownStyle}
     >
       <button
         type="button"
@@ -208,40 +238,90 @@ export function ConnectionTerminalChrome({
     </div>
   ) : null;
 
+  if (chromeLayout === "statusBar") {
+    const showBuild = buildId !== undefined && statusBarShowBuildId;
+    const showFs = statusBarShowFullscreen;
+    tddyDevDebug("[ConnectionTerminalChrome] render statusBar", {
+      showBuild,
+      showFs,
+      hasEndSlot: !!statusBarEndSlot,
+    });
+    return (
+      <>
+        <style>{CONNECTION_TERMINAL_DOT_STYLES}</style>
+        <div className="relative flex w-full min-w-0 items-center gap-2 px-2 py-1">
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+            {showBuild ? (
+              <span
+                data-testid="build-id"
+                className="truncate font-mono text-[10px]"
+                style={{ color: "#888", cursor: "default" }}
+              >
+                {buildId}
+              </span>
+            ) : null}
+          </div>
+          <div className="relative flex shrink-0 items-center gap-1">
+            {!fullscreenTargetRef ? (
+              <div
+                ref={internalFullscreenTargetRef}
+                data-testid="connection-chrome-fullscreen-fallback-target"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 0,
+                  pointerEvents: "none",
+                }}
+                aria-hidden
+              />
+            ) : null}
+            <button
+              ref={dotRef}
+              type="button"
+              data-testid="connection-status-dot"
+              data-connection-status={statusAttr}
+              aria-label="Connection status"
+              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+              aria-controls={menuDomId}
+              className="relative shrink-0 cursor-pointer rounded border border-input bg-background/80 px-2 py-1"
+              style={{
+                minWidth: 36,
+                minHeight: 32,
+                fontSize: 12,
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleMenu();
+              }}
+            >
+              <span className={dotClassForStatus(overlayStatus)} aria-hidden />
+            </button>
+            {showFs ? (
+              <button
+                type="button"
+                data-testid="terminal-fullscreen-button"
+                aria-label={fullscreenActive ? "Exit fullscreen" : "Enter fullscreen"}
+                className="relative shrink-0 cursor-pointer rounded border border-input bg-background/80 px-2 py-1 text-foreground"
+                style={{ minWidth: 36, minHeight: 32 }}
+                onClick={handleFullscreenClick}
+              >
+                <span aria-hidden>⛶</span>
+              </button>
+            ) : null}
+            {menuPanel}
+          </div>
+          {statusBarEndSlot}
+        </div>
+      </>
+    );
+  }
+
   if (chromeLayout === "paneHeader") {
     return (
       <>
-        <style>
-          {`
-          @keyframes tddy-dot-pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.55; transform: scale(0.92); }
-          }
-          .tddy-connection-dot-inner {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            display: inline-block;
-            vertical-align: middle;
-          }
-          .tddy-connection-dot--connecting {
-            background: #f59e0b;
-            animation: tddy-dot-pulse 1.2s ease-in-out infinite;
-          }
-          .tddy-connection-dot--connected {
-            background: #22c55e;
-          }
-          .tddy-connection-dot--error {
-            background: #ef4444;
-          }
-          @media (prefers-reduced-motion: reduce) {
-            .tddy-connection-dot--connecting {
-              animation: none;
-              opacity: 0.85;
-            }
-          }
-        `}
-        </style>
+        <style>{CONNECTION_TERMINAL_DOT_STYLES}</style>
         <div className="relative inline-flex shrink-0 items-center">
           <button
             ref={dotRef}
@@ -272,7 +352,7 @@ export function ConnectionTerminalChrome({
               toggleMenu();
             }}
           >
-            <span className={dotClassForStatus(overlayStatus)} aria-hidden />
+            <span className={dotClassForStatus(overlayStatus, true)} aria-hidden />
           </button>
           {menuPanel}
         </div>
@@ -295,37 +375,7 @@ export function ConnectionTerminalChrome({
           aria-hidden
         />
       ) : null}
-      <style>
-        {`
-          @keyframes tddy-dot-pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.55; transform: scale(0.92); }
-          }
-          .tddy-connection-dot-inner {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            display: inline-block;
-            vertical-align: middle;
-          }
-          .tddy-connection-dot--connecting {
-            background: #f59e0b;
-            animation: tddy-dot-pulse 1.2s ease-in-out infinite;
-          }
-          .tddy-connection-dot--connected {
-            background: #22c55e;
-          }
-          .tddy-connection-dot--error {
-            background: #ef4444;
-          }
-          @media (prefers-reduced-motion: reduce) {
-            .tddy-connection-dot--connecting {
-              animation: none;
-              opacity: 0.85;
-            }
-          }
-        `}
-      </style>
+      <style>{CONNECTION_TERMINAL_DOT_STYLES}</style>
       {buildId !== undefined && (
         <span
           data-testid="build-id"

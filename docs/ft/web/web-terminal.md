@@ -37,16 +37,27 @@ When the terminal connects and renders, it supports:
 
 ### Connection chrome (LiveKit overlay)
 
-When **`GhosttyTerminalLiveKit`** is mounted with **`connectionOverlay`**, the shell includes:
+When **`GhosttyTerminalLiveKit`** is mounted with **`connectionOverlay`**, connection controls render in a dedicated top row (**`TerminalConnectionStatusBar`**, `data-testid="terminal-connection-status-bar"`) above the Ghostty terminal area. The row uses **`role="toolbar"`** and **`aria-label="Terminal connection"`**. **`ConnectionTerminalChrome`** supplies the interactive content; supported layouts are **`corner`** (controls over the terminal canvas), **`paneHeader`** (compact dot + menu for floating toolbars), and **`statusBar`** (horizontal toolbar: build id, status dot, fullscreen; no overlay on the grid). **`GhosttyTerminalLiveKit`**, **`ConnectionScreen`**, and the standalone connected view use **`chromeLayout="statusBar"`** inside the status bar wrapper.
 
-- **Build ID**: Shown top-left when provided (`data-testid="build-id"`).
-- **Status dot**: Fixed top-right (`data-testid="connection-status-dot"`). Attribute **`data-connection-status`** reads **`connecting`**, **`connected`**, or **`error`** for the LiveKit / token phase. While **`connecting`**, the dot uses a pulse animation; steady colors distinguish **`connected`** and **`error`**. Users who prefer reduced motion receive a non-animated connecting state via **`prefers-reduced-motion`**.
+**Placement modes** (**`connectionChromePlacement`** on **`GhosttyTerminalLiveKit`**, default **`floating`**):
+
+- **`floating`**: Full status bar — build id, status dot, fullscreen control, and an optional trailing slot for the mobile keyboard affordance when **`showMobileKeyboard`** applies.
+- **`none`**: Compact status bar — status dot and menu (and optional mobile keyboard slot); build id and fullscreen controls are omitted so overlay / mini terminal presentations stay unobstructed.
+
+The shell includes:
+
+- **Build ID**: Shown in the status bar row when provided (`data-testid="build-id"`) whenever the placement mode includes it.
+- **Status dot**: **`data-testid="connection-status-dot"`**. Attribute **`data-connection-status`** reads **`connecting`**, **`connected`**, or **`error`** for the LiveKit / token phase. While **`connecting`**, the dot uses a pulse animation; steady colors distinguish **`connected`** and **`error`**. Users who prefer reduced motion receive a non-animated connecting state via **`prefers-reduced-motion`**.
 - **LiveKit status strip**: With the overlay enabled, the plain **`livekit-status`** row does not occupy layout during **`connecting`** or **`connected`**; the dot carries those phases. Token, room, and stream failures surface through **`data-testid="livekit-error"`** and related error UI.
-- **Fullscreen**: A dedicated control (`data-testid="terminal-fullscreen-button"`, top-right beside the dot) enters or exits document fullscreen on the connected terminal subtree. The implementation uses the standard Fullscreen API with vendor-prefixed fallbacks (`packages/tddy-web/src/lib/browserFullscreen.ts`). The parent passes **`fullscreenTargetRef`** to select the element; when absent, chrome supplies an internal fullscreen target wrapper (`data-testid="connection-chrome-fullscreen-fallback-target"`). **`fullscreenchange`** and **`webkitfullscreenchange`** on **`document`** keep the control label in sync with the active element.
+- **Fullscreen**: A dedicated control (`data-testid="terminal-fullscreen-button"`, in the status bar row when placement is **`floating`**) enters or exits document fullscreen on the connected terminal subtree. The implementation uses the standard Fullscreen API with vendor-prefixed fallbacks (`packages/tddy-web/src/lib/browserFullscreen.ts`). The parent passes **`fullscreenTargetRef`** to select the element; when absent, chrome supplies an internal fullscreen target wrapper (`data-testid="connection-chrome-fullscreen-fallback-target"`). **`fullscreenchange`** and **`webkitfullscreenchange`** on **`document`** keep the control label in sync with the active element.
 - **Menu**: Activating the dot opens a menu with **Disconnect** (`data-testid="connection-menu-disconnect"`) and **Terminate** (`data-testid="connection-menu-terminate"`) when the host passes **`onTerminate`** (daemon flows with session context). The standalone GitHub connect flow omits **Terminate** when no session-backed handler exists. **Terminate** runs a native **`window.confirm`** dialog; **`onTerminate`** runs only after the user confirms. The menu closes on **Escape** or an outside pointer press.
 - **Interrupt (Stop)**: There is no web **Stop** button; interrupt is the TUI **Stop** pane (red **U+25A0**), to the right of the Enter strip. Clicks are SGR mouse bytes to the virtual TUI, same path as keyboard **Ctrl+C** (byte **0x03**).
 
+**Layout acceptance (tests)**: Pure geometry helpers in **`terminalStatusBarLayout.ts`** express rules such as “status bar bottom meets or above terminal top” and “control centers lie outside the terminal canvas.” Bun tests cover **`terminalStatusBarLayout`**; Cypress **`GhosttyTerminalLiveKit.cy.tsx`** imports the same helpers so assertions stay aligned with the library.
+
 **ConnectedTerminal** wrappers (**App** after connect and **ConnectionScreen** after session connect) render the fullscreen **`connected-terminal-container`** with this chrome during JWT acquisition so the status dot reflects the loading phase while **`livekit-status`** text stays suppressed for normal overlay states. On the daemon **ConnectionScreen**, each attached session can mount under a per-session root with **`data-testid="connection-attached-terminal-{sessionId}"`** (URL-encoded segment in the attribute matches the session id string).
+
+Implementation reference: [terminal-connection-chrome.md](../../../packages/tddy-web/docs/terminal-connection-chrome.md).
 
 ### Mobile UX
 
@@ -106,7 +117,7 @@ Each project’s session table and the **Other sessions** table list rows in thi
 2. Within the active group and within the inactive group, rows follow **`createdAt`** descending (newer timestamps first), using ISO-8601 strings parsed with the browser **`Date`** implementation.
 3. When two rows share the same comparable time, or when **`createdAt`** does not parse to a finite time, order follows **`sessionId`** lexicographically (deterministic tie-break).
 
-The client applies **`sortSessionsForDisplay`** (`packages/tddy-web/src/utils/sessionSort.ts`) to the session array already held in React state after **`ListSessions`**—no additional RPC for ordering. In Vite development builds, optional **`console.debug`** / **`console.info`** traces run when **`import.meta.env.DEV`** is true.
+The client applies **`sortSessionsForDisplay`** (`packages/tddy-web/src/utils/sessionSort.ts`) to the session array already held in React state after **`ListSessions`**—no additional RPC for ordering.
 
 ### Session workflow status (TUI parity)
 
@@ -137,6 +148,17 @@ While the session list includes at least one row with **`isActive`**, the client
 - **Delete** (trash): Available for **active** and **inactive** rows. Confirm explains that a running tool process is stopped first, then on-disk data is removed. On success, **`ListSessions`** is refreshed; errors use the shared connection error area.
 - **Inactive rows** also show **Resume**; **active** rows show **Connect** and **Signal** (dropdown) alongside **Delete**.
 - **Orphan** table follows the same actions pattern as project session tables.
+
+#### Per-table selection and bulk delete
+
+- Each project session table and the **Other sessions** table keeps its own selection: a set of **`sessionId`** values independent of other tables.
+- Row checkboxes and a header **select all** control use stable **`data-testid`** values scoped by table (**`session-table-select-all-{projectId}`** or **`session-table-select-all-orphan`**, row **`session-row-select-{sessionId}`**). The header checkbox is **checked** when every row in that table is selected, **indeterminate** when at least one but not all rows are selected, and **unchecked** when none are selected (including empty tables: unchecked, not indeterminate). The **ID** cell follows the checkbox column: it shows the short session id and, when **`ListSessions`** marks **`pendingElicitation`**, an **Input needed** badge (`data-testid="elicitation-indicator-{sessionId}"`); the row carries **`data-pending-elicitation="true"`** or **`"false"`**.
+- **Delete selected** sits in the table toolbar, disabled when the selection is empty. Choosing it opens a single **`window.confirm`** whose text includes the number of sessions to delete and the same stop-then-delete explanation as single-row delete.
+- The client sends one **`DeleteSession`** request per selected id in order, awaits each response, then calls **`ListSessions`** and clears that table’s selection when every **`DeleteSession`** succeeds.
+- If a **`DeleteSession`** call fails after earlier calls in the same bulk operation have succeeded, the shared connection error area shows the error, **`ListSessions`** runs again, and the table’s selection retains only ids that appear in the refreshed list.
+- Dismissing the confirmation dialog does not invoke **`DeleteSession`**.
+
+Pure selection helpers live in **`packages/tddy-web/src/utils/sessionSelection.ts`** (Bun **`sessionSelection.test.ts`**). **`ConnectionScreen`** bulk-path logging is limited to Vite development builds (**`import.meta.env.DEV`**); the **`sessionSelection`** helpers do not emit **`console`** calls in production bundles.
 
 The daemon **`DeleteSession`** uses the same GitHub user → OS user → **`sessions_base`** resolution as **`ListSessions`**, terminates a live **`metadata.pid`** when needed, then removes **`{sessions_base}/sessions/{session_id}/`**. See [daemon changelog](../daemon/changelog.md) and [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md).
 

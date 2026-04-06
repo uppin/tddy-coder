@@ -148,7 +148,7 @@ mod livekit_tests {
                 || text.contains("Build"),
             "Expected terminal content, got stripped text (len {}): {:?}",
             text.len(),
-            &text[..text.len().min(200)]
+            &text[..text.floor_char_boundary(200)]
         );
 
         Ok(())
@@ -246,14 +246,14 @@ mod livekit_tests {
             "[TEST] livekit init: {} bytes, text_len={}, preview={:?}",
             initial_output.len(),
             initial_text.len(),
-            &initial_text[..initial_text.len().min(300)]
+            &initial_text[..initial_text.floor_char_boundary(300)]
         );
 
         assert!(
             initial_text.contains("State:") || initial_text.contains("Scope"),
             "Initial TUI should render before any keyboard input; got (len {}): {:?}",
             initial_text.len(),
-            &initial_text[..initial_text.len().min(300)]
+            &initial_text[..initial_text.floor_char_boundary(300)]
         );
 
         // Phase 2: send keyboard inputs, drain output after each.
@@ -289,14 +289,14 @@ mod livekit_tests {
             "[TEST] livekit total output: {} bytes, text_len={}, preview={:?}",
             all_output.len(),
             text.len(),
-            &text[..text.len().min(500)]
+            &text[..text.floor_char_boundary(500)]
         );
 
         assert!(
             text.contains("State:") || text.contains("Scope"),
             "Should receive initial TUI output; got (len {}): {:?}",
             text.len(),
-            &text[..text.len().min(300)]
+            &text[..text.floor_char_boundary(300)]
         );
 
         let progressed = text.contains("Session dir:")
@@ -310,7 +310,7 @@ mod livekit_tests {
             progressed,
             "Keyboard inputs should advance the workflow past the initial screen; got (len {}): {:?}",
             text.len(),
-            &text[..text.len().min(500)]
+            &text[..text.floor_char_boundary(500)]
         );
 
         Ok(())
@@ -531,7 +531,7 @@ mod livekit_tests {
             initial_text.contains("State:") || initial_text.contains("Scope"),
             "Initial TUI should render before any keyboard input; got (len {}): {:?}",
             initial_text.len(),
-            &initial_text[..initial_text.len().min(300)]
+            &initial_text[..initial_text.floor_char_boundary(300)]
         );
 
         // Phase 2: send keyboard inputs, drain output after each.
@@ -571,7 +571,7 @@ mod livekit_tests {
             progressed,
             "Keyboard inputs should advance the workflow; stripped text (len {}): {:?}",
             visible.len(),
-            &visible[..visible.len().min(500)]
+            &visible[..visible.floor_char_boundary(500)]
         );
 
         Ok(())

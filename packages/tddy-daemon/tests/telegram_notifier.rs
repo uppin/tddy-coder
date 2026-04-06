@@ -33,6 +33,16 @@ impl TelegramSender for MockTelegramSender {
         self.calls.lock().unwrap().push((chat_id, text.to_string()));
         Ok(())
     }
+
+    async fn send_message_with_keyboard(
+        &self,
+        chat_id: i64,
+        text: &str,
+        _inline_keyboard: tddy_daemon::telegram_notifier::InlineKeyboardRows,
+    ) -> anyhow::Result<()> {
+        self.calls.lock().unwrap().push((chat_id, text.to_string()));
+        Ok(())
+    }
 }
 
 fn write_config(yaml: &str) -> DaemonConfig {

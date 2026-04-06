@@ -45,7 +45,7 @@ fn create_fake_tddy_tools(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// `--recipe tdd|bugfix|free-prompting|grill-me` is accepted; invalid values are rejected.
+/// `--recipe tdd|bugfix|free-prompting|grill-me|review` is accepted; invalid values are rejected.
 #[test]
 fn cli_accepts_recipe_flag() {
     let mut cmd = tddy_coder_bin();
@@ -58,13 +58,18 @@ fn cli_accepts_recipe_flag() {
         "--recipe should appear in help output, stdout: {}",
         stdout
     );
+    let recipe_help = stdout
+        .split("--recipe <RECIPE>")
+        .nth(1)
+        .expect("--recipe must appear in --help");
     assert!(
-        stdout.contains("bugfix")
-            && stdout.contains("tdd")
-            && stdout.contains("free-prompting")
-            && stdout.contains("grill-me"),
-        "help should mention all shipped recipes, stdout: {}",
-        stdout
+        recipe_help.contains("tdd")
+            && recipe_help.contains("bugfix")
+            && recipe_help.contains("free-prompting")
+            && recipe_help.contains("grill-me")
+            && recipe_help.contains("review"),
+        "help --recipe section must list shipped recipes including review; got:{}",
+        recipe_help
     );
 
     let mut cmd_bad = tddy_coder_bin();
@@ -77,6 +82,35 @@ fn cli_accepts_recipe_flag() {
         stderr_bad.contains("invalid value") || stderr_bad.contains("isn't a valid value"),
         "invalid --recipe should be rejected, stderr: {}",
         stderr_bad
+    );
+}
+
+/// Help and `--recipe` validation include **`review`** with other shipped recipes.
+#[test]
+fn cli_accepts_recipe_review() {
+    let mut cmd = tddy_coder_bin();
+    cmd.arg("--help");
+    let output = cmd.output().expect("run tddy-coder --help");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let recipe_help = stdout
+        .split("--recipe <RECIPE>")
+        .nth(1)
+        .expect("--recipe must appear in --help");
+    assert!(
+        recipe_help.contains("review"),
+        "--help --recipe section must list review; got:{}",
+        recipe_help
+    );
+
+    let mut cmd_ok = tddy_coder_bin();
+    cmd_ok.args(["--recipe", "review", "--goal", "plan"]);
+    let out_ok = cmd_ok.output().expect("run tddy-coder --recipe review");
+    let stderr_ok = String::from_utf8_lossy(&out_ok.stderr);
+    assert!(
+        !stderr_ok.contains("invalid value 'review'")
+            && !stderr_ok.contains("'review' isn't a valid value"),
+        "--recipe review must be accepted by clap; stderr: {}",
+        stderr_ok
     );
 }
 

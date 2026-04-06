@@ -51,7 +51,7 @@ async fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
     assert!(
         prompt.starts_with("<context-reminder>"),
         "acceptance-tests prompt must start with context-reminder tag, got:\n{}",
-        &prompt[..prompt.len().min(300)]
+        &prompt[..prompt.floor_char_boundary(300)]
     );
     assert!(
         prompt.contains("**CRITICAL FOR CONTEXT AND SUMMARY**"),

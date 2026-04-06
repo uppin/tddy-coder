@@ -473,7 +473,7 @@ mod context_header_tests {
         assert!(
             header.starts_with("**CRITICAL FOR CONTEXT AND SUMMARY**\n"),
             "header must start with the marker line, got: {:?}",
-            &header[..header.len().min(200)]
+            &header[..header.floor_char_boundary(200)]
         );
         assert!(
             header.contains("SessionDoc.md:"),

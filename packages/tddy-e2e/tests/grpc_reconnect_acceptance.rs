@@ -184,11 +184,16 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
     drop(input_tx2);
 
     const CLEAR_HOME: &[u8] = b"\x1b[2J\x1b[H";
+    let reconnect_prefix_preview = {
+        let lossy = String::from_utf8_lossy(&reconnect_burst);
+        let end = lossy.floor_char_boundary(16.min(lossy.len()));
+        lossy[..end].to_string()
+    };
     assert!(
         reconnect_burst.starts_with(CLEAR_HOME),
         "reconnect must begin with full-screen clear + home so empty VT clients resync; \
          prefix {:?}",
-        &reconnect_burst[..reconnect_burst.len().min(16)]
+        reconnect_prefix_preview
     );
 
     // Full composited frame size varies slightly (e.g. idle status dot vs fast spinner ANSI churn).

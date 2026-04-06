@@ -7,6 +7,16 @@ Release note history for the Web product area.
 - **`tddy-web`**: **`ConnectionScreen`** stores **`sessionAttachments`** (**`Map<sessionId, LiveKitConnectionParams>`**); **Connect** / **Resume** / **Start** merge attachments without dropping prior sessions; **`focusedSessionIdFromPathname`** aligns **fullscreen** focus with **`/terminal/{sessionId}`**; floating **overlay** / **mini** render one **`ConnectedTerminal`** per attachment under **`data-testid="connection-attached-terminal-{sessionId}"`**; inactive **`ListSessions`** rows prune matching attachments only; **Disconnect** removes one entry; **popstate** to `/` clears all. Pure helpers: **`multiSessionState.ts`**, **`multiSessionPresentation.ts`**. Bun **`multiSessionState.test.ts`**, **`multiSessionPresentation.test.ts`**; Cypress **`ConnectionScreen.cy.tsx`** (multi-session scenarios).
 - **Feature doc**: [web-terminal.md](web-terminal.md) (daemon mode — concurrent attachments, attach behavior). **Dev reference**: [terminal-presentation.md](../../../packages/tddy-web/docs/terminal-presentation.md). Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**.
 
+## 2026-04-05 — Workflow recipe control: `review`
+
+- **ConnectionScreen**: The **Workflow recipe** options include **`review`** alongside existing recipe names; the value is sent on **`StartSession`** as for other recipes.
+- **Reference**: [workflow-recipes.md](../coder/workflow-recipes.md) (**ReviewRecipe**, **Selecting a recipe**).
+
+## 2026-04-05 — Terminal connection status bar (chrome layouts)
+
+- **tddy-web**: **`TerminalConnectionStatusBar`** hosts **`ConnectionTerminalChrome`** with **`chromeLayout="statusBar"`** above **`GhosttyTerminal`** in **`GhosttyTerminalLiveKit`**, **`ConnectionScreen`**, and standalone connect. **`connectionChromePlacement`** **`floating`** | **`none`** selects full vs compact bar (build id + fullscreen vs dot-focused chrome for overlay / mini). **`terminalStatusBarLayout`** geometry helpers with Bun tests; Cypress **`GhosttyTerminalLiveKit.cy.tsx`** shares those helpers. **`connectionTerminalChromeDotStyles`** centralizes dot animation styles.
+- **Feature doc**: [web-terminal.md](web-terminal.md) (Connection chrome). Dev reference: [terminal-connection-chrome.md](../../../packages/tddy-web/docs/terminal-connection-chrome.md). Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**; package: **[packages/tddy-web/docs/changesets.md](../../../packages/tddy-web/docs/changesets.md)**.
+
 ## 2026-04-04 — Connection screen: pending elicitation indicator
 
 - **`SessionEntry`**: **`pending_elicitation`** on **`ListSessions`** (proto field **14**); generated clients expose **`pendingElicitation`**.
@@ -16,6 +26,13 @@ Release note history for the Web product area.
 ## 2026-04-05 — Documentation wrap (worktrees PRD retired)
 
 - **Docs**: WIP PRD for worktrees ConnectionService + web removed from **`docs/ft/web/1-WIP/`**; behavior remains in [worktrees.md](worktrees.md) and [web-terminal.md](web-terminal.md). Session validation report copies under **`plans/`** for terminal reconnect removed. Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
+## 2026-04-05 — Connection screen: per-table bulk session selection and delete
+
+- **tddy-web**: **`sessionSelection`** helpers (**`computeHeaderCheckboxState`**, **`toggleSelectAllForTable`**, **`toggleRowInTableSelection`**); **`ConnectionScreen`** stores selection per project table and **`orphan`** table; header checkbox **indeterminate** for partial selection; **Delete selected** (**`bulk-delete-selected-{tableKey}`**) with one **`window.confirm`** (count in copy), sequential **`DeleteSession`**, **`ListSessions`** refresh and selection clear on full success; on failure after partial deletes, **`setError`**, **`ListSessions`**, and selection pruned to ids still listed. **`sessionSelection`** has no **`console`** in shipped helpers; **`ConnectionScreen`** bulk diagnostics use **`import.meta.env.DEV`**. **Bun** **`sessionSelection.test.ts`**; Cypress **`ConnectionScreen.cy.tsx`** (select all, indeterminate, per-id deletes, cancel confirm, orphan vs project independence).
+- **Feature doc**: [web-terminal.md](web-terminal.md) (**Session deletion** — per-table selection and bulk delete).
+- **Dev guide**: [testing.md](../../dev/guides/testing.md) (**Rust workspace: `./verify` vs plain `cargo test`** — **`tddy-acp-stub`** prerequisite for full **`cargo test`**).
+- **Package history**: [packages/tddy-web/docs/changesets.md](../../../packages/tddy-web/docs/changesets.md).
 
 ## 2026-04-04 — Terminal reconnect overlay (presentation + routing)
 

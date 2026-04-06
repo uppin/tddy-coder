@@ -2,6 +2,7 @@
 
 Wrapped changeset history for tddy-coder.
 
+- **2026-04-05** [Feature] **`--recipe review`** — CLI **`value_parser`** includes **`review`** (with **`tdd-small`** where applicable); resolves **`ReviewRecipe`** via **`recipe_resolve`**. Feature doc: [workflow-recipes.md](../../../docs/ft/coder/workflow-recipes.md). (tddy-coder, tddy-workflow-recipes)
 - **2026-04-04** [Feature] **Plan refinement uses `plan_refinement_goal`** — **`run_plan_refinement`**: **`recipe.plan_refinement_goal()`** for **`get_session_for_tag`** and **`WorkflowEngine::run_goal`** (TDD **`plan`**, grill-me **`create-plan`**). Plain-mode / bootstrap paths align with **`interview`** as TDD entry. See [docs/ft/coder/workflow-recipes.md](../../../docs/ft/coder/workflow-recipes.md). (tddy-coder)
 - **2026-04-04** [Feature] Presenter integration tests — user prompt activity asserts exact submitted text and **`ActivityKind::UserPrompt`**; queued lines keep **`Queued: `** prefix. Feature doc: [activity-log-streaming.md](../../../docs/ft/coder/activity-log-streaming.md). (tddy-coder)
 - **2026-03-29** [Feature] Presenter integration tests for activity log streaming — **`presenter_integration`**: **`submit_feature_input_appends_user_prompt_activity`**, **`queue_prompt_appends_queued_prompt_activity`** (stable prefixes and **`ActivityLogged`**). Feature doc: [activity-log-streaming.md](../../../docs/ft/coder/activity-log-streaming.md). (tddy-coder)

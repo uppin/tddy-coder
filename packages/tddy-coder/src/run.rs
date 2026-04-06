@@ -318,7 +318,7 @@ pub struct Args {
     pub cursor_agent_path: Option<PathBuf>,
     /// Path to the Codex CLI. When set, overrides `TDDY_CODEX_CLI` and the default `codex` on `PATH`.
     pub codex_cli_path: Option<PathBuf>,
-    /// Workflow recipe name (`tdd`, `bugfix`, `free-prompting`, or `grill-me`). `None` means default `tdd` or recipe from changeset on resume.
+    /// Workflow recipe name (`tdd`, `bugfix`, `free-prompting`, `grill-me`, `tdd-small`, `review`). `None` means default `tdd` or recipe from changeset on resume.
     pub recipe: Option<String>,
 }
 
@@ -455,8 +455,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, or `grill-me`. Must match [`WorkflowRecipe::name`].
-    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me"])]
+    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, `grill-me`, `tdd-small`, `review`. Must match [`WorkflowRecipe::name`].
+    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me", "tdd-small", "review"])]
     pub recipe: Option<String>,
 
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
@@ -601,8 +601,8 @@ pub struct DemoArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, or `grill-me`.
-    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me"])]
+    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, `grill-me`, `tdd-small`, `review`.
+    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me", "tdd-small", "review"])]
     pub recipe: Option<String>,
 }
 
@@ -1097,13 +1097,15 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
 
     let service = tddy_service::DaemonService::new(tddy_data_dir.clone(), backend.clone());
     #[allow(clippy::type_complexity)]
-    let (view_factory, presenter_observer): (
+    let (view_factory, presenter_observer, presenter_intent_tx): (
         Option<Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>>,
         Option<tddy_service::PresenterObserverService>,
+        Option<std::sync::mpsc::Sender<tddy_core::UserIntent>>,
     ) = if livekit_enabled {
         let (event_tx, _) = tokio::sync::broadcast::channel(256);
         let presenter_observer = tddy_service::PresenterObserverService::new(event_tx.clone());
         let (intent_tx, intent_rx) = std::sync::mpsc::channel();
+        let presenter_intent_tx = intent_tx.clone();
         let mut presenter = Presenter::new(
             agent_str,
             args.model
@@ -1147,9 +1149,16 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
         // New daemon sessions must not use a placeholder prompt: stdin is /dev/null from the
         // parent spawner, so the workflow must block on `answer_rx` until the user submits
-        // feature text via Virtual TUI / LiveKit (SubmitFeatureInput). A placeholder skips
-        // that and jumps straight into plan / first clarification.
-        let initial_prompt = None;
+        // feature text via Virtual TUI / LiveKit (SubmitFeatureInput) or Telegram `/submit-feature`
+        // (PresenterIntent gRPC). A placeholder skips that and jumps straight into plan / first clarification.
+        //
+        // Load `initial_prompt` from `changeset.yaml` in this session dir (e.g. written by Telegram
+        // before spawn) so it matches the same path as `tddy_data_dir_path()` / `TDDY_SESSIONS_DIR`.
+        let initial_prompt = read_changeset(&session_artifact_dir)
+            .ok()
+            .and_then(|cs| cs.initial_prompt)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         presenter.start_workflow(
             backend,
             agent_working_dir,
@@ -1188,9 +1197,13 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         });
-        (Some(factory), Some(presenter_observer))
+        (
+            Some(factory),
+            Some(presenter_observer),
+            Some(presenter_intent_tx),
+        )
     } else {
-        (None, None)
+        (None, None, None)
     };
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -1207,11 +1220,15 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
 
         let mut grpc_router = tonic::transport::Server::builder()
             .add_service(tddy_service::gen::tddy_remote_server::TddyRemoteServer::new(service));
-        if let Some(observer) = presenter_observer {
+        if let (Some(observer), Some(intent_tx_grpc)) = (presenter_observer, presenter_intent_tx) {
             grpc_router = grpc_router.add_service(
                 tddy_service::gen::presenter_observer_server::PresenterObserverServer::new(
                     observer,
                 ),
+            );
+            let intent_svc = tddy_service::PresenterIntentService::new(intent_tx_grpc);
+            grpc_router = grpc_router.add_service(
+                tddy_service::gen::presenter_intent_server::PresenterIntentServer::new(intent_svc),
             );
         }
         if let Some(ref factory) = view_factory {
