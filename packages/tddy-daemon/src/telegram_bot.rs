@@ -12,9 +12,10 @@ use tokio::sync::Mutex;
 use crate::telegram_notifier::TeloxideSender;
 use crate::telegram_session_control::{
     parse_answer_multi_command, parse_answer_text_command, parse_delete_command,
-    parse_document_review_callback, parse_elicitation_select_callback,
-    parse_recipe_callback_session_dir, parse_session_control_callback, parse_sessions_command,
-    parse_start_workflow_prompt, parse_submit_feature_command, parse_telegram_agent_callback,
+    parse_document_review_callback, parse_elicitation_other_callback,
+    parse_elicitation_select_callback, parse_recipe_callback_session_dir,
+    parse_session_control_callback, parse_sessions_command, parse_start_workflow_prompt,
+    parse_submit_feature_command, parse_telegram_agent_callback, parse_telegram_branch_callback,
     parse_telegram_project_callback, SessionControlCallback, StartWorkflowCommand,
     TelegramCallback, TelegramSessionControlHarness,
 };
@@ -59,6 +60,23 @@ async fn telegram_message_handler(bot: Bot, harness: Harness, msg: Message) -> H
     let chat_id = msg.chat.id.0;
     let user_id = msg.from.map(|u| u.id.0).unwrap_or(0);
 
+    if !text.trim_start().starts_with('/') {
+        let h = harness.lock().await;
+        if h.is_authorized(chat_id) {
+            match h
+                .handle_elicitation_other_followup_plain_message(chat_id, &text)
+                .await
+            {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                Err(e) => {
+                    bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
+                    return Ok(());
+                }
+            }
+        }
+    }
+
     if let Some(prompt) = parse_start_workflow_prompt(&text) {
         let cmd = StartWorkflowCommand {
             chat_id,
@@ -68,75 +86,65 @@ async fn telegram_message_handler(bot: Bot, harness: Harness, msg: Message) -> H
         let mut h = harness.lock().await;
         if h.is_authorized(chat_id) {
             h.handle_start_workflow(cmd).await?;
-        } else {
-            h.handle_start_workflow_unauthorized(cmd).await?;
         }
+        // Not configured for this chat: ignore (multi-daemon — each instance has its own allowlist).
         return Ok(());
     }
 
     if let Some((session_key, body)) = parse_submit_feature_command(&text) {
         let h = harness.lock().await;
-        if h.is_authorized(chat_id) {
-            if let Err(e) = h.handle_submit_feature(chat_id, &session_key, &body).await {
-                bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
-            }
-        } else {
-            bot.send_message(
-                ChatId(chat_id),
-                "Access denied: this chat is not authorized to control workflows.",
-            )
-            .await?;
+        if !h.is_authorized(chat_id) {
+            return Ok(());
+        }
+        if let Err(e) = h.handle_submit_feature(chat_id, &session_key, &body).await {
+            bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
         }
         return Ok(());
     }
 
     if let Some((session_key, body)) = parse_answer_text_command(&text) {
         let h = harness.lock().await;
-        if h.is_authorized(chat_id) {
-            if let Err(e) = h
-                .handle_answer_text_command(chat_id, &session_key, &body)
-                .await
-            {
-                bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
-            }
-        } else {
-            bot.send_message(
-                ChatId(chat_id),
-                "Access denied: this chat is not authorized to control workflows.",
-            )
-            .await?;
+        if !h.is_authorized(chat_id) {
+            return Ok(());
+        }
+        if let Err(e) = h
+            .handle_answer_text_command(chat_id, &session_key, &body)
+            .await
+        {
+            bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
         }
         return Ok(());
     }
 
     if let Some((session_key, indices)) = parse_answer_multi_command(&text) {
         let h = harness.lock().await;
-        if h.is_authorized(chat_id) {
-            if let Err(e) = h
-                .handle_answer_multi_command(chat_id, &session_key, &indices)
-                .await
-            {
-                bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
-            }
-        } else {
-            bot.send_message(
-                ChatId(chat_id),
-                "Access denied: this chat is not authorized to control workflows.",
-            )
-            .await?;
+        if !h.is_authorized(chat_id) {
+            return Ok(());
+        }
+        if let Err(e) = h
+            .handle_answer_multi_command(chat_id, &session_key, &indices)
+            .await
+        {
+            bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
         }
         return Ok(());
     }
 
     if let Some(offset) = parse_sessions_command(&text) {
-        let harness = harness.lock().await;
-        harness.handle_list_sessions(chat_id, offset).await?;
+        let h = harness.lock().await;
+        if !h.is_authorized(chat_id) {
+            return Ok(());
+        }
+        h.handle_list_sessions(chat_id, offset).await?;
         return Ok(());
     }
 
     if let Some(session_id) = parse_delete_command(&text) {
-        let harness = harness.lock().await;
-        match harness.handle_delete_session(chat_id, &session_id).await {
+        let h = harness.lock().await;
+        if !h.is_authorized(chat_id) {
+            return Ok(());
+        }
+        match h.handle_delete_session(chat_id, &session_id).await {
             Ok(_) => {}
             Err(e) => {
                 bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
@@ -170,16 +178,21 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     let user_id = q.from.id.0;
 
     if let Some(action) = parse_session_control_callback(&data) {
-        let harness = harness.lock().await;
+        let h = harness.lock().await;
+        if !h.is_authorized(chat_id) {
+            drop(h);
+            bot.answer_callback_query(qid).await?;
+            return Ok(());
+        }
         match action {
             SessionControlCallback::Enter { session_id } => {
-                harness.handle_enter_session(chat_id, &session_id).await?;
+                h.handle_enter_session(chat_id, &session_id).await?;
             }
             SessionControlCallback::Delete { session_id } => {
-                harness.handle_delete_session(chat_id, &session_id).await?;
+                h.handle_delete_session(chat_id, &session_id).await?;
             }
             SessionControlCallback::More { offset } => {
-                harness.handle_list_sessions(chat_id, offset).await?;
+                h.handle_list_sessions(chat_id, offset).await?;
             }
         }
         bot.answer_callback_query(qid).await?;
@@ -187,6 +200,14 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     }
 
     if let Some((proj_idx, session_id)) = parse_telegram_project_callback(&data) {
+        {
+            let h = harness.lock().await;
+            if !h.is_authorized(chat_id) {
+                drop(h);
+                let _ = bot.answer_callback_query(qid.clone()).await;
+                return Ok(());
+            }
+        }
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
         match h
@@ -205,7 +226,42 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
         return Ok(());
     }
 
+    if let Some((branch_idx, proj_idx, session_id)) = parse_telegram_branch_callback(&data) {
+        {
+            let h = harness.lock().await;
+            if !h.is_authorized(chat_id) {
+                drop(h);
+                let _ = bot.answer_callback_query(qid.clone()).await;
+                return Ok(());
+            }
+        }
+        let _ = bot.answer_callback_query(qid.clone()).await;
+        let h = harness.lock().await;
+        match h
+            .handle_telegram_branch_callback(chat_id, branch_idx, proj_idx, &session_id)
+            .await
+        {
+            Ok(()) => {}
+            Err(e) => {
+                bot.send_message(
+                    ChatId(chat_id),
+                    telegram_workflow_error_message(format!("{e:#}")),
+                )
+                .await?;
+            }
+        }
+        return Ok(());
+    }
+
     if let Some((agent_idx, proj_idx, session_id)) = parse_telegram_agent_callback(&data) {
+        {
+            let h = harness.lock().await;
+            if !h.is_authorized(chat_id) {
+                drop(h);
+                let _ = bot.answer_callback_query(qid.clone()).await;
+                return Ok(());
+            }
+        }
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
         match h
@@ -225,46 +281,71 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     }
 
     if let Some((action, session_id)) = parse_document_review_callback(&data) {
+        {
+            let h = harness.lock().await;
+            if !h.is_authorized(chat_id) {
+                drop(h);
+                let _ = bot.answer_callback_query(qid.clone()).await;
+                return Ok(());
+            }
+        }
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
-        if h.is_authorized(chat_id) {
-            if let Err(e) = h
-                .handle_document_review_action(chat_id, action, &session_id)
-                .await
-            {
-                bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
+        if let Err(e) = h
+            .handle_document_review_action(chat_id, action, &session_id)
+            .await
+        {
+            bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
+        }
+        return Ok(());
+    }
+
+    if let Some(session_id) = parse_elicitation_other_callback(&data) {
+        {
+            let h = harness.lock().await;
+            if !h.is_authorized(chat_id) {
+                drop(h);
+                let _ = bot.answer_callback_query(qid.clone()).await;
+                return Ok(());
             }
-        } else {
-            bot.send_message(
-                ChatId(chat_id),
-                "Access denied: this chat is not authorized to control workflows.",
-            )
-            .await?;
+        }
+        let _ = bot.answer_callback_query(qid.clone()).await;
+        let h = harness.lock().await;
+        if let Err(e) = h.handle_elicitation_other(chat_id, &session_id).await {
+            bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
         }
         return Ok(());
     }
 
     if let Some((session_id, option_index)) = parse_elicitation_select_callback(&data) {
+        {
+            let h = harness.lock().await;
+            if !h.is_authorized(chat_id) {
+                drop(h);
+                let _ = bot.answer_callback_query(qid.clone()).await;
+                return Ok(());
+            }
+        }
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
-        if h.is_authorized(chat_id) {
-            if let Err(e) = h
-                .handle_elicitation_select(chat_id, &session_id, option_index)
-                .await
-            {
-                bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
-            }
-        } else {
-            bot.send_message(
-                ChatId(chat_id),
-                "Access denied: this chat is not authorized to control workflows.",
-            )
-            .await?;
+        if let Err(e) = h
+            .handle_elicitation_select(chat_id, &session_id, option_index)
+            .await
+        {
+            bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
         }
         return Ok(());
     }
 
     if data.contains("recipe:") || data.starts_with("mr:") {
+        {
+            let h = harness.lock().await;
+            if !h.is_authorized(chat_id) {
+                drop(h);
+                let _ = bot.answer_callback_query(qid.clone()).await;
+                return Ok(());
+            }
+        }
         log::info!(
             target: "tddy_daemon::telegram_bot",
             "recipe callback chat_id={} data_len={}",

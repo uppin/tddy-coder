@@ -1,94 +1,87 @@
-# Production readiness: Telegram session control
-
-**Scope:** `packages/tddy-daemon/src/telegram_session_control.rs`, `InMemoryTelegramSender` changes in `telegram_notifier.rs`, `tests/telegram_session_control_integration.rs`  
-**Review date:** 2026-04-05
+# Chain PR integration base — production readiness validation
 
 ## Executive summary
 
-The new code establishes a **testable contract** for Telegram-driven workflow control (parsing, chunking, presenter byte encoding, and a **`TelegramSessionControlHarness`** with chat allowlisting). Logging uses explicit `log` targets and generally avoids sensitive content (lengths and paths, not prompts or tokens).
+`tddy-core` implements chain-PR integration base handling in `worktree.rs`: strict validation (`validate_chain_pr_integration_base_ref`), scoped fetch (`fetch_chain_pr_integration_base`), session setup with optional user base (`setup_worktree_for_session_with_optional_chain_base`), and resume resolution (`resolve_persisted_worktree_integration_base_for_session`). `changeset.rs` persists `effective_worktree_integration_base_ref` and `worktree_integration_base_ref` with appropriate serde defaults.
 
-**Production readiness is not met** for an end-to-end Telegram control plane: the harness is **not wired** into the daemon’s teloxide inbound path or `DaemonConfig` in `main.rs`—only outbound notifications (`TelegramSessionWatcher` / `TelegramDaemonHooks`) are. Several behaviors are **explicitly test-scoped** (e.g. plan chunk size `CHUNK_MAX = 24`), and authorization is **chat-only** with no binding between Telegram identity and session directories for callbacks.
-
-**Overall risk level:** **Medium–High** until inbound integration, config alignment, production chunk limits, and session–chat binding are addressed.
-
-## Risk level
-
-| Area | Level | Note |
-|------|--------|------|
-| Security (authz, session binding) | **High** | Allowlist exists; no user verification; callbacks not tied to owning session/chat. |
-| Configuration / feature flags | **High** | No `DaemonConfig` fields or flags for inbound control; harness uses ad-hoc `Vec<i64>`. |
-| Error handling / data integrity | **Medium** | Silent empty `changeset.yaml`; YAML parse failures propagate; some parsers are loose. |
-| Logging / secrets | **Low** | Targets and length-based fields are sound; tokens not present in this module. |
-| Performance | **Low–Medium** | Acceptable for expected scale; chunking allocates; sequential sends. |
-
-## Checklist
-
-| Criterion | Status | Notes |
-|-----------|--------|--------|
-| Errors surfaced with `anyhow` / `Result` on I/O and YAML | **Pass** | `handle_*` and `read_changeset_routing_snapshot` return `anyhow::Result`. |
-| Edge cases: empty input, UTF-8 boundaries | **Partial** | `chunk_telegram_text` handles empty and char boundaries; `max_utf8_bytes == 0` returns full string (documented). |
-| Edge cases: missing/malformed `changeset.yaml` on recipe callback | **Fail** | `read_to_string` + `unwrap_or_default()` treats missing file as empty mapping—risk of silent overwrite. |
-| Logging: `log` crate, stable targets | **Pass** | `tddy_daemon::telegram_session_control` and `tddy_daemon::telegram` for in-memory sender. |
-| No secrets in logs (tokens, prompts) | **Pass** | Lengths, `chat_id`, path display; no bot token logging in scoped files. |
-| Configuration: `DaemonConfig` / YAML for control plane | **Fail** | Harness takes constructor args; not loaded from `TelegramConfig`; no separate inbound flag. |
-| Security: chat allowlist | **Partial** | `ensure_authorized` for `chat_id`; `user_id` on commands is logged but **not** checked. |
-| Security: session scoping for callbacks | **Fail** | `handle_recipe_callback` accepts any `session_dir` without proving it belongs to the chat/session. |
-| Production Telegram message limits | **Fail** | `handle_plan_review_phase` uses `CHUNK_MAX = 24` (test forcing); not ~4096 UTF-16/codepoint policy. |
-| Async: no blocking in wrong places | **Pass** | Harness methods are `async`; I/O is sync in async fns (acceptable at small scale; see recommendations). |
-| Integration tests cover critical paths | **Partial** | Start workflow, recipe write, plan chunks, unauthorized message, elicitation bytes; no negative paths for YAML/recipe. |
-
-## Findings
-
-### Error handling (`anyhow`, edge cases)
-
-- **Strengths:** I/O and YAML errors propagate from `handle_recipe_callback`, `handle_start_workflow`, and `read_changeset_routing_snapshot`.
-- **`handle_recipe_callback`:** `std::fs::read_to_string(&path).unwrap_or_default()` collapses “file missing” into an empty document, then writes—can **create or replace** content without an explicit decision. Prefer `read_to_string` and map `NotFound` to a clear error, or require an existing file for updates.
-- **`parse_callback_payload`:** Returns `Some` only when the string contains the substring `"recipe:"`—brittle and not a structured parse.
-- **`map_elicitation_callback_to_presenter_input`:** If the payload lacks the `elicitation:` prefix, the code still encodes using `unwrap_or(callback_data)`—risk of **mis-encoding** arbitrary strings as presenter input.
-- **`parse_demo_options_value`:** Heuristic `:true`/`:false` spacing fix is fragile for real YAML edge cases.
-
-### Logging (`log`, targets, secrets)
-
-- **Strengths:** Consistent `target: "tddy_daemon::telegram_session_control"` for the control module; debug/info mix; `InMemoryTelegramSender::send_message_with_inline_keyboard` logs `chat_id`, `text_len`, `keyboard_rows` only.
-- **Note:** `handle_start_workflow` logs `user_id` (not secret, but PII-adjacent)—acceptable for ops if retention policies allow.
-
-### Configuration (`DaemonConfig`, feature flags)
-
-- **`TelegramConfig`** (`config.rs`) exposes `enabled`, `bot_token`, `chat_ids` for **notifications**, not for labeling this inbound harness.
-- **Gap:** No field such as `telegram_session_control_enabled`, no reuse of `chat_ids` as the allowlist for the harness, and no documented merge rule if notification chats differ from control chats.
-- **Integration:** `main.rs` only constructs `TelegramDaemonHooks` (outbound presenter observer). **`TelegramSessionControlHarness` is not registered**—inbound control is **not production-active**.
-
-### Security (authorization, allowlist, tokens)
-
-- **Allowlist:** `ensure_authorized` checks `chat_id` against `allowed_chat_ids`.
-- **Gaps:**
-  - **`user_id` is not authorized**—any member of an allowed group chat could act; no admin vs member distinction.
-  - **Callback path safety:** `handle_recipe_callback(&session_dir, cb)` does not validate that `session_dir` is the one associated with this chat’s prior `handle_start_workflow`—callers must enforce; the API does not.
-  - **Token logging:** Not applicable in these files; production teloxide path should continue using patterns like `mask_bot_token_for_logs` elsewhere (already present in `telegram_notifier.rs`).
-
-### Performance (allocations, chunk sizes, async)
-
-- **`chunk_telegram_text`:** Per-chunk `format!` / `to_string` allocations; acceptable for typical plan sizes.
-- **`handle_plan_review_phase`:** Sequential `send_message` in a loop—appropriate for Telegram rate limits; consider batching only if API allows and limits are configured.
-- **`CHUNK_MAX = 24`:** Favors integration tests (forced continuation markers), **not** production limits—must be config-driven and aligned with Telegram’s limits (and encoding: UTF-16 length for Bot API in some cases).
-- **`InMemoryTelegramSender::recorded_with_keyboards`:** Full `clone()` of stored messages—fine for tests; unbounded growth if used as a long-lived fake without clearing.
-
-### Tests (`telegram_session_control_integration.rs`)
-
-- **Strengths:** Covers keyboard on start, changeset persistence, chunked plan delivery, unauthorized denial, elicitation byte mapping.
-- **Gaps:** No test for corrupt `changeset.yaml`, missing file behavior on recipe callback, or unauthorized `handle_recipe_callback` / `handle_plan_review_phase` (only unauthorized entry path via `handle_start_workflow_unauthorized`).
-
-## Recommendations for follow-up
-
-1. **Wire inbound teloxide updates** to shared helpers (not only the harness), with a single place that enforces allowlist + session correlation.
-2. **Add `DaemonConfig` (or nested) options:** inbound enable flag, allowlist (or explicit reuse of `telegram.chat_ids` with documented semantics), and **production chunk size** (bytes or policy enum).
-3. **Replace `CHUNK_MAX = 24`** with a constant or config default matching Telegram limits; keep test-only small values only in tests via injected limits.
-4. **Harden `handle_recipe_callback`:** fail closed on missing `changeset.yaml` if updates are not intended to create; or document “create if absent” and add tests.
-5. **Tighten `map_elicitation_callback_to_presenter_input`:** require `elicitation:` prefix or return `Result` / explicit enum instead of silent fallback.
-6. **Session–chat binding:** persist mapping `(session_id, chat_id)` and validate on every callback referencing `session_dir` or `session_id`.
-7. **Optional:** consider `user_id` checks if the bot only serves private chats with a known operator set.
-8. **Async I/O:** for large files or high concurrency, move blocking `std::fs` off the runtime with `spawn_blocking` or use async fs (project-wide convention permitting).
+The library layer is directionally sound for production use (validation before `git`, no shell interpolation). **Gaps for “prod-ready” end-to-end behavior:** (1) the legacy helper `setup_worktree_for_session_with_integration_base` does **not** persist effective/user integration-base fields, so observability and resume parity differ from the optional-chain API; (2) **no product entry point** (`tddy-service` daemon, `tddy-workflow-recipes` hooks) calls `setup_worktree_for_session_with_optional_chain_base` or threads a chain-base parameter from RPC/UI—production paths still use `setup_worktree_for_session` only; (3) default-path setup performs **redundant fetches** (`git fetch origin` inside default resolution, then `git fetch origin <branch>`). Address wiring and persistence parity before treating chain PR base as a shipped feature.
 
 ---
 
-*This review is limited to the files listed in the request; production behavior also depends on future teloxide wiring and `ConnectionService` integration not fully covered here.*
+## Checklist
+
+| Area | Status | Notes |
+|------|--------|--------|
+| Ref validation (injection / unsafe args) | **Pass** | `origin/` prefix, segment rules, forbids `..`, `--`, whitespace, common shell metacharacters; args passed via `Command::args` (no shell). |
+| Git invocation safety | **Pass** | Literal argv; validated ref fragments only. |
+| Error typing / user vs internal | **Partial** | Uniform `Result<_, String>`; useful messages but no structured error type or stable codes for UI. |
+| Logging level & content | **Partial** | `info` for operations and paths; `debug` for outcomes and fetch stderr snippets. Ref names logged at info—usually acceptable; no obvious token leakage. |
+| Configuration | **Partial** | Remote is hardcoded `origin`; no env/config override (consistent with existing integration-base helpers). |
+| Serialization / schema | **Pass** | Optional fields, `skip_serializing_if`, `Default` in `Changeset`. |
+| Persistence parity (legacy vs new API) | **Fail** | `setup_worktree_for_session_with_integration_base` omits `effective_worktree_integration_base_ref` / `worktree_integration_base_ref`. |
+| Performance (fetch) | **Partial** | Redundant `fetch origin` + `fetch origin <branch>` on default optional-chain path. |
+| Operational / resume | **Partial** | `resolve_persisted_*` prefers persisted effective ref; does not re-validate ref shape on read (trust on-disk YAML). |
+| Daemon / CLI / RPC integration | **Fail** | Daemon and recipe hooks use `setup_worktree_for_session` only—optional chain base not exposed. |
+
+---
+
+## Findings
+
+### 1. Validation and security
+
+- **`validate_chain_pr_integration_base_ref`** allows multi-segment paths under `origin/` and rejects empty segments, `..`, `--`, whitespace, and a set of shell-oriented characters. This aligns with passing a single refspec fragment to `git fetch origin <branch_path>` without shell interpretation.
+- **Residual edge cases:** Ref names may still include characters Git treats specially in other commands (not covered here). Narrowing to a Git ref-name charset (e.g. rejecting `*`, `?`, `[`, `@` where inappropriate) would reduce surprise if these strings are ever forwarded to broader git plumbing. Not blocking for the current `fetch` argv usage.
+- **`validate_integration_base_ref`** (single segment) remains the gate for non-chain `fetch_integration_base`; chain path uses the separate validator—clear separation.
+
+### 2. Error handling
+
+- Public APIs return **`Result<_, String>`**. Callers (e.g. daemon) surface the string to workflow completion. There is no distinction between “user fixable” (bad ref) and infrastructure (git missing, disk). Acceptable for an internal library; product layer may want typed errors later.
+- Failure paths attach **full `git` stderr** to the returned `Err` in several places—appropriate for operators; ensure UI does not echo raw stderr to untrusted telemetry without scrubbing if that becomes a requirement.
+
+### 3. Logging
+
+- **`log::info`** records repo root, session dir, integration ref strings, and boolean opt-in. Paths and branch/ref names are operational data, not credentials.
+- **`log::debug`** records fetch stderr on failure—reasonable; avoids noisy logs on success paths.
+- User-selected chain base is logged at **info** when `Some`—intentional audit trail; confirm product privacy expectations for branch names in shared logs.
+
+### 4. Configuration
+
+- **`origin`** is fixed in all fetch helpers. Multi-remote repos cannot select a remote via config—consistent with existing design, not a regression for this feature.
+
+### 5. Performance and operations
+
+- **`setup_worktree_for_session_with_optional_chain_base(None)`** calls **`resolve_default_integration_base_ref`**, which runs **`git fetch origin`** (no refspec), then **`fetch_integration_base`**, which runs **`git fetch origin <single-branch>`**. The second fetch is often redundant immediately after a full origin fetch. Consider deduplicating (e.g. resolve without implicit fetch, or pass “already fetched” state)—operational efficiency, not correctness.
+- **`resolve_persisted_worktree_integration_base_for_session`** may call **`resolve_default_integration_base_ref`** when no persisted base exists—another full `git fetch origin`. Callers should avoid hammering this in tight loops.
+
+### 6. Persistence and legacy API (cross-check)
+
+- **`setup_worktree_for_session_with_optional_chain_base`** sets **`cs.effective_worktree_integration_base_ref`** always and **`cs.worktree_integration_base_ref`** only when the user supplied a chain base (`Some`). Matches documented intent.
+- **`setup_worktree_for_session_with_integration_base`** updates worktree/branch/repo_path but **does not** set `effective_worktree_integration_base_ref` or `worktree_integration_base_ref`. Any session created through this path (or through **`setup_worktree_for_session`**, which delegates to it) will **not** record the effective base in the changeset. Resume and observability for those sessions lag the optional-chain API unless callers are updated or the legacy function gains the same writes.
+
+### 7. RPC / product wiring (cross-check)
+
+- **`packages/tddy-service/src/daemon_service.rs`** uses **`setup_worktree_for_session`** after planning—no parameter for chain PR base, no call to **`setup_worktree_for_session_with_optional_chain_base`**.
+- **`packages/tddy-workflow-recipes/src/tdd/hooks_common.rs`** (`ensure_worktree` path) also calls **`setup_worktree_for_session`** only.
+- No grep hits for the optional-chain API outside **`tddy-core`** and **integration tests**. End users cannot select a chain base through current daemon/workflow entry points until RPC/session context carries that field and the worktree hook reads it.
+
+---
+
+## Prioritized recommendations
+
+1. **P0 — Wire product entry points:** Extend session/RPC/context (where workflow receives user intent) with an optional chain PR base ref; call **`setup_worktree_for_session_with_optional_chain_base`** from the same places that create worktrees today when that value is present. Until then, the feature exists only for direct library/test callers.
+
+2. **P0 — Persistence parity for legacy path:** In **`setup_worktree_for_session_with_integration_base`**, set **`effective_worktree_integration_base_ref`** to the explicit ref used (and **`worktree_integration_base_ref`** only if you later distinguish “user selected” vs “caller supplied”). Alternatively, document that only the optional-chain API persists these fields and accept inconsistent changesets—less desirable for resume tooling.
+
+3. **P1 — Reduce redundant fetches:** After **`resolve_default_integration_base_ref`**, skip **`fetch_integration_base`** if the default resolution already performed an equivalent fetch, or split “resolve ref name” from “fetch” so hooks can fetch once.
+
+4. **P2 — Optional validation on read:** When loading persisted refs for downstream git use, re-run **`validate_chain_pr_integration_base_ref`** / **`validate_integration_base_ref`** so tampered `changeset.yaml` fails fast with a clear error.
+
+5. **P2 — Error taxonomy:** Introduce a small enum or structured error for worktree/git failures if the web/UI must map to specific user messages.
+
+---
+
+## Return to parent
+
+- **File written:** yes  
+- **Path:** `/var/tddy/Code/tddy-coder/.worktrees/chain-pr-base-branch/plans/validate-prod-ready-report.md`  
+- **One-line summary:** Core validation and optional-chain setup are solid, but legacy setup omits persisted effective ref, default path double-fetches, and daemon/workflow still only call `setup_worktree_for_session`—chain PR base is not wired for production.

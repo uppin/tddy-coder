@@ -1,91 +1,47 @@
-# Clean-code analysis: Telegram session control
+# Chain PR — Clean Code Analysis
 
-**Scope:** `packages/tddy-daemon/src/telegram_session_control.rs`, relevant parts of `packages/tddy-daemon/src/telegram_notifier.rs`, `packages/tddy-daemon/tests/telegram_session_control_integration.rs`  
-**Tooling:** `./dev cargo fmt -p tddy-daemon -- --check` — **passed** (exit 0).
-
----
-
-## Summary
-
-The new control-plane module is readable, well-structured with section headers, and backed by a clear `TelegramSender` abstraction from `telegram_notifier`. Documentation at module and public-type level is generally strong. Main improvement areas are **naming vs. behavior** (`parse_callback_payload`), **incomplete use of parameters** in plan review, **tight coupling** to `InMemoryTelegramSender` for the harness, and **mixed responsibilities** inside `TelegramSessionControlHarness`.
-
----
+Analysis of Chain PR–related changes in `tddy-core` (worktree integration base, changeset persistence, crate exports), plus incidental noise elsewhere.
 
 ## Strengths
 
-### `telegram_session_control.rs`
+- **Clear security model split**: `validate_integration_base_ref` enforces a strict single-segment `origin/<branch>` contract for legacy/project defaults; `validate_chain_pr_integration_base_ref` deliberately allows multi-segment paths with extra guards (`..`, empty segments). The two validators are documented and aligned with different product rules.
+- **Fetch symmetry**: `fetch_chain_pr_integration_base` mirrors `fetch_integration_base` (validate → `git fetch origin <path>` → log on failure). Behavior is easy to follow and audit.
+- **Persistence model**: `Changeset::effective_worktree_integration_base_ref` vs `worktree_integration_base_ref` is explained in field-level comments—effective = what was used to create the worktree; the latter = user opt-in chain base when present.
+- **Public API documentation**: `setup_worktree_for_session_with_optional_chain_base` and `resolve_persisted_worktree_integration_base_for_session` have substantial `///` docs describing `None` vs `Some` and resume order.
+- **`lib.rs` exports**: New symbols are grouped with existing worktree re-exports; naming is consistent with the module (`validate_chain_pr_integration_base_ref`, `setup_worktree_for_session_with_optional_chain_base`, etc.).
+- **Resume ordering**: `resolve_persisted_worktree_integration_base_for_session` prefers persisted effective ref first, which matches the stated contract for deterministic resume.
 
-- **Module-level docs** state purpose, bridge to web encodings, and point to the harness and tests.
-- **Public contract types** (`StartWorkflowCommand`, `TelegramCallback`, `CapturedTelegramMessage`, outcomes, `PresenterInputPayload`, `WorkflowTransitionKind`) are documented and used consistently in tests.
-- **Separation of pure helpers** (`parse_start_workflow_prompt`, `chunk_telegram_text`, `map_elicitation_callback_to_presenter_input`) from I/O-heavy harness methods improves testability; inline `#[cfg(test)]` unit tests cover parsers and chunking.
-- **Logging** uses a dedicated target (`tddy_daemon::telegram_session_control`) for filterability.
-- **`chunk_telegram_text`** documents edge cases (empty input, `max_utf8_bytes == 0`, continuation suffix vs. byte-only splits) and UTF-8 boundary handling via `take_utf8_prefix`.
+## Issues (by severity)
 
-### `telegram_notifier.rs` (relevant sections)
+### Medium
 
-- **`TelegramSender`** is a small, focused async trait — good boundary for dependency inversion; production (`TeloxideSender`) and test (`InMemoryTelegramSender`) implementations stay behind the trait for plain sends.
-- **`InMemoryTelegramSender`** extension (`recorded_with_keyboards`, `send_message_with_inline_keyboard`) is documented as optional for keyboard-aware tests; `recorded()` remains backward compatible.
-- **Docs on `InMemoryTelegramSender`** and **`send_daemon_lifecycle_message`** clarify intent.
+- **Duplication vs `validate_integration_base_ref` / `fetch_integration_base`**: Shared logic (trim, `origin/`, forbidden shell-ish characters, `--`, whitespace) is copy-pasted between the two validators. The two fetch helpers differ only by which validator runs and the label for the ref tail (`branch` vs `branch_path`). Risk: future rule changes updated in one path only.
+- **Duplication in setup paths**: `setup_worktree_for_session_with_integration_base` and `setup_worktree_for_session_with_optional_chain_base` both repeat branch/worktree name resolution from the changeset, `create_worktree_with_retry`, and the same three assignments (`worktree`, `branch`, `repo_path`). The optional-chain variant adds resolution/fetch branching and extra fields. This increases the surface area for drift if one path is fixed and the other is not.
+- **Misleading test module and names**: `chain_pr_red_tests` and the module comment (`RED: ... must fail until Green implements behavior`) describe a red-phase harness, but the tests now assert success (`is_ok()`, `GREEN` in messages). Same pattern in `integration_base_red_tests` (e.g. `fetch_integration_base_succeeds_for_valid_origin_main_red`, `setup_worktree_with_integration_base_completes_red`). **Severity**: maintainability and onboarding—readers will doubt whether failures are expected.
+- **Doc redundancy**: `setup_worktree_for_session_with_optional_chain_base` repeats the `None` vs `Some` story across two doc paragraphs; could be tightened into one behavioral block.
 
-### `telegram_session_control_integration.rs`
+### Low
 
-- **Stable chat constants** (`AUTHORIZED_CHAT`, `UNAUTHORIZED_CHAT`) avoid magic numbers.
-- **`harness_with_sender`** centralizes harness construction and shared `Arc<InMemoryTelegramSender>`.
-- **Tests map to user-visible scenarios** (start workflow + keyboard, recipe callback → YAML, plan chunking + transition, elicitation bytes, unauthorized denial).
-- **Assertions** include actionable failure messages (`sent={sent:?}`, `recorded={:?}`).
+- **`setup_worktree_for_session_with_optional_chain_base` size**: One function handles resolution/validation, conditional fetch strategy, worktree creation, and changeset writes (~80 lines). Cyclomatic complexity is moderate (one `match`, one `if` on fetch). Acceptable for now but not ideal for single-responsibility purists.
+- **Naming overlap**: `worktree_integration_base_ref` reads like “the” worktree base; only the comment disambiguates from `effective_worktree_integration_base_ref`. A more explicit name (e.g. `user_chain_pr_integration_base_ref`) would reduce confusion—would be a breaking serde field rename unless aliased.
 
----
+### Informational (noise)
 
-## Issues
+- **`packages/tddy-livekit/tests/rpc_scenarios.rs`**: Diff is formatting-only (multi-line `EchoRequest` collapsed to one line). No behavior change—safe to treat as unrelated churn in review or revert to shrink the PR.
 
-### Naming and semantics
+## Refactoring suggestions
 
-| Item | Concern |
-|------|--------|
-| `parse_callback_payload` | Returns `Some` only when `callback_data.contains("recipe:")`. The name implies generic callback parsing; actual behavior is recipe-specific. Callers may assume other callback types are recognized. |
-| `parse_demo_options_value` | Heuristic `replace(":true", ": true")` is brittle for nested structures or keys containing those substrings; acceptable for tests but worth documenting as a **known limitation** if kept. |
+1. **Extract shared validation helpers** (private): e.g. `fn validate_origin_prefixed_ref_common(rest: &str, label: &str) -> Result<(), String>` for whitespace, forbidden chars, `--`, and optionally compose single-segment vs multi-segment rules on top. Keeps error messages specific per public API while deduplicating the mechanical checks.
+2. **Unify fetch**: Single internal `fetch_origin_integration_base_ref(repo_root, ref_str, mode: IntegrationBaseRefKind)` where `Kind` selects validator, or pass a validated tail and a flag—avoid two nearly identical `Command::new("git")` blocks.
+3. **Extract “apply worktree session to changeset”**: A small private helper taking `(session_dir, worktree_path, actual_branch, integration_base_ref, Option<user_chain_ref>)` could perform the shared field writes and optional `effective_*` / `worktree_integration_base_ref` updates, so the two setup functions only differ in how they obtain `integration_base_ref` and which fetch they call.
+4. **Rename test modules** after green: e.g. `chain_pr_integration_base_tests` or `worktree_integration_base_tests`, and drop `_red` from test function names unless you intentionally keep “red” as historical artifact (not recommended).
 
-### Function complexity and completeness
+## Optional small follow-ups
 
-- **`chunk_telegram_text`**: Two main branches (with vs. without continuation room). Complexity is moderate and localized; acceptable, but the `max_utf8_bytes == 0` branch returns a single full string — behavior is documented; ensure product callers never rely on ambiguous edge cases.
-- **`handle_plan_review_phase`**: Takes `approval_callback` but ends with `let _ = approval_callback;` — the approval payload is **not** used to validate or branch. That reads as **unfinished behavior** or misleading API (violates principle of least surprise). Either integrate approval handling or narrow the signature / document as reserved for future use with a `TODO`/`FIXME` per project rules.
-- **`handle_recipe_callback`**: Mixes parsing, YAML load/merge, and write — still readable; could grow if more segments are added.
-
-### Duplication
-
-- Repeated **`log::info!` / `log::debug!`** blocks with the same target across methods — could extract small helpers (e.g. `fn log_control(level, msg: ...)`) if churn increases; not urgent.
-- **`TelegramSessionWatcher`-style** “enabled + chat_ids loop” patterns exist elsewhere in `telegram_notifier`; session control uses `InMemoryTelegramSender` directly — duplication is low between files, but **broadcast-to-chats** logic is conceptually similar.
-
-### SOLID / module boundaries
-
-- **`TelegramSessionControlHarness`**: Combines authorization, filesystem (session dir, `changeset.yaml`), and Telegram outbound calls. For a harness this is **acceptable**; for production extraction, consider splitting **authorization**, **changeset persistence**, and **messaging** to respect single responsibility and ease reuse from a future teloxide dispatcher.
-- **Dependency direction**: `telegram_session_control` imports `InMemoryTelegramSender` and `TelegramSender` from `telegram_notifier` — reasonable; the harness is test-oriented. Production wiring should keep **domain types** in `telegram_session_control` and **transport** in notifier/teloxide layers.
-- **`TelegramSender` trait** does not include `send_message_with_inline_keyboard`; the harness calls that method on the concrete `InMemoryTelegramSender`. That **leaks** a test-only API into the harness type — fine for tests, but if production needs keyboards, the trait or a separate abstraction should be extended consistently.
-
-### Documentation (module docs, public API)
-
-- **Strong** for top-level types and chunking/elicitation encoding.
-- **Gaps**: `parse_callback_payload` should document the **exact** subset of callbacks handled. `ChangesetRoutingSnapshot` fields `demo_options` / `run_optional_step_x` — clarify whether Telegram path populates all fields or only those under test.
-- **`handle_start_workflow_unauthorized`**: Docs say unauthorized behavior; the early return `Ok(None)` when chat **is** authorized is correct but subtle — worth one line in doc (“returns `None` if chat is authorized — caller should use `handle_start_workflow`”).
-
-### Test quality
-
-- **Integration file** includes a **pure encoding test** (`telegram_elicitation_choice_mapped_to_presenter_expected_input`) that duplicates coverage already in unit tests in `telegram_session_control.rs`. Acceptable as acceptance redundancy; optional consolidation to avoid double maintenance.
-- **`unwrap()` on `tempfile::tempdir()`** — standard in tests; fine.
-- **Integration tests** do not assert on **filesystem session persistence** for `handle_start_workflow` (only session id + outbound messages) — may be intentional; call out if disk layout is part of the contract.
+- Add a one-line `///` on `fetch_chain_pr_integration_base` noting it is the chain-PR counterpart to public `fetch_integration_base` (same operational semantics, different validation).
+- Consider shortening the first paragraph of `setup_worktree_for_session_with_optional_chain_base` docs to remove duplication with the second.
+- If the PR should stay minimal, **exclude** `rpc_scenarios.rs` from the same commit as functional Chain PR work to keep blame and review focused.
 
 ---
 
-## Prioritized refactors
-
-1. **High — API honesty:** Resolve `approval_callback` in `handle_plan_review_phase` (use it or remove/rename parameters) and align `parse_callback_payload` name/docs with behavior (or implement real multi-type parsing).
-2. **Medium — Naming/docs:** Rename or narrowly document `parse_callback_payload`; document `parse_demo_options_value` limitations or replace with a stricter parser if production-bound.
-3. **Medium — Boundaries:** If teloxide integration lands, introduce a small **outbound port** (trait) for “plain text + optional inline keyboard” so the harness and production share one abstraction instead of concrete `InMemoryTelegramSender` methods.
-4. **Low — DRY:** Optional shared logging helper for `telegram_session_control` to shrink repetitive log blocks.
-5. **Low — Tests:** Drop duplicate elicitation byte test from integration or mark it explicitly as acceptance-only duplicate; add an integration assertion for **session directory** contents after start if that becomes a guaranteed contract.
-
----
-
-## `rustfmt`
-
-`./dev cargo fmt -p tddy-daemon -- --check` completed successfully — formatting for this package matches the toolchain’s expectations.
+**Artifacts**: Report generated for workspace `/var/tddy/Code/tddy-coder/.worktrees/chain-pr-base-branch`.

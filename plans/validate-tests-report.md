@@ -1,89 +1,72 @@
-# Validate-tests report: Telegram session control (`tddy-daemon`)
+# Chain PR base branch — validate-tests report
 
 **Date:** 2026-04-05
 
 ## Commands run
 
-| Command | Environment |
-|--------|----------------|
-| `export TMPDIR=/var/tddy/tmp-tddy-cargo` | Writable temp base (created if missing). |
-| `cd /var/tddy/Code/tddy-coder/.worktrees/telegram-session-control && ./dev cargo test -p tddy-daemon 2>&1` | Primary validation. |
-| `./dev cargo check --workspace 2>&1` | Broader workspace compile smoke test (dev profile). |
-| `./dev cargo test --workspace --no-run` | **Optional** — started but not run to completion in this session (long-running); terminated after extended wait. Use locally if you need test-binary compilation for every crate. |
+| Command | Purpose |
+|--------|---------|
+| `./dev cargo test -p tddy-core -- worktree::` | Filtered `worktree::` tests (chain PR + integration base RED tests) |
+| `./dev cargo test -p tddy-integration-tests --test chain_pr_base_acceptance` | Acceptance tests for optional chain base |
+| `./dev cargo test -p tddy-core` | Full `tddy-core` unit + integration tests |
+| `./dev cargo test` | Full workspace (attempted) |
 
-## Overall result
+## Results table
 
-- **`cargo test -p tddy-daemon`:** **PASS** — exit code **0**.
-- **`cargo check --workspace`:** **PASS** — exit code **0** (`Finished` in ~4 minutes).
+| Scope | Passed | Failed | Ignored | Notes |
+|-------|--------|--------|---------|-------|
+| `tddy-core` with filter `worktree::` | 5 | 0 | 0 | 114 tests filtered out in lib tests; 2 filtered in `changeset_demo_workflow_acceptance` |
+| `tddy-integration-tests` `chain_pr_base_acceptance` | 5 | 0 | 0 | — |
+| `tddy-core` (full package) | 121 | 0 | 0 | 119 lib + 2 `changeset_demo_workflow_acceptance` |
+| Full workspace `./dev cargo test` | — | **compile error** | — | See failures |
 
-## Passing summary (`tddy-daemon`)
+## Failures
 
-| Suite | Passed |
-|-------|--------|
-| Library unit tests (`src/lib.rs`) | 58 |
-| Binary unit tests (`src/main.rs`) | 0 |
-| `tests/acceptance_daemon.rs` | 8 |
-| `tests/delete_session.rs` | 2 |
-| `tests/grpc_spawn_contract.rs` | 1 |
-| `tests/list_agents_allowlist_acceptance.rs` | 4 |
-| `tests/list_sessions_enriched.rs` | 2 |
-| `tests/multi_host_acceptance.rs` | 5 |
-| `tests/session_workflow_files_rpc.rs` | 3 |
-| `tests/signal_session.rs` | 3 |
-| `tests/telegram_notifier.rs` | 3 |
-| `tests/telegram_session_control_integration.rs` | 5 |
-| `tests/worktrees_acceptance.rs` | 2 |
-| `tests/worktrees_rpc.rs` | 4 |
-| Doc-tests | 0 |
-| **Total** | **100** |
+### Feature-scoped runs
 
-**Telegram-focused tests in this run**
+No failures. All chain-PR–focused and `tddy-core` tests **passed**.
 
-- **Unit (`telegram_session_control`):** 4 tests — `parse_start_workflow_extracts_prompt`, `chunk_telegram_text_respects_limit_and_continuation_markers`, `parse_callback_payload_recognizes_recipe_selection`, `map_elicitation_callback_to_presenter_input_matches_web_encoding`.
-- **Integration (`telegram_session_control_integration`):** 5 tests — start workflow + keyboard, recipe + demo_options persistence, plan review chunking + transition, elicitation byte mapping, unauthorized chat denial.
+### Full workspace `./dev cargo test`
 
-## Failing tests
+Build failed before tests ran:
 
-**None.** All 100 `tddy-daemon` tests passed.
+- **Crate:** `tddy-e2e`
+- **Target:** test `grpc_reconnect_acceptance`
+- **File:** `packages/tddy-e2e/tests/grpc_reconnect_acceptance.rs` (approx. line 191)
+- **Reason:** `E0599` — `floor_char_boundary` called on `Vec<u8>`; method not found (likely Rust version / API mismatch: `floor_char_boundary` is on `str`, not `Vec<u8>`).
 
-*(Note: `packages/tddy-daemon/telegram_session_control_red_test_output.txt` captures an older red-phase / marker-driven failure log; it is not the result of the current successful run.)*
+This failure appears **unrelated** to chain PR / worktree integration base work (`worktree.rs`, `changeset.rs`, `chain_pr_base_acceptance.rs`).
 
 ## Coverage gaps
 
-### `telegram_session_control.rs` (unit)
+The following areas are **not** covered (or only lightly covered) by current tests for chain PR optional base behavior:
 
-- **Covered well:** `parse_start_workflow_prompt`, `chunk_telegram_text`, `parse_callback_payload` (recipe branch), `map_elicitation_callback_to_presenter_input` (one multi-select case).
-- **Gaps / light coverage:**
-  - **`parse_callback_payload`:** Returns `None` for non-`recipe:` payloads; no explicit test for elicitation-only or mixed strings beyond the integration layer.
-  - **`chunk_telegram_text`:** Edge cases (`max_utf8_bytes == 0`, empty string, very small max vs continuation suffix) are partially implied but not all enumerated in unit tests.
-  - **`parse_demo_options_value`:** Exercised indirectly via integration (`demo_options:{run:true}`), not isolated unit tests for JSON vs YAML normalization failures.
-  - **`read_changeset_routing_snapshot`:** Used in integration; no dedicated unit test for malformed YAML or missing file errors.
-  - **`TelegramSessionControlHarness`:** Handler behavior is mostly integration-tested; `handle_plan_review_phase` discards `approval_callback` (no assertion that callback data drives workflow server-side — aligns with “harness” scope).
-  - **`WorkflowTransitionKind::ElicitationSubmitted`:** Not referenced in current tests (only `PlanReviewApproved` appears in the plan-review test).
+1. **`validate_chain_pr_integration_base_ref` negative cases**  
+   Unit tests cover empty string and a valid multi-segment ref. Not exercised in tests: rejection of `..`, `--`, shell/forbidden characters, missing `origin/` prefix, empty path segments, whitespace in segments (logic exists in `worktree.rs`).
 
-### `telegram_notifier` — `InMemoryTelegramSender` keyboard paths
+2. **`fetch_chain_pr_integration_base` / `git fetch` failures**  
+   No automated test asserts behavior when fetch fails (e.g. ref does not exist on remote, network error). Success paths are covered indirectly via acceptance tests with a real repo.
 
-- **`send_message_with_inline_keyboard` and `recorded_with_keyboards`:** Exercised through **session control integration tests** and `drain_outbound_messages`, not through **`telegram_notifier`**’s own `acceptance_unit_tests` (those use `InMemoryTelegramSender` for plain `send_message` / watcher behavior).
-- **Gap:** No focused unit test in `telegram_notifier.rs` that asserts `recorded_with_keyboards()` row/column structure after `send_message_with_inline_keyboard`, or that `recorded()` strips keyboards as documented.
+3. **RPC / daemon / LiveKit wiring**  
+   Grep shows no chain-PR-specific handling in `packages/tddy-livekit`. Daemon `project_storage` uses `validate_integration_base_ref` (single-segment `origin/<branch>`), not `validate_chain_pr_integration_base_ref`. End-to-end or RPC scenarios that pass an optional chain base from UI/agent through daemon are **not** present in the reviewed test set.
 
-### Gaps vs product / architecture (inbound bot, RPC, config)
+4. **`resolve_persisted_worktree_integration_base_for_session` precedence**  
+   RED test checks resolution when both effective and user refs are set to the same value. Gaps: differing `effective_*` vs `worktree_integration_base_ref`, missing/invalid YAML, or only one field set — should match documented preference order.
 
-Aligned with the stated evaluation context (**medium risk; full bot/RPC not wired**):
+5. **Resume + worktree recreation**  
+   `chain_pr_resume_uses_persisted_base` compares resolved ref to default; it does **not** run `setup_worktree_for_session_with_optional_chain_base` again after resume to prove the worktree is created from the persisted base.
 
-| Area | Status |
-|------|--------|
-| **Inbound Telegram bot (teloxide update loop)** | `telegram_session_control` is a **library harness + helpers**; module docs state the live loop should call these helpers — **no end-to-end daemon process test** receiving real Telegram updates. |
-| **RPC** | Outbound **`PresenterObserver`** / **`TelegramDaemonHooks`** exists for notifications; **no RPC surface** for interactive Telegram session control (plan approval, recipe selection) in `ConnectionService` or similar — integration tests use the harness directly, not gRPC. |
-| **Config** | Existing **`telegram`** block (`enabled`, `bot_token`, `chat_ids`) supports **notifications**; there is **no separate config schema** documented for “session control allowlist” beyond reusing allowed chat ids in harness tests (`Vec<i64>` in code). |
-| **PRD / `docs/ft/`** | **[telegram-notifications.md](../docs/ft/daemon/telegram-notifications.md)** describes **outbound** session notifications and Presenter stream elicitation — **not** an inbound command-and-control PRD for `/start-workflow`. Product docs for interactive Telegram-driven TDD workflow control would need to be added or cross-linked when the feature is wired. |
+6. **Cross-package regression**  
+   `tddy-livekit` tests (`rpc_scenarios.rs` etc.) were not run as part of the minimum command set; full workspace compile currently blocks a clean full run.
 
 ## Recommendations
 
-1. **Before production wiring:** Add a **small unit test module** next to `InMemoryTelegramSender` verifying `send_message_with_inline_keyboard` + `recorded_with_keyboards` + `recorded()` invariants (so keyboard regressions surface without running full integration tests).
-2. **Extend `telegram_session_control` unit tests** for `parse_demo_options_value` error paths and `chunk_telegram_text` boundary cases if you tighten behavior.
-3. **Integration:** When the teloxide inbound loop lands, add **one** narrow daemon-level or black-box test (or documented manual checklist) that proves authorized chat id config matches harness assumptions.
-4. **Optional CI:** Run `./dev cargo test --workspace --no-run` periodically or in CI if you need guaranteed compilation of all test targets across the workspace (this run used `cargo check --workspace` instead for a faster smoke test).
+1. Add **unit tests** for `validate_chain_pr_integration_base_ref` covering each documented rejection (`..`, `--`, `origin` without branch, empty segment, forbidden chars).
+2. Add a **controlled failure test** for fetch (e.g. temporary repo with no `origin` remote or nonexistent ref) if the project accepts maintaining such a fixture.
+3. If the product exposes chain base via **daemon/RPC**, add an integration or RPC scenario test that mirrors the production call path (request field → `setup_worktree_for_session_with_optional_chain_base` or equivalent).
+4. Extend **resume** acceptance to call setup twice or assert worktree HEAD after a simulated resume using persisted `changeset.yaml`.
+5. **Fix `tddy-e2e` compile error** (`grpc_reconnect_acceptance.rs`) so full-workspace `cargo test` can run for regression signal; track separately from chain PR scope if it predates this branch.
 
 ---
 
-*Generated by validate-tests subagent for refactor validation.*
+*Generated by validate-tests subagent for workspace `chain-pr-base-branch`.*

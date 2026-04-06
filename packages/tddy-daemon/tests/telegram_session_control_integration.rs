@@ -268,9 +268,9 @@ async fn telegram_elicitation_choice_mapped_to_presenter_expected_input() {
     );
 }
 
-/// `telegram_unauthorized_chat_cannot_control_session`
+/// `telegram_unauthorized_start_workflow_is_silent`
 #[tokio::test]
-async fn telegram_unauthorized_chat_cannot_control_session() {
+async fn telegram_unauthorized_start_workflow_is_silent() {
     let tmp = tempfile::tempdir().unwrap();
     let (harness, sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
@@ -284,18 +284,14 @@ async fn telegram_unauthorized_chat_cannot_control_session() {
         .await
         .expect("unauthorized handler");
 
-    let msg = denial.expect("unauthorized chat must receive explicit denial message");
     assert!(
-        msg.text.to_lowercase().contains("denied")
-            || msg.text.to_lowercase().contains("not authorized"),
-        "denial text must be explicit; got {:?}",
-        msg.text
+        denial.is_none(),
+        "unauthorized chat must not get a captured denial message (silent ignore for multi-daemon)"
     );
     assert!(
+        collect_outbound_messages(&sender, UNAUTHORIZED_CHAT).is_empty(),
+        "unauthorized chat must receive no Telegram traffic; got {:?}",
         collect_outbound_messages(&sender, UNAUTHORIZED_CHAT)
-            .iter()
-            .any(|m| m.text == msg.text),
-        "denial must be sent to the same chat"
     );
 }
 

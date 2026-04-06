@@ -702,6 +702,11 @@ fn select_options_extended_listing(q: &tddy_service::gen::ClarificationQuestionP
         }
         out.push('\n');
     }
+    if q.allow_other {
+        out.push_str(
+            "\nYou can also tap **Other** and send a free-text answer as your next message.\n",
+        );
+    }
     out
 }
 
@@ -782,6 +787,18 @@ fn clarification_select_keyboard(
     }
     if !row.is_empty() {
         rows.push(row);
+    }
+    if q.allow_other {
+        let cb = format!("eli:o:{session_id}");
+        if cb.len() > 64 {
+            log::warn!(
+                target: "tddy_daemon::telegram",
+                "Other callback_data too long ({} bytes); skipping Other button",
+                cb.len()
+            );
+        } else {
+            rows.push(vec![("Other".to_string(), cb)]);
+        }
     }
     if rows.is_empty() {
         None
@@ -1046,6 +1063,7 @@ mod acceptance_unit_tests {
                                 },
                             ],
                             multi_select: false,
+                            allow_other: false,
                         }),
                         question_index: 0,
                         total_questions: 1,
@@ -1091,6 +1109,77 @@ mod acceptance_unit_tests {
     }
 
     #[tokio::test]
+    async fn mode_changed_select_includes_other_button_when_allow_other() {
+        use tddy_service::gen::app_mode_proto::Variant;
+        use tddy_service::gen::server_message::Event;
+        use tddy_service::gen::{
+            AppModeProto, AppModeSelect, ClarificationQuestionProto, ModeChanged,
+            QuestionOptionProto, ServerMessage,
+        };
+
+        let mut watcher = TelegramSessionWatcher::new();
+        let mut cfg = DaemonConfig::default();
+        cfg.telegram = Some(crate::config::TelegramConfig {
+            enabled: true,
+            bot_token: "x".to_string(),
+            chat_ids: vec![42],
+        });
+        let mem = InMemoryTelegramSender::new();
+        let sid = "018f1234-5678-7abc-8def-123456789abc";
+        let msg = ServerMessage {
+            event: Some(Event::ModeChanged(ModeChanged {
+                mode: Some(AppModeProto {
+                    variant: Some(Variant::Select(AppModeSelect {
+                        question: Some(ClarificationQuestionProto {
+                            header: "Clarify".into(),
+                            question: "Pick one".into(),
+                            options: vec![QuestionOptionProto {
+                                label: "A".into(),
+                                description: String::new(),
+                            }],
+                            multi_select: false,
+                            allow_other: true,
+                        }),
+                        question_index: 0,
+                        total_questions: 1,
+                        initial_selected: 0,
+                    })),
+                }),
+            })),
+        };
+        watcher
+            .on_server_message(&cfg, &mem, sid, &msg)
+            .await
+            .unwrap();
+        let recorded = mem.recorded_with_keyboards();
+        let with_kb = recorded.iter().find(|(_, _, kb)| !kb.is_empty());
+        assert!(with_kb.is_some(), "select mode must include a keyboard");
+        let labels: Vec<&str> = with_kb
+            .unwrap()
+            .2
+            .iter()
+            .flat_map(|r| r.iter().map(|(l, _)| l.as_str()))
+            .collect();
+        assert!(
+            labels.contains(&"1"),
+            "numeric option button; got {labels:?}"
+        );
+        assert!(
+            labels.contains(&"Other"),
+            "allow_other must add Other button; got {labels:?}"
+        );
+        let joined = recorded
+            .iter()
+            .map(|(_, t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("tap **Other**"),
+            "body should hint at Other flow; got {joined:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn mode_changed_select_populates_shared_elicitation_cache() {
         use tddy_service::gen::app_mode_proto::Variant;
         use tddy_service::gen::server_message::Event;
@@ -1127,6 +1216,7 @@ mod acceptance_unit_tests {
                                 },
                             ],
                             multi_select: false,
+                            allow_other: false,
                         }),
                         question_index: 0,
                         total_questions: 1,

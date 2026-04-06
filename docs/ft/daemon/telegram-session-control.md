@@ -8,13 +8,13 @@ This surface is **distinct** from **[Telegram session notifications](telegram-no
 
 ## Daemon binary (inbound)
 
-When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the daemon can resolve **`sessions_base`** for the current OS user (`USER` → `~/.tddy`), **`tddy-daemon`** starts a **teloxide long-polling** dispatcher (**`telegram_bot`**) alongside the web/RPC server. It handles the commands in the table above, inline **Enter** / **Delete** / **More** session-list callbacks (`enter:…`, `delete:…`, `more:…`), recipe/project/agent pick callbacks, document-review callbacks (`doc:…`), and elicitation select callbacks (`eli:s:…`). Commands and callbacks that drive the running **`tddy-coder`** child use **`PresenterIntent`** over **localhost** on the port registered for that session (see **`packages/tddy-daemon/src/presenter_intent_client.rs`**). The same **`TeloxideSender`** / **`Bot`** instance is shared with outbound notifications.
+When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the daemon can resolve **`sessions_base`** for the current OS user (`USER` → `~/.tddy`), **`tddy-daemon`** starts a **teloxide long-polling** dispatcher (**`telegram_bot`**) alongside the web/RPC server. It handles the commands in the table above, inline **Enter** / **Delete** / **More** session-list callbacks (`enter:…`, `delete:…`, `more:…`), recipe / project / **integration-base branch** / agent pick callbacks (`recipe:…`, `tp:…`, `tb:…`, `ta:…`), document-review callbacks (`doc:…`), and elicitation select callbacks (`eli:s:…`). Commands and callbacks that drive the running **`tddy-coder`** child use **`PresenterIntent`** over **localhost** on the port registered for that session (see **`packages/tddy-daemon/src/presenter_intent_client.rs`**). The same **`TeloxideSender`** / **`Bot`** instance is shared with outbound notifications.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| **`/start-workflow <prompt>`** | Create a new session. Bot presents **Recipe: tdd-small** and **More recipes…**; **More recipes** sends a second message with **tdd**, **bugfix**, **free-prompting**, and **grill-me** (compact `mr:` callbacks). Choosing a recipe writes **`changeset.yaml`**. |
+| **`/start-workflow <prompt>`** | Create a new session. Bot presents **Recipe: tdd-small** and **More recipes…**; **More recipes** sends a second message with **tdd**, **bugfix**, **free-prompting**, and **grill-me** (compact `mr:` callbacks). Choosing a recipe writes **`changeset.yaml`**, then the operator picks a **project**, then an **integration base** (see below), then an **agent** when the daemon **`allowed_agents`** list is non-empty. |
 | **`/sessions`** | List sessions (10 at a time). Each session shows status, elapsed time, and workflow state. Paginated with a **"More"** inline keyboard button when more sessions exist. |
 | **`/delete <session_id>`** | Delete a session. Bot sends SIGTERM/SIGKILL to the session process (if alive), removes the session directory, and confirms. |
 | **`/submit-feature <session> <text>`** | Send feature description text to the running child presenter (**`PresenterIntent::SubmitFeatureText`**) when the workflow asks for it. |
@@ -34,6 +34,11 @@ When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the
 - Delegates to the same **`session_deletion::delete_session_directory`** logic as **`ConnectionService::DeleteSession`**.
 - If a live PID exists in **`.session.yaml`**, the daemon terminates the process before directory removal.
 - Bot sends a confirmation message after successful deletion.
+
+### Integration base branch (`/start-workflow` after project) (Updated: 2026-04-05)
+
+- After a **project** is chosen (`tp:<proj_idx>|s:<session_id>`), the bot lists **Default (`<branch>`)** using **`effective_integration_base_ref_for_project`** (project registry **`main_branch_ref`**, else documented default **`origin/master`**), then up to **10** remote branches **`origin/...`** sorted by **most recent commit** (`git branch -r --sort=-committerdate`), exposed as **`list_recent_remote_branches`** in **tddy-core**.
+- Callbacks: **`tb:0|p:<proj_idx>|s:<session_id>`** = use project default (no chain opt-in); **`tb:<n>|p:<proj_idx>|s:<session_id>`** with **`1 ≤ n ≤ 10`** = use the *n*th line from that sorted list. The choice is persisted to **`changeset.yaml`** as **`worktree_integration_base_ref`** when non-default; **`tddy-workflow-recipes`** / **`tddy-service`** worktree setup calls **`setup_worktree_for_session_with_optional_chain_base`** so the session worktree matches the selected base.
 
 ### Enter workflow
 
