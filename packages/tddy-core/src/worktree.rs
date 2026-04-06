@@ -321,6 +321,62 @@ fn git_rev_parse(cwd: &Path, rev: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// Lists absolute paths of all registered worktrees (including the primary checkout).
+fn registered_worktree_paths(repo_root: &Path) -> Result<Vec<PathBuf>, String> {
+    let out = Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git worktree list: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git worktree list failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    let mut paths = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let Some(rest) = line.strip_prefix("worktree ") else {
+            continue;
+        };
+        paths.push(PathBuf::from(rest.trim()));
+    }
+    Ok(paths)
+}
+
+/// If any linked worktree already has `HEAD` at the same commit as `branch_ref` (as resolved in
+/// `repo_root`), returns that path so callers can **reuse** it instead of `git worktree add`.
+///
+/// Preference order when multiple worktrees match (same tip): paths under **`.worktrees/`** first,
+/// then others (e.g. primary repo), then lexicographic path order for stability.
+pub fn find_existing_worktree_for_branch_ref(
+    repo_root: &Path,
+    branch_ref: &str,
+) -> Result<Option<PathBuf>, String> {
+    let target = git_rev_parse(repo_root, branch_ref)?;
+    let mut matches: Vec<PathBuf> = Vec::new();
+    for p in registered_worktree_paths(repo_root)? {
+        if !p.exists() {
+            continue;
+        }
+        let Ok(head) = git_rev_parse(&p, "HEAD") else {
+            continue;
+        };
+        if head == target {
+            matches.push(p.canonicalize().unwrap_or(p));
+        }
+    }
+    if matches.is_empty() {
+        return Ok(None);
+    }
+    matches.sort_by(|a, b| {
+        let aw = a.to_string_lossy().contains("/.worktrees/");
+        let bw = b.to_string_lossy().contains("/.worktrees/");
+        bw.cmp(&aw).then_with(|| a.cmp(b))
+    });
+    Ok(matches.into_iter().next())
+}
+
 /// Add a linked worktree at `.worktrees/<name>` checked out to an **existing** local branch.
 ///
 /// Uses `git worktree add <path> <branch>` when the branch is not already checked out in another
@@ -530,6 +586,20 @@ pub fn setup_worktree_for_session_with_integration_base(
                         branch_name
                     );
                     fetch_integration_base(repo_root, integration_base_ref)?;
+                    if let Some(existing) =
+                        find_existing_worktree_for_branch_ref(repo_root, &branch_name)?
+                    {
+                        log::info!(
+                            "setup_worktree_for_session_with_integration_base: reusing existing worktree {} for {} (no new git worktree add)",
+                            existing.display(),
+                            branch_name
+                        );
+                        cs.worktree = Some(existing.to_string_lossy().to_string());
+                        cs.branch = Some(branch_name.clone());
+                        cs.repo_path = Some(existing.to_string_lossy().to_string());
+                        write_changeset(session_dir, &cs).map_err(|e| e.to_string())?;
+                        return Ok(existing);
+                    }
                     let worktree_name = cs
                         .worktree_directory_basename()
                         .ok_or_else(|| "no worktree suggestion or name for worktree".to_string())?;
@@ -758,6 +828,23 @@ pub fn setup_worktree_for_session_with_optional_chain_base(
                         fetch_chain_pr_integration_base(repo_root, &integration_base_ref)?;
                     } else {
                         fetch_integration_base(repo_root, &integration_base_ref)?;
+                    }
+                    if let Some(existing) =
+                        find_existing_worktree_for_branch_ref(repo_root, &branch_name)?
+                    {
+                        log::info!(
+                            "setup_worktree_for_session_with_optional_chain_base: reusing existing worktree {} for {} (no new git worktree add)",
+                            existing.display(),
+                            branch_name
+                        );
+                        cs.worktree = Some(existing.to_string_lossy().to_string());
+                        cs.branch = Some(branch_name.clone());
+                        cs.repo_path = Some(existing.to_string_lossy().to_string());
+                        cs.effective_worktree_integration_base_ref =
+                            Some(integration_base_ref.clone());
+                        cs.worktree_integration_base_ref = user_chain_ref.map(|s| s.to_string());
+                        write_changeset(session_dir, &cs).map_err(|e| e.to_string())?;
+                        return Ok(existing);
                     }
                     let worktree_name = cs
                         .worktree_directory_basename()
