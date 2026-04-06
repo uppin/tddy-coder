@@ -1,4 +1,5 @@
-//! CLI subcommands: `submit`, `ask`, `get-schema`, `list-schemas`, `set-session-context`.
+//! CLI subcommands: `submit`, `ask`, `get-schema`, `list-schemas`, `set-session-context`,
+//! `persist-changeset-workflow`.
 //!
 //! Workflow goal names and schema filenames are defined in `packages/tddy-workflow-recipes/goals.json`
 //! (see [`tddy_tools::schema`] and [`tddy_tools::schema_manifest`]).
@@ -10,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
 use std::path::PathBuf;
 
+use tddy_core::{read_changeset, write_changeset, ChangesetWorkflow};
+use tddy_tools::review_persist;
 use tddy_tools::schema;
 use tddy_tools::schema_manifest;
 use tddy_tools::session_context;
@@ -53,6 +56,19 @@ pub struct ListSchemasArgs {}
 #[command(name = "set-session-context")]
 pub struct SetSessionContextArgs {
     /// JSON object to merge into session context (same size limits as submit).
+    #[arg(long)]
+    pub data: Option<String>,
+}
+
+/// Merge validated workflow/demo JSON into `changeset.yaml` (`workflow` block).
+#[derive(Parser)]
+#[command(name = "persist-changeset-workflow")]
+pub struct PersistChangesetWorkflowArgs {
+    /// Directory containing `changeset.yaml` (session / plan dir).
+    #[arg(long)]
+    pub session_dir: PathBuf,
+
+    /// JSON body for the `workflow` block (validated against `changeset-workflow` schema).
     #[arg(long)]
     pub data: Option<String>,
 }
@@ -147,6 +163,16 @@ pub fn run_submit(args: SubmitArgs) -> Result<()> {
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
         relay_submit(std::path::Path::new(&socket_path), &goal, &data)?;
     } else {
+        if goal == "branch-review" {
+            if let Ok(session_dir) = std::env::var("TDDY_SESSION_DIR") {
+                if let Err(e) = review_persist::persist_review_md_from_branch_review_json(
+                    std::path::Path::new(&session_dir),
+                    &json_str,
+                ) {
+                    output_error(&e, 1);
+                }
+            }
+        }
         output_success(&goal);
     }
 
@@ -361,6 +387,33 @@ pub fn run_list_schemas(_args: ListSchemasArgs) -> Result<()> {
     );
     let out = serde_json::json!({ "goals": goals });
     println!("{}", serde_json::to_string(&out)?);
+    Ok(())
+}
+
+pub fn run_persist_changeset_workflow(args: PersistChangesetWorkflowArgs) -> Result<()> {
+    info!(
+        target: "tddy_tools::cli",
+        "persist-changeset-workflow: session_dir={}",
+        args.session_dir.display()
+    );
+    let json_str = read_input(&args.data, false)?;
+    if let Err(errors) = schema::validate_output("changeset-workflow", &json_str) {
+        let tip = schema::validation_error_tip("changeset-workflow");
+        output_validation_error_with_tip(&errors, &tip);
+        std::process::exit(3);
+    }
+    let workflow: ChangesetWorkflow = match serde_json::from_str(&json_str) {
+        Ok(w) => w,
+        Err(e) => {
+            output_error(&format!("invalid workflow JSON: {}", e), 1);
+            unreachable!()
+        }
+    };
+    let mut cs = read_changeset(&args.session_dir)
+        .map_err(|e| anyhow::anyhow!("read changeset {}: {}", args.session_dir.display(), e))?;
+    cs.workflow = Some(workflow);
+    write_changeset(&args.session_dir, &cs)
+        .map_err(|e| anyhow::anyhow!("write changeset {}: {}", args.session_dir.display(), e))?;
     Ok(())
 }
 

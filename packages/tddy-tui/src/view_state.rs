@@ -537,8 +537,15 @@ impl ViewState {
                 true
             }
             KeyCode::Enter => {
+                let display = self.feature_edit.display();
+                if tddy_core::feature_start_slash::parse_feature_start_slash_line(display.trim())
+                    .is_some()
+                {
+                    self.close_feature_slash_menu_clear();
+                    return false;
+                }
                 if self.feature_slash_entries.is_empty() {
-                    return true;
+                    return false;
                 }
                 match &self.feature_slash_entries[self.feature_slash_selected] {
                     tddy_core::SlashMenuEntry::BuiltinRecipe => {
@@ -1214,6 +1221,14 @@ mod tests {
             "expected /recipe builtin, got {:?}",
             vs.feature_slash_entries
         );
+        assert!(
+            vs.feature_slash_entries.iter().any(|e| matches!(
+                e,
+                tddy_core::SlashMenuEntry::StartRecipe { label } if label == "/start-tdd"
+            )),
+            "expected /start-tdd in slash autocomplete for workflow start, got {:?}",
+            vs.feature_slash_entries
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1234,6 +1249,23 @@ mod tests {
             0,
             false,
             None,
+        );
+        assert!(!vs.feature_slash_open);
+    }
+
+    #[test]
+    fn feature_slash_enter_on_parsed_start_line_yields_submit_not_menu_confirm() {
+        let mut vs = ViewState::new();
+        vs.on_mode_changed(&AppMode::FeatureInput);
+        vs.feature_edit.set_plain_text("/start-tdd a todo app");
+        vs.feature_slash_open = true;
+        vs.feature_slash_entries = vec![tddy_core::SlashMenuEntry::BuiltinRecipe];
+        vs.feature_slash_trigger_byte = 0;
+        let enter =
+            KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::empty(), KeyEventKind::Press);
+        assert!(
+            !vs.handle_key_view_local(enter, &AppMode::FeatureInput, 0, false, None),
+            "Enter must propagate to SubmitFeatureInput when the buffer is a full /start- line"
         );
         assert!(!vs.feature_slash_open);
     }

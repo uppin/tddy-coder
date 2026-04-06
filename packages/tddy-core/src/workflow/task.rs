@@ -146,6 +146,8 @@ pub struct BackendInvokeTask {
     submit_key: GoalId,
     hints: GoalHints,
     backend: Arc<dyn CodingBackend>,
+    recipe: Arc<dyn WorkflowRecipe>,
+    goal_requires_tddy_tools_submit: bool,
 }
 
 impl BackendInvokeTask {
@@ -155,6 +157,8 @@ impl BackendInvokeTask {
         submit_key: GoalId,
         hints: GoalHints,
         backend: Arc<dyn CodingBackend>,
+        recipe: Arc<dyn WorkflowRecipe>,
+        goal_requires_tddy_tools_submit: bool,
     ) -> Self {
         Self {
             id: id.into(),
@@ -162,14 +166,16 @@ impl BackendInvokeTask {
             submit_key,
             hints,
             backend,
+            recipe,
+            goal_requires_tddy_tools_submit,
         }
     }
 
-    /// Resolve hints and submit key from a [`WorkflowRecipe`].
+    /// Resolve hints, submit key, and submit policy from a [`WorkflowRecipe`].
     pub fn from_recipe(
         id: impl Into<String>,
         goal_id: GoalId,
-        recipe: &dyn WorkflowRecipe,
+        recipe: Arc<dyn WorkflowRecipe>,
         backend: Arc<dyn CodingBackend>,
     ) -> Self {
         let hints = recipe.goal_hints(&goal_id).unwrap_or_else(|| {
@@ -180,7 +186,16 @@ impl BackendInvokeTask {
             )
         });
         let submit_key = recipe.submit_key(&goal_id);
-        Self::new(id, goal_id, submit_key, hints, backend)
+        let goal_requires_tddy_tools_submit = recipe.goal_requires_tddy_tools_submit(&goal_id);
+        Self::new(
+            id,
+            goal_id,
+            submit_key,
+            hints,
+            backend,
+            recipe,
+            goal_requires_tddy_tools_submit,
+        )
     }
 }
 
@@ -297,6 +312,27 @@ impl Task for BackendInvokeTask {
                     next_action: NextAction::WaitForInput,
                     task_id: self.id.clone(),
                     status_message: Some("Clarification needed".to_string()),
+                });
+            }
+
+            if !self.goal_requires_tddy_tools_submit {
+                if let Some(qs) = self
+                    .recipe
+                    .host_clarification_gate_after_no_submit_turn(&self.goal_id, &context)
+                {
+                    context.set_sync("pending_questions", qs);
+                    return Ok(TaskResult {
+                        response: response.output,
+                        next_action: NextAction::WaitForInput,
+                        task_id: self.id.clone(),
+                        status_message: Some("Host clarification needed".to_string()),
+                    });
+                }
+                return Ok(TaskResult {
+                    response: response.output,
+                    next_action: NextAction::Continue,
+                    task_id: self.id.clone(),
+                    status_message: Some(format!("{} step complete", self.id)),
                 });
             }
 

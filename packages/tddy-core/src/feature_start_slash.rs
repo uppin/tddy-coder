@@ -59,6 +59,10 @@ pub fn next_session_recipe_cli_name_after_start_slash_structured_workflow_comple
 
 /// Parse `/start-<cli-recipe-name>` from a feature prompt line.
 ///
+/// The recipe token is the longest matching shipped CLI name at the start of the text after
+/// `/start-` (so `tdd-small` wins over `tdd`). Additional words on the same line are **not** part of
+/// the recipe name (e.g. `/start-tdd a todo app` → `tdd`).
+///
 /// Returns [`None`] if the line does not start with `/start-` (after trim). Otherwise [`Some`]`(Ok(name))`
 /// or [`Some`]`(Err(..))` aligned with resolver/unknown-recipe messaging.
 pub fn parse_feature_start_slash_line(line: &str) -> Option<Result<String, String>> {
@@ -69,24 +73,32 @@ pub fn parse_feature_start_slash_line(line: &str) -> Option<Result<String, Strin
     );
     let line = line.trim();
     let rest = line.strip_prefix("/start-")?;
-    let suffix = rest.trim();
-    if suffix.is_empty() {
+    let rest = rest.trim_start();
+    if rest.is_empty() {
         log::debug!("parse_feature_start_slash_line: empty suffix");
         return Some(Err("empty /start- recipe suffix".to_string()));
     }
-    if SHIPPED_WORKFLOW_RECIPE_CLI_NAMES
-        .iter()
-        .any(|n| *n == suffix)
-    {
-        log::debug!("parse_feature_start_slash_line: ok suffix={:?}", suffix);
-        Some(Ok(suffix.to_string()))
-    } else {
-        log::debug!(
-            "parse_feature_start_slash_line: unknown suffix={:?}",
-            suffix
-        );
-        Some(Err(unknown_workflow_recipe_error(suffix)))
+
+    let mut names: Vec<&'static str> = SHIPPED_WORKFLOW_RECIPE_CLI_NAMES.to_vec();
+    names.sort_by_key(|n| std::cmp::Reverse(n.len()));
+
+    for name in names {
+        if rest == name {
+            log::debug!("parse_feature_start_slash_line: ok exact name={name:?}");
+            return Some(Ok(name.to_string()));
+        }
+        let prefix = format!("{name} ");
+        if rest.starts_with(&prefix) {
+            log::debug!(
+                "parse_feature_start_slash_line: ok name={name:?} with remainder after space"
+            );
+            return Some(Ok(name.to_string()));
+        }
     }
+
+    let unknown = rest.split_whitespace().next().unwrap_or(rest).to_string();
+    log::debug!("parse_feature_start_slash_line: unknown recipe token={unknown:?}");
+    Some(Err(unknown_workflow_recipe_error(&unknown)))
 }
 
 /// Text after `/start-<cli>` on the same line (trimmed). Empty if the line is only `/start-<cli>`.
@@ -118,5 +130,29 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert!(e.contains("tdd") && e.contains("bugfix"));
+    }
+
+    #[test]
+    fn parse_tdd_with_trailing_feature_text() {
+        assert_eq!(
+            parse_feature_start_slash_line("/start-tdd a todo app"),
+            Some(Ok("tdd".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_hyphenated_recipe_before_remainder() {
+        assert_eq!(
+            parse_feature_start_slash_line("/start-tdd-small run focused suite"),
+            Some(Ok("tdd-small".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_free_prompting_with_remainder() {
+        assert_eq!(
+            parse_feature_start_slash_line("/start-free-prompting optional note"),
+            Some(Ok("free-prompting".to_string()))
+        );
     }
 }

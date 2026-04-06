@@ -29,6 +29,11 @@ fn start_slash_resolves_to_recipe_cli_name() {
         Some(Ok("bugfix".to_string())),
         "PRD: /start-<cli-name> must resolve to the same string as WorkflowRecipe CLI names (e.g. bugfix)"
     );
+    assert_eq!(
+        parse_feature_start_slash_line("/start-tdd a todo app"),
+        Some(Ok("tdd".to_string())),
+        "PRD: text after the recipe token is feature context, not part of the CLI name"
+    );
 }
 
 #[test]

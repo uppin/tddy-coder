@@ -1166,19 +1166,28 @@ fn render_feature_slash_menu(frame: &mut Frame, view_state: &ViewState, area: Re
     if area.height == 0 {
         return;
     }
-    let mut lines = vec![Line::from(Span::styled(
-        "Commands & skills (.agents/skills/)",
-        Style::default().add_modifier(Modifier::BOLD),
-    ))];
-    let max_rows = (area.height.saturating_sub(2)) as usize;
+    // One line for the key hint at the bottom. When the strip is short (typical on small terminals),
+    // omit the bold header so we still have room for at least `/recipe` and one `/start-*` row.
+    const HINT_LINES: u16 = 1;
+    let include_header = area.height >= 5;
+    let header_lines = u16::from(include_header);
+    let max_rows = area.height.saturating_sub(header_lines + HINT_LINES) as usize;
     let cap = max_rows.max(1);
-    for (i, entry) in view_state
+
+    let mut lines = Vec::new();
+    if include_header {
+        lines.push(Line::from(Span::styled(
+            "Commands & skills (.agents/skills/)",
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+    }
+    for (entry_idx, entry) in view_state
         .feature_slash_entries
         .iter()
-        .take(cap)
         .enumerate()
+        .take(cap)
     {
-        let prefix = if i == view_state.feature_slash_selected {
+        let prefix = if entry_idx == view_state.feature_slash_selected {
             "> "
         } else {
             "  "
@@ -1201,7 +1210,7 @@ fn render_feature_slash_menu(frame: &mut Frame, view_state: &ViewState, area: Re
         } else {
             format!("{prefix}{label} — {desc}")
         };
-        let style = if i == view_state.feature_slash_selected {
+        let style = if entry_idx == view_state.feature_slash_selected {
             Style::default().add_modifier(Modifier::REVERSED)
         } else {
             Style::default()
@@ -1545,6 +1554,57 @@ mod tests {
         assert_eq!(r[0], "");
         assert_eq!(r[1].chars().count(), 10);
         assert!(r[2].ends_with('…'), "got {:?}", r[2]);
+    }
+
+    /// Short strips omit the bold header so a three-line dynamic region still fits two entry rows
+    /// (`/recipe` plus at least one `/start-*`), matching PRD workflow-start visibility.
+    #[test]
+    fn feature_slash_menu_short_strip_budget_allows_two_entry_rows() {
+        let dynamic_area_height = 3u16;
+        const HINT_LINES: u16 = 1;
+        let include_header = dynamic_area_height >= 5;
+        let header_lines = u16::from(include_header);
+        let max_rows = dynamic_area_height.saturating_sub(header_lines + HINT_LINES) as usize;
+        let menu_entry_rows = max_rows.max(1);
+        assert!(
+            menu_entry_rows >= 2,
+            "height {dynamic_area_height}: need ≥2 entry rows for /recipe + /start-*; got {menu_entry_rows}"
+        );
+    }
+
+    #[test]
+    fn feature_slash_menu_three_row_area_renders_start_tdd_label() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut vs = ViewState::new();
+        vs.feature_slash_open = true;
+        vs.feature_slash_entries = vec![
+            tddy_core::SlashMenuEntry::BuiltinRecipe,
+            tddy_core::SlashMenuEntry::StartRecipe {
+                label: "/start-tdd".to_string(),
+            },
+        ];
+        vs.feature_slash_selected = 0;
+        let area = Rect::new(0, 0, 80, 3);
+        terminal
+            .draw(|f| {
+                super::render_feature_slash_menu(f, &vs, area);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let flat: String = buffer
+            .content
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            flat.contains("/start-tdd"),
+            "compact 3-row slash strip must still paint a workflow start row; buffer sample: {}",
+            flat.chars().take(200).collect::<String>()
+        );
     }
 
     /// Acceptance (PRD): Virtual TUI uses the same `draw()` path as the local TUI; autonomous
