@@ -1,4 +1,9 @@
 //! Read session metadata from user's ~/.tddy/sessions/.
+//!
+//! `SessionEntry.status` is **session metadata** from `.session.yaml` (process / lifecycle), not TDD
+//! workflow state. Live workflow status for the web UI must come from **`TddyRemote.Stream`**
+//! (`ServerMessage.session_runtime_status`) from the running `tddy-*` tool, not from parsing
+//! `changeset.yaml` here.
 
 use std::path::Path;
 

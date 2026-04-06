@@ -61,6 +61,14 @@ function truncateId(id: string, maxLen = 12): string {
   return `${id.slice(0, 6)}…${id.slice(-4)}`;
 }
 
+/** Label for the session list Status column when the API omits `status` for an active process. */
+function sessionListStatusLabel(s: SessionEntry): string {
+  const t = s.status.trim();
+  if (t.length > 0) return t;
+  if (s.isActive) return "Active";
+  return "";
+}
+
 type ProjectSessionForm = {
   toolPath: string;
   agent: string;
@@ -675,7 +683,7 @@ export function ConnectionScreen() {
                     <tr key={s.sessionId} style={{ borderBottom: "1px solid #eee" }}>
                       <td style={{ padding: 8 }}>{truncateId(s.sessionId)}</td>
                       <td style={{ padding: 8 }}>{s.createdAt}</td>
-                      <td style={{ padding: 8 }}>{s.status}</td>
+                      <td style={{ padding: 8 }}>{sessionListStatusLabel(s)}</td>
                       <td style={{ padding: 8 }}>{s.repoPath}</td>
                       <td style={{ padding: 8 }}>{s.pid}</td>
                       <td style={{ padding: 8 }}>
@@ -747,7 +755,7 @@ export function ConnectionScreen() {
                 <tr key={s.sessionId} style={{ borderBottom: "1px solid #eee" }}>
                   <td style={{ padding: 8 }}>{truncateId(s.sessionId)}</td>
                   <td style={{ padding: 8 }}>{s.createdAt}</td>
-                  <td style={{ padding: 8 }}>{s.status}</td>
+                  <td style={{ padding: 8 }}>{sessionListStatusLabel(s)}</td>
                   <td style={{ padding: 8 }}>{s.repoPath}</td>
                   <td style={{ padding: 8 }}>{s.pid}</td>
                   <td style={{ padding: 8 }}>

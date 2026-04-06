@@ -41,6 +41,17 @@ const INACTIVE_SESSION = {
   projectId: "proj-1",
 };
 
+/** Active process but daemon left `status` empty — list view must still show meaningful session status. */
+const ACTIVE_SESSION_NO_STATUS_TEXT = {
+  sessionId: "session-active-no-status",
+  createdAt: "2026-03-22T12:00:00Z",
+  status: "",
+  repoPath: "/home/dev/project",
+  pid: 4242,
+  isActive: true,
+  projectId: "proj-1",
+};
+
 const PROJECT = {
   projectId: "proj-1",
   name: "Test Project",
@@ -278,5 +289,34 @@ describe("ConnectionScreen Signal Dropdown", () => {
     cy.get(`[data-testid="signal-sigint-${ACTIVE_SESSION.sessionId}"]`).click();
     cy.get("[data-testid='connection-error']", { timeout: 5000 })
       .should("exist");
+  });
+});
+
+describe("ConnectionScreen session list status", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("shows non-empty session status for an active session when list API omits status text", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION_NO_STATUS_TEXT]);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="sessions-table-${PROJECT.projectId}"]`, { timeout: 5000 })
+      .should("exist");
+    cy.get(`[data-testid="sessions-table-${PROJECT.projectId}"] tbody tr`)
+      .first()
+      .find("td")
+      .eq(2)
+      .should(($td) => {
+        const t = $td.text().trim();
+        expect(t.length, "status cell must not be empty for active sessions").to.be.greaterThan(0);
+      });
+    cy.get(`[data-testid="sessions-table-${PROJECT.projectId}"] tbody tr`)
+      .first()
+      .find("td")
+      .eq(4)
+      .should("contain.text", "4242");
   });
 });

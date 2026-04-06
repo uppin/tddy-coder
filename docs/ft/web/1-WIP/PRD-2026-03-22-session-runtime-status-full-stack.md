@@ -19,6 +19,14 @@ The web terminal must show the same workflow/session information as the local TU
 3. **Web**: On `TddyRemote` stream, handle `sessionRuntimeStatus` first; prefer `status_line`, else format from structured fields.
 4. **Tests**: gRPC integration sees `SessionRuntimeStatus`; TS contract round-trip; Cypress component + Storybook e2e unchanged for UI shell.
 
+## Requirements (Updated: 2026-03-22) — Authoritative live status
+
+**Live** workflow and session-runtime status in the web UI **must** come from the running **`tddy-*` tool instance** via **remote control transport** — i.e. **`TddyRemote`** bidirectional streaming over **gRPC and/or LiveKit** (data-channel RPC), not from reading the on-disk **changeset** manifest (`changeset.yaml`) or inferring state solely from daemon **catalog** RPCs.
+
+- **Subscription**: The browser **subscribes** to `ServerMessage` on `TddyRemote.Stream` (including **`session_runtime_status`** and other presenter-backed events) and **updates the UI in real time** as events arrive.
+- **Not the source of truth for live UI**: Parsing or polling **`changeset.yaml`** (or equivalent disk state) to drive the **connected** terminal’s status bar is **out of scope** for authoritative live display; that persistence exists for **resume** and **offline inspection**, not for replacing the stream.
+- **Discovery vs live session**: Daemon **`ListSessions`** exposes **session metadata** from **`.session.yaml`** (lifecycle `status`, etc.) for the connection table — **not** workflow state merged from **`changeset.yaml`**. **Once connected**, runtime status for that session is **stream-backed** as above.
+
 ## Success criteria
 
 - [x] `cargo test -p tddy-service` includes integration assertion for `SessionRuntimeStatus` on stream.

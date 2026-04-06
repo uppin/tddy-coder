@@ -55,6 +55,12 @@ When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated us
 
 See [daemon project concept](../daemon/project-concept.md).
 
+### Session runtime status — live source (Updated: 2026-03-22)
+
+After the user **Connect**s and a **`tddy-*`** session is running, **workflow and status-line information** for the terminal UI **must** be driven by **`TddyRemote.Stream`** (`ServerMessage`), including **`session_runtime_status`**, over **gRPC / LiveKit** from that **tool process**. The web client **subscribes** to the stream and updates the status presentation **in real time** as events arrive.
+
+**Do not** use the on-disk **changeset** manifest (`changeset.yaml`) as the authoritative source for **live** runtime status in the browser while the session is active; that file supports **resume** and inspection, not replacement of the remote-control event stream. Session **discovery** rows on the connection screen may still reflect daemon metadata separately; **connected** session status follows the stream.
+
 ## See also (development)
 
 - [LiveKit and gRPC terminal RPC E2E](../../dev/guides/livekit-terminal-rpc-e2e.md) — `tddy-e2e` tests, VirtualTui vs LiveKit bidi behavior, assertion patterns.

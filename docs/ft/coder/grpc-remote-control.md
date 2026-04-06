@@ -52,6 +52,10 @@ service TddyRemote {
 
 Both directions carry the full set of events for bidirectional mirroring.
 
+### Live runtime status vs disk (Updated: 2026-03-22)
+
+**Live** workflow and status-line updates for clients (especially the web terminal) **must** be observed via this **`TddyRemote`** stream from the running **`tddy-*` instance** — including **`session_runtime_status`** — with the UI **subscribing in real time**. The on-disk **changeset** (`changeset.yaml`) is **not** the authoritative channel for that live display; it remains persisted workflow state for resume and tooling. Do not replace stream subscription with changeset polling for active-session UI.
+
 ### 3. Event bus in Presenter
 
 Replace the single `V: PresenterView` generic with a broadcast channel pattern:
@@ -74,8 +78,8 @@ The `--daemon` flag starts a headless gRPC server (no TUI) suitable for systemd 
 
 **Session lifecycle via gRPC**:
 - **Stream RPC**: Clients send `StartSession` with a prompt; daemon creates a session, runs the plan step, streams events (SessionCreated, ModeChanged with PlanReview for plan approval, WorkflowComplete). Client responds with `ApprovePlan`; the daemon automatically creates a worktree from `origin/master` and continues the workflow.
-- **GetSession**: Returns session status (Active, Completed, Failed) by reading changeset.yaml from disk.
-- **ListSessions**: Lists all sessions with their status.
+- **GetSession**: May return persisted session information by reading **changeset.yaml** from disk where applicable — useful for **catalog / resume**, not a substitute for **`TddyRemote`** stream events for **live** runtime status while a tool instance is connected.
+- **ListSessions**: Lists sessions (often from session metadata on disk). Same distinction: **not** a replacement for subscribing to **`TddyRemote`** for **real-time** workflow status from the running **`tddy-*`** process.
 
 **Session states**: Pending, Active, WaitingForInput, Completed, Failed.
 

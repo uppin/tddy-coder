@@ -69,6 +69,13 @@ cd packages/tddy-rust-typescript-tests && bun run generate
 
 **Note**: Full `bun test` in `tddy-rust-typescript-tests` includes `echo-unary.test.ts`, which spawns `tddy-coder --daemon` and may time out if the binary or web bundle is missing; run contract test in isolation in constrained environments.
 
+## Requirement clarification (Updated: 2026-03-22)
+
+**Product direction**: **Live** session runtime / workflow status shown in the web UI must be retrieved from the **`tddy-*` process** via **`TddyRemote`** over **gRPC / LiveKit RPC** (stream `ServerMessage`, including **`SessionRuntimeStatus`**). The UI **subscribes** to that stream and renders updates **in real time**.
+
+- **Do not** treat the on-disk **changeset** (`changeset.yaml`) as the authoritative channel for **live** status in the browser; it remains persistence for workflow continuity and tooling, not a substitute for the remote-control event stream.
+- **Implementation alignment**: `SessionRuntimeStatus` on the stream + `GhosttyTerminalLiveKit` handling matches this for the **connected** terminal status bar. **`ListSessions`** / `tddy-daemon` session listing uses **`.session.yaml` metadata only** for the status field (lifecycle); it does **not** read `changeset.yaml` for workflow display.
+
 ## References
 
 - `packages/tddy-service/proto/tddy/v1/remote.proto`

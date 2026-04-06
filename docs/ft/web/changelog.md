@@ -7,6 +7,7 @@ Release note history for the Web product area.
 - **Proto / gRPC / LiveKit**: `ServerMessage` adds **`session_runtime_status`** (`SessionRuntimeStatus`: `status_line`, goal, workflow state, elapsed ms, agent, model). The presenter emits a snapshot after each broadcastable `PresenterEvent` so the web terminal matches the TUI status bar.
 - **tddy-web**: `GhosttyTerminalLiveKit` subscribes to `TddyRemote.Stream` and updates **`SessionRuntimeStatusBar`** from **`sessionRuntimeStatus`** events (prefers `status_line`, else structured fields). Regenerate TS: `cd packages/tddy-web && bunx buf generate ../tddy-service/proto`.
 - **Contract tests**: `packages/tddy-rust-typescript-tests/tests/remote-session-runtime-contract.test.ts` asserts protobuf round-trip for `SessionRuntimeStatus`.
+- **Requirements doc (Updated: 2026-03-22)**: [PRD](1-WIP/PRD-2026-03-22-session-runtime-status-full-stack.md), [web-terminal.md](web-terminal.md), and [gRPC remote control](../coder/grpc-remote-control.md) now state explicitly that **live** runtime status for the connected web terminal comes from **`TddyRemote` / LiveKit stream** from the **`tddy-*`** instance (real-time subscription), **not** from on-disk **`changeset.yaml`** as the authoritative UI source. Changeset remains for persistence/resume; see PRD “Authoritative live status” section.
 
 ## 2026-03-21 — Terminal: coder left the room
 

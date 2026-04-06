@@ -98,6 +98,39 @@ livekit_room: "daemon-session-123"
     assert_eq!(sessions[0].project_id, "proj-1");
 }
 
+/// When `changeset.yaml` exists, `ListSessions` / session reader still exposes **metadata** `status`
+/// only — workflow state is not merged from disk; live workflow comes from `TddyRemote` stream.
+#[test]
+fn acceptance_session_reader_lists_metadata_status_only_even_with_changeset_on_disk() {
+    let temp = tempfile::tempdir().unwrap();
+    let sessions_base = temp.path().join("sessions");
+    let session_dir = sessions_base.join("session-workflow");
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let metadata = r#"
+session_id: "session-workflow"
+project_id: "proj-1"
+created_at: "2026-03-19T10:00:00Z"
+updated_at: "2026-03-19T10:30:00Z"
+status: "active"
+repo_path: "/var/tddy/Code/tddy-coder"
+pid: 999999001
+tool: "target/release/tddy-coder"
+livekit_room: "daemon-session-workflow"
+"#;
+    std::fs::write(session_dir.join(".session.yaml"), metadata).unwrap();
+
+    let mut cs = tddy_core::Changeset::default();
+    cs.state.current = "GreenComplete".to_string();
+    tddy_core::write_changeset(&session_dir, &cs).unwrap();
+
+    let sessions = session_reader::list_sessions_in_dir(&sessions_base).unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(
+        sessions[0].status, "active",
+        "connection list uses .session.yaml status; workflow lives on TddyRemote stream, not changeset.yaml"
+    );
+}
+
 /// Acceptance: project_storage round-trips projects.yaml.
 #[test]
 fn acceptance_project_storage_roundtrip() {
