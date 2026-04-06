@@ -13,7 +13,10 @@ use tddy_core::read_changeset;
 use tddy_core::session_lifecycle::validate_session_id_segment;
 use tddy_core::workflow::graph::{ElicitationEvent, ExecutionStatus};
 use tddy_core::workflow::session::workflow_engine_storage_dir;
-use tddy_core::{setup_worktree_for_session, SharedBackend, WorkflowEngine, WorkflowRecipe};
+use tddy_core::{
+    setup_worktree_for_session_with_optional_chain_base, SharedBackend, WorkflowEngine,
+    WorkflowRecipe,
+};
 use tddy_workflow_recipes::{parse_planning_response_with_base, PlanningOutput};
 use tddy_workflow_recipes::{workflow_recipe_and_manifest_from_cli_name, SessionArtifactManifest};
 
@@ -525,7 +528,12 @@ impl DaemonStreamHandler {
         }
         let _ = tddy_core::changeset::write_changeset(session_dir_path, &cs);
 
-        let worktree_path = match setup_worktree_for_session(repo, session_dir_path) {
+        let chain_opt = cs.worktree_integration_base_ref.as_deref();
+        let worktree_path = match setup_worktree_for_session_with_optional_chain_base(
+            repo,
+            session_dir_path,
+            chain_opt,
+        ) {
             Ok(p) => p,
             Err(e) => {
                 send_workflow_complete(&self.tx, false, e).await;

@@ -206,6 +206,7 @@ fn main() -> anyhow::Result<()> {
                             telegram_hooks: Some(hooks.clone()),
                             child_grpc_by_session: Arc::new(StdMutex::new(HashMap::new())),
                             elicitation_select_options: elicitation_select_options.clone(),
+                            pending_elicitation_other: Arc::new(StdMutex::new(HashMap::new())),
                         },
                     ));
                     let harness = Arc::new(Mutex::new(

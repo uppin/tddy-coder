@@ -10,7 +10,7 @@ use tddy_core::changeset::{
     get_session_for_tag, read_changeset, resolve_model, update_state, write_changeset, Changeset,
 };
 use tddy_core::presenter::WorkflowEvent;
-use tddy_core::setup_worktree_for_session;
+use tddy_core::setup_worktree_for_session_with_optional_chain_base;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::find_git_root;
 use tddy_core::workflow::ids::WorkflowState;
@@ -157,7 +157,8 @@ pub(crate) fn ensure_worktree_for_session(
     }
 
     let repo_root = find_git_root(&output_dir);
-    match setup_worktree_for_session(&repo_root, session_dir) {
+    let chain_opt = cs.worktree_integration_base_ref.as_deref();
+    match setup_worktree_for_session_with_optional_chain_base(&repo_root, session_dir, chain_opt) {
         Ok(worktree_path) => {
             context.set_sync("worktree_dir", worktree_path.clone());
             if let Some(tx) = event_tx {

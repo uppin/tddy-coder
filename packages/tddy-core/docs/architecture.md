@@ -34,9 +34,13 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 - **DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF**: `origin/master` — effective integration base for legacy project registry rows without `main_branch_ref`.
 - **validate_integration_base_ref**: Accepts only `origin/<single-branch-segment>` refs; rejects empty, multi-segment paths, whitespace, and characters that could widen `git` invocation beyond a single branch argument.
-- **fetch_integration_base**: Runs `git fetch origin <branch>` for a validated integration base ref.
+- **validate_chain_pr_integration_base_ref**: Accepts `origin/<path>` where `path` may contain `/` (multi-segment); rejects `..`, `--`, empty segments, whitespace, and shell-oriented metacharacters in the path.
+- **fetch_integration_base**: Runs `git fetch origin <branch>` for a validated integration base ref (single-segment).
+- **fetch_chain_pr_integration_base**: Validates with **validate_chain_pr_integration_base_ref**, then runs `git fetch origin <path>` for the path after `origin/`.
 - **resolve_default_integration_base_ref**: Runs `git fetch origin`, then prefers `origin/master` if present, else `origin/main`, else follows `refs/remotes/origin/HEAD` when it resolves to a valid `origin/<branch>`.
 - **setup_worktree_for_session_with_integration_base**: Fetches the given integration base ref, creates a worktree from that ref via **create_worktree** / retry helper, updates changeset with `worktree`, `branch`, `repo_path`.
+- **setup_worktree_for_session_with_optional_chain_base**: Optional chain-PR base: with `None`, resolves default base, fetches, creates worktree, sets **effective_worktree_integration_base_ref** on the changeset; with `Some(ref)`, validates and fetches the multi-segment ref, creates the worktree from that tip, sets **effective_worktree_integration_base_ref** and **worktree_integration_base_ref**.
+- **resolve_persisted_worktree_integration_base_for_session**: Reads **changeset.yaml** and returns persisted effective ref, else user chain ref, else **resolve_default_integration_base_ref**.
 - **setup_worktree_for_session**: Resolves the default integration base ref, then calls **setup_worktree_for_session_with_integration_base**. Used by TUI and daemon after plan approval when no explicit ref is passed at this API layer.
 - **fetch_origin_master**: Equivalent to **fetch_integration_base** with **DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF**.
 - **create_worktree**: Creates worktree with optional `start_point` (remote-tracking ref). Worktrees live in `.worktrees/` relative to repo root.
@@ -52,7 +56,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Changeset (`changeset.rs`)
 
-- **Changeset**: Unified manifest in plan directory. Replaces `.session` and `.impl-session`. Contains name, initial_prompt, clarification_qa, models, sessions (with system_prompt_file per session), state, artifacts, discovery, worktree, branch, branch_suggestion, worktree_suggestion, repo_path.
+- **Changeset**: Unified manifest in plan directory. Replaces `.session` and `.impl-session`. Contains name, initial_prompt, clarification_qa, models, sessions (with system_prompt_file per session), state, artifacts, discovery, worktree, branch, branch_suggestion, worktree_suggestion, repo_path, optional **effective_worktree_integration_base_ref** (remote-tracking ref used to create the worktree), optional **worktree_integration_base_ref** (user-selected chain-PR base when present).
 - **SessionEntry**: id, agent, tag, created_at, system_prompt_file (path to system prompt for this session).
 - **ClarificationQa**: Question and answer pairs from planning clarification.
 - **read_changeset / write_changeset**: Load and persist changeset.yaml.
