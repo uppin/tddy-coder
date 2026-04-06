@@ -119,6 +119,11 @@ message SessionCreated {
 message WorktreeElicitation {
   string suggested_branch = 1;
   string suggested_worktree = 2;
+  /// Matches `changeset.yaml` workflow: `new_branch_from_base` | `work_on_selected_branch`.
+  optional string branch_worktree_intent = 3;
+  optional string selected_integration_base_ref = 4;
+  optional string new_branch_name = 5;
+  optional string selected_branch_to_work_on = 6;
 }
 
 message SessionStatusChanged {
@@ -197,6 +202,8 @@ message ClarificationQuestionProto {
   string question = 2;
   repeated QuestionOptionProto options = 3;
   bool multi_select = 4;
+  // When true, Telegram shows an "Other" control; the user may send a custom answer (see daemon).
+  bool allow_other = 5;
 }
 
 message QuestionOptionProto {

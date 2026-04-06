@@ -2,6 +2,7 @@
 
 pub mod agent_skills;
 pub mod backend;
+pub mod branch_worktree_intent;
 pub mod changeset;
 pub mod elapsed_format;
 pub mod error;
@@ -37,8 +38,8 @@ pub use backend::{
 pub use changeset::{
     append_session_and_update_state, get_session_for_tag, merge_persisted_workflow_into_context,
     read_changeset, resolve_agent_from_changeset, resolve_model, start_goal_for_session_continue,
-    update_state, write_changeset, write_changeset_atomic, Changeset, ChangesetState,
-    ChangesetWorkflow, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
+    update_state, write_changeset, write_changeset_atomic, BranchWorktreeIntent, Changeset,
+    ChangesetState, ChangesetWorkflow, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
     QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use elapsed_format::format_elapsed_compact;
@@ -80,10 +81,13 @@ pub use workflow::{
     GoalOptions,
 };
 pub use worktree::{
-    create_worktree, fetch_integration_base, fetch_origin_master, list_worktrees, remove_worktree,
-    resolve_default_integration_base_ref, setup_worktree_for_session,
-    setup_worktree_for_session_with_integration_base, validate_integration_base_ref, worktree_dir,
-    WorktreeInfo, DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF,
+    create_worktree, fetch_integration_base, fetch_origin_master, list_recent_remote_branches,
+    list_worktrees, remove_worktree, resolve_default_integration_base_ref,
+    resolve_persisted_worktree_integration_base_for_session, setup_worktree_for_session,
+    setup_worktree_for_session_with_integration_base,
+    setup_worktree_for_session_with_optional_chain_base, validate_chain_pr_integration_base_ref,
+    validate_integration_base_ref, worktree_dir, WorktreeInfo,
+    DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF,
 };
 
 #[cfg(test)]

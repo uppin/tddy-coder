@@ -9,15 +9,18 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
-use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
+use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent, Changeset};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::{read_session_metadata, WorkflowError, SESSION_METADATA_FILENAME};
+use tddy_core::{
+    list_recent_remote_branches, read_session_metadata, validate_chain_pr_integration_base_ref,
+    WorkflowError, SESSION_METADATA_FILENAME,
+};
 use uuid::Uuid;
 
 use crate::config::DaemonConfig;
 use crate::presenter_intent_client;
-use crate::project_storage::{self, ProjectData};
+use crate::project_storage::{self, effective_integration_base_ref_for_project, ProjectData};
 use crate::session_list_enrichment::SessionListStatusDisplay;
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
@@ -75,6 +78,15 @@ pub struct ChangesetRoutingSnapshot {
     pub demo_options: Option<serde_yaml::Value>,
     #[serde(default)]
     pub run_optional_step_x: Option<bool>,
+    #[serde(default)]
+    pub workflow: Option<WorkflowRoutingSnapshot>,
+}
+
+/// Subset of `workflow` from `changeset.yaml` for tests and snapshots.
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct WorkflowRoutingSnapshot {
+    #[serde(default)]
+    pub branch_worktree_intent: Option<BranchWorktreeIntent>,
 }
 
 /// Bytes sent to the presenter / workflow input layer (must match web RPC encoding for the same UI action).
@@ -145,6 +157,10 @@ pub const CB_MORE: &str = "more:";
 pub const CB_TELEGRAM_PROJECT: &str = "tp:";
 /// Pick agent: `ta:<agent_idx>|p:<proj_idx>|s:<session_id>`.
 pub const CB_TELEGRAM_AGENT: &str = "ta:";
+/// Pick integration base (`branch_idx` 0 = project default; 1..=N = recent remote at index N−1): `tb:<branch_idx>|p:<proj_idx>|s:<session_id>`.
+pub const CB_TELEGRAM_BRANCH: &str = "tb:";
+/// Branch/worktree intent (`nb` / `ws` — must fit Telegram `callback_data` byte limit with `|s:<uuid>`).
+pub const CB_TELEGRAM_INTENT: &str = "intent:";
 
 /// Parsed [`CallbackQuery::data`](https://core.telegram.org/bots/api#callbackquery) for session list actions.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,6 +272,15 @@ pub fn parse_elicitation_select_callback(callback_data: &str) -> Option<(String,
         return None;
     }
     Some((sid.to_string(), idx))
+}
+
+/// `eli:o:<session_id>` — user chose "Other"; next plain chat message is the custom answer.
+pub fn parse_elicitation_other_callback(callback_data: &str) -> Option<String> {
+    let sid = callback_data.strip_prefix("eli:o:")?.trim();
+    if sid.is_empty() {
+        return None;
+    }
+    Some(sid.to_string())
 }
 
 /// Free-text answer for clarification / text-input mode: `/answer-text <session> <text…>`
@@ -413,6 +438,24 @@ pub fn parse_recipe_callback_session_dir(
     None
 }
 
+/// Decode `intent:nb|s:<session_id>` or `intent:ws|s:<session_id>` (and full snake_case slugs).
+pub fn parse_telegram_intent_callback(
+    callback_data: &str,
+) -> Option<(BranchWorktreeIntent, String)> {
+    let rest = callback_data.strip_prefix(CB_TELEGRAM_INTENT)?;
+    let (intent_part, sess_part) = rest.split_once("|s:")?;
+    let intent = match intent_part {
+        "nb" | "new_branch_from_base" => BranchWorktreeIntent::NewBranchFromBase,
+        "ws" | "work_on_selected_branch" => BranchWorktreeIntent::WorkOnSelectedBranch,
+        _ => return None,
+    };
+    let session_id = sess_part.trim().to_string();
+    if session_id.is_empty() {
+        return None;
+    }
+    Some((intent, session_id))
+}
+
 /// Decode `tp:<proj_idx>|s:<session_id>` (project pick after recipe).
 pub fn parse_telegram_project_callback(callback_data: &str) -> Option<(usize, String)> {
     let rest = callback_data.strip_prefix(CB_TELEGRAM_PROJECT)?;
@@ -438,6 +481,23 @@ pub fn parse_telegram_agent_callback(callback_data: &str) -> Option<(usize, usiz
         return None;
     }
     Some((agent_idx, proj_idx, session_id))
+}
+
+/// Decode `tb:<branch_idx>|p:<proj_idx>|s:<session_id>` (branch pick after project).
+pub fn parse_telegram_branch_callback(callback_data: &str) -> Option<(usize, usize, String)> {
+    let rest = callback_data.strip_prefix(CB_TELEGRAM_BRANCH)?;
+    let (branch_part, tail) = rest.split_once("|p:")?;
+    let branch_idx: usize = branch_part.parse().ok()?;
+    let (proj_part, sess_part) = tail.split_once("|s:")?;
+    let proj_idx: usize = proj_part.parse().ok()?;
+    let session_id = sess_part.trim().to_string();
+    if session_id.is_empty() {
+        return None;
+    }
+    if branch_idx > 10 {
+        return None;
+    }
+    Some((branch_idx, proj_idx, session_id))
 }
 
 /// Parse callback payload strings into internal routing keys (recipe id, demo flags, elicitation ids).
@@ -564,9 +624,14 @@ fn default_tool_path_for_spawn(config: &DaemonConfig) -> String {
         .unwrap_or_else(|| "tddy-coder".to_string())
 }
 
-fn sorted_projects_for_os_user(os_user: &str) -> anyhow::Result<Vec<ProjectData>> {
-    let projects_dir = projects_path_for_user(os_user)
-        .ok_or_else(|| anyhow::anyhow!("could not resolve projects path"))?;
+fn sorted_projects_for_workflow_spawn(
+    deps: &TelegramWorkflowSpawn,
+) -> anyhow::Result<Vec<ProjectData>> {
+    let projects_dir: PathBuf = match &deps.projects_dir_override {
+        Some(p) => p.clone(),
+        None => projects_path_for_user(&deps.os_user)
+            .ok_or_else(|| anyhow::anyhow!("could not resolve projects path"))?,
+    };
     let mut projects = project_storage::read_projects(&projects_dir)?;
     projects.sort_by(|a, b| a.project_id.cmp(&b.project_id));
     Ok(projects)
@@ -588,11 +653,15 @@ pub struct TelegramWorkflowSpawn {
     pub config: Arc<DaemonConfig>,
     pub spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
     pub os_user: String,
+    /// When set (e.g. integration tests), read `projects.yaml` from this directory instead of `~/.tddy/projects`.
+    pub projects_dir_override: Option<PathBuf>,
     pub telegram_hooks: Option<Arc<TelegramDaemonHooks>>,
     /// Full session id → child gRPC port (for [`crate::presenter_intent_client`]).
     pub child_grpc_by_session: Arc<Mutex<HashMap<String, u16>>>,
     /// Same cache as [`crate::telegram_notifier::TelegramSessionWatcher`] — full strings for select confirmations.
     pub elicitation_select_options: ElicitationSelectOptionsCache,
+    /// Chat id → session id (full) when the user tapped "Other" and we await a free-text follow-up message.
+    pub pending_elicitation_other: Arc<Mutex<HashMap<i64, String>>>,
 }
 
 impl TelegramWorkflowSpawn {
@@ -727,8 +796,55 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         )
     }
 
-    /// After a recipe is saved: prompt for a project (then agent) so the operator can start `tddy-coder` like the web UI.
-    pub async fn send_project_pick_after_recipe(
+    /// After recipe selection: ask whether to fork a new branch from the integration base or work on an existing branch.
+    pub async fn send_intent_pick_keyboard(
+        &self,
+        chat_id: i64,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        self.ensure_authorized(chat_id)?;
+        let data_nb = format!("{CB_TELEGRAM_INTENT}nb|s:{session_id}");
+        let data_ws = format!("{CB_TELEGRAM_INTENT}ws|s:{session_id}");
+        debug_assert!(
+            data_nb.len() <= 64 && data_ws.len() <= 64,
+            "Telegram callback_data exceeds 64 bytes: nb_len={} ws_len={} session_id_len={}",
+            data_nb.len(),
+            data_ws.len(),
+            session_id.len()
+        );
+        let rows: InlineKeyboardRows = vec![vec![
+            ("New branch + worktree".to_string(), data_nb),
+            ("Work on existing branch".to_string(), data_ws),
+        ]];
+        self.sender
+            .send_message_with_keyboard(chat_id, "Choose branch/worktree intent:", rows)
+            .await?;
+        Ok(())
+    }
+
+    /// Persist [`BranchWorktreeIntent`] from Telegram and continue to project selection.
+    pub async fn handle_telegram_intent_callback(
+        &self,
+        chat_id: i64,
+        intent: BranchWorktreeIntent,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        self.ensure_authorized(chat_id)?;
+        let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
+        let mut cs = match read_changeset(&session_dir) {
+            Ok(c) => c,
+            Err(WorkflowError::ChangesetMissing(_)) => Changeset::default(),
+            Err(e) => anyhow::bail!("read changeset: {e}"),
+        };
+        cs.workflow
+            .get_or_insert_with(Default::default)
+            .branch_worktree_intent = Some(intent);
+        write_changeset(&session_dir, &cs).map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
+        self.send_project_pick_keyboard(chat_id, session_id).await
+    }
+
+    /// After branch/worktree intent is chosen: prompt for a project (then branch, then agent) like the web UI.
+    pub async fn send_project_pick_keyboard(
         &self,
         chat_id: i64,
         session_id: &str,
@@ -737,7 +853,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         let Some(ref deps) = self.workflow_spawn else {
             return Ok(());
         };
-        let projects = sorted_projects_for_os_user(&deps.os_user)?;
+        let projects = sorted_projects_for_workflow_spawn(deps)?;
         if projects.is_empty() {
             self.sender
                 .send_message(
@@ -764,6 +880,69 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         Ok(())
     }
 
+    /// After project pick: show default integration base + up to 10 recent `origin/*` branches.
+    async fn send_branch_pick_keyboard(
+        &self,
+        chat_id: i64,
+        proj_idx: usize,
+        session_id: &str,
+        project: &ProjectData,
+    ) -> anyhow::Result<()> {
+        let Some(ref deps) = self.workflow_spawn else {
+            anyhow::bail!("Telegram workflow spawn is not configured");
+        };
+        let projects_dir = projects_path_for_user(&deps.os_user)
+            .ok_or_else(|| anyhow::anyhow!("could not resolve projects path"))?;
+        let default_ref =
+            effective_integration_base_ref_for_project(&projects_dir, &project.project_id)?;
+        let repo_path = Path::new(&project.main_repo_path);
+        if !repo_path.exists() {
+            anyhow::bail!("project main repo path does not exist");
+        }
+        let branches = match list_recent_remote_branches(repo_path, 10) {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "list_recent_remote_branches: {}",
+                    e
+                );
+                Vec::new()
+            }
+        };
+        let short_default = default_ref
+            .strip_prefix("origin/")
+            .unwrap_or(default_ref.as_str());
+        let default_label = format!("Default ({short_default})");
+        let mut rows: InlineKeyboardRows = Vec::new();
+        let data0 = format!("{CB_TELEGRAM_BRANCH}0|p:{proj_idx}|s:{session_id}");
+        debug_assert!(
+            data0.len() <= 64,
+            "Telegram callback_data exceeds 64 bytes: len={} data={data0:?}",
+            data0.len()
+        );
+        rows.push(vec![(default_label, data0)]);
+        for (i, br) in branches.iter().enumerate().take(10) {
+            let idx = i + 1;
+            let label = take_utf8_prefix(br, 52).to_string();
+            let data = format!("{CB_TELEGRAM_BRANCH}{idx}|p:{proj_idx}|s:{session_id}");
+            debug_assert!(
+                data.len() <= 64,
+                "Telegram callback_data exceeds 64 bytes: len={} data={data:?}",
+                data.len()
+            );
+            rows.push(vec![(label, data)]);
+        }
+        let intro = format!(
+            "Project `{}` selected. Choose integration base (remote branch):",
+            project.project_id
+        );
+        self.sender
+            .send_message_with_keyboard(chat_id, &intro, rows)
+            .await?;
+        Ok(())
+    }
+
     pub async fn handle_telegram_project_callback(
         &self,
         chat_id: i64,
@@ -774,10 +953,59 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         let Some(ref deps) = self.workflow_spawn else {
             anyhow::bail!("Telegram workflow spawn is not configured");
         };
-        let projects = sorted_projects_for_os_user(&deps.os_user)?;
+        let projects = sorted_projects_for_workflow_spawn(deps)?;
         let project = projects
             .get(proj_idx)
             .ok_or_else(|| anyhow::anyhow!("invalid project index"))?;
+        self.send_branch_pick_keyboard(chat_id, proj_idx, session_id, project)
+            .await
+    }
+
+    pub async fn handle_telegram_branch_callback(
+        &self,
+        chat_id: i64,
+        branch_idx: usize,
+        proj_idx: usize,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        self.ensure_authorized(chat_id)?;
+        let Some(ref deps) = self.workflow_spawn else {
+            anyhow::bail!("Telegram workflow spawn is not configured");
+        };
+        let projects = sorted_projects_for_workflow_spawn(deps)?;
+        let project = projects
+            .get(proj_idx)
+            .ok_or_else(|| anyhow::anyhow!("invalid project index"))?;
+        let repo_path = Path::new(&project.main_repo_path);
+        if !repo_path.exists() {
+            anyhow::bail!("project main repo path does not exist");
+        }
+        let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
+        if branch_idx == 0 {
+            let mut cs = match read_changeset(&session_dir) {
+                Ok(c) => c,
+                Err(WorkflowError::ChangesetMissing(_)) => Changeset::default(),
+                Err(e) => anyhow::bail!("read changeset: {e}"),
+            };
+            cs.worktree_integration_base_ref = None;
+            write_changeset(&session_dir, &cs)
+                .map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
+        } else {
+            let branches =
+                list_recent_remote_branches(repo_path, 10).map_err(|e| anyhow::anyhow!("{e}"))?;
+            let chain = branches
+                .get(branch_idx - 1)
+                .ok_or_else(|| anyhow::anyhow!("invalid branch index (list may have changed)"))?;
+            validate_chain_pr_integration_base_ref(chain).map_err(|e| anyhow::anyhow!(e))?;
+            let mut cs = match read_changeset(&session_dir) {
+                Ok(c) => c,
+                Err(WorkflowError::ChangesetMissing(_)) => Changeset::default(),
+                Err(e) => anyhow::bail!("read changeset: {e}"),
+            };
+            cs.worktree_integration_base_ref = Some(chain.clone());
+            write_changeset(&session_dir, &cs)
+                .map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
+        }
         let allowed = deps.config.allowed_agents();
         if allowed.is_empty() {
             self.spawn_telegram_workflow(chat_id, session_id, &project.project_id, None)
@@ -801,7 +1029,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             rows.push(vec![(label, data)]);
         }
         let intro = format!(
-            "Project `{}` selected. Choose an agent:",
+            "Branch saved for `{}`. Choose an agent:",
             project.project_id
         );
         self.sender
@@ -821,7 +1049,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         let Some(ref deps) = self.workflow_spawn else {
             anyhow::bail!("Telegram workflow spawn is not configured");
         };
-        let projects = sorted_projects_for_os_user(&deps.os_user)?;
+        let projects = sorted_projects_for_workflow_spawn(deps)?;
         let project = projects
             .get(proj_idx)
             .ok_or_else(|| anyhow::anyhow!("invalid project index"))?;
@@ -968,6 +1196,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             .workflow_spawn
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?;
+        if let Ok(mut g) = deps.pending_elicitation_other.lock() {
+            g.remove(&chat_id);
+        }
         let (session_id, port) = {
             let map = deps
                 .child_grpc_by_session
@@ -995,6 +1226,95 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         Ok(())
     }
 
+    /// User tapped **Other** on a single-select clarification keyboard — next plain message is the answer.
+    pub async fn handle_elicitation_other(
+        &self,
+        chat_id: i64,
+        session_key: &str,
+    ) -> anyhow::Result<()> {
+        self.ensure_authorized(chat_id)?;
+        let deps = self
+            .workflow_spawn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?;
+        let (_session_id, _port) = {
+            let map = deps
+                .child_grpc_by_session
+                .lock()
+                .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
+            resolve_child_grpc_port(&map, session_key)?
+        };
+        deps.pending_elicitation_other
+            .lock()
+            .map_err(|e| anyhow::anyhow!("pending elicitation other lock: {e}"))?
+            .insert(chat_id, session_key.to_string());
+        self.sender
+            .send_message(
+                chat_id,
+                "Send your custom answer as your next message in this chat.",
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// If this chat is awaiting an "Other" free-text answer, consume `body` and forward to the presenter.
+    ///
+    /// Returns `Ok(true)` when the message was handled (including presenter errors surfaced to the user).
+    pub async fn handle_elicitation_other_followup_plain_message(
+        &self,
+        chat_id: i64,
+        body: &str,
+    ) -> anyhow::Result<bool> {
+        if !self.is_authorized(chat_id) {
+            return Ok(false);
+        }
+        let Some(ref deps) = self.workflow_spawn else {
+            return Ok(false);
+        };
+        let session_key = {
+            let mut g = deps
+                .pending_elicitation_other
+                .lock()
+                .map_err(|e| anyhow::anyhow!("pending elicitation other lock: {e}"))?;
+            match g.remove(&chat_id) {
+                Some(s) => s,
+                None => return Ok(false),
+            }
+        };
+        let trimmed = body.trim();
+        if trimmed.is_empty() {
+            self.sender
+                .send_message(
+                    chat_id,
+                    "That message was empty — send your custom answer as text, or pick an option on the question.",
+                )
+                .await?;
+            deps.pending_elicitation_other
+                .lock()
+                .map_err(|e| anyhow::anyhow!("pending elicitation other lock: {e}"))?
+                .insert(chat_id, session_key);
+            return Ok(true);
+        }
+        let (_session_id, port) = {
+            let map = deps
+                .child_grpc_by_session
+                .lock()
+                .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
+            resolve_child_grpc_port(&map, &session_key)?
+        };
+        if let Err(e) =
+            presenter_intent_client::answer_clarification_text_localhost(port, trimmed).await
+        {
+            if let Ok(mut g) = deps.pending_elicitation_other.lock() {
+                g.insert(chat_id, session_key);
+            }
+            return Err(e);
+        }
+        let text = format!("You selected:\n{trimmed}");
+        self.sender.send_message(chat_id, &text).await?;
+        Ok(true)
+    }
+
     /// Free-text clarification ([`PresenterIntent::AnswerClarificationText`]).
     pub async fn handle_answer_text_command(
         &self,
@@ -1007,6 +1327,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             .workflow_spawn
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?;
+        if let Ok(mut g) = deps.pending_elicitation_other.lock() {
+            g.remove(&chat_id);
+        }
         let (_session_id, port) = {
             let map = deps
                 .child_grpc_by_session
@@ -1450,7 +1773,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         })
     }
 
-    /// Unauthorized chat must not create sessions or open control streams.
+    /// Unauthorized chat: no session creation and no outbound message.
+    ///
+    /// The inbound [`crate::telegram_bot`] path does not call this for disallowed chats (silent
+    /// ignore for multi-daemon deployments). Kept for tests and any caller that needs the same
+    /// contract without sending Telegram noise to unrelated channels.
     pub async fn handle_start_workflow_unauthorized(
         &self,
         cmd: StartWorkflowCommand,
@@ -1468,13 +1795,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             return Ok(None);
         }
 
-        let text = "Access denied: this chat is not authorized to control workflows.";
-        self.sender.send_message(cmd.chat_id, text).await?;
-        Ok(Some(CapturedTelegramMessage {
-            chat_id: cmd.chat_id,
-            text: text.to_string(),
-            inline_keyboard: Vec::new(),
-        }))
+        log::debug!(
+            target: "tddy_daemon::telegram_session_control",
+            "handle_start_workflow_unauthorized: ignoring chat not in allowlist"
+        );
+        Ok(None)
     }
 }
 
@@ -1595,6 +1920,17 @@ mod unit_tests {
             Some((sid.to_string(), 2))
         );
         assert_eq!(parse_elicitation_select_callback("eli:s:bad"), None);
+    }
+
+    #[test]
+    fn parse_elicitation_other_callback_round_trip() {
+        let sid = "018f1234-5678-7abc-8def-123456789abc";
+        assert_eq!(
+            parse_elicitation_other_callback(&format!("eli:o:{sid}")),
+            Some(sid.to_string())
+        );
+        assert_eq!(parse_elicitation_other_callback("eli:o:"), None);
+        assert_eq!(parse_elicitation_other_callback("eli:s:x:1"), None);
     }
 
     #[test]
@@ -1838,6 +2174,39 @@ mod unit_tests {
         assert_eq!(
             parse_telegram_agent_callback(&ta),
             Some((1, 2, sid.to_string()))
+        );
+        let tb = format!("tb:3|p:2|s:{sid}");
+        assert_eq!(
+            parse_telegram_branch_callback(&tb),
+            Some((3, 2, sid.to_string()))
+        );
+        assert_eq!(parse_telegram_branch_callback("tb:11|p:0|s:x"), None);
+    }
+
+    #[test]
+    fn parse_telegram_intent_callback_round_trip() {
+        use tddy_core::changeset::BranchWorktreeIntent;
+        let sid = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
+        let nb = format!("intent:nb|s:{sid}");
+        let ws = format!("intent:ws|s:{sid}");
+        assert!(
+            nb.len() <= 64 && ws.len() <= 64,
+            "callback_data must fit Telegram limit: nb={} ws={}",
+            nb.len(),
+            ws.len()
+        );
+        assert_eq!(
+            parse_telegram_intent_callback(&nb),
+            Some((BranchWorktreeIntent::NewBranchFromBase, sid.to_string()))
+        );
+        assert_eq!(
+            parse_telegram_intent_callback(&ws),
+            Some((BranchWorktreeIntent::WorkOnSelectedBranch, sid.to_string()))
+        );
+        let nb_long = format!("intent:new_branch_from_base|s:{sid}");
+        assert_eq!(
+            parse_telegram_intent_callback(&nb_long),
+            Some((BranchWorktreeIntent::NewBranchFromBase, sid.to_string()))
         );
     }
 }

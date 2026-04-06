@@ -1,7 +1,7 @@
 # Workflow recipes (pluggable workflows)
 
 **Product area:** Coder  
-**Updated:** 2026-04-05
+**Updated:** 2026-04-06
 
 ## Summary
 
@@ -127,7 +127,7 @@ This section records how the shipped recipes map to the same product philosophy 
 - **Default** when **`--recipe`** is omitted or **`changeset.yaml`** has no **`recipe`** field.
 - **Start goal:** **`interview`** — clarification before PRD/plan; **`plan`** follows with PRD/TODO-style artifacts; full graph continues with acceptance-tests → red → green → ….
 - **Spirit:** Discovery-style elicitation (interview), then structured planning, then tests and implementation.
-- **Changeset workflow block:** **`changeset.yaml`** includes an optional **`workflow`** object: **`run_optional_step_x`** (boolean for the post-green branch), **`demo_options`** (strings describing how to run an optional **demo** goal), and optional **`tool_schema_id`** (URN tying the block to the **`changeset-workflow`** JSON Schema). **`tddy-tools persist-changeset-workflow`** validates a JSON payload against that schema and replaces the **`workflow`** section using an atomic write. **`tddy_core::changeset::merge_persisted_workflow_into_context`** copies persisted values into the engine **`Context`** so graph **`goal_conditions`** (e.g. **`run_optional_step_x`**) match the manifest; call sites pass the plan session directory.
+- **Changeset workflow block:** **`changeset.yaml`** includes an optional **`workflow`** object: **`run_optional_step_x`** (boolean for the post-green branch), **`demo_options`** (strings describing how to run an optional **demo** goal), optional **`tool_schema_id`** (URN tying the block to the **`changeset-workflow`** JSON Schema), and optional branch/worktree fields: **`branch_worktree_intent`** (**`new_branch_from_base`** | **`work_on_selected_branch`**), **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**. **`tddy-tools persist-changeset-workflow`** validates a JSON payload against that schema and replaces the **`workflow`** section using an atomic write. **`tddy_core::changeset::merge_persisted_workflow_into_context`** copies persisted values into the engine **`Context`** (including intent keys for hooks and resume) so graph **`goal_conditions`** (e.g. **`run_optional_step_x`**) match the manifest; call sites pass the plan session directory. **`tddy_core::worktree`** applies **`branch_worktree_intent`** during **`setup_worktree_for_session_with_integration_base`** (and the optional chain-base variant): new branch creation from the integration base vs checking out an existing branch in a new worktree path under **`.worktrees/`**.
 - **Interview:** System and user prompts require **`tddy-tools ask`** for whether the **demo** goal runs after **green**, for demo execution options, and for persisting **`run_optional_step_x`** / **`demo_options`** (via **`persist-changeset-workflow`**) into **`changeset.yaml`** before PRD-driven planning completes.
 
 ### TDD-small (`tdd-small`)
