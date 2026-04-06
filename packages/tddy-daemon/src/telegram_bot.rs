@@ -17,8 +17,8 @@ use crate::telegram_session_control::{
     parse_session_control_callback, parse_sessions_command, parse_start_workflow_prompt,
     parse_submit_feature_command, parse_telegram_agent_callback, parse_telegram_branch_callback,
     parse_telegram_branch_more_callback, parse_telegram_intent_callback,
-    parse_telegram_project_callback, SessionControlCallback,
-    StartWorkflowCommand, TelegramCallback, TelegramSessionControlHarness,
+    parse_telegram_project_callback, SessionControlCallback, StartWorkflowCommand,
+    TelegramCallback, TelegramSessionControlHarness,
 };
 
 type Harness = Arc<Mutex<TelegramSessionControlHarness<TeloxideSender>>>;

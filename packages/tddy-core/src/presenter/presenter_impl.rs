@@ -663,8 +663,12 @@ impl Presenter {
                     log::info!(
                         "ContinueWithAgent: read_changeset from {} (workflow_session_dir={:?}, workflow_output_dir={:?})",
                         cs_dir.display(),
-                        self.workflow_session_dir.as_ref().map(|p| p.display().to_string()),
-                        self.workflow_output_dir.as_ref().map(|p| p.display().to_string()),
+                        self.workflow_session_dir
+                            .as_ref()
+                            .map(|p| p.display().to_string()),
+                        self.workflow_output_dir
+                            .as_ref()
+                            .map(|p| p.display().to_string()),
                     );
                     match crate::changeset::read_changeset(cs_dir) {
                         Ok(cs) => {

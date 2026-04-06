@@ -13,8 +13,8 @@ use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::{
-    list_recent_remote_branches_skip, read_session_metadata, validate_chain_pr_integration_base_ref,
-    WorkflowError, SESSION_METADATA_FILENAME,
+    list_recent_remote_branches_skip, read_session_metadata,
+    validate_chain_pr_integration_base_ref, WorkflowError, SESSION_METADATA_FILENAME,
 };
 use uuid::Uuid;
 
@@ -491,7 +491,9 @@ pub fn parse_telegram_agent_callback(callback_data: &str) -> Option<(usize, usiz
 
 /// Decode `tb:…|p:…|s:…` (branch pick after project). Optional `|o:<list_offset>` scopes button rows
 /// to a page of [`list_recent_remote_branches_skip`] results.
-pub fn parse_telegram_branch_callback(callback_data: &str) -> Option<(usize, usize, usize, String)> {
+pub fn parse_telegram_branch_callback(
+    callback_data: &str,
+) -> Option<(usize, usize, usize, String)> {
     let rest = callback_data.strip_prefix(CB_TELEGRAM_BRANCH)?;
     let (before_p, after_p) = rest.split_once("|p:")?;
     let (branch_idx, list_offset) = if let Some((idx, off)) = before_p.split_once("|o:") {
@@ -917,29 +919,29 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         let Some(ref deps) = self.workflow_spawn else {
             anyhow::bail!("Telegram workflow spawn is not configured");
         };
-        let projects_dir = projects_path_for_user(&deps.os_user)
-            .ok_or_else(|| anyhow::anyhow!("could not resolve projects path"))?;
+        let projects_dir: PathBuf = match &deps.projects_dir_override {
+            Some(p) => p.clone(),
+            None => projects_path_for_user(&deps.os_user)
+                .ok_or_else(|| anyhow::anyhow!("could not resolve projects path"))?,
+        };
         let default_ref =
             effective_integration_base_ref_for_project(&projects_dir, &project.project_id)?;
         let repo_path = Path::new(&project.main_repo_path);
         if !repo_path.exists() {
             anyhow::bail!("project main repo path does not exist");
         }
-        let page_peek = match list_recent_remote_branches_skip(
-            repo_path,
-            list_offset,
-            BRANCH_PAGE_SIZE + 1,
-        ) {
-            Ok(b) => b,
-            Err(e) => {
-                log::warn!(
-                    target: "tddy_daemon::telegram_session_control",
-                    "list_recent_remote_branches_skip: {}",
-                    e
-                );
-                Vec::new()
-            }
-        };
+        let page_peek =
+            match list_recent_remote_branches_skip(repo_path, list_offset, BRANCH_PAGE_SIZE + 1) {
+                Ok(b) => b,
+                Err(e) => {
+                    log::warn!(
+                        target: "tddy_daemon::telegram_session_control",
+                        "list_recent_remote_branches_skip: {}",
+                        e
+                    );
+                    Vec::new()
+                }
+            };
         let has_more = page_peek.len() > BRANCH_PAGE_SIZE;
         let branches: Vec<String> = page_peek.into_iter().take(BRANCH_PAGE_SIZE).collect();
         let short_default = default_ref
@@ -1028,14 +1030,8 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         let project = projects
             .get(proj_idx)
             .ok_or_else(|| anyhow::anyhow!("invalid project index"))?;
-        self.send_branch_pick_keyboard(
-            chat_id,
-            proj_idx,
-            session_id,
-            project,
-            next_list_offset,
-        )
-        .await
+        self.send_branch_pick_keyboard(chat_id, proj_idx, session_id, project, next_list_offset)
+            .await
     }
 
     pub async fn handle_telegram_branch_callback(

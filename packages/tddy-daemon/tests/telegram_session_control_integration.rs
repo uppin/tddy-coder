@@ -822,9 +822,11 @@ async fn telegram_branch_pick_shows_more_when_more_than_ten_remote_branches() {
         .iter()
         .find(|m| m.text.contains("Choose integration base"))
         .expect("branch pick message");
-    let has_more = branch_msg.inline_keyboard.iter().flatten().any(|(l, d)| {
-        l.to_lowercase().contains("more") || d.starts_with("tbm:")
-    });
+    let has_more = branch_msg
+        .inline_keyboard
+        .iter()
+        .flatten()
+        .any(|(l, d)| l == "More…" || d.starts_with("tbm:"));
     assert!(
         has_more,
         "must show More… when >10 origin branches; keyboards={:?}",
@@ -881,9 +883,11 @@ async fn telegram_branch_pick_no_more_when_at_most_ten_remote_branches() {
         .iter()
         .find(|m| m.text.contains("Choose integration base"))
         .expect("branch pick message");
-    let has_more = branch_msg.inline_keyboard.iter().flatten().any(|(l, d)| {
-        l.to_lowercase().contains("more") || d.starts_with("tbm:")
-    });
+    let has_more = branch_msg
+        .inline_keyboard
+        .iter()
+        .flatten()
+        .any(|(l, d)| l == "More…" || d.starts_with("tbm:"));
     assert!(
         !has_more,
         "no More… when at most 10 origin branches; keyboards={:?}",
