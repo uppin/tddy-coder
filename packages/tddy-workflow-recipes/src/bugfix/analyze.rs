@@ -4,7 +4,9 @@
 
 use std::path::Path;
 
-use tddy_core::changeset::{read_changeset, update_state, write_changeset, Changeset};
+use tddy_core::changeset::{
+    read_changeset, update_state, write_changeset, BranchWorktreeIntent, Changeset,
+};
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::task::TaskResult;
 
@@ -75,8 +77,15 @@ pub fn apply_analyze_submit_to_changeset(
         read_changeset(session_dir).map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
             format!("read changeset: {}", e).into()
         })?;
-    cs.branch_suggestion = Some(parsed.branch_suggestion);
+    cs.branch_suggestion = Some(parsed.branch_suggestion.clone());
     cs.worktree_suggestion = Some(parsed.worktree_suggestion);
+    if cs.workflow.as_ref().and_then(|w| w.branch_worktree_intent)
+        == Some(BranchWorktreeIntent::NewBranchFromBase)
+    {
+        cs.workflow
+            .get_or_insert_with(Default::default)
+            .new_branch_name = Some(parsed.branch_suggestion);
+    }
     if let Some(n) = parsed.name {
         cs.name = Some(n);
     }

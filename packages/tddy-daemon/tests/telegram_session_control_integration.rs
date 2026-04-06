@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent, Changeset};
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_core::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF;
 use tddy_daemon::config::{AllowedAgent, DaemonConfig};
 use tddy_daemon::project_storage::{self, ProjectData};
 use tddy_daemon::telegram_notifier::InMemoryTelegramSender;
@@ -997,5 +998,74 @@ async fn telegram_branch_callback_work_on_selected_sets_selected_branch_to_work_
         selected.contains("feature/test-branch"),
         "selected_branch_to_work_on should contain the branch name; got {:?}",
         selected
+    );
+}
+
+#[tokio::test]
+async fn telegram_branch_callback_new_branch_from_base_sets_selected_integration_base_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    let sessions_base = tmp.path().join("sessions");
+    std::fs::create_dir_all(&sessions_base).unwrap();
+
+    let clone = init_repo_with_remote_branch(tmp.path());
+
+    let projects_dir = tmp.path().join("proj-registry");
+    std::fs::create_dir_all(&projects_dir).unwrap();
+    project_storage::write_projects(
+        &projects_dir,
+        &[ProjectData {
+            project_id: "proj-a".to_string(),
+            name: "Project A".to_string(),
+            git_url: "https://example.invalid/a.git".to_string(),
+            main_repo_path: clone.to_string_lossy().to_string(),
+            main_branch_ref: None,
+            host_repo_paths: HashMap::new(),
+        }],
+    )
+    .expect("write projects");
+
+    let session_id = "a9f84aa1-8d9b-4c2e-9f00-000000000001";
+    let session_dir = unified_session_dir_path(&sessions_base, session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+
+    let mut cs = Changeset::default();
+    cs.recipe = Some("tdd".to_string());
+    write_changeset(&session_dir, &cs).expect("write changeset");
+
+    let dummy_agent = AllowedAgent {
+        id: "claude".to_string(),
+        label: Some("Claude".to_string()),
+    };
+    let (harness, _sender) = harness_with_workflow_projects_and_agents(
+        vec![AUTHORIZED_CHAT],
+        sessions_base,
+        projects_dir,
+        vec![dummy_agent],
+    );
+
+    harness
+        .handle_telegram_intent_callback(
+            AUTHORIZED_CHAT,
+            BranchWorktreeIntent::NewBranchFromBase,
+            session_id,
+        )
+        .await
+        .expect("intent callback");
+
+    harness
+        .handle_telegram_branch_callback(AUTHORIZED_CHAT, 0, 0, session_id)
+        .await
+        .expect("branch callback default integration base");
+
+    let cs = read_changeset(&session_dir).expect("read changeset after branch callback");
+    let wf = cs.workflow.as_ref().expect("workflow block");
+    assert_eq!(
+        wf.selected_integration_base_ref.as_deref(),
+        Some(DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF),
+        "default branch row must persist project integration base ref"
+    );
+    assert!(
+        wf.new_branch_name.is_none(),
+        "new_branch_name comes from the LLM (plan or bugfix analyze submit), not Telegram"
     );
 }
