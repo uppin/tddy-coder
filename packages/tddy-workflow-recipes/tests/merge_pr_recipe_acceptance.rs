@@ -1,7 +1,7 @@
 //! PRD acceptance: **`merge-pr`** resolver, graph ordering, submit policy, and GitHub vs degraded behavior contracts.
 //!
 //! These tests fail until `MergePrRecipe` is registered, `approval_policy` lists **`merge-pr`**, and the
-//! graph exposes **`sync-main` → `finalize` → `end`** (integrate default branch before finalize/push/API merge).
+//! graph exposes **`analyze` → `sync-main` → `finalize` → `end`** (read-only analysis, then worktree sync, then finalize).
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -14,7 +14,8 @@ use tddy_workflow_recipes::{
     approval_policy, unknown_workflow_recipe_error, workflow_recipe_and_manifest_from_cli_name,
 };
 
-/// Graph / goal ids (PRD: sync with **`main`**, then finalize with structured submit + push / optional API merge).
+/// Graph / goal ids (PRD: analyze feasibility read-only, then sync with **`main`** in worktree, then finalize).
+pub const TASK_ANALYZE: &str = "analyze";
 pub const TASK_SYNC_MAIN: &str = "sync-main";
 pub const TASK_FINALIZE: &str = "finalize";
 
@@ -67,11 +68,19 @@ fn merge_pr_graph_has_ordered_goals() {
 
     let ids: BTreeSet<String> = graph.task_ids().cloned().collect();
     assert!(
-        ids.contains(TASK_SYNC_MAIN) && ids.contains(TASK_FINALIZE) && ids.contains("end"),
-        "merge-pr graph must include sync-main, finalize, and end; got {:?}",
+        ids.contains(TASK_ANALYZE)
+            && ids.contains(TASK_SYNC_MAIN)
+            && ids.contains(TASK_FINALIZE)
+            && ids.contains("end"),
+        "merge-pr graph must include analyze, sync-main, finalize, and end; got {:?}",
         ids
     );
 
+    assert_eq!(
+        graph.next_task_id(TASK_ANALYZE, &ctx),
+        Some(TASK_SYNC_MAIN.to_string()),
+        "analyze must run before sync-main (read-only feasibility check before worktree merge)"
+    );
     assert_eq!(
         graph.next_task_id(TASK_SYNC_MAIN, &ctx),
         Some(TASK_FINALIZE.to_string()),
@@ -83,12 +92,16 @@ fn merge_pr_graph_has_ordered_goals() {
         "finalize must precede workflow end"
     );
 
-    assert_eq!(recipe.start_goal().as_str(), TASK_SYNC_MAIN);
-    assert_eq!(recipe.initial_state().as_str(), "SyncMain");
+    assert_eq!(recipe.start_goal().as_str(), TASK_ANALYZE);
+    assert_eq!(recipe.initial_state().as_str(), "Analyze");
 
     assert_eq!(
         recipe.next_goal_for_state(&WorkflowState::new("Init")),
-        Some(GoalId::new(TASK_SYNC_MAIN))
+        Some(GoalId::new(TASK_ANALYZE))
+    );
+    assert_eq!(
+        recipe.next_goal_for_state(&WorkflowState::new("Analyze")),
+        Some(GoalId::new(TASK_ANALYZE))
     );
     assert_eq!(
         recipe.next_goal_for_state(&WorkflowState::new("SyncMain")),
@@ -106,7 +119,7 @@ fn merge_pr_skips_github_when_no_token() {
     let (recipe, _) =
         workflow_recipe_and_manifest_from_cli_name("merge-pr").expect("merge-pr must resolve");
 
-    // Single finalize step owns structured submit + push + conditional GitHub merge (no separate graph node for REST).
+    // No dedicated GitHub merge graph task; API merge is conditional inside finalize.
     assert!(
         !recipe
             .goal_ids()
@@ -121,7 +134,11 @@ fn merge_pr_skips_github_when_no_token() {
         "finalize must require tddy-tools submit for merge-pr-report-style outcome"
     );
 
-    // Sync step: agent-assisted git operations (like review **inspect**), no structured submit on the sync goal itself.
+    // Analyze and sync steps: no structured submit.
+    assert!(
+        !recipe.goal_requires_tddy_tools_submit(&GoalId::new(TASK_ANALYZE)),
+        "analyze must allow completion without structured submit (read-only analysis)"
+    );
     assert!(
         !recipe.goal_requires_tddy_tools_submit(&GoalId::new(TASK_SYNC_MAIN)),
         "sync-main must allow completion from agent output without structured submit"
@@ -138,17 +155,22 @@ fn merge_pr_merges_pr_when_token_present() {
     let ids: Vec<&str> = goal_ids.iter().map(|g| g.as_str()).collect();
     assert_eq!(
         ids.first().copied(),
-        Some(TASK_SYNC_MAIN),
-        "first recipe goal must be sync-main"
+        Some(TASK_ANALYZE),
+        "first recipe goal must be analyze"
     );
     assert!(
-        ids.contains(&TASK_FINALIZE),
-        "recipe.goal_ids must include finalize for merge + push + API"
+        ids.contains(&TASK_SYNC_MAIN) && ids.contains(&TASK_FINALIZE),
+        "recipe.goal_ids must include sync-main and finalize for merge + push + API"
     );
 
     let backend = Arc::new(StubBackend::new());
     let graph = recipe.build_graph(backend);
     let ctx = Context::new();
+    assert_eq!(
+        graph.next_task_id(TASK_ANALYZE, &ctx),
+        Some(TASK_SYNC_MAIN.to_string()),
+        "sync-main must follow analyze (worktree created after read-only analysis)"
+    );
     assert_eq!(
         graph.next_task_id(TASK_SYNC_MAIN, &ctx),
         Some(TASK_FINALIZE.to_string()),
@@ -162,16 +184,35 @@ fn merge_pr_sync_requires_session_worktree_for_conflict_hooks() {
         workflow_recipe_and_manifest_from_cli_name("merge-pr").expect("merge-pr must resolve");
 
     assert!(
-        recipe.goal_requires_session_dir(&GoalId::new(TASK_SYNC_MAIN))
+        recipe.goal_requires_session_dir(&GoalId::new(TASK_ANALYZE))
+            && recipe.goal_requires_session_dir(&GoalId::new(TASK_SYNC_MAIN))
             && recipe.goal_requires_session_dir(&GoalId::new(TASK_FINALIZE)),
-        "sync-main and finalize must require a session worktree for git operations"
+        "analyze, sync-main, and finalize must all require a session dir"
     );
 
+    assert!(
+        recipe.goal_ids().iter().any(|g| g.as_str() == TASK_ANALYZE),
+        "analyze goal must exist for read-only merge feasibility check"
+    );
     assert!(
         recipe
             .goal_ids()
             .iter()
             .any(|g| g.as_str() == TASK_SYNC_MAIN),
-        "sync-main goal must exist so conflict detection can bind to it"
+        "sync-main goal must exist so conflict resolution can bind to it"
+    );
+}
+
+/// PRD: analyze may emit a structured `worktree_suggestion` (directory basename) after read-only
+/// analysis; `submit_key` must map to a dedicated goal id so `tddy-tools get-schema` and persistence
+/// can target that shape before sync-main creates `.worktrees/<name>/`.
+#[test]
+fn merge_pr_analyze_submit_key_targets_dedicated_goal_for_worktree_suggestion() {
+    let (recipe, _) =
+        workflow_recipe_and_manifest_from_cli_name("merge-pr").expect("merge-pr must resolve");
+    assert_eq!(
+        recipe.submit_key(&GoalId::new(TASK_ANALYZE)).as_str(),
+        "merge-pr-analyze",
+        "submit_key(analyze) must be merge-pr-analyze so analyze can persist worktree_suggestion before sync-main"
     );
 }

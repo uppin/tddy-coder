@@ -54,6 +54,11 @@ fn goals_json_includes_merge_pr_report_goal() {
         "goals.json must register merge-pr-report for structured finalize submit (PRD schema contract); got {:?}",
         names
     );
+    assert!(
+        names.iter().any(|n| *n == "merge-pr-analyze"),
+        "goals.json must register merge-pr-analyze for optional structured analyze submit (worktree_suggestion); got {:?}",
+        names
+    );
 }
 
 #[test]

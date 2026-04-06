@@ -981,15 +981,19 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             anyhow::bail!("project main repo path does not exist");
         }
         let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
+        let mut cs = match read_changeset(&session_dir) {
+            Ok(c) => c,
+            Err(WorkflowError::ChangesetMissing(_)) => Changeset::default(),
+            Err(e) => anyhow::bail!("read changeset: {e}"),
+        };
+        let intent = cs.workflow.as_ref().and_then(|w| w.branch_worktree_intent);
         if branch_idx == 0 {
-            let mut cs = match read_changeset(&session_dir) {
-                Ok(c) => c,
-                Err(WorkflowError::ChangesetMissing(_)) => Changeset::default(),
-                Err(e) => anyhow::bail!("read changeset: {e}"),
-            };
             cs.worktree_integration_base_ref = None;
-            write_changeset(&session_dir, &cs)
-                .map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
+            if intent == Some(BranchWorktreeIntent::WorkOnSelectedBranch) {
+                cs.workflow
+                    .get_or_insert_with(Default::default)
+                    .selected_branch_to_work_on = None;
+            }
         } else {
             let branches =
                 list_recent_remote_branches(repo_path, 10).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -997,15 +1001,15 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 .get(branch_idx - 1)
                 .ok_or_else(|| anyhow::anyhow!("invalid branch index (list may have changed)"))?;
             validate_chain_pr_integration_base_ref(chain).map_err(|e| anyhow::anyhow!(e))?;
-            let mut cs = match read_changeset(&session_dir) {
-                Ok(c) => c,
-                Err(WorkflowError::ChangesetMissing(_)) => Changeset::default(),
-                Err(e) => anyhow::bail!("read changeset: {e}"),
-            };
-            cs.worktree_integration_base_ref = Some(chain.clone());
-            write_changeset(&session_dir, &cs)
-                .map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
+            if intent == Some(BranchWorktreeIntent::WorkOnSelectedBranch) {
+                cs.workflow
+                    .get_or_insert_with(Default::default)
+                    .selected_branch_to_work_on = Some(chain.clone());
+            } else {
+                cs.worktree_integration_base_ref = Some(chain.clone());
+            }
         }
+        write_changeset(&session_dir, &cs).map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
         let allowed = deps.config.allowed_agents();
         if allowed.is_empty() {
             self.spawn_telegram_workflow(chat_id, session_id, &project.project_id, None)

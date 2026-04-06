@@ -243,6 +243,84 @@ pub fn create_worktree(
     Ok(worktree_path.canonicalize().unwrap_or(worktree_path))
 }
 
+/// If `worktree_path` exists and is already a linked worktree of `repo_root`, and its `HEAD`
+/// matches `git rev-parse <branch>` in `repo_root`, return that path for resume (changeset lost
+/// `worktree` but the directory remains registered with Git).
+fn try_reuse_linked_worktree_at_path(
+    repo_root: &Path,
+    worktree_path: &Path,
+    branch: &str,
+) -> Result<Option<PathBuf>, String> {
+    if !worktree_path.exists() {
+        return Ok(None);
+    }
+    if !path_is_registered_worktree_of_repo(repo_root, worktree_path)? {
+        return Ok(None);
+    }
+    let expected = git_rev_parse(repo_root, branch)?;
+    let actual = git_rev_parse(worktree_path, "HEAD")?;
+    if expected != actual {
+        return Err(format!(
+            "existing worktree at {} has HEAD {actual} but {branch} resolves to {expected}; \
+             remove the directory or fix the worktree before retrying",
+            worktree_path.display()
+        ));
+    }
+    Ok(Some(
+        worktree_path
+            .canonicalize()
+            .unwrap_or_else(|_| worktree_path.to_path_buf()),
+    ))
+}
+
+fn path_is_registered_worktree_of_repo(
+    repo_root: &Path,
+    worktree_path: &Path,
+) -> Result<bool, String> {
+    let want = worktree_path
+        .canonicalize()
+        .map_err(|e| format!("canonicalize {}: {}", worktree_path.display(), e))?;
+    let out = Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git worktree list: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git worktree list failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let Some(rest) = line.strip_prefix("worktree ") else {
+            continue;
+        };
+        let p = PathBuf::from(rest.trim());
+        let canon = p.canonicalize().unwrap_or(p);
+        if canon == want {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn git_rev_parse(cwd: &Path, rev: &str) -> Result<String, String> {
+    let out = Command::new("git")
+        .args(["rev-parse", rev])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("git rev-parse: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git rev-parse {} in {} failed: {}",
+            rev,
+            cwd.display(),
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
 /// Add a linked worktree at `.worktrees/<name>` checked out to an **existing** local branch.
 ///
 /// Uses `git worktree add <path> <branch>` when the branch is not already checked out in another
@@ -267,6 +345,17 @@ pub fn add_worktree_for_existing_branch(
     std::fs::create_dir_all(&worktrees).map_err(|e| format!("create worktrees dir: {}", e))?;
     let worktree_path = worktrees.join(name);
     if worktree_path.exists() {
+        match try_reuse_linked_worktree_at_path(repo_root, &worktree_path, branch) {
+            Ok(Some(p)) => {
+                log::info!(
+                    "add_worktree_for_existing_branch: reusing existing linked worktree at {}",
+                    p.display()
+                );
+                return Ok(p);
+            }
+            Ok(None) => {}
+            Err(e) => return Err(e),
+        }
         return Err(format!(
             "worktree path already exists at {} — reuse the existing worktree or confirm before proceeding",
             worktree_path.display()

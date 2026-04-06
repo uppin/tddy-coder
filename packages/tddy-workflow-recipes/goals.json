@@ -45,6 +45,11 @@
       "name": "merge-pr-report",
       "schema": "merge-pr-report.schema.json",
       "proto": "merge_pr_report.proto"
+    },
+    {
+      "name": "merge-pr-analyze",
+      "schema": "merge-pr-analyze.schema.json",
+      "proto": "merge_pr_analyze.proto"
     }
   ]
 }

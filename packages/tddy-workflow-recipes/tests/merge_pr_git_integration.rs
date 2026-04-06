@@ -9,7 +9,7 @@ use std::process::Command;
 use tddy_core::GoalId;
 use tddy_workflow_recipes::workflow_recipe_and_manifest_from_cli_name;
 
-const TASK_SYNC_MAIN: &str = "sync-main";
+const TASK_ANALYZE: &str = "analyze";
 const TASK_FINALIZE: &str = "finalize";
 
 fn git(args: &[&str], cwd: &Path) -> std::process::Output {
@@ -109,7 +109,7 @@ fn merge_pr_fails_on_unresolved_conflicts() {
 
     let (recipe, _) = workflow_recipe_and_manifest_from_cli_name("merge-pr")
         .expect("merge-pr must register before conflict integration asserts");
-    assert_eq!(recipe.start_goal().as_str(), TASK_SYNC_MAIN);
+    assert_eq!(recipe.start_goal().as_str(), TASK_ANALYZE);
     assert!(
         recipe
             .goal_ids()
