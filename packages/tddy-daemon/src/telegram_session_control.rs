@@ -18,6 +18,7 @@ use tddy_core::{
 };
 use uuid::Uuid;
 
+use crate::active_elicitation::{ActiveElicitationCoordinator, SharedActiveElicitationCoordinator};
 use crate::config::DaemonConfig;
 use crate::presenter_intent_client;
 use crate::project_storage::{self, effective_integration_base_ref_for_project, ProjectData};
@@ -712,11 +713,13 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     sessions_base: PathBuf,
     sender: Arc<S>,
     workflow_spawn: Option<Arc<TelegramWorkflowSpawn>>,
+    /// Single active elicitation token per Telegram chat (shared with [`crate::telegram_notifier::TelegramSessionWatcher`] when wired in `main`).
+    active_elicitation: SharedActiveElicitationCoordinator,
 }
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     pub fn new(allowed_chat_ids: Vec<i64>, sessions_base: PathBuf, sender: Arc<S>) -> Self {
-        Self::with_workflow_spawn(allowed_chat_ids, sessions_base, sender, None)
+        Self::with_workflow_spawn(allowed_chat_ids, sessions_base, sender, None, None)
     }
 
     pub fn with_workflow_spawn(
@@ -724,19 +727,24 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         sessions_base: PathBuf,
         sender: Arc<S>,
         workflow_spawn: Option<Arc<TelegramWorkflowSpawn>>,
+        shared_elicitation: Option<SharedActiveElicitationCoordinator>,
     ) -> Self {
         log::info!(
             target: "tddy_daemon::telegram_session_control",
-            "TelegramSessionControlHarness::with_workflow_spawn: allowed_chats={} sessions_base={} workflow_spawn={}",
+            "TelegramSessionControlHarness::with_workflow_spawn: allowed_chats={} sessions_base={} workflow_spawn={} shared_elicitation={}",
             allowed_chat_ids.len(),
             sessions_base.display(),
-            workflow_spawn.is_some()
+            workflow_spawn.is_some(),
+            shared_elicitation.is_some()
         );
+        let active_elicitation = shared_elicitation
+            .unwrap_or_else(|| Arc::new(Mutex::new(ActiveElicitationCoordinator::new())));
         Self {
             allowed_chat_ids,
             sessions_base,
             sender,
             workflow_spawn,
+            active_elicitation,
         }
     }
 
@@ -748,6 +756,99 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     /// Whether `chat_id` is allowed to use session control (matches configured `chat_ids`).
     pub fn is_authorized(&self, chat_id: i64) -> bool {
         self.allowed_chat_ids.contains(&chat_id)
+    }
+
+    // -------------------------------------------------------------------------
+    // Concurrent elicitation (single active token per Telegram chat) — public contract for tests
+    // and future inbound/outbound wiring. Implementations live with the per-chat lease/queue.
+    // -------------------------------------------------------------------------
+
+    /// Session id that currently owns the **active** elicitation token for this chat, if any.
+    ///
+    /// Plain-text follow-ups and commands that target the active session (without an explicit
+    /// session key) must resolve through this value.
+    pub fn active_elicitation_session_for_chat(&self, chat_id: i64) -> Option<String> {
+        match self.active_elicitation.lock() {
+            Ok(g) => g.active_session_for_chat(chat_id),
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "active_elicitation_session_for_chat: mutex poisoned: {e}"
+                );
+                None
+            }
+        }
+    }
+
+    /// Register demand for elicitation UI (same entry point as outbound notifier; used when tests
+    /// or future inbound paths seed the queue).
+    pub fn register_elicitation_surface_request(&self, chat_id: i64, session_id: String) {
+        match self.active_elicitation.lock() {
+            Ok(mut g) => g.register_elicitation_surface_request(chat_id, session_id),
+            Err(e) => log::error!(
+                target: "tddy_daemon::telegram_session_control",
+                "register_elicitation_surface_request: mutex poisoned: {e}"
+            ),
+        }
+    }
+
+    /// Whether an inbound `eli:s:` / `eli:o:` callback for `session_id` may be applied under the
+    /// single-active elicitation policy for this chat.
+    pub fn elicitation_callback_permitted(&self, chat_id: i64, session_id: &str) -> bool {
+        match self.active_elicitation.lock() {
+            Ok(g) => g.elicitation_callback_permitted(chat_id, session_id),
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "elicitation_callback_permitted: mutex poisoned: {e}"
+                );
+                false
+            }
+        }
+    }
+
+    /// When `completed_session_id` finishes its elicitation step, advance the queue and return the
+    /// next session id that becomes active for `chat_id`, if any.
+    pub fn advance_after_elicitation_completion(
+        &mut self,
+        chat_id: i64,
+        completed_session_id: &str,
+    ) -> Option<String> {
+        match self.active_elicitation.lock() {
+            Ok(mut g) => g.advance_after_elicitation_completion(chat_id, completed_session_id),
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "advance_after_elicitation_completion: mutex poisoned: {e}"
+                );
+                None
+            }
+        }
+    }
+
+    fn try_advance_elicitation_after_step(
+        &self,
+        chat_id: i64,
+        completed_session_id: &str,
+        context: &'static str,
+    ) {
+        let next = match self.active_elicitation.lock() {
+            Ok(mut g) => g.advance_after_elicitation_completion(chat_id, completed_session_id),
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "{context}: active elicitation mutex poisoned: {e}"
+                );
+                None
+            }
+        };
+        log::info!(
+            target: "tddy_daemon::telegram_session_control",
+            "{context}: elicitation queue advanced chat_id={} completed_session_id={} next_active_session_id={:?}",
+            chat_id,
+            completed_session_id,
+            next
+        );
     }
 
     fn ensure_authorized(&self, chat_id: i64) -> anyhow::Result<()> {
@@ -1083,7 +1184,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             .workflow_spawn
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?;
-        let (_session_id, port) = {
+        let (session_id, port) = {
             let map = deps
                 .child_grpc_by_session
                 .lock()
@@ -1098,6 +1199,14 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             'j' => presenter_intent_client::reject_session_document_localhost(port).await,
             _ => anyhow::bail!("unknown document action {action:?}"),
         }?;
+        // Rotate queue only when the document-review gate is decisively completed (approve/reject).
+        if matches!(action, 'a' | 'j') {
+            self.try_advance_elicitation_after_step(
+                chat_id,
+                &session_id,
+                "handle_document_review_action",
+            );
+        }
         Ok(())
     }
 
@@ -1125,6 +1234,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         };
         presenter_intent_client::answer_clarification_select_localhost(port, option_index as u32)
             .await?;
+        self.try_advance_elicitation_after_step(chat_id, &session_id, "handle_elicitation_select");
         let confirmation = {
             let guard = deps
                 .elicitation_select_options
@@ -1189,15 +1299,27 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             return Ok(false);
         };
         let session_key = {
-            let mut g = deps
+            let g = deps
                 .pending_elicitation_other
                 .lock()
                 .map_err(|e| anyhow::anyhow!("pending elicitation other lock: {e}"))?;
-            match g.remove(&chat_id) {
+            match g.get(&chat_id).cloned() {
                 Some(s) => s,
                 None => return Ok(false),
             }
         };
+        let (session_id, port) = {
+            let map = deps
+                .child_grpc_by_session
+                .lock()
+                .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
+            resolve_child_grpc_port(&map, &session_key)?
+        };
+        if !self.elicitation_callback_permitted(chat_id, &session_id) {
+            anyhow::bail!(
+                "That follow-up does not match the active elicitation for this chat. Finish the current prompt or use the web UI."
+            );
+        }
         let trimmed = body.trim();
         if trimmed.is_empty() {
             self.sender
@@ -1206,27 +1328,29 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                     "That message was empty — send your custom answer as text, or pick an option on the question.",
                 )
                 .await?;
+            return Ok(true);
+        }
+        {
+            let mut g = deps
+                .pending_elicitation_other
+                .lock()
+                .map_err(|e| anyhow::anyhow!("pending elicitation other lock: {e}"))?;
+            g.remove(&chat_id);
+        }
+        if let Err(e) =
+            presenter_intent_client::answer_clarification_text_localhost(port, trimmed).await
+        {
             deps.pending_elicitation_other
                 .lock()
                 .map_err(|e| anyhow::anyhow!("pending elicitation other lock: {e}"))?
                 .insert(chat_id, session_key);
-            return Ok(true);
-        }
-        let (_session_id, port) = {
-            let map = deps
-                .child_grpc_by_session
-                .lock()
-                .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
-            resolve_child_grpc_port(&map, &session_key)?
-        };
-        if let Err(e) =
-            presenter_intent_client::answer_clarification_text_localhost(port, trimmed).await
-        {
-            if let Ok(mut g) = deps.pending_elicitation_other.lock() {
-                g.insert(chat_id, session_key);
-            }
             return Err(e);
         }
+        self.try_advance_elicitation_after_step(
+            chat_id,
+            &session_id,
+            "handle_elicitation_other_followup_plain_message",
+        );
         let text = format!("You selected:\n{trimmed}");
         self.sender.send_message(chat_id, &text).await?;
         Ok(true)
@@ -1247,14 +1371,20 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         if let Ok(mut g) = deps.pending_elicitation_other.lock() {
             g.remove(&chat_id);
         }
-        let (_session_id, port) = {
+        let (session_id, port) = {
             let map = deps
                 .child_grpc_by_session
                 .lock()
                 .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
             resolve_child_grpc_port(&map, session_key)?
         };
+        if !self.elicitation_callback_permitted(chat_id, &session_id) {
+            anyhow::bail!(
+                "That session is not the active elicitation for this chat. Finish the current prompt or use the web UI."
+            );
+        }
         presenter_intent_client::answer_clarification_text_localhost(port, text).await?;
+        self.try_advance_elicitation_after_step(chat_id, &session_id, "handle_answer_text_command");
         Ok(())
     }
 
@@ -1270,13 +1400,18 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             .workflow_spawn
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?;
-        let (_session_id, port) = {
+        let (session_id, port) = {
             let map = deps
                 .child_grpc_by_session
                 .lock()
                 .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
             resolve_child_grpc_port(&map, session_key)?
         };
+        if !self.elicitation_callback_permitted(chat_id, &session_id) {
+            anyhow::bail!(
+                "That session is not the active elicitation for this chat. Finish the current prompt or use the web UI."
+            );
+        }
         let u32s: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
         presenter_intent_client::answer_clarification_multi_select_localhost(
             port,
@@ -1284,6 +1419,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             String::new(),
         )
         .await?;
+        self.try_advance_elicitation_after_step(
+            chat_id,
+            &session_id,
+            "handle_answer_multi_command",
+        );
         Ok(())
     }
 

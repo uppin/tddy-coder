@@ -176,9 +176,13 @@ fn main() -> anyhow::Result<()> {
                     teloxide_sender.clone();
                 let elicitation_select_options: tddy_daemon::telegram_notifier::ElicitationSelectOptionsCache =
                     Arc::new(StdMutex::new(HashMap::new()));
+                let active_elicitation = Arc::new(StdMutex::new(
+                    tddy_daemon::active_elicitation::ActiveElicitationCoordinator::new(),
+                ));
                 let watcher = Arc::new(Mutex::new(
-                    tddy_daemon::telegram_notifier::TelegramSessionWatcher::with_elicitation_select_options(
+                    tddy_daemon::telegram_notifier::TelegramSessionWatcher::with_elicitation_select_options_and_coordinator(
                         elicitation_select_options.clone(),
+                        active_elicitation.clone(),
                     ),
                 ));
                 let hooks = Arc::new(
@@ -215,6 +219,7 @@ fn main() -> anyhow::Result<()> {
                             sessions_base,
                             teloxide_sender,
                             workflow_spawn,
+                            Some(active_elicitation),
                         ),
                     ));
                     telegram_inbound = Some((bot.clone(), harness));
