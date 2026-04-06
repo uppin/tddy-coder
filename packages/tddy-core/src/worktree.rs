@@ -2,6 +2,7 @@
 //!
 //! Worktrees are stored in `.worktrees/` relative to the repo root.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -1038,6 +1039,16 @@ fn slugify_for_branch(name: &str) -> String {
 /// Uses `git branch -r --sort=-committerdate`. Excludes `origin/HEAD` and any ref that is not under
 /// `origin/`. Entries that fail [`validate_chain_pr_integration_base_ref`] are skipped.
 pub fn list_recent_remote_branches(repo_root: &Path, limit: usize) -> Result<Vec<String>, String> {
+    list_recent_remote_branches_skip(repo_root, 0, limit)
+}
+
+/// Like [`list_recent_remote_branches`], but skips the first `skip` qualifying remote branches
+/// (same ordering and filtering), then returns up to `limit` entries.
+pub fn list_recent_remote_branches_skip(
+    repo_root: &Path,
+    skip: usize,
+    limit: usize,
+) -> Result<Vec<String>, String> {
     if limit == 0 {
         return Ok(Vec::new());
     }
@@ -1058,6 +1069,8 @@ pub fn list_recent_remote_branches(repo_root: &Path, limit: usize) -> Result<Vec
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut skip_remaining = skip;
     let mut out: Vec<String> = Vec::new();
     for line in stdout.lines() {
         let line = line.trim();
@@ -1073,10 +1086,15 @@ pub fn list_recent_remote_branches(repo_root: &Path, limit: usize) -> Result<Vec
         if validate_chain_pr_integration_base_ref(line).is_err() {
             continue;
         }
-        if out.iter().any(|e| e == line) {
+        let line = line.to_string();
+        if !seen.insert(line.clone()) {
             continue;
         }
-        out.push(line.to_string());
+        if skip_remaining > 0 {
+            skip_remaining -= 1;
+            continue;
+        }
+        out.push(line);
         if out.len() >= limit {
             break;
         }
@@ -1407,6 +1425,91 @@ mod list_recent_remote_branches_tests {
             list
         );
         assert!(!list.contains(&"origin/HEAD".to_string()));
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn list_recent_remote_branches_skip_skips_first_n() {
+        let base = std::env::temp_dir().join("tddy-core-list-recent-remote-branches-skip");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        let repo = base.join("repo-skip");
+        fs::create_dir_all(&repo).unwrap();
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "t@t.com"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "T"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        fs::write(repo.join("f"), "x").unwrap();
+        Command::new("git")
+            .args(["add", "f"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "c"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["remote", "add", "origin", repo.to_str().unwrap()])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["push", "-u", "origin", "main"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        for name in ["feature/a", "feature/b"] {
+            Command::new("git")
+                .args(["checkout", "-b", name])
+                .current_dir(&repo)
+                .output()
+                .unwrap();
+            fs::write(repo.join("g"), name).unwrap();
+            Command::new("git")
+                .args(["add", "g"])
+                .current_dir(&repo)
+                .output()
+                .unwrap();
+            Command::new("git")
+                .args(["commit", "-m", "c2"])
+                .current_dir(&repo)
+                .output()
+                .unwrap();
+            Command::new("git")
+                .args(["push", "-u", "origin", name])
+                .current_dir(&repo)
+                .output()
+                .unwrap();
+        }
+
+        let first = list_recent_remote_branches_skip(&repo, 0, 1).unwrap();
+        let second = list_recent_remote_branches_skip(&repo, 1, 1).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert_ne!(
+            first[0], second[0],
+            "skip(0,1) and skip(1,1) must differ when multiple remotes exist; first={first:?} second={second:?}"
+        );
 
         let _ = fs::remove_dir_all(&base);
     }
