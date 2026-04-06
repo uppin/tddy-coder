@@ -42,7 +42,7 @@ When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the
 - If a live PID exists in **`.session.yaml`**, the daemon terminates the process before directory removal.
 - Bot sends a confirmation message after successful deletion.
 
-### Integration base branch (`/start-workflow` after project) (Updated: 2026-04-05)
+### Integration base branch (`/start-workflow` after project) (2026-04-05)
 
 - After a **project** is chosen (`tp:<proj_idx>|s:<session_id>`), the bot lists **Default (`<branch>`)** using **`effective_integration_base_ref_for_project`** (project registry **`main_branch_ref`**, else documented default **`origin/master`**), then up to **10** remote branches **`origin/...`** sorted by **most recent commit** (`git branch -r --sort=-committerdate`), exposed as **`list_recent_remote_branches`** in **tddy-core**.
 - Callbacks: **`tb:0|p:<proj_idx>|s:<session_id>`** = use project default (no chain opt-in); **`tb:<n>|p:<proj_idx>|s:<session_id>`** with **`1 ≤ n ≤ 10`** = use the *n*th line from that sorted list. The choice is persisted to **`changeset.yaml`** as **`worktree_integration_base_ref`** when non-default; **`tddy-workflow-recipes`** / **`tddy-service`** worktree setup calls **`setup_worktree_for_session_with_optional_chain_base`** so the session worktree matches the selected base.
