@@ -13,6 +13,8 @@ import {
   ListEligibleDaemonsResponseSchema,
   EligibleDaemonEntrySchema,
   StartSessionRequestSchema,
+  StartSessionResponseSchema,
+  ConnectSessionRequestSchema,
   ConnectSessionResponseSchema,
   ResumeSessionResponseSchema,
   DeleteSessionRequestSchema,
@@ -1420,5 +1422,175 @@ describe("ConnectionScreen — pending elicitation indicator", () => {
     cy.get(`[data-testid="connect-${SESSION_WITHOUT_ELICITATION.sessionId}"]`)
       .closest("tr")
       .should("have.attr", "data-pending-elicitation", "false");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multi-session concurrent attachments (acceptance — PRD: Connection screen N≥1)
+// ---------------------------------------------------------------------------
+
+const SESSION_MULTI_A: MockSessionRow = {
+  sessionId: "multi-session-aaaaaaaa-bbbb-cccc-dddd-eeee11111111",
+  createdAt: "2026-03-21T10:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/project",
+  pid: 70001,
+  isActive: true,
+  projectId: "proj-1",
+};
+
+const SESSION_MULTI_B: MockSessionRow = {
+  sessionId: "multi-session-bbbbbbbb-aaaa-cccc-dddd-ffff22222222",
+  createdAt: "2026-03-21T11:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/project",
+  pid: 70002,
+  isActive: true,
+  projectId: "proj-1",
+};
+
+/** Per-request ConnectSession: room name derived from requested session id (distinct LiveKit rooms). */
+function interceptConnectSessionPerSessionId() {
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ConnectSession", (req) => {
+    const bodyBytes = new Uint8Array(req.body as ArrayBuffer);
+    const decoded = fromBinary(ConnectSessionRequestSchema, bodyBytes);
+    const sid = decoded.sessionId;
+    const body = toBinary(
+      ConnectSessionResponseSchema,
+      create(ConnectSessionResponseSchema, {
+        livekitRoom: `room-${sid}`,
+        livekitUrl: "ws://127.0.0.1:7880",
+        livekitServerIdentity: `server-${sid.slice(0, 8)}`,
+      }),
+    );
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(body),
+    });
+  }).as("connectSessionMulti");
+}
+
+describe("ConnectionScreen — multi-session attachments (acceptance)", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("ConnectionScreen — two concurrent connects: two distinct attachment roots (mocked RPC)", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([SESSION_MULTI_A, SESSION_MULTI_B]);
+    interceptConnectSessionPerSessionId();
+    interceptTokenForPresence();
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="connect-${SESSION_MULTI_A.sessionId}"]`, { timeout: 8000 }).click();
+    cy.wait("@connectSessionMulti");
+    cy.get("[data-testid='connected-terminal-container']", { timeout: 15000 }).should("exist");
+    cy.get(`[data-testid="connect-${SESSION_MULTI_B.sessionId}"]`).click();
+    cy.wait("@connectSessionMulti");
+    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_A.sessionId}"]`, {
+      timeout: 15000,
+    }).should("exist");
+    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_B.sessionId}"]`).should(
+      "exist",
+    );
+  });
+
+  it("ConnectionScreen — disconnect first leaves second terminal (mocked)", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([SESSION_MULTI_A, SESSION_MULTI_B]);
+    interceptConnectSessionPerSessionId();
+    interceptTokenForPresence();
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="connect-${SESSION_MULTI_A.sessionId}"]`, { timeout: 8000 }).click();
+    cy.wait("@connectSessionMulti");
+    cy.get(`[data-testid="connect-${SESSION_MULTI_B.sessionId}"]`).click();
+    cy.wait("@connectSessionMulti");
+    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_A.sessionId}"]`, {
+      timeout: 15000,
+    })
+      .find("[data-testid='connection-status-dot']", { timeout: 20000 })
+      .should("be.visible")
+      .click();
+    cy.get("[data-testid='connection-menu-disconnect']", { timeout: 10000 })
+      .should("be.visible")
+      .click({ force: true });
+    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_B.sessionId}"]`, {
+      timeout: 15000,
+    }).should("exist");
+    cy.get("[data-testid='connection-status-dot']", { timeout: 20000 }).should("exist");
+  });
+
+  it("ConnectionScreen — Start New Session with another terminal open adds attachment (mocked)", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([SESSION_MULTI_A, SESSION_MULTI_B]);
+    interceptConnectSessionPerSessionId();
+    const newSessionId = "multi-session-new-start-cccc-dddd-eeee-ffffffffffff";
+    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+      const body = toBinary(
+        StartSessionResponseSchema,
+        create(StartSessionResponseSchema, {
+          sessionId: newSessionId,
+          livekitRoom: `room-${newSessionId}`,
+          livekitUrl: "ws://127.0.0.1:7880",
+          livekitServerIdentity: "server-new",
+        }),
+      );
+      req.reply({
+        statusCode: 200,
+        headers: { "Content-Type": "application/proto" },
+        body: toArrayBuffer(body),
+      });
+    }).as("startSessionMulti");
+    interceptTokenForPresence();
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="connect-${SESSION_MULTI_A.sessionId}"]`, { timeout: 8000 }).click();
+    cy.wait("@connectSessionMulti");
+    cy.get(`[data-testid="start-session-${PROJECT.projectId}"]`, { timeout: 8000 }).click();
+    cy.wait("@startSessionMulti");
+    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_A.sessionId}"]`, {
+      timeout: 20000,
+    }).should("exist");
+    cy.get(`[data-testid="connection-attached-terminal-${newSessionId}"]`).should("exist");
+  });
+
+  it("ConnectionScreen — inactive ListSessions clears only matching attachment (mocked)", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    let poll = 0;
+    interceptAllRpcsWithListSessionsFactory(() => {
+      poll += 1;
+      if (poll === 1) {
+        return [SESSION_MULTI_A, SESSION_MULTI_B];
+      }
+      return [
+        { ...SESSION_MULTI_A, isActive: false, status: "exited", pid: 0 },
+        SESSION_MULTI_B,
+      ];
+    });
+    interceptConnectSessionPerSessionId();
+    interceptTokenForPresence();
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="connect-${SESSION_MULTI_A.sessionId}"]`, { timeout: 8000 }).click();
+    cy.wait("@connectSessionMulti");
+    cy.get(`[data-testid="connect-${SESSION_MULTI_B.sessionId}"]`).click();
+    cy.wait("@connectSessionMulti");
+    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_A.sessionId}"]`, {
+      timeout: 15000,
+    }).should("exist");
+    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_B.sessionId}"]`).should(
+      "exist",
+    );
+    cy.wait(5500);
+    cy.wait("@listSessions");
+    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_B.sessionId}"]`, {
+      timeout: 15000,
+    }).should("exist");
+    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_A.sessionId}"]`).should(
+      "not.exist",
+    );
   });
 });

@@ -1,14 +1,19 @@
 //! Integration acceptance tests: Telegram inbound control plane → session + changeset + presenter inputs.
 //! Integration tests for [`tddy_daemon::telegram_session_control`] (harness + sender recording).
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
+use tddy_core::changeset::{write_changeset, BranchWorktreeIntent, Changeset};
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_daemon::config::DaemonConfig;
+use tddy_daemon::project_storage::{self, ProjectData};
 use tddy_daemon::telegram_notifier::InMemoryTelegramSender;
 use tddy_daemon::telegram_session_control::{
     collect_outbound_messages, map_elicitation_callback_to_presenter_input,
     read_changeset_routing_snapshot, StartWorkflowCommand, TelegramCallback,
-    TelegramSessionControlHarness, WorkflowTransitionKind, SESSIONS_PAGE_SIZE,
+    TelegramSessionControlHarness, TelegramWorkflowSpawn, WorkflowTransitionKind,
+    SESSIONS_PAGE_SIZE,
 };
 
 const AUTHORIZED_CHAT: i64 = 424_242;
@@ -23,6 +28,34 @@ fn harness_with_sender(
 ) {
     let sender = Arc::new(InMemoryTelegramSender::new());
     let h = TelegramSessionControlHarness::new(allowed, sessions_base, sender.clone());
+    (h, sender)
+}
+
+fn harness_with_workflow_projects(
+    allowed: Vec<i64>,
+    sessions_base: std::path::PathBuf,
+    projects_dir: std::path::PathBuf,
+) -> (
+    TelegramSessionControlHarness<InMemoryTelegramSender>,
+    Arc<InMemoryTelegramSender>,
+) {
+    let sender = Arc::new(InMemoryTelegramSender::new());
+    let workflow_spawn = Arc::new(TelegramWorkflowSpawn {
+        config: Arc::new(DaemonConfig::default()),
+        spawn_client: None,
+        os_user: "n/a".to_string(),
+        projects_dir_override: Some(projects_dir),
+        telegram_hooks: None,
+        child_grpc_by_session: Arc::new(Mutex::new(HashMap::new())),
+        elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
+        pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
+    });
+    let h = TelegramSessionControlHarness::with_workflow_spawn(
+        allowed,
+        sessions_base,
+        sender.clone(),
+        Some(workflow_spawn),
+    );
     (h, sender)
 }
 
@@ -268,9 +301,9 @@ async fn telegram_elicitation_choice_mapped_to_presenter_expected_input() {
     );
 }
 
-/// `telegram_unauthorized_chat_cannot_control_session`
+/// `telegram_unauthorized_start_workflow_is_silent`
 #[tokio::test]
-async fn telegram_unauthorized_chat_cannot_control_session() {
+async fn telegram_unauthorized_start_workflow_is_silent() {
     let tmp = tempfile::tempdir().unwrap();
     let (harness, sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
@@ -284,18 +317,14 @@ async fn telegram_unauthorized_chat_cannot_control_session() {
         .await
         .expect("unauthorized handler");
 
-    let msg = denial.expect("unauthorized chat must receive explicit denial message");
     assert!(
-        msg.text.to_lowercase().contains("denied")
-            || msg.text.to_lowercase().contains("not authorized"),
-        "denial text must be explicit; got {:?}",
-        msg.text
+        denial.is_none(),
+        "unauthorized chat must not get a captured denial message (silent ignore for multi-daemon)"
     );
     assert!(
+        collect_outbound_messages(&sender, UNAUTHORIZED_CHAT).is_empty(),
+        "unauthorized chat must receive no Telegram traffic; got {:?}",
         collect_outbound_messages(&sender, UNAUTHORIZED_CHAT)
-            .iter()
-            .any(|m| m.text == msg.text),
-        "denial must be sent to the same chat"
     );
 }
 
@@ -599,6 +628,147 @@ async fn telegram_delete_session_unauthorized_is_denied() {
     assert!(
         session_dir.exists(),
         "session directory must not be removed by unauthorized request"
+    );
+}
+
+// -------------------------------------------------------------------------
+// Branch/worktree intent (Telegram /start-workflow)
+// -------------------------------------------------------------------------
+
+/// After recipe selection, intent keyboard exposes both intent callbacks.
+#[tokio::test]
+async fn telegram_intent_pick_shown_after_recipe() {
+    let tmp = tempfile::tempdir().unwrap();
+    let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
+    let session_dir = unified_session_dir_path(tmp.path(), session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let mut cs = Changeset::default();
+    cs.recipe = Some("tdd".to_string());
+    write_changeset(&session_dir, &cs).expect("write changeset");
+
+    let (mut harness, sender) =
+        harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
+    let cb = TelegramCallback {
+        chat_id: AUTHORIZED_CHAT,
+        user_id: 77,
+        callback_data: format!("recipe:tdd|session:{session_id}"),
+    };
+    harness
+        .handle_recipe_callback(&session_dir, cb)
+        .await
+        .expect("recipe callback");
+    harness
+        .send_intent_pick_keyboard(AUTHORIZED_CHAT, session_id)
+        .await
+        .expect("intent keyboard");
+
+    let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
+    let intent_msg = sent
+        .iter()
+        .find(|m| m.text.contains("branch/worktree intent"))
+        .expect("intent prompt message");
+    let callbacks: Vec<&str> = intent_msg
+        .inline_keyboard
+        .iter()
+        .flatten()
+        .map(|(_, d)| d.as_str())
+        .collect();
+    let nb = format!("intent:nb|s:{session_id}");
+    let ws = format!("intent:ws|s:{session_id}");
+    assert!(
+        callbacks.iter().any(|d| *d == nb.as_str()),
+        "expected nb intent callback; got {callbacks:?}"
+    );
+    assert!(
+        callbacks.iter().any(|d| *d == ws.as_str()),
+        "expected ws intent callback; got {callbacks:?}"
+    );
+}
+
+#[tokio::test]
+async fn telegram_intent_persists_to_changeset() {
+    let tmp = tempfile::tempdir().unwrap();
+    let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
+    let session_dir = unified_session_dir_path(tmp.path(), session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let mut cs = Changeset::default();
+    cs.recipe = Some("tdd".to_string());
+    write_changeset(&session_dir, &cs).expect("write changeset");
+
+    let (harness, _sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
+    harness
+        .handle_telegram_intent_callback(
+            AUTHORIZED_CHAT,
+            BranchWorktreeIntent::NewBranchFromBase,
+            session_id,
+        )
+        .await
+        .expect("intent callback");
+
+    let snap = read_changeset_routing_snapshot(&session_dir).expect("read changeset.yaml");
+    assert_eq!(
+        snap.workflow
+            .as_ref()
+            .and_then(|w| w.branch_worktree_intent),
+        Some(BranchWorktreeIntent::NewBranchFromBase)
+    );
+}
+
+#[tokio::test]
+async fn telegram_intent_then_project_pick_continues_flow() {
+    let tmp = tempfile::tempdir().unwrap();
+    let projects_dir = tmp.path().join("proj-registry");
+    std::fs::create_dir_all(&projects_dir).unwrap();
+    let repo_path = tmp.path().join("fake-repo");
+    std::fs::create_dir_all(&repo_path).unwrap();
+    project_storage::write_projects(
+        &projects_dir,
+        &[ProjectData {
+            project_id: "proj-a".to_string(),
+            name: "Project A".to_string(),
+            git_url: "https://example.invalid/a.git".to_string(),
+            main_repo_path: repo_path.to_string_lossy().to_string(),
+            main_branch_ref: None,
+            host_repo_paths: HashMap::new(),
+        }],
+    )
+    .expect("write projects");
+
+    let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
+    let session_dir = unified_session_dir_path(tmp.path(), session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let mut cs = Changeset::default();
+    cs.recipe = Some("tdd".to_string());
+    write_changeset(&session_dir, &cs).expect("write changeset");
+
+    let (harness, sender) = harness_with_workflow_projects(
+        vec![AUTHORIZED_CHAT],
+        tmp.path().to_path_buf(),
+        projects_dir,
+    );
+    harness
+        .handle_telegram_intent_callback(
+            AUTHORIZED_CHAT,
+            BranchWorktreeIntent::WorkOnSelectedBranch,
+            session_id,
+        )
+        .await
+        .expect("intent callback");
+
+    let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
+    let proj_msg = sent
+        .iter()
+        .find(|m| m.text.contains("Choose a project"))
+        .expect("project pick message");
+    let tp = format!("tp:0|s:{session_id}");
+    assert!(
+        proj_msg
+            .inline_keyboard
+            .iter()
+            .flatten()
+            .any(|(_, d)| d == &tp),
+        "expected project callback {tp}; keyboards={:?}",
+        proj_msg.inline_keyboard
     );
 }
 

@@ -223,6 +223,7 @@ fn clarification_to_proto(q: &tddy_core::ClarificationQuestion) -> Clarification
             })
             .collect(),
         multi_select: q.multi_select,
+        allow_other: q.allow_other,
     }
 }
 

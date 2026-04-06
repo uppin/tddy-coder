@@ -7,6 +7,20 @@ Release note history for the Coder product area.
 - **tddy-daemon**: **`codex_oauth_relay`** validates authorize URLs and parses OAuth callbacks for future **`BROWSER`** capture and Codex listener relay (**`tddy-integration-tests`**: **`codex_oauth_web_relay_acceptance`**).
 - **tddy-web**: **`CodexOAuthDialog`** for authorize URL display (iframe vs embedding-blocked link). Product doc: **[codex-oauth-web-relay.md](../web/codex-oauth-web-relay.md)**; daemon product doc: **[codex-oauth-relay.md](../daemon/codex-oauth-relay.md)**. Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**.
 
+## 2026-04-06 — Branch/worktree intent (changeset workflow)
+
+- **tddy-core**: **`BranchWorktreeIntent`** (**`new_branch_from_base`** | **`work_on_selected_branch`**) on **`ChangesetWorkflow`**; **`branch_worktree_intent`** module (**`validate_workflow_branch_intent`**, **`resolve_branch_and_worktree_plan`**, **`merge_branch_worktree_intent_into_context`**); worktree setup paths **`setup_worktree_for_session_with_integration_base`** and **`setup_worktree_for_session_with_optional_chain_base`** apply intent when **`changeset.yaml`** **`workflow`** carries **`branch_worktree_intent`**; **`merge_persisted_workflow_into_context`** merges intent keys into engine **`Context`**.
+- **tddy-tools**: **`changeset-workflow`** JSON Schema (**`branch_worktree_intent`**, **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**); **`persist-changeset-workflow`** round-trip validation.
+- **tddy-service**: **`WorktreeElicitation`** optional fields align with **`changeset.yaml`** workflow (**`branch_worktree_intent`**, **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**).
+- **Tests**: **`branch_worktree_intent_acceptance`**, **`branch_worktree_intent_red`** (**tddy-core**, **tddy-tools**).
+- **Docs**: [workflow-json-schemas.md](workflow-json-schemas.md), [workflow-recipes.md](workflow-recipes.md), [planning-step.md](planning-step.md), [git-integration-base-ref.md](git-integration-base-ref.md); **[docs/dev/changesets.md](../../dev/changesets.md)**; package **`changesets.md`** for **tddy-core**, **tddy-tools**, **tddy-workflow-recipes**, **tddy-service**.
+
+## 2026-04-05 — Chain PR optional integration base (worktrees)
+
+- **tddy-core**: **`validate_chain_pr_integration_base_ref`**, **`fetch_chain_pr_integration_base`**, **`setup_worktree_for_session_with_optional_chain_base`**, **`resolve_persisted_worktree_integration_base_for_session`**; **`Changeset`** fields **`effective_worktree_integration_base_ref`**, **`worktree_integration_base_ref`** on **`changeset.yaml`**.
+- **tddy-integration-tests**: **`chain_pr_base_acceptance`** (default base, selected **`origin/...`** base, persistence, validation, resume resolution).
+- **Docs**: [git-integration-base-ref.md](git-integration-base-ref.md); **`packages/tddy-core/docs/architecture.md`**, **`packages/tddy-core/docs/changesets.md`**; cross-package **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-04-05 — Review workflow recipe (`review`)
 
 - **Workflow recipes**: **`ReviewRecipe`** — graph **`inspect` → `branch-review` → `end`**; **`ReviewWorkflowHooks`** merge-base and bounded **`git diff`** context; **`SessionArtifactManifest`** maps **`review` → `review.md`**; **`approval_policy`** includes **`review`** in supported CLI names and session-document skip rules.

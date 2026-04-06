@@ -5,6 +5,11 @@
 - **tddy-daemon**: **`codex_oauth_relay`** — **`validate_codex_oauth_authorize_url`** (**`https`**, host allowlist, session correlation), **`dispatch_browser_open_capture`** (argv → **`CodexOAuthAuthorizeCapture`**), **`relay_oauth_callback_to_registered_listener`** (callback URL query → **`CodexOAuthCallbackDelivery`**). Logging target **`tddy_daemon::codex_oauth`**. Integration tests **`codex_oauth_web_relay_acceptance`**.
 - **Docs**: **[codex-oauth-relay.md](codex-oauth-relay.md)** (product); **[codex-oauth-relay.md](../../../packages/tddy-daemon/docs/codex-oauth-relay.md)** (package). Web feature: **[codex-oauth-web-relay.md](../web/codex-oauth-web-relay.md)**. Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**; **[packages/tddy-daemon/docs/changesets.md](../../../packages/tddy-daemon/docs/changesets.md)**.
 
+## 2026-04-06 — Telegram `/start-workflow`: branch/worktree intent step
+
+- **`tddy-daemon`**: After a recipe is saved (excluding **More recipes** follow-up), the bot prompts for **branch/worktree intent** (**New branch + worktree** vs **Work on existing branch**). The choice is written to **`changeset.yaml`** under **`workflow.branch_worktree_intent`** (`new_branch_from_base` / `work_on_selected_branch`) before project selection. Inline **`callback_data`** uses compact **`intent:nb|s:<session_id>`** and **`intent:ws|s:<session_id>`** so payloads stay within Telegram’s 64-byte limit with a UUID session id.
+- **Feature doc**: [telegram-session-control.md](telegram-session-control.md). Package history: [changesets.md](../../packages/tddy-daemon/docs/changesets.md).
+
 ## 2026-04-05 — Telegram: inbound session control, PresenterIntent, elicitation UX
 
 - **Inbound control**: Daemon runs **`telegram_bot`** (teloxide long-polling) when Telegram is configured and **`sessions_base`** resolves. Commands include **`/start-workflow`**, **`/sessions`**, **`/delete`**, **`/submit-feature`**, **`/answer-text`**, **`/answer-multi`**; callbacks cover session list, recipe/project/agent picks, document review (**`doc:`**), and elicitation select (**`eli:s:`**). **`TelegramSessionControlHarness`** and integration tests exercise the library; production uses **`TeloxideSender`** with the same bot as outbound notifications.

@@ -9,7 +9,7 @@ Technical reference for **`terminalPresentation`** helpers and **`ConnectionScre
 
 ## Rules
 
-- **`nextPresentationFromAttach`**: A **new** attach yields **`full`** and a terminal route **push** when the prior presentation is not already **`full`**. A **reconnect** attach yields **`overlay`** and **no** route push.
+- **`nextPresentationFromAttach`**: A **new** attach yields **`overlay`** and **no** automatic route **push** (`shouldPushTerminalRoute: false`). A **reconnect** attach yields **`overlay`** and **no** route push. **`ConnectionScreen`** applies **`replace`** navigation to `/terminal/{sessionId}` after RPC success so the address bar matches the focused attachment; **Expand** uses **push** when entering **`full`**.
 - **`applyOverlayPreviewClickToFull`**: Expands from overlay preview to **`full`** without mutating connection counters (no second **connectSession** / **resumeSession**).
 - **`applyDedicatedTerminalBackToMini`**: Fullscreen **Back** yields **`mini`** without incrementing disconnect counters.
 - **`reconcileReconnectOverlayInstances`**: Maps any positive reconnect signal count to a single logical overlay instance (show-at-most-once).
@@ -26,7 +26,7 @@ Technical reference for **`terminalPresentation`** helpers and **`ConnectionScre
 
 ## Tests
 
-- Bun: **`terminalPresentation.test.ts`**, **`appRoutes.test.ts`**, **`ConnectionScreen.test.tsx`** (import contract).
-- Cypress component: **`ConnectionScreen.cy.tsx`** (resume omits history push; connect performs push).
+- Bun: **`terminalPresentation.test.ts`**, **`multiSessionState.test.ts`**, **`appRoutes.test.ts`**, **`ConnectionScreen.test.tsx`** (import contract).
+- Cypress component: **`ConnectionScreen.cy.tsx`** (multi-session attach roots, partial disconnect, inactive prune); resume vs connect history behavior.
 
 See [web-terminal.md](../../../../docs/ft/web/web-terminal.md) for product-facing behavior.
