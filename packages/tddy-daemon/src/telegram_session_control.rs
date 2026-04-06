@@ -13,7 +13,7 @@ use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::{
-    list_recent_remote_branches, read_session_metadata, validate_chain_pr_integration_base_ref,
+    list_recent_remote_branches_skip, read_session_metadata, validate_chain_pr_integration_base_ref,
     WorkflowError, SESSION_METADATA_FILENAME,
 };
 use uuid::Uuid;
@@ -149,6 +149,9 @@ const TELEGRAM_CONTINUATION: &str = "\n(continued)";
 /// Number of sessions shown per Telegram page.
 pub const SESSIONS_PAGE_SIZE: usize = 10;
 
+/// Remote branches listed per Telegram page (plus one row for project default integration base).
+pub const BRANCH_PAGE_SIZE: usize = 10;
+
 /// Callback prefixes for session list inline buttons (must fit Telegram `callback_data` byte limit).
 pub const CB_ENTER: &str = "enter:";
 pub const CB_DELETE: &str = "delete:";
@@ -157,8 +160,11 @@ pub const CB_MORE: &str = "more:";
 pub const CB_TELEGRAM_PROJECT: &str = "tp:";
 /// Pick agent: `ta:<agent_idx>|p:<proj_idx>|s:<session_id>`.
 pub const CB_TELEGRAM_AGENT: &str = "ta:";
-/// Pick integration base (`branch_idx` 0 = project default; 1..=N = recent remote at index N−1): `tb:<branch_idx>|p:<proj_idx>|s:<session_id>`.
+/// Pick integration base (`branch_idx` 0 = project default; 1..=N = recent remote on this page):
+/// `tb:<branch_idx>|p:<proj_idx>|s:<session_id>` or `tb:<branch_idx>|o:<list_offset>|p:<proj_idx>|s:<session_id>`.
 pub const CB_TELEGRAM_BRANCH: &str = "tb:";
+/// Next page of remote branches: `tbm:<next_list_offset>|p:<proj_idx>|s:<session_id>`.
+pub const CB_TELEGRAM_BRANCH_MORE: &str = "tbm:";
 /// Branch/worktree intent (`nb` / `ws` — must fit Telegram `callback_data` byte limit with `|s:<uuid>`).
 pub const CB_TELEGRAM_INTENT: &str = "intent:";
 
@@ -483,21 +489,40 @@ pub fn parse_telegram_agent_callback(callback_data: &str) -> Option<(usize, usiz
     Some((agent_idx, proj_idx, session_id))
 }
 
-/// Decode `tb:<branch_idx>|p:<proj_idx>|s:<session_id>` (branch pick after project).
-pub fn parse_telegram_branch_callback(callback_data: &str) -> Option<(usize, usize, String)> {
+/// Decode `tb:…|p:…|s:…` (branch pick after project). Optional `|o:<list_offset>` scopes button rows
+/// to a page of [`list_recent_remote_branches_skip`] results.
+pub fn parse_telegram_branch_callback(callback_data: &str) -> Option<(usize, usize, usize, String)> {
     let rest = callback_data.strip_prefix(CB_TELEGRAM_BRANCH)?;
-    let (branch_part, tail) = rest.split_once("|p:")?;
-    let branch_idx: usize = branch_part.parse().ok()?;
-    let (proj_part, sess_part) = tail.split_once("|s:")?;
+    let (before_p, after_p) = rest.split_once("|p:")?;
+    let (branch_idx, list_offset) = if let Some((idx, off)) = before_p.split_once("|o:") {
+        (idx.parse().ok()?, off.parse().ok()?)
+    } else {
+        (before_p.parse().ok()?, 0usize)
+    };
+    let (proj_part, sess_part) = after_p.split_once("|s:")?;
     let proj_idx: usize = proj_part.parse().ok()?;
     let session_id = sess_part.trim().to_string();
     if session_id.is_empty() {
         return None;
     }
-    if branch_idx > 10 {
+    if branch_idx > BRANCH_PAGE_SIZE {
         return None;
     }
-    Some((branch_idx, proj_idx, session_id))
+    Some((branch_idx, list_offset, proj_idx, session_id))
+}
+
+/// Decode `tbm:<next_list_offset>|p:<proj_idx>|s:<session_id>` (more remote branches).
+pub fn parse_telegram_branch_more_callback(callback_data: &str) -> Option<(usize, usize, String)> {
+    let rest = callback_data.strip_prefix(CB_TELEGRAM_BRANCH_MORE)?;
+    let (off_part, after_p) = rest.split_once("|p:")?;
+    let next_offset: usize = off_part.parse().ok()?;
+    let (proj_part, sess_part) = after_p.split_once("|s:")?;
+    let proj_idx: usize = proj_part.parse().ok()?;
+    let session_id = sess_part.trim().to_string();
+    if session_id.is_empty() {
+        return None;
+    }
+    Some((next_offset, proj_idx, session_id))
 }
 
 /// Parse callback payload strings into internal routing keys (recipe id, demo flags, elicitation ids).
@@ -880,13 +905,14 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         Ok(())
     }
 
-    /// After project pick: show default integration base + up to 10 recent `origin/*` branches.
+    /// After project pick: show default integration base + recent `origin/*` branches (paginated).
     async fn send_branch_pick_keyboard(
         &self,
         chat_id: i64,
         proj_idx: usize,
         session_id: &str,
         project: &ProjectData,
+        list_offset: usize,
     ) -> anyhow::Result<()> {
         let Some(ref deps) = self.workflow_spawn else {
             anyhow::bail!("Telegram workflow spawn is not configured");
@@ -899,39 +925,64 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         if !repo_path.exists() {
             anyhow::bail!("project main repo path does not exist");
         }
-        let branches = match list_recent_remote_branches(repo_path, 10) {
+        let page_peek = match list_recent_remote_branches_skip(
+            repo_path,
+            list_offset,
+            BRANCH_PAGE_SIZE + 1,
+        ) {
             Ok(b) => b,
             Err(e) => {
                 log::warn!(
                     target: "tddy_daemon::telegram_session_control",
-                    "list_recent_remote_branches: {}",
+                    "list_recent_remote_branches_skip: {}",
                     e
                 );
                 Vec::new()
             }
         };
+        let has_more = page_peek.len() > BRANCH_PAGE_SIZE;
+        let branches: Vec<String> = page_peek.into_iter().take(BRANCH_PAGE_SIZE).collect();
         let short_default = default_ref
             .strip_prefix("origin/")
             .unwrap_or(default_ref.as_str());
         let default_label = format!("Default ({short_default})");
         let mut rows: InlineKeyboardRows = Vec::new();
-        let data0 = format!("{CB_TELEGRAM_BRANCH}0|p:{proj_idx}|s:{session_id}");
+        let data0 = if list_offset == 0 {
+            format!("{CB_TELEGRAM_BRANCH}0|p:{proj_idx}|s:{session_id}")
+        } else {
+            format!("{CB_TELEGRAM_BRANCH}0|o:{list_offset}|p:{proj_idx}|s:{session_id}")
+        };
         debug_assert!(
             data0.len() <= 64,
             "Telegram callback_data exceeds 64 bytes: len={} data={data0:?}",
             data0.len()
         );
         rows.push(vec![(default_label, data0)]);
-        for (i, br) in branches.iter().enumerate().take(10) {
+        for (i, br) in branches.iter().enumerate() {
             let idx = i + 1;
             let label = take_utf8_prefix(br, 52).to_string();
-            let data = format!("{CB_TELEGRAM_BRANCH}{idx}|p:{proj_idx}|s:{session_id}");
+            let data = if list_offset == 0 {
+                format!("{CB_TELEGRAM_BRANCH}{idx}|p:{proj_idx}|s:{session_id}")
+            } else {
+                format!("{CB_TELEGRAM_BRANCH}{idx}|o:{list_offset}|p:{proj_idx}|s:{session_id}")
+            };
             debug_assert!(
                 data.len() <= 64,
                 "Telegram callback_data exceeds 64 bytes: len={} data={data:?}",
                 data.len()
             );
             rows.push(vec![(label, data)]);
+        }
+        if has_more {
+            let next_off = list_offset + branches.len();
+            let more_data =
+                format!("{CB_TELEGRAM_BRANCH_MORE}{next_off}|p:{proj_idx}|s:{session_id}");
+            debug_assert!(
+                more_data.len() <= 64,
+                "Telegram callback_data exceeds 64 bytes: len={} data={more_data:?}",
+                more_data.len()
+            );
+            rows.push(vec![("More…".to_string(), more_data)]);
         }
         let intro = format!(
             "Project `{}` selected. Choose integration base (remote branch):",
@@ -957,14 +1008,41 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         let project = projects
             .get(proj_idx)
             .ok_or_else(|| anyhow::anyhow!("invalid project index"))?;
-        self.send_branch_pick_keyboard(chat_id, proj_idx, session_id, project)
+        self.send_branch_pick_keyboard(chat_id, proj_idx, session_id, project, 0)
             .await
+    }
+
+    /// Show another page of remote branches after **More…** (`tbm:…` callback).
+    pub async fn handle_telegram_branch_more_callback(
+        &self,
+        chat_id: i64,
+        next_list_offset: usize,
+        proj_idx: usize,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        self.ensure_authorized(chat_id)?;
+        let Some(ref deps) = self.workflow_spawn else {
+            anyhow::bail!("Telegram workflow spawn is not configured");
+        };
+        let projects = sorted_projects_for_workflow_spawn(deps)?;
+        let project = projects
+            .get(proj_idx)
+            .ok_or_else(|| anyhow::anyhow!("invalid project index"))?;
+        self.send_branch_pick_keyboard(
+            chat_id,
+            proj_idx,
+            session_id,
+            project,
+            next_list_offset,
+        )
+        .await
     }
 
     pub async fn handle_telegram_branch_callback(
         &self,
         chat_id: i64,
         branch_idx: usize,
+        list_offset: usize,
         proj_idx: usize,
         session_id: &str,
     ) -> anyhow::Result<()> {
@@ -995,10 +1073,14 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                     .selected_branch_to_work_on = None;
             }
         } else {
-            let branches =
-                list_recent_remote_branches(repo_path, 10).map_err(|e| anyhow::anyhow!("{e}"))?;
-            let chain = branches
-                .get(branch_idx - 1)
+            let global_idx = list_offset
+                .checked_add(branch_idx)
+                .and_then(|n| n.checked_sub(1))
+                .ok_or_else(|| anyhow::anyhow!("invalid branch index"))?;
+            let picked = list_recent_remote_branches_skip(repo_path, global_idx, 1)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let chain = picked
+                .get(0)
                 .ok_or_else(|| anyhow::anyhow!("invalid branch index (list may have changed)"))?;
             validate_chain_pr_integration_base_ref(chain).map_err(|e| anyhow::anyhow!(e))?;
             if intent == Some(BranchWorktreeIntent::WorkOnSelectedBranch) {
@@ -2182,7 +2264,17 @@ mod unit_tests {
         let tb = format!("tb:3|p:2|s:{sid}");
         assert_eq!(
             parse_telegram_branch_callback(&tb),
-            Some((3, 2, sid.to_string()))
+            Some((3, 0, 2, sid.to_string()))
+        );
+        let tb_page = format!("tb:3|o:10|p:2|s:{sid}");
+        assert_eq!(
+            parse_telegram_branch_callback(&tb_page),
+            Some((3, 10, 2, sid.to_string()))
+        );
+        let tbm = format!("tbm:10|p:2|s:{sid}");
+        assert_eq!(
+            parse_telegram_branch_more_callback(&tbm),
+            Some((10, 2, sid.to_string()))
         );
         assert_eq!(parse_telegram_branch_callback("tb:11|p:0|s:x"), None);
     }
