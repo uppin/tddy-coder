@@ -112,52 +112,6 @@ fn parse_planning_response_impl(
     })
 }
 
-/// Parsed bugfix `analyze` goal output (branch / worktree naming).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct AnalyzeOutput {
-    pub goal: String,
-    pub branch_suggestion: String,
-    pub worktree_suggestion: String,
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub summary: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct StructuredAnalyze {
-    goal: Option<String>,
-    branch_suggestion: Option<String>,
-    worktree_suggestion: Option<String>,
-    name: Option<String>,
-    summary: Option<String>,
-}
-
-/// Parse `tddy-tools submit --goal analyze` JSON (validated upstream by tddy-tools).
-pub fn parse_analyze_response(s: &str) -> Result<AnalyzeOutput, ParseError> {
-    let s = s.trim();
-    let parsed: StructuredAnalyze = serde_json::from_str(s)
-        .map_err(|e| ParseError::Malformed(format!("invalid JSON: {}", e)))?;
-    if parsed.goal.as_deref() != Some("analyze") {
-        return Err(ParseError::Malformed("goal is not analyze".into()));
-    }
-    let branch = parsed
-        .branch_suggestion
-        .filter(|x| !x.trim().is_empty())
-        .ok_or_else(|| ParseError::Malformed("branch_suggestion missing or empty".into()))?;
-    let wt = parsed
-        .worktree_suggestion
-        .filter(|x| !x.trim().is_empty())
-        .ok_or_else(|| ParseError::Malformed("worktree_suggestion missing or empty".into()))?;
-    Ok(AnalyzeOutput {
-        goal: "analyze".to_string(),
-        branch_suggestion: branch,
-        worktree_suggestion: wt,
-        name: parsed.name.filter(|s| !s.trim().is_empty()),
-        summary: parsed.summary.filter(|s| !s.trim().is_empty()),
-    })
-}
-
 /// Parsed acceptance tests output.
 #[derive(Debug, Clone)]
 pub struct AcceptanceTestsOutput {
@@ -1198,50 +1152,6 @@ mod tests {
     fn parse_planning_response_rejects_empty_prd() {
         let input = r#"{"goal":"plan","prd":"   "}"#;
         let err = parse_planning_response(input).unwrap_err();
-        assert!(matches!(err, ParseError::Malformed(_)));
-    }
-
-    #[test]
-    fn parse_analyze_response_accepts_valid_json() {
-        let s = r#"{"goal":"analyze","branch_suggestion":"b/wt","worktree_suggestion":"wt-1","name":"N","summary":"S"}"#;
-        let out = parse_analyze_response(s).expect("parse");
-        assert_eq!(out.goal, "analyze");
-        assert_eq!(out.branch_suggestion, "b/wt");
-        assert_eq!(out.worktree_suggestion, "wt-1");
-        assert_eq!(out.name.as_deref(), Some("N"));
-        assert_eq!(out.summary.as_deref(), Some("S"));
-    }
-
-    #[test]
-    fn parse_analyze_response_rejects_malformed_json() {
-        let err = parse_analyze_response("not json {{{").unwrap_err();
-        assert!(matches!(err, ParseError::Malformed(_)));
-    }
-
-    #[test]
-    fn parse_analyze_response_rejects_wrong_goal() {
-        let err = parse_analyze_response(
-            r#"{"goal":"plan","branch_suggestion":"a","worktree_suggestion":"b"}"#,
-        )
-        .unwrap_err();
-        assert!(matches!(err, ParseError::Malformed(_)));
-    }
-
-    #[test]
-    fn parse_analyze_response_rejects_empty_branch() {
-        let err = parse_analyze_response(
-            r#"{"goal":"analyze","branch_suggestion":"","worktree_suggestion":"wt"}"#,
-        )
-        .unwrap_err();
-        assert!(matches!(err, ParseError::Malformed(_)));
-    }
-
-    #[test]
-    fn parse_analyze_response_rejects_empty_worktree() {
-        let err = parse_analyze_response(
-            r#"{"goal":"analyze","branch_suggestion":"br","worktree_suggestion":"   "}"#,
-        )
-        .unwrap_err();
         assert!(matches!(err, ParseError::Malformed(_)));
     }
 
