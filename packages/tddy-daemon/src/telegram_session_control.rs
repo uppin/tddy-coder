@@ -13,8 +13,8 @@ use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::{
-    list_recent_remote_branches_skip, read_session_metadata, validate_chain_pr_integration_base_ref,
-    WorkflowError, SESSION_METADATA_FILENAME,
+    list_recent_remote_branches_skip, read_session_metadata,
+    validate_chain_pr_integration_base_ref, WorkflowError, SESSION_METADATA_FILENAME,
 };
 use uuid::Uuid;
 
@@ -24,6 +24,7 @@ use crate::project_storage::{self, effective_integration_base_ref_for_project, P
 use crate::session_list_enrichment::SessionListStatusDisplay;
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
+use crate::telegram_github_link::TelegramGithubMappingStore;
 use crate::telegram_notifier::{
     session_telegram_label, ElicitationSelectOptionsCache, InMemoryTelegramSender,
     InlineKeyboardRows, TelegramSender,
@@ -491,7 +492,9 @@ pub fn parse_telegram_agent_callback(callback_data: &str) -> Option<(usize, usiz
 
 /// Decode `tb:…|p:…|s:…` (branch pick after project). Optional `|o:<list_offset>` scopes button rows
 /// to a page of [`list_recent_remote_branches_skip`] results.
-pub fn parse_telegram_branch_callback(callback_data: &str) -> Option<(usize, usize, usize, String)> {
+pub fn parse_telegram_branch_callback(
+    callback_data: &str,
+) -> Option<(usize, usize, usize, String)> {
     let rest = callback_data.strip_prefix(CB_TELEGRAM_BRANCH)?;
     let (before_p, after_p) = rest.split_once("|p:")?;
     let (branch_idx, list_offset) = if let Some((idx, off)) = before_p.split_once("|o:") {
@@ -779,11 +782,30 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     sessions_base: PathBuf,
     sender: Arc<S>,
     workflow_spawn: Option<Arc<TelegramWorkflowSpawn>>,
+    /// When set, [`Self::handle_start_workflow`] requires a linked GitHub identity for `user_id`.
+    telegram_github_mapping_path: Option<PathBuf>,
 }
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     pub fn new(allowed_chat_ids: Vec<i64>, sessions_base: PathBuf, sender: Arc<S>) -> Self {
         Self::with_workflow_spawn(allowed_chat_ids, sessions_base, sender, None)
+    }
+
+    /// Same as [`Self::new`], but workflow start checks [`TelegramGithubMappingStore`] at `path`
+    /// so unlinked Telegram users receive an explicit error (PRD).
+    pub fn with_telegram_github_link(
+        allowed_chat_ids: Vec<i64>,
+        sessions_base: PathBuf,
+        sender: Arc<S>,
+        github_mapping_path: PathBuf,
+    ) -> Self {
+        Self::with_workflow_spawn_and_github_mapping(
+            allowed_chat_ids,
+            sessions_base,
+            sender,
+            None,
+            Some(github_mapping_path),
+        )
     }
 
     pub fn with_workflow_spawn(
@@ -792,18 +814,36 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         sender: Arc<S>,
         workflow_spawn: Option<Arc<TelegramWorkflowSpawn>>,
     ) -> Self {
+        Self::with_workflow_spawn_and_github_mapping(
+            allowed_chat_ids,
+            sessions_base,
+            sender,
+            workflow_spawn,
+            None,
+        )
+    }
+
+    fn with_workflow_spawn_and_github_mapping(
+        allowed_chat_ids: Vec<i64>,
+        sessions_base: PathBuf,
+        sender: Arc<S>,
+        workflow_spawn: Option<Arc<TelegramWorkflowSpawn>>,
+        telegram_github_mapping_path: Option<PathBuf>,
+    ) -> Self {
         log::info!(
             target: "tddy_daemon::telegram_session_control",
-            "TelegramSessionControlHarness::with_workflow_spawn: allowed_chats={} sessions_base={} workflow_spawn={}",
+            "TelegramSessionControlHarness::with_workflow_spawn: allowed_chats={} sessions_base={} workflow_spawn={} github_mapping={}",
             allowed_chat_ids.len(),
             sessions_base.display(),
-            workflow_spawn.is_some()
+            workflow_spawn.is_some(),
+            telegram_github_mapping_path.is_some()
         );
         Self {
             allowed_chat_ids,
             sessions_base,
             sender,
             workflow_spawn,
+            telegram_github_mapping_path,
         }
     }
 
@@ -930,21 +970,18 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         if !repo_path.exists() {
             anyhow::bail!("project main repo path does not exist");
         }
-        let page_peek = match list_recent_remote_branches_skip(
-            repo_path,
-            list_offset,
-            BRANCH_PAGE_SIZE + 1,
-        ) {
-            Ok(b) => b,
-            Err(e) => {
-                log::warn!(
-                    target: "tddy_daemon::telegram_session_control",
-                    "list_recent_remote_branches_skip: {}",
-                    e
-                );
-                Vec::new()
-            }
-        };
+        let page_peek =
+            match list_recent_remote_branches_skip(repo_path, list_offset, BRANCH_PAGE_SIZE + 1) {
+                Ok(b) => b,
+                Err(e) => {
+                    log::warn!(
+                        target: "tddy_daemon::telegram_session_control",
+                        "list_recent_remote_branches_skip: {}",
+                        e
+                    );
+                    Vec::new()
+                }
+            };
         let has_more = page_peek.len() > BRANCH_PAGE_SIZE;
         let branches: Vec<String> = page_peek.into_iter().take(BRANCH_PAGE_SIZE).collect();
         let short_default = default_ref
@@ -1033,14 +1070,8 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         let project = projects
             .get(proj_idx)
             .ok_or_else(|| anyhow::anyhow!("invalid project index"))?;
-        self.send_branch_pick_keyboard(
-            chat_id,
-            proj_idx,
-            session_id,
-            project,
-            next_list_offset,
-        )
-        .await
+        self.send_branch_pick_keyboard(chat_id, proj_idx, session_id, project, next_list_offset)
+            .await
     }
 
     pub async fn handle_telegram_branch_callback(
@@ -1093,7 +1124,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             let picked = list_recent_remote_branches_skip(repo_path, global_idx, 1)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             let chain = picked
-                .get(0)
+                .first()
                 .ok_or_else(|| anyhow::anyhow!("invalid branch index (list may have changed)"))?;
             validate_chain_pr_integration_base_ref(chain).map_err(|e| anyhow::anyhow!(e))?;
             if intent == Some(BranchWorktreeIntent::WorkOnSelectedBranch) {
@@ -1565,6 +1596,25 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             cmd.prompt.len()
         );
         self.ensure_authorized(cmd.chat_id)?;
+
+        if let Some(ref map_path) = self.telegram_github_mapping_path {
+            log::debug!(
+                target: "tddy_daemon::telegram_session_control",
+                "handle_start_workflow: github link required; mapping_path={}",
+                map_path.display()
+            );
+            let store = TelegramGithubMappingStore::open(map_path)?;
+            if store.get_github_login(cmd.user_id).is_none() {
+                log::info!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "handle_start_workflow: rejected start-workflow — telegram user_id={} has no linked GitHub identity",
+                    cmd.user_id
+                );
+                anyhow::bail!(
+                    "Telegram account is not linked to GitHub. Use the bot's /link-github flow (or web OAuth) to connect your GitHub identity before starting a workflow."
+                );
+            }
+        }
 
         let session_id = Uuid::new_v4().to_string();
         let session_dir = unified_session_dir_path(&self.sessions_base, &session_id);
