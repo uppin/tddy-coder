@@ -193,12 +193,35 @@ pub struct ChangesetWorkflow {
 
 impl Changeset {
     /// Directory basename under `.worktrees/<basename>/` (matches [`crate::worktree`] conventions).
+    ///
+    /// When neither [`Changeset::worktree_suggestion`] nor [`Changeset::name`] is set, derives a
+    /// stable folder name from [`ChangesetWorkflow::selected_branch_to_work_on`] or
+    /// [`ChangesetWorkflow::new_branch_name`] so worktree setup can proceed (e.g. merge-pr after
+    /// Telegram branch pick with only workflow fields populated).
     pub fn worktree_directory_basename(&self) -> Option<String> {
-        self.worktree_suggestion.clone().or_else(|| {
-            self.name
-                .as_ref()
-                .map(|n| slugify_changeset_segment_for_worktree(n))
-        })
+        self.worktree_suggestion
+            .clone()
+            .or_else(|| {
+                self.name
+                    .as_ref()
+                    .map(|n| slugify_changeset_segment_for_worktree(n))
+            })
+            .or_else(|| {
+                self.workflow.as_ref().and_then(|w| {
+                    w.selected_branch_to_work_on
+                        .as_ref()
+                        .filter(|s| !s.trim().is_empty())
+                        .map(|b| slugify_changeset_segment_for_worktree(b))
+                })
+            })
+            .or_else(|| {
+                self.workflow.as_ref().and_then(|w| {
+                    w.new_branch_name
+                        .as_ref()
+                        .filter(|s| !s.trim().is_empty())
+                        .map(|b| slugify_changeset_segment_for_worktree(b))
+                })
+            })
     }
 }
 
@@ -554,5 +577,55 @@ mod resolve_agent_tests {
             resolve_agent_from_changeset(&cs, "plan").as_deref(),
             Some("stub")
         );
+    }
+}
+
+#[cfg(test)]
+mod worktree_directory_basename_tests {
+    use super::*;
+
+    #[test]
+    fn derives_from_selected_branch_when_name_missing() {
+        let cs = Changeset {
+            workflow: Some(ChangesetWorkflow {
+                selected_branch_to_work_on: Some(
+                    "origin/feature/codex-oauth-web-relay".to_string(),
+                ),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            cs.worktree_directory_basename().as_deref(),
+            Some("origin-feature-codex-oauth-web-relay")
+        );
+    }
+
+    #[test]
+    fn derives_from_new_branch_name_when_name_missing() {
+        let cs = Changeset {
+            workflow: Some(ChangesetWorkflow {
+                new_branch_name: Some("feature/foo-bar".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            cs.worktree_directory_basename().as_deref(),
+            Some("feature-foo-bar")
+        );
+    }
+
+    #[test]
+    fn prefers_worktree_suggestion_over_workflow() {
+        let cs = Changeset {
+            worktree_suggestion: Some("my-wt".to_string()),
+            workflow: Some(ChangesetWorkflow {
+                selected_branch_to_work_on: Some("origin/other".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(cs.worktree_directory_basename().as_deref(), Some("my-wt"));
     }
 }

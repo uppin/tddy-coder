@@ -4,9 +4,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use tddy_core::changeset::{write_changeset, BranchWorktreeIntent, Changeset};
+use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent, Changeset};
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon::config::DaemonConfig;
+use tddy_daemon::config::{AllowedAgent, DaemonConfig};
 use tddy_daemon::project_storage::{self, ProjectData};
 use tddy_daemon::telegram_notifier::InMemoryTelegramSender;
 use tddy_daemon::telegram_session_control::{
@@ -836,5 +836,166 @@ async fn telegram_enter_session_unauthorized_is_denied() {
     assert!(
         result.is_err(),
         "unauthorized chat must be denied entering a session"
+    );
+}
+
+// -------------------------------------------------------------------------
+// Branch callback — work_on_selected_branch must set selected_branch_to_work_on
+// -------------------------------------------------------------------------
+
+fn git(args: &[&str], cwd: &std::path::Path) -> std::process::Output {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap_or_else(|e| panic!("run git {:?} in {}: {e}", args, cwd.display()));
+    assert!(
+        out.status.success(),
+        "git {:?} failed in {}:\nstdout={}\nstderr={}",
+        args,
+        cwd.display(),
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out
+}
+
+fn init_repo_with_remote_branch(root: &std::path::Path) -> std::path::PathBuf {
+    let bare = root.join("origin.git");
+    let clone = root.join("work");
+
+    git(&["init", "--bare", bare.to_str().unwrap()], root);
+    git(&["clone", bare.to_str().unwrap(), "work"], root);
+    std::fs::write(clone.join("README.md"), "# init\n").unwrap();
+    git(&["config", "user.email", "test@test.com"], &clone);
+    git(&["config", "user.name", "test"], &clone);
+    git(&["add", "README.md"], &clone);
+    git(&["commit", "-m", "init"], &clone);
+    git(&["branch", "-M", "master"], &clone);
+    git(&["push", "-u", "origin", "master"], &clone);
+
+    git(&["checkout", "-b", "feature/test-branch"], &clone);
+    std::fs::write(clone.join("README.md"), "# feature\n").unwrap();
+    git(&["add", "README.md"], &clone);
+    git(&["commit", "-m", "feature work"], &clone);
+    git(&["push", "-u", "origin", "feature/test-branch"], &clone);
+
+    git(&["checkout", "master"], &clone);
+
+    clone
+}
+
+fn harness_with_workflow_projects_and_agents(
+    allowed: Vec<i64>,
+    sessions_base: std::path::PathBuf,
+    projects_dir: std::path::PathBuf,
+    agents: Vec<AllowedAgent>,
+) -> (
+    TelegramSessionControlHarness<InMemoryTelegramSender>,
+    Arc<InMemoryTelegramSender>,
+) {
+    let sender = Arc::new(InMemoryTelegramSender::new());
+    let mut config = DaemonConfig::default();
+    config.allowed_agents = agents;
+    let workflow_spawn = Arc::new(TelegramWorkflowSpawn {
+        config: Arc::new(config),
+        spawn_client: None,
+        os_user: "n/a".to_string(),
+        projects_dir_override: Some(projects_dir),
+        telegram_hooks: None,
+        child_grpc_by_session: Arc::new(Mutex::new(HashMap::new())),
+        elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
+        pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
+    });
+    let h = TelegramSessionControlHarness::with_workflow_spawn(
+        allowed,
+        sessions_base,
+        sender.clone(),
+        Some(workflow_spawn),
+    );
+    (h, sender)
+}
+
+#[tokio::test]
+async fn telegram_branch_callback_work_on_selected_sets_selected_branch_to_work_on() {
+    let tmp = tempfile::tempdir().unwrap();
+    let sessions_base = tmp.path().join("sessions");
+    std::fs::create_dir_all(&sessions_base).unwrap();
+
+    let clone = init_repo_with_remote_branch(tmp.path());
+
+    let projects_dir = tmp.path().join("proj-registry");
+    std::fs::create_dir_all(&projects_dir).unwrap();
+    project_storage::write_projects(
+        &projects_dir,
+        &[ProjectData {
+            project_id: "proj-a".to_string(),
+            name: "Project A".to_string(),
+            git_url: "https://example.invalid/a.git".to_string(),
+            main_repo_path: clone.to_string_lossy().to_string(),
+            main_branch_ref: None,
+            host_repo_paths: HashMap::new(),
+        }],
+    )
+    .expect("write projects");
+
+    let session_id = "019d6392-3cff-0001-aaaa-000000000001";
+    let session_dir = unified_session_dir_path(&sessions_base, session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+
+    let mut cs = Changeset::default();
+    cs.recipe = Some("merge-pr".to_string());
+    write_changeset(&session_dir, &cs).expect("write changeset");
+
+    let dummy_agent = AllowedAgent {
+        id: "claude".to_string(),
+        label: Some("Claude".to_string()),
+    };
+    let (harness, _sender) = harness_with_workflow_projects_and_agents(
+        vec![AUTHORIZED_CHAT],
+        sessions_base,
+        projects_dir,
+        vec![dummy_agent],
+    );
+
+    harness
+        .handle_telegram_intent_callback(
+            AUTHORIZED_CHAT,
+            BranchWorktreeIntent::WorkOnSelectedBranch,
+            session_id,
+        )
+        .await
+        .expect("intent callback");
+
+    // branch_idx=1 selects the first remote branch (origin/feature/test-branch);
+    // the agent picker keyboard is shown instead of spawning (one allowed agent configured).
+    harness
+        .handle_telegram_branch_callback(AUTHORIZED_CHAT, 1, 0, session_id)
+        .await
+        .expect("branch callback");
+
+    let cs = read_changeset(&session_dir).expect("read changeset after branch callback");
+
+    assert!(
+        cs.workflow
+            .as_ref()
+            .and_then(|w| w.selected_branch_to_work_on.as_deref())
+            .is_some(),
+        "when intent is work_on_selected_branch, handle_telegram_branch_callback must set \
+         workflow.selected_branch_to_work_on; changeset: worktree_integration_base_ref={:?}, \
+         workflow={:?}",
+        cs.worktree_integration_base_ref,
+        cs.workflow
+    );
+
+    let selected = cs
+        .workflow
+        .as_ref()
+        .and_then(|w| w.selected_branch_to_work_on.as_deref())
+        .unwrap();
+    assert!(
+        selected.contains("feature/test-branch"),
+        "selected_branch_to_work_on should contain the branch name; got {:?}",
+        selected
     );
 }
