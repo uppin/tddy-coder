@@ -377,6 +377,24 @@ pub fn find_existing_worktree_for_branch_ref(
     Ok(matches.into_iter().next())
 }
 
+/// Like [`find_existing_worktree_for_branch_ref`], but returns `Ok(None)` when `branch_ref` does not
+/// resolve in `repo_root` (e.g. suggested branch not created yet). Propagates I/O and worktree
+/// enumeration errors.
+fn try_find_existing_worktree_for_branch_ref(
+    repo_root: &Path,
+    branch_ref: &str,
+) -> Result<Option<PathBuf>, String> {
+    let verify = Command::new("git")
+        .args(["rev-parse", "--verify", branch_ref])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git rev-parse --verify: {}", e))?;
+    if !verify.status.success() {
+        return Ok(None);
+    }
+    find_existing_worktree_for_branch_ref(repo_root, branch_ref)
+}
+
 /// Add a linked worktree at `.worktrees/<name>` checked out to an **existing** local branch.
 ///
 /// Uses `git worktree add <path> <branch>` when the branch is not already checked out in another
@@ -636,6 +654,19 @@ pub fn setup_worktree_for_session_with_integration_base(
 
     fetch_integration_base(repo_root, integration_base_ref)?;
 
+    if let Some(existing) = try_find_existing_worktree_for_branch_ref(repo_root, &branch)? {
+        log::info!(
+            "setup_worktree_for_session_with_integration_base: reusing existing worktree {} for branch {} (no new git worktree add)",
+            existing.display(),
+            branch
+        );
+        cs.worktree = Some(existing.to_string_lossy().to_string());
+        cs.branch = Some(branch.clone());
+        cs.repo_path = Some(existing.to_string_lossy().to_string());
+        write_changeset(session_dir, &cs).map_err(|e| e.to_string())?;
+        return Ok(existing);
+    }
+
     let (worktree_path, actual_branch) = create_worktree_with_retry(
         repo_root,
         &worktree_name,
@@ -887,6 +918,21 @@ pub fn setup_worktree_for_session_with_optional_chain_base(
         fetch_chain_pr_integration_base(repo_root, &integration_base_ref)?;
     } else {
         fetch_integration_base(repo_root, &integration_base_ref)?;
+    }
+
+    if let Some(existing) = try_find_existing_worktree_for_branch_ref(repo_root, &branch)? {
+        log::info!(
+            "setup_worktree_for_session_with_optional_chain_base: reusing existing worktree {} for branch {} (no new git worktree add)",
+            existing.display(),
+            branch
+        );
+        cs.worktree = Some(existing.to_string_lossy().to_string());
+        cs.branch = Some(branch.clone());
+        cs.repo_path = Some(existing.to_string_lossy().to_string());
+        cs.effective_worktree_integration_base_ref = Some(integration_base_ref.clone());
+        cs.worktree_integration_base_ref = user_chain_ref.map(|s| s.to_string());
+        write_changeset(session_dir, &cs).map_err(|e| e.to_string())?;
+        return Ok(existing);
     }
 
     let (worktree_path, actual_branch) = create_worktree_with_retry(

@@ -624,14 +624,20 @@ fn default_tool_path_for_spawn(config: &DaemonConfig) -> String {
         .unwrap_or_else(|| "tddy-coder".to_string())
 }
 
+fn projects_dir_for_telegram_workflow_spawn(
+    deps: &TelegramWorkflowSpawn,
+) -> anyhow::Result<PathBuf> {
+    match &deps.projects_dir_override {
+        Some(p) => Ok(p.clone()),
+        None => projects_path_for_user(&deps.os_user)
+            .ok_or_else(|| anyhow::anyhow!("could not resolve projects path")),
+    }
+}
+
 fn sorted_projects_for_workflow_spawn(
     deps: &TelegramWorkflowSpawn,
 ) -> anyhow::Result<Vec<ProjectData>> {
-    let projects_dir: PathBuf = match &deps.projects_dir_override {
-        Some(p) => p.clone(),
-        None => projects_path_for_user(&deps.os_user)
-            .ok_or_else(|| anyhow::anyhow!("could not resolve projects path"))?,
-    };
+    let projects_dir = projects_dir_for_telegram_workflow_spawn(deps)?;
     let mut projects = project_storage::read_projects(&projects_dir)?;
     projects.sort_by(|a, b| a.project_id.cmp(&b.project_id));
     Ok(projects)
@@ -891,8 +897,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         let Some(ref deps) = self.workflow_spawn else {
             anyhow::bail!("Telegram workflow spawn is not configured");
         };
-        let projects_dir = projects_path_for_user(&deps.os_user)
-            .ok_or_else(|| anyhow::anyhow!("could not resolve projects path"))?;
+        let projects_dir = projects_dir_for_telegram_workflow_spawn(deps)?;
         let default_ref =
             effective_integration_base_ref_for_project(&projects_dir, &project.project_id)?;
         let repo_path = Path::new(&project.main_repo_path);
@@ -987,12 +992,20 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             Err(e) => anyhow::bail!("read changeset: {e}"),
         };
         let intent = cs.workflow.as_ref().and_then(|w| w.branch_worktree_intent);
+        let projects_dir = projects_dir_for_telegram_workflow_spawn(deps)?;
         if branch_idx == 0 {
             cs.worktree_integration_base_ref = None;
             if intent == Some(BranchWorktreeIntent::WorkOnSelectedBranch) {
                 cs.workflow
                     .get_or_insert_with(Default::default)
                     .selected_branch_to_work_on = None;
+            }
+            if intent == Some(BranchWorktreeIntent::NewBranchFromBase) {
+                let default_ref =
+                    effective_integration_base_ref_for_project(&projects_dir, &project.project_id)?;
+                let wf = cs.workflow.get_or_insert_with(Default::default);
+                wf.selected_integration_base_ref = Some(default_ref);
+                wf.selected_branch_to_work_on = None;
             }
         } else {
             let branches =
@@ -1007,6 +1020,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                     .selected_branch_to_work_on = Some(chain.clone());
             } else {
                 cs.worktree_integration_base_ref = Some(chain.clone());
+            }
+            if intent == Some(BranchWorktreeIntent::NewBranchFromBase) {
+                let wf = cs.workflow.get_or_insert_with(Default::default);
+                wf.selected_integration_base_ref = Some(chain.clone());
+                wf.selected_branch_to_work_on = None;
             }
         }
         write_changeset(&session_dir, &cs).map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
