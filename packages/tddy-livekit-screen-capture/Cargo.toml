@@ -1,0 +1,36 @@
+[package]
+name = "tddy-livekit-screen-capture"
+version = "0.1.0"
+edition = "2021"
+description = "CLI: capture screen or window and stream to LiveKit as video"
+
+[[bin]]
+name = "tddy-livekit-screen-capture"
+path = "src/main.rs"
+
+[lib]
+name = "tddy_livekit_screen_capture"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.11"
+futures = "0.3"
+image = { version = "0.25", default-features = false, features = ["png"] }
+livekit = "0.7"
+livekit-api = "0.4"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+tddy-livekit = { path = "../tddy-livekit" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "signal", "sync", "time"] }
+xcap = "0.9"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-graphics = { version = "0.3.2", features = ["CGWindow"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
