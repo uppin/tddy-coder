@@ -6,6 +6,7 @@ Release note history for the Coder product area.
 
 - **tddy-daemon**: **`codex_oauth_relay`** validates authorize URLs and parses OAuth callbacks for future **`BROWSER`** capture and Codex listener relay (**`tddy-integration-tests`**: **`codex_oauth_web_relay_acceptance`**).
 - **tddy-web**: **`CodexOAuthDialog`** for authorize URL display (iframe vs embedding-blocked link). Product doc: **[codex-oauth-web-relay.md](../web/codex-oauth-web-relay.md)**; daemon product doc: **[codex-oauth-relay.md](../daemon/codex-oauth-relay.md)**. Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-04-06 — GitHub PR MCP tools (tddy-tools) and recipe prompts
 
 - **tddy-tools**: MCP tools **`github_create_pull_request`** and **`github_update_pull_request`** (GitHub REST via **`curl`**); **`ServerInfo`** instructions name those tools when **`GITHUB_TOKEN`** or **`GH_TOKEN`** is set; mock-recorded request tests for JSON bodies and headers.
