@@ -4,6 +4,17 @@
 
 - **tddy-daemon**: **`codex_oauth_relay`** — **`validate_codex_oauth_authorize_url`** (**`https`**, host allowlist, session correlation), **`dispatch_browser_open_capture`** (argv → **`CodexOAuthAuthorizeCapture`**), **`relay_oauth_callback_to_registered_listener`** (callback URL query → **`CodexOAuthCallbackDelivery`**). Logging target **`tddy_daemon::codex_oauth`**. Integration tests **`codex_oauth_web_relay_acceptance`**.
 - **Docs**: **[codex-oauth-relay.md](codex-oauth-relay.md)** (product); **[codex-oauth-relay.md](../../../packages/tddy-daemon/docs/codex-oauth-relay.md)** (package). Web feature: **[codex-oauth-web-relay.md](../web/codex-oauth-web-relay.md)**. Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**; **[packages/tddy-daemon/docs/changesets.md](../../../packages/tddy-daemon/docs/changesets.md)**.
+## 2026-04-06 — Telegram user ↔ GitHub identity (library)
+
+- **`tddy-daemon`**: Module **`telegram_github_link`** — **`TelegramOAuthStateSigner`** (HMAC-SHA256 OAuth **`state`** bound to **`telegram_user_id`**), **`TelegramGithubMappingStore`** (JSON on disk, atomic replace), **`resolved_os_user_for_telegram_workflow`**, **`complete_telegram_link_via_stub_exchange`** (**`StubGitHubProvider`**). **`TelegramSessionControlHarness::with_telegram_github_link`** optional mapping path; **`handle_start_workflow`** rejects unlinked Telegram users when that path is set (error text references **`/link-github`** / web OAuth). Dependencies: **`base64`**, **`hmac`**, **`sha2`**, **`subtle`**.
+- **Feature doc**: [telegram-session-control.md](telegram-session-control.md). Package: [telegram-github-link.md](../../packages/tddy-daemon/docs/telegram-github-link.md), [changesets.md](../../packages/tddy-daemon/docs/changesets.md).
+## 2026-04-06 — Telegram: concurrent elicitation (one chat, active token)
+
+- **Coordinator:** **`ActiveElicitationCoordinator`** maintains a per-chat FIFO queue of workflow sessions; the head session owns the **active elicitation token** for Telegram interactive surfaces.
+- **Outbound:** **`TelegramSessionWatcher`** registers elicitation requests on **`ModeChanged`**; sessions that are not primary for a chat receive a **deferred** text notice without a competing full **`eli:s:`** inline keyboard.
+- **Inbound:** **`telegram_bot`** applies the same **active-token** policy to **`eli:s:`**, **`eli:o:`**, and **`doc:`** callbacks; **`/answer-text`** and **`/answer-multi`** check the active session before **`PresenterIntent`** calls. **`telegram_session_control`** advances the queue after completion on select, Other follow-up, applicable document-review actions, and successful text/multi answers.
+- **Observability:** Deep per-chat queues trigger a **warning** log at a fixed depth threshold.
+- **Feature docs:** [telegram-session-control.md](telegram-session-control.md), [telegram-notifications.md](telegram-notifications.md). Package: [telegram-notifier.md](../../packages/tddy-daemon/docs/telegram-notifier.md), [changesets.md](../../packages/tddy-daemon/docs/changesets.md).
 
 ## 2026-04-06 — Telegram `/start-workflow`: branch/worktree intent step
 

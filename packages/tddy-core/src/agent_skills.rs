@@ -36,14 +36,27 @@ pub struct SkillScanReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashMenuItem {
     BuiltinRecipe,
-    Skill { name: String },
+    /// `/start-<recipe>` — structured workflow entry (see [`SlashMenuEntry::StartRecipe`]).
+    StartRecipe {
+        label: String,
+    },
+    Skill {
+        name: String,
+    },
 }
 
 /// One row in the feature-prompt slash menu (labels + skill descriptions for the TUI).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashMenuEntry {
     BuiltinRecipe,
-    Skill { name: String, description: String },
+    /// Insert this exact label (e.g. `/start-tdd`) when the user confirms the row.
+    StartRecipe {
+        label: String,
+    },
+    Skill {
+        name: String,
+        description: String,
+    },
 }
 
 /// Minimal `name` / `description` from SKILL.md YAML frontmatter (between `---` lines).
@@ -286,8 +299,12 @@ pub fn slash_menu_entries(project_root: &Path) -> Vec<SlashMenuEntry> {
         project_root.display()
     );
     let scan = scan_skills_at_project_root(project_root);
-    let mut items = Vec::with_capacity(1 + scan.valid.len());
+    let start_labels = crate::feature_start_slash::feature_slash_menu_start_command_labels();
+    let mut items = Vec::with_capacity(1 + start_labels.len() + scan.valid.len());
     items.push(SlashMenuEntry::BuiltinRecipe);
+    for label in start_labels {
+        items.push(SlashMenuEntry::StartRecipe { label });
+    }
     for s in scan.valid {
         items.push(SlashMenuEntry::Skill {
             name: s.name,
@@ -304,6 +321,7 @@ pub fn slash_menu_items(project_root: &Path) -> Vec<SlashMenuItem> {
         .into_iter()
         .map(|e| match e {
             SlashMenuEntry::BuiltinRecipe => SlashMenuItem::BuiltinRecipe,
+            SlashMenuEntry::StartRecipe { label } => SlashMenuItem::StartRecipe { label },
             SlashMenuEntry::Skill { name, .. } => SlashMenuItem::Skill { name },
         })
         .collect()

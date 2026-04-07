@@ -39,7 +39,8 @@ impl CodingBackend for OutputOnlyBackend {
 async fn grill_me_backend_invoke_waits_for_host_gate_without_relayed_ask_answers() {
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(GrillMeRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
-    let task = BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), recipe, backend);
+    let task =
+        BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), recipe.clone(), backend);
 
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");
@@ -57,7 +58,8 @@ async fn grill_me_backend_invoke_waits_for_host_gate_without_relayed_ask_answers
 async fn grill_me_backend_invoke_continues_when_grill_ask_answers_file_present() {
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(GrillMeRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
-    let task = BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), recipe, backend);
+    let task =
+        BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), recipe.clone(), backend);
 
     let tmp = std::env::temp_dir().join(format!("grill-gate-relay-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
@@ -84,12 +86,12 @@ async fn grill_me_backend_invoke_continues_when_grill_ask_answers_file_present()
 
 #[tokio::test]
 async fn tdd_interview_backend_invoke_completes_without_tddy_tools_submit() {
-    let recipe = TddRecipe;
+    let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
     let task = BackendInvokeTask::from_recipe(
         "interview",
         GoalId::new("interview"),
-        Arc::new(recipe),
+        recipe.clone(),
         backend,
     );
 
@@ -110,8 +112,12 @@ async fn tdd_interview_backend_invoke_completes_without_tddy_tools_submit() {
 async fn free_prompting_backend_invoke_completes_without_tddy_tools_submit() {
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(FreePromptingRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
-    let task =
-        BackendInvokeTask::from_recipe("prompting", GoalId::new("prompting"), recipe, backend);
+    let task = BackendInvokeTask::from_recipe(
+        "prompting",
+        GoalId::new("prompting"),
+        recipe.clone(),
+        backend,
+    );
 
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");

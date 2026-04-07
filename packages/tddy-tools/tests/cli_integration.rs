@@ -7,41 +7,41 @@ use std::path::Path;
 
 /// Parity with `tddy_tools::schema::GOAL_SCHEMA_FILES` — the registered workflow goals.
 const REGISTERED_GOALS: &[&str] = &[
-    "analyze",
-    "plan",
     "acceptance-tests",
-    "red",
-    "green",
-    "post-green-review",
+    "analyze",
     "branch-review",
+    "changeset-workflow",
+    "demo",
     "evaluate-changes",
-    "validate",
+    "green",
+    "merge-pr-analyze",
+    "merge-pr-report",
+    "plan",
+    "post-green-review",
+    "red",
     "refactor",
     "update-docs",
-    "demo",
-    "changeset-workflow",
-    "merge-pr-report",
-    "merge-pr-analyze",
+    "validate",
 ];
 
 /// Expected `$id` for each CLI goal (differs from the CLI name where the URN uses a shorter id).
 fn expected_schema_id_for_goal(goal: &str) -> &'static str {
     match goal {
-        "analyze" => "urn:tddy:goal/analyze",
         "plan" => "urn:tddy:goal/plan",
         "acceptance-tests" => "urn:tddy:goal/acceptance-tests",
+        "analyze" => "urn:tddy:goal/analyze",
+        "branch-review" => "urn:tddy:goal/branch-review",
+        "changeset-workflow" => "urn:tddy:tool/changeset-workflow",
         "red" => "urn:tddy:goal/red",
         "green" => "urn:tddy:goal/green",
         "post-green-review" => "urn:tddy:goal/post-green-review",
-        "branch-review" => "urn:tddy:goal/branch-review",
         "evaluate-changes" => "urn:tddy:goal/evaluate",
         "validate" => "urn:tddy:goal/validate-subagents",
         "refactor" => "urn:tddy:goal/refactor",
         "update-docs" => "urn:tddy:goal/update-docs",
         "demo" => "urn:tddy:goal/demo",
-        "changeset-workflow" => "urn:tddy:tool/changeset-workflow",
-        "merge-pr-report" => "urn:tddy:goal/merge-pr-report",
         "merge-pr-analyze" => "urn:tddy:goal/merge-pr-analyze",
+        "merge-pr-report" => "urn:tddy:goal/merge-pr-report",
         _ => panic!("unexpected goal: {goal}"),
     }
 }
@@ -236,21 +236,6 @@ fn get_schema_unknown_goal_returns_error() {
     cmd.assert()
         .code(2)
         .stderr(predicates::str::contains("unknown goal"));
-}
-
-/// PRD: `get-schema merge-pr-report` returns JSON Schema after goals.json / registry update.
-#[test]
-fn tddy_tools_get_schema_includes_merge_pr_goal() {
-    let mut cmd = tddy_tools_bin();
-    cmd.args(["get-schema", "merge-pr-report"]);
-    let assert = cmd.assert().success();
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let schema: Value =
-        serde_json::from_str(stdout.trim()).expect("get-schema stdout must be JSON");
-    assert_eq!(
-        schema.get("$id").and_then(|v| v.as_str()),
-        Some("urn:tddy:goal/merge-pr-report")
-    );
 }
 
 #[test]

@@ -7,18 +7,26 @@
 
 Workflow behavior is defined by **recipes** in the **`tddy-workflow-recipes`** crate. **`tddy-core`** implements a recipe-agnostic engine (`WorkflowRecipe`, `WorkflowEngine`, graph execution, `CodingBackend`). Goals, states, transitions, hooks, backend hints, and permissions are **recipe-provided strings and metadata**, not a fixed enum in core.
 
-The shipped recipes are **`TddRecipe`** (default), **`TddSmallRecipe`**, **`BugfixRecipe`**, **`FreePromptingRecipe`**, **`GrillMeRecipe`**, **`ReviewRecipe`**, and **`MergePrRecipe`**. Recipe selection uses a single resolution path in **`tddy-workflow-recipes::recipe_resolve`**: `workflow_recipe_and_manifest_from_cli_name` and `resolve_workflow_recipe_from_cli_name` return the active `WorkflowRecipe` (and, where needed, the paired **`SessionArtifactManifest`** on the same concrete type).
+The shipped recipes are **`TddRecipe`**, **`TddSmallRecipe`**, **`BugfixRecipe`**, **`FreePromptingRecipe`**, **`GrillMeRecipe`**, **`ReviewRecipe`**, and **`MergePrRecipe`**. **New sessions** with no explicit recipe use **`FreePromptingRecipe`** (`free-prompting`) by default; users can select **`tdd`** or other recipes per session or via **`--recipe`**. Recipe selection uses a single resolution path in **`tddy-workflow-recipes::recipe_resolve`**: `workflow_recipe_and_manifest_from_cli_name` and `resolve_workflow_recipe_from_cli_name` return the active `WorkflowRecipe` (and, where needed, the paired **`SessionArtifactManifest`** on the same concrete type).
 
 ## Selecting a recipe
 
 | Surface | Mechanism |
 |---------|-----------|
 | **tddy-coder** | `--recipe tdd`, `--recipe tdd-small`, `--recipe bugfix`, `--recipe free-prompting`, `--recipe grill-me`, `--recipe review`, or `--recipe merge-pr`; optional YAML `recipe:` (CLI overrides). |
-| **changeset.yaml** | Optional `recipe:` records the workflow for resume and session lists; empty or absent values behave like **`tdd`**. Initial session creation (presenter bootstrap and matching CLI paths) persists **`recipe`** on the written **`changeset.yaml`** so resume and tooling read the same recipe name as **`StartSession`**. |
+| **changeset.yaml** | Optional `recipe:` records the workflow for resume and session lists; empty or absent values on **new** sessions resolve to **`free-prompting`** (same as omitting **`--recipe`**). Legacy changesets without `recipe:` may still resume with resolver defaults. Initial session creation persists **`recipe`** on the written **`changeset.yaml`** so resume and tooling read the same recipe name as **`StartSession`**. |
 | **tddy-daemon** | Spawns **`tddy-coder`** with `--recipe` when set; **`ConnectionService` `StartSessionRequest`** and **`TddyRemote` `StartSession`** carry a **`recipe`** string. |
 | **tddy-web** | **ConnectionScreen** exposes a **Workflow recipe** control per **Start New Session**; the value is sent on **`StartSession`**. |
 
 Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**, **`review`**, and **`merge-pr`** (aligned with **`WorkflowRecipe::name()`**). Invalid names fail on the CLI with a clear error; daemon streams report failure via **`WorkflowComplete`** with a descriptive message that lists supported names.
+
+## Feature prompt: `/start-<recipe>`
+
+In **tddy-coder** TUI **FeatureInput**, a submitted line that matches **`/start-<cli>`** for a supported recipe CLI name selects that recipe for the session, persists **`recipe`** on **`changeset.yaml`**, and restarts the workflow. Text after the command becomes the feature remainder for the run.
+
+The feature-prompt slash menu lists **`/start-…`** rows for each shipped recipe before the built-in **`/recipe`** entry and project skills. Choosing a row inserts the corresponding **`/start-…`** literal for submission.
+
+When the workflow completes successfully after a **`/start-*`** session that targeted a structured recipe (any active recipe whose name is not **`free-prompting`**), the session’s active recipe returns to **`free-prompting`** and **`changeset.yaml`** records **`free-prompting`** when the resolver succeeds.
 
 ## TddRecipe
 
@@ -37,6 +45,7 @@ Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**
 - **Pipeline:** **`plan` → `red` → `green` → `post-green-review` → `refactor` → `update-docs` → `end`**. There are no separate graph nodes for **`acceptance-tests`**, **`demo`**, **`evaluate-changes`**, or **`validate`**; the **`red`** step uses merged red/evaluate-style prompt text, and **`post-green-review`** is a single structured submit that covers evaluate- and validate-style reporting (see **`tddy-tools get-schema post-green-review`**).
 - **Primary session document:** **`prd`** → **`PRD.md`** (same manifest pattern as full TDD); **`TddSmallRecipe::uses_primary_session_document`** is **`true`** so the plan approval gate applies after **`plan`**.
 - **Structured submit:** Goals follow the same JSON Schema registry as full TDD where applicable; **`post-green-review`** has a dedicated schema and parser (**`parse_post_green_review_response`**) in **`tddy-workflow-recipes`**.
+- **Merged red prompt:** The **`red`** system prompt includes a **GitHub PR tools** subsection when **`GITHUB_TOKEN`** or **`GH_TOKEN`** is set (non-empty), matching merge-pr hook gating for GitHub-aware guidance. See [GitHub pull request tools (tddy-tools MCP)](github-pr-tools-mcp.md).
 
 ## BugfixRecipe
 
@@ -119,7 +128,7 @@ Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**
 |---------|----------------|
 | **`tddy-core`** | `WorkflowRecipe` trait, `WorkflowEngine` parameterized by `Arc<dyn WorkflowRecipe>`, session storage, backends, presenter integration. |
 | **`tddy-workflow-recipes`** | Concrete recipes, **`recipe_resolve`**, **`approval_policy`**, hooks, parsers, and backend hints per recipe. |
-| **`tddy-coder`**, **`tddy-service`**, **`tddy-daemon`**, **`tddy-demo`** | Resolve the active recipe from CLI, config, changeset, or RPC; default **`tdd`** when unspecified. |
+| **`tddy-coder`**, **`tddy-service`**, **`tddy-daemon`**, **`tddy-demo`** | Resolve the active recipe from CLI, config, changeset, or RPC; **new sessions** with no explicit recipe use **`free-prompting`** (same rule as **`changeset.yaml`** when **`recipe`** is absent). |
 
 ## Structured output contracts
 
@@ -141,7 +150,7 @@ This section records how the shipped recipes map to the same product philosophy 
 
 ### TDD (`tdd`)
 
-- **Default** when **`--recipe`** is omitted or **`changeset.yaml`** has no **`recipe`** field.
+- **Typical selection:** **`tdd`** when **`--recipe tdd`** is set or **`changeset.yaml`** records **`recipe: tdd`**. **New sessions** without an explicit recipe use **`free-prompting`** unless the CLI or **`changeset.yaml`** supplies a different name (see **Summary**).
 - **Start goal:** **`interview`** — clarification before PRD/plan; **`plan`** follows with PRD/TODO-style artifacts; full graph continues with acceptance-tests → red → green → ….
 - **Spirit:** Discovery-style elicitation (interview), then structured planning, then tests and implementation.
 - **Changeset workflow block:** **`changeset.yaml`** includes an optional **`workflow`** object: **`run_optional_step_x`** (boolean for the post-green branch), **`demo_options`** (strings describing how to run an optional **demo** goal), optional **`tool_schema_id`** (URN tying the block to the **`changeset-workflow`** JSON Schema), and optional branch/worktree fields: **`branch_worktree_intent`** (**`new_branch_from_base`** | **`work_on_selected_branch`**), **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**. **`tddy-tools persist-changeset-workflow`** validates a JSON payload against that schema and replaces the **`workflow`** section using an atomic write. **`tddy_core::changeset::merge_persisted_workflow_into_context`** copies persisted values into the engine **`Context`** (including intent keys for hooks and resume) so graph **`goal_conditions`** (e.g. **`run_optional_step_x`**) match the manifest; call sites pass the plan session directory. **`tddy_core::worktree`** applies **`branch_worktree_intent`** during **`setup_worktree_for_session_with_integration_base`** (and the optional chain-base variant): new branch creation from the integration base vs checking out an existing branch in a new worktree path under **`.worktrees/`**.
@@ -151,6 +160,7 @@ This section records how the shipped recipes map to the same product philosophy 
 
 - **Start goal:** **`plan`** — same planning and PRD-style artifacts as full TDD.
 - **Pipeline:** **`plan` → `red` → `green` → `post-green-review` → `refactor` → `update-docs`** — a linear graph without standalone acceptance-tests, demo, evaluate, or validate tasks; **`post-green-review`** carries merged reporting concerns in one **`tddy-tools submit`** payload.
+- **GitHub PR awareness in red:** The merged **`red`** prompt surfaces MCP GitHub PR tool names and usage guidance when a GitHub token is present in the environment; without a token, that block is omitted. See [GitHub pull request tools (tddy-tools MCP)](github-pr-tools-mcp.md).
 - **Spirit:** Smaller session surface for teams that want TDD discipline without the full optional branches (demo routing, separate evaluate/validate invocations).
 
 ### Bugfix (`bugfix`)

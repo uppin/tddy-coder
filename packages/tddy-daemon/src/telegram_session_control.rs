@@ -13,17 +13,19 @@ use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::{
-    list_recent_remote_branches, read_session_metadata, validate_chain_pr_integration_base_ref,
-    WorkflowError, SESSION_METADATA_FILENAME,
+    list_recent_remote_branches_skip, read_session_metadata,
+    validate_chain_pr_integration_base_ref, WorkflowError, SESSION_METADATA_FILENAME,
 };
 use uuid::Uuid;
 
+use crate::active_elicitation::{ActiveElicitationCoordinator, SharedActiveElicitationCoordinator};
 use crate::config::DaemonConfig;
 use crate::presenter_intent_client;
 use crate::project_storage::{self, effective_integration_base_ref_for_project, ProjectData};
 use crate::session_list_enrichment::SessionListStatusDisplay;
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
+use crate::telegram_github_link::TelegramGithubMappingStore;
 use crate::telegram_notifier::{
     session_telegram_label, ElicitationSelectOptionsCache, InMemoryTelegramSender,
     InlineKeyboardRows, TelegramSender,
@@ -149,6 +151,9 @@ const TELEGRAM_CONTINUATION: &str = "\n(continued)";
 /// Number of sessions shown per Telegram page.
 pub const SESSIONS_PAGE_SIZE: usize = 10;
 
+/// Remote branches listed per Telegram page (plus one row for project default integration base).
+pub const BRANCH_PAGE_SIZE: usize = 10;
+
 /// Callback prefixes for session list inline buttons (must fit Telegram `callback_data` byte limit).
 pub const CB_ENTER: &str = "enter:";
 pub const CB_DELETE: &str = "delete:";
@@ -157,8 +162,11 @@ pub const CB_MORE: &str = "more:";
 pub const CB_TELEGRAM_PROJECT: &str = "tp:";
 /// Pick agent: `ta:<agent_idx>|p:<proj_idx>|s:<session_id>`.
 pub const CB_TELEGRAM_AGENT: &str = "ta:";
-/// Pick integration base (`branch_idx` 0 = project default; 1..=N = recent remote at index N−1): `tb:<branch_idx>|p:<proj_idx>|s:<session_id>`.
+/// Pick integration base (`branch_idx` 0 = project default; 1..=N = recent remote on this page):
+/// `tb:<branch_idx>|p:<proj_idx>|s:<session_id>` or `tb:<branch_idx>|o:<list_offset>|p:<proj_idx>|s:<session_id>`.
 pub const CB_TELEGRAM_BRANCH: &str = "tb:";
+/// Next page of remote branches: `tbm:<next_list_offset>|p:<proj_idx>|s:<session_id>`.
+pub const CB_TELEGRAM_BRANCH_MORE: &str = "tbm:";
 /// Branch/worktree intent (`nb` / `ws` — must fit Telegram `callback_data` byte limit with `|s:<uuid>`).
 pub const CB_TELEGRAM_INTENT: &str = "intent:";
 
@@ -483,21 +491,42 @@ pub fn parse_telegram_agent_callback(callback_data: &str) -> Option<(usize, usiz
     Some((agent_idx, proj_idx, session_id))
 }
 
-/// Decode `tb:<branch_idx>|p:<proj_idx>|s:<session_id>` (branch pick after project).
-pub fn parse_telegram_branch_callback(callback_data: &str) -> Option<(usize, usize, String)> {
+/// Decode `tb:…|p:…|s:…` (branch pick after project). Optional `|o:<list_offset>` scopes button rows
+/// to a page of [`list_recent_remote_branches_skip`] results.
+pub fn parse_telegram_branch_callback(
+    callback_data: &str,
+) -> Option<(usize, usize, usize, String)> {
     let rest = callback_data.strip_prefix(CB_TELEGRAM_BRANCH)?;
-    let (branch_part, tail) = rest.split_once("|p:")?;
-    let branch_idx: usize = branch_part.parse().ok()?;
-    let (proj_part, sess_part) = tail.split_once("|s:")?;
+    let (before_p, after_p) = rest.split_once("|p:")?;
+    let (branch_idx, list_offset) = if let Some((idx, off)) = before_p.split_once("|o:") {
+        (idx.parse().ok()?, off.parse().ok()?)
+    } else {
+        (before_p.parse().ok()?, 0usize)
+    };
+    let (proj_part, sess_part) = after_p.split_once("|s:")?;
     let proj_idx: usize = proj_part.parse().ok()?;
     let session_id = sess_part.trim().to_string();
     if session_id.is_empty() {
         return None;
     }
-    if branch_idx > 10 {
+    if branch_idx > BRANCH_PAGE_SIZE {
         return None;
     }
-    Some((branch_idx, proj_idx, session_id))
+    Some((branch_idx, list_offset, proj_idx, session_id))
+}
+
+/// Decode `tbm:<next_list_offset>|p:<proj_idx>|s:<session_id>` (more remote branches).
+pub fn parse_telegram_branch_more_callback(callback_data: &str) -> Option<(usize, usize, String)> {
+    let rest = callback_data.strip_prefix(CB_TELEGRAM_BRANCH_MORE)?;
+    let (off_part, after_p) = rest.split_once("|p:")?;
+    let next_offset: usize = off_part.parse().ok()?;
+    let (proj_part, sess_part) = after_p.split_once("|s:")?;
+    let proj_idx: usize = proj_part.parse().ok()?;
+    let session_id = sess_part.trim().to_string();
+    if session_id.is_empty() {
+        return None;
+    }
+    Some((next_offset, proj_idx, session_id))
 }
 
 /// Parse callback payload strings into internal routing keys (recipe id, demo flags, elicitation ids).
@@ -624,14 +653,20 @@ fn default_tool_path_for_spawn(config: &DaemonConfig) -> String {
         .unwrap_or_else(|| "tddy-coder".to_string())
 }
 
+fn projects_dir_for_telegram_workflow_spawn(
+    deps: &TelegramWorkflowSpawn,
+) -> anyhow::Result<PathBuf> {
+    match &deps.projects_dir_override {
+        Some(p) => Ok(p.clone()),
+        None => projects_path_for_user(&deps.os_user)
+            .ok_or_else(|| anyhow::anyhow!("could not resolve projects path")),
+    }
+}
+
 fn sorted_projects_for_workflow_spawn(
     deps: &TelegramWorkflowSpawn,
 ) -> anyhow::Result<Vec<ProjectData>> {
-    let projects_dir: PathBuf = match &deps.projects_dir_override {
-        Some(p) => p.clone(),
-        None => projects_path_for_user(&deps.os_user)
-            .ok_or_else(|| anyhow::anyhow!("could not resolve projects path"))?,
-    };
+    let projects_dir = projects_dir_for_telegram_workflow_spawn(deps)?;
     let mut projects = project_storage::read_projects(&projects_dir)?;
     projects.sort_by(|a, b| a.project_id.cmp(&b.project_id));
     Ok(projects)
@@ -748,11 +783,33 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     sessions_base: PathBuf,
     sender: Arc<S>,
     workflow_spawn: Option<Arc<TelegramWorkflowSpawn>>,
+    /// When set, [`Self::handle_start_workflow`] requires a linked GitHub identity for `user_id`.
+    telegram_github_mapping_path: Option<PathBuf>,
+    /// Single active elicitation token per Telegram chat (shared with [`crate::telegram_notifier::TelegramSessionWatcher`] when wired in `main`).
+    active_elicitation: SharedActiveElicitationCoordinator,
 }
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     pub fn new(allowed_chat_ids: Vec<i64>, sessions_base: PathBuf, sender: Arc<S>) -> Self {
-        Self::with_workflow_spawn(allowed_chat_ids, sessions_base, sender, None)
+        Self::with_workflow_spawn(allowed_chat_ids, sessions_base, sender, None, None)
+    }
+
+    /// Same as [`Self::new`], but workflow start checks [`TelegramGithubMappingStore`] at `path`
+    /// so unlinked Telegram users receive an explicit error (PRD).
+    pub fn with_telegram_github_link(
+        allowed_chat_ids: Vec<i64>,
+        sessions_base: PathBuf,
+        sender: Arc<S>,
+        github_mapping_path: PathBuf,
+    ) -> Self {
+        Self::with_workflow_spawn_and_github_mapping(
+            allowed_chat_ids,
+            sessions_base,
+            sender,
+            None,
+            Some(github_mapping_path),
+            None,
+        )
     }
 
     pub fn with_workflow_spawn(
@@ -760,19 +817,44 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         sessions_base: PathBuf,
         sender: Arc<S>,
         workflow_spawn: Option<Arc<TelegramWorkflowSpawn>>,
+        shared_elicitation: Option<SharedActiveElicitationCoordinator>,
+    ) -> Self {
+        Self::with_workflow_spawn_and_github_mapping(
+            allowed_chat_ids,
+            sessions_base,
+            sender,
+            workflow_spawn,
+            None,
+            shared_elicitation,
+        )
+    }
+
+    fn with_workflow_spawn_and_github_mapping(
+        allowed_chat_ids: Vec<i64>,
+        sessions_base: PathBuf,
+        sender: Arc<S>,
+        workflow_spawn: Option<Arc<TelegramWorkflowSpawn>>,
+        telegram_github_mapping_path: Option<PathBuf>,
+        shared_elicitation: Option<SharedActiveElicitationCoordinator>,
     ) -> Self {
         log::info!(
             target: "tddy_daemon::telegram_session_control",
-            "TelegramSessionControlHarness::with_workflow_spawn: allowed_chats={} sessions_base={} workflow_spawn={}",
+            "TelegramSessionControlHarness::with_workflow_spawn: allowed_chats={} sessions_base={} workflow_spawn={} github_mapping={} shared_elicitation={}",
             allowed_chat_ids.len(),
             sessions_base.display(),
-            workflow_spawn.is_some()
+            workflow_spawn.is_some(),
+            telegram_github_mapping_path.is_some(),
+            shared_elicitation.is_some()
         );
+        let active_elicitation = shared_elicitation
+            .unwrap_or_else(|| Arc::new(Mutex::new(ActiveElicitationCoordinator::new())));
         Self {
             allowed_chat_ids,
             sessions_base,
             sender,
             workflow_spawn,
+            telegram_github_mapping_path,
+            active_elicitation,
         }
     }
 
@@ -784,6 +866,99 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     /// Whether `chat_id` is allowed to use session control (matches configured `chat_ids`).
     pub fn is_authorized(&self, chat_id: i64) -> bool {
         self.allowed_chat_ids.contains(&chat_id)
+    }
+
+    // -------------------------------------------------------------------------
+    // Concurrent elicitation (single active token per Telegram chat) — public contract for tests
+    // and future inbound/outbound wiring. Implementations live with the per-chat lease/queue.
+    // -------------------------------------------------------------------------
+
+    /// Session id that currently owns the **active** elicitation token for this chat, if any.
+    ///
+    /// Plain-text follow-ups and commands that target the active session (without an explicit
+    /// session key) must resolve through this value.
+    pub fn active_elicitation_session_for_chat(&self, chat_id: i64) -> Option<String> {
+        match self.active_elicitation.lock() {
+            Ok(g) => g.active_session_for_chat(chat_id),
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "active_elicitation_session_for_chat: mutex poisoned: {e}"
+                );
+                None
+            }
+        }
+    }
+
+    /// Register demand for elicitation UI (same entry point as outbound notifier; used when tests
+    /// or future inbound paths seed the queue).
+    pub fn register_elicitation_surface_request(&self, chat_id: i64, session_id: String) {
+        match self.active_elicitation.lock() {
+            Ok(mut g) => g.register_elicitation_surface_request(chat_id, session_id),
+            Err(e) => log::error!(
+                target: "tddy_daemon::telegram_session_control",
+                "register_elicitation_surface_request: mutex poisoned: {e}"
+            ),
+        }
+    }
+
+    /// Whether an inbound `eli:s:` / `eli:o:` callback for `session_id` may be applied under the
+    /// single-active elicitation policy for this chat.
+    pub fn elicitation_callback_permitted(&self, chat_id: i64, session_id: &str) -> bool {
+        match self.active_elicitation.lock() {
+            Ok(g) => g.elicitation_callback_permitted(chat_id, session_id),
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "elicitation_callback_permitted: mutex poisoned: {e}"
+                );
+                false
+            }
+        }
+    }
+
+    /// When `completed_session_id` finishes its elicitation step, advance the queue and return the
+    /// next session id that becomes active for `chat_id`, if any.
+    pub fn advance_after_elicitation_completion(
+        &mut self,
+        chat_id: i64,
+        completed_session_id: &str,
+    ) -> Option<String> {
+        match self.active_elicitation.lock() {
+            Ok(mut g) => g.advance_after_elicitation_completion(chat_id, completed_session_id),
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "advance_after_elicitation_completion: mutex poisoned: {e}"
+                );
+                None
+            }
+        }
+    }
+
+    fn try_advance_elicitation_after_step(
+        &self,
+        chat_id: i64,
+        completed_session_id: &str,
+        context: &'static str,
+    ) {
+        let next = match self.active_elicitation.lock() {
+            Ok(mut g) => g.advance_after_elicitation_completion(chat_id, completed_session_id),
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "{context}: active elicitation mutex poisoned: {e}"
+                );
+                None
+            }
+        };
+        log::info!(
+            target: "tddy_daemon::telegram_session_control",
+            "{context}: elicitation queue advanced chat_id={} completed_session_id={} next_active_session_id={:?}",
+            chat_id,
+            completed_session_id,
+            next
+        );
     }
 
     fn ensure_authorized(&self, chat_id: i64) -> anyhow::Result<()> {
@@ -880,58 +1055,80 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         Ok(())
     }
 
-    /// After project pick: show default integration base + up to 10 recent `origin/*` branches.
+    /// After project pick: show default integration base + recent `origin/*` branches (paginated).
     async fn send_branch_pick_keyboard(
         &self,
         chat_id: i64,
         proj_idx: usize,
         session_id: &str,
         project: &ProjectData,
+        list_offset: usize,
     ) -> anyhow::Result<()> {
         let Some(ref deps) = self.workflow_spawn else {
             anyhow::bail!("Telegram workflow spawn is not configured");
         };
-        let projects_dir = projects_path_for_user(&deps.os_user)
-            .ok_or_else(|| anyhow::anyhow!("could not resolve projects path"))?;
+        let projects_dir = projects_dir_for_telegram_workflow_spawn(deps)?;
         let default_ref =
             effective_integration_base_ref_for_project(&projects_dir, &project.project_id)?;
         let repo_path = Path::new(&project.main_repo_path);
         if !repo_path.exists() {
             anyhow::bail!("project main repo path does not exist");
         }
-        let branches = match list_recent_remote_branches(repo_path, 10) {
-            Ok(b) => b,
-            Err(e) => {
-                log::warn!(
-                    target: "tddy_daemon::telegram_session_control",
-                    "list_recent_remote_branches: {}",
-                    e
-                );
-                Vec::new()
-            }
-        };
+        let page_peek =
+            match list_recent_remote_branches_skip(repo_path, list_offset, BRANCH_PAGE_SIZE + 1) {
+                Ok(b) => b,
+                Err(e) => {
+                    log::warn!(
+                        target: "tddy_daemon::telegram_session_control",
+                        "list_recent_remote_branches_skip: {}",
+                        e
+                    );
+                    Vec::new()
+                }
+            };
+        let has_more = page_peek.len() > BRANCH_PAGE_SIZE;
+        let branches: Vec<String> = page_peek.into_iter().take(BRANCH_PAGE_SIZE).collect();
         let short_default = default_ref
             .strip_prefix("origin/")
             .unwrap_or(default_ref.as_str());
         let default_label = format!("Default ({short_default})");
         let mut rows: InlineKeyboardRows = Vec::new();
-        let data0 = format!("{CB_TELEGRAM_BRANCH}0|p:{proj_idx}|s:{session_id}");
+        let data0 = if list_offset == 0 {
+            format!("{CB_TELEGRAM_BRANCH}0|p:{proj_idx}|s:{session_id}")
+        } else {
+            format!("{CB_TELEGRAM_BRANCH}0|o:{list_offset}|p:{proj_idx}|s:{session_id}")
+        };
         debug_assert!(
             data0.len() <= 64,
             "Telegram callback_data exceeds 64 bytes: len={} data={data0:?}",
             data0.len()
         );
         rows.push(vec![(default_label, data0)]);
-        for (i, br) in branches.iter().enumerate().take(10) {
+        for (i, br) in branches.iter().enumerate() {
             let idx = i + 1;
             let label = take_utf8_prefix(br, 52).to_string();
-            let data = format!("{CB_TELEGRAM_BRANCH}{idx}|p:{proj_idx}|s:{session_id}");
+            let data = if list_offset == 0 {
+                format!("{CB_TELEGRAM_BRANCH}{idx}|p:{proj_idx}|s:{session_id}")
+            } else {
+                format!("{CB_TELEGRAM_BRANCH}{idx}|o:{list_offset}|p:{proj_idx}|s:{session_id}")
+            };
             debug_assert!(
                 data.len() <= 64,
                 "Telegram callback_data exceeds 64 bytes: len={} data={data:?}",
                 data.len()
             );
             rows.push(vec![(label, data)]);
+        }
+        if has_more {
+            let next_off = list_offset + branches.len();
+            let more_data =
+                format!("{CB_TELEGRAM_BRANCH_MORE}{next_off}|p:{proj_idx}|s:{session_id}");
+            debug_assert!(
+                more_data.len() <= 64,
+                "Telegram callback_data exceeds 64 bytes: len={} data={more_data:?}",
+                more_data.len()
+            );
+            rows.push(vec![("More…".to_string(), more_data)]);
         }
         let intro = format!(
             "Project `{}` selected. Choose integration base (remote branch):",
@@ -957,7 +1154,27 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         let project = projects
             .get(proj_idx)
             .ok_or_else(|| anyhow::anyhow!("invalid project index"))?;
-        self.send_branch_pick_keyboard(chat_id, proj_idx, session_id, project)
+        self.send_branch_pick_keyboard(chat_id, proj_idx, session_id, project, 0)
+            .await
+    }
+
+    /// Show another page of remote branches after **More…** (`tbm:…` callback).
+    pub async fn handle_telegram_branch_more_callback(
+        &self,
+        chat_id: i64,
+        next_list_offset: usize,
+        proj_idx: usize,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        self.ensure_authorized(chat_id)?;
+        let Some(ref deps) = self.workflow_spawn else {
+            anyhow::bail!("Telegram workflow spawn is not configured");
+        };
+        let projects = sorted_projects_for_workflow_spawn(deps)?;
+        let project = projects
+            .get(proj_idx)
+            .ok_or_else(|| anyhow::anyhow!("invalid project index"))?;
+        self.send_branch_pick_keyboard(chat_id, proj_idx, session_id, project, next_list_offset)
             .await
     }
 
@@ -965,6 +1182,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         &self,
         chat_id: i64,
         branch_idx: usize,
+        list_offset: usize,
         proj_idx: usize,
         session_id: &str,
     ) -> anyhow::Result<()> {
@@ -987,6 +1205,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             Err(e) => anyhow::bail!("read changeset: {e}"),
         };
         let intent = cs.workflow.as_ref().and_then(|w| w.branch_worktree_intent);
+        let projects_dir = projects_dir_for_telegram_workflow_spawn(deps)?;
         if branch_idx == 0 {
             cs.worktree_integration_base_ref = None;
             if intent == Some(BranchWorktreeIntent::WorkOnSelectedBranch) {
@@ -994,11 +1213,22 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                     .get_or_insert_with(Default::default)
                     .selected_branch_to_work_on = None;
             }
+            if intent == Some(BranchWorktreeIntent::NewBranchFromBase) {
+                let default_ref =
+                    effective_integration_base_ref_for_project(&projects_dir, &project.project_id)?;
+                let wf = cs.workflow.get_or_insert_with(Default::default);
+                wf.selected_integration_base_ref = Some(default_ref);
+                wf.selected_branch_to_work_on = None;
+            }
         } else {
-            let branches =
-                list_recent_remote_branches(repo_path, 10).map_err(|e| anyhow::anyhow!("{e}"))?;
-            let chain = branches
-                .get(branch_idx - 1)
+            let global_idx = list_offset
+                .checked_add(branch_idx)
+                .and_then(|n| n.checked_sub(1))
+                .ok_or_else(|| anyhow::anyhow!("invalid branch index"))?;
+            let picked = list_recent_remote_branches_skip(repo_path, global_idx, 1)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let chain = picked
+                .first()
                 .ok_or_else(|| anyhow::anyhow!("invalid branch index (list may have changed)"))?;
             validate_chain_pr_integration_base_ref(chain).map_err(|e| anyhow::anyhow!(e))?;
             if intent == Some(BranchWorktreeIntent::WorkOnSelectedBranch) {
@@ -1007,6 +1237,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                     .selected_branch_to_work_on = Some(chain.clone());
             } else {
                 cs.worktree_integration_base_ref = Some(chain.clone());
+            }
+            if intent == Some(BranchWorktreeIntent::NewBranchFromBase) {
+                let wf = cs.workflow.get_or_insert_with(Default::default);
+                wf.selected_integration_base_ref = Some(chain.clone());
+                wf.selected_branch_to_work_on = None;
             }
         }
         write_changeset(&session_dir, &cs).map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
@@ -1170,7 +1405,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             .workflow_spawn
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?;
-        let (_session_id, port) = {
+        let (session_id, port) = {
             let map = deps
                 .child_grpc_by_session
                 .lock()
@@ -1185,6 +1420,14 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             'j' => presenter_intent_client::reject_session_document_localhost(port).await,
             _ => anyhow::bail!("unknown document action {action:?}"),
         }?;
+        // Rotate queue only when the document-review gate is decisively completed (approve/reject).
+        if matches!(action, 'a' | 'j') {
+            self.try_advance_elicitation_after_step(
+                chat_id,
+                &session_id,
+                "handle_document_review_action",
+            );
+        }
         Ok(())
     }
 
@@ -1212,6 +1455,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         };
         presenter_intent_client::answer_clarification_select_localhost(port, option_index as u32)
             .await?;
+        self.try_advance_elicitation_after_step(chat_id, &session_id, "handle_elicitation_select");
         let confirmation = {
             let guard = deps
                 .elicitation_select_options
@@ -1276,15 +1520,27 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             return Ok(false);
         };
         let session_key = {
-            let mut g = deps
+            let g = deps
                 .pending_elicitation_other
                 .lock()
                 .map_err(|e| anyhow::anyhow!("pending elicitation other lock: {e}"))?;
-            match g.remove(&chat_id) {
+            match g.get(&chat_id).cloned() {
                 Some(s) => s,
                 None => return Ok(false),
             }
         };
+        let (session_id, port) = {
+            let map = deps
+                .child_grpc_by_session
+                .lock()
+                .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
+            resolve_child_grpc_port(&map, &session_key)?
+        };
+        if !self.elicitation_callback_permitted(chat_id, &session_id) {
+            anyhow::bail!(
+                "That follow-up does not match the active elicitation for this chat. Finish the current prompt or use the web UI."
+            );
+        }
         let trimmed = body.trim();
         if trimmed.is_empty() {
             self.sender
@@ -1293,27 +1549,29 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                     "That message was empty — send your custom answer as text, or pick an option on the question.",
                 )
                 .await?;
+            return Ok(true);
+        }
+        {
+            let mut g = deps
+                .pending_elicitation_other
+                .lock()
+                .map_err(|e| anyhow::anyhow!("pending elicitation other lock: {e}"))?;
+            g.remove(&chat_id);
+        }
+        if let Err(e) =
+            presenter_intent_client::answer_clarification_text_localhost(port, trimmed).await
+        {
             deps.pending_elicitation_other
                 .lock()
                 .map_err(|e| anyhow::anyhow!("pending elicitation other lock: {e}"))?
                 .insert(chat_id, session_key);
-            return Ok(true);
-        }
-        let (_session_id, port) = {
-            let map = deps
-                .child_grpc_by_session
-                .lock()
-                .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
-            resolve_child_grpc_port(&map, &session_key)?
-        };
-        if let Err(e) =
-            presenter_intent_client::answer_clarification_text_localhost(port, trimmed).await
-        {
-            if let Ok(mut g) = deps.pending_elicitation_other.lock() {
-                g.insert(chat_id, session_key);
-            }
             return Err(e);
         }
+        self.try_advance_elicitation_after_step(
+            chat_id,
+            &session_id,
+            "handle_elicitation_other_followup_plain_message",
+        );
         let text = format!("You selected:\n{trimmed}");
         self.sender.send_message(chat_id, &text).await?;
         Ok(true)
@@ -1334,14 +1592,20 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         if let Ok(mut g) = deps.pending_elicitation_other.lock() {
             g.remove(&chat_id);
         }
-        let (_session_id, port) = {
+        let (session_id, port) = {
             let map = deps
                 .child_grpc_by_session
                 .lock()
                 .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
             resolve_child_grpc_port(&map, session_key)?
         };
+        if !self.elicitation_callback_permitted(chat_id, &session_id) {
+            anyhow::bail!(
+                "That session is not the active elicitation for this chat. Finish the current prompt or use the web UI."
+            );
+        }
         presenter_intent_client::answer_clarification_text_localhost(port, text).await?;
+        self.try_advance_elicitation_after_step(chat_id, &session_id, "handle_answer_text_command");
         Ok(())
     }
 
@@ -1357,13 +1621,18 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             .workflow_spawn
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?;
-        let (_session_id, port) = {
+        let (session_id, port) = {
             let map = deps
                 .child_grpc_by_session
                 .lock()
                 .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
             resolve_child_grpc_port(&map, session_key)?
         };
+        if !self.elicitation_callback_permitted(chat_id, &session_id) {
+            anyhow::bail!(
+                "That session is not the active elicitation for this chat. Finish the current prompt or use the web UI."
+            );
+        }
         let u32s: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
         presenter_intent_client::answer_clarification_multi_select_localhost(
             port,
@@ -1371,6 +1640,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             String::new(),
         )
         .await?;
+        self.try_advance_elicitation_after_step(
+            chat_id,
+            &session_id,
+            "handle_answer_multi_command",
+        );
         Ok(())
     }
 
@@ -1465,6 +1739,25 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             cmd.prompt.len()
         );
         self.ensure_authorized(cmd.chat_id)?;
+
+        if let Some(ref map_path) = self.telegram_github_mapping_path {
+            log::debug!(
+                target: "tddy_daemon::telegram_session_control",
+                "handle_start_workflow: github link required; mapping_path={}",
+                map_path.display()
+            );
+            let store = TelegramGithubMappingStore::open(map_path)?;
+            if store.get_github_login(cmd.user_id).is_none() {
+                log::info!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "handle_start_workflow: rejected start-workflow — telegram user_id={} has no linked GitHub identity",
+                    cmd.user_id
+                );
+                anyhow::bail!(
+                    "Telegram account is not linked to GitHub. Use the bot's /link-github flow (or web OAuth) to connect your GitHub identity before starting a workflow."
+                );
+            }
+        }
 
         let session_id = Uuid::new_v4().to_string();
         let session_dir = unified_session_dir_path(&self.sessions_base, &session_id);
@@ -2182,7 +2475,17 @@ mod unit_tests {
         let tb = format!("tb:3|p:2|s:{sid}");
         assert_eq!(
             parse_telegram_branch_callback(&tb),
-            Some((3, 2, sid.to_string()))
+            Some((3, 0, 2, sid.to_string()))
+        );
+        let tb_page = format!("tb:3|o:10|p:2|s:{sid}");
+        assert_eq!(
+            parse_telegram_branch_callback(&tb_page),
+            Some((3, 10, 2, sid.to_string()))
+        );
+        let tbm = format!("tbm:10|p:2|s:{sid}");
+        assert_eq!(
+            parse_telegram_branch_more_callback(&tbm),
+            Some((10, 2, sid.to_string()))
         );
         assert_eq!(parse_telegram_branch_callback("tb:11|p:0|s:x"), None);
     }

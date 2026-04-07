@@ -1,10 +1,10 @@
 //! Ctrl+C handling shared by the local TUI (`event_loop`) and VirtualTui (RPC/web byte 0x03).
 //!
-//! Must run before `key_event_to_intent`: interrupt kills the tracked **agent/backend child**
-//! (e.g. Cursor CLI) via [`tddy_core::kill_child_process`]. It does **not** set the session
-//! [`std::sync::atomic::AtomicBool`] passed into the event loop / VirtualTui — that flag is for
-//! tearing down the whole runner (SIGINT from [`ctrlc`] handler, daemon shutdown). Stop pane /
-//! `UserIntent::Interrupt` use this path so the TUI keeps running after canceling the agent.
+//! [`ctrl_c_interrupt_session`] kills the tracked **agent/backend child** via
+//! [`tddy_core::kill_child_process`] only. The local TUI and VirtualTui call it **and** set the
+//! shared `shutdown` flag: in raw mode, Ctrl+C is usually a key event (not SIGINT), so without
+//! that the process would never exit when no child is registered (e.g. stub demo). Stop pane /
+//! `UserIntent::Interrupt` still only kill the child so the session can continue.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use tddy_core::kill_child_process;

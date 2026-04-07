@@ -67,6 +67,13 @@ Formatting: adapt session markdown to what Telegram can render. The Bot API acce
 
 For **`Select`** clarification, the notification includes the usual short action line plus a **multi-line listing**: one line per option (full label; optional description on the same line). Inline keyboard buttons use **numeric labels** (1, 2, …) so the full text lives in the message body. After the operator chooses, the inbound Telegram path sends a **confirmation** message that repeats the **full** selected option text (label; description on a following line when present). The daemon keeps the per-option strings in a small in-memory cache keyed by session id so the confirmation matches the presenter without stuffing long text into **`callback_data`** (64-byte limit).
 
+### Concurrent sessions in one chat (elicitation queue)
+
+- **`ActiveElicitationCoordinator`:** A process-wide structure (shared with inbound **`telegram_session_control`**) records, per Telegram chat id, an ordered list of sessions that need elicitation surface. The list front is the session that may receive the **primary** inline keyboard for **`ModeChanged`** elicitation (**`eli:s:`** / **`eli:o:`** where applicable).
+- **Registration:** Each outbound **`ModeChanged`** that represents user-facing elicitation registers the session for every configured **`chat_ids`** entry. Duplicate ids in the queue for the same chat are ignored.
+- **Deferred surface:** When a session is registered but is **not** at the head of its chat queue, the notifier sends the action line as **text** (with a short “queued” explanation) and **does not** attach the full primary inline keyboard for that session, so at most one competing **`eli:s:`** keyboard appears in the chat at a time.
+- **Depth monitoring:** When the per-chat queue length exceeds an internal threshold, the daemon emits a **warning** log line for operators (see **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)** and **`active_elicitation`**).
+
 ### Other elicitation modes
 
 For modes that are **not** full-document review (feature input, clarification **`MultiSelect`**, free-text **`TextInput`**), messages remain short hints: short session label and explicit **approval** or **input** wording, except where **`Select`** adds the extended listing above. Message bodies avoid embedding unrelated secrets unless the product explicitly extends them.

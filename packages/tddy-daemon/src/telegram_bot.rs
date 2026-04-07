@@ -6,7 +6,7 @@ use teloxide::dispatching::Dispatcher;
 use teloxide::payloads::AnswerCallbackQuerySetters;
 use teloxide::prelude::*;
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, ChatId, Message};
+use teloxide::types::{CallbackQuery, CallbackQueryId, ChatId, Message};
 use tokio::sync::Mutex;
 
 use crate::telegram_notifier::TeloxideSender;
@@ -16,13 +16,51 @@ use crate::telegram_session_control::{
     parse_elicitation_select_callback, parse_recipe_callback_session_dir,
     parse_session_control_callback, parse_sessions_command, parse_start_workflow_prompt,
     parse_submit_feature_command, parse_telegram_agent_callback, parse_telegram_branch_callback,
-    parse_telegram_intent_callback, parse_telegram_project_callback, SessionControlCallback,
-    StartWorkflowCommand, TelegramCallback, TelegramSessionControlHarness,
+    parse_telegram_branch_more_callback, parse_telegram_intent_callback,
+    parse_telegram_project_callback, SessionControlCallback, StartWorkflowCommand,
+    TelegramCallback, TelegramSessionControlHarness,
 };
 
 type Harness = Arc<Mutex<TelegramSessionControlHarness<TeloxideSender>>>;
 
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+/// Authorize the chat and ensure `session_id` holds the active elicitation token for interactive
+/// surfaces (`eli:s:` / `eli:o:` / document-review). If not, answers `qid` and returns `true` (caller
+/// should return `Ok(())`).
+async fn authorized_elicitation_surface_gate(
+    bot: &Bot,
+    harness: &Harness,
+    chat_id: i64,
+    session_id: &str,
+    qid: CallbackQueryId,
+    kind: &'static str,
+) -> bool {
+    let h = harness.lock().await;
+    if !h.is_authorized(chat_id) {
+        drop(h);
+        let _ = bot.answer_callback_query(qid).await;
+        return true;
+    }
+    if !h.elicitation_callback_permitted(chat_id, session_id) {
+        log::info!(
+            target: "tddy_daemon::telegram_bot",
+            "{kind} callback ignored: session not active for chat chat_id={} session_id={}",
+            chat_id,
+            session_id
+        );
+        drop(h);
+        let _ = bot
+            .answer_callback_query(qid)
+            .text(
+                "That elicitation is not active for this chat. Finish the current prompt or use the web UI.",
+            )
+            .show_alert(true)
+            .await;
+        return true;
+    }
+    false
+}
 
 fn telegram_workflow_error_message(detail: String) -> String {
     format!(
@@ -253,7 +291,7 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
         return Ok(());
     }
 
-    if let Some((branch_idx, proj_idx, session_id)) = parse_telegram_branch_callback(&data) {
+    if let Some((next_off, proj_idx, session_id)) = parse_telegram_branch_more_callback(&data) {
         {
             let h = harness.lock().await;
             if !h.is_authorized(chat_id) {
@@ -265,7 +303,42 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
         match h
-            .handle_telegram_branch_callback(chat_id, branch_idx, proj_idx, &session_id)
+            .handle_telegram_branch_more_callback(chat_id, next_off, proj_idx, &session_id)
+            .await
+        {
+            Ok(()) => {}
+            Err(e) => {
+                bot.send_message(
+                    ChatId(chat_id),
+                    telegram_workflow_error_message(format!("{e:#}")),
+                )
+                .await?;
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some((branch_idx, list_offset, proj_idx, session_id)) =
+        parse_telegram_branch_callback(&data)
+    {
+        {
+            let h = harness.lock().await;
+            if !h.is_authorized(chat_id) {
+                drop(h);
+                let _ = bot.answer_callback_query(qid.clone()).await;
+                return Ok(());
+            }
+        }
+        let _ = bot.answer_callback_query(qid.clone()).await;
+        let h = harness.lock().await;
+        match h
+            .handle_telegram_branch_callback(
+                chat_id,
+                branch_idx,
+                list_offset,
+                proj_idx,
+                &session_id,
+            )
             .await
         {
             Ok(()) => {}
@@ -308,13 +381,17 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     }
 
     if let Some((action, session_id)) = parse_document_review_callback(&data) {
+        if authorized_elicitation_surface_gate(
+            &bot,
+            &harness,
+            chat_id,
+            &session_id,
+            qid.clone(),
+            "document_review",
+        )
+        .await
         {
-            let h = harness.lock().await;
-            if !h.is_authorized(chat_id) {
-                drop(h);
-                let _ = bot.answer_callback_query(qid.clone()).await;
-                return Ok(());
-            }
+            return Ok(());
         }
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
@@ -328,13 +405,17 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     }
 
     if let Some(session_id) = parse_elicitation_other_callback(&data) {
+        if authorized_elicitation_surface_gate(
+            &bot,
+            &harness,
+            chat_id,
+            &session_id,
+            qid.clone(),
+            "elicitation_other",
+        )
+        .await
         {
-            let h = harness.lock().await;
-            if !h.is_authorized(chat_id) {
-                drop(h);
-                let _ = bot.answer_callback_query(qid.clone()).await;
-                return Ok(());
-            }
+            return Ok(());
         }
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
@@ -345,13 +426,17 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     }
 
     if let Some((session_id, option_index)) = parse_elicitation_select_callback(&data) {
+        if authorized_elicitation_surface_gate(
+            &bot,
+            &harness,
+            chat_id,
+            &session_id,
+            qid.clone(),
+            "elicitation_select",
+        )
+        .await
         {
-            let h = harness.lock().await;
-            if !h.is_authorized(chat_id) {
-                drop(h);
-                let _ = bot.answer_callback_query(qid.clone()).await;
-                return Ok(());
-            }
+            return Ok(());
         }
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;

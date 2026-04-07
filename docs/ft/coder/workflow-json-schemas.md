@@ -54,6 +54,7 @@ The **`changeset-workflow`** schema includes post-green routing fields (**`run_o
 ## Related
 
 - [Workflow recipes](workflow-recipes.md) — `TddRecipe`, goals as strings, engine integration  
+- [GitHub pull request tools (tddy-tools MCP)](github-pr-tools-mcp.md) — optional **`github_pr_tools_metadata`** on **`changeset-workflow`**, MCP tool names, environment gating  
 - `docs/dev/1-WIP/workflow-schema-pipeline.md` — build pipeline and editing workflow  
 - `packages/tddy-tools/docs/json-schema.md` — CLI and library technical details  
 - `packages/tddy-workflow-recipes/docs/workflow-schemas.md` — crate-owned schema and proto layout  

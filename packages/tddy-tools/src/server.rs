@@ -1,4 +1,4 @@
-//! Permission server implementing the approval_prompt MCP tool.
+//! Permission server implementing the approval_prompt MCP tool and GitHub PR REST tools.
 
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -8,6 +8,10 @@ use rmcp::{
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::PathBuf;
+use tddy_tools::github_pr::{
+    create_pull_request_via_rest_api, update_pull_request_via_rest_api, CreatePullRequestParams,
+    UpdatePullRequestParams,
+};
 
 /// Unix socket for relaying approval prompts to the tddy-coder TUI. In `cfg(test)` builds this is
 /// disabled unless `TDDY_TOOLS_TEST_ALLOW_SOCKET=1`, so unit tests never hit a live session when
@@ -34,6 +38,35 @@ pub struct ApprovalPromptInput {
     pub tool_name: String,
     #[schemars(description = "Tool input")]
     pub input: Value,
+}
+
+/// Parameters for [`github_create_pull_request`](PermissionServer::github_create_pull_request).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GithubCreatePullRequestToolInput {
+    #[schemars(description = "Repository owner (user or organization).")]
+    pub owner: String,
+    #[schemars(description = "Repository name.")]
+    pub repo: String,
+    #[schemars(description = "Pull request title.")]
+    pub title: String,
+    #[schemars(description = "Head branch name (e.g. feature/foo).")]
+    pub head: String,
+    #[schemars(description = "Base branch name (e.g. main).")]
+    pub base: String,
+    #[schemars(description = "Pull request body (description).")]
+    pub body: String,
+}
+
+/// Parameters for [`github_update_pull_request`](PermissionServer::github_update_pull_request).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GithubUpdatePullRequestToolInput {
+    pub owner: String,
+    pub repo: String,
+    #[schemars(description = "Pull request number.")]
+    pub pull_number: u64,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub draft: Option<bool>,
 }
 
 /// MCP server that handles permission prompts for Claude Code.
@@ -276,13 +309,100 @@ impl PermissionServer {
     ) -> String {
         self.decide(&tool_name, &input)
     }
+
+    #[tool(
+        description = "Create a GitHub pull request (REST POST /repos/{owner}/{repo}/pulls). Requires GITHUB_TOKEN or GH_TOKEN; uses curl against api.github.com."
+    )]
+    fn github_create_pull_request(
+        &self,
+        Parameters(p): Parameters<GithubCreatePullRequestToolInput>,
+    ) -> String {
+        log::info!(
+            target: "tddy_tools::server",
+            "MCP github_create_pull_request owner={} repo={}",
+            p.owner,
+            p.repo
+        );
+        let params = CreatePullRequestParams {
+            owner: p.owner,
+            repo: p.repo,
+            title: p.title,
+            head: p.head,
+            base: p.base,
+            body: p.body,
+        };
+        match create_pull_request_via_rest_api(&params) {
+            Ok(n) => {
+                log::debug!(
+                    target: "tddy_tools::server",
+                    "github_create_pull_request: created pull_number={}",
+                    n
+                );
+                serde_json::json!({ "pull_number": n }).to_string()
+            }
+            Err(e) => {
+                let msg = format!("{e}");
+                log::debug!(
+                    target: "tddy_tools::server",
+                    "github_create_pull_request: error {}",
+                    msg
+                );
+                serde_json::json!({ "error": msg }).to_string()
+            }
+        }
+    }
+
+    #[tool(
+        description = "Update an existing GitHub pull request metadata (REST PATCH). Requires GITHUB_TOKEN or GH_TOKEN."
+    )]
+    fn github_update_pull_request(
+        &self,
+        Parameters(p): Parameters<GithubUpdatePullRequestToolInput>,
+    ) -> String {
+        log::info!(
+            target: "tddy_tools::server",
+            "MCP github_update_pull_request owner={} repo={} pull_number={}",
+            p.owner,
+            p.repo,
+            p.pull_number
+        );
+        let params = UpdatePullRequestParams {
+            owner: p.owner,
+            repo: p.repo,
+            pull_number: p.pull_number,
+            title: p.title,
+            body: p.body,
+            draft: p.draft,
+        };
+        match update_pull_request_via_rest_api(&params) {
+            Ok(()) => {
+                log::debug!(
+                    target: "tddy_tools::server",
+                    "github_update_pull_request: success pr={}",
+                    params.pull_number
+                );
+                serde_json::json!({ "ok": true }).to_string()
+            }
+            Err(e) => {
+                let msg = format!("{e}");
+                log::debug!(
+                    target: "tddy_tools::server",
+                    "github_update_pull_request: error {}",
+                    msg
+                );
+                serde_json::json!({ "error": msg }).to_string()
+            }
+        }
+    }
 }
 
 #[tool_handler]
 impl rmcp::ServerHandler for PermissionServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Permission prompt tool for tddy-coder. Denies unexpected tool requests.",
+            "Permission prompt tool for tddy-coder. Denies unexpected tool requests. \
+             When **GITHUB_TOKEN** or **GH_TOKEN** is set, this server also exposes GitHub PR tools: \
+             **github_create_pull_request** and **github_update_pull_request** (REST via curl to api.github.com).",
         )
     }
 }
@@ -290,7 +410,22 @@ impl rmcp::ServerHandler for PermissionServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rmcp::ServerHandler;
     use serial_test::serial;
+
+    #[test]
+    fn mcp_server_get_info_mentions_github_pr_tools() {
+        let info = PermissionServer::new().get_info();
+        let text = info
+            .instructions
+            .as_deref()
+            .expect("server instructions must be set");
+        assert!(
+            text.contains("github_create_pull_request")
+                && text.contains("github_update_pull_request"),
+            "MCP server instructions must name GitHub PR tools; got: {text}"
+        );
+    }
 
     #[test]
     fn approval_prompt_allows_bash_tddy_tools_submit() {
