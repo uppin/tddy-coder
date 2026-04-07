@@ -1,5 +1,6 @@
 //! tddy-daemon library — shared by binary and tests.
 
+pub mod active_elicitation;
 pub mod agent_list_mapping;
 pub mod auth;
 pub mod config;
@@ -17,6 +18,7 @@ pub mod spawn_worker;
 pub mod spawner;
 pub mod tddy_user_config;
 pub mod telegram_bot;
+pub mod telegram_github_link;
 pub mod telegram_notifier;
 pub mod telegram_session_control;
 pub mod telegram_session_subscriber;
