@@ -149,6 +149,7 @@ The workflow has three main phases:
 - Produces clean State B documentation
 - Removes amendment metadata
 - Results in final-state feature docs without delta/change language
+- Prepends **one** changelog/changeset index line per [changelog-merge-hygiene.md](../../../docs/dev/guides/changelog-merge-hygiene.md) (product `##` sections; package/cross-package single-line bullets)
 
 **Outcome**: Feature Doc transitions from State A to State B (clean, no amendment history)
 

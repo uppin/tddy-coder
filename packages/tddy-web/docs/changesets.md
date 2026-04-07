@@ -2,6 +2,8 @@
 
 Wrapped changeset history for tddy-web.
 
+**Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
+
 - **2026-04-06** [Feature] **Codex OAuth dialog (`CodexOAuthDialog`)** — Modal, iframe vs **`embeddingBlocked`** fallback, Cypress **`CodexOAuth*.cy.tsx`**. Feature doc: [codex-oauth-web-relay.md](../../../../docs/ft/web/codex-oauth-web-relay.md); dev: [codex-oauth-dialog.md](./codex-oauth-dialog.md). (tddy-web)
 - **2026-04-05** [Feature] **Connection screen — concurrent terminal attachments** — **`ConnectionScreen`** **`sessionAttachments`** map; **`addSessionAttachment`** / **`removeSessionAttachment`** / **`focusedSessionIdFromPathname`** / **`connectionAttachedTerminalTestId`**; **`detachOthersWhenAddingSecondSession`** policy; stacked **`ConnectedTerminal`** instances under **`connection-attached-terminal-*`** test ids; Bun **`multiSessionState.test.ts`**, **`multiSessionPresentation.test.ts`**; Cypress **`ConnectionScreen.cy.tsx`**. Feature doc: [web-terminal.md](../../../../docs/ft/web/web-terminal.md); presentation reference: [terminal-presentation.md](./terminal-presentation.md). (tddy-web)
 - **2026-04-05** [Feature] **Connection screen — workflow recipe default** — **`ConnectionScreen`**: **`recipe`** state defaults to **`free-prompting`**; **Workflow recipe** `<select>` includes **`tdd-small`**, **`review`**, **`merge-pr`**, and other shipped names. Feature doc: [web-terminal.md](../../../../docs/ft/web/web-terminal.md). (tddy-web)

@@ -1,6 +1,8 @@
-# Web Changelog
+q# Web Changelog
 
 Release note history for the Web product area.
+
+**Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
 ## 2026-04-06 — Codex OAuth web relay (dialog + docs)
 

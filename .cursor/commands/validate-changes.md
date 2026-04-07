@@ -135,12 +135,12 @@ This command analyzes code changes to identify risks and issues in test infrastr
    - Product area structure (`1-OVERVIEW.md`, correct titles)
    - Feature document standards (correct template, acceptance criteria, status indicators)
    - Asset management (all `appendices/` files referenced, no orphans)
-   - Changelog format (no broken PRD links, release note style, says "PRDs" not "amendments")
+   - Changelog format (no broken PRD links, release note style, says "PRDs" not "amendments"; [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md) for indexes)
 
    **Validate Development Documentation** (against `@dev-doc`):
    - Package README standards (single README, < 150 lines, no implementation details)
    - Detailed docs structure (`packages/{package}/docs/` exists, comprehensive)
-   - Changesets history format (no broken changeset links, release note style, reverse chronological)
+   - Changesets history format (no broken changeset links, release note style, reverse chronological, single-line bullets per [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md))
 
    **Report issues found:**
    ```markdown

@@ -686,7 +686,7 @@ Track code quality issues and refactoring opportunities discovered during develo
 - **Refactoring Needed** section removed (issues should be resolved)
 - **Validation Results** section removed (not preserved)
 - Changeset **deleted**: `YYYY-MM-DD-changeset-name.md` (not archived)
-- Release note-style summary added to `packages/{pkg}/docs/changesets.md`
+- Release note-style summary added to `packages/{pkg}/docs/changesets.md` (and `docs/dev/changesets.md` when cross-package)—**one new single-line bullet** prepended; follow [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md). Optional long narrative: `docs/dev/changesets.d/YYYY-MM-DD-slug.md` plus one index line.
 
 ## Cross-Package Changesets
 

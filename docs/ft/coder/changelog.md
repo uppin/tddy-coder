@@ -2,6 +2,8 @@
 
 Release note history for the Coder product area.
 
+**Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
+
 ## 2026-04-06 — Codex OAuth relay foundations (daemon library; web UI)
 
 - **tddy-daemon**: **`codex_oauth_relay`** validates authorize URLs and parses OAuth callbacks for future **`BROWSER`** capture and Codex listener relay (**`tddy-integration-tests`**: **`codex_oauth_web_relay_acceptance`**).

@@ -2,6 +2,8 @@
 
 Wrapped changeset history for tddy-tools.
 
+**Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
+
 - **2026-04-06** [Feature] **GitHub PR MCP tools and shared REST helpers** — **`github_pr`** module: **`github_create_pull_request`** / **`github_update_pull_request`** registration, mock-recorded REST tests; re-exports **`tddy_workflow_recipes::github_rest_common`** constants; MCP **`get_info`** lists GitHub PR tools when authenticated. Feature docs: [github-pr-tools-mcp.md](../../../../docs/ft/coder/github-pr-tools-mcp.md). (tddy-tools, tddy-workflow-recipes)
 - **2026-04-06** [Feature] **`changeset-workflow` branch/worktree fields** — Embedded schema includes **`branch_worktree_intent`**, **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**; **`persist-changeset-workflow`** validates and atomically writes **`workflow`**. Tests: **`branch_worktree_intent_acceptance`**. Feature docs: [workflow-json-schemas.md](../../../../docs/ft/coder/workflow-json-schemas.md). (tddy-tools)
 - **2026-04-05** [Feature] **`branch-review` submit and `review.md`** — Embeds **`branch-review`** schema from **`goals.json`**; **`submit`**: after validation, writes **`review.md`** under **`TDDY_SESSION_DIR`** when set; **`review_persist`** wraps **`tddy_workflow_recipes::review::persist_review_md_to_session_dir`**. Feature docs: [workflow-json-schemas.md](../../../../docs/ft/coder/workflow-json-schemas.md); [json-schema.md](../json-schema.md). (tddy-tools, tddy-workflow-recipes)

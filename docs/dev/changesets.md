@@ -2,7 +2,7 @@
 
 Wrapped changesets that span multiple packages or don’t map to a single `packages/*/docs/changesets.md` only.
 
-**Merge hygiene:** Product and package changelog/changeset indexes use Git’s **union** merge driver (see repo `.gitattributes`). Prefer **adding one new bullet** for new work instead of editing or reordering existing bullets on a branch that will merge alongside other feature work—parallel edits to the same line still conflict.
+**Merge hygiene:** [Changelog merge hygiene](./guides/changelog-merge-hygiene.md) — **one bullet = one line** (prepend under this block); do **not** rewrite shipped bullets in parallel with unrelated feature work. Optional long notes: [`changesets.d/`](./changesets.d/README.md). Repo `.gitattributes` sets **union** merge on this file; same-line edits on two branches still conflict.
 
 - **2026-04-06** [Documentation] **Codex OAuth web relay** — Feature **[docs/ft/web/codex-oauth-web-relay.md](../ft/web/codex-oauth-web-relay.md)**, **[docs/ft/daemon/codex-oauth-relay.md](../ft/daemon/codex-oauth-relay.md)**; changelogs **[web/changelog.md](../ft/web/changelog.md)**, **[daemon/changelog.md](../ft/daemon/changelog.md)**, **[coder/changelog.md](../ft/coder/changelog.md)**; packages **[tddy-daemon/docs/codex-oauth-relay.md](../../packages/tddy-daemon/docs/codex-oauth-relay.md)**, **[tddy-web/docs/codex-oauth-dialog.md](../../packages/tddy-web/docs/codex-oauth-dialog.md)**, **[tddy-daemon/docs/changesets.md](../../packages/tddy-daemon/docs/changesets.md)**, **[tddy-web/docs/changesets.md](../../packages/tddy-web/docs/changesets.md)**. (tddy-daemon, tddy-web, tddy-integration-tests, docs)
 

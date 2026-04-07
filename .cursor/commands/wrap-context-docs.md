@@ -90,6 +90,8 @@ Update milestone checkboxes as work completes:
    - **Update change history**: Add release note-style entry to `docs/ft/{product-area}/changelog.md`
    - **Delete source**: Remove PRD from `docs/ft/1-WIP/` (not archived)
 
+**Changelog / changeset index format (merge hygiene)** — follow [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md): **prepend** one new **`##`** (product changelog) or **one new bullet line** (indexes); **single-line** bullets; **do not** rewrite existing shipped lines in the same PR as unrelated work; optional **`docs/dev/changesets.d/YYYY-MM-DD-slug.md`** for long cross-package notes plus one line in `docs/dev/changesets.md`.
+
 **State B, Not Delta**: Documentation must read as cohesive, unified documents without traces of change process. No "previously", "now", "changed from", or temporal language.
 
 ### Decision Logic
