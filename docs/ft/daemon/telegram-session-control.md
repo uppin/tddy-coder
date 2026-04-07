@@ -29,6 +29,13 @@ Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`T
 | **`/answer-text <session> <text>`** | Free-text clarification answer (**`PresenterIntent::AnswerClarificationText`**). |
 | **`/answer-multi <session> i,j,…`** | Multi-select clarification with 0-based indices (**`PresenterIntent::AnswerClarificationMultiSelect`**). |
 
+### Concurrent elicitation (one Telegram chat, multiple sessions)
+
+- **Per-chat queue:** The daemon maintains a **FIFO queue** of workflow session ids per Telegram chat. The **first** session in the queue holds the **active elicitation token** for that chat. Only that session receives full interactive treatment consistent with the “single visible question” policy for inbound and outbound Telegram.
+- **Inbound gating:** **`eli:s:`**, **`eli:o:`**, and **`doc:`** (document-review) callbacks are accepted only when the callback’s session id matches the active token; other sessions receive a short alert. **`/answer-text`** and **`/answer-multi`** resolve the child gRPC target from the session key in the command, then apply the same active-token check before forwarding to **`PresenterIntent`**.
+- **Plain-text follow-up (“Other”):** After the operator taps **Other** on a select clarification, the next non-command message in the chat is routed to the pending session when it matches the active token policy (see harness **`handle_elicitation_other_followup_plain_message`**).
+- **Queue advancement:** After a successful step that completes the elicitation gate for the active session—including select confirmation, Other follow-up, terminal document-review actions where applicable, and successful **`/answer-text`** / **`/answer-multi`**—the coordinator removes the completed session from the head of the queue and exposes the next session as active (when present).
+
 ### Session list behavior (`/sessions`)
 
 - Sessions are listed **most recent first**, 10 per page.
@@ -98,6 +105,7 @@ The daemon binary runs **long-polling** inbound handling (see above). Durable **
 - **Unit tests** live in **`telegram_session_control.rs`** (`#[cfg(test)]`): parsers, chunking, presenter bytes.
 - **Integration tests** live in **`packages/tddy-daemon/tests/telegram_session_control_integration.rs`**: start workflow, recipe **`changeset.yaml`**, branch/worktree intent keyboard and persistence, plan chunk markers, elicitation mapping, unauthorized denial.
 - **Telegram ↔ GitHub linking** integration and unit tests live in **`packages/tddy-daemon/tests/telegram_github_link.rs`** and **`telegram_github_link.rs`** (`#[cfg(test)]`): OAuth state round-trip, mapping persistence, unlinked **`handle_start_workflow`** error path, stub exchange.
+- **Concurrent elicitation** scenarios (single chat, multiple sessions, active token) live in **`packages/tddy-daemon/tests/telegram_concurrent_elicitation_integration.rs`**.
 
 ## Related documentation
 

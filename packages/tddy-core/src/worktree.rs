@@ -322,6 +322,53 @@ fn git_rev_parse(cwd: &Path, rev: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// Short branch name for `rev` (e.g. `feature/a`), for comparison with [`git_head_branch_name`].
+fn git_rev_parse_abbrev_ref(cwd: &Path, rev: &str) -> Result<String, String> {
+    let out = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", rev])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("git rev-parse --abbrev-ref: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git rev-parse --abbrev-ref {} in {} failed: {}",
+            rev,
+            cwd.display(),
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s == "HEAD" {
+        return Err(format!(
+            "git rev-parse --abbrev-ref {} in {} resolved to detached HEAD",
+            rev,
+            cwd.display()
+        ));
+    }
+    Ok(s)
+}
+
+/// Current branch name in `cwd`, or [`None`] when `HEAD` is detached.
+fn git_head_branch_name(cwd: &Path) -> Result<Option<String>, String> {
+    let out = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("git rev-parse --abbrev-ref HEAD: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git rev-parse --abbrev-ref HEAD in {} failed: {}",
+            cwd.display(),
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s == "HEAD" {
+        return Ok(None);
+    }
+    Ok(Some(s))
+}
+
 /// Lists absolute paths of all registered worktrees (including the primary checkout).
 fn registered_worktree_paths(repo_root: &Path) -> Result<Vec<PathBuf>, String> {
     let out = Command::new("git")
@@ -345,37 +392,67 @@ fn registered_worktree_paths(repo_root: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(paths)
 }
 
-/// If any linked worktree already has `HEAD` at the same commit as `branch_ref` (as resolved in
-/// `repo_root`), returns that path so callers can **reuse** it instead of `git worktree add`.
+/// Finds a worktree to reuse for `branch_ref`:
+/// 1. **Name match**: a registered worktree whose current branch name equals `git rev-parse
+///    --abbrev-ref` of `branch_ref` in `repo_root` (e.g. `feature/x` checked out for `feature/x`).
+/// 2. Else **linked + same tip**: a worktree path under **`.worktrees/`** whose `HEAD` equals the
+///    resolved commit of `branch_ref`. This covers `origin/feature/x` vs a local `feature/x`
+///    checkout without matching the **primary** checkout when it sits on another branch (e.g.
+///    `master`) while an unused local branch exists at the same commit as `master` — the primary
+///    is not under `.worktrees/` and is excluded from tier 2.
 ///
-/// Preference order when multiple worktrees match (same tip): paths under **`.worktrees/`** first,
-/// then others (e.g. primary repo), then lexicographic path order for stability.
+/// Preference order within a tier: paths under **`.worktrees/`** first, then others, then
+/// lexicographic path order for stability.
 pub fn find_existing_worktree_for_branch_ref(
     repo_root: &Path,
     branch_ref: &str,
 ) -> Result<Option<PathBuf>, String> {
     let target = git_rev_parse(repo_root, branch_ref)?;
-    let mut matches: Vec<PathBuf> = Vec::new();
+    let want_branch = git_rev_parse_abbrev_ref(repo_root, branch_ref).ok();
+
+    let mut by_name: Vec<PathBuf> = Vec::new();
+    let mut by_commit_linked: Vec<PathBuf> = Vec::new();
+
     for p in registered_worktree_paths(repo_root)? {
         if !p.exists() {
             continue;
         }
+        if let Some(ref w) = want_branch {
+            if let Some(cur) = git_head_branch_name(&p)? {
+                if cur == *w {
+                    by_name.push(p.canonicalize().unwrap_or(p));
+                    continue;
+                }
+            }
+        }
         let Ok(head) = git_rev_parse(&p, "HEAD") else {
             continue;
         };
-        if head == target {
-            matches.push(p.canonicalize().unwrap_or(p));
+        if head != target {
+            continue;
+        }
+        if p.to_string_lossy().contains("/.worktrees/") {
+            by_commit_linked.push(p.canonicalize().unwrap_or(p));
         }
     }
-    if matches.is_empty() {
-        return Ok(None);
-    }
-    matches.sort_by(|a, b| {
+
+    let sort_key = |a: &PathBuf, b: &PathBuf| {
         let aw = a.to_string_lossy().contains("/.worktrees/");
         let bw = b.to_string_lossy().contains("/.worktrees/");
         bw.cmp(&aw).then_with(|| a.cmp(b))
-    });
-    Ok(matches.into_iter().next())
+    };
+
+    if !by_name.is_empty() {
+        let mut v = by_name;
+        v.sort_by(sort_key);
+        return Ok(v.into_iter().next());
+    }
+    if !by_commit_linked.is_empty() {
+        let mut v = by_commit_linked;
+        v.sort_by(sort_key);
+        return Ok(v.into_iter().next());
+    }
+    Ok(None)
 }
 
 /// Like [`find_existing_worktree_for_branch_ref`], but returns `Ok(None)` when `branch_ref` does not

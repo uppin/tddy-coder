@@ -53,7 +53,7 @@ pub struct Config {
     pub web: Option<WebConfig>,
     #[serde(default)]
     pub github: Option<GitHubConfig>,
-    /// Workflow recipe: `tdd` (default) or `bugfix`.
+    /// Workflow recipe: `free-prompting` (default when omitted in CLI/changeset), `tdd`, `bugfix`, etc.
     #[serde(default)]
     pub recipe: Option<String>,
 }

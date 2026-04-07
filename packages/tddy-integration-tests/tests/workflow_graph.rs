@@ -393,12 +393,8 @@ async fn backend_invoke_task_submit_takes_priority_over_questions() {
         .expect("MockBackend has channel")
         .store("plan", plan_json);
 
-    let task = BackendInvokeTask::from_recipe(
-        "plan",
-        GoalId::new("plan"),
-        common::tdd_recipe(),
-        backend.clone(),
-    );
+    let recipe = common::tdd_recipe();
+    let task = BackendInvokeTask::from_recipe("plan", GoalId::new("plan"), recipe, backend.clone());
     let ctx = Context::new();
     ctx.set_sync("prompt", "Add feature");
     ctx.set_sync("output_dir", std::path::PathBuf::from("/tmp"));
