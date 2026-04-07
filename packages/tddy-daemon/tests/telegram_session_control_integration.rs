@@ -20,6 +20,11 @@ use tddy_daemon::telegram_session_control::{
 const AUTHORIZED_CHAT: i64 = 424_242;
 const UNAUTHORIZED_CHAT: i64 = 999_001;
 
+/// True only for the branch-list **More…** pagination row (`tbm:`), not `origin/feature/more-*` labels.
+fn branch_keyboard_has_more_pagination_row(kb: &[Vec<(String, String)>]) -> bool {
+    kb.iter().flatten().any(|(l, d)| d.starts_with("tbm:") || l == "More…")
+}
+
 fn harness_with_sender(
     allowed: Vec<i64>,
     sessions_base: std::path::PathBuf,
@@ -56,6 +61,7 @@ fn harness_with_workflow_projects(
         sessions_base,
         sender.clone(),
         Some(workflow_spawn),
+        None,
     );
     (h, sender)
 }
@@ -823,9 +829,7 @@ async fn telegram_branch_pick_shows_more_when_more_than_ten_remote_branches() {
         .iter()
         .find(|m| m.text.contains("Choose integration base"))
         .expect("branch pick message");
-    let has_more = branch_msg.inline_keyboard.iter().flatten().any(|(l, d)| {
-        l.to_lowercase().contains("more") || d.starts_with("tbm:")
-    });
+    let has_more = branch_keyboard_has_more_pagination_row(&branch_msg.inline_keyboard);
     assert!(
         has_more,
         "must show More… when >10 origin branches; keyboards={:?}",
@@ -882,9 +886,7 @@ async fn telegram_branch_pick_no_more_when_at_most_ten_remote_branches() {
         .iter()
         .find(|m| m.text.contains("Choose integration base"))
         .expect("branch pick message");
-    let has_more = branch_msg.inline_keyboard.iter().flatten().any(|(l, d)| {
-        l.to_lowercase().contains("more") || d.starts_with("tbm:")
-    });
+    let has_more = branch_keyboard_has_more_pagination_row(&branch_msg.inline_keyboard);
     assert!(
         !has_more,
         "no More… when at most 10 origin branches; keyboards={:?}",
@@ -1058,6 +1060,7 @@ fn harness_with_workflow_projects_and_agents(
         sessions_base,
         sender.clone(),
         Some(workflow_spawn),
+        None,
     );
     (h, sender)
 }
@@ -1198,7 +1201,7 @@ async fn telegram_branch_callback_new_branch_from_base_sets_selected_integration
         .expect("intent callback");
 
     harness
-        .handle_telegram_branch_callback(AUTHORIZED_CHAT, 0, 0, session_id)
+        .handle_telegram_branch_callback(AUTHORIZED_CHAT, 0, 0, 0, session_id)
         .await
         .expect("branch callback default integration base");
 
