@@ -6,7 +6,7 @@ mod hooks;
 pub mod git_ops;
 pub mod github;
 
-pub use hooks::MergePrWorkflowHooks;
+pub use hooks::{merge_pr_github_tools_awareness_line, MergePrWorkflowHooks};
 
 use std::collections::BTreeMap;
 use std::path::Path;

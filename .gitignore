@@ -27,6 +27,8 @@ packages/tddy-daemon/.red-test-output.txt
 .green-submit-payload.json
 .evaluate-submit-payload.json
 .red-phase-marker-capture.txt
+.github-red-phase-test-output.txt
+.verify-result-acceptance.txt
 
 # Build artifacts
 target/

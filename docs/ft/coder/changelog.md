@@ -2,6 +2,13 @@
 
 Release note history for the Coder product area.
 
+## 2026-04-06 — GitHub PR MCP tools (tddy-tools) and recipe prompts
+
+- **tddy-tools**: MCP tools **`github_create_pull_request`** and **`github_update_pull_request`** (GitHub REST via **`curl`**); **`ServerInfo`** instructions name those tools when **`GITHUB_TOKEN`** or **`GH_TOKEN`** is set; mock-recorded request tests for JSON bodies and headers.
+- **tddy-workflow-recipes**: **`github_rest_common`** holds shared **`Accept`**, **`X-GitHub-Api-Version`**, token resolution, and User-Agent strings for merge-pr curl and **tddy-tools**; **tdd-small** merged **`red`** prompt includes the GitHub PR tools section only with a non-empty token; merge-pr hooks continue to append GitHub PR tool awareness under the same condition.
+- **Schema**: **`changeset-workflow`** accepts optional **`github_pr_tools_metadata`** alongside **`workflow`** fields.
+- **Docs**: [github-pr-tools-mcp.md](github-pr-tools-mcp.md); [workflow-recipes.md](workflow-recipes.md); [workflow-json-schemas.md](workflow-json-schemas.md); **`packages/tddy-tools/docs/json-schema.md`**; package **`changesets.md`** for **tddy-tools** and **tddy-workflow-recipes**; **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-04-06 — Branch/worktree intent (changeset workflow)
 
 - **tddy-core**: **`BranchWorktreeIntent`** (**`new_branch_from_base`** | **`work_on_selected_branch`**) on **`ChangesetWorkflow`**; **`branch_worktree_intent`** module (**`validate_workflow_branch_intent`**, **`resolve_branch_and_worktree_plan`**, **`merge_branch_worktree_intent_into_context`**); worktree setup paths **`setup_worktree_for_session_with_integration_base`** and **`setup_worktree_for_session_with_optional_chain_base`** apply intent when **`changeset.yaml`** **`workflow`** carries **`branch_worktree_intent`**; **`merge_persisted_workflow_into_context`** merges intent keys into engine **`Context`**.

@@ -2,7 +2,7 @@
 
 **Type**: Technical Product (Developer Tool)
 **Status**: Active
-**Updated**: 2026-04-05
+**Updated**: 2026-04-06
 
 ## Summary
 
@@ -49,6 +49,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 | Feature | Description |
 |---------|-------------|
 | [Workflow JSON Schemas](workflow-json-schemas.md) | JSON Schema contracts per goal; `goals.json` registry; `tddy-tools` `get-schema`, `list-schemas`, `submit` validation |
+| [GitHub pull request tools (MCP)](github-pr-tools-mcp.md) | **`github_create_pull_request`** / **`github_update_pull_request`** on **`tddy-tools --mcp`**; shared REST constants; merge-pr and **tdd-small** prompt gating |
 | [Workflow recipes](workflow-recipes.md) | Pluggable `WorkflowRecipe`; shipped recipes include **`TddRecipe`**, **`TddSmallRecipe`**, **`BugfixRecipe`**, **`FreePromptingRecipe`**, and **`GrillMeRecipe`**; **new sessions** default to **`free-prompting`** when no recipe is specified; `recipe_resolve` in `tddy-workflow-recipes`; `GoalId` / string states; **FeatureInput** **`/start-<recipe>`** and slash menu rows. **Grill me** **Create plan** brief: session `artifacts/grill-me-brief.md`; repo persistence per [AGENTS.md](../../../AGENTS.md) (`plans/` or feature-doc path). (Updated: 2026-04-05) |
 | [Planning Step](planning-step.md) | Plan goal, acceptance-tests goal, plan approval gate, CLI interface, LLM backend abstraction |
 | [Implementation Step](implementation-step.md) | Red, green, demo, evaluate goals; state machine; output artifacts |
