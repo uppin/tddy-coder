@@ -10,6 +10,14 @@ This surface is **distinct** from **[Telegram session notifications](telegram-no
 
 When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the daemon can resolve **`sessions_base`** for the current OS user (`USER` → `~/.tddy`), **`tddy-daemon`** starts a **teloxide long-polling** dispatcher (**`telegram_bot`**) alongside the web/RPC server. It handles the commands in the table above, inline **Enter** / **Delete** / **More** session-list callbacks (`enter:…`, `delete:…`, `more:…`), recipe / **branch-worktree intent** / project / **integration-base branch** / agent pick callbacks (`recipe:…`, `intent:…`, `tp:…`, `tb:…`, `ta:…`), document-review callbacks (`doc:…`), and elicitation select callbacks (`eli:s:…`). Commands and callbacks that drive the running **`tddy-coder`** child use **`PresenterIntent`** over **localhost** on the port registered for that session (see **`packages/tddy-daemon/src/presenter_intent_client.rs`**). The same **`TeloxideSender`** / **`Bot`** instance is shared with outbound notifications.
 
+## Telegram user ↔ GitHub identity
+
+The library module **`tddy_daemon::telegram_github_link`** binds a **Telegram user id** to a **GitHub login** (JSON store on disk, HMAC-signed OAuth **`state`**, stub OAuth exchange for tests). **`resolved_os_user_for_telegram_workflow`** resolves **`daemon.yaml`** **`users:`** the same way as web OAuth flows.
+
+**`TelegramSessionControlHarness::with_telegram_github_link`** accepts a mapping file path. When that path is set, **`handle_start_workflow`** requires a stored GitHub login for the Telegram **`user_id`** before it creates a session directory. If the user is not linked, the handler fails with a message that instructs the operator to complete GitHub linking (including reference to **`/link-github`** in the error text).
+
+Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`TelegramWorkflowSpawn`** OS user from the mapping, and Telegram commands that start the browser OAuth flow) integrates with **`DaemonConfig`** and **`AuthService`** at the binary layer. Technical reference: **[telegram-github-link.md](../../../packages/tddy-daemon/docs/telegram-github-link.md)**.
+
 ## Commands
 
 | Command | Description |
@@ -96,6 +104,7 @@ The daemon binary runs **long-polling** inbound handling (see above). Durable **
 
 - **Unit tests** live in **`telegram_session_control.rs`** (`#[cfg(test)]`): parsers, chunking, presenter bytes.
 - **Integration tests** live in **`packages/tddy-daemon/tests/telegram_session_control_integration.rs`**: start workflow, recipe **`changeset.yaml`**, branch/worktree intent keyboard and persistence, plan chunk markers, elicitation mapping, unauthorized denial.
+- **Telegram ↔ GitHub linking** integration and unit tests live in **`packages/tddy-daemon/tests/telegram_github_link.rs`** and **`telegram_github_link.rs`** (`#[cfg(test)]`): OAuth state round-trip, mapping persistence, unlinked **`handle_start_workflow`** error path, stub exchange.
 - **Concurrent elicitation** scenarios (single chat, multiple sessions, active token) live in **`packages/tddy-daemon/tests/telegram_concurrent_elicitation_integration.rs`**.
 
 ## Related documentation
