@@ -9,6 +9,14 @@
       "type": "array",
       "items": { "type": "string" }
     },
-    "tool_schema_id": { "type": "string" }
-  }
+    "tool_schema_id": { "type": "string" },
+    "branch_worktree_intent": {
+      "type": "string",
+      "enum": ["new_branch_from_base", "work_on_selected_branch"]
+    },
+    "selected_integration_base_ref": { "type": "string" },
+    "new_branch_name": { "type": "string" },
+    "selected_branch_to_work_on": { "type": "string" }
+  },
+  "additionalProperties": false
 }

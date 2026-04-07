@@ -2,6 +2,20 @@
 
 Release note history for the Coder product area.
 
+## 2026-04-06 — Branch/worktree intent (changeset workflow)
+
+- **tddy-core**: **`BranchWorktreeIntent`** (**`new_branch_from_base`** | **`work_on_selected_branch`**) on **`ChangesetWorkflow`**; **`branch_worktree_intent`** module (**`validate_workflow_branch_intent`**, **`resolve_branch_and_worktree_plan`**, **`merge_branch_worktree_intent_into_context`**); worktree setup paths **`setup_worktree_for_session_with_integration_base`** and **`setup_worktree_for_session_with_optional_chain_base`** apply intent when **`changeset.yaml`** **`workflow`** carries **`branch_worktree_intent`**; **`merge_persisted_workflow_into_context`** merges intent keys into engine **`Context`**.
+- **tddy-tools**: **`changeset-workflow`** JSON Schema (**`branch_worktree_intent`**, **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**); **`persist-changeset-workflow`** round-trip validation.
+- **tddy-service**: **`WorktreeElicitation`** optional fields align with **`changeset.yaml`** workflow (**`branch_worktree_intent`**, **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**).
+- **Tests**: **`branch_worktree_intent_acceptance`**, **`branch_worktree_intent_red`** (**tddy-core**, **tddy-tools**).
+- **Docs**: [workflow-json-schemas.md](workflow-json-schemas.md), [workflow-recipes.md](workflow-recipes.md), [planning-step.md](planning-step.md), [git-integration-base-ref.md](git-integration-base-ref.md); **[docs/dev/changesets.md](../../dev/changesets.md)**; package **`changesets.md`** for **tddy-core**, **tddy-tools**, **tddy-workflow-recipes**, **tddy-service**.
+
+## 2026-04-05 — Default `free-prompting` session recipe and `/start-<recipe>` feature prompt
+
+- **Sessions**: **New** sessions with no **`--recipe`** and no **`recipe`** in **`changeset.yaml`** use **`free-prompting`**. **`--recipe`** accepts **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**, **`review`**, and **`merge-pr`** on the CLI.
+- **TUI**: **FeatureInput** accepts **`/start-<cli>`** lines (supported recipe names); the slash menu lists **`/start-…`** rows before **`/recipe`** and project skills. After **`WorkflowComplete`** for a structured **`/start-*`** run (any recipe other than **`free-prompting`**), the active recipe returns to **`free-prompting`** and **`changeset.yaml`** stores **`free-prompting`** when resolution succeeds.
+- **Docs**: [workflow-recipes.md](workflow-recipes.md) (**Feature prompt: `/start-<recipe>`**), [1-OVERVIEW.md](1-OVERVIEW.md), [feature-prompt-agent-skills.md](feature-prompt-agent-skills.md); package **`changesets.md`** for **tddy-core**, **tddy-coder**, **tddy-workflow-recipes**, **tddy-tui**; cross-package **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-04-05 — Chain PR optional integration base (worktrees)
 
 - **tddy-core**: **`validate_chain_pr_integration_base_ref`**, **`fetch_chain_pr_integration_base`**, **`setup_worktree_for_session_with_optional_chain_base`**, **`resolve_persisted_worktree_integration_base_for_session`**; **`Changeset`** fields **`effective_worktree_integration_base_ref`**, **`worktree_integration_base_ref`** on **`changeset.yaml`**.

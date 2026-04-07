@@ -1,24 +1,32 @@
 # Workflow recipes (pluggable workflows)
 
 **Product area:** Coder  
-**Updated:** 2026-04-05
+**Updated:** 2026-04-06
 
 ## Summary
 
 Workflow behavior is defined by **recipes** in the **`tddy-workflow-recipes`** crate. **`tddy-core`** implements a recipe-agnostic engine (`WorkflowRecipe`, `WorkflowEngine`, graph execution, `CodingBackend`). Goals, states, transitions, hooks, backend hints, and permissions are **recipe-provided strings and metadata**, not a fixed enum in core.
 
-The shipped recipes are **`TddRecipe`** (default), **`TddSmallRecipe`**, **`BugfixRecipe`**, **`FreePromptingRecipe`**, **`GrillMeRecipe`**, and **`ReviewRecipe`**. Recipe selection uses a single resolution path in **`tddy-workflow-recipes::recipe_resolve`**: `workflow_recipe_and_manifest_from_cli_name` and `resolve_workflow_recipe_from_cli_name` return the active `WorkflowRecipe` (and, where needed, the paired **`SessionArtifactManifest`** on the same concrete type).
+The shipped recipes are **`TddRecipe`**, **`TddSmallRecipe`**, **`BugfixRecipe`**, **`FreePromptingRecipe`**, **`GrillMeRecipe`**, **`ReviewRecipe`**, and **`MergePrRecipe`**. **New sessions** with no explicit recipe use **`FreePromptingRecipe`** (`free-prompting`) by default; users can select **`tdd`** or other recipes per session or via **`--recipe`**. Recipe selection uses a single resolution path in **`tddy-workflow-recipes::recipe_resolve`**: `workflow_recipe_and_manifest_from_cli_name` and `resolve_workflow_recipe_from_cli_name` return the active `WorkflowRecipe` (and, where needed, the paired **`SessionArtifactManifest`** on the same concrete type).
 
 ## Selecting a recipe
 
 | Surface | Mechanism |
 |---------|-----------|
-| **tddy-coder** | `--recipe tdd`, `--recipe tdd-small`, `--recipe bugfix`, `--recipe free-prompting`, `--recipe grill-me`, or `--recipe review`; optional YAML `recipe:` (CLI overrides). |
-| **changeset.yaml** | Optional `recipe:` records the workflow for resume and session lists; empty or absent values behave like **`tdd`**. Initial session creation (presenter bootstrap and matching CLI paths) persists **`recipe`** on the written **`changeset.yaml`** so resume and tooling read the same recipe name as **`StartSession`**. |
+| **tddy-coder** | `--recipe tdd`, `--recipe tdd-small`, `--recipe bugfix`, `--recipe free-prompting`, `--recipe grill-me`, `--recipe review`, or `--recipe merge-pr`; optional YAML `recipe:` (CLI overrides). |
+| **changeset.yaml** | Optional `recipe:` records the workflow for resume and session lists; empty or absent values on **new** sessions resolve to **`free-prompting`** (same as omitting **`--recipe`**). Legacy changesets without `recipe:` may still resume with resolver defaults. Initial session creation persists **`recipe`** on the written **`changeset.yaml`** so resume and tooling read the same recipe name as **`StartSession`**. |
 | **tddy-daemon** | Spawns **`tddy-coder`** with `--recipe` when set; **`ConnectionService` `StartSessionRequest`** and **`TddyRemote` `StartSession`** carry a **`recipe`** string. |
 | **tddy-web** | **ConnectionScreen** exposes a **Workflow recipe** control per **Start New Session**; the value is sent on **`StartSession`**. |
 
-Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**, and **`review`** (aligned with **`WorkflowRecipe::name()`**). Invalid names fail on the CLI with a clear error; daemon streams report failure via **`WorkflowComplete`** with a descriptive message that lists supported names.
+Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**, **`review`**, and **`merge-pr`** (aligned with **`WorkflowRecipe::name()`**). Invalid names fail on the CLI with a clear error; daemon streams report failure via **`WorkflowComplete`** with a descriptive message that lists supported names.
+
+## Feature prompt: `/start-<recipe>`
+
+In **tddy-coder** TUI **FeatureInput**, a submitted line that matches **`/start-<cli>`** for a supported recipe CLI name selects that recipe for the session, persists **`recipe`** on **`changeset.yaml`**, and restarts the workflow. Text after the command becomes the feature remainder for the run.
+
+The feature-prompt slash menu lists **`/start-…`** rows for each shipped recipe before the built-in **`/recipe`** entry and project skills. Choosing a row inserts the corresponding **`/start-…`** literal for submission.
+
+When the workflow completes successfully after a **`/start-*`** session that targeted a structured recipe (any active recipe whose name is not **`free-prompting`**), the session’s active recipe returns to **`free-prompting`** and **`changeset.yaml`** records **`free-prompting`** when the resolver succeeds.
 
 ## TddRecipe
 
@@ -76,6 +84,22 @@ Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**
 - **Primary session document:** **`uses_primary_session_document`** **`false`**. **`approval_policy::recipe_should_skip_session_document_approval`** includes **`review`** with **free-prompting** and **grill-me**.
 - **Plan refinement:** **`plan_refinement_goal()`** returns **`branch-review`** so refinement targets the structured review step.
 
+## MergePrRecipe (Updated: 2026-04-06)
+
+- **CLI / recipe name:** **`merge-pr`** (**`WorkflowRecipe::name()`**).
+- **Start goal:** **`analyze`** — read-only feasibility check: fetch from origin, diff against the integration branch, report whether the merge is clean or has conflicts; **initial workflow state string:** **`Analyze`**.
+- **Pipeline:** **`analyze` → `sync-main` → `finalize` → `end`**.
+  - **`analyze`** — read-only, `PermissionHint::ReadOnly`, `evaluate_allowlist`. Fetches origin, examines the diff between the feature branch and the integration branch (e.g. `origin/main`), and reports: (1) whether a merge is needed, (2) whether it would be clean or has conflicts, (3) conflicting files and nature of conflicts, (4) recommendation (automatic vs manual resolution). No worktree created; runs from `output_dir`.
+  - **`sync-main`** — creates/selects a session worktree via `ensure_worktree_for_session`, then invokes the agent for the actual git merge and conflict resolution (`PermissionHint::AcceptEdits`).
+  - **`finalize`** — requires a validated **`tddy-tools submit --goal merge-pr-report`** payload (JSON Schema **`merge-pr-report`** in **`goals.json`**) with outcome metadata: sync strategy, PR number, merge commit SHA or skip reason.
+- **Worktree:** **`MergePrWorkflowHooks::before_task`** calls **`ensure_worktree_for_session`** before **`sync-main`** (not before **`analyze`**) so the read-only analysis runs without worktree overhead. Worktree is created/selected if already available for the session.
+- **Git context:** For all tasks, hooks resolve the repository root from **`worktree_dir`** / **`output_dir`** / **`session_dir`**, compute merge-base, and inject bounded **`git diff`** context into the system prompt (same approach as **`ReviewWorkflowHooks`**).
+- **GitHub merge (when available):** If **`GITHUB_TOKEN`** or **`GH_TOKEN`** is set, the **`finalize`** step can locate the open PR for the current branch and merge it via the GitHub REST API (`PUT /repos/{owner}/{repo}/pulls/{number}/merge`). When no token is available, the recipe completes git sync + push only (degraded mode).
+- **Structured submit:** **`finalize`** only (**`goal_requires_tddy_tools_submit`** is **`true`** for **`finalize`**, **`false`** for **`analyze`** and **`sync-main`**).
+- **Primary session document:** None; **`uses_primary_session_document`** defaults to **`false`**; **`approval_policy::recipe_should_skip_session_document_approval`** includes **`merge-pr`**.
+- **Artifacts:** **`merge_pr` → `merge-pr-report.json`** in **`SessionArtifactManifest`**.
+- **Permissions:** **`PermissionHint::ReadOnly`** for **`analyze`**; **`PermissionHint::AcceptEdits`** for **`sync-main`** and **`finalize`**; allowed tools include **`Bash(git *)`** and **`Bash(tddy-tools *)`**.
+
 ## Key types
 
 | Concept | Role |
@@ -88,6 +112,7 @@ Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**
 | **`FreePromptingRecipe`** | Minimal graph and hooks for the **Prompting** loop without TDD gates. |
 | **`GrillMeRecipe`** | Two goals (**`grill`** → **`create-plan`**); session **`artifacts/grill-me-brief.md`**; repo copy per **AGENTS.md** / **`plans/`** default. |
 | **`ReviewRecipe`** | **`inspect` → `branch-review` → `end`**; **`ReviewWorkflowHooks`**; session **`review.md`**; JSON goal **`branch-review`**. |
+| **`MergePrRecipe`** | **`analyze` → `sync-main` → `finalize` → `end`**; **`MergePrWorkflowHooks`** (read-only analysis, then worktree setup + git merge); session **`merge-pr-report.json`**; JSON goal **`merge-pr-report`**. |
 | **`approval_policy`** | Supported CLI name list and skip rules aligned with **`recipe_resolve`** and acceptance tests. |
 | **`recipe_resolve`** | **`workflow_recipe_and_manifest_from_cli_name`**, **`resolve_workflow_recipe_from_cli_name`**, **`unknown_workflow_recipe_error`**, **`WorkflowRecipeAndManifest`**. |
 
@@ -102,7 +127,7 @@ Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**
 |---------|----------------|
 | **`tddy-core`** | `WorkflowRecipe` trait, `WorkflowEngine` parameterized by `Arc<dyn WorkflowRecipe>`, session storage, backends, presenter integration. |
 | **`tddy-workflow-recipes`** | Concrete recipes, **`recipe_resolve`**, **`approval_policy`**, hooks, parsers, and backend hints per recipe. |
-| **`tddy-coder`**, **`tddy-service`**, **`tddy-daemon`**, **`tddy-demo`** | Resolve the active recipe from CLI, config, changeset, or RPC; default **`tdd`** when unspecified. |
+| **`tddy-coder`**, **`tddy-service`**, **`tddy-daemon`**, **`tddy-demo`** | Resolve the active recipe from CLI, config, changeset, or RPC; **new sessions** with no explicit recipe use **`free-prompting`** (same rule as **`changeset.yaml`** when **`recipe`** is absent). |
 
 ## Structured output contracts
 
@@ -124,10 +149,10 @@ This section records how the shipped recipes map to the same product philosophy 
 
 ### TDD (`tdd`)
 
-- **Default** when **`--recipe`** is omitted or **`changeset.yaml`** has no **`recipe`** field.
+- **Typical selection:** **`tdd`** when **`--recipe tdd`** is set or **`changeset.yaml`** records **`recipe: tdd`**. **New sessions** without an explicit recipe use **`free-prompting`** unless the CLI or **`changeset.yaml`** supplies a different name (see **Summary**).
 - **Start goal:** **`interview`** — clarification before PRD/plan; **`plan`** follows with PRD/TODO-style artifacts; full graph continues with acceptance-tests → red → green → ….
 - **Spirit:** Discovery-style elicitation (interview), then structured planning, then tests and implementation.
-- **Changeset workflow block:** **`changeset.yaml`** includes an optional **`workflow`** object: **`run_optional_step_x`** (boolean for the post-green branch), **`demo_options`** (strings describing how to run an optional **demo** goal), and optional **`tool_schema_id`** (URN tying the block to the **`changeset-workflow`** JSON Schema). **`tddy-tools persist-changeset-workflow`** validates a JSON payload against that schema and replaces the **`workflow`** section using an atomic write. **`tddy_core::changeset::merge_persisted_workflow_into_context`** copies persisted values into the engine **`Context`** so graph **`goal_conditions`** (e.g. **`run_optional_step_x`**) match the manifest; call sites pass the plan session directory.
+- **Changeset workflow block:** **`changeset.yaml`** includes an optional **`workflow`** object: **`run_optional_step_x`** (boolean for the post-green branch), **`demo_options`** (strings describing how to run an optional **demo** goal), optional **`tool_schema_id`** (URN tying the block to the **`changeset-workflow`** JSON Schema), and optional branch/worktree fields: **`branch_worktree_intent`** (**`new_branch_from_base`** | **`work_on_selected_branch`**), **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**. **`tddy-tools persist-changeset-workflow`** validates a JSON payload against that schema and replaces the **`workflow`** section using an atomic write. **`tddy_core::changeset::merge_persisted_workflow_into_context`** copies persisted values into the engine **`Context`** (including intent keys for hooks and resume) so graph **`goal_conditions`** (e.g. **`run_optional_step_x`**) match the manifest; call sites pass the plan session directory. **`tddy_core::worktree`** applies **`branch_worktree_intent`** during **`setup_worktree_for_session_with_integration_base`** (and the optional chain-base variant): new branch creation from the integration base vs checking out an existing branch in a new worktree path under **`.worktrees/`**.
 - **Interview:** System and user prompts require **`tddy-tools ask`** for whether the **demo** goal runs after **green**, for demo execution options, and for persisting **`run_optional_step_x`** / **`demo_options`** (via **`persist-changeset-workflow`**) into **`changeset.yaml`** before PRD-driven planning completes.
 
 ### TDD-small (`tdd-small`)
@@ -163,6 +188,16 @@ This section records how the shipped recipes map to the same product philosophy 
 - **Next goal:** **`branch-review`** — produces **`review.md`** in the session directory via **`tddy-tools submit --goal branch-review`** (schema-validated JSON with **`review_body_markdown`**).
 - **Artifacts:** **`review.md`** on the manifest for session file lists and previews.
 - **Spirit:** Branch-oriented code review with operator elicitation, then a single persisted markdown review aligned with the same merge-base scope as **`inspect`**.
+
+### Merge PR (`merge-pr`) (Updated: 2026-04-06)
+
+- **Start goal:** **`analyze`** — read-only merge feasibility check: fetch origin, diff against integration branch, report whether merge is clean or has conflicts, recommend auto vs manual resolution.
+- **Pipeline:** **`analyze` → `sync-main` → `finalize` → `end`**.
+  - **`analyze`**: Read-only (`PermissionHint::ReadOnly`). No worktree created. Runs from `output_dir`. Examines branch relationship, lists conflicting files if any, and advises on merge strategy.
+  - **`sync-main`**: Creates/selects session worktree via `ensure_worktree_for_session`, then performs the actual merge and conflict resolution (`PermissionHint::AcceptEdits`).
+  - **`finalize`**: Submits structured **`merge-pr-report`** outcome (sync strategy, PR number or skip reason, merge SHA or push ref).
+- **Worktree isolation:** Before **`sync-main`** runs (not before **`analyze`**), hooks call **`ensure_worktree_for_session`** to create or reuse a session worktree. The read-only analysis runs without worktree overhead.
+- **Spirit:** Analyze-then-act: read-only feasibility check before any modifications, deterministic git sync with optional GitHub API merge, safe degradation when no credentials are available.
 
 ### Tests
 

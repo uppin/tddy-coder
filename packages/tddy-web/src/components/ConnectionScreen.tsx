@@ -153,7 +153,7 @@ function createTokenClient() {
 type ProjectSessionForm = {
   toolPath: string;
   agent: string;
-  /** Workflow recipe: `tdd`, `bugfix`, `free-prompting`, or `grill-me` (matches `WorkflowRecipe::name()`). */
+  /** Workflow recipe: `tdd`, `tdd-small`, `bugfix`, `free-prompting`, or `grill-me` (matches `WorkflowRecipe::name()`). */
   recipe: string;
   debugLogging: boolean;
   daemonInstanceId: string;
@@ -171,7 +171,7 @@ function defaultProjectSessionForm(
   return {
     toolPath: tools[0]?.path ?? "",
     agent: coalesceBackendAgentSelection(agentOptions, undefined),
-    recipe: "tdd",
+    recipe: "free-prompting",
     debugLogging: false,
     daemonInstanceId: localDaemon?.instanceId ?? daemons[0]?.instanceId ?? "",
   };
@@ -280,6 +280,7 @@ function ProjectSessionOptions({
             className={sessionControlSelectClassName}
           >
             <option value="tdd">TDD (plan → implement)</option>
+            <option value="tdd-small">TDD small (plan → red → green)</option>
             <option value="bugfix">Bugfix (reproduce → fix)</option>
             <option value="free-prompting">Free prompting (open-ended)</option>
             <option value="grill-me">Grill me (Grill → Create plan)</option>

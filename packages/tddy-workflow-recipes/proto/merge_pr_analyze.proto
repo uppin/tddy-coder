@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Structured optional submit after merge-pr **analyze** (worktree directory name for sync-main).
+message MergePrAnalyzeOutput {
+  string goal = 1;
+  string summary = 2;
+  string worktree_suggestion = 3;
+}

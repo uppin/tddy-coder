@@ -28,12 +28,18 @@ use tddy_core::Presenter;
 use crate::disable_raw_mode;
 
 fn recipe_arc_for_args(args: &Args) -> anyhow::Result<Arc<dyn WorkflowRecipe>> {
-    let name = args.recipe.as_deref().unwrap_or("tdd");
+    let name = args
+        .recipe
+        .as_deref()
+        .unwrap_or_else(|| crate::default_unspecified_workflow_recipe_cli_name());
     crate::resolve_workflow_recipe_from_cli_name(name.trim()).map_err(|e| anyhow::anyhow!(e))
 }
 
 fn validate_recipe_cli(args: &Args) -> anyhow::Result<()> {
-    let name = args.recipe.as_deref().unwrap_or("tdd");
+    let name = args
+        .recipe
+        .as_deref()
+        .unwrap_or_else(|| crate::default_unspecified_workflow_recipe_cli_name());
     crate::resolve_workflow_recipe_from_cli_name(name.trim())
         .map(|_| ())
         .map_err(|e| anyhow::anyhow!(e))
@@ -318,7 +324,7 @@ pub struct Args {
     pub cursor_agent_path: Option<PathBuf>,
     /// Path to the Codex CLI. When set, overrides `TDDY_CODEX_CLI` and the default `codex` on `PATH`.
     pub codex_cli_path: Option<PathBuf>,
-    /// Workflow recipe name (`tdd`, `bugfix`, `free-prompting`, `grill-me`, `tdd-small`, `review`). `None` means default `tdd` or recipe from changeset on resume.
+    /// Workflow recipe name (`tdd`, `tdd-small`, `bugfix`, `free-prompting`, `grill-me`, `review`, `merge-pr`). `None` means default `free-prompting` or recipe from changeset on resume.
     pub recipe: Option<String>,
 }
 
@@ -455,8 +461,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, `grill-me`, `tdd-small`, `review`. Must match [`WorkflowRecipe::name`].
-    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me", "tdd-small", "review"])]
+    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`. Must match [`WorkflowRecipe::name`].
+    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr"])]
     pub recipe: Option<String>,
 
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
@@ -601,8 +607,8 @@ pub struct DemoArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `tdd` (default), `bugfix`, `free-prompting`, `grill-me`, `tdd-small`, `review`.
-    #[arg(long, value_parser = ["tdd", "bugfix", "free-prompting", "grill-me", "tdd-small", "review"])]
+    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`.
+    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr"])]
     pub recipe: Option<String>,
 }
 
@@ -984,10 +990,16 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
     let init_cs = tddy_core::changeset::Changeset {
         initial_prompt: Some(input.clone()),
         repo_path: Some(output_dir_for_ctx.display().to_string()),
-        recipe: Some(args.recipe.as_deref().unwrap_or("tdd").to_string()),
+        recipe: Some(
+            args.recipe
+                .as_deref()
+                .unwrap_or_else(|| crate::default_unspecified_workflow_recipe_cli_name())
+                .to_string(),
+        ),
         ..tddy_core::changeset::Changeset::default()
     };
-    let _ = tddy_core::changeset::write_changeset(&session_dir, &init_cs);
+    tddy_core::changeset::write_changeset(&session_dir, &init_cs)
+        .map_err(|e| anyhow::anyhow!("write changeset: {}", e))?;
     tddy_core::write_initial_tool_session_metadata(
         &session_dir,
         tddy_core::InitialToolSessionMetadataOpts {
@@ -1518,7 +1530,10 @@ fn merge_session_coder_config_from_dir(args: &mut Args, session_dir: &Path) -> a
 ///
 /// Clears [`Args::goal`] when it is neither the recipe start goal nor one of [`WorkflowRecipe::goal_ids`].
 fn clear_goal_when_not_in_recipe_goal_ids(args: &mut Args) {
-    let recipe_name = args.recipe.as_deref().unwrap_or("tdd");
+    let recipe_name = args
+        .recipe
+        .as_deref()
+        .unwrap_or_else(|| crate::default_unspecified_workflow_recipe_cli_name());
     let Ok(recipe) = crate::resolve_workflow_recipe_from_cli_name(recipe_name.trim()) else {
         return;
     };
@@ -1555,7 +1570,10 @@ fn apply_agent_from_changeset_if_needed(args: &mut Args) -> anyhow::Result<()> {
         Ok(cs) => cs,
         Err(_) => return Ok(()),
     };
-    let recipe_name = cs.recipe.as_deref().unwrap_or("tdd");
+    let recipe_name = cs
+        .recipe
+        .as_deref()
+        .unwrap_or_else(|| crate::default_unspecified_workflow_recipe_cli_name());
     let recipe = crate::resolve_workflow_recipe_from_cli_name(recipe_name.trim())
         .map_err(|e| anyhow::anyhow!(e))?;
     let start_goal_id = recipe.start_goal();
@@ -2409,10 +2427,16 @@ fn run_plan_bootstrap_in_session_dir(
     let init_cs = tddy_core::changeset::Changeset {
         initial_prompt: Some(input.clone()),
         repo_path: Some(output_dir_for_ctx.display().to_string()),
-        recipe: Some(args.recipe.as_deref().unwrap_or("tdd").to_string()),
+        recipe: Some(
+            args.recipe
+                .as_deref()
+                .unwrap_or_else(|| crate::default_unspecified_workflow_recipe_cli_name())
+                .to_string(),
+        ),
         ..tddy_core::changeset::Changeset::default()
     };
-    let _ = tddy_core::changeset::write_changeset(session_dir, &init_cs);
+    tddy_core::changeset::write_changeset(session_dir, &init_cs)
+        .map_err(|e| anyhow::anyhow!("write changeset: {}", e))?;
     tddy_core::write_initial_tool_session_metadata(
         session_dir,
         tddy_core::InitialToolSessionMetadataOpts {

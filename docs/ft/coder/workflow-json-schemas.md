@@ -1,7 +1,7 @@
 # Workflow JSON Schemas (structured agent output)
 
 **Product area:** Coder  
-**Updated:** 2026-04-05
+**Updated:** 2026-04-06
 
 ## Summary
 
@@ -37,6 +37,19 @@ This command is **not** listed in **`goals.json`**; it is a session utility, not
 ## Changeset workflow (`persist-changeset-workflow`)
 
 **`tddy-tools persist-changeset-workflow`** takes **`--session-dir`** (directory containing **`changeset.yaml`**) and **`--data`** (JSON object). Payloads validate against the **`changeset-workflow`** schema (**`$id`**: **`urn:tddy:tool/changeset-workflow`**), then merge into **`changeset.yaml`** under **`workflow`** with an atomic replace. This goal is listed in **`goals.json`** alongside workflow goals so **`get-schema changeset-workflow`** and **`list-schemas`** include it. It complements **`set-session-context`**: the latter updates ephemeral session JSON; **`persist-changeset-workflow`** updates the durable changeset manifest.
+
+The **`changeset-workflow`** schema includes post-green routing fields (**`run_optional_step_x`**, **`demo_options`**, optional **`tool_schema_id`**) and branch/worktree intent fields:
+
+- **`branch_worktree_intent`**: string enum **`new_branch_from_base`** | **`work_on_selected_branch`** (optional).
+- **`selected_integration_base_ref`**: remote-tracking ref used when creating a new branch from a base (for example **`origin/main`**).
+- **`new_branch_name`**: branch name for **`new_branch_from_base`**.
+- **`selected_branch_to_work_on`**: existing local branch name for **`work_on_selected_branch`**.
+
+**`additionalProperties`** is **`false`** on the payload object: unknown keys fail validation.
+
+**`tddy_core::changeset::merge_persisted_workflow_into_context`** copies **`run_optional_step_x`**, **`demo_options`**, and intent-related keys (**`branch_worktree_intent`**, **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**) into the engine **`Context`** when present so hooks and resume logic read the same values as **`changeset.yaml`**.
+
+**`tddy_core::worktree`** uses persisted workflow intent in **`setup_worktree_for_session_with_integration_base`** and **`setup_worktree_for_session_with_optional_chain_base`**: **`new_branch_from_base`** creates a new branch and worktree from the integration base; **`work_on_selected_branch`** attaches a worktree at the suggested directory name to an existing branch (including a detach-and-switch path when Git reports the branch is already checked out elsewhere).
 
 ## Related
 

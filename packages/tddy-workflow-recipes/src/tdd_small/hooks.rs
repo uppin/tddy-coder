@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tddy_core::backend::{AgentOutputSink, ProgressSink};
 use tddy_core::changeset::{
     append_session_and_update_state, read_changeset, resolve_model, update_state, write_changeset,
-    Changeset, SessionEntry,
+    BranchWorktreeIntent, Changeset, SessionEntry,
 };
 use tddy_core::error::WorkflowError;
 use tddy_core::presenter::WorkflowEvent;
@@ -222,6 +222,17 @@ fn after_plan(
     cs.discovery = planning.discovery.clone();
     cs.branch_suggestion = planning.branch_suggestion.clone();
     cs.worktree_suggestion = planning.worktree_suggestion.clone();
+    if cs.workflow.as_ref().and_then(|w| w.branch_worktree_intent)
+        == Some(BranchWorktreeIntent::NewBranchFromBase)
+    {
+        if let Some(ref b) = planning.branch_suggestion {
+            if !b.trim().is_empty() {
+                cs.workflow
+                    .get_or_insert_with(Default::default)
+                    .new_branch_name = Some(b.clone());
+            }
+        }
+    }
     let session_exists = cs.sessions.iter().any(|s| s.id == session_id);
     let start_tag = recipe.start_goal().as_str().to_string();
     if session_exists {

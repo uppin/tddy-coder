@@ -6,7 +6,10 @@ mod parse;
 mod persist;
 mod prompt;
 
-pub use git_context::merge_base_strategy_documentation;
+pub use git_context::{
+    format_diff_context_for_prompt, merge_base_commit_for_review,
+    merge_base_strategy_documentation, resolve_git_repo_root,
+};
 pub use hooks::ReviewWorkflowHooks;
 pub use parse::{parse_branch_review_output, BranchReviewOutput};
 pub use persist::persist_review_md_to_session_dir;

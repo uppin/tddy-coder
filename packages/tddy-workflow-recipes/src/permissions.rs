@@ -105,6 +105,21 @@ pub fn refactor_allowlist() -> Vec<String> {
     ]
 }
 
+/// Allowlist for the **merge-pr** recipe (`sync-main`, `finalize`): git fetch/merge/push + `tddy-tools`.
+pub fn merge_pr_allowlist() -> Vec<String> {
+    vec![
+        "Read".to_string(),
+        "Write".to_string(),
+        "Edit".to_string(),
+        "Glob".to_string(),
+        "Grep".to_string(),
+        "SemanticSearch".to_string(),
+        "AskUserQuestion".to_string(),
+        "Bash(git *)".to_string(),
+        "Bash(tddy-tools *)".to_string(),
+    ]
+}
+
 /// Allowlist for the update-docs goal (read PRD/changeset/progress, update feature/dev docs).
 /// Complements --permission-mode acceptEdits.
 pub fn update_docs_allowlist() -> Vec<String> {
@@ -146,5 +161,6 @@ mod tests {
         assert_allowlist_contains_ask_user_question(&validate_subagents_allowlist(), "validate");
         assert_allowlist_contains_ask_user_question(&refactor_allowlist(), "refactor");
         assert_allowlist_contains_ask_user_question(&update_docs_allowlist(), "update-docs");
+        assert_allowlist_contains_ask_user_question(&merge_pr_allowlist(), "merge-pr");
     }
 }

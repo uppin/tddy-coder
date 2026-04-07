@@ -19,7 +19,7 @@ use tddy_core::{
 use tddy_service::gen::tddy_remote_server::TddyRemoteServer;
 use tddy_service::TddyRemoteService;
 use tddy_tui::{render::draw, virtual_tui::drain_presenter_broadcast, TuiView};
-use tddy_workflow_recipes::TddRecipe;
+use tddy_workflow_recipes::{resolve_workflow_recipe_from_cli_name, TddRecipe};
 
 use crate::test_util::temp_dir_with_git_repo;
 
@@ -347,7 +347,10 @@ fn spawn_presenter_stub_workflow(
 
     let presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe))
         .with_broadcast(event_tx)
-        .with_intent_sender(intent_tx);
+        .with_intent_sender(intent_tx)
+        .with_recipe_resolver(Arc::new(|name: &str| {
+            resolve_workflow_recipe_from_cli_name(name.trim())
+        }));
     let output_dir = std::env::temp_dir().join(format!("tddy-e2e-vt-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&output_dir).unwrap();
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));

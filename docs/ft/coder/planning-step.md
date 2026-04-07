@@ -2,7 +2,7 @@
 
 **Product Area**: Coder
 **Status**: Draft
-**Updated**: 2026-04-04
+**Updated**: 2026-04-06
 
 ## Summary
 
@@ -10,7 +10,7 @@ The planning phase of the tddy-coder workflow includes an optional **interview**
 
 ## Changeset workflow (TDD recipe)
 
-`changeset.yaml` carries an optional **`workflow`** object for graph routing after **green**: **`run_optional_step_x`** (boolean), **`demo_options`** (list of strings describing how an optional **demo** goal runs), and optional **`tool_schema_id`** (URN for the **`changeset-workflow`** JSON Schema). Agents persist this block with **`tddy-tools persist-changeset-workflow`** after JSON Schema validation. **`tddy_core::changeset::merge_persisted_workflow_into_context`** loads the block into the workflow **`Context`** so **`run_optional_step_x`** and **`demo_options`** align with transition predicates. The **interview** prompts require **`tddy-tools ask`** for demo yes/no and options, and persistence of those fields into **`changeset.yaml`**. See [Workflow recipes — TDD](workflow-recipes.md#developer-reference-shipped-recipes) for the full recipe picture.
+`changeset.yaml` carries an optional **`workflow`** object for graph routing after **green**: **`run_optional_step_x`** (boolean), **`demo_options`** (list of strings describing how an optional **demo** goal runs), optional **`tool_schema_id`** (URN for the **`changeset-workflow`** JSON Schema), and optional branch/worktree intent fields (**`branch_worktree_intent`**, **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**) validated by the same schema. Agents persist this block with **`tddy-tools persist-changeset-workflow`** after JSON Schema validation. **`tddy_core::changeset::merge_persisted_workflow_into_context`** loads the block into the workflow **`Context`** so **`run_optional_step_x`**, **`demo_options`**, and intent keys align with transition predicates and automation. The **interview** prompts require **`tddy-tools ask`** for demo yes/no and options, and persistence of those fields into **`changeset.yaml`**. See [Workflow recipes — TDD](workflow-recipes.md#developer-reference-shipped-recipes) and [Workflow JSON schemas](workflow-json-schemas.md#changeset-workflow-persist-changeset-workflow) for the full picture.
 
 ## Background
 

@@ -7,37 +7,41 @@ use std::path::Path;
 
 /// Parity with `tddy_tools::schema::GOAL_SCHEMA_FILES` — the registered workflow goals.
 const REGISTERED_GOALS: &[&str] = &[
-    "analyze",
-    "plan",
     "acceptance-tests",
-    "red",
-    "green",
-    "post-green-review",
+    "analyze",
     "branch-review",
+    "changeset-workflow",
+    "demo",
     "evaluate-changes",
-    "validate",
+    "green",
+    "merge-pr-analyze",
+    "merge-pr-report",
+    "plan",
+    "post-green-review",
+    "red",
     "refactor",
     "update-docs",
-    "demo",
-    "changeset-workflow",
+    "validate",
 ];
 
 /// Expected `$id` for each CLI goal (differs from the CLI name where the URN uses a shorter id).
 fn expected_schema_id_for_goal(goal: &str) -> &'static str {
     match goal {
-        "analyze" => "urn:tddy:goal/analyze",
         "plan" => "urn:tddy:goal/plan",
         "acceptance-tests" => "urn:tddy:goal/acceptance-tests",
+        "analyze" => "urn:tddy:goal/analyze",
+        "branch-review" => "urn:tddy:goal/branch-review",
+        "changeset-workflow" => "urn:tddy:tool/changeset-workflow",
         "red" => "urn:tddy:goal/red",
         "green" => "urn:tddy:goal/green",
         "post-green-review" => "urn:tddy:goal/post-green-review",
-        "branch-review" => "urn:tddy:goal/branch-review",
         "evaluate-changes" => "urn:tddy:goal/evaluate",
         "validate" => "urn:tddy:goal/validate-subagents",
         "refactor" => "urn:tddy:goal/refactor",
         "update-docs" => "urn:tddy:goal/update-docs",
         "demo" => "urn:tddy:goal/demo",
-        "changeset-workflow" => "urn:tddy:tool/changeset-workflow",
+        "merge-pr-analyze" => "urn:tddy:goal/merge-pr-analyze",
+        "merge-pr-report" => "urn:tddy:goal/merge-pr-report",
         _ => panic!("unexpected goal: {goal}"),
     }
 }

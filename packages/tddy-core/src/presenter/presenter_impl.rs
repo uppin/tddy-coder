@@ -102,6 +102,9 @@ pub struct Presenter {
     recipe_slash_selection_pending: bool,
     /// Resolves CLI recipe name to a new [`WorkflowRecipe`] (wired from `tddy-coder`).
     recipe_resolver: Option<Arc<RecipeResolverFn>>,
+    /// Set when the user started a non-`free-prompting` workflow via `/start-*`; cleared after
+    /// `WorkflowComplete` restores the session to free prompting (or on workflow error).
+    start_slash_structured_run_active: bool,
     /// Shared critical state for broadcast lag recovery.
     /// Updated on every GoalStarted/StateChanged; views read after Lagged.
     critical_state: Arc<std::sync::Mutex<CriticalPresenterState>>,
@@ -170,6 +173,7 @@ impl Presenter {
             workflow_recipe,
             recipe_slash_selection_pending: false,
             recipe_resolver: None,
+            start_slash_structured_run_active: false,
             critical_state: Arc::new(std::sync::Mutex::new(CriticalPresenterState::default())),
         }
     }
@@ -429,6 +433,9 @@ impl Presenter {
         match intent {
             UserIntent::SubmitFeatureInput(text) => {
                 if text.is_empty() {
+                    return;
+                }
+                if self.try_handle_start_slash_line(&text) {
                     return;
                 }
                 if let Some(ref dir) = self.workflow_session_dir {
@@ -1248,6 +1255,14 @@ impl Presenter {
                             );
                         }
                     } else {
+                        match &result {
+                            Ok(_) => {
+                                self.finish_start_slash_structured_run_if_needed();
+                            }
+                            Err(_) => {
+                                self.start_slash_structured_run_active = false;
+                            }
+                        }
                         match result {
                             Err(ref msg) => {
                                 log::error!("Workflow failed: {}", msg);
@@ -1354,6 +1369,10 @@ impl Presenter {
             self.workflow_output_dir.clone(),
         ) {
             if let Some(h) = self.workflow_handle.take() {
+                // Drop the answer sender so a workflow blocked on `answer_rx.recv()` (initial
+                // feature line or clarification) unblocks and exits; otherwise `join()` deadlocks
+                // (e.g. `/start-*` from FeatureInput before any text was sent to the channel).
+                self.answer_tx = None;
                 let _ = h.join();
             }
             self.workflow_result = None;
@@ -1422,6 +1441,92 @@ impl Presenter {
         self.workflow_session_dir
             .as_ref()
             .or(self.workflow_output_dir.as_ref())
+    }
+
+    /// After a successful `/start-*` structured run, switch active recipe back to free prompting.
+    fn finish_start_slash_structured_run_if_needed(&mut self) {
+        if !self.start_slash_structured_run_active {
+            return;
+        }
+        self.start_slash_structured_run_active = false;
+        let Some(ref resolve) = self.recipe_resolver else {
+            log::debug!("finish_start_slash_structured_run: no recipe_resolver");
+            return;
+        };
+        let fp_name = crate::feature_start_slash::DEFAULT_UNSPECIFIED_WORKFLOW_RECIPE_CLI_NAME;
+        match resolve(fp_name) {
+            Ok(r) => {
+                self.workflow_recipe = r;
+                if let Some(dir) = self.changeset_read_dir().cloned() {
+                    let mut cs = crate::changeset::read_changeset(&dir).unwrap_or_default();
+                    cs.recipe = Some(fp_name.to_string());
+                    if let Err(e) = crate::changeset::write_changeset(&dir, &cs) {
+                        log::warn!("finish_start_slash_structured_run: write_changeset: {}", e);
+                    }
+                }
+                log::info!(
+                    "finish_start_slash_structured_run: active recipe restored to {:?}",
+                    fp_name
+                );
+            }
+            Err(e) => log::warn!(
+                "finish_start_slash_structured_run: resolve free-prompting: {}",
+                e
+            ),
+        }
+    }
+
+    /// Handle `/start-<recipe>` from feature input: switch recipe, persist, restart workflow with remainder.
+    /// Returns `true` if the line was fully handled as a start-slash command (including parse errors).
+    /// Returns `false` when a resolver is required but missing so the caller treats the line as a normal feature submit.
+    fn try_handle_start_slash_line(&mut self, full_line: &str) -> bool {
+        if !matches!(self.state.mode, AppMode::FeatureInput) {
+            return false;
+        }
+        let Some(parsed) = crate::feature_start_slash::parse_feature_start_slash_line(full_line)
+        else {
+            return false;
+        };
+        match parsed {
+            Err(msg) => {
+                self.log_activity(format!("/start-: {msg}"), ActivityKind::Info);
+                true
+            }
+            Ok(cli_name) => {
+                let Some(ref resolve) = self.recipe_resolver else {
+                    log::debug!(
+                        "try_handle_start_slash_line: no recipe_resolver; pass through as normal submit"
+                    );
+                    return false;
+                };
+                match resolve(&cli_name) {
+                    Err(e) => {
+                        self.log_activity(
+                            format!("Unknown or unsupported recipe `{cli_name}`: {e}"),
+                            ActivityKind::Info,
+                        );
+                        true
+                    }
+                    Ok(new_recipe) => {
+                        let structured = new_recipe.name() != "free-prompting";
+                        self.start_slash_structured_run_active = structured;
+                        self.workflow_recipe = new_recipe;
+                        if let Some(dir) = self.changeset_read_dir().cloned() {
+                            let mut cs = crate::changeset::read_changeset(&dir).unwrap_or_default();
+                            cs.recipe = Some(cli_name.clone());
+                            if let Err(e) = crate::changeset::write_changeset(&dir, &cs) {
+                                log::warn!("try_handle_start_slash_line: write_changeset: {}", e);
+                            }
+                        }
+                        let rest = crate::feature_start_slash::remainder_after_start_slash_line(
+                            full_line, &cli_name,
+                        );
+                        self.restart_workflow(rest);
+                        true
+                    }
+                }
+            }
+        }
     }
 
     /// Reference to current state.
@@ -2105,5 +2210,71 @@ mod tests {
             "expected a single authoritative representation for agent line text in presenter events; got {} (events: {:?})",
             channels, events
         );
+    }
+
+    #[test]
+    fn submit_start_slash_without_recipe_resolver_logs_as_normal_feature_input() {
+        let mut p = make_presenter();
+        assert!(matches!(p.state().mode, AppMode::FeatureInput));
+        p.handle_intent(UserIntent::SubmitFeatureInput(
+            "/start-tdd a todo app".to_string(),
+        ));
+        let user_prompts: Vec<_> = p
+            .state()
+            .activity_log
+            .iter()
+            .filter(|e| e.kind == ActivityKind::UserPrompt)
+            .map(|e| e.text.as_str())
+            .collect();
+        assert_eq!(
+            user_prompts,
+            vec!["/start-tdd a todo app"],
+            "without recipe_resolver, /start-* must fall through so the user sees a normal submit"
+        );
+    }
+
+    /// `/start-*` calls `restart_workflow` while the first run may still be blocked on the first
+    /// `answer_rx.recv()` (no `session_dir`, no `initial_prompt`). The old workflow thread must
+    /// exit when the answer channel closes so `join()` cannot deadlock.
+    #[test]
+    fn start_slash_restart_unblocks_workflow_waiting_for_first_feature_input() {
+        use crate::presenter::presenter_test_recipe::EmptyPresenterTestRecipe;
+        use crate::{AnyBackend, StubBackend};
+
+        let tmp = std::env::temp_dir().join(format!("tddy-restart-unblock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let resolver =
+            Arc::new(|_: &str| Ok(Arc::new(EmptyPresenterTestRecipe) as Arc<dyn WorkflowRecipe>));
+        let mut p = Presenter::new("stub", "opus", Arc::new(EmptyPresenterTestRecipe))
+            .with_recipe_resolver(resolver);
+        let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+        p.start_workflow(
+            backend,
+            tmp.clone(),
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+            None,
+            None,
+        );
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let _ = std::thread::spawn(move || {
+            p.handle_intent(UserIntent::SubmitFeatureInput(
+                "/start-tdd hello world".to_string(),
+            ));
+            let _ = done_tx.send(());
+        });
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .expect("handle_intent must not deadlock waiting on workflow join");
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
