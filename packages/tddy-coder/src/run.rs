@@ -80,6 +80,65 @@ impl tddy_service::TokenProvider for LiveKitTokenProvider {
     }
 }
 
+/// Virtual terminal + in-memory Codex OAuth state and LiveKit metadata channel for `codex_oauth` JSON.
+fn terminal_and_codex_oauth_for_livekit(
+    view_factory: Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>,
+    mouse: bool,
+) -> (
+    tddy_service::TerminalServiceVirtualTui,
+    tddy_service::CodexOAuthSession,
+    tokio::sync::watch::Sender<String>,
+    tokio::sync::watch::Receiver<String>,
+) {
+    let oauth_session: tddy_service::CodexOAuthSession = Arc::new(std::sync::Mutex::new(
+        tddy_service::CodexOAuthSessionState::default(),
+    ));
+    let (metadata_tx, metadata_rx) = tokio::sync::watch::channel(String::new());
+    let scan_buf = Arc::new(std::sync::Mutex::new(String::new()));
+    let session_cl = oauth_session.clone();
+    let meta_cl = metadata_tx.clone();
+    let buf_cl = scan_buf.clone();
+    let hook = Arc::new(move |chunk: &[u8]| {
+        let mut b = match buf_cl.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        tddy_service::codex_oauth_scan::append_terminal_scan_buffer(&mut b, chunk, 65_536);
+        let Some(detected) = tddy_service::codex_oauth_scan::scan_codex_oauth_from_buffer(&b)
+        else {
+            return;
+        };
+        let mut g = match session_cl.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        let update = match &g.pending {
+            None => true,
+            Some(p) => p.detected.authorize_url != detected.authorize_url,
+        };
+        if !update {
+            return;
+        }
+        g.pending = Some(tddy_service::CodexOAuthPending {
+            detected: detected.clone(),
+        });
+        drop(g);
+        let json = serde_json::json!({
+            "codex_oauth": {
+                "pending": true,
+                "authorize_url": detected.authorize_url,
+                "callback_port": detected.callback_port,
+                "state": detected.state,
+            }
+        })
+        .to_string();
+        let _ = meta_cl.send(json);
+    });
+    let terminal_service =
+        tddy_service::TerminalServiceVirtualTui::with_output_hook(view_factory, mouse, hook);
+    (terminal_service, oauth_session, metadata_tx, metadata_rx)
+}
+
 /// Verify tddy-tools binary is available. Required for claude, cursor, and codex agents.
 /// Skips when agent is stub (uses InMemoryToolExecutor).
 fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
@@ -1389,10 +1448,29 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             let factory = view_factory
                 .clone()
                 .expect("factory set when livekit_enabled");
-            let terminal_service =
-                tddy_service::TerminalServiceVirtualTui::new(factory, args.mouse);
+            let (terminal_service, oauth_session, metadata_tx, metadata_rx) =
+                terminal_and_codex_oauth_for_livekit(factory, args.mouse);
+            let codex_oauth_impl = tddy_service::CodexOAuthServiceImpl::with_metadata_watch(
+                oauth_session,
+                metadata_tx,
+            );
+            let livekit_multi = tddy_rpc::MultiRpcService::new(vec![
+                tddy_rpc::ServiceEntry {
+                    name: "terminal.TerminalService",
+                    service: std::sync::Arc::new(tddy_service::TerminalServiceServer::new(
+                        terminal_service,
+                    )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                },
+                tddy_rpc::ServiceEntry {
+                    name: tddy_service::CodexOAuthServiceServer::<
+                        tddy_service::CodexOAuthServiceImpl,
+                    >::NAME,
+                    service: std::sync::Arc::new(tddy_service::CodexOAuthServiceServer::new(
+                        codex_oauth_impl,
+                    )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                },
+            ]);
             if has_key_secret {
-                let oauth_for_reconnect = codex_oauth_watch.clone();
                 let token_generator = tddy_livekit::TokenGenerator::new(
                     args.livekit_api_key.as_ref().unwrap().clone(),
                     args.livekit_api_secret.as_ref().unwrap().clone(),
@@ -1401,13 +1479,13 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     std::time::Duration::from_secs(120),
                 );
                 tokio::spawn(async move {
-                    tddy_livekit::LiveKitParticipant::run_with_reconnect(
+                    tddy_livekit::LiveKitParticipant::run_with_reconnect_metadata(
                         &url,
                         &token_generator,
-                        tddy_service::TerminalServiceServer::new(terminal_service),
+                        livekit_multi,
                         tddy_livekit::RoomOptions::default(),
                         shutdown_clone,
-                        oauth_for_reconnect,
+                        Some(metadata_rx),
                     )
                     .await
                 });
@@ -1417,7 +1495,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     let participant = match tddy_livekit::LiveKitParticipant::connect(
                         &url,
                         &token,
-                        tddy_service::TerminalServiceServer::new(terminal_service),
+                        livekit_multi,
                         tddy_livekit::RoomOptions::default(),
                         codex_oauth_watch,
                     )
@@ -1432,6 +1510,9 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                             return;
                         }
                     };
+                    let local = participant.room().local_participant().clone();
+                    let meta_task =
+                        tddy_livekit::spawn_local_participant_metadata_watcher(metadata_rx, local);
                     tokio::select! {
                         _ = participant.run() => {
                             log::info!("LiveKit participant disconnected");
@@ -1442,6 +1523,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                             }
                         } => {}
                     }
+                    meta_task.abort();
                 });
             }
         }
@@ -2144,8 +2226,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     }
 
     if livekit_enabled {
-        let terminal_service =
-            tddy_service::TerminalServiceVirtualTui::new(view_factory.clone(), args.mouse);
+        let (terminal_service, oauth_session, metadata_tx, metadata_rx) =
+            terminal_and_codex_oauth_for_livekit(view_factory.clone(), args.mouse);
+        let codex_oauth_impl =
+            tddy_service::CodexOAuthServiceImpl::with_metadata_watch(oauth_session, metadata_tx);
         let url = args.livekit_url.clone().unwrap();
         let codex_oauth_watch = args
             .session_dir
@@ -2164,6 +2248,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
             let terminal_server = tddy_service::TerminalServiceServer::new(terminal_service);
             let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
+            let codex_server = tddy_service::CodexOAuthServiceServer::new(codex_oauth_impl);
             let multi_service = tddy_rpc::MultiRpcService::new(vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
@@ -2175,27 +2260,49 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     service: std::sync::Arc::new(token_server)
                         as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
+                tddy_rpc::ServiceEntry {
+                    name: tddy_service::CodexOAuthServiceServer::<
+                        tddy_service::CodexOAuthServiceImpl,
+                    >::NAME,
+                    service: std::sync::Arc::new(codex_server)
+                        as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                },
             ]);
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()
                     .expect("tokio runtime");
-                let watch = codex_oauth_watch.clone();
                 rt.block_on(async {
-                    tddy_livekit::LiveKitParticipant::run_with_reconnect(
+                    tddy_livekit::LiveKitParticipant::run_with_reconnect_metadata(
                         &url,
                         token_generator.as_ref(),
                         multi_service,
                         tddy_livekit::RoomOptions::default(),
                         shutdown,
-                        watch,
+                        Some(metadata_rx),
                     )
                     .await
                 });
             });
         } else {
             let token = args.livekit_token.clone().unwrap();
+            let livekit_multi = tddy_rpc::MultiRpcService::new(vec![
+                tddy_rpc::ServiceEntry {
+                    name: "terminal.TerminalService",
+                    service: std::sync::Arc::new(tddy_service::TerminalServiceServer::new(
+                        terminal_service,
+                    )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                },
+                tddy_rpc::ServiceEntry {
+                    name: tddy_service::CodexOAuthServiceServer::<
+                        tddy_service::CodexOAuthServiceImpl,
+                    >::NAME,
+                    service: std::sync::Arc::new(tddy_service::CodexOAuthServiceServer::new(
+                        codex_oauth_impl,
+                    )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                },
+            ]);
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
@@ -2206,7 +2313,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     match tddy_livekit::LiveKitParticipant::connect(
                         &url,
                         &token,
-                        tddy_service::TerminalServiceServer::new(terminal_service),
+                        livekit_multi,
                         tddy_livekit::RoomOptions::default(),
                         watch,
                     )
@@ -2214,7 +2321,13 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     {
                         Ok(participant) => {
                             log::info!("READY");
+                            let local = participant.room().local_participant().clone();
+                            let meta_task = tddy_livekit::spawn_local_participant_metadata_watcher(
+                                metadata_rx,
+                                local,
+                            );
                             participant.run().await;
+                            meta_task.abort();
                         }
                         Err(e) => {
                             log::error!("LiveKit connect failed: {}", e);

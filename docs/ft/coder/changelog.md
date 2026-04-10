@@ -4,6 +4,10 @@ Release note history for the Coder product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-04-10 — Codex OAuth multi-service on LiveKit path
+
+- **tddy-coder**: `terminal_and_codex_oauth_for_livekit` wires `CodexOAuthServiceImpl` alongside `TerminalService` via `MultiRpcService`; `run_with_reconnect_metadata` pushes `codex_oauth` JSON to participant metadata via `watch::Receiver<String>`. Feature doc: [tddy-desktop-electrobun.md](../desktop/tddy-desktop-electrobun.md).
+
 ## 2026-04-09 — Codex ACP backend (`codex-acp` agent)
 
 - **tddy-core**: **`CodexAcpBackend`** speaks ACP to a **`codex-acp`** subprocess (mirrors **`ClaudeAcpBackend`**); session resume via **`load_session`**; OAuth retry path reuses **`codex login`** + **`codex_oauth_authorize.url`** when ACP reports auth-like errors and **`session_dir`** is set; **`agent-client-protocol`** **`=0.10.4`** with **`unstable`**. **`AnyBackend::CodexAcp`**, backend menu / CLI mapping for **`codex-acp`**; **`task.rs`** treats **`codex-acp`** like **`codex`** for **`codex_thread_id`** persistence.

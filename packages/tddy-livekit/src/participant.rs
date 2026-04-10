@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, watch, Mutex};
 
 use tddy_rpc::{RequestMetadata, RpcMessage};
 
@@ -18,6 +18,28 @@ use crate::rpc_trace;
 use crate::token::TokenGenerator;
 
 const RPC_TOPIC: &str = "tddy-rpc";
+
+/// Applies [`watch::Receiver`] updates to LiveKit participant metadata via [`LocalParticipant::set_metadata`].
+/// Abort the returned handle on room reconnect so updates target the current [`LocalParticipant`].
+pub fn spawn_local_participant_metadata_watcher(
+    mut rx: watch::Receiver<String>,
+    local: LocalParticipant,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            if rx.changed().await.is_err() {
+                break;
+            }
+            let v = rx.borrow().clone();
+            if v.is_empty() {
+                continue;
+            }
+            if let Err(e) = local.set_metadata(v).await {
+                log::warn!("LiveKit set_metadata failed: {}", e);
+            }
+        }
+    })
+}
 
 /// Composite key for multiplexing RPC streams per remote client (request_id alone is not unique across tabs).
 type SessionKey = (String, i32);
@@ -187,6 +209,26 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         shutdown: Arc<AtomicBool>,
         codex_oauth_watch: Option<PathBuf>,
     ) {
+        Self::run_with_reconnect_metadata(
+            url,
+            token_generator,
+            service,
+            room_options,
+            shutdown,
+            None,
+        )
+        .await;
+    }
+
+    /// Like [`Self::run_with_reconnect`], but pushes `metadata_watch` values to the local participant metadata.
+    pub async fn run_with_reconnect_metadata(
+        url: &str,
+        token_generator: &TokenGenerator,
+        service: S,
+        room_options: RoomOptions,
+        shutdown: Arc<AtomicBool>,
+        metadata_watch: Option<watch::Receiver<String>>,
+    ) {
         let bridge = Arc::new(RpcBridge::new(service));
         let shared_publisher = SharedPublisher::new();
         let active_bidi: Arc<Mutex<HashMap<SessionKey, BidiStreamMeta>>> =
@@ -194,7 +236,11 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         let active_bidi_sessions: Arc<Mutex<HashMap<SessionKey, BidiSession>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let mut cycle: u64 = 0;
+        let mut metadata_task: Option<tokio::task::JoinHandle<()>> = None;
         loop {
+            if let Some(t) = metadata_task.take() {
+                t.abort();
+            }
             cycle += 1;
             let token = match token_generator.generate() {
                 Ok(t) => t,
@@ -224,6 +270,10 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     return;
                 }
             };
+            if let Some(rx) = metadata_watch.clone() {
+                let local = participant.room().local_participant().clone();
+                metadata_task = Some(spawn_local_participant_metadata_watcher(rx, local));
+            }
             let refresh_delay = token_generator.time_until_refresh();
             log::info!(
                 "[reconnect] cycle={} refresh_delay={:?} ttl={:?}",
@@ -259,6 +309,9 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     break;
                 }
             }
+        }
+        if let Some(t) = metadata_task.take() {
+            t.abort();
         }
     }
 
