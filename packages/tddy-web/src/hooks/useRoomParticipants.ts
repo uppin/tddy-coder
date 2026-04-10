@@ -12,8 +12,14 @@ export interface RoomParticipant {
 
 /** Infer UI role from LiveKit identity (browser clients use `web-{github}`). */
 export function inferParticipantRole(identity: string): ParticipantRole {
-  if (identity.startsWith("web-")) return "browser";
-  if (identity === "server" || identity.startsWith("server")) return "server";
+  if (identity.startsWith("web-") || identity.startsWith("browser-")) return "browser";
+  if (
+    identity === "server" ||
+    identity.startsWith("server") ||
+    identity.startsWith("daemon-")
+  ) {
+    return "server";
+  }
   return "unknown";
 }
 

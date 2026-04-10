@@ -1,6 +1,9 @@
 {
   "private": true,
   "workspaces": ["packages/tddy-web", "packages/tddy-livekit-web", "packages/tddy-rust-typescript-tests"],
+  "dependencies": {
+    "@zed-industries/codex-acp": "0.11.1"
+  },
   "devDependencies": {
     "@zed-industries/claude-agent-acp": "0.22.2"
   },

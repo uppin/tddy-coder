@@ -130,6 +130,15 @@ fn main() -> anyhow::Result<()> {
 
     let common_room = config.livekit.as_ref().and_then(|l| l.common_room.clone());
 
+    let allowed_agents: Vec<tddy_coder::web_server::ClientAllowedAgent> =
+        tddy_daemon::agent_list_mapping::agent_allowlist_rows(&config)
+            .into_iter()
+            .map(|row| tddy_coder::web_server::ClientAllowedAgent {
+                id: row.id,
+                label: row.display_label,
+            })
+            .collect();
+
     let auth_result = tddy_daemon::auth::build_auth_entries(&config, host, port);
     let mut rpc_entries = auth_result.entries;
 
@@ -282,6 +291,7 @@ fn main() -> anyhow::Result<()> {
             rpc_entries,
             livekit_url,
             common_room,
+            allowed_agents,
             lifecycle_telegram,
         )
         .await;

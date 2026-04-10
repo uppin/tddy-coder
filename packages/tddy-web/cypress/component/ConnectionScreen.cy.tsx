@@ -219,12 +219,14 @@ function mockListToolsResponse() {
   );
 }
 
-/** Matches prior hardcoded backend options / default dev.daemon.yaml `allowed_agents`. */
+/** Matches default dev.daemon.yaml `allowed_agents`. */
 const MOCK_DEFAULT_LIST_AGENTS = [
   { id: "claude", label: "Claude (opus)" },
   { id: "claude-acp", label: "Claude ACP (opus)" },
   { id: "cursor", label: "Cursor (composer-2)" },
   { id: "stub", label: "Stub" },
+  { id: "codex", label: "Codex" },
+  { id: "codex-acp", label: "Codex ACP" },
 ];
 
 function mockListAgentsResponse(agents: Array<{ id: string; label: string }>) {

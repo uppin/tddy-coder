@@ -15,9 +15,9 @@ use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
     backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
     output::SESSIONS_SUBDIR, preselected_index_for_agent, read_changeset, read_session_metadata,
-    AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexBackend, CodingBackend, CursorBackend,
-    GoalId, PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend, WorkflowEngine,
-    WorkflowRecipe,
+    AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend, CodingBackend,
+    CursorBackend, GoalId, PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend,
+    WorkflowEngine, WorkflowRecipe,
 };
 use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response};
 
@@ -324,6 +324,10 @@ pub struct Args {
     pub cursor_agent_path: Option<PathBuf>,
     /// Path to the Codex CLI. When set, overrides `TDDY_CODEX_CLI` and the default `codex` on `PATH`.
     pub codex_cli_path: Option<PathBuf>,
+    /// Path to the Codex ACP stdio agent (`codex-acp`). When set, overrides `TDDY_CODEX_ACP_CLI` and sibling/`PATH` discovery.
+    pub codex_acp_cli_path: Option<PathBuf>,
+    /// Run `codex login` browser OAuth (not `--device-auth`), capture authorize URL, wait for completion. Requires session directory.
+    pub codex_oauth_login: bool,
     /// Workflow recipe name (`tdd`, `tdd-small`, `bugfix`, `free-prompting`, `grill-me`, `review`, `merge-pr`). `None` means default `free-prompting` or recipe from changeset on resume.
     pub recipe: Option<String>,
 }
@@ -365,8 +369,11 @@ pub struct CoderArgs {
     #[arg(long, value_name = "LEVEL", value_parser = ["off", "error", "warn", "info", "debug", "trace"])]
     pub log_level: Option<String>,
 
-    /// Agent backend: claude, claude-acp, cursor, codex, or stub. Omit to choose interactively at startup.
-    #[arg(long, value_parser = ["claude", "claude-acp", "cursor", "codex", "stub"])]
+    /// Agent backend: claude, claude-acp, cursor, codex, codex-acp, or stub. Omit to choose interactively at startup.
+    #[arg(
+        long,
+        value_parser = ["claude", "claude-acp", "cursor", "codex", "codex-acp", "stub"]
+    )]
     pub agent: Option<String>,
 
     /// Feature description (alternative to stdin). When set, skips interactive/piped input.
@@ -472,6 +479,17 @@ pub struct CoderArgs {
     /// Path to the Codex CLI (defaults to `codex` on `PATH`, or `TDDY_CODEX_CLI` if set).
     #[arg(long, value_name = "PATH", env = "TDDY_CODEX_CLI")]
     pub codex_cli_path: Option<PathBuf>,
+
+    /// Path to the Codex ACP agent binary (stdio JSON-RPC). Defaults to `codex-acp` next to the
+    /// resolved `codex` binary when present, else `codex-acp` on `PATH`, or `TDDY_CODEX_ACP_CLI`.
+    #[arg(long, value_name = "PATH", env = "TDDY_CODEX_ACP_CLI")]
+    pub codex_acp_cli_path: Option<PathBuf>,
+
+    /// Run OpenAI Codex `login` with browser OAuth (default flow, not `--device-auth`). Writes the
+    /// authorize URL to `{session_dir}/codex_oauth_authorize.url` (same as Codex `exec` + `BROWSER`
+    /// hook) and waits until login finishes. Requires `--session-dir` or `--session-id`.
+    #[arg(long)]
+    pub codex_oauth_login: bool,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -686,6 +704,8 @@ impl From<CoderArgs> for Args {
             project_id: a.project_id,
             cursor_agent_path: a.cursor_agent_path,
             codex_cli_path: a.codex_cli_path,
+            codex_acp_cli_path: a.codex_acp_cli_path,
+            codex_oauth_login: a.codex_oauth_login,
             recipe: a.recipe,
         }
     }
@@ -728,6 +748,8 @@ impl From<DemoArgs> for Args {
             project_id: a.project_id,
             cursor_agent_path: None,
             codex_cli_path: None,
+            codex_acp_cli_path: None,
+            codex_oauth_login: false,
             recipe: a.recipe,
         }
     }
@@ -851,7 +873,35 @@ fn build_client_config(args: &Args) -> crate::web_server::ClientConfig {
         livekit_room: args.livekit_room.clone(),
         common_room: None,
         daemon_mode: None,
+        allowed_agents: vec![],
     }
+}
+
+/// Run OpenAI Codex `login` with browser OAuth (default flow, not `--device-auth`).
+fn run_codex_oauth_login(args: &Args) -> anyhow::Result<()> {
+    let session_dir = session_artifact_dir_for_args(args).context(
+        "--codex-oauth-login requires --session-dir or --session-id so the artifact directory is known",
+    )?;
+    let codex_bin = resolve_codex_binary(args.codex_cli_path.as_deref());
+    let backend = CodexBackend::with_path(codex_bin);
+    let url_file = session_dir.join(tddy_core::CODEX_OAUTH_AUTHORIZE_URL_FILENAME);
+    eprintln!("Codex browser OAuth login (OpenAI). This is not `--device-auth`.");
+    eprintln!(
+        "Authorize URL file (web UI / LiveKit poller): {}",
+        url_file.display()
+    );
+    eprintln!(
+        "Complete sign-in in a browser on this host; Codex listens on localhost for the callback until finished or interrupted."
+    );
+    let mut child = backend
+        .spawn_oauth_login(&session_dir)
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let status = child.wait().context("wait on codex login")?;
+    if !status.success() {
+        anyhow::bail!("codex login exited with status {:?}", status.code());
+    }
+    eprintln!("codex login completed successfully.");
+    Ok(())
 }
 
 /// Main entry point. Run the workflow with the given args.
@@ -859,6 +909,9 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
     validate_web_args(args)?;
     validate_livekit_args(args)?;
     validate_recipe_cli(args)?;
+    if args.codex_oauth_login {
+        return run_codex_oauth_login(args);
+    }
     if let Some(ref a) = args.agent {
         verify_tddy_tools_available(a)?;
     }
@@ -889,6 +942,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         &resolved_agent,
         args.cursor_agent_path.as_deref(),
         args.codex_cli_path.as_deref(),
+        args.codex_acp_cli_path.as_deref(),
         None,
         None,
     );
@@ -1097,6 +1151,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         agent_str,
         args.cursor_agent_path.as_deref(),
         args.codex_cli_path.as_deref(),
+        args.codex_acp_cli_path.as_deref(),
         None,
         None,
     );
@@ -1323,6 +1378,13 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
 
         if livekit_enabled {
             let url = args.livekit_url.as_ref().unwrap().clone();
+            let (_, session_artifact_dir, _) = livekit_daemon_workflow_paths(
+                &tddy_data_dir,
+                args.resume_from.as_deref(),
+                args.session_id.as_deref(),
+            );
+            let codex_oauth_watch =
+                Some(session_artifact_dir.join(tddy_core::CODEX_OAUTH_AUTHORIZE_URL_FILENAME));
             let shutdown_clone = shutdown.clone();
             let factory = view_factory
                 .clone()
@@ -1330,6 +1392,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             let terminal_service =
                 tddy_service::TerminalServiceVirtualTui::new(factory, args.mouse);
             if has_key_secret {
+                let oauth_for_reconnect = codex_oauth_watch.clone();
                 let token_generator = tddy_livekit::TokenGenerator::new(
                     args.livekit_api_key.as_ref().unwrap().clone(),
                     args.livekit_api_secret.as_ref().unwrap().clone(),
@@ -1344,6 +1407,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         tddy_service::TerminalServiceServer::new(terminal_service),
                         tddy_livekit::RoomOptions::default(),
                         shutdown_clone,
+                        oauth_for_reconnect,
                     )
                     .await
                 });
@@ -1355,6 +1419,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         &token,
                         tddy_service::TerminalServiceServer::new(terminal_service),
                         tddy_livekit::RoomOptions::default(),
+                        codex_oauth_watch,
                     )
                     .await
                     {
@@ -1599,6 +1664,69 @@ fn resolve_codex_binary(codex_cli_path: Option<&Path>) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(CodexBackend::DEFAULT_CLI_BINARY))
 }
 
+/// Resolve `codex-acp` stdio agent: explicit path / env, then `codex-acp` beside resolved `codex`, else `codex-acp` on `PATH`.
+fn resolve_codex_acp_binary(
+    codex_acp_cli_path: Option<&Path>,
+    codex_cli_path: Option<&Path>,
+) -> PathBuf {
+    if let Some(p) = codex_acp_cli_path {
+        return p.to_path_buf();
+    }
+    if let Some(p) = std::env::var_os("TDDY_CODEX_ACP_CLI").map(PathBuf::from) {
+        return p;
+    }
+    let codex = resolve_codex_binary(codex_cli_path);
+    if let Some(acp) = codex_acp_beside_resolved_codex(&codex) {
+        return acp;
+    }
+    PathBuf::from(tddy_core::backend::codex_acp::DEFAULT_CODEX_ACP_BINARY)
+}
+
+/// If `codex` resolves to a concrete file, return `codex-acp` in the same directory when it exists.
+fn codex_acp_beside_resolved_codex(codex: &std::path::Path) -> Option<PathBuf> {
+    let codex_file = if codex.is_absolute() {
+        codex.to_path_buf()
+    } else if codex.components().count() == 1 {
+        #[cfg(unix)]
+        {
+            resolve_executable_on_path(codex.as_os_str())?
+        }
+        #[cfg(not(unix))]
+        {
+            return None;
+        }
+    } else {
+        return None;
+    };
+    if !codex_file.is_file() {
+        return None;
+    }
+    let parent = codex_file.parent()?;
+    let acp = parent.join(tddy_core::backend::codex_acp::DEFAULT_CODEX_ACP_BINARY);
+    if acp.is_file() {
+        Some(acp)
+    } else {
+        None
+    }
+}
+
+#[cfg(unix)]
+fn resolve_executable_on_path(name: &std::ffi::OsStr) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = PathBuf::from(dir).join(name);
+        if candidate.is_file() {
+            if let Ok(meta) = std::fs::metadata(&candidate) {
+                if meta.permissions().mode() & 0o111 != 0 {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Create backend once at startup (plain mode, no progress events).
 /// StubBackend always uses InMemoryToolExecutor (no tddy-tools): stub simulates the agent,
 /// so it stores results directly. ProcessToolExecutor is for real agents (Claude/Cursor/Codex)
@@ -1607,6 +1735,7 @@ fn create_backend(
     agent: &str,
     cursor_agent_path: Option<&Path>,
     codex_cli_path: Option<&Path>,
+    codex_acp_cli_path: Option<&Path>,
     _socket_path: Option<&Path>,
     _working_dir: Option<&Path>,
 ) -> SharedBackend {
@@ -1628,6 +1757,18 @@ fn create_backend(
                 path.display()
             );
             AnyBackend::Codex(CodexBackend::with_path(path))
+        }
+        "codex-acp" => {
+            let acp_bin = resolve_codex_acp_binary(codex_acp_cli_path, codex_cli_path);
+            let codex_bin = resolve_codex_binary(codex_cli_path);
+            log::info!(
+                "[tddy-coder] Codex ACP backend: agent `{}`, codex CLI for OAuth `{}`",
+                acp_bin.display(),
+                codex_bin.display()
+            );
+            AnyBackend::CodexAcp(CodexAcpBackend::with_agent_and_codex_paths(
+                acp_bin, codex_bin,
+            ))
         }
         "stub" => AnyBackend::Stub(StubBackend::new()),
         _ => AnyBackend::Claude(ClaudeCodeBackend::new().with_progress(on_progress)),
@@ -1678,6 +1819,13 @@ fn build_goal_context(
     }
     if let Some(p) = session_dir {
         ctx.insert("session_dir".to_string(), serde_json::to_value(p).unwrap());
+        let codex_tid_path = p.join(tddy_core::CODEX_THREAD_ID_FILENAME);
+        if let Ok(s) = std::fs::read_to_string(&codex_tid_path) {
+            let trimmed = s.trim().to_string();
+            if !trimmed.is_empty() {
+                ctx.insert("codex_thread_id".to_string(), serde_json::json!(trimmed));
+            }
+        }
         // Repo root is stored in changeset.repo_path (set when plan started). Use it for worktree creation.
         let output_dir = tddy_core::read_changeset(p)
             .ok()
@@ -1895,6 +2043,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         let socket_path_for_factory = socket_path.clone();
         let cursor_path_for_factory = args.cursor_agent_path.clone();
         let codex_path_for_factory = args.codex_cli_path.clone();
+        let codex_acp_path_for_factory = args.codex_acp_cli_path.clone();
         let mut p = presenter.lock().unwrap();
         p.configure_deferred_workflow_start(
             Box::new(move |agent: &str| {
@@ -1903,6 +2052,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     agent,
                     cursor_path_for_factory.as_deref(),
                     codex_path_for_factory.as_deref(),
+                    codex_acp_path_for_factory.as_deref(),
                     socket_path_for_factory.as_deref(),
                     None,
                 ))
@@ -1927,6 +2077,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             agent,
             args.cursor_agent_path.as_deref(),
             args.codex_cli_path.as_deref(),
+            args.codex_acp_cli_path.as_deref(),
             socket_path.as_deref(),
             None,
         );
@@ -1996,6 +2147,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         let terminal_service =
             tddy_service::TerminalServiceVirtualTui::new(view_factory.clone(), args.mouse);
         let url = args.livekit_url.clone().unwrap();
+        let codex_oauth_watch = args
+            .session_dir
+            .clone()
+            .map(|d| d.join(tddy_core::CODEX_OAUTH_AUTHORIZE_URL_FILENAME));
         let shutdown = shutdown.clone();
         if has_key_secret {
             let token_generator = std::sync::Arc::new(tddy_livekit::TokenGenerator::new(
@@ -2026,6 +2181,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     .enable_all()
                     .build()
                     .expect("tokio runtime");
+                let watch = codex_oauth_watch.clone();
                 rt.block_on(async {
                     tddy_livekit::LiveKitParticipant::run_with_reconnect(
                         &url,
@@ -2033,6 +2189,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         multi_service,
                         tddy_livekit::RoomOptions::default(),
                         shutdown,
+                        watch,
                     )
                     .await
                 });
@@ -2044,12 +2201,14 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     .enable_all()
                     .build()
                     .expect("tokio runtime");
+                let watch = codex_oauth_watch;
                 rt.block_on(async {
                     match tddy_livekit::LiveKitParticipant::connect(
                         &url,
                         &token,
                         tddy_service::TerminalServiceServer::new(terminal_service),
                         tddy_livekit::RoomOptions::default(),
+                        watch,
                     )
                     .await
                     {
@@ -2207,6 +2366,7 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         &agent_str,
         args.cursor_agent_path.as_deref(),
         args.codex_cli_path.as_deref(),
+        args.codex_acp_cli_path.as_deref(),
         None,
         None,
     );
@@ -2637,6 +2797,8 @@ mod resume_session_config_tests {
             project_id: None,
             cursor_agent_path: None,
             codex_cli_path: None,
+            codex_acp_cli_path: None,
+            codex_oauth_login: false,
             recipe: None,
         };
 
@@ -2696,6 +2858,8 @@ mod resume_session_identity_tests {
             project_id: None,
             cursor_agent_path: None,
             codex_cli_path: None,
+            codex_acp_cli_path: None,
+            codex_oauth_login: false,
             recipe: None,
         };
 
@@ -2758,6 +2922,8 @@ mod session_dir_sync_tests {
             project_id: None,
             cursor_agent_path: None,
             codex_cli_path: None,
+            codex_acp_cli_path: None,
+            codex_oauth_login: false,
             recipe: None,
         };
 
@@ -2834,6 +3000,8 @@ mod changeset_agent_resume_tests {
             project_id: None,
             cursor_agent_path: None,
             codex_cli_path: None,
+            codex_acp_cli_path: None,
+            codex_oauth_login: false,
             recipe: None,
         };
 
@@ -2927,6 +3095,8 @@ mod post_tui_workflow_exit_tests {
             project_id: None,
             cursor_agent_path: None,
             codex_cli_path: None,
+            codex_acp_cli_path: None,
+            codex_oauth_login: false,
             recipe: None,
         }
     }

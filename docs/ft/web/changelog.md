@@ -1,6 +1,13 @@
-# Web Changelog
+q# Web Changelog
 
 Release note history for the Web product area.
+
+**Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
+
+## 2026-04-06 — Codex OAuth web relay (dialog + docs)
+
+- **tddy-web**: **`CodexOAuthDialog`** — modal (**`codex-oauth-dialog`**), dismiss (**`codex-oauth-dismiss`**), sandboxed authorize **iframe** when **`embeddingBlocked`** is false; **embedding-blocked** panel (**`codex-oauth-embedding-fallback`**) with external link (**`noopener`**, **`noreferrer`**) when **`embeddingBlocked`** is true. Cypress **`CodexOAuthDialog.cy.tsx`**, **`CodexOAuthIframeFallback.cy.tsx`**.
+- **Docs**: **[codex-oauth-web-relay.md](codex-oauth-web-relay.md)**; package **[codex-oauth-dialog.md](../../../packages/tddy-web/docs/codex-oauth-dialog.md)**. Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**; **[packages/tddy-web/docs/changesets.md](../../../packages/tddy-web/docs/changesets.md)**.
 
 ## 2026-04-05 — Connection screen: concurrent terminal attachments
 

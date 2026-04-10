@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Enter dev shell with a profile (GC root) so the environment persists across nix gc.
 # With args: run the command inside the shell. E.g. ./dev cargo test  or  ./dev echo "Hello"
+#
+# If nix fails with "getting attributes of path /nix/store/...-nodejs-...: No such file or directory",
+# the GC-rooted profile is stale: rm -rf .nix-profile && ./dev <command>  (rebuilds the shell).
 if [ $# -eq 0 ]; then
   exec nix develop --profile ./.nix-profile
 else

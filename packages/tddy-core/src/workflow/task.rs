@@ -236,13 +236,28 @@ impl Task for BackendInvokeTask {
         // (e.g. Evaluate after Green — after_task clears is_resume). Use Fresh only when
         // explicitly creating a new session (before_red, before_acceptance_tests set is_resume=false).
         let is_resume = context.get_sync::<bool>("is_resume").unwrap_or(true);
-        let session = context.get_sync::<String>("session_id").map(|id| {
+        // Codex `exec resume` requires the CLI's thread id from JSONL (`thread.started` / `session`),
+        // not the TDDY artifact `session_id`. See `codex_thread_id` + `CODEX_THREAD_ID_FILENAME`.
+        let session = if matches!(self.backend.name(), "codex" | "codex-acp") {
             if is_resume {
-                SessionMode::Resume(id)
+                context
+                    .get_sync::<String>("codex_thread_id")
+                    .filter(|s| !s.trim().is_empty())
+                    .map(SessionMode::Resume)
             } else {
-                SessionMode::Fresh(id)
+                context
+                    .get_sync::<String>("session_id")
+                    .map(SessionMode::Fresh)
             }
-        });
+        } else {
+            context.get_sync::<String>("session_id").map(|id| {
+                if is_resume {
+                    SessionMode::Resume(id)
+                } else {
+                    SessionMode::Fresh(id)
+                }
+            })
+        };
 
         let key = self.submit_key.as_str();
         let mut prompt_for_invoke = prompt;
@@ -274,6 +289,17 @@ impl Task for BackendInvokeTask {
                 .invoke(request)
                 .await
                 .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+
+            if matches!(self.backend.name(), "codex" | "codex-acp") {
+                if let Some(ref tid) = response.session_id {
+                    if !tid.trim().is_empty() {
+                        context.set_sync("codex_thread_id", tid.clone());
+                        if let Some(ref sd) = session_dir {
+                            crate::backend::write_codex_thread_id_file(sd, tid);
+                        }
+                    }
+                }
+            }
 
             let submit_output = self
                 .backend

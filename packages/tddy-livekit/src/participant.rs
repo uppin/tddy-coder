@@ -2,6 +2,8 @@
 
 use livekit::prelude::*;
 use std::collections::{HashMap, VecDeque};
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -105,6 +107,9 @@ pub struct LiveKitParticipant<S: crate::bridge::RpcService> {
     /// When set, bidi output tasks publish through this instead of a direct LocalParticipant,
     /// allowing them to survive room reconnection during token refresh.
     shared_publisher: Option<SharedPublisher>,
+    /// When set, poll this path for an `https://` authorize URL (written by the Codex `BROWSER` hook)
+    /// and publish JSON metadata so dashboards can show “sign in” next to this participant.
+    codex_oauth_watch: Option<PathBuf>,
 }
 
 impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
@@ -114,6 +119,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         token: &str,
         service: S,
         room_options: RoomOptions,
+        codex_oauth_watch: Option<PathBuf>,
     ) -> Result<Self, livekit::RoomError> {
         log::debug!("LiveKitParticipant::connect url={}", url);
         let bridge = RpcBridge::new(service);
@@ -131,6 +137,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             active_bidi_sessions: Arc::new(Mutex::new(HashMap::new())),
             pending_data: Arc::new(Mutex::new(VecDeque::new())),
             shared_publisher: None,
+            codex_oauth_watch,
         })
     }
 
@@ -145,6 +152,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         active_bidi: Arc<Mutex<HashMap<SessionKey, BidiStreamMeta>>>,
         active_bidi_sessions: Arc<Mutex<HashMap<SessionKey, BidiSession>>>,
         shared_publisher: SharedPublisher,
+        codex_oauth_watch: Option<PathBuf>,
     ) -> Result<Self, livekit::RoomError> {
         log::debug!("LiveKitParticipant::connect_for_reconnect url={}", url);
         let (room, events) = Room::connect(url, token, room_options).await?;
@@ -164,6 +172,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             active_bidi_sessions,
             pending_data: Arc::new(Mutex::new(VecDeque::new())),
             shared_publisher: Some(shared_publisher),
+            codex_oauth_watch,
         })
     }
 
@@ -176,6 +185,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         service: S,
         room_options: RoomOptions,
         shutdown: Arc<AtomicBool>,
+        codex_oauth_watch: Option<PathBuf>,
     ) {
         let bridge = Arc::new(RpcBridge::new(service));
         let shared_publisher = SharedPublisher::new();
@@ -201,6 +211,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                 active_bidi.clone(),
                 active_bidi_sessions.clone(),
                 shared_publisher.clone(),
+                codex_oauth_watch.clone(),
             )
             .await
             {
@@ -255,6 +266,19 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
     /// and dispatches to the RpcBridge. Returns when the room disconnects.
     pub async fn run(mut self) {
         log::info!("[echo_server] LiveKitParticipant event loop started");
+        if let Some(ref path) = self.codex_oauth_watch {
+            let local = self.room.local_participant().clone();
+            let path = path.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                let mut last_sent: Option<String> = None;
+                loop {
+                    interval.tick().await;
+                    Self::try_publish_codex_oauth_metadata(&local, path.as_path(), &mut last_sent)
+                        .await;
+                }
+            });
+        }
         while let Some(event) = self.events.recv().await {
             match event {
                 RoomEvent::ConnectionStateChanged(state) => {
@@ -400,6 +424,45 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             bidi_count,
             stream_count,
         );
+    }
+
+    async fn try_publish_codex_oauth_metadata(
+        local: &LocalParticipant,
+        path: &Path,
+        last_sent: &mut Option<String>,
+    ) {
+        let Ok(raw) = tokio::fs::read_to_string(path).await else {
+            return;
+        };
+        let url = raw.trim().to_string();
+        if !url.starts_with("https://") {
+            return;
+        }
+        if last_sent.as_ref() == Some(&url) {
+            return;
+        }
+        let meta = serde_json::json!({
+            "codex_oauth": {
+                "pending": true,
+                "authorize_url": url,
+            }
+        });
+        match local.set_metadata(meta.to_string()).await {
+            Ok(()) => {
+                *last_sent = Some(url);
+                log::info!(
+                    target: "tddy_livekit::codex_oauth",
+                    "published Codex OAuth pending to participant metadata (URL omitted from logs)"
+                );
+            }
+            Err(e) => {
+                log::warn!(
+                    target: "tddy_livekit::codex_oauth",
+                    "set_metadata failed: {}",
+                    e
+                );
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

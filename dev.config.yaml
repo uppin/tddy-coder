@@ -16,3 +16,9 @@ web:
 github:
   stub: true
   stub_codes: "test-code:testuser"
+
+# Codex CLI / Codex ACP — paths are relative to the process cwd. Use with
+# `tddy-coder -c dev.config.yaml` from this repo root (not daemon-spawned project cwd).
+# After `./dev bun install`, the shim resolves the platform native package.
+# codex_cli_path: path/to/codex
+codex_acp_cli_path: node_modules/.bin/codex-acp

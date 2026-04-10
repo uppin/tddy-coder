@@ -22,7 +22,9 @@ const UNAUTHORIZED_CHAT: i64 = 999_001;
 
 /// True only for the branch-list **More…** pagination row (`tbm:`), not `origin/feature/more-*` labels.
 fn branch_keyboard_has_more_pagination_row(kb: &[Vec<(String, String)>]) -> bool {
-    kb.iter().flatten().any(|(l, d)| d.starts_with("tbm:") || l == "More…")
+    kb.iter()
+        .flatten()
+        .any(|(l, d)| d.starts_with("tbm:") || l == "More…")
 }
 
 fn harness_with_sender(

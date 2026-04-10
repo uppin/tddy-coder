@@ -276,6 +276,8 @@ Feature requirement → Create changeset → Implement → Wrap changeset → Up
 
 ### File Format
 
+**Canonical merge rules**: [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md) (single-line bullets, prepend-only, optional `docs/dev/changesets.d/` shards for cross-package narratives).
+
 **Package index** (`packages/{package-name}/docs/changesets.md`) and **cross-package index** (`docs/dev/changesets.md`): flat bullet list under the H1 (and short intro, if present).
 
 ```markdown
@@ -283,26 +285,29 @@ Feature requirement → Create changeset → Implement → Wrap changeset → Up
 
 Wrapped changeset history for {package-name}.
 
+**Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
+
 - **2026-01-29** [Bug Fix] Icon Generation Idempotency — Fixed duplicate Duplexer events from Greyhound retries via processedIconIds tracking. (icons-server)
 - **2026-01-27** [Bug Fix] RGBA to HEX Color Format — Converted RGBA to HEX with separate opacity attributes for native image preview compatibility. (icons-server)
 - **2026-01-22** [Bug Fix] Icon Export Quality Fixes — Fixed blurry PNG at small sizes, gradient stop-color not themed, background visible at 0% opacity. (icons-server)
 ```
 
-**Product-area changelogs** (`docs/ft/{coder,daemon,web}/changelog.md`): same **reverse chronological** order using `## YYYY-MM-DD — Title` sections (newest section first, after the opening paragraph).
+**Product-area changelogs** (`docs/ft/{coder,daemon,web}/changelog.md`): **reverse chronological** `## YYYY-MM-DD — Title` sections (newest first, after the intro). Use **distinct titles** when two releases share a date.
 
 ### Guidelines
 
-**Format** (package / cross-package bullets): `- **YYYY-MM-DD** [Type] Title — Summary. (affected packages)`
+**Format** (package / cross-package bullets): `- **YYYY-MM-DD** [Type] Title — Summary. (affected packages)` — **one bullet, one line** (no wrapped continuations).
 
 **Rules**:
-- **Reverse chronological order** (newest first). Add each wrapped changeset as a **new bullet immediately under the title block** (or new `##` section in product changelogs). Do not reorder older entries when adding a new one.
+- **Reverse chronological order** (newest first). Add each wrapped changeset as a **new bullet immediately under** the intro/hygiene block (or a **new** `##` at the top of product changelogs). Do not reorder older entries when adding a new one.
 - **One bullet (or one `##` section) per wrapped changeset** — keeps each addition localized.
 - **No headers per bullet** in `changesets.md` — no H2/H3 per entry in the flat list; product changelogs use `##` per release as above.
 - **No file references** — source changesets are deleted after wrapping
 - **Past tense** — "Fixed X", "Added Y", "Refactored Z"
 - **Type in brackets** — `[Feature]`, `[Bug Fix]`, `[Refactor]`, `[Architecture Change]`
+- **Do not rewrite** existing index lines for unrelated “cleanup” while other feature branches may be open; use a doc-only PR or add a new correcting entry.
 
-**Git merges**: Repo `.gitattributes` sets `merge=union` on these changelog/changeset index paths so parallel branches that each **add** a new line usually merge cleanly. Still avoid editing the **same** bullet or section line as another branch; add a new entry instead of rewriting history lines.
+**Git merges**: Repo `.gitattributes` sets `merge=union` on these paths. Union helps when branches **add different lines**; **same-line edits** still conflict—see [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md).
 
 ## Acceptance Tests
 

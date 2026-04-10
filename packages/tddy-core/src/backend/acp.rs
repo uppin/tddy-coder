@@ -197,7 +197,7 @@ fn run_acp_worker(
                     let acp_session_id = match acp_session_id {
                         Some(sid) => acp::SessionId::new(sid),
                         None => {
-                            let new_req = acp::NewSessionRequest::new(cwd);
+                            let new_req = acp::NewSessionRequest::new(cwd.clone());
                             match conn.new_session(new_req).await {
                                 Ok(r) => {
                                     let sid = r.session_id.0.clone();

@@ -4,6 +4,7 @@ import { GripVertical, Minus, Trash2 } from "lucide-react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
+  AgentInfoSchema,
   ConnectionService,
   DeleteSessionRequestSchema,
   Signal,
@@ -981,10 +982,13 @@ function ConnectedTerminal({
 export function ConnectionScreen({
   livekitUrl,
   commonRoom,
+  allowedAgentsFromConfig,
   onNavigate,
 }: {
   livekitUrl?: string;
   commonRoom?: string;
+  /** From GET /api/config (daemon `allowed_agents`); preferred over RPC until ListAgents hydrates. */
+  allowedAgentsFromConfig?: { id: string; label: string }[];
   /** Client-side navigation (daemon shell: Sessions ↔ Worktrees). */
   onNavigate?: (path: string) => void;
 } = {}) {
@@ -1007,6 +1011,14 @@ export function ConnectionScreen({
   const [newProjectUserRelativePath, setNewProjectUserRelativePath] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const effectiveAgents: AgentInfo[] = useMemo(() => {
+    if (allowedAgentsFromConfig && allowedAgentsFromConfig.length > 0) {
+      return allowedAgentsFromConfig.map((a) =>
+        create(AgentInfoSchema, { id: a.id, label: a.label }),
+      );
+    }
+    return agents;
+  }, [allowedAgentsFromConfig, agents]);
   const [sessionAttachments, setSessionAttachments] = useState<SessionAttachmentMap>(
     () => new Map(),
   );
@@ -1178,9 +1190,9 @@ export function ConnectionScreen({
   useEffect(() => {
     setProjectForms((prev) => {
       const next = { ...prev };
-      const def = defaultProjectSessionForm(tools, agents, daemons);
+      const def = defaultProjectSessionForm(tools, effectiveAgents, daemons);
       const agentOptions = buildAgentSelectOptionsFromRpc(
-        agents.map((a) => ({ id: a.id, label: a.label })),
+        effectiveAgents.map((a) => ({ id: a.id, label: a.label })),
       );
       for (const p of projects) {
         const existing = next[p.projectId];
@@ -1191,7 +1203,7 @@ export function ConnectionScreen({
           if (!toolStillValid && tools[0]) {
             next[p.projectId] = { ...existing, toolPath: tools[0].path };
           }
-          const agentStillValid = agents.some((a) => a.id === existing.agent);
+          const agentStillValid = effectiveAgents.some((a) => a.id === existing.agent);
           if (!agentStillValid) {
             next[p.projectId] = {
               ...next[p.projectId],
@@ -1208,13 +1220,13 @@ export function ConnectionScreen({
       }
       return next;
     });
-  }, [projects, tools, agents, daemons]);
+  }, [projects, tools, effectiveAgents, daemons]);
 
   const updateProjectForm = (projectId: string, patch: Partial<ProjectSessionForm>) => {
     setProjectForms((prev) => ({
       ...prev,
       [projectId]: {
-        ...(prev[projectId] ?? defaultProjectSessionForm(tools, agents, daemons)),
+        ...(prev[projectId] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons)),
         ...patch,
       },
     }));
@@ -1390,7 +1402,7 @@ export function ConnectionScreen({
   }, [sessions, navigatePath]);
 
   const handleStartSession = async (projectId: string) => {
-    const form = projectForms[projectId] ?? defaultProjectSessionForm(tools, agents, daemons);
+    const form = projectForms[projectId] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons);
     if (!sessionToken || !form.toolPath || !projectId.trim() || !form.agent) return;
     setError(null);
     try {
@@ -1823,10 +1835,10 @@ export function ConnectionScreen({
               <ProjectSessionOptions
                 projectId={p.projectId}
                 tools={tools}
-                agents={agents}
+                agents={effectiveAgents}
                 daemons={daemons}
                 form={
-                  projectForms[p.projectId] ?? defaultProjectSessionForm(tools, agents, daemons)
+                  projectForms[p.projectId] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons)
                 }
                 onChange={(patch) => updateProjectForm(p.projectId, patch)}
                 startSessionButton={
@@ -1836,9 +1848,9 @@ export function ConnectionScreen({
                     onClick={() => handleStartSession(p.projectId)}
                     disabled={
                       loading ||
-                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, agents, daemons))
+                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons))
                         .toolPath ||
-                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, agents, daemons))
+                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons))
                         .agent
                     }
                   >

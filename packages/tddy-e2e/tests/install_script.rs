@@ -117,6 +117,38 @@ fn write_fake_release_binaries(root: &Path) {
     }
 }
 
+/// Matches `install` script `resolve_codex_acp_native_src` / npm optional package names.
+fn codex_acp_platform_pkg_dir() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => Some("codex-acp-linux-x64"),
+        ("linux", "aarch64") => Some("codex-acp-linux-arm64"),
+        ("macos", "aarch64") => Some("codex-acp-darwin-arm64"),
+        ("macos", "x86_64") => Some("codex-acp-darwin-x64"),
+        _ => None,
+    }
+}
+
+fn write_fake_codex_acp_native(root: &Path) {
+    let Some(pkg) = codex_acp_platform_pkg_dir() else {
+        return;
+    };
+    let p = root
+        .join("node_modules")
+        .join("@zed-industries")
+        .join(pkg)
+        .join("bin")
+        .join("codex-acp");
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(&p, b"fake-codex-acp\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&p).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&p, perms).unwrap();
+    }
+}
+
 fn run_install_in(root: &Path, env: &[(&str, &str)]) -> std::process::ExitStatus {
     let mut cmd = Command::new("bash");
     cmd.current_dir(root);
@@ -135,6 +167,7 @@ fn install_copies_binaries_to_custom_dir() {
     let root = tmp.path();
     copy_install_tree(root);
     write_fake_release_binaries(root);
+    write_fake_codex_acp_native(root);
 
     let bin_dir = root.join("custom-bin");
     let cfg_dir = root.join("custom-etc");
@@ -162,6 +195,13 @@ fn install_copies_binaries_to_custom_dir() {
         let body = fs::read_to_string(&p).unwrap();
         assert_eq!(body, "fake-binary\n");
     }
+
+    if codex_acp_platform_pkg_dir().is_some() {
+        let cap = bin_dir.join("codex-acp");
+        assert!(cap.is_file(), "expected {} installed", cap.display());
+        let body = fs::read_to_string(&cap).unwrap();
+        assert_eq!(body, "fake-codex-acp\n");
+    }
 }
 
 #[test]
@@ -170,6 +210,7 @@ fn install_creates_config_only_if_absent() {
     let root = tmp.path();
     copy_install_tree(root);
     write_fake_release_binaries(root);
+    write_fake_codex_acp_native(root);
 
     let bin_dir = root.join("b");
     let cfg_dir = root.join("c");
@@ -207,6 +248,7 @@ fn install_generates_unit_with_correct_paths() {
     let root = tmp.path();
     copy_install_tree(root);
     write_fake_release_binaries(root);
+    write_fake_codex_acp_native(root);
 
     let bin_dir = root.join("mybin");
     let cfg_dir = root.join("mycfg");
@@ -244,6 +286,7 @@ fn install_preserves_systemd_unit_unless_overwrite_env() {
     let root = tmp.path();
     copy_install_tree(root);
     write_fake_release_binaries(root);
+    write_fake_codex_acp_native(root);
 
     let bin_dir = root.join("bin");
     let cfg_dir = root.join("etc");
@@ -311,5 +354,22 @@ fn install_fails_without_binaries() {
     assert!(
         !st.success(),
         "install should fail when release binaries are missing"
+    );
+}
+
+#[test]
+fn install_fails_without_codex_acp_native_when_platform_supported() {
+    let Some(_) = codex_acp_platform_pkg_dir() else {
+        return;
+    };
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    copy_install_tree(root);
+    write_fake_release_binaries(root);
+
+    let st = run_install_in(root, &[("INSTALL_NO_SYSTEMCTL", "1")]);
+    assert!(
+        !st.success(),
+        "install should fail when codex-acp native package is missing from node_modules"
     );
 }
