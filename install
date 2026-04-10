@@ -6,6 +6,10 @@
 #   --systemd   Required. Install release binaries, config template, unit file; enable+start service.
 #   --build     Optional. Run ./release before copying binaries.
 #
+# Prerequisites (from repo root): ./dev bun install — installs @zed-industries/codex-acp and the
+# platform-specific native package under node_modules/. The install script copies that native
+# codex-acp binary to INSTALL_BIN_DIR alongside tddy-*.
+#
 # Environment (install paths — override for tests or non-FHS layouts):
 #   INSTALL_PREFIX       Base prefix (default: /usr/local). Binaries go to INSTALL_PREFIX/bin
 #                        unless INSTALL_BIN_DIR is set.
@@ -85,6 +89,35 @@ if [[ ! -f "${WEB_DIST_SRC}/index.html" ]]; then
   exit 1
 fi
 
+# Native codex-acp from bun/npm optional platform package (see package.json dependencies).
+resolve_codex_acp_native_src() {
+  local os arch
+  case "$(uname -s)" in
+    Linux) os=linux ;;
+    Darwin) os=darwin ;;
+    *)
+      echo "install: unsupported OS for bundled codex-acp: $(uname -s)" >&2
+      return 1
+      ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch=x64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *)
+      echo "install: unsupported CPU for bundled codex-acp: $(uname -m)" >&2
+      return 1
+      ;;
+  esac
+  echo "${ROOT_DIR}/node_modules/@zed-industries/codex-acp-${os}-${arch}/bin/codex-acp"
+}
+
+CODEX_ACP_NATIVE="$(resolve_codex_acp_native_src)" || exit 1
+if [[ ! -f "$CODEX_ACP_NATIVE" ]]; then
+  echo "install: missing codex-acp native binary: ${CODEX_ACP_NATIVE}" >&2
+  echo "install: run from repo root: ./dev bun install  (pulls @zed-industries/codex-acp + platform package)" >&2
+  exit 1
+fi
+
 echo "install: paths — BIN_DIR=${BIN_DIR}"
 echo "install: paths — CONFIG_DIR=${CONFIG_DIR} (daemon.yaml)"
 echo "install: paths — SYSTEMD_DIR=${SYSTEMD_DIR}"
@@ -93,6 +126,7 @@ echo "install: logging — daemon process file log (from daemon.yaml.production)
 echo "install: logging — OAuth/token storage (auth_storage): ${AUTH_STORAGE_DIR}"
 echo "install: logging — spawned tddy-coder sessions write under each repo: <repo>/tmp/logs/coder and <repo>/tmp/logs/child/ (runtime; not created by this script)"
 echo "install: per–OS-user spawn PATH (e.g. Cursor agent): ~/.tddy/config.yaml on the target user (spawn_path_extra); not created by this script"
+echo "install: codex-acp — native binary from bun lock (see node_modules/@zed-industries/codex-acp-*) -> \${BIN_DIR}/codex-acp"
 
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR" "$WEB_BUNDLE_DIR"
 
@@ -108,6 +142,8 @@ install -m 0755 "${ROOT_DIR}/target/release/tddy-coder" "${BIN_DIR}/tddy-coder"
 echo "install:   updated ${BIN_DIR}/tddy-coder"
 install -m 0755 "${ROOT_DIR}/target/release/tddy-tools" "${BIN_DIR}/tddy-tools"
 echo "install:   updated ${BIN_DIR}/tddy-tools"
+install -m 0755 "$CODEX_ACP_NATIVE" "${BIN_DIR}/codex-acp"
+echo "install:   updated ${BIN_DIR}/codex-acp (from @zed-industries/codex-acp platform package)"
 
 echo "install: copying web static bundle ${WEB_DIST_SRC}/ -> ${WEB_BUNDLE_DIR}/"
 cp -a "${WEB_DIST_SRC}/." "$WEB_BUNDLE_DIR/"

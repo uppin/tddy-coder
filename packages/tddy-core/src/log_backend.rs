@@ -125,10 +125,25 @@ impl<'de> Deserialize<'de> for LogOutput {
 pub struct LogRotation {
     #[serde(default = "default_max_rotated")]
     pub max_rotated: usize,
+    /// When non-empty, only these log file paths are rotated on startup. Paths are compared to
+    /// [`LogOutput::File`] entries after normalizing when both exist (see [`paths_equal_for_rotation`]).
+    /// When empty, every file output from `loggers` is rotated (backward compatible).
+    #[serde(default)]
+    pub only_paths: Vec<PathBuf>,
 }
 
 fn default_max_rotated() -> usize {
     5
+}
+
+fn paths_equal_for_rotation(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => false,
+    }
 }
 
 /// Returns true if the record matches the selector.
@@ -586,7 +601,24 @@ fn rotate_log_files(config: &LogConfig) {
         return;
     }
 
+    let restrict = config
+        .rotation
+        .as_ref()
+        .is_some_and(|r| !r.only_paths.is_empty());
+
     for path in collect_file_outputs(config) {
+        if restrict {
+            let Some(rotation) = config.rotation.as_ref() else {
+                continue;
+            };
+            if !rotation
+                .only_paths
+                .iter()
+                .any(|op| paths_equal_for_rotation(&path, op))
+            {
+                continue;
+            }
+        }
         if !path.exists() {
             continue;
         }

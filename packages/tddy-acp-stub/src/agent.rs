@@ -72,6 +72,7 @@ impl acp::Agent for StubAgent {
         _args: acp::InitializeRequest,
     ) -> Result<acp::InitializeResponse, acp::Error> {
         Ok(acp::InitializeResponse::new(acp::ProtocolVersion::V1)
+            .agent_capabilities(acp::AgentCapabilities::new().load_session(true))
             .agent_info(acp::Implementation::new("tddy-acp-stub", "0.1.0").title("TDDY ACP Stub")))
     }
 
@@ -88,7 +89,17 @@ impl acp::Agent for StubAgent {
     ) -> Result<acp::NewSessionResponse, acp::Error> {
         let session_id = self.next_session_id.get();
         self.next_session_id.set(session_id + 1);
-        Ok(acp::NewSessionResponse::new(session_id.to_string()))
+        Ok(acp::NewSessionResponse::new(acp::SessionId::new(
+            session_id.to_string(),
+        )))
+    }
+
+    async fn load_session(
+        &self,
+        args: acp::LoadSessionRequest,
+    ) -> Result<acp::LoadSessionResponse, acp::Error> {
+        let _ = args;
+        Ok(acp::LoadSessionResponse::default())
     }
 
     async fn prompt(&self, args: acp::PromptRequest) -> Result<acp::PromptResponse, acp::Error> {

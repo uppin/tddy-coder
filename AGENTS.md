@@ -53,7 +53,7 @@ All `./` scripts use nix dev shell via `--profile ./.nix-profile` for a consiste
 | Lint | `cargo clippy -- -D warnings` |
 | Format | `cargo fmt` |
 | Run CLI | `cargo run -p tddy-coder -- --goal plan` (reads feature from stdin) |
-| Web install | `./dev bun install` — install web workspace dependencies |
+| Web install | `./dev bun install` — workspace JS deps (includes **`@zed-industries/codex-acp`** for **`./install`**) |
 | Web build | `./dev bun run build` (from root or `packages/tddy-web`) |
 | Storybook | `./dev bun run storybook` — dev server at http://localhost:6006 |
 | Cypress component | `./dev bun run cypress:component` (from root or `packages/tddy-web`) |

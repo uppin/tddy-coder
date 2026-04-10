@@ -1,5 +1,24 @@
+import { ExternalLink } from "lucide-react";
 import type { CommonRoomStatus } from "../hooks/useCommonRoom";
 import type { RoomParticipant } from "../hooks/useRoomParticipants";
+
+/** LiveKit participant metadata JSON published when Codex triggers OAuth (see tddy-livekit poller). */
+export function parseCodexOAuthPending(metadata: string): { authorizeUrl: string } | null {
+  const t = metadata.trim();
+  if (!t.startsWith("{")) return null;
+  try {
+    const o = JSON.parse(t) as {
+      codex_oauth?: { pending?: boolean; authorize_url?: string };
+    };
+    const u = o.codex_oauth?.authorize_url;
+    if (o.codex_oauth?.pending === true && typeof u === "string" && u.startsWith("https://")) {
+      return { authorizeUrl: u };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
 
 function safeTestIdPart(s: string): string {
   return s.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -91,11 +110,13 @@ export function ParticipantList({ participants, roomStatus, connectionError }: P
             <th style={{ padding: 6 }}>Role</th>
             <th style={{ padding: 6 }}>Joined</th>
             <th style={{ padding: 6 }}>Metadata</th>
+            <th style={{ padding: 6 }}>Codex sign-in</th>
           </tr>
         </thead>
         <tbody>
           {participants.map((p) => {
             const id = safeTestIdPart(p.identity);
+            const codexOAuth = parseCodexOAuthPending(p.metadata);
             return (
               <tr key={p.identity} style={{ borderBottom: "1px solid #eee" }}>
                 <td style={{ padding: 6 }} data-testid={`participant-entry-${id}`}>
@@ -111,7 +132,32 @@ export function ParticipantList({ participants, roomStatus, connectionError }: P
                   style={{ padding: 6, maxWidth: 200, wordBreak: "break-all" }}
                   data-testid={`participant-metadata-${id}`}
                 >
-                  {p.metadata || "—"}
+                  {codexOAuth ? (
+                    <span title={p.metadata}>Codex OAuth pending — open sign-in (→)</span>
+                  ) : (
+                    (p.metadata || "—")
+                  )}
+                </td>
+                <td style={{ padding: 6, textAlign: "center" }} data-testid={`participant-codex-oauth-${id}`}>
+                  {codexOAuth ? (
+                    <a
+                      href={codexOAuth.authorizeUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Open Codex / OpenAI authorization in a new tab"
+                      aria-label="Open Codex OAuth in new tab"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#1565c0",
+                      }}
+                    >
+                      <ExternalLink size={18} strokeWidth={2} />
+                    </a>
+                  ) : (
+                    "—"
+                  )}
                 </td>
               </tr>
             );
