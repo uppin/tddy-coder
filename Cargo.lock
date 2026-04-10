@@ -6002,6 +6002,8 @@ dependencies = [
  "log",
  "prost 0.13.5",
  "prost-build 0.13.5",
+ "reqwest 0.12.28",
+ "serde",
  "serde_json",
  "tddy-codegen",
  "tddy-core",
@@ -6013,6 +6015,7 @@ dependencies = [
  "tokio-stream",
  "tonic 0.12.3",
  "tonic-build",
+ "url",
  "uuid",
 ]
 

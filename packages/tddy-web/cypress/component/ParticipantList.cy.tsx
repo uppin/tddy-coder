@@ -33,12 +33,14 @@ describe("ParticipantList", () => {
         role: "browser",
         joinedAt: 1_700_000_000_000,
         metadata: "",
+        codexOAuth: null,
       },
       {
         identity: "server-abc",
         role: "server",
         joinedAt: 1_700_000_000_000,
         metadata: '{"k":"v"}',
+        codexOAuth: null,
       },
     ];
     cy.mount(

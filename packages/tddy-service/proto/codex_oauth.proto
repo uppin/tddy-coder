@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package codex_oauth;
+
+service CodexOAuthService {
+  rpc DeliverCallback(DeliverCallbackRequest) returns (DeliverCallbackResponse);
+}
+
+message DeliverCallbackRequest {
+  string code = 1;
+  string state = 2;
+  string session_id = 3;
+}
+
+message DeliverCallbackResponse {
+  bool success = 1;
+  string error_message = 2;
+}
