@@ -22,4 +22,4 @@ Main process (Bun) opens a `BrowserWindow`, optionally runs `runLiveKitOAuthRela
 ## Documentation
 
 - Product: [docs/ft/desktop/tddy-desktop-electrobun.md](../../docs/ft/desktop/tddy-desktop-electrobun.md)
-- Changeset: [docs/dev/1-WIP/2026-04-10-tddy-desktop-electrobun-changeset.md](../../docs/dev/1-WIP/2026-04-10-tddy-desktop-electrobun-changeset.md)
+- Changesets: [docs/changesets.md](./docs/changesets.md)

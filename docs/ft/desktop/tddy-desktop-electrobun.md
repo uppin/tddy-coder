@@ -139,9 +139,9 @@ packages/tddy-desktop/
 
 ## Phases
 
-1. **Shell:** Electrobun app loads **production `tddy-web` dist** from disk or env URL; Connect flow unchanged (RPC via daemon as today).
-2. **OAuth discovery:** Desktop reads **`codex_oauth` metadata**; opens browser; local callback server stub logs hits (no relay yet).
-3. **Relay MVP:** LiveKit message from desktop → **`tddy-coder`** → completes Codex login on agent host (implementation of Variant A or B).
+1. **Shell** (implemented): Electrobun app loads **production `tddy-web` dist** from disk or env URL; Connect flow unchanged (RPC via daemon as today).
+2. **OAuth discovery** (implemented): Desktop reads **`codex_oauth` metadata**; opens browser; local callback server captures `GET /auth/callback`.
+3. **Relay MVP** (implemented, Variant A): LiveKit message from desktop → **`CodexOAuthService/DeliverCallback`** RPC → **`tddy-coder`** proxies HTTP to Codex loopback on agent host.
 4. **Polish:** Installer, code signing, auto-update, tray icon.
 
 ## Related docs

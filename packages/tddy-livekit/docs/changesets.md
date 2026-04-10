@@ -4,6 +4,7 @@ Wrapped changeset history for tddy-livekit.
 
 **Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
 
+- **2026-04-10** [Feature] **Participant metadata watch channel** — `spawn_local_participant_metadata_watcher` (`watch::Receiver<String>` → `LocalParticipant::set_metadata`); `run_with_reconnect_metadata` (metadata task lifecycle across reconnection cycles); `run_with_reconnect` delegates with `None`. Feature doc: [tddy-desktop-electrobun.md](../../../docs/ft/desktop/tddy-desktop-electrobun.md). (tddy-livekit)
 - **2026-03-14** [Feature] LiveKit Token Generation — TokenGenerator in token.rs (generate, time_until_refresh). connect_with_bridge accepts Arc<RpcBridge<S>> for service reuse. run_with_reconnect: token refresh loop (TTL minus 60s), reconnects before expiry. livekit-api 0.4 dependency. (tddy-livekit)
 - **2026-03-13** [Architecture Change] Dual-Transport Service Codegen — Slimmed to thin LiveKit transport adapter. Proto envelope (rpc_envelope.proto), participant, RpcRequest→RpcMessage→RpcBridge. Depends on tddy-rpc only; no service impls. (tddy-livekit)
 - **2026-03-13** [Feature] Ghostty Terminal via LiveKit — terminal.proto with TerminalService/StreamTerminalIO. TerminalServiceImpl: broadcast output, mpsc input sink; RpcService impl for handle_rpc_stream. terminal_service_acceptance test. (tddy-livekit)
