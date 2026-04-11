@@ -14,6 +14,10 @@ Session state for the CLI, headless daemon (`tddy-service`), and `tddy-daemon` l
 
 When a backend reports a different agent thread id than the process-bound session id, the effective id for the workflow engine follows the **process-bound** session id. Policy lives in `tddy_core::session_lifecycle::resolve_effective_session_id`.
 
+## Codex session id (`codex_thread_id`)
+
+For **`--agent codex`** and **`--agent codex-acp`**, the workflow persists the agent’s thread / session identifier in **`codex_thread_id`** under the session directory. **`codex-acp`** resume uses ACP **`load_session`** with that same stored value. Product reference: [codex-acp-backend.md](codex-acp-backend.md).
+
 ## RPC and daemon validation
 
 `validate_session_id_segment` applies wherever a caller-supplied `session_id` joins `sessions_base`. Rejected ids surface as `INVALID_ARGUMENT` (gRPC) before any filesystem access. This matches delete-path rules and prevents path traversal via `session_id`.

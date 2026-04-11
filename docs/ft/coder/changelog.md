@@ -7,6 +7,9 @@ Release note history for the Coder product area.
 ## 2026-04-11 — LiveKit participant metadata: publish lock
 
 - **tddy-coder**: **`spawn_local_participant_metadata_watcher`** uses **`participant.metadata_publish_lock()`** from **`LiveKitParticipant::connect`** so watch-channel metadata merges with OAuth and registry publishers; **`projects_registry_dir`** is **`None`** on **`connect`** / **`run_with_reconnect_metadata`** until the session registry path is supplied by the spawn layer. Feature doc: [livekit-participant-owned-projects.md](../web/livekit-participant-owned-projects.md); transport: [participant-metadata.md](../../../packages/tddy-livekit/docs/participant-metadata.md).
+## 2026-04-11 — Codex ACP backend documentation wrap
+
+- **Docs**: Feature **[codex-acp-backend.md](codex-acp-backend.md)** documents shipped **`--agent codex-acp`** (ACP subprocess, **`codex login`** OAuth retry, **`codex_thread_id`**); cross-links in **[1-OVERVIEW.md](1-OVERVIEW.md)**, **[implementation-step.md](implementation-step.md)**, **[session-layout.md](session-layout.md)**, **[codex-oauth-web-relay.md](../web/codex-oauth-web-relay.md)**, **[codex-oauth-relay.md](../daemon/codex-oauth-relay.md)**; **`packages/tddy-core/docs/architecture.md`**; PRD removed from **`docs/ft/coder/1-WIP/`**; dev and package **`changesets.md`** indexes point at **[codex-acp-backend.md](codex-acp-backend.md)**.
 
 ## 2026-04-10 — Codex OAuth multi-service on LiveKit path
 
@@ -17,7 +20,7 @@ Release note history for the Coder product area.
 - **tddy-core**: **`CodexAcpBackend`** speaks ACP to a **`codex-acp`** subprocess (mirrors **`ClaudeAcpBackend`**); session resume via **`load_session`**; OAuth retry path reuses **`codex login`** + **`codex_oauth_authorize.url`** when ACP reports auth-like errors and **`session_dir`** is set; **`agent-client-protocol`** **`=0.10.4`** with **`unstable`**. **`AnyBackend::CodexAcp`**, backend menu / CLI mapping for **`codex-acp`**; **`task.rs`** treats **`codex-acp`** like **`codex`** for **`codex_thread_id`** persistence.
 - **tddy-coder**: **`--agent codex-acp`**, **`create_backend`** wiring, **`TDDY_CODEX_ACP_CLI`** override alongside existing Codex CLI env for OAuth helper.
 - **tddy-acp-stub** / **tddy-integration-tests**: protocol bump; stub **`initialize`** advertises **`load_session`**; **`codex_acp_backend`** acceptance tests.
-- **Docs**: [PRD-2026-04-09-codex-acp-backend.md](1-WIP/PRD-2026-04-09-codex-acp-backend.md); **[docs/dev/changesets.md](../../dev/changesets.md)**; package **`changesets.md`** for **tddy-core** and **tddy-coder**.
+- **Docs**: [codex-acp-backend.md](codex-acp-backend.md); **[docs/dev/changesets.md](../../dev/changesets.md)**; package **`changesets.md`** for **tddy-core** and **tddy-coder**.
 
 ## 2026-04-06 — Codex OAuth relay foundations (daemon library; web UI)
 

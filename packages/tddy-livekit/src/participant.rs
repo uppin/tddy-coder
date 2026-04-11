@@ -263,7 +263,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
     /// Connect to a LiveKit room, sharing bidi session state and publisher across
     /// reconnection cycles. The SharedPublisher is updated with the new LocalParticipant
     /// so that output tasks from previous cycles can publish through the new room.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)] // Reconnect path threads many handles; struct refactor is churn.
     async fn connect_for_reconnect(
         url: &str,
         token: &str,

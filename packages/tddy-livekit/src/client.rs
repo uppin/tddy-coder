@@ -28,7 +28,7 @@ type BidiStreamResult<'a> = Result<
 
 /// Client for making RPC calls to a participant in a LiveKit room.
 pub struct RpcClient {
-    room: Room,
+    room: Arc<Room>,
     target_identity: ParticipantIdentity,
     next_request_id: AtomicI32,
     pending_unary: Arc<Mutex<PendingMap>>,
@@ -40,6 +40,16 @@ impl RpcClient {
     /// Spawns a background task to handle incoming responses - use the events from room.subscribe().
     pub fn new(
         room: Room,
+        target_identity: impl Into<ParticipantIdentity>,
+        events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
+    ) -> Self {
+        Self::new_shared(Arc::new(room), target_identity, events)
+    }
+
+    /// Like [`Self::new`], but shares an existing [`Arc`] so multiple clients can use the same room
+    /// (e.g. discovery + **StartSession** forwarding on one LiveKit connection).
+    pub fn new_shared(
+        room: Arc<Room>,
         target_identity: impl Into<ParticipantIdentity>,
         mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
     ) -> Self {

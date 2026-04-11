@@ -22,4 +22,7 @@ See [screen-capture.example.yaml](./screen-capture.example.yaml) in this directo
 - Crate: `packages/tddy-livekit-screen-capture`
 - Binary: `tddy-livekit-screen-capture`
 
-Product requirements: [docs/ft/screen-capture/livekit-screen-capture.md](../../docs/ft/screen-capture/livekit-screen-capture.md).
+## Documentation
+
+- Product requirements: [docs/ft/screen-capture/livekit-screen-capture.md](../../docs/ft/screen-capture/livekit-screen-capture.md)
+- [Changesets](./docs/changesets.md)
