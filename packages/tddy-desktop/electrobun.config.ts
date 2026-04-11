@@ -11,6 +11,9 @@ const config: ElectrobunConfig = {
     bun: {
       entrypoint: "src/bun/index.ts",
     },
+    copy: {
+      "resources/bin/tddy-daemon": "resources/bin/tddy-daemon",
+    },
   },
 };
 

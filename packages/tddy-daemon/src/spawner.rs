@@ -7,8 +7,56 @@ use std::process::Stdio;
 
 use uuid::Uuid;
 
+use tddy_core::{default_log_config, resolve_logger, LogConfig};
+
 use crate::config::DaemonConfig;
 use crate::tddy_user_config;
+
+/// Same default line format as `tddy_core` and typical `dev.desktop.yaml` `log.loggers.*.format`.
+pub const CHILD_LOG_FORMAT_FALLBACK: &str = "{timestamp} [{level}] [{target}] {message}";
+
+fn level_filter_to_yaml(level: log::LevelFilter) -> &'static str {
+    match level {
+        log::LevelFilter::Off => "off",
+        log::LevelFilter::Error => "error",
+        log::LevelFilter::Warn => "warn",
+        log::LevelFilter::Info => "info",
+        log::LevelFilter::Debug => "debug",
+        log::LevelFilter::Trace => "trace",
+    }
+}
+
+/// Escape `s` for use as a YAML double-quoted scalar (child session `log.loggers.default.format`).
+fn yaml_double_quote_scalar(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Level + format string for the per-session `tddy-coder` `--config` snippet, matching the daemon's
+/// effective `log:` (e.g. from `dev.desktop.yaml`). When the daemon omits `log:`, matches
+/// `main.rs` (`default_log_config` / `RUST_LOG`).
+pub fn child_log_yaml_tuning(daemon_log: Option<&LogConfig>) -> (String, String) {
+    let cfg = daemon_log
+        .cloned()
+        .unwrap_or_else(|| default_log_config(None, None));
+    let level = level_filter_to_yaml(cfg.default.level).to_string();
+    let format = resolve_logger(&cfg, None, &cfg.default.logger)
+        .and_then(|logger| logger.format.clone())
+        .unwrap_or_else(|| CHILD_LOG_FORMAT_FALLBACK.to_string());
+    (level, format)
+}
 
 /// LiveKit credentials to pass to spawned process (url, api_key, api_secret).
 /// Optional `common_room` forces all daemon spawns into one LiveKit room (see [`resolve_livekit_room_name`]).
@@ -81,6 +129,8 @@ struct ChildProcessLogFiles {
 fn create_child_log_config_and_streams(
     repo_path: &Path,
     session_id: &str,
+    child_log_level: &str,
+    child_log_format: &str,
 ) -> anyhow::Result<ChildProcessLogFiles> {
     let child_logs_dir = repo_path.join("tmp").join("logs").join("child");
     std::fs::create_dir_all(&child_logs_dir).map_err(|e| {
@@ -101,19 +151,22 @@ fn create_child_log_config_and_streams(
 
     let config_path = child_logs_dir.join(format!("{}.yaml", session_id));
 
+    let format_quoted = yaml_double_quote_scalar(child_log_format);
     let yaml = format!(
         r#"log:
   loggers:
     default:
       output: {{ file: "{}" }}
-      format: "{{timestamp}} [{{level}}] [{{target}}] {{message}}"
+      format: {}
   default:
-    level: debug
+    level: {}
     logger: default
   rotation:
     max_rotated: 0
 "#,
-        log_file_abs.display()
+        log_file_abs.display(),
+        format_quoted,
+        child_log_level
     );
 
     std::fs::write(&config_path, yaml).map_err(|e| {
@@ -343,6 +396,8 @@ pub fn spawn_as_user(
     repo_path: &Path,
     livekit: &LiveKitCreds,
     opts: SpawnOptions<'_>,
+    child_log_level: &str,
+    child_log_format: &str,
 ) -> anyhow::Result<SpawnResult> {
     use std::os::unix::process::CommandExt;
 
@@ -396,7 +451,12 @@ pub fn spawn_as_user(
 
     let same_user = uid == unsafe { libc::getuid() } && gid == unsafe { libc::getgid() };
 
-    let logs = create_child_log_config_and_streams(repo_path, &session_id)?;
+    let logs = create_child_log_config_and_streams(
+        repo_path,
+        &session_id,
+        child_log_level,
+        child_log_format,
+    )?;
 
     let user_cfg = Path::new(&home_dir).join(".tddy").join("config.yaml");
     let path_extra = tddy_user_config::spawn_path_extra_for_home(Path::new(&home_dir));
@@ -576,6 +636,8 @@ pub fn spawn_as_user(
     _repo_path: &Path,
     _livekit: &LiveKitCreds,
     _opts: SpawnOptions<'_>,
+    _child_log_level: &str,
+    _child_log_format: &str,
 ) -> anyhow::Result<SpawnResult> {
     anyhow::bail!("spawn_as_user is only supported on Unix")
 }
@@ -641,6 +703,46 @@ mod livekit_server_identity_multi_host_tests {
         assert_eq!(
             livekit_server_identity_for_session(None, "sid-9"),
             "daemon-sid-9"
+        );
+    }
+}
+
+#[cfg(test)]
+mod child_log_yaml_tuning_tests {
+    use super::child_log_yaml_tuning;
+    use tddy_core::LogConfig;
+
+    #[test]
+    fn uses_daemon_default_level_and_logger_format() {
+        let yaml = r#"
+log:
+  loggers:
+    default:
+      output: stderr
+      format: "[TEST] {level} {message}"
+  default:
+    level: warn
+    logger: default
+"#;
+        let cfg: LogConfig = serde_yaml::from_str(yaml).expect("parse");
+        let (level, format) = child_log_yaml_tuning(Some(&cfg));
+        assert_eq!(level, "warn");
+        assert_eq!(format, "[TEST] {level} {message}");
+    }
+
+    #[test]
+    fn when_daemon_log_missing_matches_default_log_config() {
+        let (level_a, fmt_a) = child_log_yaml_tuning(None);
+        let (level_b, fmt_b) = child_log_yaml_tuning(None);
+        assert_eq!(level_a, level_b);
+        assert_eq!(fmt_a, fmt_b);
+        assert!(
+            matches!(
+                level_a.as_str(),
+                "off" | "error" | "warn" | "info" | "debug" | "trace"
+            ),
+            "unexpected level {}",
+            level_a
         );
     }
 }

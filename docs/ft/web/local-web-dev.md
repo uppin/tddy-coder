@@ -4,6 +4,8 @@
 
 The repo root script **`./web-dev`** starts **`tddy-daemon`** (RPC backend) and the **`tddy-web`** Vite dev server. The browser app talks to the daemon over the Vite dev proxy (`/rpc` → daemon HTTP port).
 
+**Tddy Desktop (Electrobun):** **`bun run desktop:dev`** runs Vite plus the desktop shell. The embedded daemon defaults to repo-root **`dev.desktop.yaml`** when **`TDDY_DAEMON_CONFIG`** is unset (same shape as **`dev.daemon.yaml`**). Repo-root **`.env`** is loaded first (same “do not override existing env” rule as **`./web-dev`**); daemon env overrides still apply. See [packages/tddy-desktop/README.md](../../../packages/tddy-desktop/README.md).
+
 ## Hot reload (HMR) — use the Vite URL
 
 `./web-dev` runs **two HTTP servers**:

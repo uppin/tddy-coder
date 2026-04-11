@@ -79,6 +79,10 @@ describe("ParticipantList", () => {
       .find("a")
       .should("have.attr", "href", "https://auth.example.com/oauth/authorize")
       .should("have.attr", "target", "_blank");
+    cy.get("[data-testid='participant-metadata-daemon-session']")
+      .find("a")
+      .should("have.attr", "href", "https://auth.example.com/oauth/authorize")
+      .should("contain.text", "open sign-in");
   });
 
   it("ParticipantList hides video affordance when participant has no camera track", () => {

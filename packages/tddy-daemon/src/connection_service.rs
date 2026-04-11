@@ -495,6 +495,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             }
         };
         let timeout = self.config.spawn_worker_request_timeout();
+        let daemon_log = self.config.log.clone();
         let result = spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
             log::debug!(
                 "StartSession: spawn_blocking running, using_spawn_worker={}",
@@ -517,9 +518,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         mouse: spawn_mouse,
                         recipe,
                     },
+                    daemon_log.as_ref(),
                 );
                 client.spawn(spawn_req)
             } else {
+                let (child_log_level, child_log_format) =
+                    spawner::child_log_yaml_tuning(daemon_log.as_ref());
                 spawner::spawn_as_user(
                     &os_user,
                     &tool_path,
@@ -533,6 +537,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         mouse: spawn_mouse,
                         recipe,
                     },
+                    child_log_level.as_str(),
+                    child_log_format.as_str(),
                 )
             }
         })
@@ -636,6 +642,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let livekit = livekit.clone();
         let project_id_resume = metadata.project_id.clone();
         let timeout = self.config.spawn_worker_request_timeout();
+        let daemon_log = self.config.log.clone();
         let result = spawn_blocking_with_timeout(timeout, "ResumeSession: spawn", move || {
             let pid = if project_id_resume.is_empty() {
                 None
@@ -656,9 +663,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         mouse: spawn_mouse,
                         recipe: None,
                     },
+                    daemon_log.as_ref(),
                 );
                 client.spawn(spawn_req)
             } else {
+                let (child_log_level, child_log_format) =
+                    spawner::child_log_yaml_tuning(daemon_log.as_ref());
                 spawner::spawn_as_user(
                     &os_user,
                     &tool_path,
@@ -672,6 +682,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         mouse: spawn_mouse,
                         recipe: None,
                     },
+                    child_log_level.as_str(),
+                    child_log_format.as_str(),
                 )
             }
         })

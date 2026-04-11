@@ -1,5 +1,6 @@
 # Dev config for tddy-daemon (default for ./web-dev when DAEMON_CONFIG is unset).
 # Maps stub user "testuser" to current OS user for local dev.
+# For Tddy Desktop (Electrobun), see dev.desktop.yaml at the repo root (default when TDDY_DAEMON_CONFIG is unset).
 
 log:
   loggers:
