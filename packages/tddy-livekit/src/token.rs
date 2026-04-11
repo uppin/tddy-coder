@@ -148,4 +148,25 @@ mod tests {
         );
         assert_eq!(gen.ttl(), Duration::from_secs(90));
     }
+
+    #[test]
+    fn livekit_coder_daemon_jwt_defaults_should_not_force_minute_scale_room_reconnects() {
+        const JWT_TTL_SECS_USED_BY_CODER_AND_DAEMON: u64 = 120;
+        const MIN_SECONDS_BETWEEN_TOKEN_REFRESH_RECONNECTS: u64 = 5 * 60;
+
+        let gen = TokenGenerator::new(
+            DEV_API_KEY.to_string(),
+            DEV_API_SECRET.to_string(),
+            "room".to_string(),
+            "identity".to_string(),
+            Duration::from_secs(JWT_TTL_SECS_USED_BY_CODER_AND_DAEMON),
+        );
+        assert!(
+            gen.time_until_refresh() >= Duration::from_secs(MIN_SECONDS_BETWEEN_TOKEN_REFRESH_RECONNECTS),
+            "JWT TTL {}s with a {}s pre-expiry slack reconnects every {}s (see TokenGenerator::time_until_refresh and LiveKitParticipant::run_with_reconnect); raise TTL or slack so dashboards do not show ~1/min participant churn",
+            JWT_TTL_SECS_USED_BY_CODER_AND_DAEMON,
+            60u64,
+            gen.time_until_refresh().as_secs()
+        );
+    }
 }
