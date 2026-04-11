@@ -10,6 +10,7 @@ export function startOAuthCallbackServer(options: {
 }): Server {
   const { port, expectedState, onHit } = options;
   return Bun.serve({
+    hostname: "127.0.0.1",
     port,
     fetch(req) {
       const u = new URL(req.url);

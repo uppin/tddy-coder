@@ -130,18 +130,18 @@ packages/tddy-desktop/
 
 ## Security
 
-- **Callback query** contains **authorization codes** — treat as secret in transit:
-  - send only on **LiveKit data channel** already authenticated by **room JWT**;
+- **Callback traffic** contains **authorization codes** — treat as secret in transit:
+  - tunnel **raw TCP** (HTTP bytes) over the **LiveKit data channel** RPC already authenticated by **room JWT**;
   - restrict **destination identities** (only the daemon participant for the session);
-  - **never** log full query strings.
+  - **never** log full HTTP requests or query strings.
 - **Metadata** from LiveKit is **not** trusted for code execution; only **HTTPS** authorize URLs (existing web parser rule).
 - **Deep links** (`tddy://…`) optional later; must validate session id.
 
 ## Phases
 
 1. **Shell** (implemented): Electrobun app loads **production `tddy-web` dist** from disk or env URL; Connect flow unchanged (RPC via daemon as today).
-2. **OAuth discovery** (implemented): Desktop reads **`codex_oauth` metadata**; opens browser; local callback server captures `GET /auth/callback`.
-3. **Relay MVP** (implemented, Variant A): LiveKit message from desktop → **`CodexOAuthService/DeliverCallback`** RPC → **`tddy-coder`** proxies HTTP to Codex loopback on agent host.
+2. **OAuth discovery** (implemented): Desktop reads **`codex_oauth` metadata**; opens browser; listens on **`127.0.0.1:{callback_port}`** for the browser callback.
+3. **Relay MVP** (implemented): **`LoopbackTunnelService.StreamBytes`** (bidirectional) pipes TCP bytes from the operator machine to **`127.0.0.1:{port}`** on the session host where Codex’s loopback listener receives the same HTTP `GET /auth/callback` as a local run.
 4. **Polish:** Installer, code signing, auto-update, tray icon.
 
 ## Related docs

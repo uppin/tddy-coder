@@ -13,8 +13,8 @@
     "@bufbuild/protobuf": "^2.2.0",
     "@connectrpc/connect": "^2.0.0",
     "@connectrpc/connect-web": "^2.0.0",
+    "@livekit/rtc-node": "0.13.24",
     "electrobun": "1.16.0",
-    "livekit-client": "^2.17.0",
     "tddy-livekit-web": "workspace:*"
   },
   "devDependencies": {

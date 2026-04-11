@@ -1,19 +1,16 @@
-import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
-import {
-  CodexOAuthService,
-  createLiveKitTransport,
-  DeliverCallbackRequestSchema,
-} from "tddy-livekit-web";
 import {
   Room,
   RoomEvent,
   type RemoteParticipant,
-} from "livekit-client";
+} from "@livekit/rtc-node";
 
-import { parseCodexOAuthMetadata } from "./codex-oauth-metadata";
-import { startOAuthCallbackServer } from "./oauth-callback-server";
+import {
+  parseCodexOAuthMetadata,
+  resolvedCodexOAuthCallbackPort,
+} from "./codex-oauth-metadata";
+import { startOAuthLoopbackTcpProxy } from "./oauth-loopback-tcp-proxy";
 import { TokenService } from "../../../tddy-web/src/gen/token_pb.ts";
 
 function openUrlInBrowser(url: string) {
@@ -32,74 +29,66 @@ function pickDaemonParticipant(
 ): RemoteParticipant | null {
   for (const p of room.remoteParticipants.values()) {
     if (p.identity.startsWith("daemon-")) {
-      return p as RemoteParticipant;
+      return p;
     }
   }
   return null;
 }
 
-/** LiveKit data-channel path used after the browser hits the local callback URL. */
-export type CodexOAuthDeliverPipeline = {
-  deliverCallback: (code: string, state: string) => Promise<void>;
-  dispose: () => void;
-};
-
-export function defaultCodexOAuthDeliverPipeline(
-  room: Room,
-  targetIdentity: string,
-): CodexOAuthDeliverPipeline {
-  const lkTransport = createLiveKitTransport({
-    room,
-    targetIdentity,
-  });
-  const oauthClient = createClient(CodexOAuthService, lkTransport);
-  return {
-    deliverCallback: async (code: string, state: string) => {
-      await oauthClient.deliverCallback(
-        create(DeliverCallbackRequestSchema, {
-          code,
-          state,
-          sessionId: "",
-        }),
-      );
-    },
-    dispose: () => {
-      lkTransport.destroy();
-    },
-  };
-}
+/** Override in tests (e.g. HTTP callback stub without WebRTC). */
+export type StartOAuthTcpTunnelFn<R extends Pick<Room, "remoteParticipants" | "on">> = (
+  opts: {
+    room: R;
+    targetIdentity: string;
+    listenPort: number;
+    remoteLoopbackPort: number;
+    expectedState: string;
+  },
+) => { stop: () => void };
 
 export type LiveKitOAuthRelayDeps<R extends Pick<Room, "remoteParticipants" | "on">> = {
   openUrlInBrowser: (url: string) => void;
-  createDeliverPipeline: (
-    room: R,
-    targetIdentity: string,
-  ) => CodexOAuthDeliverPipeline;
+  startOAuthTcpTunnel?: StartOAuthTcpTunnelFn<R>;
 };
 
 export type LiveKitOAuthRelayHandle = {
   dispose: () => void;
-  /** OS port for the local callback server when pending OAuth is active; otherwise `null`. */
+  /** Local TCP listen port when pending OAuth is active; otherwise `null`. */
   getCallbackPort: () => number | null;
 };
 
+function defaultStartOAuthTcpTunnel(
+  opts: Parameters<StartOAuthTcpTunnelFn<Room>>[0],
+): { stop: () => void } {
+  return startOAuthLoopbackTcpProxy({
+    room: opts.room,
+    targetIdentity: opts.targetIdentity,
+    listenPort: opts.listenPort,
+    remoteLoopbackPort: opts.remoteLoopbackPort,
+  });
+}
+
 /**
- * Watch daemon participant metadata, open authorize URL, run callback server, relay to coder via `deliverCallback`.
- * Used by production (`runLiveKitOAuthRelay`) and by E2E tests with a mock `room`.
+ * Watch daemon participant metadata, open authorize URL, listen on loopback TCP, tunnel bytes to the session host via LiveKit.
  */
 export async function installLiveKitOAuthRelay<
   R extends Pick<Room, "remoteParticipants" | "on">,
 >(room: R, deps: LiveKitOAuthRelayDeps<R>): Promise<LiveKitOAuthRelayHandle> {
-  const { openUrlInBrowser: openUrl, createDeliverPipeline } = deps;
+  const { openUrlInBrowser: openUrl } = deps;
+  const startTunnel = deps.startOAuthTcpTunnel ?? (defaultStartOAuthTcpTunnel as StartOAuthTcpTunnelFn<R>);
 
-  let callbackServer: ReturnType<typeof startOAuthCallbackServer> | null = null;
+  let tunnel: { stop: () => void } | null = null;
+  let listeningPort: number | null = null;
   let lastAuthorize: string | null = null;
+  let callbackListenReserved = false;
 
-  const stopCallbackServer = () => {
-    if (callbackServer) {
-      callbackServer.stop();
-      callbackServer = null;
+  const stopTunnel = () => {
+    if (tunnel) {
+      tunnel.stop();
+      tunnel = null;
     }
+    listeningPort = null;
+    callbackListenReserved = false;
   };
 
   const onMetadata = async () => {
@@ -107,7 +96,7 @@ export async function installLiveKitOAuthRelay<
     if (!daemon) return;
     const info = parseCodexOAuthMetadata(daemon.metadata ?? "");
     if (!info?.pending || !info.authorizeUrl) {
-      stopCallbackServer();
+      stopTunnel();
       lastAuthorize = null;
       return;
     }
@@ -115,25 +104,34 @@ export async function installLiveKitOAuthRelay<
       lastAuthorize = info.authorizeUrl;
       openUrl(info.authorizeUrl);
     }
-    const port = info.callbackPort ?? 1455;
+    const port = resolvedCodexOAuthCallbackPort(info);
     const expectedState = info.state ?? "";
-    if (callbackServer) {
+    if (tunnel || callbackListenReserved) {
       return;
     }
+    callbackListenReserved = true;
     const targetIdentity = daemon.identity;
-    callbackServer = startOAuthCallbackServer({
-      port,
-      expectedState,
-      onHit: async (hit) => {
-        const pipeline = createDeliverPipeline(room, targetIdentity);
-        try {
-          await pipeline.deliverCallback(hit.code, hit.state);
-        } finally {
-          pipeline.dispose();
-        }
-        stopCallbackServer();
-      },
-    });
+    console.info(
+      `[tddy-desktop] OAuth loopback TCP listening on 127.0.0.1:${port} (tunnel → ${targetIdentity} @ 127.0.0.1:${port})`,
+    );
+    try {
+      listeningPort = port;
+      tunnel = startTunnel({
+        room,
+        targetIdentity,
+        listenPort: port,
+        remoteLoopbackPort: port,
+        expectedState,
+      });
+    } catch (e) {
+      callbackListenReserved = false;
+      listeningPort = null;
+      console.error(
+        "[tddy-desktop] OAuth relay: failed to bind loopback TCP listener:",
+        e,
+      );
+      throw e;
+    }
   };
 
   room.on(RoomEvent.ParticipantConnected, () => {
@@ -147,15 +145,14 @@ export async function installLiveKitOAuthRelay<
 
   return {
     dispose: () => {
-      stopCallbackServer();
+      stopTunnel();
     },
-    getCallbackPort: () => callbackServer?.port ?? null,
+    getCallbackPort: () => listeningPort,
   };
 }
 
 /**
- * Join LiveKit common room, watch daemon metadata for `codex_oauth`, run callback server, relay via RPC.
- * Requires `TDDY_RPC_BASE` (e.g. http://127.0.0.1:8899/rpc), `TDDY_LIVEKIT_URL`, `TDDY_LIVEKIT_ROOM`.
+ * Join LiveKit room, watch daemon metadata for `codex_oauth`, tunnel OAuth callback TCP via LiveKit.
  */
 export async function runLiveKitOAuthRelay(options: {
   livekitUrl: string;
@@ -172,10 +169,15 @@ export async function runLiveKitOAuthRelay(options: {
   const tokenClient = createClient(TokenService, transport);
   const res = await tokenClient.generateToken({ room: roomName, identity });
   const room = new Room();
-  await room.connect(livekitUrl, res.token);
+  await room.connect(livekitUrl, res.token, {
+    autoSubscribe: true,
+    dynacast: true,
+  });
+  console.info(
+    `[tddy-desktop] OAuth relay: LiveKit connected (room ${roomName}, identity ${identity})`,
+  );
 
   await installLiveKitOAuthRelay(room, {
     openUrlInBrowser,
-    createDeliverPipeline: defaultCodexOAuthDeliverPipeline,
   });
 }

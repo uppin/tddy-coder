@@ -3,8 +3,7 @@
 use livekit::prelude::*;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -219,8 +218,9 @@ pub struct LiveKitParticipant<S: crate::bridge::RpcService> {
     /// When set, bidi output tasks publish through this instead of a direct LocalParticipant,
     /// allowing them to survive room reconnection during token refresh.
     shared_publisher: Option<SharedPublisher>,
-    /// When set, poll this path for an `https://` authorize URL (written by the Codex `BROWSER` hook)
-    /// and publish JSON metadata so dashboards can show “sign in” next to this participant.
+    /// Poll this path for an `https://` authorize URL (Codex `BROWSER` hook) and publish **metadata
+    /// only** for UIs. Includes `callback_port` / `state` when
+    /// derivable from the URL so the desktop relay matches the terminal-driven metadata shape.
     codex_oauth_watch: Option<PathBuf>,
     /// When set, publish [`OWNED_PROJECT_COUNT_METADATA_KEY`] from the registry at this directory (e.g. daemon project store).
     projects_registry_dir: Option<PathBuf>,
@@ -664,10 +664,16 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         if last_sent.as_ref() == Some(&url) {
             return;
         }
+        let (callback_port, state) =
+            tddy_service::codex_oauth_scan::codex_oauth_from_authorize_url_only(&url)
+                .map(|d| (d.callback_port, d.state))
+                .unwrap_or((1455, String::new()));
         let update = serde_json::json!({
             "codex_oauth": {
                 "pending": true,
                 "authorize_url": url,
+                "callback_port": callback_port,
+                "state": state,
             }
         })
         .to_string();

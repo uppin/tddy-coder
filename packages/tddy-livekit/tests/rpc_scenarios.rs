@@ -2,6 +2,7 @@
 //!
 //! All scenarios run inside a **single** test function that owns the Docker
 //! container.  This guarantees cleanup via `Drop` when the test ends.
+//! Includes **loopback tunnel** (`LoopbackTunnelService.StreamBytes` → session-host TCP).
 //!
 //! Run with: cargo test -p tddy-livekit --test rpc_scenarios
 //! Debug:    RUST_LOG=debug cargo test -p tddy-livekit --test rpc_scenarios -- --nocapture
@@ -18,8 +19,13 @@ use std::time::Duration;
 use tddy_livekit::{LiveKitParticipant, RpcClient, TokenGenerator};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Code;
+use tddy_service::proto::loopback_tunnel::TunnelChunk;
 use tddy_service::proto::test::{EchoRequest, EchoResponse, EchoService};
-use tddy_service::{EchoServiceImpl, EchoServiceServer};
+use tddy_service::{
+    EchoServiceImpl, EchoServiceServer, LoopbackTunnelServiceImpl, LoopbackTunnelServiceServer,
+};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -241,6 +247,75 @@ impl TestHarness {
     fn teardown(self) {
         log::debug!("TestHarness::teardown aborting server task");
         self.server_handle.abort();
+    }
+}
+
+/// `LoopbackTunnelService` dials `127.0.0.1:{port}` on the host running the server participant.
+struct LoopbackTunnelHarness {
+    rpc_client: RpcClient,
+    server_handle: tokio::task::JoinHandle<()>,
+    echo_task: tokio::task::JoinHandle<()>,
+    loopback_port: u16,
+}
+
+impl LoopbackTunnelHarness {
+    async fn start(livekit: &LiveKitTestkit, room_name: &str) -> Result<Self> {
+        let url = livekit.get_ws_url();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let loopback_port = listener.local_addr()?.port();
+        anyhow::ensure!(
+            loopback_port >= 1024,
+            "loopback tunnel test expects non-privileged ephemeral port"
+        );
+
+        let echo_task = tokio::spawn(async move {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 64];
+            let Ok(n) = stream.read(&mut buf).await else {
+                return;
+            };
+            if n > 0 && &buf[..n] == b"ping" {
+                let _ = stream.write_all(b"pong").await;
+            }
+        });
+
+        let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
+        let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
+
+        let server = LiveKitParticipant::connect(
+            &url,
+            &server_token,
+            LoopbackTunnelServiceServer::new(LoopbackTunnelServiceImpl),
+            RoomOptions::default(),
+            None,
+        )
+        .await?;
+        let server_handle = tokio::spawn(async move { server.run().await });
+
+        let (client_room, mut client_events) =
+            Room::connect(&url, &client_token, RoomOptions::default())
+                .await
+                .map_err(|e| anyhow::anyhow!("loopback tunnel client connect: {}", e))?;
+
+        wait_for_participant(&client_room, &mut client_events, SERVER_IDENTITY).await?;
+
+        let rpc_events = client_room.subscribe();
+        let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
+
+        Ok(Self {
+            rpc_client,
+            server_handle,
+            echo_task,
+            loopback_port,
+        })
+    }
+
+    fn teardown(self) {
+        self.server_handle.abort();
+        self.echo_task.abort();
     }
 }
 
@@ -882,6 +957,65 @@ async fn rpc_scenarios() -> Result<()> {
             "exactly one bidi handler for the stream"
         );
 
+        harness.teardown();
+    }
+
+    // -----------------------------------------------------------------------
+    // Loopback tunnel: bidi StreamBytes dials session-host TCP (Codex OAuth path)
+    // -----------------------------------------------------------------------
+    {
+        let harness = LoopbackTunnelHarness::start(&livekit, "loopback-tunnel-scenarios").await?;
+
+        log::debug!("scenario: loopback tunnel ping/pong over LiveKit bidi RPC");
+        let first = TunnelChunk {
+            open_port: harness.loopback_port as u32,
+            data: vec![],
+        };
+        let second = TunnelChunk {
+            open_port: 0,
+            data: b"ping".to_vec(),
+        };
+
+        let mut rx = match harness
+            .rpc_client
+            .call_bidi_stream(
+                "loopback_tunnel.LoopbackTunnelService",
+                "StreamBytes",
+                vec![first.encode_to_vec(), second.encode_to_vec()],
+            )
+            .await
+        {
+            Ok(rx) => rx,
+            Err(e) => {
+                harness.teardown();
+                return Err(anyhow::anyhow!("loopback tunnel bidi: {}", e));
+            }
+        };
+
+        let mut acc = Vec::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while acc.len() < 4 && std::time::Instant::now() < deadline {
+            let next = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await;
+            match next {
+                Ok(Some(Ok(bytes))) => {
+                    let chunk = TunnelChunk::decode(&bytes[..])?;
+                    acc.extend_from_slice(&chunk.data);
+                }
+                Ok(Some(Err(e))) => {
+                    harness.teardown();
+                    return Err(anyhow::anyhow!("loopback tunnel chunk error: {}", e));
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    harness.teardown();
+                    return Err(anyhow::anyhow!(
+                        "timeout waiting for loopback tunnel response"
+                    ));
+                }
+            }
+        }
+
+        assert_eq!(acc.as_slice(), b"pong");
         harness.teardown();
     }
 
