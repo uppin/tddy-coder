@@ -2,6 +2,10 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-04-11 — Operator OAuth loopback tunnel (daemon)
+
+- **`tddy-daemon`**: **`oauth_loopback_tunnel`** — **`TcpListener`** on operator **`127.0.0.1:{callback_port}`**, **`RpcClient::start_bidi_stream`** **`loopback_tunnel.LoopbackTunnelService`/`StreamBytes`**, **`pick_daemon_oauth_target`** over common-room **`daemon-*`** metadata; **`run_oauth_tunnel_supervisor_follow_room_slot`** with **`livekit_peer_discovery`**; **`codex_oauth_participant_metadata`**. Package **[oauth-loopback-tunnel.md](../../packages/tddy-daemon/docs/oauth-loopback-tunnel.md)**; feature **[codex-oauth-relay.md](codex-oauth-relay.md)**, **[livekit-peer-discovery.md](livekit-peer-discovery.md)**. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-04-11 — LiveKit common-room peer discovery and cross-daemon StartSession
 
 - **`tddy-daemon`**: Module **`livekit_peer_discovery`** — JSON metadata advertisement, **`CommonRoomPeerRegistry`**, **`LiveKitEligibleDaemonSource`**, **`LiveKitDiscoveryHandles`**, background join/sync for **`livekit.common_room`**, **StartSession** forward via **`tddy_livekit::RpcClient`** to peer identity; **`local_instance_id_for_config`** shared with **ConnectionService**; **`TDDY_PROJECTS_DIR`** test hook documented on **`projects_path_for_user`**. Integration tests **`livekit_peer_daemons_acceptance`**, **`multi_host_acceptance`** (remote routing). **`tddy-livekit`**: **`RpcClient::new_shared`** (**`Arc<Room>`**).

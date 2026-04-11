@@ -47,6 +47,7 @@ After sign-in, **ConnectionScreen** loads **ListEligibleDaemons** with tools and
 
 ## Related documentation
 
+- [Codex OAuth relay — operator loopback tunnel](codex-oauth-relay.md#operator-loopback-tunnel-tddy-daemon)
 - [Web terminal — eligible daemons and host selection](../web/web-terminal.md#eligible-daemons-and-host-selection)
 - [Project concept — `host_repo_paths`](project-concept.md)
 - [Daemon changelog](changelog.md)
