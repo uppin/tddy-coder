@@ -275,7 +275,7 @@ When complete → Wrap changeset via /wrap-context-docs
 **Wrap Behavior:**
 When `/wrap-context-docs` is run on a complete changeset:
 1. Updates package READMEs and dev docs with final state
-2. Updates changeset history in `packages/{package}/docs/changesets.md`
+2. Prepends **one single-line** entry to `packages/{package}/docs/changesets.md` (and `docs/dev/changesets.md` when cross-package)—see [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md)
 3. Creates git commit with wrapped changes
 
 Example:

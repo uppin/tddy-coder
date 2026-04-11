@@ -390,7 +390,9 @@ fn run_start_goal_without_output_dir(
             "[workflow_runner] run_start_goal_without_output_dir: wrote changeset.yaml recipe={}",
             recipe_name
         );
-        let _ = crate::changeset::write_changeset(dir, &init_cs);
+        if let Err(e) = crate::changeset::write_changeset(dir, &init_cs) {
+            log::warn!("write_changeset (run_start_goal_without_output_dir): {}", e);
+        }
         if let Err(e) = crate::session_metadata::write_initial_tool_session_metadata(
             dir,
             crate::session_metadata::InitialToolSessionMetadataOpts {

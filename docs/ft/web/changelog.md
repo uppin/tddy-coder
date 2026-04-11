@@ -1,16 +1,27 @@
-# Web Changelog
+q# Web Changelog
 
 Release note history for the Web product area.
+
+**Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
+
+## 2026-04-10 — ParticipantList Codex OAuth presence
+
+- **tddy-web**: `parseCodexOAuthPending` in `ParticipantList` — "Codex sign-in" column with `ExternalLink` icon for pending OAuth; `codexOauthMetadata.ts` parser. Cypress `ParticipantList.cy.tsx` OAuth assertions; Bun `codexOauthMetadata.test.ts`. Feature doc: [codex-oauth-web-relay.md](codex-oauth-web-relay.md).
+
+## 2026-04-06 — Codex OAuth web relay (dialog + docs)
+
+- **tddy-web**: **`CodexOAuthDialog`** — modal (**`codex-oauth-dialog`**), dismiss (**`codex-oauth-dismiss`**), sandboxed authorize **iframe** when **`embeddingBlocked`** is false; **embedding-blocked** panel (**`codex-oauth-embedding-fallback`**) with external link (**`noopener`**, **`noreferrer`**) when **`embeddingBlocked`** is true. Cypress **`CodexOAuthDialog.cy.tsx`**, **`CodexOAuthIframeFallback.cy.tsx`**.
+- **Docs**: **[codex-oauth-web-relay.md](codex-oauth-web-relay.md)**; package **[codex-oauth-dialog.md](../../../packages/tddy-web/docs/codex-oauth-dialog.md)**. Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**; **[packages/tddy-web/docs/changesets.md](../../../packages/tddy-web/docs/changesets.md)**.
 
 ## 2026-04-05 — Connection screen: concurrent terminal attachments
 
 - **`tddy-web`**: **`ConnectionScreen`** stores **`sessionAttachments`** (**`Map<sessionId, LiveKitConnectionParams>`**); **Connect** / **Resume** / **Start** merge attachments without dropping prior sessions; **`focusedSessionIdFromPathname`** aligns **fullscreen** focus with **`/terminal/{sessionId}`**; floating **overlay** / **mini** render one **`ConnectedTerminal`** per attachment under **`data-testid="connection-attached-terminal-{sessionId}"`**; inactive **`ListSessions`** rows prune matching attachments only; **Disconnect** removes one entry; **popstate** to `/` clears all. Pure helpers: **`multiSessionState.ts`**, **`multiSessionPresentation.ts`**. Bun **`multiSessionState.test.ts`**, **`multiSessionPresentation.test.ts`**; Cypress **`ConnectionScreen.cy.tsx`** (multi-session scenarios).
 - **Feature doc**: [web-terminal.md](web-terminal.md) (daemon mode — concurrent attachments, attach behavior). **Dev reference**: [terminal-presentation.md](../../../packages/tddy-web/docs/terminal-presentation.md). Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**.
 
-## 2026-04-05 — Workflow recipe control: `review`
+## 2026-04-05 — Connection screen: workflow recipe control
 
-- **ConnectionScreen**: The **Workflow recipe** options include **`review`** alongside existing recipe names; the value is sent on **`StartSession`** as for other recipes.
-- **Reference**: [workflow-recipes.md](../coder/workflow-recipes.md) (**ReviewRecipe**, **Selecting a recipe**).
+- **`ConnectionScreen`**: **Workflow recipe** lists **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**, **`review`**, and **`merge-pr`**; the default selection for **Start New Session** is **`free-prompting`**. **`StartSession.recipe`** sends the selected CLI name to the daemon.
+- **Feature doc**: [web-terminal.md](web-terminal.md) (Projects — collapsible sections). Package **[tddy-web](../../packages/tddy-web/docs/changesets.md)**.
 
 ## 2026-04-05 — Terminal connection status bar (chrome layouts)
 

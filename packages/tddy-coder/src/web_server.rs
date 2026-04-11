@@ -8,6 +8,13 @@ use axum::routing::get;
 use axum::{Json, Router};
 use tower_http::services::{ServeDir, ServeFile};
 
+/// One backend row for [`ClientConfig::allowed_agents`] (daemon `allowed_agents` YAML).
+#[derive(Clone, serde::Serialize)]
+pub struct ClientAllowedAgent {
+    pub id: String,
+    pub label: String,
+}
+
 /// Client-visible server config, served at /api/config.
 #[derive(Clone, serde::Serialize)]
 pub struct ClientConfig {
@@ -21,6 +28,9 @@ pub struct ClientConfig {
     /// When true, server is tddy-daemon; show ConnectionScreen instead of ConnectionForm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub daemon_mode: Option<bool>,
+    /// Daemon: same allowlist as `ListAgents` / `allowed_agents` in YAML (for UI before RPC hydrates).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_agents: Vec<ClientAllowedAgent>,
 }
 
 /// Serve static files from `bundle_path` on the given `host` and `port`.

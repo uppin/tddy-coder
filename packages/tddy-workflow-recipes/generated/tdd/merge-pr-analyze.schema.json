@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tddy:goal/merge-pr-analyze",
+  "title": "Merge PR analyze",
+  "description": "Structured submit for merge-pr analyze: optional worktree directory basename before sync-main.",
+  "type": "object",
+  "required": ["goal", "summary"],
+  "properties": {
+    "goal": {
+      "type": "string",
+      "const": "merge-pr-analyze"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "worktree_suggestion": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,6 +1,6 @@
 # Systemd install (`./install --systemd`)
 
-The repo root **`./install`** script installs **`tddy-daemon`**, **`tddy-coder`**, and **`tddy-tools`** as a systemd service: copies release binaries, installs a production config template when missing, writes **`tddy-daemon.service`**, copies the **tddy-web** static bundle when present, and runs **`systemctl`** enable/start (unless disabled for tests).
+The repo root **`./install`** script installs **`tddy-daemon`**, **`tddy-coder`**, **`tddy-tools`**, and the native **`codex-acp`** binary (from **`@zed-industries/codex-acp`** after **`./dev bun install`**) as a systemd service: copies release binaries, installs **`codex-acp`** into the same bin directory, installs a production config template when missing, writes **`tddy-daemon.service`**, copies the **tddy-web** static bundle when present, and runs **`systemctl`** enable/start (unless disabled for tests).
 
 ## Usage
 
@@ -12,6 +12,7 @@ sudo ./install --systemd --build # run ./release first, then install
 - Requires **root** unless **`INSTALL_NO_SYSTEMCTL=1`** (test/CI harness).
 - Release binaries must exist under **`target/release/`** (use **`--build`** or run **`./release`** first).
 - Web dashboard: build **`packages/tddy-web`** (`bun run build`) so **`packages/tddy-web/dist`** exists before install if you want the bundle copied.
+- **Codex ACP:** run **`./dev bun install`** from the repo root so **`node_modules/@zed-industries/codex-acp-<os>-<arch>/bin/codex-acp`** exists; **`./install`** copies it to **`$INSTALL_BIN_DIR/codex-acp`**.
 
 ## Paths and defaults
 
@@ -40,7 +41,7 @@ The generated unit uses **`ExecStart`** pointing at the resolved **`tddy-daemon`
 
 ## Behavior notes
 
-- **Binaries** are copied from **`target/release/`** (overwritten on each install).
+- **Binaries** **`tddy-*`** are copied from **`target/release/`** (overwritten on each install). **`codex-acp`** is copied from **`node_modules/.../bin/codex-acp`** (same **`INSTALL_BIN_DIR`**).
 - **Config** is skipped if **`daemon.yaml`** already exists.
 - **Unit file** behavior depends on **`INSTALL_OVERWRITE_SYSTEMD_UNIT`** (see above).
 - **`systemctl daemon-reload`**, **enable**, and **start** run after files are installed when **`INSTALL_NO_SYSTEMCTL` is unset.

@@ -5,7 +5,7 @@ edition = "2021"
 description = "Core library for tddy-coder"
 
 [dependencies]
-agent-client-protocol = "0.10.2"
+agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }
 async-trait = "0.1"
 futures = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -23,7 +23,6 @@ tddy-workflow = { path = "../tddy-workflow" }
 
 [dev-dependencies]
 async-trait = "0.1"
-serde_yaml = "0.9"
 serial_test = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 

@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tddy_coder::web_server::{serve_web_bundle_with_shutdown, ClientConfig};
+use tddy_coder::web_server::{serve_web_bundle_with_shutdown, ClientAllowedAgent, ClientConfig};
 use tddy_connectrpc::connect_router;
 use tddy_rpc::{MultiRpcService, RpcBridge};
 
@@ -18,6 +18,7 @@ pub async fn run_server(
     rpc_entries: Vec<tddy_rpc::ServiceEntry>,
     livekit_url: Option<String>,
     common_room: Option<String>,
+    allowed_agents: Vec<ClientAllowedAgent>,
     lifecycle_telegram: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
 ) -> anyhow::Result<()> {
     if let Some((ref cfg, ref sender)) = lifecycle_telegram {
@@ -36,6 +37,7 @@ pub async fn run_server(
         livekit_room: None,
         common_room,
         daemon_mode: Some(true),
+        allowed_agents,
     };
 
     let shutdown_copy = lifecycle_telegram.clone();

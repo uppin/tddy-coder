@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tddy:goal/merge-pr-report",
+  "title": "Merge PR report",
+  "description": "Structured submit for merge-pr finalize (sync outcome, push ref, optional GitHub merge SHA).",
+  "type": "object",
+  "required": ["goal", "summary"],
+  "properties": {
+    "goal": {
+      "type": "string",
+      "const": "merge-pr-report"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sync_strategy": {
+      "type": "string"
+    },
+    "push_ref": {
+      "type": "string"
+    },
+    "github_merge_sha": {
+      "type": "string"
+    },
+    "skip_reason": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

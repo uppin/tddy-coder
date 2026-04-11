@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tddy_core::WorkflowRecipe;
 
 use crate::{
-    approval_policy, BugfixRecipe, FreePromptingRecipe, GrillMeRecipe, ReviewRecipe,
+    approval_policy, BugfixRecipe, FreePromptingRecipe, GrillMeRecipe, MergePrRecipe, ReviewRecipe,
     SessionArtifactManifest, TddRecipe, TddSmallRecipe,
 };
 
@@ -94,6 +94,14 @@ pub fn workflow_recipe_and_manifest_from_cli_name(
         "review" => {
             log::info!("workflow recipe resolved: review (ReviewRecipe)");
             let r: Arc<ReviewRecipe> = Arc::new(ReviewRecipe);
+            Ok((
+                r.clone() as Arc<dyn WorkflowRecipe>,
+                r as Arc<dyn SessionArtifactManifest>,
+            ))
+        }
+        "merge-pr" => {
+            log::info!("workflow recipe resolved: merge-pr (MergePrRecipe)");
+            let r: Arc<MergePrRecipe> = Arc::new(MergePrRecipe);
             Ok((
                 r.clone() as Arc<dyn WorkflowRecipe>,
                 r as Arc<dyn SessionArtifactManifest>,

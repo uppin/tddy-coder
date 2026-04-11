@@ -54,6 +54,7 @@ mod livekit_tests {
                     EchoServiceServer::new(EchoServiceImpl),
                     RoomOptions::default(),
                     shutdown,
+                    None,
                 )
                 .await
             }

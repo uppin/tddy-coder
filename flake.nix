@@ -42,6 +42,11 @@
           ];
           shellHook = ''
             echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node"
+            if _tddy_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+              if [[ -d "$_tddy_root/node_modules/.bin" ]]; then
+                export PATH="$_tddy_root/node_modules/.bin:$PATH"
+              fi
+            fi
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
             export CXXFLAGS="-include ''${SDKROOT}/usr/include/uuid/uuid.h''${CXXFLAGS:+ $CXXFLAGS}"
           '';

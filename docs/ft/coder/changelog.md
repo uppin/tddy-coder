@@ -2,6 +2,45 @@
 
 Release note history for the Coder product area.
 
+**Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
+
+## 2026-04-10 — Codex OAuth multi-service on LiveKit path
+
+- **tddy-coder**: `terminal_and_codex_oauth_for_livekit` wires `CodexOAuthServiceImpl` alongside `TerminalService` via `MultiRpcService`; `run_with_reconnect_metadata` pushes `codex_oauth` JSON to participant metadata via `watch::Receiver<String>`. Feature doc: [tddy-desktop-electrobun.md](../desktop/tddy-desktop-electrobun.md).
+
+## 2026-04-09 — Codex ACP backend (`codex-acp` agent)
+
+- **tddy-core**: **`CodexAcpBackend`** speaks ACP to a **`codex-acp`** subprocess (mirrors **`ClaudeAcpBackend`**); session resume via **`load_session`**; OAuth retry path reuses **`codex login`** + **`codex_oauth_authorize.url`** when ACP reports auth-like errors and **`session_dir`** is set; **`agent-client-protocol`** **`=0.10.4`** with **`unstable`**. **`AnyBackend::CodexAcp`**, backend menu / CLI mapping for **`codex-acp`**; **`task.rs`** treats **`codex-acp`** like **`codex`** for **`codex_thread_id`** persistence.
+- **tddy-coder**: **`--agent codex-acp`**, **`create_backend`** wiring, **`TDDY_CODEX_ACP_CLI`** override alongside existing Codex CLI env for OAuth helper.
+- **tddy-acp-stub** / **tddy-integration-tests**: protocol bump; stub **`initialize`** advertises **`load_session`**; **`codex_acp_backend`** acceptance tests.
+- **Docs**: [PRD-2026-04-09-codex-acp-backend.md](1-WIP/PRD-2026-04-09-codex-acp-backend.md); **[docs/dev/changesets.md](../../dev/changesets.md)**; package **`changesets.md`** for **tddy-core** and **tddy-coder**.
+
+## 2026-04-06 — Codex OAuth relay foundations (daemon library; web UI)
+
+- **tddy-daemon**: **`codex_oauth_relay`** validates authorize URLs and parses OAuth callbacks for future **`BROWSER`** capture and Codex listener relay (**`tddy-integration-tests`**: **`codex_oauth_web_relay_acceptance`**).
+- **tddy-web**: **`CodexOAuthDialog`** for authorize URL display (iframe vs embedding-blocked link). Product doc: **[codex-oauth-web-relay.md](../web/codex-oauth-web-relay.md)**; daemon product doc: **[codex-oauth-relay.md](../daemon/codex-oauth-relay.md)**. Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
+## 2026-04-06 — GitHub PR MCP tools (tddy-tools) and recipe prompts
+
+- **tddy-tools**: MCP tools **`github_create_pull_request`** and **`github_update_pull_request`** (GitHub REST via **`curl`**); **`ServerInfo`** instructions name those tools when **`GITHUB_TOKEN`** or **`GH_TOKEN`** is set; mock-recorded request tests for JSON bodies and headers.
+- **tddy-workflow-recipes**: **`github_rest_common`** holds shared **`Accept`**, **`X-GitHub-Api-Version`**, token resolution, and User-Agent strings for merge-pr curl and **tddy-tools**; **tdd-small** merged **`red`** prompt includes the GitHub PR tools section only with a non-empty token; merge-pr hooks continue to append GitHub PR tool awareness under the same condition.
+- **Schema**: **`changeset-workflow`** accepts optional **`github_pr_tools_metadata`** alongside **`workflow`** fields.
+- **Docs**: [github-pr-tools-mcp.md](github-pr-tools-mcp.md); [workflow-recipes.md](workflow-recipes.md); [workflow-json-schemas.md](workflow-json-schemas.md); **`packages/tddy-tools/docs/json-schema.md`**; package **`changesets.md`** for **tddy-tools** and **tddy-workflow-recipes**; **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
+## 2026-04-06 — Branch/worktree intent (changeset workflow)
+
+- **tddy-core**: **`BranchWorktreeIntent`** (**`new_branch_from_base`** | **`work_on_selected_branch`**) on **`ChangesetWorkflow`**; **`branch_worktree_intent`** module (**`validate_workflow_branch_intent`**, **`resolve_branch_and_worktree_plan`**, **`merge_branch_worktree_intent_into_context`**); worktree setup paths **`setup_worktree_for_session_with_integration_base`** and **`setup_worktree_for_session_with_optional_chain_base`** apply intent when **`changeset.yaml`** **`workflow`** carries **`branch_worktree_intent`**; **`merge_persisted_workflow_into_context`** merges intent keys into engine **`Context`**.
+- **tddy-tools**: **`changeset-workflow`** JSON Schema (**`branch_worktree_intent`**, **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**); **`persist-changeset-workflow`** round-trip validation.
+- **tddy-service**: **`WorktreeElicitation`** optional fields align with **`changeset.yaml`** workflow (**`branch_worktree_intent`**, **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**).
+- **Tests**: **`branch_worktree_intent_acceptance`**, **`branch_worktree_intent_red`** (**tddy-core**, **tddy-tools**).
+- **Docs**: [workflow-json-schemas.md](workflow-json-schemas.md), [workflow-recipes.md](workflow-recipes.md), [planning-step.md](planning-step.md), [git-integration-base-ref.md](git-integration-base-ref.md); **[docs/dev/changesets.md](../../dev/changesets.md)**; package **`changesets.md`** for **tddy-core**, **tddy-tools**, **tddy-workflow-recipes**, **tddy-service**.
+
+## 2026-04-05 — Default `free-prompting` session recipe and `/start-<recipe>` feature prompt
+
+- **Sessions**: **New** sessions with no **`--recipe`** and no **`recipe`** in **`changeset.yaml`** use **`free-prompting`**. **`--recipe`** accepts **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**, **`review`**, and **`merge-pr`** on the CLI.
+- **TUI**: **FeatureInput** accepts **`/start-<cli>`** lines (supported recipe names); the slash menu lists **`/start-…`** rows before **`/recipe`** and project skills. After **`WorkflowComplete`** for a structured **`/start-*`** run (any recipe other than **`free-prompting`**), the active recipe returns to **`free-prompting`** and **`changeset.yaml`** stores **`free-prompting`** when resolution succeeds.
+- **Docs**: [workflow-recipes.md](workflow-recipes.md) (**Feature prompt: `/start-<recipe>`**), [1-OVERVIEW.md](1-OVERVIEW.md), [feature-prompt-agent-skills.md](feature-prompt-agent-skills.md); package **`changesets.md`** for **tddy-core**, **tddy-coder**, **tddy-workflow-recipes**, **tddy-tui**; cross-package **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-04-05 — Chain PR optional integration base (worktrees)
 
 - **tddy-core**: **`validate_chain_pr_integration_base_ref`**, **`fetch_chain_pr_integration_base`**, **`setup_worktree_for_session_with_optional_chain_base`**, **`resolve_persisted_worktree_integration_base_for_session`**; **`Changeset`** fields **`effective_worktree_integration_base_ref`**, **`worktree_integration_base_ref`** on **`changeset.yaml`**.

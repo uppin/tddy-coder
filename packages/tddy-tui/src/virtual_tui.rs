@@ -290,6 +290,7 @@ pub fn run_virtual_tui(
                             &mut view,
                             &layout_areas,
                             &intent_tx,
+                            shutdown.as_ref(),
                         );
                     }
                     Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
@@ -365,6 +366,7 @@ pub fn run_virtual_tui(
                                 &mut view,
                                 &layout_areas,
                                 &intent_tx,
+                                shutdown.as_ref(),
                             );
                         }
                         Ok(_) => {}
@@ -413,6 +415,7 @@ fn process_virtual_tui_input_chunk(
     view: &mut TuiView,
     layout_areas: &LayoutAreas,
     intent_tx: &std_mpsc::Sender<UserIntent>,
+    shutdown: &AtomicBool,
 ) {
     *recv_chunk_count += 1;
     let chunk_len = bytes.len() as u64;
@@ -468,6 +471,7 @@ fn process_virtual_tui_input_chunk(
         );
         if key_is_ctrl_c_press(&key) {
             ctrl_c_interrupt_session();
+            shutdown.store(true, Ordering::Relaxed);
             input_buf.drain(..consumed);
             *updated = true;
             continue;

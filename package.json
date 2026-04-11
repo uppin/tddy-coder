@@ -1,13 +1,23 @@
 {
   "private": true,
-  "workspaces": ["packages/tddy-web", "packages/tddy-livekit-web", "packages/tddy-rust-typescript-tests"],
+  "workspaces": [
+    "packages/tddy-web",
+    "packages/tddy-livekit-web",
+    "packages/tddy-desktop",
+    "packages/tddy-rust-typescript-tests"
+  ],
+  "dependencies": {
+    "@zed-industries/codex-acp": "0.11.1"
+  },
   "devDependencies": {
     "@zed-industries/claude-agent-acp": "0.22.2"
   },
   "scripts": {
     "build": "bun run --filter tddy-web build",
+    "desktop:dev": "bun run --filter tddy-desktop dev",
+    "desktop:build": "bun run --filter tddy-desktop build",
     "storybook": "bun run --filter tddy-web storybook",
-    "test": "bun run --filter tddy-rust-typescript-tests test && bun run --filter tddy-web cypress:component && bun run --filter tddy-livekit-web cypress:component",
+    "test": "bun run --filter tddy-rust-typescript-tests test && bun run --filter tddy-desktop test && bun run --filter tddy-web cypress:component && bun run --filter tddy-livekit-web cypress:component",
     "cypress:component": "bun run --filter tddy-web cypress:component",
     "cypress:e2e": "bun run --filter tddy-web cypress:e2e"
   }

@@ -96,7 +96,10 @@ fn output_file_writes_log_to_path_with_target_in_format() {
             logger: "default".to_string(),
         },
         policies: vec![],
-        rotation: Some(LogRotation { max_rotated: 0 }),
+        rotation: Some(LogRotation {
+            max_rotated: 0,
+            only_paths: vec![],
+        }),
     };
     init_tddy_logger(config);
     log::debug!(target: "test_target", "file output message");
@@ -161,7 +164,10 @@ fn log_rotation_renames_existing_file_with_timestamp() {
             logger: "default".to_string(),
         },
         policies: vec![],
-        rotation: Some(LogRotation { max_rotated: 5 }),
+        rotation: Some(LogRotation {
+            max_rotated: 5,
+            only_paths: vec![],
+        }),
     };
     init_tddy_logger(config);
     log::debug!("new content");
@@ -219,7 +225,10 @@ fn log_rotation_prunes_beyond_max_rotated() {
             logger: "default".to_string(),
         },
         policies: vec![],
-        rotation: Some(LogRotation { max_rotated: 3 }),
+        rotation: Some(LogRotation {
+            max_rotated: 3,
+            only_paths: vec![],
+        }),
     };
     init_tddy_logger(config);
 
