@@ -1478,6 +1478,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     args.livekit_identity.as_ref().unwrap().clone(),
                     std::time::Duration::from_secs(120),
                 );
+                let codex_oauth_watch_for_reconnect = codex_oauth_watch.clone();
                 tokio::spawn(async move {
                     tddy_livekit::LiveKitParticipant::run_with_reconnect_metadata(
                         &url,
@@ -1486,6 +1487,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         tddy_livekit::RoomOptions::default(),
                         shutdown_clone,
                         Some(metadata_rx),
+                        codex_oauth_watch_for_reconnect,
                     )
                     .await
                 });
@@ -1797,7 +1799,7 @@ fn resolve_executable_on_path(name: &std::ffi::OsStr) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     let path_var = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path_var) {
-        let candidate = PathBuf::from(dir).join(name);
+        let candidate = dir.join(name);
         if candidate.is_file() {
             if let Ok(meta) = std::fs::metadata(&candidate) {
                 if meta.permissions().mode() & 0o111 != 0 {
@@ -2268,6 +2270,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
             ]);
+            let codex_oauth_watch_for_reconnect = codex_oauth_watch.clone();
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
@@ -2281,6 +2284,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         tddy_livekit::RoomOptions::default(),
                         shutdown,
                         Some(metadata_rx),
+                        codex_oauth_watch_for_reconnect,
                     )
                     .await
                 });

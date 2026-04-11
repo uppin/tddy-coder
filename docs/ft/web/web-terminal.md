@@ -178,9 +178,11 @@ The fullscreen **GhosttyTerminalLiveKit** view opened after **Expand** from a fl
 
 ### Eligible daemons and host selection
 
-- **`ListEligibleDaemons`**: After sign-in, **ConnectionScreen** loads eligible daemon entries (`instance_id`, `label`, `is_local`) alongside tools and projects. The daemon implementation lists instances from **`EligibleDaemonSource`** (currently the local daemon; LiveKit common-room peer discovery is deferred).
-- **Host dropdown**: Per project, the selected host is sent as **`daemon_instance_id`** on **`StartSession`**. Empty or matching the local instance keeps the existing local spawn path. Selecting a non-local instance is rejected by the daemon until cross-daemon spawn routing exists.
+- **`ListEligibleDaemons`**: After sign-in, **ConnectionScreen** loads eligible daemon entries (`instance_id`, `label`, `is_local`) alongside tools and projects. With **`livekit.common_room`** and LiveKit credentials configured on the daemon, the list includes the local daemon plus peers in the same room; otherwise only the local daemon appears.
+- **Host dropdown**: Per project, the selected host is sent as **`daemon_instance_id`** on **`StartSession`**. Empty or matching the local instance selects the local spawn path. A peer **`instance_id`** from the list routes **StartSession** to that daemon over the common-room RPC bridge. Rows are displayed with the local daemon first, then peers ordered by **`instance_id`**.
 - **Session host column**: **`ListSessions`** returns **`daemon_instance_id`** per row; the UI shows it in project and **Other sessions** tables.
+
+See [LiveKit peer discovery (daemon)](../daemon/livekit-peer-discovery.md) for configuration, trust model, and RPC semantics.
 
 ### Worktrees manager scaffolding
 
@@ -192,7 +194,6 @@ The **Worktrees** product area includes a **`WorktreesScreen`** table component 
 
 ## Future Scope
 
-- LiveKit-based **peer daemon discovery** and **cross-daemon `StartSession` routing** (gateway delegates spawn to a peer over the common room control plane)
 - **Per-terminal zoom scoping**: with multiple embedded terminals, font zoom bridge listeners should remain scoped per session (see package reference **terminal-zoom.md**).
 - Authentication and access control
 - Session persistence and reconnection

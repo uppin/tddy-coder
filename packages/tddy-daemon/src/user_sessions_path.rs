@@ -4,6 +4,16 @@ use std::path::PathBuf;
 
 use tddy_core::output::TDDY_SESSIONS_DIR_ENV;
 
+/// When set to a non-empty path, [`projects_path_for_user`] returns this directory (where
+/// `projects.yaml` lives) instead of `~/.tddy/projects`.
+///
+/// **Intended for integration tests only** (e.g. isolated `projects.yaml` without touching a real
+/// home directory). Leave unset in production. In CI, do **not** export this globally across unrelated
+/// test jobs: it affects every `projects_path_for_user` call in the same process. Prefer setting
+/// it only around suites that need it (see `multi_host_acceptance` restore pattern) or use
+/// `#[serial]` where the env is mutated.
+pub const TDDY_PROJECTS_DIR_ENV: &str = "TDDY_PROJECTS_DIR";
+
 /// Home directory for an OS user (from passwd).
 #[cfg(unix)]
 pub fn home_dir_for_user(os_user: &str) -> Option<PathBuf> {
@@ -68,14 +78,26 @@ pub fn tddy_data_root_matching_child(_os_user: &str) -> Option<PathBuf> {
     None
 }
 
-/// Directory containing `projects.yaml` (~user/.tddy/projects/).
+/// Directory containing `projects.yaml` (~user/.tddy/projects/), unless [`TDDY_PROJECTS_DIR_ENV`] is set.
 #[cfg(unix)]
 pub fn projects_path_for_user(os_user: &str) -> Option<PathBuf> {
+    if let Ok(p) = std::env::var(TDDY_PROJECTS_DIR_ENV) {
+        let t = p.trim();
+        if !t.is_empty() {
+            return Some(PathBuf::from(t));
+        }
+    }
     Some(home_dir_for_user(os_user)?.join(".tddy").join("projects"))
 }
 
 #[cfg(not(unix))]
 pub fn projects_path_for_user(_os_user: &str) -> Option<PathBuf> {
+    if let Ok(p) = std::env::var(TDDY_PROJECTS_DIR_ENV) {
+        let t = p.trim();
+        if !t.is_empty() {
+            return Some(PathBuf::from(t));
+        }
+    }
     None
 }
 

@@ -7,6 +7,7 @@ pub mod codex_oauth_relay;
 pub mod config;
 pub mod connection_service;
 pub mod elicitation;
+pub mod livekit_peer_discovery;
 pub mod multi_host;
 pub mod presenter_intent_client;
 pub mod project_storage;

@@ -84,6 +84,16 @@ import {
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
 
+/** Host dropdown: local daemon first, then peers; stable order by `instanceId` (matches daemon list policy). */
+function sortEligibleDaemonsForDisplay(daemons: EligibleDaemonEntry[]): EligibleDaemonEntry[] {
+  return [...daemons].sort((a, b) => {
+    if (a.isLocal !== b.isLocal) {
+      return a.isLocal ? -1 : 1;
+    }
+    return a.instanceId.localeCompare(b.instanceId);
+  });
+}
+
 /** Full viewport width shell (session tables are not max-width capped). */
 const screenShellClassName =
   "min-h-svh w-full min-w-0 box-border px-4 py-6 sm:px-6 font-sans text-foreground";
@@ -1163,7 +1173,14 @@ export function ConnectionScreen({
 
     client
       .listEligibleDaemons({ sessionToken })
-      .then((res) => setDaemons(res.daemons))
+      .then((res) => {
+        const sorted = sortEligibleDaemonsForDisplay(res.daemons);
+        console.debug("[ConnectionScreen] ListEligibleDaemons", {
+          count: sorted.length,
+          order: sorted.map((d) => ({ id: d.instanceId, isLocal: d.isLocal })),
+        });
+        setDaemons(sorted);
+      })
       .catch(() => setDaemons([]));
 
     const loadProjects = () => {
