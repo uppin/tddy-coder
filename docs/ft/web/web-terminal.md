@@ -2,7 +2,7 @@
 
 ## Summary
 
-A web application that displays an interactive terminal in the browser using the ghostty-web terminal emulator. **tddy-demo TUI streaming over LiveKit** is implemented: GhosttyTerminal component in tddy-web receives ANSI bytes via TerminalService RPC, with Cypress E2E validation. A standalone generic terminal (user's default shell over WebSocket) remains available via the Ghostty-web demo.
+A web application that displays an interactive terminal in the browser using the ghostty-web terminal emulator. **tddy-demo TUI streaming over LiveKit** is implemented: GhosttyTerminal component in tddy-web receives ANSI bytes via TerminalService RPC, with Cypress E2E validation. A standalone generic terminal (user's default shell over WebSocket) remains available via the Ghostty-web demo. In **daemon mode**, **ConnectionScreen** treats **`ListProjects`** as a row registry (**`ProjectEntry.daemon_instance_id`** identifies the owning daemon): one accordion and session table per row, with session assignment scoped to each session’s host.
 
 ## Recommended Setup
 
@@ -187,7 +187,7 @@ The fullscreen **GhosttyTerminalLiveKit** view opened after **Expand** from a fl
 
 ### Worktrees manager scaffolding
 
-The **Worktrees** product area includes a **`WorktreesScreen`** table component (mocked data in component tests) and a **`tddy-daemon`** **`worktrees`** library for **`git worktree list`**, on-disk stats cache, and **`git worktree remove`**. **ConnectionService** does not expose worktree RPCs yet; shell navigation from the main app to a dedicated route is follow-up work. Full operator semantics, cache layout, and test commands: [worktrees.md](worktrees.md).
+The **Worktrees** product area includes a **`WorktreesScreen`** table component (mocked data in component tests) and a **`tddy-daemon`** **`worktrees`** library for **`git worktree list`**, on-disk stats cache, and **`git worktree remove`**. **ConnectionService** does not expose worktree RPCs yet; shell navigation from the main app to a dedicated route is follow-up work. **`WorktreesAppPage`** does not yet align project identity with composite **`project_id` + `daemon_instance_id`** rows from **`ListProjects`**. Full operator semantics, cache layout, and test commands: [worktrees.md](worktrees.md).
 
 ## See also (development)
 
