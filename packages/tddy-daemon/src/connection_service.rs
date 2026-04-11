@@ -128,6 +128,32 @@ impl ConnectionServiceImpl {
     }
 }
 
+/// Merge local `ListProjects` rows with [`EligibleDaemonSource::peer_project_entries`].
+fn merge_listed_projects_with_peers(
+    eligible: &dyn EligibleDaemonSource,
+    session_token: &str,
+    local: Vec<ProtoProjectEntry>,
+) -> Vec<ProtoProjectEntry> {
+    let peer_rows = eligible.peer_project_entries(session_token);
+    log::debug!(
+        target: "tddy_daemon::connection_service",
+        "merge_listed_projects_with_peers: local_rows={} peer_rows={} (session_token len={})",
+        local.len(),
+        peer_rows.len(),
+        session_token.len()
+    );
+    let mut merged = local;
+    let n_append = peer_rows.len();
+    merged.extend(peer_rows);
+    log::info!(
+        target: "tddy_daemon::connection_service",
+        "merge_listed_projects_with_peers: merged_total={} appended_from_peers={}",
+        merged.len(),
+        n_append
+    );
+    merged
+}
+
 #[async_trait::async_trait]
 impl ConnectionServiceTrait for ConnectionServiceImpl {
     async fn list_tools(
@@ -246,6 +272,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
         let projects = project_storage::read_projects(&projects_dir)
             .map_err(|e| Status::internal(e.to_string()))?;
+        let local_daemon_id = self.local_daemon_instance_id_string();
         let entries: Vec<ProtoProjectEntry> = projects
             .into_iter()
             .map(|p| ProtoProjectEntry {
@@ -253,9 +280,21 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 name: p.name,
                 git_url: p.git_url,
                 main_repo_path: p.main_repo_path,
+                daemon_instance_id: local_daemon_id.clone(),
             })
             .collect();
-        Ok(Response::new(ListProjectsResponse { projects: entries }))
+        log::debug!(
+            target: "tddy_daemon::connection_service",
+            "list_projects: local_registry_rows={} local_daemon_instance_id={}",
+            entries.len(),
+            local_daemon_id
+        );
+        let merged = merge_listed_projects_with_peers(
+            &*self.eligible_daemon_source,
+            &req.session_token,
+            entries,
+        );
+        Ok(Response::new(ListProjectsResponse { projects: merged }))
     }
 
     async fn create_project(
@@ -332,6 +371,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             name: project.name.clone(),
             git_url: project.git_url.clone(),
             main_repo_path: project.main_repo_path.clone(),
+            daemon_instance_id: self.local_daemon_instance_id_string(),
         };
         project_storage::add_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;

@@ -1805,7 +1805,7 @@ fn resolve_executable_on_path(name: &std::ffi::OsStr) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     let path_var = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path_var) {
-        let candidate = PathBuf::from(dir).join(name);
+        let candidate = dir.join(name);
         if candidate.is_file() {
             if let Ok(meta) = std::fs::metadata(&candidate) {
                 if meta.permissions().mode() & 0o111 != 0 {

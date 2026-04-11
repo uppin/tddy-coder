@@ -4,6 +4,10 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-04-11 — Connection screen: multi-daemon project rows and host-scoped sessions
+
+- **`tddy-web`**: **`ListProjects`** rows carry **`daemon_instance_id`**; **`ConnectionScreen`** renders one accordion and session table per row, with composite **`data-testid`** keys **`projectId__daemonInstanceId`** when the field is set; **`sessionProjectTable`** helpers (**`connectionProjectRowKey`**, **`sessionBelongsToProjectHost`**, **`sortedSessionsForProjectHostTable`**, **`isSessionOrphan`**) scope sessions and unscoped repo matching per host. Cypress **`ConnectionScreen.cy.tsx`** covers multi-host listing and collision cases; Bun **`sessionProjectTableMultiHost.test.ts`** covers table helpers. Feature doc: [web-terminal.md](web-terminal.md).
+
 ## 2026-04-11 — LiveKit presence: owned project count
 
 - **tddy-web**: **`ParticipantList`** **Projects** column for **`owned_project_count`** in participant metadata (**`parseOwnedProjectCount`**, **`OWNED_PROJECT_COUNT_METADATA_KEY`**); em dash when the field is absent; **`useRoomParticipants`** supplies **`ownedProjectCount`** from LiveKit metadata; Cypress **`ParticipantList.cy.tsx`** covers render and metadata updates. Feature doc: [livekit-participant-owned-projects.md](livekit-participant-owned-projects.md).
