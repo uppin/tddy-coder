@@ -209,6 +209,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
           token="fake-token"
           getToken={getToken}
           ttlSeconds={BigInt(600)}
+          debugLogging
         />
       </div>
     );

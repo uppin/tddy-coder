@@ -495,10 +495,11 @@ describe("ConnectionScreen terminal chrome — status dot menu", () => {
     cy.get("[data-testid='connected-terminal-container']", { timeout: 5000 }).should("exist");
     // Token fetch uses standalone chrome; after the JWT arrives Ghostty mounts and replaces the tree — wait for LiveKit UI before clicking the dot (avoids detached DOM).
     cy.get("[data-testid='connection-status-dot']", { timeout: 20000 })
+      .first()
       .should("be.visible")
       .and("have.attr", "data-connection-status");
     cy.get("[data-testid='livekit-status']").should("not.be.visible");
-    cy.get("[data-testid='connection-status-dot']", { timeout: 5000 }).should("be.visible").click();
+    cy.get("[data-testid='connection-status-dot']", { timeout: 5000 }).first().should("be.visible").click();
     cy.get("[data-testid='connection-menu-disconnect']", { timeout: 10000 }).should("be.visible");
     cy.get("[data-testid='connection-menu-terminate']", { timeout: 10000 }).should("be.visible");
     cy.get("[data-testid='connection-menu-terminate']").click({ force: true });
@@ -529,12 +530,12 @@ describe("ConnectionScreen terminal chrome — status dot menu", () => {
     cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
     cy.wait("@connectSession");
     cy.get("[data-testid='connected-terminal-container']", { timeout: 5000 }).should("exist");
-    // Match the stable LiveKit chrome wait from the Terminate test — avoids detached DOM during async remount.
     cy.get("[data-testid='connection-status-dot']", { timeout: 20000 })
+      .first()
       .should("be.visible")
       .and("have.attr", "data-connection-status");
     cy.get("[data-testid='livekit-status']").should("not.be.visible");
-    cy.get("[data-testid='connection-status-dot']").should("be.visible").click();
+    cy.get("[data-testid='connection-status-dot']").first().should("be.visible").click();
     cy.get("[data-testid='connection-menu-disconnect']", { timeout: 10000 }).should("be.visible");
     cy.get("[data-testid='connection-menu-terminate']", { timeout: 10000 }).should("be.visible");
     cy.get("[data-testid='connection-menu-terminate']").click({ force: true });
