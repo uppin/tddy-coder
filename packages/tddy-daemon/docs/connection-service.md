@@ -66,6 +66,10 @@ Project rows in **`projects.yaml`** may include optional **`main_branch_ref`** (
 
 Spawn and **git clone** requests run through a forked single-threaded worker (`spawn_worker`) so fork+setuid from a Tokio process avoids deadlocks. JSON protocol: `WorkerRequest` (`spawn` | `clone`) and `WorkerResponse` (`spawn_ok` | `clone_ok` | `error`).
 
+## Project registry and multi-daemon ownership
+
+**`ListProjects`** and **`CreateProject`** read and write **`projects.yaml`** through **`project_storage`** for the authenticated OS user. Library support for LiveKit metadata election and registry snapshot alignment lives in **`project_data_ownership`**; feature behavior and configuration are documented in **[livekit-project-data-ownership.md](../../../docs/ft/daemon/livekit-project-data-ownership.md)** and **[project-data-ownership.md](./project-data-ownership.md)**.
+
 ## See also
 
 - **Worktrees**: **`ListWorktreesForProject`** (cached rows; **`refresh`** runs **`WorktreeStatsCache::refresh_stats_for_project`** in a blocking worker), **`RemoveWorktree`** ( **`remove_worktree_under_repo`**, then **`invalidate_project`**). Project checkout: **`main_repo_path_for_host`** with the local **`daemon_instance_id`**. Details: [worktrees.md](./worktrees.md), [docs/ft/web/worktrees.md](../../../../docs/ft/web/worktrees.md).

@@ -51,8 +51,13 @@ repos_base_path: "repos"
 
 The **`tddy-daemon`** binary is the multi-user orchestrator: serves the web bundle, exposes **AuthService** (GitHub OAuth via Connect-RPC), maps authenticated GitHub users to OS users, lists allowed tools and sessions, and spawns **`tddy-coder`** with LiveKit credentials and **`--project-id`** when applicable. **`tddy-coder --daemon`** remains for single-user local use. Service install and paths: [systemd-install.md](systemd-install.md). Connection UX: [Web terminal](../web/web-terminal.md).
 
+## Multi-daemon project registry
+
+When several **`tddy-daemon`** instances share a LiveKit **`common_room`**, project registry coordination (single writer, metadata, snapshot helpers) is described in **[livekit-project-data-ownership.md](livekit-project-data-ownership.md)**. The on-disk registry for each OS user remains **`~/.tddy/projects/projects.yaml`**.
+
 ## Related
 
 - [Git integration base ref (worktrees)](../coder/git-integration-base-ref.md) — validation, default ref, project registry fields.
 - [gRPC remote control](../coder/grpc-remote-control.md) — daemon and transport roles.
 - [Web terminal](../web/web-terminal.md) — Connection screen UI.
+- [LiveKit project-data ownership](livekit-project-data-ownership.md) — shared-room owner election and replica alignment (library + tests).

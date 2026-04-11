@@ -9,6 +9,7 @@ pub mod connection_service;
 pub mod elicitation;
 pub mod multi_host;
 pub mod presenter_intent_client;
+pub mod project_data_ownership;
 pub mod project_storage;
 pub mod server;
 pub mod session_deletion;

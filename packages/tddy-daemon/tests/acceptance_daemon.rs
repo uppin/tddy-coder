@@ -249,7 +249,9 @@ allowed_agents:
                     .and_then(|v| v.as_array())
                     .expect("allowed_agents from YAML must appear in /api/config");
                 assert!(
-                    agents.iter().any(|a| a.get("id") == Some(&serde_json::json!("codex-acp"))),
+                    agents
+                        .iter()
+                        .any(|a| a.get("id") == Some(&serde_json::json!("codex-acp"))),
                     "expected codex-acp in allowed_agents, got {agents:?}"
                 );
                 return;

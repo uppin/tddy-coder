@@ -1486,6 +1486,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         tddy_livekit::RoomOptions::default(),
                         shutdown_clone,
                         Some(metadata_rx),
+                        codex_oauth_watch,
                     )
                     .await
                 });
@@ -2281,6 +2282,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         tddy_livekit::RoomOptions::default(),
                         shutdown,
                         Some(metadata_rx),
+                        codex_oauth_watch,
                     )
                     .await
                 });

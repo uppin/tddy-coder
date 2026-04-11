@@ -95,7 +95,13 @@ pub struct ListenConfig {
     pub web_host: Option<String>,
 }
 
-#[derive(Debug, Default, Clone, serde::Deserialize)]
+fn default_project_data_owner_eligible() -> bool {
+    // When `livekit:` is present, default allows single-node / typical local operation until operators
+    // explicitly disable project-data ownership for multi-host replicas (PRD: project catalog owner).
+    true
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LiveKitConfig {
     #[serde(default)]
@@ -109,6 +115,22 @@ pub struct LiveKitConfig {
     /// Shared LiveKit room for presence (browser + tddy-* tools). Exposed to web as `common_room` in `/api/config`.
     #[serde(default)]
     pub common_room: Option<String>,
+    /// When true, this daemon may become the active **project-data owner** in `common_room` (election among eligible peers).
+    #[serde(default = "default_project_data_owner_eligible")]
+    pub project_data_owner_eligible: bool,
+}
+
+impl Default for LiveKitConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            api_key: None,
+            api_secret: None,
+            public_url: None,
+            common_room: None,
+            project_data_owner_eligible: default_project_data_owner_eligible(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize)]
@@ -210,6 +232,53 @@ impl DaemonConfig {
             chat_ids_csv.as_deref(),
             enabled.as_deref(),
         );
+    }
+
+    /// Merge LiveKit-related process environment overrides after YAML load (same style as Telegram).
+    ///
+    /// Variables (documented for operators):
+    /// - `TDDY_LIVEKIT_PROJECT_DATA_OWNER` — `true`/`false`/`1`/`0`/… (see [`parse_env_bool`]) overrides
+    ///   `livekit.project_data_owner_eligible` when set. If no `livekit:` block exists yet, a default
+    ///   block is created so the flag can still be applied (mirrors env-only Telegram creation).
+    pub fn apply_livekit_env_overrides(&mut self) {
+        let Some(raw) = non_empty_env("TDDY_LIVEKIT_PROJECT_DATA_OWNER") else {
+            log::debug!(
+                target: "tddy_daemon::config",
+                "apply_livekit_env_overrides: TDDY_LIVEKIT_PROJECT_DATA_OWNER unset, skipping"
+            );
+            return;
+        };
+        let Some(project_data_owner_eligible) = parse_env_bool(&raw) else {
+            log::warn!(
+                target: "tddy_daemon::config",
+                "TDDY_LIVEKIT_PROJECT_DATA_OWNER: expected true/false/1/0/yes/no/on/off, ignoring"
+            );
+            return;
+        };
+        if self.livekit.is_none() {
+            log::debug!(
+                target: "tddy_daemon::config",
+                "apply_livekit_env_overrides: creating default livekit block for env-only override"
+            );
+            self.livekit = Some(LiveKitConfig::default());
+        }
+        let lk = self.livekit.as_mut().expect("livekit just ensured");
+        let before = lk.project_data_owner_eligible;
+        lk.project_data_owner_eligible = project_data_owner_eligible;
+        log::info!(
+            target: "tddy_daemon::config",
+            "apply_livekit_env_overrides: project_data_owner_eligible {} -> {} (from TDDY_LIVEKIT_PROJECT_DATA_OWNER)",
+            before,
+            project_data_owner_eligible
+        );
+    }
+
+    /// Effective project-data ownership eligibility (YAML + env merge). When `livekit` is absent, local single-daemon behavior applies.
+    pub fn effective_project_data_owner_eligible(&self) -> bool {
+        match &self.livekit {
+            None => true,
+            Some(lk) => lk.project_data_owner_eligible,
+        }
     }
 }
 
@@ -378,5 +447,45 @@ mod spawn_timeout_tests {
             ..Default::default()
         };
         assert_eq!(c.spawn_worker_request_timeout().as_secs(), 1);
+    }
+}
+
+#[cfg(test)]
+mod project_data_ownership_env_tests {
+    use std::io::Write;
+
+    use super::*;
+
+    /// PRD acceptance: YAML `livekit.project_data_owner_eligible` must be overridden by `TDDY_LIVEKIT_PROJECT_DATA_OWNER` after merge.
+    #[test]
+    fn config_project_ownership_yaml_and_env_effective_value() {
+        let yaml = r#"
+livekit:
+  url: ws://127.0.0.1:7880
+  common_room: tddy-acceptance-room
+  project_data_owner_eligible: true
+users:
+  - github_user: "gh1"
+    os_user: "os1"
+"#;
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(yaml.as_bytes()).unwrap();
+        let mut c = DaemonConfig::load(tmp.path()).unwrap();
+        assert!(
+            c.livekit.as_ref().unwrap().project_data_owner_eligible,
+            "YAML enables project_data_owner_eligible"
+        );
+        assert!(c.effective_project_data_owner_eligible());
+
+        let _guard = scopeguard::guard((), |_| {
+            std::env::remove_var("TDDY_LIVEKIT_PROJECT_DATA_OWNER");
+        });
+        std::env::set_var("TDDY_LIVEKIT_PROJECT_DATA_OWNER", "false");
+        c.apply_livekit_env_overrides();
+        assert_eq!(
+            c.effective_project_data_owner_eligible(),
+            false,
+            "TDDY_LIVEKIT_PROJECT_DATA_OWNER must override YAML when apply_livekit_env_overrides runs"
+        );
     }
 }

@@ -216,6 +216,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             room_options,
             shutdown,
             None,
+            codex_oauth_watch,
         )
         .await;
     }
@@ -228,6 +229,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         room_options: RoomOptions,
         shutdown: Arc<AtomicBool>,
         metadata_watch: Option<watch::Receiver<String>>,
+        codex_oauth_watch: Option<PathBuf>,
     ) {
         let bridge = Arc::new(RpcBridge::new(service));
         let shared_publisher = SharedPublisher::new();

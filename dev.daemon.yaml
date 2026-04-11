@@ -24,6 +24,9 @@ livekit:
   api_secret: secret
   public_url: ws://127.0.0.1:7880
   common_room: tddy-lobby
+  # Project catalog owner in common_room: when true (default), this process may be elected sole writer.
+  # Env override after YAML load: TDDY_LIVEKIT_PROJECT_DATA_OWNER=true|false
+  # project_data_owner_eligible: true
 
 github:
   stub: true

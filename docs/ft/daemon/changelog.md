@@ -2,6 +2,10 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-04-11 — LiveKit project-data ownership (daemon library)
+
+- **`tddy-daemon`**: **`LiveKitConfig::project_data_owner_eligible`**; **`DaemonConfig::apply_livekit_env_overrides`** (**`TDDY_LIVEKIT_PROJECT_DATA_OWNER`**); **`effective_project_data_owner_eligible`**; module **`project_data_ownership`** (metadata JSON, lexicographic election among eligible LiveKit identities, **`apply_owner_project_registry_snapshot_to_replica`**, **`converge_replica_project_registry_with_elected_owner`**). Integration tests **`livekit_project_ownership`** (**`tddy-livekit-testkit`**). **`livekit`** **0.7** direct dependency for **`Room`** / **`set_metadata`**. Feature **[livekit-project-data-ownership.md](livekit-project-data-ownership.md)**; package **[project-data-ownership.md](../../packages/tddy-daemon/docs/project-data-ownership.md)**, **[changesets.md](../../packages/tddy-daemon/docs/changesets.md)**. Cross-package: **`tddy-livekit`** **`run_with_reconnect_metadata`** / **`codex_oauth_watch`** signature; **`tddy-coder`** call sites. **`ConnectionService`** project RPCs unchanged at this layer.
+
 ## 2026-04-06 — Telegram user ↔ GitHub identity (library)
 
 - **`tddy-daemon`**: Module **`telegram_github_link`** — **`TelegramOAuthStateSigner`** (HMAC-SHA256 OAuth **`state`** bound to **`telegram_user_id`**), **`TelegramGithubMappingStore`** (JSON on disk, atomic replace), **`resolved_os_user_for_telegram_workflow`**, **`complete_telegram_link_via_stub_exchange`** (**`StubGitHubProvider`**). **`TelegramSessionControlHarness::with_telegram_github_link`** optional mapping path; **`handle_start_workflow`** rejects unlinked Telegram users when that path is set (error text references **`/link-github`** / web OAuth). Dependencies: **`base64`**, **`hmac`**, **`sha2`**, **`subtle`**.
