@@ -4,6 +4,9 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-04-11 — Connection screen: multi-host eligible daemons (LiveKit common room)
+
+- **`tddy-web`**: **ConnectionScreen** sorts **ListEligibleDaemons** for the Host dropdown (**local** first, then **`instance_id`**); **StartSession** sends the selected **`daemonInstanceId`** when the daemon lists multiple eligible hosts. Cypress **ConnectionScreen** covers multi-row host list and multi-session disconnect scoping. **Feature docs**: [web-terminal.md](web-terminal.md), [livekit-peer-discovery.md](../daemon/livekit-peer-discovery.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
 ## 2026-04-11 — Connection screen: multi-daemon project rows and host-scoped sessions
 
 - **`tddy-web`**: **`ListProjects`** rows carry **`daemon_instance_id`**; **`ConnectionScreen`** renders one accordion and session table per row, with composite **`data-testid`** keys **`projectId__daemonInstanceId`** when the field is set; **`sessionProjectTable`** helpers (**`connectionProjectRowKey`**, **`sessionBelongsToProjectHost`**, **`sortedSessionsForProjectHostTable`**, **`isSessionOrphan`**) scope sessions and unscoped repo matching per host. Cypress **`ConnectionScreen.cy.tsx`** covers multi-host listing and collision cases; Bun **`sessionProjectTableMultiHost.test.ts`** covers table helpers. Feature doc: [web-terminal.md](web-terminal.md).

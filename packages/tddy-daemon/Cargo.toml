@@ -28,6 +28,8 @@ sha2 = "0.10"
 subtle = "2.6"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal"] }
 tonic = { version = "0.12", default-features = false, features = ["transport"] }
+livekit = "0.7"
+prost = "0.13"
 tddy-coder = { path = "../tddy-coder" }
 tddy-core = { path = "../tddy-core" }
 tddy-github = { path = "../tddy-github" }
@@ -45,5 +47,8 @@ libc = "0.2"
 [dev-dependencies]
 tempfile = "3"
 tddy-github = { path = "../tddy-github" }
+tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
+livekit = "0.7"
+serial_test = "3"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 scopeguard = "1"

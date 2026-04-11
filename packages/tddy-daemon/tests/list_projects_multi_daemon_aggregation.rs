@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
@@ -50,7 +51,10 @@ fn test_service(
         sessions_base_resolver,
         user_resolver,
         None,
-        Some(eligible),
+        Some(LiveKitDiscoveryHandles {
+            eligible_daemon_source: eligible,
+            common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
+        }),
         None,
     )
 }

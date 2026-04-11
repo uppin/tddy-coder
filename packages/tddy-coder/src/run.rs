@@ -1478,7 +1478,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     args.livekit_identity.as_ref().unwrap().clone(),
                     std::time::Duration::from_secs(120),
                 );
-                let codex_oauth_watch_reconnect = codex_oauth_watch.clone();
+                let codex_oauth_watch_for_reconnect = codex_oauth_watch.clone();
                 tokio::spawn(async move {
                     tddy_livekit::LiveKitParticipant::run_with_reconnect_metadata(
                         &url,
@@ -1487,7 +1487,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         tddy_livekit::RoomOptions::default(),
                         shutdown_clone,
                         Some(metadata_rx),
-                        codex_oauth_watch_reconnect,
+                        codex_oauth_watch_for_reconnect,
                         None,
                     )
                     .await
@@ -2276,7 +2276,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
             ]);
-            let codex_oauth_watch_reconnect = codex_oauth_watch.clone();
+            let codex_oauth_watch_for_reconnect = codex_oauth_watch.clone();
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
@@ -2290,7 +2290,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         tddy_livekit::RoomOptions::default(),
                         shutdown,
                         Some(metadata_rx),
-                        codex_oauth_watch_reconnect,
+                        codex_oauth_watch_for_reconnect,
                         None,
                     )
                     .await

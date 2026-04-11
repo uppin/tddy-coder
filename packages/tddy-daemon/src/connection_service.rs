@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use livekit::prelude::Room;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
@@ -26,6 +27,7 @@ use uuid::Uuid;
 
 use crate::agent_list_mapping::agent_allowlist_rows;
 use crate::config::DaemonConfig;
+use crate::livekit_peer_discovery::{local_instance_id_for_config, LiveKitDiscoveryHandles};
 use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
 use crate::project_storage::{self, ProjectData};
 use crate::session_deletion;
@@ -80,6 +82,8 @@ pub struct ConnectionServiceImpl {
     user_resolver: SessionUserResolver,
     spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
+    /// When set, LiveKit **Room** handle for forwarding **StartSession** to peer daemons in `common_room`.
+    common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
     telegram: Option<Arc<TelegramDaemonHooks>>,
     worktree_stats_cache: Arc<WorktreeStatsCache>,
 }
@@ -90,12 +94,17 @@ impl ConnectionServiceImpl {
         sessions_base_for_user: SessionsBaseResolver,
         user_resolver: SessionUserResolver,
         spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
-        eligible_daemon_source: Option<Arc<dyn EligibleDaemonSource>>,
+        livekit_discovery: Option<LiveKitDiscoveryHandles>,
         telegram: Option<Arc<TelegramDaemonHooks>>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
-        let eligible_daemon_source = eligible_daemon_source
-            .unwrap_or_else(|| Arc::new(StubEligibleDaemonSource) as Arc<dyn EligibleDaemonSource>);
+        let (eligible_daemon_source, common_room_livekit_room) = match livekit_discovery {
+            Some(h) => (h.eligible_daemon_source, Some(h.common_room_livekit_room)),
+            None => (
+                Arc::new(StubEligibleDaemonSource) as Arc<dyn EligibleDaemonSource>,
+                None,
+            ),
+        };
         let worktree_stats_cache = Arc::new(WorktreeStatsCache::new(
             worktrees::projects_stats_cache_root(),
         ));
@@ -105,6 +114,7 @@ impl ConnectionServiceImpl {
             user_resolver,
             spawn_client,
             eligible_daemon_source,
+            common_room_livekit_room,
             telegram,
             worktree_stats_cache,
         }
@@ -114,17 +124,6 @@ impl ConnectionServiceImpl {
         if let Some(ref tg) = self.telegram {
             tg.spawn_presenter_observer_task(session_id, grpc_port);
         }
-    }
-
-    /// Instance id for this daemon process: config override, else hostname-based default.
-    fn local_daemon_instance_id_string(&self) -> String {
-        self.config
-            .daemon_instance_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| crate::multi_host::local_daemon_instance_id().0)
     }
 }
 
@@ -212,7 +211,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let timeout = self.config.spawn_worker_request_timeout();
         let sessions_base_blocking = sessions_base.clone();
-        let local_daemon_id = self.local_daemon_instance_id_string();
+        let local_daemon_id = local_instance_id_for_config(&self.config);
         let entries =
             spawn_blocking_with_timeout(timeout, "ListSessions: read and enrich", move || {
                 let sessions = session_reader::list_sessions_in_dir(&sessions_base_blocking)
@@ -272,7 +271,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
         let projects = project_storage::read_projects(&projects_dir)
             .map_err(|e| Status::internal(e.to_string()))?;
-        let local_daemon_id = self.local_daemon_instance_id_string();
+        let local_daemon_id = local_instance_id_for_config(&self.config);
         let entries: Vec<ProtoProjectEntry> = projects
             .into_iter()
             .map(|p| ProtoProjectEntry {
@@ -371,7 +370,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             name: project.name.clone(),
             git_url: project.git_url.clone(),
             main_repo_path: project.main_repo_path.clone(),
-            daemon_instance_id: self.local_daemon_instance_id_string(),
+            daemon_instance_id: local_instance_id_for_config(&self.config),
         };
         project_storage::add_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -405,12 +404,49 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }
 
         let requested_daemon = req.daemon_instance_id.trim();
-        if !requested_daemon.is_empty()
-            && requested_daemon != self.local_daemon_instance_id_string().as_str()
-        {
-            return Err(Status::unimplemented(
-                "cross-daemon session routing not yet implemented",
-            ));
+        let local_id = local_instance_id_for_config(&self.config);
+        let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
+        let eligible_ids: Vec<String> = eligible_rows
+            .iter()
+            .map(|e| e.instance_id.0.clone())
+            .collect();
+        let route = match crate::livekit_peer_discovery::classify_start_session_peer_route(
+            &local_id,
+            requested_daemon,
+            &eligible_ids,
+        ) {
+            Ok(r) => r,
+            Err(msg) => {
+                log::info!("StartSession: rejected daemon routing: {}", msg);
+                return Err(Status::failed_precondition(msg));
+            }
+        };
+
+        match route {
+            crate::livekit_peer_discovery::StartSessionPeerRoute::Forward { peer_instance_id } => {
+                log::info!(
+                    "StartSession: forwarding RPC to remote daemon_instance_id={}",
+                    peer_instance_id
+                );
+                let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                    Status::failed_precondition(
+                        "cannot forward StartSession: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
+                    )
+                })?;
+                let inner = crate::livekit_peer_discovery::forward_start_session_via_livekit(
+                    slot,
+                    &peer_instance_id,
+                    &req,
+                )
+                .await?;
+                log::info!(
+                    "StartSession: forward succeeded session_id={} livekit_server_identity={}",
+                    inner.session_id,
+                    inner.livekit_server_identity
+                );
+                return Ok(Response::new(inner));
+            }
+            crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
         }
 
         let livekit = spawner::livekit_creds_from_config(&self.config)
@@ -774,7 +810,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
-        let local_id = self.local_daemon_instance_id_string();
+        let local_id = local_instance_id_for_config(&self.config);
         let daemons: Vec<EligibleDaemonEntry> = self
             .eligible_daemon_source
             .list_eligible_daemons()
@@ -887,7 +923,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .map_err(|e| Status::internal(e.to_string()))?
             .ok_or_else(|| Status::not_found("project not found"))?;
 
-        let local_id = self.local_daemon_instance_id_string();
+        let local_id = local_instance_id_for_config(&self.config);
         let main_repo_str =
             project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
                 .map_err(|e| Status::internal(e.to_string()))?
@@ -962,7 +998,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .map_err(|e| Status::internal(e.to_string()))?
             .ok_or_else(|| Status::not_found("project not found"))?;
 
-        let local_id = self.local_daemon_instance_id_string();
+        let local_id = local_instance_id_for_config(&self.config);
         let main_repo_str =
             project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
                 .map_err(|e| Status::internal(e.to_string()))?

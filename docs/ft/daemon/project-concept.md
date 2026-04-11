@@ -56,3 +56,4 @@ The **`tddy-daemon`** binary is the multi-user orchestrator: serves the web bund
 - [Git integration base ref (worktrees)](../coder/git-integration-base-ref.md) — validation, default ref, project registry fields.
 - [gRPC remote control](../coder/grpc-remote-control.md) — daemon and transport roles.
 - [Web terminal](../web/web-terminal.md) — Connection screen UI.
+- [LiveKit peer discovery and host selection](livekit-peer-discovery.md) — **`ListEligibleDaemons`**, **`StartSession`** routing across daemons sharing **`livekit.common_room`**.

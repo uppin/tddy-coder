@@ -11,6 +11,7 @@ use crate::config::DaemonConfig;
 use crate::telegram_notifier::{send_daemon_lifecycle_message, TelegramSender};
 
 /// Start the web server with static bundle and RPC services.
+#[allow(clippy::too_many_arguments)] // Server bootstrap threads many handles; grouping is churn for little gain.
 pub async fn run_server(
     host: &str,
     port: u16,

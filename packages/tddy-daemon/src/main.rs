@@ -115,7 +115,11 @@ fn main() -> anyhow::Result<()> {
         .listen
         .web_port
         .ok_or_else(|| anyhow::anyhow!("config.listen.web_port is required"))?;
-    let host = config.listen.web_host.as_deref().unwrap_or("0.0.0.0");
+    let host = config
+        .listen
+        .web_host
+        .clone()
+        .unwrap_or_else(|| "0.0.0.0".to_string());
     log::info!("tddy-daemon listening on {}:{}", host, port);
     let bundle_path = config
         .web_bundle_path
@@ -139,7 +143,7 @@ fn main() -> anyhow::Result<()> {
             })
             .collect();
 
-    let auth_result = tddy_daemon::auth::build_auth_entries(&config, host, port);
+    let auth_result = tddy_daemon::auth::build_auth_entries(&config, host.as_str(), port);
     let mut rpc_entries = auth_result.entries;
 
     if let Some(ref lk) = config.livekit {
@@ -244,21 +248,7 @@ fn main() -> anyhow::Result<()> {
             _ => None,
         };
 
-    if let Some(user_resolver) = auth_result.user_resolver {
-        let connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
-            config.clone(),
-            Arc::new(tddy_daemon::user_sessions_path::sessions_base_for_user),
-            user_resolver,
-            spawn_client,
-            Some(Arc::new(tddy_daemon::multi_host::StubEligibleDaemonSource)),
-            telegram_hooks.clone(),
-        );
-        let connection_server = tddy_service::ConnectionServiceServer::new(connection_impl);
-        rpc_entries.push(tddy_rpc::ServiceEntry {
-            name: "connection.ConnectionService",
-            service: Arc::new(connection_server) as Arc<dyn tddy_rpc::RpcService>,
-        });
-    }
+    let user_resolver_for_connection = auth_result.user_resolver.clone();
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -270,7 +260,78 @@ fn main() -> anyhow::Result<()> {
                 as Arc<dyn tddy_daemon::telegram_notifier::TelegramSender + Send + Sync>,
         )
     });
-    rt.block_on(async {
+    rt.block_on(async move {
+        if let Some(user_resolver) = user_resolver_for_connection {
+            let config_arc = Arc::new(config.clone());
+            let livekit_discovery: Option<
+                tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles,
+            > = {
+                let common = config
+                    .livekit
+                    .as_ref()
+                    .and_then(|l| l.common_room.as_deref())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty());
+                let lk = config.livekit.as_ref();
+                let has_creds = lk.is_some_and(|l| {
+                    l.url
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .is_some()
+                        && l.api_key
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .is_some()
+                        && l.api_secret
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .is_some()
+                });
+                if common.is_some() && has_creds {
+                    let registry = Arc::new(
+                        tddy_daemon::livekit_peer_discovery::CommonRoomPeerRegistry::new(),
+                    );
+                    let room_slot = Arc::new(tokio::sync::RwLock::new(None));
+                    log::info!(
+                        "Starting LiveKit common-room peer discovery (room {:?})",
+                        common
+                    );
+                    tddy_daemon::livekit_peer_discovery::spawn_common_room_discovery_task(
+                        config_arc.clone(),
+                        registry.clone(),
+                        room_slot.clone(),
+                    );
+                    Some(tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles {
+                        eligible_daemon_source: Arc::new(
+                            tddy_daemon::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
+                                config_arc, registry,
+                            ),
+                        )
+                            as Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource>,
+                        common_room_livekit_room: room_slot,
+                    })
+                } else {
+                    None
+                }
+            };
+            let connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
+                config.clone(),
+                Arc::new(tddy_daemon::user_sessions_path::sessions_base_for_user),
+                user_resolver,
+                spawn_client,
+                livekit_discovery,
+                telegram_hooks.clone(),
+            );
+            let connection_server = tddy_service::ConnectionServiceServer::new(connection_impl);
+            rpc_entries.push(tddy_rpc::ServiceEntry {
+                name: "connection.ConnectionService",
+                service: Arc::new(connection_server) as Arc<dyn tddy_rpc::RpcService>,
+            });
+        }
+
         let inbound_task = if let Some((bot, harness)) = telegram_inbound {
             Some(tokio::spawn(async move {
                 if let Err(e) = tddy_daemon::telegram_bot::run_telegram_bot(bot, harness).await {
@@ -285,7 +346,7 @@ fn main() -> anyhow::Result<()> {
         };
 
         let res = tddy_daemon::server::run_server(
-            host,
+            host.as_str(),
             port,
             bundle_path,
             rpc_entries,

@@ -80,19 +80,3 @@ impl EligibleDaemonSource for StubEligibleDaemonSource {
         vec![entry]
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stub_eligible_daemon_source_non_empty_when_multi_host_complete() {
-        let src = StubEligibleDaemonSource;
-        let list = src.list_eligible_daemons();
-        assert!(
-            !list.is_empty(),
-            "eligible daemon listing must not be empty once multi-host discovery is implemented"
-        );
-        assert!(!list[0].instance_id.0.is_empty());
-    }
-}
