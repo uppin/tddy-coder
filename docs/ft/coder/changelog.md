@@ -4,6 +4,10 @@ Release note history for the Coder product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-04-11 — LiveKit participant metadata: publish lock
+
+- **tddy-coder**: **`spawn_local_participant_metadata_watcher`** uses **`participant.metadata_publish_lock()`** from **`LiveKitParticipant::connect`** so watch-channel metadata merges with OAuth and registry publishers; **`projects_registry_dir`** is **`None`** on **`connect`** / **`run_with_reconnect_metadata`** until the session registry path is supplied by the spawn layer. Feature doc: [livekit-participant-owned-projects.md](../web/livekit-participant-owned-projects.md); transport: [participant-metadata.md](../../../packages/tddy-livekit/docs/participant-metadata.md).
+
 ## 2026-04-10 — Codex OAuth multi-service on LiveKit path
 
 - **tddy-coder**: `terminal_and_codex_oauth_for_livekit` wires `CodexOAuthServiceImpl` alongside `TerminalService` via `MultiRpcService`; `run_with_reconnect_metadata` pushes `codex_oauth` JSON to participant metadata via `watch::Receiver<String>`. Feature doc: [tddy-desktop-electrobun.md](../desktop/tddy-desktop-electrobun.md).

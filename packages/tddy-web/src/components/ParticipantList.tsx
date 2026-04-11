@@ -2,7 +2,10 @@ import { useState } from "react";
 import { ExternalLink } from "lucide-react";
 import type { CommonRoomStatus } from "../hooks/useCommonRoom";
 import { shouldShowParticipantVideoAffordance } from "../hooks/participantCameraVideo";
-import type { RoomParticipant } from "../hooks/useRoomParticipants";
+import {
+  parseOwnedProjectCount,
+  type RoomParticipant,
+} from "../hooks/useRoomParticipants";
 import { ParticipantVideoPreviewDialog } from "./ParticipantVideoPreviewDialog";
 import { Button } from "./ui/button";
 
@@ -150,6 +153,7 @@ export function ParticipantList({
             <th style={{ padding: 6 }}>Identity</th>
             <th style={{ padding: 6 }}>Role</th>
             <th style={{ padding: 6 }}>Joined</th>
+            <th style={{ padding: 6 }}>Projects</th>
             <th style={{ padding: 6 }}>Metadata</th>
             <th style={{ padding: 6 }}>Codex sign-in</th>
             <th style={{ padding: 6 }}>Video</th>
@@ -159,6 +163,10 @@ export function ParticipantList({
           {participants.map((p) => {
             const id = safeTestIdPart(p.identity);
             const codexOAuth = parseCodexOAuthPending(p.metadata);
+            const ownedProjectCount =
+              p.ownedProjectCount !== undefined
+                ? p.ownedProjectCount
+                : parseOwnedProjectCount(p.metadata);
             const showVideoAffordance = shouldShowParticipantVideoAffordance(
               participantHasCameraVideo,
               p.identity,
@@ -173,6 +181,12 @@ export function ParticipantList({
                 </td>
                 <td style={{ padding: 6 }} data-testid={`participant-joined-${id}`}>
                   {formatJoinedAt(p.joinedAt)}
+                </td>
+                <td
+                  style={{ padding: 6, textAlign: "right", fontVariantNumeric: "tabular-nums" }}
+                  data-testid={`participant-owned-project-count-${id}`}
+                >
+                  {ownedProjectCount !== null ? String(ownedProjectCount) : "—"}
                 </td>
                 <td
                   style={{ padding: 6, maxWidth: 200, wordBreak: "break-all" }}

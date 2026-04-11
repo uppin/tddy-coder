@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { ParticipantList } from "../../src/components/ParticipantList";
 import type { RoomParticipant } from "../../src/hooks/useRoomParticipants";
 
@@ -173,5 +173,60 @@ describe("ParticipantList", () => {
     });
     cy.get("[data-testid='participant-video-dialog']").should("not.exist");
     cy.get("[data-testid='participant-video-preview']").should("not.exist");
+  });
+
+  /** Canonical LiveKit metadata key (see `OWNED_PROJECT_COUNT_METADATA_KEY` in tddy-livekit). */
+  const OWNED_PROJECT_COUNT_KEY = "owned_project_count";
+
+  it("participant_list_renders_project_count", () => {
+    const count = 7;
+    const meta = JSON.stringify({ [OWNED_PROJECT_COUNT_KEY]: count });
+    const participants: RoomParticipant[] = [
+      {
+        identity: "server-agent",
+        role: "server",
+        joinedAt: 1_700_000_000_000,
+        metadata: meta,
+        codexOAuth: null,
+      },
+    ];
+    cy.mount(
+      <ParticipantList participants={participants} roomStatus="connected" connectionError={null} />,
+    );
+    cy.get("[data-testid='participant-owned-project-count-server-agent']").should("have.text", String(count));
+  });
+
+  it("participant_list_updates_when_metadata_changes", () => {
+    function Harness() {
+      const [meta, setMeta] = useState(JSON.stringify({ [OWNED_PROJECT_COUNT_KEY]: 2 }));
+      return (
+        <div>
+          <ParticipantList
+            participants={[
+              {
+                identity: "meta-peer",
+                role: "server",
+                joinedAt: 1_700_000_000_000,
+                metadata: meta,
+                codexOAuth: null,
+              },
+            ]}
+            roomStatus="connected"
+            connectionError={null}
+          />
+          <button
+            type="button"
+            data-testid="acceptance-bump-owned-project-count"
+            onClick={() => setMeta(JSON.stringify({ [OWNED_PROJECT_COUNT_KEY]: 5 }))}
+          >
+            bump
+          </button>
+        </div>
+      );
+    }
+    cy.mount(<Harness />);
+    cy.get("[data-testid='participant-owned-project-count-meta-peer']").should("have.text", "2");
+    cy.get("[data-testid='acceptance-bump-owned-project-count']").click();
+    cy.get("[data-testid='participant-owned-project-count-meta-peer']").should("have.text", "5");
   });
 });

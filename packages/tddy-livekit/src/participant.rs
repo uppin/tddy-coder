@@ -1,6 +1,7 @@
 //! LiveKit room participant that serves RPC over the data channel.
 
 use livekit::prelude::*;
+use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::path::PathBuf;
@@ -13,28 +14,117 @@ use tddy_rpc::{RequestMetadata, RpcMessage};
 
 use crate::bridge::{ResponseBody, RpcBridge};
 use crate::envelope::{decode_request, encode_response, response_from_result};
+use crate::projects_registry;
 use crate::proto::{CallMetadata, RpcRequest};
 use crate::rpc_trace;
 use crate::token::TokenGenerator;
 
 const RPC_TOPIC: &str = "tddy-rpc";
 
-/// Applies [`watch::Receiver`] updates to LiveKit participant metadata via [`LocalParticipant::set_metadata`].
-/// Abort the returned handle on room reconnect so updates target the current [`LocalParticipant`].
+/// Canonical JSON key for the daemon project registry row count published on server LiveKit participants.
+pub const OWNED_PROJECT_COUNT_METADATA_KEY: &str = "owned_project_count";
+
+/// Returns the number of project rows under `path` using the same `projects.yaml` layout as **tddy-daemon**
+/// (`project_storage`; see [`crate::projects_registry`] — kept in sync because this crate cannot depend on the daemon).
+pub fn owned_project_count_for_projects_dir(path: &Path) -> anyhow::Result<u64> {
+    log::debug!(
+        target: "tddy_livekit::metadata",
+        "owned_project_count_for_projects_dir: dir={}",
+        path.display()
+    );
+    projects_registry::owned_project_row_count(path)
+}
+
+/// Shallow-merge two JSON **objects** for [`LocalParticipant::set_metadata`].
+///
+/// Top-level keys from `update` overwrite or add to `baseline`. Nested values are replaced as a whole (not deep-merged).
+/// Non-object `baseline` (or invalid JSON) is treated as an empty object with a warning.
+pub fn merge_participant_metadata_json(
+    baseline: &str,
+    update: &str,
+) -> Result<String, serde_json::Error> {
+    log::debug!(
+        target: "tddy_livekit::metadata",
+        "merge_participant_metadata_json: baseline_len={} update_len={}",
+        baseline.len(),
+        update.len()
+    );
+
+    let mut base_map = if baseline.trim().is_empty() {
+        serde_json::Map::new()
+    } else {
+        match serde_json::from_str::<Value>(baseline)? {
+            Value::Object(m) => m,
+            other => {
+                log::warn!(
+                    target: "tddy_livekit::metadata",
+                    "merge_participant_metadata_json: baseline is not a JSON object (got {:?}); starting from {{}}",
+                    other
+                );
+                serde_json::Map::new()
+            }
+        }
+    };
+
+    let update_val: Value = if update.trim().is_empty() {
+        Value::Object(serde_json::Map::new())
+    } else {
+        serde_json::from_str(update)?
+    };
+
+    if let Value::Object(up_map) = update_val {
+        for (k, v) in up_map {
+            base_map.insert(k, v);
+        }
+    }
+
+    let merged = Value::Object(base_map);
+    log::debug!(
+        target: "tddy_livekit::metadata",
+        "merge_participant_metadata_json: merged top-level keys={}",
+        merged.as_object().map(|m| m.len()).unwrap_or(0)
+    );
+    serde_json::to_string(&merged)
+}
+
+/// Applies [`watch::Receiver`] updates to LiveKit participant metadata via [`LocalParticipant::set_metadata`],
+/// shallow-merging each payload into the current wire metadata so other keys (e.g. [`OWNED_PROJECT_COUNT_METADATA_KEY`]) stay intact.
+///
+/// `metadata_publish_lock` must be the same mutex used by other metadata publishers on this participant (Codex OAuth poller, project count).
 pub fn spawn_local_participant_metadata_watcher(
     mut rx: watch::Receiver<String>,
     local: LocalParticipant,
+    metadata_publish_lock: Arc<Mutex<()>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             if rx.changed().await.is_err() {
+                log::debug!(target: "tddy_livekit::metadata", "metadata watcher: channel closed");
                 break;
             }
             let v = rx.borrow().clone();
             if v.is_empty() {
                 continue;
             }
-            if let Err(e) = local.set_metadata(v).await {
+            let _guard = metadata_publish_lock.lock().await;
+            let baseline = local.metadata();
+            let merged = match merge_participant_metadata_json(&baseline, &v) {
+                Ok(m) => m,
+                Err(e) => {
+                    log::warn!(
+                        target: "tddy_livekit::metadata",
+                        "metadata watcher: merge failed: {}",
+                        e
+                    );
+                    continue;
+                }
+            };
+            log::info!(
+                target: "tddy_livekit::metadata",
+                "metadata watcher: applying merged metadata (len={})",
+                merged.len()
+            );
+            if let Err(e) = local.set_metadata(merged).await {
                 log::warn!("LiveKit set_metadata failed: {}", e);
             }
         }
@@ -132,6 +222,10 @@ pub struct LiveKitParticipant<S: crate::bridge::RpcService> {
     /// When set, poll this path for an `https://` authorize URL (written by the Codex `BROWSER` hook)
     /// and publish JSON metadata so dashboards can show “sign in” next to this participant.
     codex_oauth_watch: Option<PathBuf>,
+    /// When set, publish [`OWNED_PROJECT_COUNT_METADATA_KEY`] from the registry at this directory (e.g. daemon project store).
+    projects_registry_dir: Option<PathBuf>,
+    /// Coordinates read–merge–write so OAuth, project count, and watch-channel updates do not clobber each other.
+    metadata_publish_lock: Arc<Mutex<()>>,
 }
 
 impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
@@ -142,6 +236,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         service: S,
         room_options: RoomOptions,
         codex_oauth_watch: Option<PathBuf>,
+        projects_registry_dir: Option<PathBuf>,
     ) -> Result<Self, livekit::RoomError> {
         log::debug!("LiveKitParticipant::connect url={}", url);
         let bridge = RpcBridge::new(service);
@@ -160,12 +255,15 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             pending_data: Arc::new(Mutex::new(VecDeque::new())),
             shared_publisher: None,
             codex_oauth_watch,
+            projects_registry_dir,
+            metadata_publish_lock: Arc::new(Mutex::new(())),
         })
     }
 
     /// Connect to a LiveKit room, sharing bidi session state and publisher across
     /// reconnection cycles. The SharedPublisher is updated with the new LocalParticipant
     /// so that output tasks from previous cycles can publish through the new room.
+    #[allow(clippy::too_many_arguments)]
     async fn connect_for_reconnect(
         url: &str,
         token: &str,
@@ -175,6 +273,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         active_bidi_sessions: Arc<Mutex<HashMap<SessionKey, BidiSession>>>,
         shared_publisher: SharedPublisher,
         codex_oauth_watch: Option<PathBuf>,
+        projects_registry_dir: Option<PathBuf>,
     ) -> Result<Self, livekit::RoomError> {
         log::debug!("LiveKitParticipant::connect_for_reconnect url={}", url);
         let (room, events) = Room::connect(url, token, room_options).await?;
@@ -195,7 +294,40 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             pending_data: Arc::new(Mutex::new(VecDeque::new())),
             shared_publisher: Some(shared_publisher),
             codex_oauth_watch,
+            projects_registry_dir,
+            metadata_publish_lock: Arc::new(Mutex::new(())),
         })
+    }
+
+    async fn apply_owned_project_count_to_local_metadata(
+        local: &LocalParticipant,
+        projects_dir: &Path,
+        metadata_publish_lock: &Arc<Mutex<()>>,
+    ) -> anyhow::Result<()> {
+        let _guard = metadata_publish_lock.lock().await;
+        let baseline = local.metadata();
+        let count = owned_project_count_for_projects_dir(projects_dir)?;
+        log::debug!(
+            target: "tddy_livekit::metadata",
+            "apply_owned_project_count: dir={} count={} baseline_len={}",
+            projects_dir.display(),
+            count,
+            baseline.len()
+        );
+        let update = serde_json::json!({ OWNED_PROJECT_COUNT_METADATA_KEY: count }).to_string();
+        let merged = merge_participant_metadata_json(&baseline, &update)
+            .map_err(|e| anyhow::anyhow!("merge participant metadata: {}", e))?;
+        local
+            .set_metadata(merged)
+            .await
+            .map_err(|e| anyhow::anyhow!("set_metadata: {}", e))?;
+        log::info!(
+            target: "tddy_livekit::metadata",
+            "published {}={} (merged with existing metadata)",
+            OWNED_PROJECT_COUNT_METADATA_KEY,
+            count
+        );
+        Ok(())
     }
 
     /// Run the participant with automatic token refresh. Generates a token, connects,
@@ -208,6 +340,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         room_options: RoomOptions,
         shutdown: Arc<AtomicBool>,
         codex_oauth_watch: Option<PathBuf>,
+        projects_registry_dir: Option<PathBuf>,
     ) {
         Self::run_with_reconnect_metadata(
             url,
@@ -217,11 +350,13 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             shutdown,
             None,
             codex_oauth_watch,
+            projects_registry_dir,
         )
         .await;
     }
 
     /// Like [`Self::run_with_reconnect`], but pushes `metadata_watch` values to the local participant metadata.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_with_reconnect_metadata(
         url: &str,
         token_generator: &TokenGenerator,
@@ -230,6 +365,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         shutdown: Arc<AtomicBool>,
         metadata_watch: Option<watch::Receiver<String>>,
         codex_oauth_watch: Option<PathBuf>,
+        projects_registry_dir: Option<PathBuf>,
     ) {
         let bridge = Arc::new(RpcBridge::new(service));
         let shared_publisher = SharedPublisher::new();
@@ -260,6 +396,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                 active_bidi_sessions.clone(),
                 shared_publisher.clone(),
                 codex_oauth_watch.clone(),
+                projects_registry_dir.clone(),
             )
             .await
             {
@@ -274,7 +411,8 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             };
             if let Some(rx) = metadata_watch.clone() {
                 let local = participant.room().local_participant().clone();
-                metadata_task = Some(spawn_local_participant_metadata_watcher(rx, local));
+                let lock = participant.metadata_publish_lock.clone();
+                metadata_task = Some(spawn_local_participant_metadata_watcher(rx, local, lock));
             }
             let refresh_delay = token_generator.time_until_refresh();
             log::info!(
@@ -324,13 +462,42 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         if let Some(ref path) = self.codex_oauth_watch {
             let local = self.room.local_participant().clone();
             let path = path.clone();
+            let lock = self.metadata_publish_lock.clone();
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_secs(1));
                 let mut last_sent: Option<String> = None;
                 loop {
                     interval.tick().await;
-                    Self::try_publish_codex_oauth_metadata(&local, path.as_path(), &mut last_sent)
-                        .await;
+                    Self::try_publish_codex_oauth_metadata(
+                        &local,
+                        path.as_path(),
+                        &mut last_sent,
+                        &lock,
+                    )
+                    .await;
+                }
+            });
+        }
+        if let Some(ref projects_dir) = self.projects_registry_dir {
+            let local = self.room.local_participant().clone();
+            let projects_dir = projects_dir.clone();
+            let lock = self.metadata_publish_lock.clone();
+            tokio::spawn(async move {
+                loop {
+                    if let Err(e) = Self::apply_owned_project_count_to_local_metadata(
+                        &local,
+                        projects_dir.as_path(),
+                        &lock,
+                    )
+                    .await
+                    {
+                        log::warn!("owned project count metadata: {}", e);
+                    }
+                    log::debug!(
+                        target: "tddy_livekit::metadata",
+                        "owned project count: sleeping 30s before next registry poll (bounded refresh)"
+                    );
+                    tokio::time::sleep(Duration::from_secs(30)).await;
                 }
             });
         }
@@ -485,6 +652,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         local: &LocalParticipant,
         path: &Path,
         last_sent: &mut Option<String>,
+        metadata_publish_lock: &Arc<Mutex<()>>,
     ) {
         let Ok(raw) = tokio::fs::read_to_string(path).await else {
             return;
@@ -496,18 +664,33 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         if last_sent.as_ref() == Some(&url) {
             return;
         }
-        let meta = serde_json::json!({
+        let update = serde_json::json!({
             "codex_oauth": {
                 "pending": true,
                 "authorize_url": url,
             }
-        });
-        match local.set_metadata(meta.to_string()).await {
+        })
+        .to_string();
+
+        let _guard = metadata_publish_lock.lock().await;
+        let baseline = local.metadata();
+        let merged = match merge_participant_metadata_json(&baseline, &update) {
+            Ok(m) => m,
+            Err(e) => {
+                log::warn!(
+                    target: "tddy_livekit::codex_oauth",
+                    "merge before set_metadata failed: {}",
+                    e
+                );
+                return;
+            }
+        };
+        match local.set_metadata(merged).await {
             Ok(()) => {
                 *last_sent = Some(url);
                 log::info!(
                     target: "tddy_livekit::codex_oauth",
-                    "published Codex OAuth pending to participant metadata (URL omitted from logs)"
+                    "published Codex OAuth pending merged into participant metadata (URL omitted from logs)"
                 );
             }
             Err(e) => {
@@ -1045,6 +1228,11 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
     pub fn room(&self) -> &Room {
         &self.room
     }
+
+    /// Lock shared with [`spawn_local_participant_metadata_watcher`] and internal metadata publishers; pass to the watcher when wiring manually.
+    pub fn metadata_publish_lock(&self) -> Arc<Mutex<()>> {
+        self.metadata_publish_lock.clone()
+    }
 }
 
 /// Resolve which participant identity to send responses to.
@@ -1072,6 +1260,7 @@ pub(crate) fn resolve_response_identity(
 mod tests {
     use super::*;
     use crate::proto::CallMetadata;
+    use serde_json::Value;
 
     #[test]
     fn resolve_response_identity_uses_sender_identity_from_request_when_present() {
@@ -1094,6 +1283,23 @@ mod tests {
             result.as_ref().map(|p| p.as_str()),
             Some("client1"),
             "response must be sent to sender_identity from request, not event participant"
+        );
+    }
+
+    #[test]
+    fn merge_participant_metadata_json_retains_baseline_keys_on_partial_update() {
+        let baseline = r#"{"codex_oauth":{"pending":false},"legacy":1}"#;
+        let update = format!(r#"{{"{key}":9}}"#, key = OWNED_PROJECT_COUNT_METADATA_KEY);
+        let merged = merge_participant_metadata_json(baseline, &update).expect("merge");
+        let v: Value = serde_json::from_str(&merged).expect("merged JSON");
+        assert!(
+            v.get("legacy").is_some(),
+            "baseline-only keys must remain after merge; got {merged}"
+        );
+        assert_eq!(
+            v.get(OWNED_PROJECT_COUNT_METADATA_KEY)
+                .and_then(|x| x.as_u64()),
+            Some(9)
         );
     }
 }
