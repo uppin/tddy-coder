@@ -19,6 +19,7 @@ import {
   ResumeSessionResponseSchema,
   DeleteSessionRequestSchema,
 } from "../../src/gen/connection_pb";
+import { PROJECT_ROW_ROUTE_PREFIX } from "../../src/routing/appRoutes";
 import {
   GetAuthStatusResponseSchema,
   GitHubUserSchema,
@@ -1420,10 +1421,15 @@ describe("ConnectionScreen multi-host daemon selection", () => {
     ]);
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"]`, { timeout: 5000 }).should("exist");
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"] option`).should("have.length", 2);
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"] option`).eq(0).should("contain.text", DAEMON_LOCAL.label);
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"] option`).eq(1).should("contain.text", DAEMON_PEER.label);
+    /** ListProjects pins the project to the local daemon id when multiple daemons exist — row key is composite. */
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 }).should("exist");
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).should("have.length", 2);
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`)
+      .eq(0)
+      .should("contain.text", DAEMON_LOCAL.label);
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`)
+      .eq(1)
+      .should("contain.text", DAEMON_PEER.label);
   });
 
   it("defaults Host dropdown to the local daemon", () => {
@@ -1699,11 +1705,12 @@ describe("ConnectionScreen — multi-session attachments (acceptance)", () => {
       .find("[data-testid='connection-status-dot']", { timeout: 20000 })
       .should("have.length.at.least", 1)
       .first()
-      .should("be.visible")
-      .click({ force: true });
+      .as("statusDotA");
+    cy.get("@statusDotA").should("be.visible");
+    cy.get("@statusDotA").click({ force: true });
     cy.get("[data-testid='connection-menu-disconnect']", { timeout: 10000 })
+      .filter(":visible")
       .first()
-      .should("be.visible")
       .click({ force: true });
     cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_B.sessionId}"]`, {
       timeout: 15000,
@@ -1785,5 +1792,195 @@ describe("ConnectionScreen — multi-session attachments (acceptance)", () => {
     cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_A.sessionId}"]`).should(
       "not.exist",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Project screen + home session cap (acceptance — PRD: preview 10 + /project/:key)
+// ---------------------------------------------------------------------------
+
+const CAP_PREVIEW_PROJECT_ID = "proj-1";
+
+/** Twelve `proj-1` sessions; display order is 6 active (newest first) then 6 inactive (newest first). */
+function buildTwelveSessionsForPreviewCap(): MockSessionRow[] {
+  const hours = [12, 11, 10, 9, 8, 7];
+  const active = hours.map((h, i) => ({
+    sessionId: `cap-act-${h}`,
+    createdAt: `2026-03-21T${String(h).padStart(2, "0")}:00:00Z`,
+    status: "active",
+    repoPath: "/home/dev/project",
+    pid: 88000 + i,
+    isActive: true,
+    projectId: CAP_PREVIEW_PROJECT_ID,
+    daemonInstanceId: "",
+  }));
+  const inactive = hours.map((h, i) => ({
+    sessionId: `cap-ina-${h}`,
+    createdAt: `2026-03-21T${String(h).padStart(2, "0")}:00:00Z`,
+    status: "exited",
+    repoPath: "/home/dev/project",
+    pid: 0,
+    isActive: false,
+    projectId: CAP_PREVIEW_PROJECT_ID,
+    daemonInstanceId: "",
+  }));
+  return [...active, ...inactive];
+}
+
+const CAP_PREVIEW_FIRST_TEN_IDS = [
+  "cap-act-12",
+  "cap-act-11",
+  "cap-act-10",
+  "cap-act-9",
+  "cap-act-8",
+  "cap-act-7",
+  "cap-ina-12",
+  "cap-ina-11",
+  "cap-ina-10",
+  "cap-ina-9",
+];
+
+const CAP_PREVIEW_HIDDEN_IDS = ["cap-ina-8", "cap-ina-7"];
+
+describe("ConnectionScreen — project sessions preview + project route (acceptance)", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("HomeProjectTableShowsAtMostTenSessionsWhenMoreExist", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    const sessions = buildTwelveSessionsForPreviewCap();
+    interceptAllRpcs(sessions);
+    cy.window().then((win) => {
+      win.history.replaceState(null, "", "/");
+    });
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    const tableSel = `[data-testid="sessions-table-${CAP_PREVIEW_PROJECT_ID}"]`;
+    cy.get(tableSel, { timeout: 8000 }).should("exist");
+    cy.get(`${tableSel} tbody tr`).should("have.length", 10);
+    cy.get(`[data-testid="project-sessions-overflow-summary-${CAP_PREVIEW_PROJECT_ID}"]`).should(
+      "exist",
+    );
+    cy.get(`[data-testid="project-sessions-overflow-summary-${CAP_PREVIEW_PROJECT_ID}"]`).should(
+      ($el) => {
+        const t = $el.text();
+        expect(t).to.match(/12/);
+        expect(t.toLowerCase()).to.match(/2|hidden|more/);
+      },
+    );
+    CAP_PREVIEW_FIRST_TEN_IDS.forEach((sessionId, index) => {
+      cy.get(`${tableSel} tbody tr`)
+        .eq(index)
+        .find(`[data-testid="connect-${sessionId}"], [data-testid="resume-${sessionId}"]`)
+        .should("exist");
+    });
+    CAP_PREVIEW_HIDDEN_IDS.forEach((sessionId) => {
+      cy.get(`${tableSel} tbody tr`).find(`[data-testid="connect-${sessionId}"]`).should("not.exist");
+      cy.get(`${tableSel} tbody tr`).find(`[data-testid="resume-${sessionId}"]`).should("not.exist");
+    });
+  });
+
+  it("HomeOverflowNavigatesToProjectScreenWithCorrectEncodedKey", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs(buildTwelveSessionsForPreviewCap());
+    cy.window().then((win) => {
+      win.history.replaceState(null, "", "/");
+    });
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    const rowKey = CAP_PREVIEW_PROJECT_ID;
+    const expectedPath = `${PROJECT_ROW_ROUTE_PREFIX}/${encodeURIComponent(rowKey)}`;
+    cy.get(`[data-testid="project-sessions-overflow-nav-${rowKey}"]`, { timeout: 8000 })
+      .should("be.visible")
+      .click();
+    cy.window().its("location.pathname").should("eq", expectedPath);
+    const segment = expectedPath.slice(`${PROJECT_ROW_ROUTE_PREFIX}/`.length);
+    expect(decodeURIComponent(segment)).to.eq(rowKey);
+  });
+
+  it("ProjectScreenListsAllSessionsForProject", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    const sessions = buildTwelveSessionsForPreviewCap();
+    interceptAllRpcs(sessions);
+    const rowKey = CAP_PREVIEW_PROJECT_ID;
+    const projectPath = `${PROJECT_ROW_ROUTE_PREFIX}/${encodeURIComponent(rowKey)}`;
+    cy.window().then((win) => {
+      win.history.replaceState(null, "", projectPath);
+    });
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="project-screen-root"]`, { timeout: 8000 }).should("exist");
+    cy.get(`[data-testid="project-screen-sessions-table-${rowKey}"]`).should("exist");
+    cy.get(`[data-testid="project-screen-sessions-table-${rowKey}"] tbody tr`).should(
+      "have.length",
+      12,
+    );
+    cy.get(`[data-testid="project-screen-sessions-table-${rowKey}"] tbody tr`)
+      .first()
+      .find(`[data-testid="connect-cap-act-12"], [data-testid="resume-cap-act-12"]`)
+      .should("exist");
+    cy.get(`[data-testid="project-screen-sessions-table-${rowKey}"] tbody tr`)
+      .last()
+      .find(`[data-testid="connect-cap-ina-7"], [data-testid="resume-cap-ina-7"]`)
+      .should("exist");
+  });
+
+  it("ProjectScreenStartNewSessionUsesProjectFormAndNavigatesLikeHome", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs(buildTwelveSessionsForPreviewCap());
+    const rowKey = CAP_PREVIEW_PROJECT_ID;
+    const projectPath = `${PROJECT_ROW_ROUTE_PREFIX}/${encodeURIComponent(rowKey)}`;
+    const newSessionId = "cap-project-screen-new-session-aaaaaaaa-bbbb-cccc-dddddddddddd";
+    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+      const body = toBinary(
+        StartSessionResponseSchema,
+        create(StartSessionResponseSchema, {
+          sessionId: newSessionId,
+          livekitRoom: `room-${newSessionId}`,
+          livekitUrl: "ws://127.0.0.1:7880",
+          livekitServerIdentity: "server-new",
+        }),
+      );
+      req.reply({
+        statusCode: 200,
+        headers: { "Content-Type": "application/proto" },
+        body: toArrayBuffer(body),
+      });
+    }).as("startSessionProjectScreen");
+    interceptTokenForPresence();
+    cy.window().then((win) => {
+      win.history.replaceState(null, "", projectPath);
+    });
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="project-screen-root"]`, { timeout: 8000 }).should("exist");
+    cy.get(`[data-testid="project-screen-start-session-${rowKey}"]`, { timeout: 8000 })
+      .should("be.visible")
+      .and("not.be.disabled");
+    cy.get(`[data-testid="project-screen-start-session-${rowKey}"]`).click();
+    cy.wait("@startSessionProjectScreen");
+    cy.get(`[data-testid="connection-attached-terminal-${newSessionId}"]`, { timeout: 20000 }).should(
+      "exist",
+    );
+  });
+
+  it("UnknownProjectRouteShowsNotFoundWithLinkHome", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcs([ACTIVE_SESSION]);
+    const unknownKey = "unknown-project-row-key-not-in-registry-999";
+    cy.window().then((win) => {
+      win.history.replaceState(
+        null,
+        "",
+        `${PROJECT_ROW_ROUTE_PREFIX}/${encodeURIComponent(unknownKey)}`,
+      );
+    });
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+    cy.get(`[data-testid="project-route-not-found"]`, { timeout: 8000 }).should("be.visible");
+    cy.get(`[data-testid="project-route-not-found-home"]`).should("be.visible").click();
+    cy.window().its("location.pathname").should("eq", "/");
   });
 });
