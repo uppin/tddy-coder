@@ -7,6 +7,13 @@ Release note history for the Web product area.
 ## 2026-04-11 — Connection screen: multi-host eligible daemons (LiveKit common room)
 
 - **`tddy-web`**: **ConnectionScreen** sorts **ListEligibleDaemons** for the Host dropdown (**local** first, then **`instance_id`**); **StartSession** sends the selected **`daemonInstanceId`** when the daemon lists multiple eligible hosts. Cypress **ConnectionScreen** covers multi-row host list and multi-session disconnect scoping. **Feature docs**: [web-terminal.md](web-terminal.md), [livekit-peer-discovery.md](../daemon/livekit-peer-discovery.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+## 2026-04-11 — Connection screen: multi-daemon project rows and host-scoped sessions
+
+- **`tddy-web`**: **`ListProjects`** rows carry **`daemon_instance_id`**; **`ConnectionScreen`** renders one accordion and session table per row, with composite **`data-testid`** keys **`projectId__daemonInstanceId`** when the field is set; **`sessionProjectTable`** helpers (**`connectionProjectRowKey`**, **`sessionBelongsToProjectHost`**, **`sortedSessionsForProjectHostTable`**, **`isSessionOrphan`**) scope sessions and unscoped repo matching per host. Cypress **`ConnectionScreen.cy.tsx`** covers multi-host listing and collision cases; Bun **`sessionProjectTableMultiHost.test.ts`** covers table helpers. Feature doc: [web-terminal.md](web-terminal.md).
+
+## 2026-04-11 — LiveKit presence: owned project count
+
+- **tddy-web**: **`ParticipantList`** **Projects** column for **`owned_project_count`** in participant metadata (**`parseOwnedProjectCount`**, **`OWNED_PROJECT_COUNT_METADATA_KEY`**); em dash when the field is absent; **`useRoomParticipants`** supplies **`ownedProjectCount`** from LiveKit metadata; Cypress **`ParticipantList.cy.tsx`** covers render and metadata updates. Feature doc: [livekit-participant-owned-projects.md](livekit-participant-owned-projects.md).
 
 ## 2026-04-10 — ParticipantList Codex OAuth presence
 

@@ -63,6 +63,7 @@ const ACTIVE_SESSION = {
   pid: 12345,
   isActive: true,
   projectId: "proj-1",
+  daemonInstanceId: "",
 };
 
 /** Same project as ACTIVE_SESSION — `pending_elicitation` true (acceptance: row exposes indicator). */
@@ -87,6 +88,7 @@ const INACTIVE_SESSION = {
   pid: 0,
   isActive: false,
   projectId: "proj-1",
+  daemonInstanceId: "",
 };
 
 /** Project id not in ListProjects — appears under "Other sessions". */
@@ -119,6 +121,7 @@ const PROJ_ORDER_ACTIVE_NEW = {
   pid: 401,
   isActive: true,
   projectId: "proj-1",
+  daemonInstanceId: "",
 };
 const PROJ_ORDER_ACTIVE_OLD = {
   sessionId: "proj-order-active-old",
@@ -128,6 +131,7 @@ const PROJ_ORDER_ACTIVE_OLD = {
   pid: 402,
   isActive: true,
   projectId: "proj-1",
+  daemonInstanceId: "",
 };
 const PROJ_ORDER_INACTIVE_NEW = {
   sessionId: "proj-order-inactive-new",
@@ -137,6 +141,7 @@ const PROJ_ORDER_INACTIVE_NEW = {
   pid: 0,
   isActive: false,
   projectId: "proj-1",
+  daemonInstanceId: "",
 };
 const PROJ_ORDER_INACTIVE_OLD = {
   sessionId: "proj-order-inactive-old",
@@ -146,6 +151,7 @@ const PROJ_ORDER_INACTIVE_OLD = {
   pid: 0,
   isActive: false,
   projectId: "proj-1",
+  daemonInstanceId: "",
 };
 
 /** Orphans share a project id that is not in ListProjects. */
@@ -193,6 +199,7 @@ const PROJECT = {
   name: "Test Project",
   gitUrl: "https://github.com/test/project.git",
   mainRepoPath: "/home/dev/project",
+  daemonInstanceId: "",
 };
 
 function mockAuthAuthenticated() {
@@ -269,11 +276,16 @@ function mockListSessionsResponse(sessions: MockSessionRow[]) {
   );
 }
 
-function mockListProjectsResponse() {
+function mockListProjectsResponse(daemonInstanceIdForProject = "") {
   return toBinary(
     ListProjectsResponseSchema,
     create(ListProjectsResponseSchema, {
-      projects: [create(ProjectEntrySchema, PROJECT)],
+      projects: [
+        create(ProjectEntrySchema, {
+          ...PROJECT,
+          daemonInstanceId: daemonInstanceIdForProject,
+        }),
+      ],
     }),
   );
 }
@@ -359,7 +371,11 @@ function interceptAllRpcs(
     });
   }).as("listSessions");
 
-  const projectsBody = mockListProjectsResponse();
+  const projectDaemonId =
+    daemonsOverride === undefined
+      ? ""
+      : (daemonsOverride.find((d) => d.isLocal) ?? daemonsOverride[0]).instanceId;
+  const projectsBody = mockListProjectsResponse(projectDaemonId);
   cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
     req.reply({
       statusCode: 200,
@@ -784,7 +800,7 @@ function interceptAllRpcsWithTrackedDelete(
     });
   }).as("listSessions");
 
-  const projectsBody = mockListProjectsResponse();
+  const projectsBody = mockListProjectsResponse("");
   cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
     req.reply({
       statusCode: 200,
@@ -1018,7 +1034,7 @@ const STATUS_PARITY_SESSION_V1: MockSessionRow = {
   pid: 12345,
   isActive: true,
   projectId: "proj-1",
-  daemonInstanceId: "workstation-1",
+  daemonInstanceId: "",
   workflowGoal: "acceptance-tests",
   workflowState: "Red",
   elapsedDisplay: "1m 2s",
@@ -1078,7 +1094,7 @@ function interceptAllRpcsWithListSessionsFactory(getSessions: () => MockSessionR
     });
   }).as("listSessions");
 
-  const projectsBody = mockListProjectsResponse();
+  const projectsBody = mockListProjectsResponse("");
   cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
     req.reply({
       statusCode: 200,
@@ -1095,6 +1111,9 @@ function interceptAllRpcsWithListSessionsFactory(getSessions: () => MockSessionR
 const DAEMON_LOCAL = { instanceId: "workstation-1", label: "workstation-1 (this daemon)", isLocal: true };
 const DAEMON_PEER = { instanceId: "server-2", label: "server-2", isLocal: false };
 
+/** Row key when ListProjects tags the project with the local eligible daemon (multi-host mocks). */
+const PROJECT_ROW_MULTI_HOST = `${PROJECT.projectId}__${DAEMON_LOCAL.instanceId}`;
+
 const SESSION_WITH_HOST: MockSessionRow = {
   sessionId: "session-host-1",
   createdAt: "2026-03-28T10:00:00Z",
@@ -1105,6 +1124,118 @@ const SESSION_WITH_HOST: MockSessionRow = {
   projectId: "proj-1",
   daemonInstanceId: "workstation-1",
 };
+
+/** `ACTIVE_SESSION` with daemon matching multi-host ListProjects + ListEligibleDaemons local row. */
+const ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON: MockSessionRow = {
+  ...ACTIVE_SESSION,
+  daemonInstanceId: DAEMON_LOCAL.instanceId,
+};
+
+/** Same `project_id` on two daemons — multi-daemon listing + grouping (PRD acceptance). */
+const COLLISION_PROJECT_ID = "cccccccc-dddd-4eee-8fff-999999999999";
+
+const COLLISION_SESSION_WS: MockSessionRow = {
+  sessionId: "collision-sess-ws",
+  createdAt: "2026-04-10T10:00:00Z",
+  status: "active",
+  repoPath: "/home/ws/dup",
+  pid: 60001,
+  isActive: true,
+  projectId: COLLISION_PROJECT_ID,
+  daemonInstanceId: DAEMON_LOCAL.instanceId,
+};
+
+const COLLISION_SESSION_SRV: MockSessionRow = {
+  sessionId: "collision-sess-srv",
+  createdAt: "2026-04-10T11:00:00Z",
+  status: "active",
+  repoPath: "/srv/dup",
+  pid: 60002,
+  isActive: true,
+  projectId: COLLISION_PROJECT_ID,
+  daemonInstanceId: DAEMON_PEER.instanceId,
+};
+
+function mockListProjectsCollisionSameProjectId() {
+  return toBinary(
+    ListProjectsResponseSchema,
+    create(ListProjectsResponseSchema, {
+      projects: [
+        create(ProjectEntrySchema, {
+          projectId: COLLISION_PROJECT_ID,
+          name: "dup-workstation",
+          gitUrl: "https://github.com/test/dup.git",
+          mainRepoPath: "/home/ws/dup",
+          daemonInstanceId: DAEMON_LOCAL.instanceId,
+        }),
+        create(ProjectEntrySchema, {
+          projectId: COLLISION_PROJECT_ID,
+          name: "dup-server",
+          gitUrl: "https://github.com/test/dup.git",
+          mainRepoPath: "/srv/dup",
+          daemonInstanceId: DAEMON_PEER.instanceId,
+        }),
+      ],
+    }),
+  );
+}
+
+/** Like `interceptAllRpcsWithDaemons` but ListProjects returns duplicate `project_id` across hosts. */
+function interceptAllRpcsProjectIdCollision(sessions: MockSessionRow[]) {
+  const authBody = mockAuthAuthenticated();
+  cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(authBody),
+    });
+  }).as("getAuthStatus");
+
+  const toolsBody = mockListToolsResponse();
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(toolsBody),
+    });
+  }).as("listTools");
+
+  const agentsBody = mockListAgentsResponse(MOCK_DEFAULT_LIST_AGENTS);
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(agentsBody),
+    });
+  }).as("listAgents");
+
+  const daemonsBody = mockListEligibleDaemonsResponse([DAEMON_LOCAL, DAEMON_PEER]);
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListEligibleDaemons", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(daemonsBody),
+    });
+  }).as("listEligibleDaemons");
+
+  const sessionsBody = mockListSessionsResponse(sessions);
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(sessionsBody),
+    });
+  }).as("listSessions");
+
+  const projectsBody = mockListProjectsCollisionSameProjectId();
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(projectsBody),
+    });
+  }).as("listProjects");
+}
 
 function interceptAllRpcsWithDaemons(
   sessions: MockSessionRow[],
@@ -1214,7 +1345,11 @@ function interceptAllRpcsWithListAgents(
     });
   }).as("listSessions");
 
-  const projectsBody = mockListProjectsResponse();
+  const projectDaemonId =
+    daemonsOverride === undefined
+      ? ""
+      : (daemonsOverride.find((d) => d.isLocal) ?? daemonsOverride[0]).instanceId;
+  const projectsBody = mockListProjectsResponse(projectDaemonId);
   cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
     req.reply({
       statusCode: 200,
@@ -1267,13 +1402,13 @@ describe("ConnectionScreen multi-host daemon selection", () => {
 
   it("renders a Host dropdown per project populated from ListEligibleDaemons", () => {
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsWithDaemons([ACTIVE_SESSION]);
+    interceptAllRpcsWithDaemons([ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON]);
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"]`, { timeout: 5000 }).should("exist");
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"] option`).should("have.length", 2);
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"] option`).eq(0).should("contain.text", DAEMON_LOCAL.label);
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"] option`).eq(1).should("contain.text", DAEMON_PEER.label);
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 }).should("exist");
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).should("have.length", 2);
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).eq(0).should("contain.text", DAEMON_LOCAL.label);
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).eq(1).should("contain.text", DAEMON_PEER.label);
   });
 
   /** PRD: local daemon row first in the Host dropdown even when the RPC returns peers before the local row. */
@@ -1293,10 +1428,10 @@ describe("ConnectionScreen multi-host daemon selection", () => {
 
   it("defaults Host dropdown to the local daemon", () => {
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsWithDaemons([ACTIVE_SESSION]);
+    interceptAllRpcsWithDaemons([ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON]);
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"]`, { timeout: 5000 })
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 })
       .should("have.value", DAEMON_LOCAL.instanceId);
   });
 
@@ -1315,9 +1450,9 @@ describe("ConnectionScreen multi-host daemon selection", () => {
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
 
-    cy.get(`[data-testid="recipe-select-${PROJECT.projectId}"]`, { timeout: 5000 })
+    cy.get(`[data-testid="recipe-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 })
       .select("bugfix");
-    cy.get(`[data-testid="start-session-${PROJECT.projectId}"]`).click();
+    cy.get(`[data-testid="start-session-${PROJECT_ROW_MULTI_HOST}"]`).click();
 
     cy.wait("@startSession").then((interception) => {
       const bodyBytes = new Uint8Array(interception.request.body as ArrayBuffer);
@@ -1341,9 +1476,9 @@ describe("ConnectionScreen multi-host daemon selection", () => {
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
 
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"]`, { timeout: 5000 })
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 })
       .select(DAEMON_PEER.instanceId);
-    cy.get(`[data-testid="start-session-${PROJECT.projectId}"]`).click();
+    cy.get(`[data-testid="start-session-${PROJECT_ROW_MULTI_HOST}"]`).click();
 
     cy.wait("@startSession").then((interception) => {
       const bodyBytes = new Uint8Array(interception.request.body as ArrayBuffer);
@@ -1357,21 +1492,51 @@ describe("ConnectionScreen multi-host daemon selection", () => {
     interceptAllRpcsWithDaemons([SESSION_WITH_HOST]);
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="sessions-table-${PROJECT.projectId}"]`, { timeout: 5000 })
+    cy.get(`[data-testid="sessions-table-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 })
       .find("th")
       .should("contain.text", "Host");
-    cy.get(`[data-testid="sessions-table-${PROJECT.projectId}"] tbody tr`)
+    cy.get(`[data-testid="sessions-table-${PROJECT_ROW_MULTI_HOST}"] tbody tr`)
       .first()
       .should("contain.text", "workstation-1");
   });
 
   it("renders single option when only one daemon is available", () => {
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsWithDaemons([ACTIVE_SESSION], [DAEMON_LOCAL]);
+    interceptAllRpcsWithDaemons([ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON], [DAEMON_LOCAL]);
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"]`, { timeout: 5000 }).should("exist");
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"] option`).should("have.length", 1);
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 }).should("exist");
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).should("have.length", 1);
+  });
+});
+
+describe("ConnectionScreen multi-daemon project collision (acceptance)", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+  });
+
+  it("renders_separate_accordions_per_project_and_host_when_project_id_collides", () => {
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptAllRpcsProjectIdCollision([COLLISION_SESSION_WS, COLLISION_SESSION_SRV]);
+    cy.mount(<ConnectionScreen />);
+    cy.wait("@getAuthStatus");
+
+    const accWs = `[data-testid="project-accordion-${COLLISION_PROJECT_ID}__${DAEMON_LOCAL.instanceId}"]`;
+    const accSrv = `[data-testid="project-accordion-${COLLISION_PROJECT_ID}__${DAEMON_PEER.instanceId}"]`;
+    cy.get(accWs, { timeout: 8000 }).should("exist");
+    cy.get(accSrv).should("exist");
+
+    const tableWs = `[data-testid="sessions-table-${COLLISION_PROJECT_ID}__${DAEMON_LOCAL.instanceId}"]`;
+    const tableSrv = `[data-testid="sessions-table-${COLLISION_PROJECT_ID}__${DAEMON_PEER.instanceId}"]`;
+    cy.get(tableWs).within(() => {
+      cy.get(`[data-testid="connect-${COLLISION_SESSION_WS.sessionId}"]`).should("exist");
+      cy.get(`[data-testid="connect-${COLLISION_SESSION_SRV.sessionId}"]`).should("not.exist");
+    });
+    cy.get(tableSrv).within(() => {
+      cy.get(`[data-testid="connect-${COLLISION_SESSION_SRV.sessionId}"]`).should("exist");
+      cy.get(`[data-testid="connect-${COLLISION_SESSION_WS.sessionId}"]`).should("not.exist");
+    });
   });
 });
 
@@ -1455,6 +1620,7 @@ const SESSION_MULTI_A: MockSessionRow = {
   pid: 70001,
   isActive: true,
   projectId: "proj-1",
+  daemonInstanceId: "",
 };
 
 const SESSION_MULTI_B: MockSessionRow = {
@@ -1465,6 +1631,7 @@ const SESSION_MULTI_B: MockSessionRow = {
   pid: 70002,
   isActive: true,
   projectId: "proj-1",
+  daemonInstanceId: "",
 };
 
 /** Per-request ConnectSession: room name derived from requested session id (distinct LiveKit rooms). */
@@ -1530,6 +1697,7 @@ describe("ConnectionScreen — multi-session attachments (acceptance)", () => {
       timeout: 15000,
     })
       .find("[data-testid='connection-status-dot']", { timeout: 20000 })
+      .should("have.length.at.least", 1)
       .first()
       .should("be.visible")
       .click({ force: true });

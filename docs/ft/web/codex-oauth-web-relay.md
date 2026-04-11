@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Operators run **tddy-coder** with the **OpenAI Codex** backend in environments without a usable desktop browser (remote agents, headless hosts, CI-like shells). The Codex CLI triggers OAuth by invoking the platform browser opener (for example via **`BROWSER`**). This product area covers surfacing the **HTTPS authorize URL** inside **tddy-web** and relaying the **OAuth callback** (authorization code and state) back to the Codex process so login completes with the same semantics as a local browser session.
+Operators run **tddy-coder** with the **OpenAI Codex** backends (**`--agent codex`** or **`--agent codex-acp`**) in environments without a usable desktop browser (remote agents, headless hosts, CI-like shells). The **`codex`** CLI OAuth path (including the helper used when **`codex-acp`** signals auth-like failures) invokes the platform browser opener (for example via **`BROWSER`**). See [Codex ACP backend](../coder/codex-acp-backend.md). This product area covers surfacing the **HTTPS authorize URL** inside **tddy-web** and relaying the **OAuth callback** (authorization code and state) back to the Codex process so login completes with the same semantics as a local browser session.
 
 ## Web dashboard
 
@@ -27,5 +27,6 @@ End-to-end capture requires **`BROWSER`** (or equivalent) routing to Tddy, daemo
 ## Related documentation
 
 - **[Local web development](local-web-dev.md)** — daemon + Vite proxy for **`/rpc`**
-- **[OpenAI Codex CLI backend](../coder/1-OVERVIEW.md)** — Codex backend overview
+- **[Coder overview](../coder/1-OVERVIEW.md)** — backend selection
+- **[Codex ACP backend](../coder/codex-acp-backend.md)** — **`codex-acp`** and OAuth retry
 - **[`codex-oauth-dialog.md`](../../../packages/tddy-web/docs/codex-oauth-dialog.md)** — tddy-web component reference

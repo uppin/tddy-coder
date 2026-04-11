@@ -70,6 +70,8 @@ message ProjectEntry {
   string name = 2;
   string git_url = 3;
   string main_repo_path = 4;
+  // Owning daemon for this registry row (multi-daemon aggregated ListProjects).
+  string daemon_instance_id = 5;
 }
 
 message ListProjectsRequest {

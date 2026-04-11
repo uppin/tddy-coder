@@ -55,6 +55,7 @@ mod livekit_tests {
                     RoomOptions::default(),
                     shutdown,
                     None,
+                    None,
                 )
                 .await
             }

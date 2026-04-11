@@ -305,6 +305,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         connection_server,
         RoomOptions::default(),
         None,
+        None,
     )
     .await
     .expect("peer daemon joins common room with ConnectionService RPC");

@@ -10,6 +10,15 @@ function normalizeRepoPath(path: string): string {
 }
 
 /**
+ * Stable UI / selection key for one registry row: `projectId` when `daemonInstanceId` is empty
+ * (legacy single-daemon), else `projectId__daemonInstanceId`.
+ */
+export function connectionProjectRowKey(p: ProjectEntry): string {
+  const d = (p.daemonInstanceId ?? "").trim();
+  return d.length > 0 ? `${p.projectId}__${d}` : p.projectId;
+}
+
+/**
  * True when an unscoped session's repo path is the same checkout as `mainRepoPath`, or lives
  * under it (e.g. git worktree under the main clone).
  */
@@ -79,10 +88,71 @@ export function sortedSessionsForProjectTable(
   );
 }
 
-/** True when the session is not listed under any project accordion (id or repo match). */
+/** Projects on the same host as `session` (by `daemon_instance_id`). */
+function projectsOnSessionHost(session: SessionEntry, projects: ProjectEntry[]): ProjectEntry[] {
+  const sid = (session.daemonInstanceId ?? "").trim();
+  return projects.filter((p) => {
+    const pd = (p.daemonInstanceId ?? "").trim();
+    if (pd === "") {
+      return sid === "";
+    }
+    return pd === sid;
+  });
+}
+
+/** True when the session is not listed under any project accordion (id or repo match on its host). */
 export function isSessionOrphan(s: SessionEntry, projects: ProjectEntry[]): boolean {
+  const onHost = projectsOnSessionHost(s, projects);
   if (s.projectId.trim() !== "") {
-    return !projects.some((p) => p.projectId === s.projectId);
+    return !onHost.some((p) => p.projectId === s.projectId);
   }
-  return projectForUnscopedSession(s, projects) === undefined;
+  return projectForUnscopedSession(s, onHost) === undefined;
+}
+
+/**
+ * Whether `session` belongs in the table for (`project`, `hostingDaemonInstanceId`).
+ * Scoped sessions must match `project_id` and owning daemon. Unscoped sessions resolve only
+ * against `projectsOnHost` and must not attach to a sibling host's copy of the same project id.
+ */
+export function sessionBelongsToProjectHost(
+  session: SessionEntry,
+  project: ProjectEntry,
+  hostingDaemonInstanceId: string,
+  projectsOnHost: ProjectEntry[]
+): boolean {
+  const hid = hostingDaemonInstanceId.trim();
+  const sid = (session.daemonInstanceId ?? "").trim();
+  const pd = (project.daemonInstanceId ?? "").trim();
+
+  if (hid !== pd) {
+    return false;
+  }
+  if (pd === "" && hid === "") {
+    if (sid !== "") {
+      return false;
+    }
+  } else if (sid !== hid) {
+    return false;
+  }
+
+  const spid = session.projectId.trim();
+  if (spid !== "") {
+    return session.projectId === project.projectId;
+  }
+  const resolved = projectForUnscopedSession(session, projectsOnHost);
+  return resolved !== undefined && resolved.projectId === project.projectId;
+}
+
+/** Sessions for one project accordion keyed by (project, hosting daemon). */
+export function sortedSessionsForProjectHostTable(
+  sessions: SessionEntry[],
+  project: ProjectEntry,
+  hostingDaemonInstanceId: string,
+  projectsOnHost: ProjectEntry[]
+): SessionEntry[] {
+  return sortSessionsForDisplay(
+    sessions.filter((s) =>
+      sessionBelongsToProjectHost(s, project, hostingDaemonInstanceId, projectsOnHost)
+    )
+  );
 }
