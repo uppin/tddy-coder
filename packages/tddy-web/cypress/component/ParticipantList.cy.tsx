@@ -33,12 +33,14 @@ describe("ParticipantList", () => {
         role: "browser",
         joinedAt: 1_700_000_000_000,
         metadata: "",
+        codexOAuth: null,
       },
       {
         identity: "server-abc",
         role: "server",
         joinedAt: 1_700_000_000_000,
         metadata: '{"k":"v"}',
+        codexOAuth: null,
       },
     ];
     cy.mount(
@@ -48,5 +50,29 @@ describe("ParticipantList", () => {
     cy.get("[data-testid='participant-role-web-testuser']").should("contain.text", "browser");
     cy.get("[data-testid='participant-role-server-abc']").should("contain.text", "server");
     cy.get("[data-testid='participant-metadata-server-abc']").should("contain.text", '{"k":"v"}');
+  });
+
+  it("shows Codex OAuth sign-in link when participant metadata requests it", () => {
+    const meta = JSON.stringify({
+      codex_oauth: {
+        pending: true,
+        authorize_url: "https://auth.example.com/oauth/authorize",
+      },
+    });
+    const participants: RoomParticipant[] = [
+      {
+        identity: "daemon-session",
+        role: "server",
+        joinedAt: 1_700_000_000_000,
+        metadata: meta,
+      },
+    ];
+    cy.mount(
+      <ParticipantList participants={participants} roomStatus="connected" connectionError={null} />
+    );
+    cy.get("[data-testid='participant-codex-oauth-daemon-session']")
+      .find("a")
+      .should("have.attr", "href", "https://auth.example.com/oauth/authorize")
+      .should("have.attr", "target", "_blank");
   });
 });

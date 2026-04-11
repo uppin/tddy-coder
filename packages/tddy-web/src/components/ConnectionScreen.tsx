@@ -4,6 +4,7 @@ import { GripVertical, Minus, Trash2 } from "lucide-react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
+  AgentInfoSchema,
   ConnectionService,
   DeleteSessionRequestSchema,
   Signal,
@@ -73,6 +74,13 @@ import {
   type TerminalPresentation,
   nextPresentationFromAttach,
 } from "./connection/terminalPresentation";
+import {
+  addSessionAttachment,
+  connectionAttachedTerminalTestId,
+  focusedSessionIdFromPathname,
+  removeSessionAttachment,
+  type SessionAttachmentMap,
+} from "./connection/multiSessionState";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
 
@@ -146,7 +154,7 @@ function createTokenClient() {
 type ProjectSessionForm = {
   toolPath: string;
   agent: string;
-  /** Workflow recipe: `tdd`, `bugfix`, `free-prompting`, or `grill-me` (matches `WorkflowRecipe::name()`). */
+  /** Workflow recipe: `tdd`, `tdd-small`, `bugfix`, `free-prompting`, or `grill-me` (matches `WorkflowRecipe::name()`). */
   recipe: string;
   debugLogging: boolean;
   daemonInstanceId: string;
@@ -164,7 +172,7 @@ function defaultProjectSessionForm(
   return {
     toolPath: tools[0]?.path ?? "",
     agent: coalesceBackendAgentSelection(agentOptions, undefined),
-    recipe: "tdd",
+    recipe: "free-prompting",
     debugLogging: false,
     daemonInstanceId: localDaemon?.instanceId ?? daemons[0]?.instanceId ?? "",
   };
@@ -273,6 +281,7 @@ function ProjectSessionOptions({
             className={sessionControlSelectClassName}
           >
             <option value="tdd">TDD (plan → implement)</option>
+            <option value="tdd-small">TDD small (plan → red → green)</option>
             <option value="bugfix">Bugfix (reproduce → fix)</option>
             <option value="free-prompting">Free prompting (open-ended)</option>
             <option value="grill-me">Grill me (Grill → Create plan)</option>
@@ -973,10 +982,13 @@ function ConnectedTerminal({
 export function ConnectionScreen({
   livekitUrl,
   commonRoom,
+  allowedAgentsFromConfig,
   onNavigate,
 }: {
   livekitUrl?: string;
   commonRoom?: string;
+  /** From GET /api/config (daemon `allowed_agents`); preferred over RPC until ListAgents hydrates. */
+  allowedAgentsFromConfig?: { id: string; label: string }[];
   /** Client-side navigation (daemon shell: Sessions ↔ Worktrees). */
   onNavigate?: (path: string) => void;
 } = {}) {
@@ -999,14 +1011,17 @@ export function ConnectionScreen({
   const [newProjectUserRelativePath, setNewProjectUserRelativePath] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [connected, setConnected] = useState<{
-    livekitUrl: string;
-    roomName: string;
-    identity: string;
-    serverIdentity: string;
-    debugLogging: boolean;
-    sessionId: string;
-  } | null>(null);
+  const effectiveAgents: AgentInfo[] = useMemo(() => {
+    if (allowedAgentsFromConfig && allowedAgentsFromConfig.length > 0) {
+      return allowedAgentsFromConfig.map((a) =>
+        create(AgentInfoSchema, { id: a.id, label: a.label }),
+      );
+    }
+    return agents;
+  }, [allowedAgentsFromConfig, agents]);
+  const [sessionAttachments, setSessionAttachments] = useState<SessionAttachmentMap>(
+    () => new Map(),
+  );
   const [routePath, setRoutePath] = useState(
     () => (typeof window !== "undefined" ? window.location.pathname : "/"),
   );
@@ -1035,18 +1050,46 @@ export function ConnectionScreen({
     [onNavigate],
   );
 
+  const focusedSessionId = useMemo(
+    () => focusedSessionIdFromPathname(routePath, sessionAttachments),
+    [routePath, sessionAttachments],
+  );
+
+  const removeAttachmentForSession = useCallback(
+    (sessionId: string, reason: string) => {
+      console.info("[ConnectionScreen] removeAttachmentForSession", { sessionId, reason });
+      setSessionAttachments((prev) => {
+        const next = removeSessionAttachment(prev, sessionId);
+        queueMicrotask(() => {
+          if (next.size === 0) {
+            setTerminalPresentation("hidden");
+            navigatePath("/", "replace");
+          } else {
+            const p = typeof window !== "undefined" ? window.location.pathname : "/";
+            const focus = focusedSessionIdFromPathname(p, next);
+            if (focus) {
+              navigatePath(terminalPathForSessionId(focus), "replace");
+            }
+          }
+        });
+        return next;
+      });
+    },
+    [navigatePath],
+  );
+
   useEffect(() => {
-    if (!connected) {
+    if (sessionAttachments.size === 0) {
       setTerminalOverlayMinimized(false);
     }
-  }, [connected]);
+  }, [sessionAttachments.size]);
 
   useEffect(() => {
     const onPopState = () => {
       const p = window.location.pathname;
       setRoutePath(p);
       if (isSessionListPath(p)) {
-        setConnected(null);
+        setSessionAttachments(new Map());
         setTerminalRouteUnknown(false);
         setTerminalPresentation("hidden");
       }
@@ -1147,9 +1190,9 @@ export function ConnectionScreen({
   useEffect(() => {
     setProjectForms((prev) => {
       const next = { ...prev };
-      const def = defaultProjectSessionForm(tools, agents, daemons);
+      const def = defaultProjectSessionForm(tools, effectiveAgents, daemons);
       const agentOptions = buildAgentSelectOptionsFromRpc(
-        agents.map((a) => ({ id: a.id, label: a.label })),
+        effectiveAgents.map((a) => ({ id: a.id, label: a.label })),
       );
       for (const p of projects) {
         const existing = next[p.projectId];
@@ -1160,7 +1203,7 @@ export function ConnectionScreen({
           if (!toolStillValid && tools[0]) {
             next[p.projectId] = { ...existing, toolPath: tools[0].path };
           }
-          const agentStillValid = agents.some((a) => a.id === existing.agent);
+          const agentStillValid = effectiveAgents.some((a) => a.id === existing.agent);
           if (!agentStillValid) {
             next[p.projectId] = {
               ...next[p.projectId],
@@ -1177,13 +1220,13 @@ export function ConnectionScreen({
       }
       return next;
     });
-  }, [projects, tools, agents, daemons]);
+  }, [projects, tools, effectiveAgents, daemons]);
 
   const updateProjectForm = (projectId: string, patch: Partial<ProjectSessionForm>) => {
     setProjectForms((prev) => ({
       ...prev,
       [projectId]: {
-        ...(prev[projectId] ?? defaultProjectSessionForm(tools, agents, daemons)),
+        ...(prev[projectId] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons)),
         ...patch,
       },
     }));
@@ -1232,20 +1275,20 @@ export function ConnectionScreen({
       setTerminalRouteUnknown(false);
       return;
     }
-    if (connected?.sessionId === id) {
+    if (sessionAttachments.has(id)) {
       setTerminalRouteUnknown(false);
       return;
     }
     const known = sessions.some((s) => s.sessionId === id);
     setTerminalRouteUnknown(!known);
-  }, [routePath, sessions, sessionsListHydrated, isAuthenticated, sessionToken, connected]);
+  }, [routePath, sessions, sessionsListHydrated, isAuthenticated, sessionToken, sessionAttachments]);
 
   useEffect(() => {
     if (!sessionsListHydrated || !isAuthenticated || !sessionToken || terminalRouteUnknown) {
       return;
     }
     const id = parseTerminalSessionIdFromPathname(routePath);
-    if (!id || connected?.sessionId === id) {
+    if (!id || sessionAttachments.has(id)) {
       return;
     }
     if (!sessions.some((s) => s.sessionId === id)) {
@@ -1258,14 +1301,16 @@ export function ConnectionScreen({
       try {
         const res = await client.connectSession({ sessionToken, sessionId: id });
         if (cancelled || seq !== terminalDeepLinkSeqRef.current) return;
-        setConnected({
-          livekitUrl: res.livekitUrl,
-          roomName: res.livekitRoom,
-          identity: `browser-${id}-${Date.now()}`,
-          serverIdentity: res.livekitServerIdentity,
-          debugLogging: debugForSessionId(id),
-          sessionId: id,
-        });
+        setSessionAttachments((prev) =>
+          addSessionAttachment(prev, id, {
+            livekitUrl: res.livekitUrl,
+            roomName: res.livekitRoom,
+            identity: `browser-${id}-${Date.now()}`,
+            serverIdentity: res.livekitServerIdentity,
+            debugLogging: debugForSessionId(id),
+          }),
+        );
+        navigatePath(terminalPathForSessionId(id), "replace");
         const attachNew = nextPresentationFromAttach(terminalPresentation, "new");
         setTerminalPresentation(attachNew.presentation);
         if (attachNew.shouldPushTerminalRoute) {
@@ -1278,14 +1323,16 @@ export function ConnectionScreen({
         try {
           const res = await client.resumeSession({ sessionToken, sessionId: id });
           if (cancelled || seq !== terminalDeepLinkSeqRef.current) return;
-          setConnected({
-            livekitUrl: res.livekitUrl,
-            roomName: res.livekitRoom,
-            identity: `browser-${res.sessionId}-${Date.now()}`,
-            serverIdentity: res.livekitServerIdentity,
-            debugLogging: debugForSessionId(id),
-            sessionId: res.sessionId,
-          });
+          setSessionAttachments((prev) =>
+            addSessionAttachment(prev, res.sessionId, {
+              livekitUrl: res.livekitUrl,
+              roomName: res.livekitRoom,
+              identity: `browser-${res.sessionId}-${Date.now()}`,
+              serverIdentity: res.livekitServerIdentity,
+              debugLogging: debugForSessionId(id),
+            }),
+          );
+          navigatePath(terminalPathForSessionId(res.sessionId), "replace");
           const attachRe = nextPresentationFromAttach(terminalPresentation, "reconnect");
           setTerminalPresentation(attachRe.presentation);
         } catch (e) {
@@ -1304,19 +1351,13 @@ export function ConnectionScreen({
     sessionsListHydrated,
     isAuthenticated,
     sessionToken,
-    connected,
+    sessionAttachments,
     terminalRouteUnknown,
     client,
     debugForSessionId,
     navigatePath,
     terminalPresentation,
   ]);
-
-  const expandTerminalPresentationToFull = useCallback(() => {
-    if (!connected) return;
-    setTerminalPresentation("full");
-    navigatePath(terminalPathForSessionId(connected.sessionId), "push");
-  }, [connected, navigatePath]);
 
   const shrinkTerminalPresentationToMini = useCallback(() => {
     setTerminalPresentation(
@@ -1328,22 +1369,40 @@ export function ConnectionScreen({
     );
   }, []);
 
-  const exitTerminalToConnectionScreen = useCallback(() => {
-    navigatePath("/", "replace");
-    setConnected(null);
-    setTerminalPresentation("hidden");
-  }, [navigatePath]);
-
   useEffect(() => {
-    if (!connected) return;
-    const row = sessions.find((s) => s.sessionId === connected.sessionId);
-    if (row && !row.isActive) {
-      exitTerminalToConnectionScreen();
-    }
-  }, [connected, sessions, exitTerminalToConnectionScreen]);
+    setSessionAttachments((prev) => {
+      if (prev.size === 0) return prev;
+      let next: SessionAttachmentMap | null = null;
+      for (const sessionId of prev.keys()) {
+        const row = sessions.find((s) => s.sessionId === sessionId);
+        if (row && !row.isActive) {
+          if (!next) next = new Map(prev);
+          next.delete(sessionId);
+          console.info("[ConnectionScreen] prune attachment: session inactive in ListSessions", {
+            sessionId,
+          });
+        }
+      }
+      if (!next) return prev;
+      const pruned = next;
+      queueMicrotask(() => {
+        if (pruned.size === 0) {
+          setTerminalPresentation("hidden");
+          navigatePath("/", "replace");
+        } else {
+          const p = typeof window !== "undefined" ? window.location.pathname : "/";
+          const focus = focusedSessionIdFromPathname(p, pruned);
+          if (focus) {
+            navigatePath(terminalPathForSessionId(focus), "replace");
+          }
+        }
+      });
+      return pruned;
+    });
+  }, [sessions, navigatePath]);
 
   const handleStartSession = async (projectId: string) => {
-    const form = projectForms[projectId] ?? defaultProjectSessionForm(tools, agents, daemons);
+    const form = projectForms[projectId] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons);
     if (!sessionToken || !form.toolPath || !projectId.trim() || !form.agent) return;
     setError(null);
     try {
@@ -1355,18 +1414,22 @@ export function ConnectionScreen({
         daemonInstanceId: form.daemonInstanceId,
         recipe: form.recipe,
       });
-      setConnected({
-        livekitUrl: res.livekitUrl,
-        roomName: res.livekitRoom,
-        identity: `browser-${res.sessionId}-${Date.now()}`,
-        serverIdentity: res.livekitServerIdentity,
-        debugLogging: form.debugLogging,
-        sessionId: res.sessionId,
-      });
+      console.info("[ConnectionScreen] startSession: new attachment", { sessionId: res.sessionId });
+      setSessionAttachments((prev) =>
+        addSessionAttachment(prev, res.sessionId, {
+          livekitUrl: res.livekitUrl,
+          roomName: res.livekitRoom,
+          identity: `browser-${res.sessionId}-${Date.now()}`,
+          serverIdentity: res.livekitServerIdentity,
+          debugLogging: form.debugLogging,
+        }),
+      );
       const attach = nextPresentationFromAttach(terminalPresentation, "new");
       setTerminalPresentation(attach.presentation);
       if (attach.shouldPushTerminalRoute) {
         navigatePath(terminalPathForSessionId(res.sessionId), "push");
+      } else {
+        navigatePath(terminalPathForSessionId(res.sessionId), "replace");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start session");
@@ -1396,21 +1459,30 @@ export function ConnectionScreen({
 
   const handleConnectSession = async (sessionId: string) => {
     if (!sessionToken) return;
+    if (sessionAttachments.has(sessionId)) {
+      console.debug("[ConnectionScreen] connectSession: already attached, focusing", { sessionId });
+      navigatePath(terminalPathForSessionId(sessionId), "replace");
+      return;
+    }
     setError(null);
     try {
       const res = await client.connectSession({ sessionToken, sessionId });
-      setConnected({
-        livekitUrl: res.livekitUrl,
-        roomName: res.livekitRoom,
-        identity: `browser-${sessionId}-${Date.now()}`,
-        serverIdentity: res.livekitServerIdentity,
-        debugLogging: debugForSessionId(sessionId),
-        sessionId,
-      });
+      console.info("[ConnectionScreen] connectSession: new attachment", { sessionId });
+      setSessionAttachments((prev) =>
+        addSessionAttachment(prev, sessionId, {
+          livekitUrl: res.livekitUrl,
+          roomName: res.livekitRoom,
+          identity: `browser-${sessionId}-${Date.now()}`,
+          serverIdentity: res.livekitServerIdentity,
+          debugLogging: debugForSessionId(sessionId),
+        }),
+      );
       const attach = nextPresentationFromAttach(terminalPresentation, "new");
       setTerminalPresentation(attach.presentation);
       if (attach.shouldPushTerminalRoute) {
         navigatePath(terminalPathForSessionId(sessionId), "push");
+      } else {
+        navigatePath(terminalPathForSessionId(sessionId), "replace");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect to session");
@@ -1419,28 +1491,36 @@ export function ConnectionScreen({
 
   const handleResumeSession = async (sessionId: string) => {
     if (!sessionToken) return;
+    if (sessionAttachments.has(sessionId)) {
+      console.debug("[ConnectionScreen] resumeSession: already attached, focusing", { sessionId });
+      navigatePath(terminalPathForSessionId(sessionId), "replace");
+      return;
+    }
     setError(null);
     try {
       const res = await client.resumeSession({ sessionToken, sessionId });
       // Resume makes the session active; list data may still say inactive until the next ListSessions.
-      // Update before setConnected so the "inactive row → exit terminal" effect does not clear the connection.
       setSessions((prev) =>
         prev.map((s) =>
           s.sessionId === res.sessionId ? { ...s, isActive: true, status: "active" } : s
         )
       );
-      setConnected({
-        livekitUrl: res.livekitUrl,
-        roomName: res.livekitRoom,
-        identity: `browser-${res.sessionId}-${Date.now()}`,
-        serverIdentity: res.livekitServerIdentity,
-        debugLogging: debugForSessionId(sessionId),
-        sessionId: res.sessionId,
-      });
+      console.info("[ConnectionScreen] resumeSession: new attachment", { sessionId: res.sessionId });
+      setSessionAttachments((prev) =>
+        addSessionAttachment(prev, res.sessionId, {
+          livekitUrl: res.livekitUrl,
+          roomName: res.livekitRoom,
+          identity: `browser-${res.sessionId}-${Date.now()}`,
+          serverIdentity: res.livekitServerIdentity,
+          debugLogging: debugForSessionId(sessionId),
+        }),
+      );
       const attach = nextPresentationFromAttach(terminalPresentation, "reconnect");
       setTerminalPresentation(attach.presentation);
       if (attach.shouldPushTerminalRoute) {
         navigatePath(terminalPathForSessionId(res.sessionId), "push");
+      } else {
+        navigatePath(terminalPathForSessionId(res.sessionId), "replace");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to resume session");
@@ -1550,7 +1630,8 @@ export function ConnectionScreen({
 
   const primaryFloatingSessionAction = (sessionId: string) => {
     const docked =
-      connected?.sessionId === sessionId &&
+      sessionAttachments.has(sessionId) &&
+      focusedSessionId === sessionId &&
       (terminalPresentation === "overlay" || terminalPresentation === "mini");
     if (docked && terminalOverlayMinimized) {
       return {
@@ -1570,26 +1651,27 @@ export function ConnectionScreen({
     };
   };
 
-  if (connected && terminalPresentation === "full") {
-    return (
-      <ConnectedTerminal
-        livekitUrl={connected.livekitUrl}
-        roomName={connected.roomName}
-        identity={connected.identity}
-        serverIdentity={connected.serverIdentity}
-        debugLogging={connected.debugLogging}
-        terminalLayout="fullscreen"
-        paneSessionLabel={sessionIdFirstSegment(connected.sessionId)}
-        onBackToMini={shrinkTerminalPresentationToMini}
-        onDisconnect={() => {
-          navigatePath("/", "replace");
-          setConnected(null);
-          setTerminalPresentation("hidden");
-        }}
-        onTerminate={() => void handleSignalSession(connected.sessionId, Signal.SIGTERM)}
-        onRemoteSessionEnded={exitTerminalToConnectionScreen}
-      />
-    );
+  if (terminalPresentation === "full" && focusedSessionId) {
+    const focusedAttachment = sessionAttachments.get(focusedSessionId);
+    if (focusedAttachment) {
+      return (
+        <ConnectedTerminal
+          livekitUrl={focusedAttachment.livekitUrl}
+          roomName={focusedAttachment.roomName}
+          identity={focusedAttachment.identity}
+          serverIdentity={focusedAttachment.serverIdentity}
+          debugLogging={focusedAttachment.debugLogging}
+          terminalLayout="fullscreen"
+          paneSessionLabel={sessionIdFirstSegment(focusedSessionId)}
+          onBackToMini={shrinkTerminalPresentationToMini}
+          onDisconnect={() => removeAttachmentForSession(focusedSessionId, "userDisconnectFullscreen")}
+          onTerminate={() => void handleSignalSession(focusedSessionId, Signal.SIGTERM)}
+          onRemoteSessionEnded={() =>
+            removeAttachmentForSession(focusedSessionId, "remoteSessionEndedFullscreen")
+          }
+        />
+      );
+    }
   }
 
   if (!isAuthenticated) {
@@ -1753,10 +1835,10 @@ export function ConnectionScreen({
               <ProjectSessionOptions
                 projectId={p.projectId}
                 tools={tools}
-                agents={agents}
+                agents={effectiveAgents}
                 daemons={daemons}
                 form={
-                  projectForms[p.projectId] ?? defaultProjectSessionForm(tools, agents, daemons)
+                  projectForms[p.projectId] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons)
                 }
                 onChange={(patch) => updateProjectForm(p.projectId, patch)}
                 startSessionButton={
@@ -1766,9 +1848,9 @@ export function ConnectionScreen({
                     onClick={() => handleStartSession(p.projectId)}
                     disabled={
                       loading ||
-                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, agents, daemons))
+                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons))
                         .toolPath ||
-                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, agents, daemons))
+                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons))
                         .agent
                     }
                   >
@@ -2070,30 +2152,41 @@ export function ConnectionScreen({
         />
       ) : null}
 
-      {connected && (terminalPresentation === "overlay" || terminalPresentation === "mini") ? (
+      {sessionAttachments.size > 0 &&
+      (terminalPresentation === "overlay" || terminalPresentation === "mini") ? (
         <div
           data-testid="terminal-reconnect-overlay-root"
           style={terminalOverlayMinimized ? { display: "none" } : undefined}
           aria-hidden={terminalOverlayMinimized}
         >
-          <ConnectedTerminal
-            livekitUrl={connected.livekitUrl}
-            roomName={connected.roomName}
-            identity={connected.identity}
-            serverIdentity={connected.serverIdentity}
-            debugLogging={connected.debugLogging}
-            terminalLayout={terminalPresentation === "overlay" ? "overlay" : "mini"}
-            paneSessionLabel={sessionIdFirstSegment(connected.sessionId)}
-            onExpandTerminal={expandTerminalPresentationToFull}
-            onMinimizePane={() => setTerminalOverlayMinimized(true)}
-            onDisconnect={() => {
-              navigatePath("/", "replace");
-              setConnected(null);
-              setTerminalPresentation("hidden");
-            }}
-            onTerminate={() => void handleSignalSession(connected.sessionId, Signal.SIGTERM)}
-            onRemoteSessionEnded={exitTerminalToConnectionScreen}
-          />
+          {Array.from(sessionAttachments.entries()).map(([sessionId, att], index) => (
+            <div
+              key={sessionId}
+              data-testid={connectionAttachedTerminalTestId(sessionId)}
+              className="relative"
+              style={{ zIndex: 50 + index, marginBottom: 12 }}
+            >
+              <ConnectedTerminal
+                livekitUrl={att.livekitUrl}
+                roomName={att.roomName}
+                identity={att.identity}
+                serverIdentity={att.serverIdentity}
+                debugLogging={att.debugLogging}
+                terminalLayout={terminalPresentation === "overlay" ? "overlay" : "mini"}
+                paneSessionLabel={sessionIdFirstSegment(sessionId)}
+                onExpandTerminal={() => {
+                  navigatePath(terminalPathForSessionId(sessionId), "push");
+                  setTerminalPresentation("full");
+                }}
+                onMinimizePane={() => setTerminalOverlayMinimized(true)}
+                onDisconnect={() => removeAttachmentForSession(sessionId, "userDisconnectOverlay")}
+                onTerminate={() => void handleSignalSession(sessionId, Signal.SIGTERM)}
+                onRemoteSessionEnded={() =>
+                  removeAttachmentForSession(sessionId, "remoteSessionEndedOverlay")
+                }
+              />
+            </div>
+          ))}
         </div>
       ) : null}
     </div>

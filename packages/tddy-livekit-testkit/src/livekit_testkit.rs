@@ -161,6 +161,7 @@ impl LiveKitTestkit {
                 room: room.to_string(),
                 can_publish: true,
                 can_subscribe: true,
+                can_update_own_metadata: true,
                 ..Default::default()
             })
             .to_jwt()?;

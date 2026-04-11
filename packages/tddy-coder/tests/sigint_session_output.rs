@@ -1,7 +1,12 @@
 //! Integration tests: SIGINT handling and session info output.
 //!
-//! Verifies that when tddy-coder (stub backend) receives SIGINT (Ctrl+C), it prints session info
+//! Verifies that when tddy-coder (stub backend) receives SIGINT (signal), it prints session info
 //! to stderr before exiting (Session: <id> and Session dir: <path>).
+//!
+//! **Keyboard Ctrl+C** in the full-screen TUI: `tddy-coder` and `tddy-demo` share
+//! [`tddy_tui::run_event_loop`]. In raw terminal mode, Ctrl+C is usually a key event (not SIGINT);
+//! the event loop sets the same `shutdown` flag there so the process exits without hanging. Rebuild
+//! the binary after `tddy-tui` changes: `cargo build -p tddy-coder`.
 
 mod common;
 
@@ -27,6 +32,8 @@ fn tddy_demo_sigint_prints_session_info_to_stderr() {
         .args([
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "plan",
             "--prompt",

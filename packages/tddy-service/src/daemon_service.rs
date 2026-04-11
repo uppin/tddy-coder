@@ -526,6 +526,17 @@ impl DaemonStreamHandler {
                 .or_else(|| planning.name.clone())
                 .or_else(|| Some(DEFAULT_WORKTREE_SUGGESTION.to_string()));
         }
+        if cs.workflow.as_ref().and_then(|w| w.branch_worktree_intent)
+            == Some(tddy_core::changeset::BranchWorktreeIntent::NewBranchFromBase)
+        {
+            if let Some(ref b) = cs.branch_suggestion {
+                if !b.trim().is_empty() {
+                    cs.workflow
+                        .get_or_insert_with(Default::default)
+                        .new_branch_name = Some(b.clone());
+                }
+            }
+        }
         let _ = tddy_core::changeset::write_changeset(session_dir_path, &cs);
 
         let chain_opt = cs.worktree_integration_base_ref.as_deref();

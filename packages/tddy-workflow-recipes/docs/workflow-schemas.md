@@ -35,4 +35,5 @@ Exposes **`proto_root()`**, **`expected_proto_basenames()`**, and **`generated_m
 ## Related
 
 - [Workflow JSON Schemas (feature)](../../../../docs/ft/coder/workflow-json-schemas.md)  
+- [GitHub pull request tools (MCP)](../../../../docs/ft/coder/github-pr-tools-mcp.md) — optional **`github_pr_tools_metadata`** on **`changeset-workflow`**  
 - [Workflow recipes (feature)](../../../../docs/ft/coder/workflow-recipes.md)  

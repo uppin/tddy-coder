@@ -215,6 +215,9 @@ listen:
   web_port: {}
   web_host: "127.0.0.1"
 web_bundle_path: {}
+allowed_agents:
+  - id: codex-acp
+    label: "Codex ACP"
 "#,
         port,
         web_dist.display()
@@ -241,6 +244,14 @@ web_bundle_path: {}
             if resp.status().is_success() {
                 let json: serde_json::Value = resp.json().unwrap();
                 assert_eq!(json.get("daemon_mode"), Some(&serde_json::json!(true)));
+                let agents = json
+                    .get("allowed_agents")
+                    .and_then(|v| v.as_array())
+                    .expect("allowed_agents from YAML must appear in /api/config");
+                assert!(
+                    agents.iter().any(|a| a.get("id") == Some(&serde_json::json!("codex-acp"))),
+                    "expected codex-acp in allowed_agents, got {agents:?}"
+                );
                 return;
             }
         }

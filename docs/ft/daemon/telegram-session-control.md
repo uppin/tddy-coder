@@ -8,18 +8,33 @@ This surface is **distinct** from **[Telegram session notifications](telegram-no
 
 ## Daemon binary (inbound)
 
-When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the daemon can resolve **`sessions_base`** for the current OS user (`USER` → `~/.tddy`), **`tddy-daemon`** starts a **teloxide long-polling** dispatcher (**`telegram_bot`**) alongside the web/RPC server. It handles the commands in the table above, inline **Enter** / **Delete** / **More** session-list callbacks (`enter:…`, `delete:…`, `more:…`), recipe / project / **integration-base branch** / agent pick callbacks (`recipe:…`, `tp:…`, `tb:…`, `ta:…`), document-review callbacks (`doc:…`), and elicitation select callbacks (`eli:s:…`). Commands and callbacks that drive the running **`tddy-coder`** child use **`PresenterIntent`** over **localhost** on the port registered for that session (see **`packages/tddy-daemon/src/presenter_intent_client.rs`**). The same **`TeloxideSender`** / **`Bot`** instance is shared with outbound notifications.
+When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the daemon can resolve **`sessions_base`** for the current OS user (`USER` → `~/.tddy`), **`tddy-daemon`** starts a **teloxide long-polling** dispatcher (**`telegram_bot`**) alongside the web/RPC server. It handles the commands in the table above, inline **Enter** / **Delete** / **More** session-list callbacks (`enter:…`, `delete:…`, `more:…`), recipe / **branch-worktree intent** / project / **integration-base branch** / agent pick callbacks (`recipe:…`, `intent:…`, `tp:…`, `tb:…`, `ta:…`), document-review callbacks (`doc:…`), and elicitation select callbacks (`eli:s:…`). Commands and callbacks that drive the running **`tddy-coder`** child use **`PresenterIntent`** over **localhost** on the port registered for that session (see **`packages/tddy-daemon/src/presenter_intent_client.rs`**). The same **`TeloxideSender`** / **`Bot`** instance is shared with outbound notifications.
+
+## Telegram user ↔ GitHub identity
+
+The library module **`tddy_daemon::telegram_github_link`** binds a **Telegram user id** to a **GitHub login** (JSON store on disk, HMAC-signed OAuth **`state`**, stub OAuth exchange for tests). **`resolved_os_user_for_telegram_workflow`** resolves **`daemon.yaml`** **`users:`** the same way as web OAuth flows.
+
+**`TelegramSessionControlHarness::with_telegram_github_link`** accepts a mapping file path. When that path is set, **`handle_start_workflow`** requires a stored GitHub login for the Telegram **`user_id`** before it creates a session directory. If the user is not linked, the handler fails with a message that instructs the operator to complete GitHub linking (including reference to **`/link-github`** in the error text).
+
+Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`TelegramWorkflowSpawn`** OS user from the mapping, and Telegram commands that start the browser OAuth flow) integrates with **`DaemonConfig`** and **`AuthService`** at the binary layer. Technical reference: **[telegram-github-link.md](../../../packages/tddy-daemon/docs/telegram-github-link.md)**.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| **`/start-workflow <prompt>`** | Create a new session. Bot presents **Recipe: tdd-small** and **More recipes…**; **More recipes** sends a second message with **tdd**, **bugfix**, **free-prompting**, and **grill-me** (compact `mr:` callbacks). Choosing a recipe writes **`changeset.yaml`**, then the operator picks a **project**, then an **integration base** (see below), then an **agent** when the daemon **`allowed_agents`** list is non-empty. |
+| **`/start-workflow <prompt>`** | Create a new session. Bot presents **Recipe: tdd-small** and **More recipes…**; **More recipes** sends a second message with **tdd**, **bugfix**, **free-prompting**, and **grill-me** (compact `mr:` callbacks). Choosing a recipe writes **`changeset.yaml`**, then the operator picks **branch/worktree intent** (new branch from integration base vs work on an existing branch — see below), then a **project**, then an **integration base** (see below), then an **agent** when the daemon **`allowed_agents`** list is non-empty. |
 | **`/sessions`** | List sessions (10 at a time). Each session shows status, elapsed time, and workflow state. Paginated with a **"More"** inline keyboard button when more sessions exist. |
 | **`/delete <session_id>`** | Delete a session. Bot sends SIGTERM/SIGKILL to the session process (if alive), removes the session directory, and confirms. |
 | **`/submit-feature <session> <text>`** | Send feature description text to the running child presenter (**`PresenterIntent::SubmitFeatureText`**) when the workflow asks for it. |
 | **`/answer-text <session> <text>`** | Free-text clarification answer (**`PresenterIntent::AnswerClarificationText`**). |
 | **`/answer-multi <session> i,j,…`** | Multi-select clarification with 0-based indices (**`PresenterIntent::AnswerClarificationMultiSelect`**). |
+
+### Concurrent elicitation (one Telegram chat, multiple sessions)
+
+- **Per-chat queue:** The daemon maintains a **FIFO queue** of workflow session ids per Telegram chat. The **first** session in the queue holds the **active elicitation token** for that chat. Only that session receives full interactive treatment consistent with the “single visible question” policy for inbound and outbound Telegram.
+- **Inbound gating:** **`eli:s:`**, **`eli:o:`**, and **`doc:`** (document-review) callbacks are accepted only when the callback’s session id matches the active token; other sessions receive a short alert. **`/answer-text`** and **`/answer-multi`** resolve the child gRPC target from the session key in the command, then apply the same active-token check before forwarding to **`PresenterIntent`**.
+- **Plain-text follow-up (“Other”):** After the operator taps **Other** on a select clarification, the next non-command message in the chat is routed to the pending session when it matches the active token policy (see harness **`handle_elicitation_other_followup_plain_message`**).
+- **Queue advancement:** After a successful step that completes the elicitation gate for the active session—including select confirmation, Other follow-up, terminal document-review actions where applicable, and successful **`/answer-text`** / **`/answer-multi`**—the coordinator removes the completed session from the head of the queue and exposes the next session as active (when present).
 
 ### Session list behavior (`/sessions`)
 
@@ -35,7 +50,12 @@ When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the
 - If a live PID exists in **`.session.yaml`**, the daemon terminates the process before directory removal.
 - Bot sends a confirmation message after successful deletion.
 
-### Integration base branch (`/start-workflow` after project) (Updated: 2026-04-05)
+### Branch/worktree intent (`/start-workflow` after recipe)
+
+- After a **recipe** is saved, the bot sends an inline keyboard with two options: **New branch + worktree** vs **Work on existing branch**. The choice is persisted immediately under **`changeset.yaml`** → **`workflow.branch_worktree_intent`** as **`new_branch_from_base`** or **`work_on_selected_branch`** (see **`BranchWorktreeIntent`** in **`tddy-core`** / workflow block in the changeset schema).
+- **Callback_data** must stay within Telegram’s **64-byte** limit per button, so the wire format uses short tokens after the `intent:` prefix: **`intent:nb|s:<session_id>`** → `new_branch_from_base`, **`intent:ws|s:<session_id>`** → `work_on_selected_branch`. The session id is the daemon session directory name (typically a UUID).
+
+### Integration base branch (`/start-workflow` after project)
 
 - After a **project** is chosen (`tp:<proj_idx>|s:<session_id>`), the bot lists **Default (`<branch>`)** using **`effective_integration_base_ref_for_project`** (project registry **`main_branch_ref`**, else documented default **`origin/master`**), then up to **10** remote branches **`origin/...`** sorted by **most recent commit** (`git branch -r --sort=-committerdate`), exposed as **`list_recent_remote_branches`** in **tddy-core**.
 - Callbacks: **`tb:0|p:<proj_idx>|s:<session_id>`** = use project default (no chain opt-in); **`tb:<n>|p:<proj_idx>|s:<session_id>`** with **`1 ≤ n ≤ 10`** = use the *n*th line from that sorted list. The choice is persisted to **`changeset.yaml`** as **`worktree_integration_base_ref`** when non-default; **`tddy-workflow-recipes`** / **`tddy-service`** worktree setup calls **`setup_worktree_for_session_with_optional_chain_base`** so the session worktree matches the selected base.
@@ -65,11 +85,11 @@ Markdown adaptation for Telegram must respect **[message entities](https://core.
 | Area | Responsibility |
 |------|----------------|
 | **Commands** | **`parse_start_workflow_prompt`** extracts the prompt after a **`/start-workflow`** prefix. |
-| **Callbacks** | **`parse_callback_payload`** recognizes recipe-style routing strings; recipe selection merges into **`changeset.yaml`** inside the harness. |
+| **Callbacks** | **`parse_callback_payload`** recognizes recipe-style routing strings; recipe and intent selection merge into **`changeset.yaml`** inside the harness (**`parse_telegram_intent_callback`** for **`intent:`** payloads). |
 | **Chunking** | **`chunk_telegram_text`** splits UTF-8 text with a newline and **`(continued)`** suffix on non-final segments when the byte budget allows continuation markers. |
 | **Presenter bridge** | **`map_elicitation_callback_to_presenter_input`** produces **`PresenterInputPayload`** bytes matching the web encoding for single- and multi-select elicitation. Live workflows use **`PresenterIntent`** gRPC for answers and document actions. |
-| **Persistence** | **`read_changeset_routing_snapshot`** reads **`recipe`**, **`demo_options`**, and **`run_optional_step_x`** from **`changeset.yaml`** for assertions. |
-| **Harness** | **`TelegramSessionControlHarness`** creates a session directory under a configurable base path, sends an intro message with an inline recipe keyboard (test contract includes **`tdd-small`** labeling), applies recipe callbacks to **`changeset.yaml`**, sends plan review text in chunks via **`TelegramSender`**, and returns an explicit denial message for chat ids outside an allowlist. |
+| **Persistence** | **`read_changeset_routing_snapshot`** reads **`recipe`**, **`demo_options`**, **`workflow.branch_worktree_intent`**, and **`run_optional_step_x`** from **`changeset.yaml`** for assertions. |
+| **Harness** | **`TelegramSessionControlHarness`** creates a session directory under a configurable base path, sends an intro message with an inline recipe keyboard (test contract includes **`tdd-small`** labeling), applies recipe and intent callbacks to **`changeset.yaml`**, can show project/branch/agent pick keyboards when **`TelegramWorkflowSpawn`** is configured, sends plan review text in chunks via **`TelegramSender`**, and returns an explicit denial message for chat ids outside an allowlist. |
 | **Test sender** | **`InMemoryTelegramSender`** (in **`telegram_notifier`**) implements **`TelegramSender`** including **`send_message_with_keyboard`** (row-major **`(label, callback_data)`** per button); **`collect_outbound_messages`** exposes structured **`CapturedTelegramMessage`** rows for tests. |
 
 ## Configuration and security (harness)
@@ -83,7 +103,9 @@ The daemon binary runs **long-polling** inbound handling (see above). Durable **
 ## Tests
 
 - **Unit tests** live in **`telegram_session_control.rs`** (`#[cfg(test)]`): parsers, chunking, presenter bytes.
-- **Integration tests** live in **`packages/tddy-daemon/tests/telegram_session_control_integration.rs`**: start workflow, recipe **`changeset.yaml`**, plan chunk markers, elicitation mapping, unauthorized denial.
+- **Integration tests** live in **`packages/tddy-daemon/tests/telegram_session_control_integration.rs`**: start workflow, recipe **`changeset.yaml`**, branch/worktree intent keyboard and persistence, plan chunk markers, elicitation mapping, unauthorized denial.
+- **Telegram ↔ GitHub linking** integration and unit tests live in **`packages/tddy-daemon/tests/telegram_github_link.rs`** and **`telegram_github_link.rs`** (`#[cfg(test)]`): OAuth state round-trip, mapping persistence, unlinked **`handle_start_workflow`** error path, stub exchange.
+- **Concurrent elicitation** scenarios (single chat, multiple sessions, active token) live in **`packages/tddy-daemon/tests/telegram_concurrent_elicitation_integration.rs`**.
 
 ## Related documentation
 

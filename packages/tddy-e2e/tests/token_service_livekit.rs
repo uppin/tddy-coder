@@ -66,9 +66,14 @@ mod livekit_tests {
             service: Arc::new(token_server) as Arc<dyn tddy_rpc::RpcService>,
         }]);
 
-        let server =
-            LiveKitParticipant::connect(&url, &server_token, multi_service, RoomOptions::default())
-                .await?;
+        let server = LiveKitParticipant::connect(
+            &url,
+            &server_token,
+            multi_service,
+            RoomOptions::default(),
+            None,
+        )
+        .await?;
         let server_handle = tokio::spawn(async move { server.run().await });
 
         let (client_room, mut client_events) =

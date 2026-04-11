@@ -55,7 +55,7 @@ The shell includes:
 
 **Layout acceptance (tests)**: Pure geometry helpers in **`terminalStatusBarLayout.ts`** express rules such as “status bar bottom meets or above terminal top” and “control centers lie outside the terminal canvas.” Bun tests cover **`terminalStatusBarLayout`**; Cypress **`GhosttyTerminalLiveKit.cy.tsx`** imports the same helpers so assertions stay aligned with the library.
 
-**ConnectedTerminal** wrappers (**App** after connect and **ConnectionScreen** after session connect) render the fullscreen **`connected-terminal-container`** with this chrome during JWT acquisition so the status dot reflects the loading phase while **`livekit-status`** text stays suppressed for normal overlay states.
+**ConnectedTerminal** wrappers (**App** after connect and **ConnectionScreen** after session connect) render the fullscreen **`connected-terminal-container`** with this chrome during JWT acquisition so the status dot reflects the loading phase while **`livekit-status`** text stays suppressed for normal overlay states. On the daemon **ConnectionScreen**, each attached session can mount under a per-session root with **`data-testid="connection-attached-terminal-{sessionId}"`** (URL-encoded segment in the attribute matches the session id string).
 
 Implementation reference: [terminal-connection-chrome.md](../../../packages/tddy-web/docs/terminal-connection-chrome.md).
 
@@ -78,14 +78,22 @@ When `tddy-daemon` serves the web bundle (`daemon_mode: true`), authenticated us
 - **Session list**: `/` — project tables, **Other sessions**, create project, presence panel when configured.
 - **Terminal**: `/terminal/{sessionId}` — one URL-encoded path segment after the fixed prefix `/terminal`. **`terminalPathForSessionId`** and **`terminalDeepLinkSessionPath`** build the same encoded path for navigation and deep links.
 
+**Concurrent terminal attachments**
+
+- The client keeps a **map** of **`sessionId` → LiveKit connection parameters** for every active attachment. There is **no** fixed cap on how many sessions attach at once; practical limits follow browser memory and WebRTC resources.
+- **Start New Session**, **Connect**, and successful deep-link **connectSession** / **resumeSession** calls **merge** a new entry or **replace** the params for an existing **`sessionId`** in that map. A second **Connect** on a different session **does not** remove the first; each session keeps its own LiveKit room name, identities, and debug flag.
+- **Focused session**: The path `/terminal/{sessionId}` selects the focused attachment when that id is present in the map. With multiple attachments, the address bar path determines which session owns **fullscreen** presentation; **overlay** / **mini** render **one** floating **`ConnectedTerminal`** per attached session (stacked under **`terminal-reconnect-overlay-root`**), each wrapped for automation with **`data-testid="connection-attached-terminal-{sessionId}"`**.
+- **Disconnect** on one session removes **only** that map entry and reconciles the URL to a remaining attachment when needed. **popstate** navigation to the session list (`/`) clears **all** attachments and sets presentation to **`hidden`**.
+- **`ListSessions`** polling: when a row for an attached session becomes inactive, the client drops **that** attachment from the map; other sessions stay attached.
+
 **Attach behavior and presentation**
 
-- **Start New Session** and **Connect** use a **new** attach: the app selects **`full`** terminal presentation and **pushes** `/terminal/{id}` onto the history stack when a push applies (redundant pushes are skipped when presentation is already **`full`** for the same logical session).
-- **Resume** uses a **reconnect** attach: the app selects **`overlay`** presentation — a floating **160px**-wide live preview (default **bottom-right**) — and does **not** push `/terminal/{id}` automatically. The session list stays visible. **Expand** on the preview switches to **`full`** presentation and **pushes** the terminal route. **Back** on the dedicated fullscreen terminal switches to **`mini`** presentation (same strip width) without tearing down LiveKit or issuing another **connectSession** / **resumeSession**.
+- **`nextPresentationFromAttach`** classifies **new** attach (**Start**, **Connect**, successful deep-link **connectSession**) vs **reconnect** attach (**Resume**, successful deep-link **resumeSession**). Both kinds select **`overlay`** presentation from the helper without an automatic history **push**; the screen applies a **`replace`** navigation to `/terminal/{sessionId}` after a successful attach so the address bar matches the focused session. The session list remains visible behind floating terminals unless the user expands to **fullscreen**.
+- **Expand** on a floating preview **pushes** the terminal route and switches to **`full`** presentation. **Back** on the dedicated fullscreen terminal switches to **`mini`** presentation without tearing down LiveKit for that session and without issuing another **connectSession** / **resumeSession**.
 
-**Deep link** (`/terminal/{id}` on full page load): **`ConnectionScreen`** attaches with **`connectSession`**, then **`resumeSession`** if connect fails. A successful **connectSession** follows **new** attach rules; a successful **resumeSession** follows **reconnect** attach rules.
+**Deep link** (`/terminal/{id}` on full page load): **`ConnectionScreen`** attaches with **`connectSession`**, then **`resumeSession`** if connect fails. If the session is **already** in the attachment map, the deep-link effect does not issue another RPC.
 
-- **Disconnect** replaces the URL with `/` and clears presentation state. **popstate** to `/` clears the connected session and resets presentation to **`hidden`**. A full page load on `/terminal/{id}` loads the SPA (same **`index.html`** as `/`; the static server uses SPA fallback for unknown paths). If the id is not in **`ListSessions`**, a **session not found** banner appears with **Back to sessions** (returns to `/`).
+- **Disconnect** (from the dot menu on a given terminal) removes that session from the map and updates history when other attachments remain. **popstate** to `/` clears **all** attachments and resets presentation to **`hidden`**. A full page load on `/terminal/{id}` loads the SPA (same **`index.html`** as `/`; the static server uses SPA fallback for unknown paths). If the id is not in **`ListSessions`**, a **session not found** banner appears with **Back to sessions** (returns to `/`).
 - **OAuth**: `/auth/callback` is unchanged; **`App`** renders **`AuthCallback`** for that path.
 
 Implementation reference: **`terminalPresentation`** helpers ([terminal-presentation.md](../../../packages/tddy-web/docs/terminal-presentation.md)), **`ConnectionScreen`**, **`appRoutes.ts`**.
@@ -95,7 +103,7 @@ Implementation reference: **`terminalPresentation`** helpers ([terminal-presenta
 Implementation helpers: **`packages/tddy-web/src/routing/appRoutes.ts`**. Static serving: **`packages/tddy-coder/src/web_server.rs`** (`ServeDir` fallback to **`index.html`**).
 
 - **Create project** (collapsible): name + git URL → `CreateProject` (clone or adopt existing path under `~/repos/<name>/` by default). Optional **path under home** overrides the clone destination (e.g. `Code/my-app`).
-- **Projects** as collapsible sections (`<details>`): each shows name, git URL, `main_repo_path`, then **Host** (target daemon instance from `ListEligibleDaemons`), **Tool** (options from `ListTools`, reflecting daemon `allowed_tools`), **Backend** (options from `ListAgents`, reflecting daemon `allowed_agents`; each option’s value is the agent **`id`** sent on **`StartSession.agent`**; the selected backend is the first list entry unless a prior choice for that project still appears in the list), **Workflow recipe** (`tdd` or `bugfix` on `StartSession.recipe`), and **Debug logging** (browser terminal only)—all **per session**, not stored on the project—then **Start New Session** (`StartSession` with `project_id`, optional `daemon_instance_id`, and `recipe`), and a table of sessions for that `project_id`. Session tables include a **Host** column (`daemon_instance_id` from `ListSessions`). Connect/Resume in that section uses that project’s debug setting.
+- **Projects** as collapsible sections (`<details>`): each shows name, git URL, `main_repo_path`, then **Host** (target daemon instance from `ListEligibleDaemons`), **Tool** (options from `ListTools`, reflecting daemon `allowed_tools`), **Backend** (options from `ListAgents`, reflecting daemon `allowed_agents`; each option’s value is the agent **`id`** sent on **`StartSession.agent`**; the selected backend is the first list entry unless a prior choice for that project still appears in the list), **Workflow recipe** (control defaults to **`free-prompting`**; **`StartSession.recipe`** accepts **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, or **`grill-me`**, aligned with **`recipe_resolve`**), and **Debug logging** (browser terminal only)—all **per session**, not stored on the project—then **Start New Session** (`StartSession` with `project_id`, optional `daemon_instance_id`, and `recipe`), and a table of sessions for that `project_id`. Session tables include a **Host** column (`daemon_instance_id` from `ListSessions`). Connect/Resume in that section uses that project’s debug setting.
 - After authentication, the client loads **Tool** and **Backend** options together (`ListTools` and `ListAgents`); a failure in either RPC clears both lists and surfaces an error in the shared connection error area.
 - **Other sessions**: Connect/Resume uses a separate **debug** checkbox for that list (sessions not tied to a listed project).
 - Sessions whose `project_id` is not in the listed projects appear under **Other sessions**.
@@ -158,7 +166,7 @@ See [daemon project concept](../daemon/project-concept.md).
 
 ### Shared LiveKit room (`livekit.common_room`)
 
-When the daemon sets **`livekit.common_room`** in YAML, that name is exposed to the web client as **`common_room`** in **`GET /api/config`** (with **`livekit_url`**). After GitHub sign-in, the browser joins that room with identity **`web-{githubLogin}`** and shows a **Connected participants** table on the session list screen (identity, role, joined time, metadata), updated live via LiveKit participant events. The **Connect** path opens a fullscreen terminal; **Resume** opens a floating preview first, then fullscreen after **Expand** — the presence connection stays active in the background while any terminal presentation is open.
+When the daemon sets **`livekit.common_room`** in YAML, that name is exposed to the web client as **`common_room`** in **`GET /api/config`** (with **`livekit_url`**). After GitHub sign-in, the browser joins that room with identity **`web-{githubLogin}`** and shows a **Connected participants** table on the session list screen (identity, role, joined time, metadata), refreshed from LiveKit participant events. **Connect** and **Resume** attach the coder terminal in **overlay** / **mini** first; **Expand** switches to **fullscreen** for the focused session — the presence connection stays active in the background while any terminal presentation is open.
 
 If **`common_room`** is unset or blank, that panel is not shown and no extra LiveKit connection is made for presence.
 
@@ -166,7 +174,7 @@ Spawned **`tddy-*`** sessions use the same configured room for **`--livekit-room
 
 ### Fullscreen terminal session chrome
 
-The fullscreen **GhosttyTerminalLiveKit** view opened after **Connect** or after **Expand** from a **Resume** overlay uses the **connection chrome** described under [Connection chrome (LiveKit overlay)](#connection-chrome-livekit-overlay). **Terminate** in the dot menu, after confirmation, calls **`SignalSession`** with SIGTERM when the UI holds an active **session id** (same semantics as **Terminate (SIGTERM)** in the per-session **Signal** dropdown).
+The fullscreen **GhosttyTerminalLiveKit** view opened after **Expand** from a floating terminal or when the focused session is in **`full`** presentation uses the **connection chrome** described under [Connection chrome (LiveKit overlay)](#connection-chrome-livekit-overlay). **Terminate** in the dot menu, after confirmation, calls **`SignalSession`** with SIGTERM for **that** session’s id (same semantics as **Terminate (SIGTERM)** in the per-session **Signal** dropdown).
 
 ### Eligible daemons and host selection
 
@@ -185,6 +193,6 @@ The **Worktrees** product area includes a **`WorktreesScreen`** table component 
 ## Future Scope
 
 - LiveKit-based **peer daemon discovery** and **cross-daemon `StartSession` routing** (gateway delegates spawn to a peer over the common room control plane)
-- Multi-session support
+- **Per-terminal zoom scoping**: with multiple embedded terminals, font zoom bridge listeners should remain scoped per session (see package reference **terminal-zoom.md**).
 - Authentication and access control
 - Session persistence and reconnection

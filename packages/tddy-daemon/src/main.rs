@@ -130,6 +130,15 @@ fn main() -> anyhow::Result<()> {
 
     let common_room = config.livekit.as_ref().and_then(|l| l.common_room.clone());
 
+    let allowed_agents: Vec<tddy_coder::web_server::ClientAllowedAgent> =
+        tddy_daemon::agent_list_mapping::agent_allowlist_rows(&config)
+            .into_iter()
+            .map(|row| tddy_coder::web_server::ClientAllowedAgent {
+                id: row.id,
+                label: row.display_label,
+            })
+            .collect();
+
     let auth_result = tddy_daemon::auth::build_auth_entries(&config, host, port);
     let mut rpc_entries = auth_result.entries;
 
@@ -176,9 +185,13 @@ fn main() -> anyhow::Result<()> {
                     teloxide_sender.clone();
                 let elicitation_select_options: tddy_daemon::telegram_notifier::ElicitationSelectOptionsCache =
                     Arc::new(StdMutex::new(HashMap::new()));
+                let active_elicitation = Arc::new(StdMutex::new(
+                    tddy_daemon::active_elicitation::ActiveElicitationCoordinator::new(),
+                ));
                 let watcher = Arc::new(Mutex::new(
-                    tddy_daemon::telegram_notifier::TelegramSessionWatcher::with_elicitation_select_options(
+                    tddy_daemon::telegram_notifier::TelegramSessionWatcher::with_elicitation_select_options_and_coordinator(
                         elicitation_select_options.clone(),
+                        active_elicitation.clone(),
                     ),
                 ));
                 let hooks = Arc::new(
@@ -203,6 +216,7 @@ fn main() -> anyhow::Result<()> {
                             config: Arc::new(config.clone()),
                             spawn_client: spawn_for_tg,
                             os_user: user.clone(),
+                            projects_dir_override: None,
                             telegram_hooks: Some(hooks.clone()),
                             child_grpc_by_session: Arc::new(StdMutex::new(HashMap::new())),
                             elicitation_select_options: elicitation_select_options.clone(),
@@ -215,6 +229,7 @@ fn main() -> anyhow::Result<()> {
                             sessions_base,
                             teloxide_sender,
                             workflow_spawn,
+                            Some(active_elicitation),
                         ),
                     ));
                     telegram_inbound = Some((bot.clone(), harness));
@@ -276,6 +291,7 @@ fn main() -> anyhow::Result<()> {
             rpc_entries,
             livekit_url,
             common_room,
+            allowed_agents,
             lifecycle_telegram,
         )
         .await;

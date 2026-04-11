@@ -43,6 +43,7 @@ users: []
 #   ~/.tddy/config.yaml
 # with e.g.:
 #   spawn_path_extra: "/home/dev1/.local/share/cursor-agent/versions/2026.03.20-44cb435"
+# After `./install`, `codex-acp` is copied to __INSTALL_BIN_DIR__/codex-acp (from `bun install` in the repo).
 
 allowed_tools:
   - path: "__INSTALL_BIN_DIR__/tddy-coder"

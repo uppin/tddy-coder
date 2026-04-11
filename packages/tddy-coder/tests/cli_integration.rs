@@ -83,6 +83,8 @@ fn cli_plain_mode_plan_approval_approve_proceeds() {
         .args([
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "plan",
             "--prompt",
@@ -153,6 +155,8 @@ fn cli_displays_agent_and_model_before_goal_execution() {
             config_path.to_str().unwrap(),
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "plan",
             "--prompt",
@@ -215,6 +219,8 @@ fn cli_displays_state_transitions() {
             config_path.to_str().unwrap(),
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "plan",
             "--prompt",
@@ -255,6 +261,8 @@ fn cli_accepts_prompt_flag_instead_of_stdin() {
         .args([
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "plan",
             "--prompt",
@@ -348,6 +356,8 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
         .args([
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "plan",
             "--prompt",
@@ -415,6 +425,8 @@ fn cli_accepts_goal_acceptance_tests_with_session_dir() {
         .args([
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "acceptance-tests",
             "--session-dir",
@@ -467,6 +479,8 @@ fn cli_accepts_goal_red_with_session_dir() {
         .args([
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "red",
             "--session-dir",
@@ -518,6 +532,8 @@ fn cli_accepts_goal_green_with_session_dir() {
         .args([
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "red",
             "--session-dir",
@@ -537,6 +553,8 @@ fn cli_accepts_goal_green_with_session_dir() {
         .args([
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "green",
             "--session-dir",
@@ -689,6 +707,8 @@ fn test_plan_goal_cli_creates_session_under_home_tddy() {
         .args([
             "--agent",
             "stub",
+            "--recipe",
+            "tdd",
             "--goal",
             "plan",
             "--prompt",

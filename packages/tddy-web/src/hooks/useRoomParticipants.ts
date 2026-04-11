@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { Room, RoomEvent, type Participant } from "livekit-client";
 
+import {
+  parseCodexOAuthMetadata,
+  type CodexOAuthInfo,
+} from "../lib/codexOauthMetadata";
+
 export type ParticipantRole = "server" | "browser" | "unknown";
 
 export interface RoomParticipant {
@@ -8,21 +13,31 @@ export interface RoomParticipant {
   role: ParticipantRole;
   joinedAt: number | null;
   metadata: string;
+  /** Structured Codex OAuth hint from metadata JSON, when present. */
+  codexOAuth: CodexOAuthInfo | null;
 }
 
 /** Infer UI role from LiveKit identity (browser clients use `web-{github}`). */
 export function inferParticipantRole(identity: string): ParticipantRole {
-  if (identity.startsWith("web-")) return "browser";
-  if (identity === "server" || identity.startsWith("server")) return "server";
+  if (identity.startsWith("web-") || identity.startsWith("browser-")) return "browser";
+  if (
+    identity === "server" ||
+    identity.startsWith("server") ||
+    identity.startsWith("daemon-")
+  ) {
+    return "server";
+  }
   return "unknown";
 }
 
 function mapParticipant(p: Participant): RoomParticipant {
+  const metadata = p.metadata ?? "";
   return {
     identity: p.identity,
     role: inferParticipantRole(p.identity),
     joinedAt: p.joinedAt?.getTime() ?? null,
-    metadata: p.metadata ?? "",
+    metadata,
+    codexOAuth: parseCodexOAuthMetadata(metadata),
   };
 }
 

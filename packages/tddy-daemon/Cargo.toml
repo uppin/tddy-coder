@@ -14,14 +14,18 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 async-trait = "0.1"
 axum = "0.8"
 clap = { version = "4", features = ["derive", "env"] }
+hmac = "0.12"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+sha2 = "0.10"
+subtle = "2.6"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal"] }
 tonic = { version = "0.12", default-features = false, features = ["transport"] }
 tddy-coder = { path = "../tddy-coder" }
@@ -31,6 +35,7 @@ tddy-livekit = { path = "../tddy-livekit" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 tddy-connectrpc = { path = "../tddy-connectrpc" }
+url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 teloxide = { version = "0.17.0", features = ["macros", "rustls"], default-features = false }
 
@@ -39,5 +44,6 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+tddy-github = { path = "../tddy-github" }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 scopeguard = "1"

@@ -17,7 +17,8 @@ fn recipe_resolve_accepts_free_prompting_and_rejects_unknown() {
             && err.contains("free-prompting")
             && err.contains("grill-me")
             && err.contains("tdd-small")
-            && err.contains("review"),
+            && err.contains("review")
+            && err.contains("merge-pr"),
         "unknown recipe errors must list every supported workflow recipe: {}",
         err
     );

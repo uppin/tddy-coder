@@ -51,6 +51,8 @@ impl TokenGenerator {
                 can_publish: true,
                 can_subscribe: true,
                 can_publish_data: true,
+                // Required for `LocalParticipant::set_metadata` (e.g. Codex OAuth URL in dashboard).
+                can_update_own_metadata: true,
                 ..Default::default()
             })
             .to_jwt()

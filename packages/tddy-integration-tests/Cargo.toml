@@ -8,7 +8,7 @@ description = "Integration tests for tddy-core + tddy-workflow-recipes (avoids c
 [dependencies]
 ctor = "0.2"
 async-trait = "0.1"
-agent-client-protocol = "0.10.2"
+agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 log = "0.4"
 serde_json = "1"
@@ -20,3 +20,5 @@ uuid = { version = "1", features = ["v7"] }
 tddy-core = { path = "../tddy-core" }
 tddy-workflow = { path = "../tddy-workflow" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+tddy-daemon = { path = "../tddy-daemon" }
+url = "2"

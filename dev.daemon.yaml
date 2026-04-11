@@ -46,6 +46,10 @@ telegram:
     - -5239346661
 
 # Backends shown in tddy-web (ConnectionScreen); ids are passed to StartSession / `tddy-coder --agent`.
+# For `codex-acp`: after `./dev bun install`, the nix dev shell prepends `node_modules/.bin` (Node shim).
+# Production: `sudo ./install --systemd` copies the native binary to INSTALL_BIN_DIR/codex-acp; spawned
+# users need that dir on PATH or `spawn_path_extra` in `~/.tddy/config.yaml`.
+# Overrides: `TDDY_CODEX_ACP_CLI`, `--codex-acp-cli-path`, or YAML from `-c` / `sessions/<id>/coder-config.yaml`.
 allowed_agents:
   - id: claude
     label: "Claude (opus)"
@@ -55,6 +59,10 @@ allowed_agents:
     label: "Cursor (composer-2)"
   - id: stub
     label: "Stub"
+  - id: codex
+    label: "Codex"
+  - id: codex-acp
+    label: "Codex ACP"
 
 allowed_tools:
   - path: "target/debug/tddy-coder"
