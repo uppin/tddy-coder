@@ -2,6 +2,10 @@ import React from "react";
 import { ParticipantList } from "../../src/components/ParticipantList";
 import type { RoomParticipant } from "../../src/hooks/useRoomParticipants";
 
+function mountParticipantList(props: React.ComponentProps<typeof ParticipantList>) {
+  cy.mount(<ParticipantList {...props} />);
+}
+
 describe("ParticipantList", () => {
   it("shows connecting state", () => {
     cy.mount(
@@ -48,5 +52,94 @@ describe("ParticipantList", () => {
     cy.get("[data-testid='participant-role-web-testuser']").should("contain.text", "browser");
     cy.get("[data-testid='participant-role-server-abc']").should("contain.text", "server");
     cy.get("[data-testid='participant-metadata-server-abc']").should("contain.text", '{"k":"v"}');
+  });
+
+  it("ParticipantList hides video affordance when participant has no camera track", () => {
+    const withCam: RoomParticipant = {
+      identity: "with-cam-user",
+      role: "browser",
+      joinedAt: 1_700_000_000_000,
+      metadata: "",
+    };
+    const noCam: RoomParticipant = {
+      identity: "no-cam-user",
+      role: "browser",
+      joinedAt: 1_700_000_000_000,
+      metadata: "",
+    };
+    mountParticipantList({
+      participants: [withCam, noCam],
+      roomStatus: "connected",
+      connectionError: null,
+      participantHasCameraVideo: { "with-cam-user": true, "no-cam-user": false },
+    });
+    cy.get("[data-testid='participant-video-trigger-with-cam-user']").should("be.visible");
+    cy.get("[data-testid='participant-video-trigger-no-cam-user']").should("not.exist");
+  });
+
+  it("ParticipantList shows video affordance when participant exposes camera video", () => {
+    const participants: RoomParticipant[] = [
+      {
+        identity: "camera-peer",
+        role: "browser",
+        joinedAt: 1_700_000_000_000,
+        metadata: "",
+      },
+    ];
+    mountParticipantList({
+      participants,
+      roomStatus: "connected",
+      connectionError: null,
+      participantHasCameraVideo: { "camera-peer": true },
+    });
+    cy.get("[data-testid='participant-video-trigger-camera-peer']").should("be.visible");
+    cy.get("[data-testid='participant-video-trigger-camera-peer']")
+      .should("have.attr", "aria-label")
+      .and("match", /camera-peer/i);
+  });
+
+  it("Activating video affordance opens dialog with video preview region", () => {
+    const participants: RoomParticipant[] = [
+      {
+        identity: "preview-peer",
+        role: "browser",
+        joinedAt: 1_700_000_000_000,
+        metadata: "",
+      },
+    ];
+    mountParticipantList({
+      participants,
+      roomStatus: "connected",
+      connectionError: null,
+      participantHasCameraVideo: { "preview-peer": true },
+    });
+    cy.get("[data-testid='participant-video-trigger-preview-peer']").should("be.visible").click();
+    cy.get("[data-testid='participant-video-dialog']").should("be.visible");
+    cy.get("[data-testid='participant-video-dialog']").should("have.attr", "role", "dialog");
+    cy.get("[data-testid='participant-video-preview']").should("be.visible");
+  });
+
+  it("Closing dialog removes dialog and preview from the document", () => {
+    const participants: RoomParticipant[] = [
+      {
+        identity: "cleanup-peer",
+        role: "browser",
+        joinedAt: 1_700_000_000_000,
+        metadata: "",
+      },
+    ];
+    mountParticipantList({
+      participants,
+      roomStatus: "connected",
+      connectionError: null,
+      participantHasCameraVideo: { "cleanup-peer": true },
+    });
+    cy.get("[data-testid='participant-video-trigger-cleanup-peer']").should("be.visible").click();
+    cy.get("[data-testid='participant-video-dialog']").should("be.visible");
+    cy.get("[data-testid='participant-video-dialog']").within(() => {
+      cy.get("[data-testid='participant-video-dialog-close']").click();
+    });
+    cy.get("[data-testid='participant-video-dialog']").should("not.exist");
+    cy.get("[data-testid='participant-video-preview']").should("not.exist");
   });
 });
