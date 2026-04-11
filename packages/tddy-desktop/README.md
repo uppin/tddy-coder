@@ -39,7 +39,7 @@ Quitting the desktop sends **SIGTERM** / **beforeExit** cleanup and kills the ch
 
 ## Architecture
 
-Main process (Bun) may spawn **`tddy-daemon`**, opens a `BrowserWindow`, and optionally runs `runLiveKitOAuthRelay` to join the room, watch `daemon-*` metadata, listen on loopback TCP for the browser callback, and tunnel bytes over **`loopback_tunnel.LoopbackTunnelService.StreamBytes`** on the LiveKit data-channel RPC envelope.
+Main process (Bun) may spawn **`tddy-daemon`**, opens a `BrowserWindow`, and optionally runs **`installLiveKitOAuthRelay`** with an injected **`startOAuthTcpTunnel`** to join the room, watch **`daemon-*`** metadata, accept loopback TCP for the browser callback, and tunnel bytes over **`loopback_tunnel.LoopbackTunnelService.StreamBytes`** on the LiveKit data-channel RPC envelope.
 
 ## Documentation
 
