@@ -70,7 +70,8 @@ const tableStyle = {
 const roleBadge = (role: RoomParticipant["role"]) => {
   const colors: Record<RoomParticipant["role"], string> = {
     browser: "#1565c0",
-    server: "#2e7d32",
+    coder: "#2e7d32",
+    daemon: "#6a1b9a",
     unknown: "#666",
   };
   return (

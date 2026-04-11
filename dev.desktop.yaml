@@ -1,21 +1,40 @@
 # Dev config for tddy-daemon when started from Tddy Desktop (Electrobun) or `bun run desktop:dev`.
+# From `packages/tddy-desktop`, use `bun run dev` (not raw `electrobun dev`) so `TDDY_WORKSPACE_ROOT`
+# / daemon binary paths resolve; or run `./scripts/desktop-dev.sh` from the repo root.
 # Default when TDDY_DAEMON_CONFIG is unset: this file at the repo root (if it exists).
 # Repo-root `.env` is loaded before spawn (same rule as ./web-dev: does not override already-set env).
 # tddy-daemon then applies env overrides (LIVEKIT_URL, LIVEKIT_API_KEY, WEB_HOST, GITHUB_*, etc.) — see packages/tddy-daemon/src/main.rs apply_env_overrides.
 # For browser dev without the desktop shell, keep using ./web-dev with dev.daemon.yaml (or DAEMON_CONFIG).
 #
-# `log:` configures the daemon logger and also the per-session `tddy-coder` child config the daemon
-# generates: `log.default.level` and the default logger’s `format` are copied into each spawn’s
-# `--config` (file output for the child remains `tmp/logs/coder`).
+# `log:` configures the daemon logger. Spawned `tddy-coder` children still get their own YAML with
+# `tmp/logs/coder` (see spawner) — only the daemon process uses this block.
+#
+# `stderr` so LiveKit discovery + `tddy_daemon::oauth_tunnel` lines show next to `[tddy-desktop]` in
+# `./dev bun run desktop:dev`. For file-only logs use: `output: { file: "tmp/logs/daemon" }`.
+# Verbose WebRTC / LiveKit SDK lines go to `tmp/logs/webrtc` (see policies).
 
 log:
   loggers:
     default:
-      output: { file: "tmp/logs/daemon" }
+      output: stderr
+      format: "{timestamp} [{level}] [{target}] {message}"
+    webrtc:
+      output: { file: "tmp/logs/webrtc" }
       format: "{timestamp} [{level}] [{target}] {message}"
   default:
     level: debug
     logger: default
+  policies:
+    - selector: { target: libwebrtc* }
+      logger: webrtc
+    - selector: { target: livekit* }
+      logger: webrtc
+    - selector: { target: livekit_api* }
+      logger: webrtc
+
+# Per-process suffix on LiveKit common_room identity (hostname or daemon_instance_id) so overlapping
+# embedded + CLI daemons on one machine do not hit DuplicateIdentity.
+daemon_instance_id_append_startup_timestamp: true
 
 listen:
   web_port: 8899

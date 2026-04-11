@@ -354,7 +354,7 @@ pub fn clone_as_user(os_user: &str, git_url: &str, destination: &Path) -> anyhow
                 if libc::setgid(gid) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
-                if libc::initgroups(pw_name.as_ptr(), gid) != 0 {
+                if libc::initgroups(pw_name.as_ptr(), gid as libc::c_int) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
                 if libc::setuid(uid) != 0 {
@@ -581,7 +581,7 @@ pub fn spawn_as_user(
                 if libc::setgid(gid) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
-                if libc::initgroups(pw_name.as_ptr(), gid) != 0 {
+                if libc::initgroups(pw_name.as_ptr(), gid as libc::c_int) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
                 if libc::setuid(uid) != 0 {
@@ -642,6 +642,39 @@ pub fn spawn_as_user(
     anyhow::bail!("spawn_as_user is only supported on Unix")
 }
 
+/// True when sessions join a shared LiveKit room (`livekit.common_room`), so participant identities
+/// must be disambiguated per daemon instance (see [`livekit_spawn_daemon_instance_id`]).
+fn livekit_common_room_is_set(config: &DaemonConfig) -> bool {
+    config
+        .livekit
+        .as_ref()
+        .and_then(|l| l.common_room.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_some()
+}
+
+/// Instance id segment for **`tddy-coder` LiveKit identity** (`daemon-{instance}-{session}`).
+///
+/// When **`livekit.common_room`** is set, every spawned coder joins that shared room; use the same
+/// effective id as [`crate::livekit_peer_discovery::local_instance_id_for_config`] so identities
+/// never collide with another daemon on the same host and match **ConnectSession** / **ResumeSession**.
+///
+/// When common room is unset, rooms are per-session (`daemon-{session_id}`) and the legacy rule
+/// applies: only honor an explicit `daemon_instance_id` YAML override (no implicit hostname).
+pub fn livekit_spawn_daemon_instance_id(config: &DaemonConfig) -> Option<String> {
+    if livekit_common_room_is_set(config) {
+        Some(crate::livekit_peer_discovery::local_instance_id_for_config(config))
+    } else {
+        config
+            .daemon_instance_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    }
+}
+
 /// Build LiveKitCreds from daemon config.
 pub fn livekit_creds_from_config(config: &DaemonConfig) -> Option<LiveKitCreds> {
     let lk = config.livekit.as_ref()?;
@@ -653,7 +686,7 @@ pub fn livekit_creds_from_config(config: &DaemonConfig) -> Option<LiveKitCreds> 
         api_key,
         api_secret,
         common_room: lk.common_room.clone(),
-        daemon_instance_id: config.daemon_instance_id.clone(),
+        daemon_instance_id: livekit_spawn_daemon_instance_id(config),
     })
 }
 
@@ -704,6 +737,39 @@ mod livekit_server_identity_multi_host_tests {
             livekit_server_identity_for_session(None, "sid-9"),
             "daemon-sid-9"
         );
+    }
+}
+
+#[cfg(test)]
+mod livekit_spawn_instance_id_tests {
+    use super::livekit_spawn_daemon_instance_id;
+    use crate::config::{DaemonConfig, LiveKitConfig};
+
+    #[test]
+    fn without_common_room_only_yaml_instance_id_opt_in() {
+        let mut c = DaemonConfig::default();
+        c.livekit = Some(LiveKitConfig {
+            url: Some("ws://x".into()),
+            ..Default::default()
+        });
+        assert_eq!(livekit_spawn_daemon_instance_id(&c), None);
+        c.daemon_instance_id = Some(" west ".into());
+        assert_eq!(
+            livekit_spawn_daemon_instance_id(&c).as_deref(),
+            Some("west")
+        );
+    }
+
+    #[test]
+    fn with_common_room_uses_local_instance_id_even_without_yaml_override() {
+        let mut c = DaemonConfig::default();
+        c.livekit = Some(LiveKitConfig {
+            url: Some("ws://x".into()),
+            common_room: Some("lobby".into()),
+            ..Default::default()
+        });
+        let id = livekit_spawn_daemon_instance_id(&c).expect("some");
+        assert!(!id.is_empty());
     }
 }
 

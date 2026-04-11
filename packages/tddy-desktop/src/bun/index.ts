@@ -88,12 +88,16 @@ const lk =
 const room =
   process.env.TDDY_LIVEKIT_ROOM?.trim() || relayFromYaml?.commonRoom;
 
-if (rpc && lk && room) {
+/** Legacy: desktop joins LiveKit and uses `Bun.listen`. Default: tunnel runs in `tddy-daemon`. */
+const desktopOauthRelayLegacy =
+  process.env.TDDY_DESKTOP_OAUTH_RELAY?.trim() === "1";
+
+if (desktopOauthRelayLegacy && rpc && lk && room) {
   const id =
     process.env.TDDY_DESKTOP_IDENTITY?.trim() ||
     `desktop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   console.info(
-    `[tddy-desktop] Codex OAuth relay scheduled (RPC ${rpc}, room ${room}) — waits for daemon HTTP, then LiveKit; /auth/callback when metadata shows pending`
+    `[tddy-desktop] Legacy Codex OAuth relay (TDDY_DESKTOP_OAUTH_RELAY=1): RPC ${rpc}, room ${room} — Bun.listen + LiveKit tunnel`
   );
   void (async () => {
     const httpReady = await waitForDaemonHttp(rpc);
@@ -110,6 +114,26 @@ if (rpc && lk && room) {
     } catch (err) {
       console.error("[tddy-desktop] LiveKit OAuth relay failed:", err);
     }
+  })();
+} else if (rpc && lk && room) {
+  console.info(
+    "[tddy-desktop] Codex OAuth loopback tunnel runs in tddy-daemon (common-room LiveKit). " +
+      "Set TDDY_DESKTOP_OAUTH_RELAY=1 to restore the legacy desktop Bun.listen relay."
+  );
+  void (async () => {
+    const httpReady = await waitForDaemonHttp(rpc);
+    if (!httpReady) {
+      console.error(
+        "[tddy-desktop] Embedded tddy-daemon is not reachable (e.g. GET /api/config on port from TDDY_RPC_BASE). " +
+          "Vite /api proxy and OAuth will fail until the daemon listens. " +
+          "Run `cargo build -p tddy-daemon`, use `bun run dev` from packages/tddy-desktop (sets TDDY_WORKSPACE_ROOT), " +
+          "or run `./scripts/desktop-dev.sh` from the repo root."
+      );
+      return;
+    }
+    console.info(
+      "[tddy-desktop] Daemon HTTP is up; OAuth TCP on 127.0.0.1:<callback_port> starts after LiveKit common_room connects and a session publishes codex_oauth metadata."
+    );
   })();
 } else {
   const missing = [

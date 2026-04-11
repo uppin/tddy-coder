@@ -239,7 +239,7 @@ export function startEmbeddedDaemon(bunDir: string = import.meta.dir): void {
       env: process.env,
     });
     console.info(
-      `[tddy-desktop] Started embedded tddy-daemon (pid ${daemonProc.pid}, config ${sourceConfig})`
+      `[tddy-desktop] Started embedded tddy-daemon (pid ${daemonProc.pid}, workspace ${repoRoot}, config ${sourceConfig}, binary ${binary})`
     );
   } catch (e) {
     console.error("[tddy-desktop] Failed to spawn tddy-daemon:", e);

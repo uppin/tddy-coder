@@ -7,9 +7,19 @@ log:
     default:
       output: { file: "tmp/logs/daemon" }
       format: "{timestamp} [{level}] [{target}] {message}"
+    webrtc:
+      output: { file: "tmp/logs/webrtc" }
+      format: "{timestamp} [{level}] [{target}] {message}"
   default:
     level: debug
     logger: default
+  policies:
+    - selector: { target: libwebrtc* }
+      logger: webrtc
+    - selector: { target: livekit* }
+      logger: webrtc
+    - selector: { target: livekit_api* }
+      logger: webrtc
 
 listen:
   web_port: 8899

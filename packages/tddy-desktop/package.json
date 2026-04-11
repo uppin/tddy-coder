@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "electrobun dev",
+    "dev": "bun run scripts/electrobun-dev.ts",
     "build": "electrobun build",
     "test": "bun run --cwd ../tddy-livekit-web build && bun test src/bun test/acceptance test/e2e",
     "prebuild": "bun run --cwd ../tddy-livekit-web build"

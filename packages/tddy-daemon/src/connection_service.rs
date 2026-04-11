@@ -584,14 +584,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let livekit_room = metadata
             .livekit_room
             .ok_or_else(|| Status::failed_precondition("session has no LiveKit room"))?;
-        let instance = self
-            .config
-            .daemon_instance_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
-        let livekit_server_identity =
-            spawner::livekit_server_identity_for_session(instance, &req.session_id);
+        let instance = spawner::livekit_spawn_daemon_instance_id(&self.config);
+        let livekit_server_identity = spawner::livekit_server_identity_for_session(
+            instance.as_deref(),
+            &req.session_id,
+        );
         log::debug!(
             "ConnectSession: livekit_server_identity={} session_id={}",
             livekit_server_identity,

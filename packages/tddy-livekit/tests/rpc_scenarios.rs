@@ -291,6 +291,7 @@ impl LoopbackTunnelHarness {
             LoopbackTunnelServiceServer::new(LoopbackTunnelServiceImpl),
             RoomOptions::default(),
             None,
+            None,
         )
         .await?;
         let server_handle = tokio::spawn(async move { server.run().await });

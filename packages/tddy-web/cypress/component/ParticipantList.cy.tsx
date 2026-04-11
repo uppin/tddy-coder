@@ -41,7 +41,7 @@ describe("ParticipantList", () => {
       },
       {
         identity: "server-abc",
-        role: "server",
+        role: "coder",
         joinedAt: 1_700_000_000_000,
         metadata: '{"k":"v"}',
         codexOAuth: null,
@@ -52,8 +52,28 @@ describe("ParticipantList", () => {
     );
     cy.get("[data-testid='participant-entry-web-testuser']").should("contain.text", "web-testuser");
     cy.get("[data-testid='participant-role-web-testuser']").should("contain.text", "browser");
-    cy.get("[data-testid='participant-role-server-abc']").should("contain.text", "server");
+    cy.get("[data-testid='participant-role-server-abc']").should("contain.text", "coder");
     cy.get("[data-testid='participant-metadata-server-abc']").should("contain.text", '{"k":"v"}');
+  });
+
+  it("labels common-room daemon advertisement as daemon", () => {
+    const meta = JSON.stringify({
+      instance_id: "my-host",
+      label: "my-host (this daemon)",
+    });
+    const participants: RoomParticipant[] = [
+      {
+        identity: "my-host",
+        role: "daemon",
+        joinedAt: 1_700_000_000_000,
+        metadata: meta,
+        codexOAuth: null,
+      },
+    ];
+    cy.mount(
+      <ParticipantList participants={participants} roomStatus="connected" connectionError={null} />,
+    );
+    cy.get("[data-testid='participant-role-my-host']").should("contain.text", "daemon");
   });
 
   it("shows Codex OAuth sign-in link when participant metadata requests it", () => {
@@ -66,7 +86,7 @@ describe("ParticipantList", () => {
     const participants: RoomParticipant[] = [
       {
         identity: "daemon-session",
-        role: "server",
+        role: "coder",
         joinedAt: 1_700_000_000_000,
         metadata: meta,
         codexOAuth: null,
@@ -188,7 +208,7 @@ describe("ParticipantList", () => {
     const participants: RoomParticipant[] = [
       {
         identity: "server-agent",
-        role: "server",
+        role: "coder",
         joinedAt: 1_700_000_000_000,
         metadata: meta,
         codexOAuth: null,
@@ -209,7 +229,7 @@ describe("ParticipantList", () => {
             participants={[
               {
                 identity: "meta-peer",
-                role: "server",
+                role: "coder",
                 joinedAt: 1_700_000_000_000,
                 metadata: meta,
                 codexOAuth: null,

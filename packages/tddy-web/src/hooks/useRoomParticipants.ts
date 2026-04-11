@@ -6,7 +6,7 @@ import {
   type CodexOAuthInfo,
 } from "../lib/codexOauthMetadata";
 
-export type ParticipantRole = "server" | "browser" | "unknown";
+export type ParticipantRole = "browser" | "coder" | "daemon" | "unknown";
 
 /** Must match `OWNED_PROJECT_COUNT_METADATA_KEY` in `tddy-livekit` (`participant.rs`). */
 export const OWNED_PROJECT_COUNT_METADATA_KEY = "owned_project_count";
@@ -36,15 +36,40 @@ export interface RoomParticipant {
   ownedProjectCount?: number | null;
 }
 
-/** Infer UI role from LiveKit identity (browser clients use `web-{github}`). */
-export function inferParticipantRole(identity: string): ParticipantRole {
+/**
+ * `tddy-daemon` common-room advertisement (`livekit_peer_discovery`):
+ * `{"instance_id":"…","label":"… (this daemon)"}`.
+ */
+export function metadataLooksLikeDaemonAdvertisement(metadata: string): boolean {
+  const t = metadata.trim();
+  if (!t.startsWith("{")) return false;
+  try {
+    const o = JSON.parse(t) as { instance_id?: unknown; label?: unknown };
+    if (typeof o.instance_id !== "string" || !o.instance_id.trim()) return false;
+    if (typeof o.label !== "string") return false;
+    return o.label.includes("(this daemon)");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Infer UI role from LiveKit identity and metadata.
+ * - **browser**: dashboard presence (`web-…`, `browser-…`).
+ * - **coder**: terminal/session tool side (`server`, `server…`, `daemon-{uuid}-…`).
+ * - **daemon**: embedded/CLI `tddy-daemon` in common room (metadata advertisement).
+ */
+export function inferParticipantRole(identity: string, metadata: string): ParticipantRole {
   if (identity.startsWith("web-") || identity.startsWith("browser-")) return "browser";
   if (
     identity === "server" ||
     identity.startsWith("server") ||
     identity.startsWith("daemon-")
   ) {
-    return "server";
+    return "coder";
+  }
+  if (metadataLooksLikeDaemonAdvertisement(metadata)) {
+    return "daemon";
   }
   return "unknown";
 }
@@ -60,7 +85,7 @@ function mapParticipant(p: Participant): RoomParticipant {
   }
   return {
     identity: p.identity,
-    role: inferParticipantRole(p.identity),
+    role: inferParticipantRole(p.identity, metadata),
     joinedAt: p.joinedAt?.getTime() ?? null,
     metadata,
     codexOAuth: parseCodexOAuthMetadata(metadata),

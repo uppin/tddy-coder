@@ -1,3 +1,8 @@
+/**
+ * LiveKit OAuth relay: watch `daemon-*` metadata, open authorize URL, tunnel callback TCP.
+ * Legacy operator-side accept (`Bun.listen`) is in `./oauth-loopback-tcp-proxy`; default path uses
+ * `tddy-daemon` on `livekit.common_room` (see `TDDY_DESKTOP_OAUTH_RELAY` in desktop `index.ts`).
+ */
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
