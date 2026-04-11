@@ -9,11 +9,21 @@ use tddy_daemon::telegram_session_control::TelegramSessionControlHarness;
 use tddy_service::gen::app_mode_proto::Variant;
 use tddy_service::gen::server_message::Event;
 use tddy_service::gen::{
-    AppModeProto, AppModeSelect, ClarificationQuestionProto, ModeChanged, QuestionOptionProto,
-    ServerMessage,
+    AppModeProto, AppModeRunning, AppModeSelect, ClarificationQuestionProto, ModeChanged,
+    QuestionOptionProto, ServerMessage,
 };
 
 const AUTHORIZED_CHAT: i64 = 424_242;
+
+fn running_mode_message() -> ServerMessage {
+    ServerMessage {
+        event: Some(Event::ModeChanged(ModeChanged {
+            mode: Some(AppModeProto {
+                variant: Some(Variant::Running(AppModeRunning {})),
+            }),
+        })),
+    }
+}
 
 fn select_elicitation_message(question: &str, opt_a: &str, opt_b: &str) -> ServerMessage {
     ServerMessage {
@@ -64,6 +74,48 @@ fn telegram_config() -> tddy_daemon::config::DaemonConfig {
         chat_ids: vec![AUTHORIZED_CHAT],
     });
     cfg
+}
+
+/// When the head session leaves elicitation (e.g. answered on web), the queue advances and the
+/// promoted session is re-notified with a primary `eli:s:` keyboard.
+#[tokio::test]
+async fn telegram_queue_advances_when_head_leaves_elicitation_without_telegram() {
+    let mut watcher = TelegramSessionWatcher::new();
+    let cfg = telegram_config();
+    let mem = InMemoryTelegramSender::new();
+    let sid_a = "01900000-0000-7000-8000-0000000000aa";
+    let sid_b = "01900000-0000-7000-8000-0000000000bb";
+
+    let msg_a = select_elicitation_message("Question from session A", "X", "Y");
+    let msg_b = select_elicitation_message("Question from session B", "P", "Q");
+
+    watcher
+        .on_server_message(&cfg, &mem, sid_a, &msg_a)
+        .await
+        .unwrap();
+    watcher
+        .on_server_message(&cfg, &mem, sid_b, &msg_b)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        count_eli_s_primary_keyboards(&mem, AUTHORIZED_CHAT),
+        1,
+        "only session A should have a primary clarification keyboard initially"
+    );
+
+    let running_a = running_mode_message();
+    watcher
+        .on_server_message(&cfg, &mem, sid_a, &running_a)
+        .await
+        .unwrap();
+
+    let primary_after = count_eli_s_primary_keyboards(&mem, AUTHORIZED_CHAT);
+    assert!(
+        primary_after >= 2,
+        "after A leaves elicitation, B should be re-sent with a primary keyboard; expected >= 2 eli:s keyboards, got {primary_after} — recorded={:?}",
+        mem.recorded_with_keyboards()
+    );
 }
 
 /// `telegram_single_chat_two_sessions_second_prompt_is_queued_or_deferred`
