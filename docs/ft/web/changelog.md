@@ -4,6 +4,10 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-04-11 — Connection screen: project session preview and `/project` detail route
+
+- **`tddy-web`**: **`ConnectionScreen`** caps each project accordion table on **`/`** to **ten** rows (**`splitSortedSessionsForHomePreview`**, **`HOME_PROJECT_SESSIONS_PREVIEW_LIMIT`**); overflow summary and navigation (**`project-sessions-overflow-summary-*`**, **`project-sessions-overflow-nav-*`**) open **`/project/{encodedRowKey}`** built from **`connectionProjectRowKey`**. **`appRoutes`**: **`PROJECT_ROW_ROUTE_PREFIX`**, **`projectPathForRowKey`**, **`parseProjectRowKeyFromPathname`**. **`projectRoute`**: **`parseProjectRowKeyForConnectionScreen`**. Project detail view: **`project-screen-root`**, full table **`project-screen-sessions-table-*`**, **`project-screen-start-session-*`**, shared **`handleStartSession`**. Unknown key: **`project-route-not-found`**, **`project-route-not-found-home`**. Cypress **`ConnectionScreen.cy.tsx`** (preview + route acceptance); Bun **`appRoutes.test.ts`**, **`projectSessionsHomePreview.test.ts`**. Feature doc: [web-terminal.md](web-terminal.md). Package: [changesets.md](../../../packages/tddy-web/docs/changesets.md). Cross-package: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-04-11 — Connection screen: multi-host eligible daemons (LiveKit common room)
 
 - **`tddy-web`**: **ConnectionScreen** sorts **ListEligibleDaemons** for the Host dropdown (**local** first, then **`instance_id`**); **StartSession** sends the selected **`daemonInstanceId`** when the daemon lists multiple eligible hosts. Cypress **ConnectionScreen** covers multi-row host list and multi-session disconnect scoping. **Feature docs**: [web-terminal.md](web-terminal.md), [livekit-peer-discovery.md](../daemon/livekit-peer-discovery.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).

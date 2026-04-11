@@ -59,11 +59,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { splitSortedSessionsForHomePreview } from "../lib/projectSessionsHomePreview";
 import {
   isSessionListPath,
   parseTerminalSessionIdFromPathname,
+  projectPathForRowKey,
   terminalPathForSessionId,
 } from "../routing/appRoutes";
+import { parseProjectRowKeyForConnectionScreen } from "../routing/projectRoute";
 import {
   applyDedicatedTerminalBackToMini,
   clampTerminalOverlayPaneSize,
@@ -1067,6 +1070,47 @@ export function ConnectionScreen({
     [routePath, sessionAttachments],
   );
 
+  const parsedProjectRowKey = useMemo(
+    () => parseProjectRowKeyForConnectionScreen(routePath),
+    [routePath],
+  );
+
+  const matchedProjectForRoute = useMemo(() => {
+    if (!parsedProjectRowKey) return undefined;
+    return projects.find((p) => connectionProjectRowKey(p) === parsedProjectRowKey);
+  }, [parsedProjectRowKey, projects]);
+
+  const projectDetailSessions = useMemo(() => {
+    if (!matchedProjectForRoute) return [] as SessionEntry[];
+    const p = matchedProjectForRoute;
+    const hostingDaemon = (p.daemonInstanceId ?? "").trim();
+    const projectsOnHost = projects.filter(
+      (x) => (x.daemonInstanceId ?? "").trim() === hostingDaemon,
+    );
+    return sortedSessionsForProjectHostTable(sessions, p, hostingDaemon, projectsOnHost);
+  }, [matchedProjectForRoute, sessions, projects]);
+
+  const showProjectDetailRoute = Boolean(matchedProjectForRoute && parsedProjectRowKey);
+
+  useEffect(() => {
+    if (matchedProjectForRoute && parsedProjectRowKey) {
+      console.info("[ConnectionScreen] project detail route active", {
+        rowKey: parsedProjectRowKey,
+        sessionCount: projectDetailSessions.length,
+      });
+    }
+  }, [matchedProjectForRoute, parsedProjectRowKey, projectDetailSessions.length]);
+
+  const projectDetailRowKey = matchedProjectForRoute
+    ? connectionProjectRowKey(matchedProjectForRoute)
+    : null;
+  const projectDetailForm = useMemo(() => {
+    if (!projectDetailRowKey) return null;
+    return (
+      projectForms[projectDetailRowKey] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons)
+    );
+  }, [projectDetailRowKey, projectForms, tools, effectiveAgents, daemons]);
+
   const removeAttachmentForSession = useCallback(
     (sessionId: string, reason: string) => {
       console.info("[ConnectionScreen] removeAttachmentForSession", { sessionId, reason });
@@ -1685,6 +1729,127 @@ export function ConnectionScreen({
     };
   };
 
+  const renderProjectHostSessionsTableCore = (rows: SessionEntry[], tableKey: string) => {
+    const selectedSet = tableSessionSelections[tableKey] ?? new Set<string>();
+    const allProjectSessionIds = rows.map((s) => s.sessionId);
+    return (
+      <>
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={selectedSet.size === 0}
+            data-testid={`bulk-delete-selected-${tableKey}`}
+            onClick={() => void handleBulkDeleteSelectedSessions(tableKey, Array.from(selectedSet))}
+          >
+            Delete selected
+          </Button>
+        </div>
+        <Table className="mt-3 w-full min-w-0">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-10">
+                <SessionTableSelectAllCheckbox
+                  selectedCount={selectedSet.size}
+                  totalRows={rows.length}
+                  dataTestId={`session-table-select-all-${tableKey}`}
+                  ariaLabel="Select all sessions in this table"
+                  onToggle={() => {
+                    const next = toggleSelectAllForTable(allProjectSessionIds, selectedSet);
+                    setTableSessionSelections((prev) => ({ ...prev, [tableKey]: next }));
+                  }}
+                />
+              </TableHead>
+              <TableHead>ID</TableHead>
+              <TableHead>Date</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Host</TableHead>
+              <TableHead>PID</TableHead>
+              <TableHead>Goal</TableHead>
+              <TableHead>Workflow</TableHead>
+              <TableHead>Elapsed</TableHead>
+              <TableHead>Agent</TableHead>
+              <TableHead>Model</TableHead>
+              <TableHead>Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((s) => {
+              const sessionAction = primaryFloatingSessionAction(s.sessionId);
+              const pendingElicitation = s.pendingElicitation === true;
+              return (
+                <TableRow key={s.sessionId} data-pending-elicitation={pendingElicitation ? "true" : "false"}>
+                  <TableCell className="w-10 align-middle">
+                    <input
+                      type="checkbox"
+                      data-testid={`session-row-select-${s.sessionId}`}
+                      aria-label={`Select session ${s.sessionId}`}
+                      checked={selectedSet.has(s.sessionId)}
+                      onChange={() => {
+                        const next = toggleRowInTableSelection(selectedSet, s.sessionId);
+                        setTableSessionSelections((prev) => ({ ...prev, [tableKey]: next }));
+                      }}
+                      className="size-4 shrink-0 rounded border border-input accent-primary"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      <span>{sessionIdFirstSegment(s.sessionId)}</span>
+                      {pendingElicitation ? (
+                        <span
+                          role="status"
+                          className="inline-flex shrink-0 items-center rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-950"
+                          aria-label="Session needs your input or approval"
+                          data-testid={`elicitation-indicator-${s.sessionId}`}
+                        >
+                          Input needed
+                        </span>
+                      ) : null}
+                    </span>
+                  </TableCell>
+                  <TableCell>{formatSessionCreatedAt(s.createdAt)}</TableCell>
+                  <TableCell>{s.status}</TableCell>
+                  <TableCell>{s.daemonInstanceId || "—"}</TableCell>
+                  <TableCell>{sessionPidDisplay(s.isActive, s.pid)}</TableCell>
+                  <SessionWorkflowStatusCells session={s} />
+                  <TableCell>
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {s.isActive ? (
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            data-testid={`connect-${s.sessionId}`}
+                            onClick={() => sessionAction.onClick()}
+                          >
+                            {sessionAction.label}
+                          </Button>
+                          <SignalDropdown sessionId={s.sessionId} onSignal={handleSignalSession} />
+                          <SessionDeleteButton sessionId={s.sessionId} onDelete={handleDeleteSession} />
+                        </>
+                      ) : (
+                        <InactiveSessionActions
+                          sessionId={s.sessionId}
+                          onResume={handleResumeSession}
+                          onDelete={handleDeleteSession}
+                        />
+                      )}
+                      <SessionMoreActionsMenu
+                        sessionId={s.sessionId}
+                        onShowFiles={() => setWorkflowFilesSessionId(s.sessionId)}
+                      />
+                    </span>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </>
+    );
+  };
+
   if (terminalPresentation === "full" && focusedSessionId) {
     const focusedAttachment = sessionAttachments.get(focusedSessionId);
     if (focusedAttachment) {
@@ -1751,6 +1916,23 @@ export function ConnectionScreen({
         </div>
       )}
 
+      {parsedProjectRowKey !== null && sessionsListHydrated && matchedProjectForRoute === undefined ? (
+        <div
+          data-testid="project-route-not-found"
+          className="mb-4 rounded-md border border-destructive/40 bg-destructive/5 p-4"
+        >
+          <p className="mb-3 text-sm text-foreground">Project not found.</p>
+          <Button
+            type="button"
+            variant="secondary"
+            data-testid="project-route-not-found-home"
+            onClick={() => navigatePath("/", "push")}
+          >
+            Back to sessions
+          </Button>
+        </div>
+      ) : null}
+
       {presenceReady && (
         <div
           data-testid="connected-participants-panel"
@@ -1771,6 +1953,60 @@ export function ConnectionScreen({
         </div>
       )}
 
+      {error && (
+        <div data-testid="connection-error" style={{ color: "#c00", marginTop: 12 }}>
+          {error}
+        </div>
+      )}
+
+      {showProjectDetailRoute && matchedProjectForRoute ? (
+        <div data-testid="project-screen-root" className="mt-4 w-full min-w-0">
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <Button type="button" variant="outline" onClick={() => navigatePath("/", "push")}>
+              All projects
+            </Button>
+          </div>
+          <h3 className="text-base font-semibold">{matchedProjectForRoute.name}</h3>
+          {matchedProjectForRoute.daemonInstanceId?.trim() ? (
+            <p className="text-xs text-muted-foreground">
+              ({matchedProjectForRoute.daemonInstanceId})
+            </p>
+          ) : null}
+          <p className="mt-1 text-xs text-muted-foreground">{matchedProjectForRoute.gitUrl}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{matchedProjectForRoute.mainRepoPath}</p>
+          {projectDetailRowKey && projectDetailForm ? (
+            <ProjectSessionOptions
+              fieldIdSuffix={projectDetailRowKey}
+              tools={tools}
+              agents={effectiveAgents}
+              daemons={daemons}
+              form={projectDetailForm}
+              onChange={(patch) => updateProjectForm(projectDetailRowKey, patch)}
+              startSessionButton={
+                <Button
+                  type="button"
+                  data-testid={`project-screen-start-session-${projectDetailRowKey}`}
+                  onClick={() => void handleStartSession(matchedProjectForRoute)}
+                  disabled={loading || !projectDetailForm.toolPath || !projectDetailForm.agent}
+                >
+                  Start New Session
+                </Button>
+              }
+            />
+          ) : null}
+          {projectDetailSessions.length === 0 ? (
+            <p className="mt-3 text-sm text-muted-foreground">No sessions for this project.</p>
+          ) : (
+            <div
+              className="mt-3 w-full min-w-0"
+              data-testid={`project-screen-sessions-table-${projectDetailRowKey!}`}
+            >
+              {renderProjectHostSessionsTableCore(projectDetailSessions, projectDetailRowKey!)}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
       <div className="my-4">
         <Button
           type="button"
@@ -1839,12 +2075,6 @@ export function ConnectionScreen({
         </div>
       )}
 
-      {error && (
-        <div data-testid="connection-error" style={{ color: "#c00", marginTop: 12 }}>
-          {error}
-        </div>
-      )}
-
       <h3 style={{ marginTop: 24, fontSize: 16 }}>Projects</h3>
       {projects.length === 0 ? (
         <p style={{ fontSize: 14, color: "#666" }}>No projects yet. Create one above.</p>
@@ -1861,9 +2091,9 @@ export function ConnectionScreen({
             hostingDaemon,
             projectsOnHost
           );
+          const homePreviewSplit = splitSortedSessionsForHomePreview(projectSessions);
+          const tableSessionsOnHome = homePreviewSplit.visible;
           const tableKey = rowKey;
-          const selectedSet = tableSessionSelections[tableKey] ?? new Set<string>();
-          const allProjectSessionIds = projectSessions.map((s) => s.sessionId);
           const formForRow =
             projectForms[rowKey] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons);
           return (
@@ -1911,129 +2141,23 @@ export function ConnectionScreen({
                     className="mt-3 w-full min-w-0"
                     data-testid={`sessions-table-${rowKey}`}
                   >
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="sm"
-                        disabled={selectedSet.size === 0}
-                        data-testid={`bulk-delete-selected-${tableKey}`}
-                        onClick={() =>
-                          void handleBulkDeleteSelectedSessions(tableKey, Array.from(selectedSet))
-                        }
-                      >
-                        Delete selected
-                      </Button>
-                    </div>
-                    <Table className="mt-3 w-full min-w-0">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-10">
-                        <SessionTableSelectAllCheckbox
-                          selectedCount={selectedSet.size}
-                          totalRows={projectSessions.length}
-                          dataTestId={`session-table-select-all-${tableKey}`}
-                          ariaLabel="Select all sessions in this table"
-                          onToggle={() => {
-                            const next = toggleSelectAllForTable(allProjectSessionIds, selectedSet);
-                            setTableSessionSelections((prev) => ({ ...prev, [tableKey]: next }));
-                          }}
-                        />
-                      </TableHead>
-                      <TableHead>ID</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Host</TableHead>
-                      <TableHead>PID</TableHead>
-                      <TableHead>Goal</TableHead>
-                      <TableHead>Workflow</TableHead>
-                      <TableHead>Elapsed</TableHead>
-                      <TableHead>Agent</TableHead>
-                      <TableHead>Model</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {projectSessions.map((s) => {
-                      const sessionAction = primaryFloatingSessionAction(s.sessionId);
-                      const pendingElicitation = s.pendingElicitation === true;
-                      return (
-                      <TableRow
-                        key={s.sessionId}
-                        data-pending-elicitation={pendingElicitation ? "true" : "false"}
-                      >
-                        <TableCell className="w-10 align-middle">
-                          <input
-                            type="checkbox"
-                            data-testid={`session-row-select-${s.sessionId}`}
-                            aria-label={`Select session ${s.sessionId}`}
-                            checked={selectedSet.has(s.sessionId)}
-                            onChange={() => {
-                              const next = toggleRowInTableSelection(selectedSet, s.sessionId);
-                              setTableSessionSelections((prev) => ({ ...prev, [tableKey]: next }));
-                            }}
-                            className="size-4 shrink-0 rounded border border-input accent-primary"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <span className="inline-flex flex-wrap items-center gap-2">
-                            <span>{sessionIdFirstSegment(s.sessionId)}</span>
-                            {pendingElicitation ? (
-                              <span
-                                role="status"
-                                className="inline-flex shrink-0 items-center rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-950"
-                                aria-label="Session needs your input or approval"
-                                data-testid={`elicitation-indicator-${s.sessionId}`}
-                              >
-                                Input needed
-                              </span>
-                            ) : null}
-                          </span>
-                        </TableCell>
-                        <TableCell>{formatSessionCreatedAt(s.createdAt)}</TableCell>
-                        <TableCell>{s.status}</TableCell>
-                        <TableCell>{s.daemonInstanceId || "—"}</TableCell>
-                        <TableCell>{sessionPidDisplay(s.isActive, s.pid)}</TableCell>
-                        <SessionWorkflowStatusCells session={s} />
-                        <TableCell>
-                          <span className="inline-flex flex-wrap items-center gap-2">
-                            {s.isActive ? (
-                              <>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  data-testid={`connect-${s.sessionId}`}
-                                  onClick={() => sessionAction.onClick()}
-                                >
-                                  {sessionAction.label}
-                                </Button>
-                                <SignalDropdown
-                                  sessionId={s.sessionId}
-                                  onSignal={handleSignalSession}
-                                />
-                                <SessionDeleteButton
-                                  sessionId={s.sessionId}
-                                  onDelete={handleDeleteSession}
-                                />
-                              </>
-                            ) : (
-                              <InactiveSessionActions
-                                sessionId={s.sessionId}
-                                onResume={handleResumeSession}
-                                onDelete={handleDeleteSession}
-                              />
-                            )}
-                            <SessionMoreActionsMenu
-                              sessionId={s.sessionId}
-                              onShowFiles={() => setWorkflowFilesSessionId(s.sessionId)}
-                            />
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                    {renderProjectHostSessionsTableCore(tableSessionsOnHome, tableKey)}
+                    {homePreviewSplit.hiddenCount > 0 ? (
+                      <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                        <p data-testid={`project-sessions-overflow-summary-${rowKey}`}>
+                          Showing {homePreviewSplit.visible.length} of {homePreviewSplit.total}{" "}
+                          sessions; {homePreviewSplit.hiddenCount} more on the project page.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          data-testid={`project-sessions-overflow-nav-${rowKey}`}
+                          onClick={() => navigatePath(projectPathForRowKey(rowKey), "push")}
+                        >
+                          View all sessions for this project
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                 </>
               )}
@@ -2184,6 +2308,9 @@ export function ConnectionScreen({
             </TableBody>
           </Table>
           </div>
+        </>
+      )}
+
         </>
       )}
 
