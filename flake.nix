@@ -28,6 +28,19 @@
             pkgs.fontconfig
           ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
             pkgs.libva
+            # tddy-livekit-screen-capture → xcap → wayland-sys / gbm (pkg-config)
+            pkgs.wayland
+            pkgs.wayland-protocols
+            pkgs.libdrm
+            pkgs.mesa
+            # khronos-egl (screen capture stack) needs egl.pc
+            pkgs.libglvnd
+            pkgs.libgbm
+            pkgs.libxcb
+            pkgs.pipewire
+            # libspa-sys (pipewire) uses bindgen — use Nix libclang, not host /usr/lib/llvm-*
+            pkgs.llvmPackages.libclang
+            pkgs.stdenv.cc.cc.lib
           ];
           packages = [
             rustToolchain
@@ -42,6 +55,9 @@
           ];
           shellHook = ''
             echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node"
+          '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+            export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
+          '' + ''
             if _tddy_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
               if [[ -d "$_tddy_root/node_modules/.bin" ]]; then
                 export PATH="$_tddy_root/node_modules/.bin:$PATH"
