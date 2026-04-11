@@ -19,6 +19,10 @@ function getEchoServerPath(): string {
 }
 
 export default defineConfig({
+  env: {
+    /** Forwarded for specs; transport tests skip when unset (see `transport.cy.tsx`). */
+    LIVEKIT_TESTKIT_WS_URL: process.env.LIVEKIT_TESTKIT_WS_URL ?? "",
+  },
   defaultCommandTimeout: 15000,
   component: {
     devServer: {

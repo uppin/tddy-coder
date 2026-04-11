@@ -26,6 +26,10 @@ cargo test -p tddy-daemon codex_oauth_relay::tests -- --test-threads=1
 cargo test -p tddy-integration-tests --test codex_oauth_web_relay_acceptance -- --test-threads=1
 ```
 
+## Related package docs
+
+- **[oauth-loopback-tunnel.md](./oauth-loopback-tunnel.md)** — operator TCP + **`StreamBytes`** bridge in **`tddy-daemon`**
+
 ## Feature documentation
 
 - **[Codex OAuth web relay](../../../../docs/ft/web/codex-oauth-web-relay.md)**

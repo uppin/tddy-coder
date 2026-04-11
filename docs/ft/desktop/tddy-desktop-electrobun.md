@@ -5,22 +5,24 @@
 Ship a **small native desktop shell** (`packages/tddy-desktop`) that:
 
 1. **Embeds or serves `tddy-web`** locally so operators get a first-class app window instead of juggling browser tabs and Vite/daemon ports.
-2. **Hosts the Codex OAuth loopback callback** (`http://localhost:<port>/auth/callback` or Codex’s chosen port) so sign-in works when the **browser runs on the same machine as the app**, and so we can **relay** the callback to the **remote `tddy-coder` session** that is waiting on another host.
-3. **Uses the existing LiveKit room** (same model as the web terminal) so **`tddy-coder` drives the auth transaction**: it already publishes the **authorize URL** via participant metadata; the desktop app completes the **browser leg** and sends the **callback query** back over LiveKit to the participant that owns the Codex process.
+2. **Relies on `tddy-daemon` for the Codex OAuth browser callback on operator loopback** when **`livekit.common_room`** is configured: the daemon binds **`127.0.0.1:<callback_port>`**, bridges raw HTTP over **`loopback_tunnel.LoopbackTunnelService.StreamBytes`**, and opens the authorize URL in the system browser; the **session host** **`LoopbackTunnelService`** dials **`127.0.0.1:<port>`** toward Codex so the callback matches a local run.
+3. **Uses the same LiveKit and metadata model as the web terminal**: **`tddy-coder`** publishes **`codex_oauth` participant metadata** on **`daemon-*`** session participants; the daemon reads that metadata from the **common room**. The desktop shell loads **`tddy-web`** and may spawn the daemon; it does **not** join LiveKit for OAuth or call **`Bun.listen`** in production (**`installLiveKitOAuthRelay`** remains for **tests** with injected **`startOAuthTcpTunnel`** stubs).
 
 This document is the **WHAT**; implementation lives in `packages/tddy-desktop` and incremental changes in `tddy-web`, `tddy-livekit`, and `tddy-coder` as needed.
 
 ## Non-goals (initial phases)
 
 - Replacing the in-browser dashboard for all users (desktop is **optional**).
-- Bundling `tddy-daemon` or `tddy-coder` inside the app (they remain separate processes/services).
+- Bundling **`tddy-coder`** inside the app (it remains a separate agent process).
+- Windows or Linux desktop bundles for **`tddy-daemon`** (macOS is the first bundled target).
 - Storing long-lived OpenAI tokens in the desktop app (credentials stay where Codex/`tddy-coder` already persist them).
 
 ## Actors
 
 | Actor | Role |
 |--------|------|
-| **Tddy Desktop** | Electrobun **main process** (Bun): window management, optional local static server, **OAuth callback HTTP listener**, LiveKit **client** for auth relay. |
+| **Tddy Desktop** | Electrobun **main process** (Bun): window management, optional local static server, optional **embedded `tddy-daemon`** spawn on macOS; **no** production OAuth TCP bind or LiveKit client in the main process. |
+| **`tddy-daemon` (operator)** | With **`livekit.common_room`**, **OAuth loopback tunnel** supervisor: metadata scan, browser open, **`TcpListener`** on operator loopback, **`StreamBytes`** toward the session **`daemon-*`** identity. |
 | **tddy-web UI** | Same React app as today; loaded from `file://` bundle, embedded dev server, or proxied `https://` in webview. |
 | **LiveKit room** | Shared **presence / RPC** room already used for terminal and participant list (e.g. `tddy-lobby` + session-scoped identities). |
 | **tddy-coder** (child) | Publishes **`codex_oauth` metadata** (`pending`, `authorize_url`); runs **Codex** / **codex-acp** which listens on loopback for OAuth callback **on the agent host**. |
@@ -31,71 +33,46 @@ This document is the **WHAT**; implementation lives in `packages/tddy-desktop` a
 - **Remote agent host**: Codex binds OAuth callback on **its** loopback. A developer’s laptop browser cannot hit that address. Today the mitigations are **SSH `-L`**, **device code**, or **copying `auth.json`** ([Codex auth](https://developers.openai.com/codex/auth/)).
 - **UX**: Even locally, a dedicated window + deep links improves discoverability vs “open Vite URL + daemon port”.
 
-The desktop app targets **relay**: laptop runs **desktop + browser**; **callback hits the laptop**; **callback payload is delivered to `tddy-coder` over LiveKit** so Codex on the remote host can complete login (see *Relay variants* below).
+The desktop app targets **relay**: laptop runs **desktop + browser**; **callback hits the laptop’s loopback**; **`tddy-daemon` on the laptop tunnels bytes to `tddy-coder` over LiveKit** so Codex on the remote host can complete login.
 
 ## High-level architecture
 
 ```mermaid
 flowchart LR
-  subgraph desktop["Tddy Desktop (Electrobun)"]
-    MP[Main process Bun]
+  subgraph desktop["Operator machine"]
+    MP[Desktop Bun shell]
     WV[Webview tddy-web]
-    CB[OAuth callback server]
-    LK_C[LiveKit client]
+    DMN[tddy-daemon]
+    TCP[Loopback TCP accept]
     MP --> WV
-    MP --> CB
-    MP --> LK_C
+    MP --> DMN
+    DMN --> TCP
   end
   subgraph cloud["LiveKit SFU"]
-    ROOM[Room]
+    ROOM[common_room + session RPC]
   end
-  subgraph agent["Agent host"]
+  subgraph agent["Session host"]
     TC[tddy-coder child]
     CX[Codex / codex-acp]
     LK_S[LiveKit participant]
+    BR[LoopbackTunnel bridge]
     TC --> CX
     TC --> LK_S
+    LK_S --> BR
+    BR -->|127.0.0.1:port| CX
   end
-  WV -->|HTTPS RPC same as today| DMN[tddy-daemon / Vite proxy]
-  LK_S <-->|data channel| ROOM
-  LK_C <-->|data channel| ROOM
-  CB -->|relay OAuth callback| LK_C
-  LK_C -->|CodexOAuthCallback message| LK_S
-  LK_S -->|forward to loopback| CX
+  WV -->|HTTPS RPC| DMN
+  DMN <-->|Room + StreamBytes| ROOM
+  LK_S <-->|data channel RPC| ROOM
+  TCP -->|browser HTTP GET| DMN
 ```
 
-## LiveKit: auth transaction (design)
+## LiveKit: OAuth metadata and loopback tunnel
 
-### Today (baseline)
-
-- `tddy-coder` + `tddy-livekit` publish participant **metadata** JSON:
-
-  `{"codex_oauth":{"pending":true,"authorize_url":"https://..."}}`
-
-- `tddy-web` **ParticipantList** parses metadata and opens the authorize link.
-
-### Extension (desktop + `tddy-coder`)
-
-Introduce a **signed, session-scoped** message on the existing **data channel** (new topic or RPC method; same security model as `tddy-rpc`):
-
-1. **Desktop** joins the room with identity **`desktop-<session-correlation>`** (or reuse `web-` pattern with a distinct prefix) and subscribes to metadata / events for the **daemon** participant for the active session.
-2. When **`codex_oauth.pending`** is true, desktop may:
-   - open the **system browser** to `authorize_url`, or
-   - embed OAuth in a **secondary webview** only if CSP allows (often blocked; **external browser** remains default).
-3. Desktop runs **`http://127.0.0.1:<port>/auth/callback`** (or the port Codex advertises — see *Port negotiation*). On **`GET /auth/callback?code=...&state=...`**:
-   - validate **state** against a value obtained from LiveKit (or from metadata envelope),
-   - send **`CodexOAuthCallbackDelivered`** (name TBD) over LiveKit to **`tddy-coder`** (destination: daemon participant identity for that session).
-
-4. **`tddy-coder`** (Rust) receives the payload and **injects** it into the Codex loopback listener. Two implementation variants:
-
-   | Variant | Idea | Pros | Cons |
-   |--------|------|------|------|
-   | **A. Proxy listener** | On agent host, `tddy-coder` opens the loopback port and **proxies** HTTP to/from desktop via LiveKit | Codex still thinks callback is local | More moving parts; latency |
-   | **B. IPC / hook** | Codex exposes or we use **`codex_oauth_relay`**-style forwarding to POST equivalent of callback into child stdin or local socket | Smaller HTTP surface | Depends on Codex CLI capabilities; may need upstream hooks |
-
-**Recommendation:** Start design with **Variant A** documented end-to-end; spike **B** if OpenAI/Codex adds official remote callback config.
-
-`packages/tddy-daemon` already has **`codex_oauth_relay`** validation helpers; the desktop path should **reuse** the same parsing/validation rules for **authorize URL** and **callback query** (host allowlist, session correlation).
+- **`tddy-coder`** publishes **`codex_oauth` JSON** on the session **`daemon-*`** participant metadata (`pending`, **`authorize_url`**, **`callback_port`**, **`state`**, etc.). **`tddy-web`** **ParticipantList** consumes it in the browser; **`tddy-daemon`** parses the same fields from the **common room** for the operator tunnel (**`codex_oauth_participant_metadata`**).
+- **Session host** registers **`loopback_tunnel.LoopbackTunnelService`** on the LiveKit **tddy-rpc** surface alongside **TerminalService** (and **TokenService** when API key mode is used). **`StreamBytes`** uses **`TunnelChunk`**: the **first** chunk sets **`open_port`** (Codex loopback port); the server connects to **`127.0.0.1:{open_port}`** and refuses **`open_port < 1024`**.
+- **Operator `tddy-daemon`** (when **`livekit.common_room`** is set) runs **`oauth_loopback_tunnel`**: after common-room connect, it supervises TCP listen + **`StreamBytes`** toward the selected **`daemon-*`** identity. **Desktop** production **`index.ts`** only ensures daemon HTTP is up and logs that OAuth TCP runs in the daemon; **`installLiveKitOAuthRelay`** is for **unit/e2e mocks**, not the shipped main-process path.
+- **`tddy_daemon::codex_oauth_relay`** remains validation/parsing for **authorize URLs** and callback **URLs** where used; the tunnel path is **byte-transparent** between browser TCP and Codex loopback.
 
 ## OAuth port negotiation
 
@@ -104,23 +81,18 @@ Codex picks an **ephemeral port** (e.g. 1455). The desktop app must learn it:
 - **Preferred:** extend metadata JSON to include `callback_origin` / `callback_port` when available from Codex stderr or a small sidecar file written by `tddy-coder` (same session dir as `codex_oauth_authorize.url`).
 - **Fallback:** desktop listens on a **fixed** local port and user configures Codex/`~/.codex/config.toml` if upstream supports **`mcp_oauth_callback_url`** or future **ChatGPT login** callback override (verify per Codex version).
 
-## `packages/tddy-desktop` layout (target)
+## `packages/tddy-desktop` layout
 
 ```
 packages/tddy-desktop/
-  README.md                 # Links to this doc; dev quickstart
-  package.json              # electrobun, scripts: dev, build
-  src/
-    main/                   # Electrobun main process (Bun)
-      index.ts              # App bootstrap, window, protocol
-      livekit-auth-relay.ts # Join room, send callback payload
-      oauth-callback-server.ts
-    preload/                # If required by Electrobun security model
-  resources/
-    web/                      # Optional: copied packages/tddy-web/dist at build time
+  README.md                 # Dev quickstart; embedded daemon env
+  electrobun.config.ts      # build.copy includes resources/bin/tddy-daemon
+  src/bun/
+    index.ts                # BrowserWindow, embedded daemon, OAuth env hints (no LiveKit in prod)
+    livekit-oauth-relay.ts  # installLiveKitOAuthRelay — tests / injection only
+    embedded-daemon.ts      # Resolve config/binary paths; spawn tddy-daemon (macOS)
+  resources/bin/            # Release binary from prebuild (gitignored)
 ```
-
-**Workspace:** add `packages/tddy-desktop` to root **`package.json` `workspaces`** when implementation starts; keep **Bun** as the JS toolchain consistent with the repo.
 
 ## Electrobun specifics
 
@@ -130,19 +102,29 @@ packages/tddy-desktop/
 
 ## Security
 
-- **Callback query** contains **authorization codes** — treat as secret in transit:
-  - send only on **LiveKit data channel** already authenticated by **room JWT**;
+- **Callback traffic** contains **authorization codes** — treat as secret in transit:
+  - tunnel **raw TCP** (HTTP bytes) over the **LiveKit data channel** RPC already authenticated by **room JWT**;
   - restrict **destination identities** (only the daemon participant for the session);
-  - **never** log full query strings.
+  - **never** log full HTTP requests or query strings.
 - **Metadata** from LiveKit is **not** trusted for code execution; only **HTTPS** authorize URLs (existing web parser rule).
 - **Deep links** (`tddy://…`) optional later; must validate session id.
 
 ## Phases
 
 1. **Shell** (implemented): Electrobun app loads **production `tddy-web` dist** from disk or env URL; Connect flow unchanged (RPC via daemon as today).
-2. **OAuth discovery** (implemented): Desktop reads **`codex_oauth` metadata**; opens browser; local callback server captures `GET /auth/callback`.
-3. **Relay MVP** (implemented, Variant A): LiveKit message from desktop → **`CodexOAuthService/DeliverCallback`** RPC → **`tddy-coder`** proxies HTTP to Codex loopback on agent host.
-4. **Polish:** Installer, code signing, auto-update, tray icon.
+2. **OAuth discovery** (implemented): **`tddy-daemon`** reads **`codex_oauth`** from common-room **`daemon-*`** metadata; opens the system browser when pending.
+3. **Relay MVP** (implemented): **`LoopbackTunnelService.StreamBytes`** pipes bytes from **daemon-held** operator loopback TCP to **`127.0.0.1:{port}`** on the session host (same HTTP **`GET /auth/callback`** as a local run).
+4. **Embedded daemon (macOS)** (implemented): see *Bundled `tddy-daemon` (macOS)* below.
+5. **Polish:** Installer, code signing, auto-update, tray icon.
+
+## Bundled `tddy-daemon` (macOS)
+
+The desktop main process may **spawn `tddy-daemon`** so the webview reaches **`/api/config`** and Connect-RPC without a separate terminal. This targets **macOS** first; other desktop OS bundles are out of scope for now.
+
+- **Config:** Daemon loads YAML via **`--config` / `TDDY_DAEMON_CONFIG`** (existing daemon behavior). The app resolves a config path from **`TDDY_DAEMON_CONFIG`**, repo-root **`dev.desktop.yaml`** when unset in dev, and root **`.env`** loading consistent with **`./web-dev`**.
+- **Binary resolution (in order):** **`TDDY_DAEMON_BINARY`**, **`resources/bin/tddy-daemon`** (populated by **`prebuild`** / **`build-daemon`**), then workspace **`target/release/tddy-daemon`** or **`target/debug/tddy-daemon`** at the repo root. **`prebuild`** runs **`cargo build --release -p tddy-daemon`** and copies into **`resources/bin/`**; **`electrobun.config.ts`** **`build.copy`** ships the binary inside the app bundle.
+- **Lifecycle:** Start when the main process starts (when config and binary resolve); **SIGTERM** / process exit tears down the child so the daemon listen port is released in normal quit paths.
+- **Security:** No API keys are embedded in the app; the user YAML remains the trust boundary. A desktop-spawned daemon is a **dev convenience** and runs as the current user—production installs may still use **launchd** or another supervisor with different privileges.
 
 ## Related docs
 

@@ -19,28 +19,30 @@
         };
       in
       {
-        devShells.default = pkgs.mkShell {
+        devShells.default = pkgs.mkShell ({
           nativeBuildInputs = [
             pkgs.pkg-config
+          ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+            # libspa-sys uses bindgen; point at Nix libclang (avoid broken /usr/lib/llvm-* in pure shells)
+            pkgs.clang
           ];
           buildInputs = [
             pkgs.glib
             pkgs.fontconfig
           ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+            # libstdc++.so.6 for prebuilt Node native addons and bindgen/libclang if host LLVM is probed.
+            pkgs.stdenv.cc.cc.lib
             pkgs.libva
-            # tddy-livekit-screen-capture → xcap → wayland-sys / gbm (pkg-config)
+            # tddy-livekit-screen-capture → xcap → wayland-sys / gbm / drm (pkg-config)
             pkgs.wayland
             pkgs.wayland-protocols
             pkgs.libdrm
-            pkgs.mesa
-            # khronos-egl (screen capture stack) needs egl.pc
-            pkgs.libglvnd
+            pkgs.pipewire
+            # khronos-egl (gbm / GPU capture path) needs egl.pc (libglvnd.dev on current nixpkgs)
+            pkgs.libglvnd.dev
+            # xcap → gbm-sys / X11 path: link needs libgbm and libxcb (-lgbm -lxcb)
             pkgs.libgbm
             pkgs.libxcb
-            pkgs.pipewire
-            # libspa-sys (pipewire) uses bindgen — use Nix libclang, not host /usr/lib/llvm-*
-            pkgs.llvmPackages.libclang
-            pkgs.stdenv.cc.cc.lib
           ];
           packages = [
             rustToolchain
@@ -66,7 +68,9 @@
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
             export CXXFLAGS="-include ''${SDKROOT}/usr/include/uuid/uuid.h''${CXXFLAGS:+ $CXXFLAGS}"
           '';
-        };
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+        });
       }
     );
 }

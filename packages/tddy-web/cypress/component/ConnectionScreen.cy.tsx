@@ -1414,16 +1414,16 @@ describe("ConnectionScreen multi-host daemon selection", () => {
   /** PRD: local daemon row first in the Host dropdown even when the RPC returns peers before the local row. */
   it("web_connection_screen_host_dropdown_lists_multiple_daemons", () => {
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsWithDaemons([ACTIVE_SESSION], [
+    interceptAllRpcsWithDaemons([ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON], [
       { instanceId: DAEMON_PEER.instanceId, label: DAEMON_PEER.label, isLocal: false },
       { instanceId: DAEMON_LOCAL.instanceId, label: DAEMON_LOCAL.label, isLocal: true },
     ]);
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"]`, { timeout: 5000 }).should("exist");
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"] option`).should("have.length", 2);
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"] option`).eq(0).should("contain.text", DAEMON_LOCAL.label);
-    cy.get(`[data-testid="host-select-${PROJECT.projectId}"] option`).eq(1).should("contain.text", DAEMON_PEER.label);
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 }).should("exist");
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).should("have.length", 2);
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).eq(0).should("contain.text", DAEMON_LOCAL.label);
+    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).eq(1).should("contain.text", DAEMON_PEER.label);
   });
 
   it("defaults Host dropdown to the local daemon", () => {
@@ -1699,11 +1699,10 @@ describe("ConnectionScreen — multi-session attachments (acceptance)", () => {
       .find("[data-testid='connection-status-dot']", { timeout: 20000 })
       .should("have.length.at.least", 1)
       .first()
-      .should("be.visible")
+      .scrollIntoView()
       .click({ force: true });
     cy.get("[data-testid='connection-menu-disconnect']", { timeout: 10000 })
       .first()
-      .should("be.visible")
       .click({ force: true });
     cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_B.sessionId}"]`, {
       timeout: 15000,

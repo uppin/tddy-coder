@@ -1,11 +1,11 @@
 /**
- * Mock-room E2E: metadata → callback listener → injectable `deliverCallback` (no WebRTC).
+ * Mock-room E2E: metadata → loopback listener → injectable tunnel (tests use HTTP callback stub).
  */
 import { describe, expect, test } from "bun:test";
 import type { Room } from "livekit-client";
-import { RoomEvent } from "livekit-client";
 
 import { installLiveKitOAuthRelay } from "../../src/bun/livekit-oauth-relay";
+import { startOAuthCallbackServer } from "../../src/bun/oauth-callback-server";
 
 function codexMetadataJson(port: number, state: string) {
   return JSON.stringify({
@@ -38,22 +38,26 @@ function createMockRoom(daemon: { identity: string; metadata: string }) {
 }
 
 describe("livekit oauth relay (mock room E2E)", () => {
-  test("pending metadata starts callback server; GET relays deliverCallback", async () => {
+  test("pending metadata starts listener; GET hits injectable tunnel stub", async () => {
     let delivered: { code: string; state: string } | null = null;
     const opened: string[] = [];
-    const daemon = { identity: "daemon-e2e", metadata: codexMetadataJson(0, "st-e2e") };
+    const daemon = { identity: "daemon-e2e", metadata: codexMetadataJson(38_471, "st-e2e") };
     const room = createMockRoom(daemon);
 
     const handle = await installLiveKitOAuthRelay(room, {
       openUrlInBrowser: (u) => {
         opened.push(u);
       },
-      createDeliverPipeline: () => ({
-        deliverCallback: async (code, state) => {
-          delivered = { code, state };
-        },
-        dispose: () => {},
-      }),
+      startOAuthTcpTunnel: ({ listenPort, expectedState }) => {
+        const server = startOAuthCallbackServer({
+          port: listenPort,
+          expectedState,
+          onHit: (hit) => {
+            delivered = { code: hit.code, state: hit.state };
+          },
+        });
+        return { stop: () => server.stop() };
+      },
     });
 
     try {
@@ -72,17 +76,21 @@ describe("livekit oauth relay (mock room E2E)", () => {
 
   test("state mismatch returns 403 and does not deliver", async () => {
     let delivered: { code: string; state: string } | null = null;
-    const daemon = { identity: "daemon-e2e", metadata: codexMetadataJson(0, "want-state") };
+    const daemon = { identity: "daemon-e2e", metadata: codexMetadataJson(38_472, "want-state") };
     const room = createMockRoom(daemon);
 
     const handle = await installLiveKitOAuthRelay(room, {
       openUrlInBrowser: () => {},
-      createDeliverPipeline: () => ({
-        deliverCallback: async (code, state) => {
-          delivered = { code, state };
-        },
-        dispose: () => {},
-      }),
+      startOAuthTcpTunnel: ({ listenPort, expectedState }) => {
+        const server = startOAuthCallbackServer({
+          port: listenPort,
+          expectedState,
+          onHit: (hit) => {
+            delivered = { code: hit.code, state: hit.state };
+          },
+        });
+        return { stop: () => server.stop() };
+      },
     });
 
     try {
@@ -98,22 +106,26 @@ describe("livekit oauth relay (mock room E2E)", () => {
     }
   });
 
-  test("ParticipantMetadataChanged starts server when daemon appears later", async () => {
+  test("ParticipantMetadataChanged starts listener when daemon appears later", async () => {
     const daemon = { identity: "daemon-e2e", metadata: "" };
     const room = createMockRoom(daemon);
 
     const handle = await installLiveKitOAuthRelay(room, {
       openUrlInBrowser: () => {},
-      createDeliverPipeline: () => ({
-        deliverCallback: async () => {},
-        dispose: () => {},
-      }),
+      startOAuthTcpTunnel: ({ listenPort, expectedState }) => {
+        const server = startOAuthCallbackServer({
+          port: listenPort,
+          expectedState,
+          onHit: () => {},
+        });
+        return { stop: () => server.stop() };
+      },
     });
 
     try {
       expect(handle.getCallbackPort()).toBeNull();
-      daemon.metadata = codexMetadataJson(0, "late");
-      room.emit(RoomEvent.ParticipantMetadataChanged);
+      daemon.metadata = codexMetadataJson(38_473, "late");
+      room.emit("participantMetadataChanged");
       const deadline = Date.now() + 2_000;
       while (handle.getCallbackPort() === null && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 10));

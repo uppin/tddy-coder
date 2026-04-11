@@ -86,7 +86,6 @@ fn terminal_and_codex_oauth_for_livekit(
     mouse: bool,
 ) -> (
     tddy_service::TerminalServiceVirtualTui,
-    tddy_service::CodexOAuthSession,
     tokio::sync::watch::Sender<String>,
     tokio::sync::watch::Receiver<String>,
 ) {
@@ -114,7 +113,11 @@ fn terminal_and_codex_oauth_for_livekit(
         };
         let update = match &g.pending {
             None => true,
-            Some(p) => p.detected.authorize_url != detected.authorize_url,
+            Some(p) => {
+                p.detected.authorize_url != detected.authorize_url
+                    || p.detected.callback_port != detected.callback_port
+                    || p.detected.state != detected.state
+            }
         };
         if !update {
             return;
@@ -136,7 +139,7 @@ fn terminal_and_codex_oauth_for_livekit(
     });
     let terminal_service =
         tddy_service::TerminalServiceVirtualTui::with_output_hook(view_factory, mouse, hook);
-    (terminal_service, oauth_session, metadata_tx, metadata_rx)
+    (terminal_service, metadata_tx, metadata_rx)
 }
 
 /// Verify tddy-tools binary is available. Required for claude, cursor, and codex agents.
@@ -1448,12 +1451,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             let factory = view_factory
                 .clone()
                 .expect("factory set when livekit_enabled");
-            let (terminal_service, oauth_session, metadata_tx, metadata_rx) =
+            let (terminal_service, _metadata_tx, metadata_rx) =
                 terminal_and_codex_oauth_for_livekit(factory, args.mouse);
-            let codex_oauth_impl = tddy_service::CodexOAuthServiceImpl::with_metadata_watch(
-                oauth_session,
-                metadata_tx,
-            );
             let livekit_multi = tddy_rpc::MultiRpcService::new(vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
@@ -1462,11 +1461,11 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
                 tddy_rpc::ServiceEntry {
-                    name: tddy_service::CodexOAuthServiceServer::<
-                        tddy_service::CodexOAuthServiceImpl,
+                    name: tddy_service::LoopbackTunnelServiceServer::<
+                        tddy_service::LoopbackTunnelServiceImpl,
                     >::NAME,
-                    service: std::sync::Arc::new(tddy_service::CodexOAuthServiceServer::new(
-                        codex_oauth_impl,
+                    service: std::sync::Arc::new(tddy_service::LoopbackTunnelServiceServer::new(
+                        tddy_service::LoopbackTunnelServiceImpl,
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
             ]);
@@ -2234,10 +2233,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     }
 
     if livekit_enabled {
-        let (terminal_service, oauth_session, metadata_tx, metadata_rx) =
+        let (terminal_service, _metadata_tx, metadata_rx) =
             terminal_and_codex_oauth_for_livekit(view_factory.clone(), args.mouse);
-        let codex_oauth_impl =
-            tddy_service::CodexOAuthServiceImpl::with_metadata_watch(oauth_session, metadata_tx);
         let url = args.livekit_url.clone().unwrap();
         let codex_oauth_watch = args
             .session_dir
@@ -2256,7 +2253,9 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
             let terminal_server = tddy_service::TerminalServiceServer::new(terminal_service);
             let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
-            let codex_server = tddy_service::CodexOAuthServiceServer::new(codex_oauth_impl);
+            let tunnel_server = tddy_service::LoopbackTunnelServiceServer::new(
+                tddy_service::LoopbackTunnelServiceImpl,
+            );
             let multi_service = tddy_rpc::MultiRpcService::new(vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
@@ -2269,10 +2268,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
                 tddy_rpc::ServiceEntry {
-                    name: tddy_service::CodexOAuthServiceServer::<
-                        tddy_service::CodexOAuthServiceImpl,
+                    name: tddy_service::LoopbackTunnelServiceServer::<
+                        tddy_service::LoopbackTunnelServiceImpl,
                     >::NAME,
-                    service: std::sync::Arc::new(codex_server)
+                    service: std::sync::Arc::new(tunnel_server)
                         as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
             ]);
@@ -2306,11 +2305,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
                 tddy_rpc::ServiceEntry {
-                    name: tddy_service::CodexOAuthServiceServer::<
-                        tddy_service::CodexOAuthServiceImpl,
+                    name: tddy_service::LoopbackTunnelServiceServer::<
+                        tddy_service::LoopbackTunnelServiceImpl,
                     >::NAME,
-                    service: std::sync::Arc::new(tddy_service::CodexOAuthServiceServer::new(
-                        codex_oauth_impl,
+                    service: std::sync::Arc::new(tddy_service::LoopbackTunnelServiceServer::new(
+                        tddy_service::LoopbackTunnelServiceImpl,
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
             ]);
@@ -2319,14 +2318,13 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     .enable_all()
                     .build()
                     .expect("tokio runtime");
-                let watch = codex_oauth_watch;
                 rt.block_on(async {
                     match tddy_livekit::LiveKitParticipant::connect(
                         &url,
                         &token,
                         livekit_multi,
                         tddy_livekit::RoomOptions::default(),
-                        watch,
+                        codex_oauth_watch,
                         None,
                     )
                     .await

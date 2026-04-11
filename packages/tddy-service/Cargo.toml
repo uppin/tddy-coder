@@ -20,7 +20,7 @@ tddy-workflow = { path = "../tddy-workflow" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-tui = { path = "../tddy-tui" }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net", "fs", "time"] }
 tokio-stream = "0.1"
 tonic = "0.12"
 url = "2"

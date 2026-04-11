@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package loopback_tunnel;
+
+// Bridges raw TCP between the operator desktop and 127.0.0.1:port on the session host (e.g. Codex OAuth callback).
+service LoopbackTunnelService {
+  rpc StreamBytes(stream TunnelChunk) returns (stream TunnelChunk);
+}
+
+// First client message: set open_port to connect the agent to 127.0.0.1:open_port.
+// Later client messages: data is upstream (browser → session host). open_port must be 0.
+// Server messages: data is downstream (session host → browser).
+message TunnelChunk {
+  uint32 open_port = 1;
+  bytes data = 2;
+}

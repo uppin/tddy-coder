@@ -8,8 +8,7 @@ export {
 } from "./gen/terminal_pb.js";
 export type { TerminalInput, TerminalOutput } from "./gen/terminal_pb.js";
 export {
-  CodexOAuthService,
-  DeliverCallbackRequestSchema,
-  DeliverCallbackResponseSchema,
-} from "./gen/codex_oauth_pb.js";
-export type { DeliverCallbackRequest, DeliverCallbackResponse } from "./gen/codex_oauth_pb.js";
+  LoopbackTunnelService,
+  TunnelChunkSchema,
+} from "./gen/loopback_tunnel_pb.js";
+export type { TunnelChunk } from "./gen/loopback_tunnel_pb.js";

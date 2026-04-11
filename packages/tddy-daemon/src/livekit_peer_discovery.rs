@@ -38,8 +38,8 @@
 //! simplicity).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use livekit::prelude::{RemoteParticipant, Room, RoomEvent, RoomOptions};
 use prost::Message;
@@ -260,15 +260,33 @@ fn remote_participant_to_eligible(
     })
 }
 
+fn process_startup_unix_ms_suffix() -> &'static str {
+    static SUFFIX: OnceLock<String> = OnceLock::new();
+    SUFFIX
+        .get_or_init(|| {
+            let ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            format!("{ms}")
+        })
+        .as_str()
+}
+
 /// Resolved local daemon instance id string (config override or hostname default).
 pub fn local_instance_id_for_config(config: &DaemonConfig) -> String {
-    config
+    let base = config
         .daemon_instance_id
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| crate::multi_host::local_daemon_instance_id().0)
+        .unwrap_or_else(|| crate::multi_host::local_daemon_instance_id().0);
+    if config.daemon_instance_id_append_startup_timestamp {
+        format!("{}-{}", base, process_startup_unix_ms_suffix())
+    } else {
+        base
+    }
 }
 
 /// LiveKit-backed **EligibleDaemonSource** — reads [`CommonRoomPeerRegistry`] populated by the discovery task.
@@ -319,6 +337,11 @@ pub fn spawn_common_room_discovery_task(
     registry: Arc<CommonRoomPeerRegistry>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
 ) {
+    let room_slot_oauth = room_slot.clone();
+    tokio::spawn(async move {
+        crate::oauth_loopback_tunnel::run_oauth_tunnel_supervisor_follow_room_slot(room_slot_oauth)
+            .await;
+    });
     tokio::spawn(async move {
         loop {
             if let Err(e) =
@@ -591,5 +614,17 @@ mod tests {
                 peer_instance_id: "remote-peer".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn local_instance_id_appends_stable_timestamp_suffix_when_configured() {
+        let mut cfg = DaemonConfig::default();
+        cfg.daemon_instance_id = Some("my-daemon".to_string());
+        cfg.daemon_instance_id_append_startup_timestamp = true;
+        let a = local_instance_id_for_config(&cfg);
+        let b = local_instance_id_for_config(&cfg);
+        assert_eq!(a, b);
+        let suffix = a.strip_prefix("my-daemon-").expect("prefix");
+        assert!(suffix.chars().all(|c| c.is_ascii_digit()));
     }
 }

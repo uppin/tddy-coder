@@ -765,10 +765,21 @@ impl TelegramWorkflowSpawn {
                 repo_path,
                 &livekit,
                 opts,
+                self.config.log.as_ref(),
             );
             client.spawn(req)
         } else {
-            spawner::spawn_as_user(&self.os_user, &tool_path, repo_path, &livekit, opts)
+            let (child_log_level, child_log_format) =
+                spawner::child_log_yaml_tuning(self.config.log.as_ref());
+            spawner::spawn_as_user(
+                &self.os_user,
+                &tool_path,
+                repo_path,
+                &livekit,
+                opts,
+                child_log_level.as_str(),
+                child_log_format.as_str(),
+            )
         }
     }
 }

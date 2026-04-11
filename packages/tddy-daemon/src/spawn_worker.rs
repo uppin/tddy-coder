@@ -48,6 +48,20 @@ pub struct SpawnRequest {
     /// Passed to spawned `tddy-coder` as `--recipe` when set (e.g. `bugfix`).
     #[serde(default)]
     pub recipe: Option<String>,
+    /// `log.default.level` for the child's `--config` (from daemon YAML `log:`, e.g. `dev.desktop.yaml`).
+    #[serde(default = "default_child_log_level")]
+    pub child_log_level: String,
+    /// `log.loggers.default.format` for the child session config.
+    #[serde(default = "default_child_log_format")]
+    pub child_log_format: String,
+}
+
+fn default_child_log_level() -> String {
+    "debug".to_string()
+}
+
+fn default_child_log_format() -> String {
+    spawner::CHILD_LOG_FORMAT_FALLBACK.to_string()
 }
 
 /// Request to clone a git repository as an OS user.
@@ -278,6 +292,8 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                         mouse: req.mouse,
                         recipe: req.recipe.as_deref(),
                     },
+                    req.child_log_level.as_str(),
+                    req.child_log_format.as_str(),
                 );
                 log::info!(
                     "spawn_worker: spawn_as_user returned session_id={}",
@@ -346,7 +362,9 @@ pub fn build_spawn_request(
     repo_path: &Path,
     livekit: &LiveKitCreds,
     opts: SpawnOptions<'_>,
+    daemon_log: Option<&tddy_core::LogConfig>,
 ) -> SpawnRequest {
+    let (child_log_level, child_log_format) = spawner::child_log_yaml_tuning(daemon_log);
     SpawnRequest {
         os_user: os_user.to_string(),
         tool_path: tool_path.to_string(),
@@ -362,5 +380,7 @@ pub fn build_spawn_request(
         common_room: livekit.common_room.clone(),
         daemon_instance_id: livekit.daemon_instance_id.clone(),
         recipe: opts.recipe.map(String::from),
+        child_log_level,
+        child_log_format,
     }
 }

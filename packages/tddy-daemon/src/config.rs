@@ -49,6 +49,11 @@ pub struct DaemonConfig {
     /// and ConnectSession use `daemon-{instance_id}-{session_id}` as LiveKit server identity.
     #[serde(default)]
     pub daemon_instance_id: Option<String>,
+    /// When true, append `-<unix_ms>` once per process to the resolved instance id (YAML override
+    /// or hostname default) so multiple local daemons avoid LiveKit `DuplicateIdentity` in
+    /// `common_room`. Intended for desktop dev / overlapping CLI embed + standalone runs.
+    #[serde(default)]
+    pub daemon_instance_id_append_startup_timestamp: bool,
     /// Optional Telegram bot notifications (see `telegram_notifier` module).
     #[serde(default)]
     pub telegram: Option<TelegramConfig>,
@@ -70,6 +75,7 @@ impl Default for DaemonConfig {
             spawn_mouse: true,
             spawn_worker_request_timeout_secs: default_spawn_worker_request_timeout_secs(),
             daemon_instance_id: None,
+            daemon_instance_id_append_startup_timestamp: false,
             telegram: None,
         }
     }

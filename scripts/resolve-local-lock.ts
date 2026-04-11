@@ -12,13 +12,15 @@
  * Zero external dependencies — semver logic is inlined.
  */
 
-import { readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join, dirname } from "path";
 
 const REGISTRY_URL =
   process.env.LOCAL_REGISTRY_URL ?? "https://npm.dev.wixpress.com";
-const LOCK_PATH = join(import.meta.dir, "..", "bun.lock");
-const OUTPUT_PATH = join(import.meta.dir, "..", "local.bun.lock");
+const PROJECT_ROOT = join(import.meta.dir, "..");
+const LOCK_PATH = join(PROJECT_ROOT, "bun.lock");
+const OUTPUT_PATH = join(PROJECT_ROOT, "local.bun.lock");
+const LOCAL_PKG_DIR = join(PROJECT_ROOT, ".local-install");
 const CONCURRENCY = 10;
 
 // ---------------------------------------------------------------------------
@@ -138,6 +140,24 @@ interface RegistryResponse {
 
 const registryCache = new Map<string, RegistryResponse | null>();
 
+async function fetchWithTimeout(
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchRegistryInfo(
   packageName: string
 ): Promise<RegistryResponse | null> {
@@ -146,18 +166,23 @@ async function fetchRegistryInfo(
   }
 
   const url = `${REGISTRY_URL}/${packageName}`;
-  const accept = packageName.startsWith("@")
-    ? "application/json"
-    : "application/vnd.npm.install-v1+json";
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
-    const response = await fetch(url, {
-      headers: { Accept: accept },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
+    // Try abbreviated metadata first (much smaller payload)
+    let response = await fetchWithTimeout(
+      url,
+      { Accept: "application/vnd.npm.install-v1+json" },
+      120_000
+    );
+
+    // Fall back to full metadata if abbreviated is not supported
+    if (response.status === 406 || response.status === 404) {
+      response = await fetchWithTimeout(
+        url,
+        { Accept: "application/json" },
+        120_000
+      );
+    }
 
     if (!response.ok) {
       console.warn(`  [WARN] ${packageName}: registry returned ${response.status}`);
@@ -252,7 +277,7 @@ async function resolvePackage(
   const packageId = entry[0];
 
   if (
-    packageId.startsWith("workspace:") ||
+    packageId.includes("@workspace:") ||
     packageId.includes("link:") ||
     packageId.includes("file:")
   ) {
@@ -355,9 +380,7 @@ async function main() {
       try {
         const result = await resolvePackage(key, entry as LockfilePackageEntry);
         processedCount++;
-        if (processedCount % 50 === 0 || processedCount === total) {
-          process.stdout.write(`\r  Progress: ${processedCount}/${total}`);
-        }
+        process.stderr.write(`\r  Progress: ${processedCount}/${total}`);
         return result;
       } catch (err) {
         console.warn(`  [ERROR] ${key}: ${(err as Error).message}`);
@@ -371,20 +394,39 @@ async function main() {
       }
     }
   );
-  console.log(); // newline after progress
+  process.stderr.write("\n");
 
   const newPackages: Record<string, LockfilePackageEntry> = {};
+  const resolvedVersions = new Map<string, string>();
 
   for (const result of results) {
     newPackages[result.key] = result.entry;
+    const { name, version } = parsePackageId(result.entry[0]);
+    resolvedVersions.set(name, version);
     if (result.changed) {
       const origEntry = lockfile.packages[result.key] as LockfilePackageEntry;
       const { name: origName, version: origVersion } = parsePackageId(origEntry[0]);
-      const { version: newVersion } = parsePackageId(result.entry[0]);
-      console.log(`  [CHANGED] ${origName}: ${origVersion} -> ${newVersion}`);
+      console.log(`  [CHANGED] ${origName}: ${origVersion} -> ${version}`);
       changedCount++;
     } else {
       unchangedCount++;
+    }
+  }
+
+  // Update nested dependency specifiers inside entry[2] metadata
+  const depFields = ["dependencies", "optionalDependencies", "peerDependencies"] as const;
+  for (const entry of Object.values(newPackages)) {
+    const meta = entry[2] as Record<string, unknown> | undefined;
+    if (!meta) continue;
+    for (const field of depFields) {
+      const deps = meta[field] as Record<string, string> | undefined;
+      if (!deps) continue;
+      for (const [depName, depRange] of Object.entries(deps)) {
+        const resolved = resolvedVersions.get(depName);
+        if (resolved && resolved !== depRange) {
+          deps[depName] = resolved;
+        }
+      }
     }
   }
 
@@ -400,12 +442,49 @@ async function main() {
   const output = JSON.stringify(newLockfile, null, 2) + "\n";
   writeFileSync(OUTPUT_PATH, output);
 
+  // Write patched package.json files for each workspace
+  const patchedPkgJsons: string[] = [];
+  for (const [wsKey, wsValue] of Object.entries(newWorkspaces)) {
+    const wsDir = wsKey === "" ? PROJECT_ROOT : join(PROJECT_ROOT, wsKey);
+    const pkgJsonPath = join(wsDir, "package.json");
+    if (!existsSync(pkgJsonPath)) continue;
+
+    const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
+    let patched = false;
+
+    for (const depField of ["dependencies", "devDependencies", "optionalDependencies"] as const) {
+      const resolvedDeps = (wsValue as Record<string, unknown>)[depField] as Record<string, string> | undefined;
+      const originalDeps = pkgJson[depField] as Record<string, string> | undefined;
+      if (!resolvedDeps || !originalDeps) continue;
+
+      for (const [depName, resolvedVersion] of Object.entries(resolvedDeps)) {
+        if (depName in originalDeps && originalDeps[depName] !== resolvedVersion) {
+          originalDeps[depName] = resolvedVersion;
+          patched = true;
+        }
+      }
+    }
+
+    if (patched) {
+      const relPath = wsKey === "" ? "package.json" : join(wsKey, "package.json");
+      const outPath = join(LOCAL_PKG_DIR, relPath);
+      mkdirSync(dirname(outPath), { recursive: true });
+      writeFileSync(outPath, JSON.stringify(pkgJson, null, 2) + "\n");
+      patchedPkgJsons.push(relPath);
+      console.log(`  [PATCHED] ${relPath}`);
+    }
+  }
+
   console.log();
   console.log("Summary:");
   console.log(`  Changed:   ${changedCount}`);
   console.log(`  Unchanged: ${unchangedCount}`);
   console.log(`  Errors:    ${errorCount}`);
+  console.log(`  Patched package.json files: ${patchedPkgJsons.length}`);
   console.log(`  Output:    ${OUTPUT_PATH}`);
+  if (patchedPkgJsons.length > 0) {
+    console.log(`  Patched:   ${LOCAL_PKG_DIR}/`);
+  }
 }
 
 main().catch((err) => {

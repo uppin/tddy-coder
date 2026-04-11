@@ -70,7 +70,8 @@ const tableStyle = {
 const roleBadge = (role: RoomParticipant["role"]) => {
   const colors: Record<RoomParticipant["role"], string> = {
     browser: "#1565c0",
-    server: "#2e7d32",
+    coder: "#2e7d32",
+    daemon: "#6a1b9a",
     unknown: "#666",
   };
   return (
@@ -193,7 +194,15 @@ export function ParticipantList({
                   data-testid={`participant-metadata-${id}`}
                 >
                   {codexOAuth ? (
-                    <span title={p.metadata}>Codex OAuth pending — open sign-in (→)</span>
+                    <a
+                      href={codexOAuth.authorizeUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={p.metadata}
+                      style={{ color: "#1565c0", textDecoration: "underline" }}
+                    >
+                      Codex OAuth pending — open sign-in (→)
+                    </a>
                   ) : (
                     (p.metadata || "—")
                   )}

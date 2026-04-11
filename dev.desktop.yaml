@@ -1,0 +1,95 @@
+# Dev config for tddy-daemon when started from Tddy Desktop (Electrobun) or `bun run desktop:dev`.
+# From `packages/tddy-desktop`, use `bun run dev` (not raw `electrobun dev`) so `TDDY_WORKSPACE_ROOT`
+# / daemon binary paths resolve; or run `./scripts/desktop-dev.sh` from the repo root.
+# Default when TDDY_DAEMON_CONFIG is unset: this file at the repo root (if it exists).
+# Repo-root `.env` is loaded before spawn (same rule as ./web-dev: does not override already-set env).
+# tddy-daemon then applies env overrides (LIVEKIT_URL, LIVEKIT_API_KEY, WEB_HOST, GITHUB_*, etc.) — see packages/tddy-daemon/src/main.rs apply_env_overrides.
+# For browser dev without the desktop shell, keep using ./web-dev with dev.daemon.yaml (or DAEMON_CONFIG).
+#
+# `log:` configures the daemon logger. Spawned `tddy-coder` children still get their own YAML with
+# `tmp/logs/coder` (see spawner) — only the daemon process uses this block.
+#
+# `stderr` so LiveKit discovery + `tddy_daemon::oauth_tunnel` lines show next to `[tddy-desktop]` in
+# `./dev bun run desktop:dev`. For file-only logs use: `output: { file: "tmp/logs/daemon" }`.
+# Verbose WebRTC / LiveKit SDK lines go to `tmp/logs/webrtc` (see policies).
+
+log:
+  loggers:
+    default:
+      output: stderr
+      format: "{timestamp} [{level}] [{target}] {message}"
+    webrtc:
+      output: { file: "tmp/logs/webrtc" }
+      format: "{timestamp} [{level}] [{target}] {message}"
+  default:
+    level: debug
+    logger: default
+  policies:
+    - selector: { target: libwebrtc* }
+      logger: webrtc
+    - selector: { target: livekit* }
+      logger: webrtc
+    - selector: { target: livekit_api* }
+      logger: webrtc
+
+# Per-process suffix on LiveKit common_room identity (hostname or daemon_instance_id) so overlapping
+# embedded + CLI daemons on one machine do not hit DuplicateIdentity.
+daemon_instance_id_append_startup_timestamp: true
+
+listen:
+  web_port: 8899
+  web_host: 127.0.0.1
+
+# Production web bundle (used when hitting the daemon port directly). With desktop:dev + Vite, open the Vite URL for HMR.
+web_bundle_path: packages/tddy-web/dist
+
+livekit:
+  url: ws://192.168.1.10:7880
+  api_key: devkey
+  api_secret: secret
+  public_url: ws://192.168.1.10:7880
+  common_room: tddy-lobby
+
+github:
+  stub: true
+  stub_codes: "test-code:testuser"
+
+users:
+  - github_user: "testuser"
+    os_user: "CURRENT_USER" # Replaced before spawn (same as ./web-dev)
+
+spawn_mouse: true
+
+telegram:
+  enabled: false
+  bot_token: "<token>"
+  chat_ids:
+    - -5239346661
+
+allowed_agents:
+  - id: claude
+    label: "Claude (opus)"
+  - id: claude-acp
+    label: "Claude ACP (opus)"
+  - id: cursor
+    label: "Cursor (composer-2)"
+  - id: stub
+    label: "Stub"
+  - id: codex
+    label: "Codex"
+  - id: codex-acp
+    label: "Codex ACP"
+
+allowed_tools:
+  - path: "target/debug/tddy-coder"
+    label: "tddy-coder (debug)"
+  - path: "target/release/tddy-coder"
+    label: "tddy-coder (release)"
+  - path: "target/debug/tddy-tools"
+    label: "tddy-tools (debug)"
+  - path: "target/release/tddy-tools"
+    label: "tddy-tools (release)"
+  - path: "target/debug/tddy-demo"
+    label: "tddy-demo (debug)"
+  - path: "target/release/tddy-demo"
+    label: "tddy-demo (release)"

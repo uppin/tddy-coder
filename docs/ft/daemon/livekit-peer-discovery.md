@@ -40,10 +40,15 @@ Membership in the configured LiveKit room (same project credentials and **`commo
 
 After sign-in, **ConnectionScreen** loads **ListEligibleDaemons** with tools and projects. The Host dropdown lists eligible rows with the **local** daemon first, then peers sorted by **`instance_id`**. The selected **`daemon_instance_id`** is sent on **StartSession**.
 
+## Operator and CI notes
+
+- **`TDDY_PROJECTS_DIR`:** test-only override for **`projects_path_for_user`**; see **`packages/tddy-daemon/src/user_sessions_path.rs`**. Avoid setting it globally across unrelated suites; tests such as **`multi_host_acceptance`** save/restore the prior value and use **`#[serial]`** where they share LiveKit.
+- **LiveKit:** use the Docker testkit or set **`LIVEKIT_TESTKIT_WS_URL`** where documented; acceptance tests that share a room use **`#[serial]`** or equivalent isolation. Rust module overview: **`packages/tddy-daemon/src/livekit_peer_discovery.rs`** (top-level **`//!`** section).
+
 ## Related documentation
 
+- [Codex OAuth relay — operator loopback tunnel](codex-oauth-relay.md#operator-loopback-tunnel-tddy-daemon)
 - [Web terminal — eligible daemons and host selection](../web/web-terminal.md#eligible-daemons-and-host-selection)
 - [Project concept — `host_repo_paths`](project-concept.md)
 - [Daemon changelog](changelog.md)
 - [Web changelog](../web/changelog.md)
-- Operator / CI notes: [docs/dev/1-WIP/2026-04-11-changeset-livekit-daemon-peer-discovery.md](../../dev/1-WIP/2026-04-11-changeset-livekit-daemon-peer-discovery.md)

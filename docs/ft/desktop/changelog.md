@@ -1,5 +1,17 @@
 # Desktop — changelog
 
+## 2026-04-11 — OAuth loopback TCP owned by tddy-daemon
+
+- **tddy-desktop**: Production main process does not **`Bun.listen`** or join LiveKit for OAuth; **`TDDY_DESKTOP_OAUTH_RELAY`/`@livekit/rtc-node`** path removed. **`tddy-daemon`**: **`oauth_loopback_tunnel`** + **`codex_oauth_participant_metadata`**, wired from **`livekit_peer_discovery`** common-room **`Room`**. **`installLiveKitOAuthRelay`** retained for tests only. Feature **[tddy-desktop-electrobun.md](tddy-desktop-electrobun.md)**; daemon **[oauth-loopback-tunnel.md](../../packages/tddy-daemon/docs/oauth-loopback-tunnel.md)**; **[codex-oauth-relay.md](../daemon/codex-oauth-relay.md)**. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
+## 2026-04-11 — Bundled tddy-daemon (macOS)
+
+- **tddy-desktop**: **`embedded-daemon`** resolves **`TDDY_DAEMON_CONFIG`** (or **`dev.desktop.yaml`** in dev), loads repo **`.env`**, spawns **`tddy-daemon`** from **`TDDY_DAEMON_BINARY`** / **`resources/bin/`** / **`target/{release,debug}`**; **`prebuild`** builds and copies release binary; **`electrobun.config.ts`** **`build.copy`** includes the binary; teardown on app exit. Feature **[tddy-desktop-electrobun.md](tddy-desktop-electrobun.md)** (bundled daemon section). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
+## 2026-04-11 — OAuth loopback tunnel over LiveKit (session host + transport)
+
+- **tddy-service**: **`LoopbackTunnelServiceImpl`**. **tddy-coder**: LiveKit **`MultiRpcService`** includes **LoopbackTunnel** (+ **Token** when applicable). **tddy-livekit** / **tddy-livekit-web**: **`rpc_scenarios`** tunnel coverage and **`loopback_tunnel_pb`**. Operator-side TCP is implemented in **`tddy-daemon`** (see **OAuth loopback TCP owned by tddy-daemon** above). Feature docs: **[codex-oauth-web-relay.md](../web/codex-oauth-web-relay.md)**, **[tddy-desktop-electrobun.md](tddy-desktop-electrobun.md)**.
+
 ## 2026-04-10 — Tddy Desktop Electrobun Phases 1–3
 
 - **tddy-desktop**: Electrobun native shell (`packages/tddy-desktop`): embedded `tddy-web` webview, local OAuth callback server, LiveKit relay via `CodexOAuthService/DeliverCallback` RPC (Variant A). Unit, acceptance, and e2e tests. [tddy-desktop-electrobun.md](tddy-desktop-electrobun.md).

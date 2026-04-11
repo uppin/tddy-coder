@@ -4,6 +4,14 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-04-11 — Codex OAuth: operator tunnel in tddy-daemon
+
+- **Docs**: **[codex-oauth-web-relay.md](codex-oauth-web-relay.md)** — operator callback TCP and **`StreamBytes`** run in **`tddy-daemon`** when using desktop + **`livekit.common_room`**; session-side **`LoopbackTunnelService`** semantics unchanged. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
+## 2026-04-11 — Codex OAuth: loopback tunnel documentation
+
+- **Docs**: **[codex-oauth-web-relay.md](codex-oauth-web-relay.md)** documents session-side **`LoopbackTunnelService`** semantics (privileged port refusal, first **`TunnelChunk`**); desktop flow cross-links **[tddy-desktop-electrobun.md](../desktop/tddy-desktop-electrobun.md)**. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-04-11 — Connection screen: multi-host eligible daemons (LiveKit common room)
 
 - **`tddy-web`**: **ConnectionScreen** sorts **ListEligibleDaemons** for the Host dropdown (**local** first, then **`instance_id`**); **StartSession** sends the selected **`daemonInstanceId`** when the daemon lists multiple eligible hosts. Cypress **ConnectionScreen** covers multi-row host list and multi-session disconnect scoping. **Feature docs**: [web-terminal.md](web-terminal.md), [livekit-peer-discovery.md](../daemon/livekit-peer-discovery.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).

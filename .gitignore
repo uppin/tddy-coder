@@ -65,3 +65,4 @@ changeset.yaml
 tmp/
 
 local.bun.lock
+.local-install/

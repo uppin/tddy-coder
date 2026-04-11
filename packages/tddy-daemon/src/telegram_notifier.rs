@@ -680,7 +680,8 @@ impl TelegramSessionWatcher {
                     "on_server_message: ModeChanged for session_id={} (elicitation path)",
                     session_id
                 );
-                let now_eliciting = crate::elicitation::mode_changed_requires_telegram_elicitation(mc);
+                let now_eliciting =
+                    crate::elicitation::mode_changed_requires_telegram_elicitation(mc);
                 let was_eliciting = self
                     .last_presenter_elicitation
                     .get(session_id)
@@ -695,10 +696,8 @@ impl TelegramSessionWatcher {
                             for &cid in &tg.chat_ids {
                                 match self.active_elicitation.lock() {
                                     Ok(mut coord) => {
-                                        let next = coord.advance_after_elicitation_completion(
-                                            cid,
-                                            session_id,
-                                        );
+                                        let next = coord
+                                            .advance_after_elicitation_completion(cid, session_id);
                                         log::info!(
                                             target: "tddy_daemon::telegram",
                                             "presenter left elicitation: advanced queue chat_id={} completed_session_id={} next_active={:?}",
@@ -719,7 +718,8 @@ impl TelegramSessionWatcher {
                                 }
                             }
                             for next_sid in promoted {
-                                let Some(mc_replay) = self.last_elicitation_mc.get(&next_sid).cloned()
+                                let Some(mc_replay) =
+                                    self.last_elicitation_mc.get(&next_sid).cloned()
                                 else {
                                     continue;
                                 };

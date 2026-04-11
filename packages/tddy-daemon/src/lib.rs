@@ -3,12 +3,14 @@
 pub mod active_elicitation;
 pub mod agent_list_mapping;
 pub mod auth;
+mod codex_oauth_participant_metadata;
 pub mod codex_oauth_relay;
 pub mod config;
 pub mod connection_service;
 pub mod elicitation;
 pub mod livekit_peer_discovery;
 pub mod multi_host;
+mod oauth_loopback_tunnel;
 pub mod presenter_intent_client;
 pub mod project_storage;
 pub mod server;
