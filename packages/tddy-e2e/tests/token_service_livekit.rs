@@ -19,7 +19,7 @@ mod livekit_tests {
     use serial_test::serial;
     use std::sync::Arc;
     use std::time::Duration;
-    use tddy_livekit::{LiveKitParticipant, RpcClient};
+    use tddy_livekit::{LiveKitParticipant, RpcClient, DEFAULT_LIVEKIT_JWT_TTL_SECS};
     use tddy_livekit_testkit::LiveKitTestkit;
     use tddy_rpc::{MultiRpcService, ServiceEntry};
     use tddy_service::proto::token::{GenerateTokenRequest, GenerateTokenResponse};
@@ -41,12 +41,12 @@ mod livekit_tests {
                 DEV_API_SECRET.to_string(),
                 room.to_string(),
                 identity.to_string(),
-                Duration::from_secs(3600),
+                Duration::from_secs(DEFAULT_LIVEKIT_JWT_TTL_SECS),
             );
             gen.generate_for(room, identity).map_err(|e| e.to_string())
         }
         fn ttl_seconds(&self) -> u64 {
-            3600
+            DEFAULT_LIVEKIT_JWT_TTL_SECS
         }
     }
 
@@ -116,7 +116,7 @@ mod livekit_tests {
             resp.token.matches('.').count() >= 2,
             "JWT should have 3 parts separated by dots"
         );
-        assert_eq!(resp.ttl_seconds, 3600);
+        assert_eq!(resp.ttl_seconds, DEFAULT_LIVEKIT_JWT_TTL_SECS);
 
         Ok(())
     }

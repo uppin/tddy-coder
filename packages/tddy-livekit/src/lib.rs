@@ -24,4 +24,4 @@ pub use participant::{
     spawn_local_participant_metadata_watcher, LiveKitParticipant, OWNED_PROJECT_COUNT_METADATA_KEY,
 };
 pub use tddy_rpc::Status;
-pub use token::TokenGenerator;
+pub use token::{TokenGenerator, DEFAULT_LIVEKIT_JWT_TTL_SECS};

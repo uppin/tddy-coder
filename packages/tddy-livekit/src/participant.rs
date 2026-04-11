@@ -330,9 +330,9 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         Ok(())
     }
 
-    /// Run the participant with automatic token refresh. Generates a token, connects,
-    /// runs the event loop until TTL-60s elapses, then reconnects with a fresh token.
-    /// Exits when the room disconnects or when `shutdown` becomes true.
+    /// Connect with a JWT from `token_generator`, then run until the room disconnects or
+    /// `shutdown` is set. Does not proactively reconnect for JWT rotation; the LiveKit SDK
+    /// handles connection health and server-driven token refresh on the signal channel.
     pub async fn run_with_reconnect(
         url: &str,
         token_generator: &TokenGenerator,
@@ -373,84 +373,65 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             Arc::new(Mutex::new(HashMap::new()));
         let active_bidi_sessions: Arc<Mutex<HashMap<SessionKey, BidiSession>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let mut cycle: u64 = 0;
-        let mut metadata_task: Option<tokio::task::JoinHandle<()>> = None;
-        loop {
-            if let Some(t) = metadata_task.take() {
-                t.abort();
+
+        let token = match token_generator.generate() {
+            Ok(t) => t,
+            Err(e) => {
+                log::error!("Token generation failed: {}", e);
+                return;
             }
-            cycle += 1;
-            let token = match token_generator.generate() {
-                Ok(t) => t,
-                Err(e) => {
-                    log::error!("Token generation failed: {}", e);
-                    return;
-                }
-            };
-            let participant = match Self::connect_for_reconnect(
-                url,
-                &token,
-                bridge.clone(),
-                room_options.clone(),
-                active_bidi.clone(),
-                active_bidi_sessions.clone(),
-                shared_publisher.clone(),
-                codex_oauth_watch.clone(),
-                projects_registry_dir.clone(),
-            )
-            .await
-            {
-                Ok(p) => {
-                    log::info!("READY");
-                    p
-                }
-                Err(e) => {
-                    log::error!("LiveKit connect failed: {}", e);
-                    return;
-                }
-            };
-            if let Some(rx) = metadata_watch.clone() {
-                let local = participant.room().local_participant().clone();
-                let lock = participant.metadata_publish_lock.clone();
-                metadata_task = Some(spawn_local_participant_metadata_watcher(rx, local, lock));
+        };
+        let participant = match Self::connect_for_reconnect(
+            url,
+            &token,
+            bridge.clone(),
+            room_options.clone(),
+            active_bidi.clone(),
+            active_bidi_sessions.clone(),
+            shared_publisher.clone(),
+            codex_oauth_watch.clone(),
+            projects_registry_dir.clone(),
+        )
+        .await
+        {
+            Ok(p) => {
+                log::info!("READY");
+                p
             }
-            let refresh_delay = token_generator.time_until_refresh();
-            log::info!(
-                "[reconnect] cycle={} refresh_delay={:?} ttl={:?}",
-                cycle,
-                refresh_delay,
-                token_generator.ttl()
-            );
-            let bidi_sessions_ref = participant.active_bidi_sessions.clone();
-            let active_streams_ref = participant.active_streams.clone();
-            let shutdown_clone = shutdown.clone();
-            tokio::select! {
-                _ = participant.run() => {
-                    log::info!("[reconnect] cycle={} participant.run() returned (disconnected)", cycle);
-                    break;
+            Err(e) => {
+                log::error!("LiveKit connect failed: {}", e);
+                return;
+            }
+        };
+
+        let metadata_task = if let Some(rx) = metadata_watch {
+            let local = participant.room().local_participant().clone();
+            let lock = participant.metadata_publish_lock.clone();
+            Some(spawn_local_participant_metadata_watcher(rx, local, lock))
+        } else {
+            None
+        };
+
+        log::info!(
+            "[livekit] participant running (jwt_ttl={:?}, no timer-driven reconnect)",
+            token_generator.ttl()
+        );
+
+        let shutdown_clone = shutdown.clone();
+        tokio::select! {
+            _ = participant.run() => {
+                log::info!("[livekit] participant.run() returned (disconnected)");
+            }
+            _ = async {
+                while !shutdown_clone.load(Ordering::Relaxed) {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
-                _ = tokio::time::sleep(refresh_delay) => {
-                    let bidi_count = bidi_sessions_ref.lock().await.len();
-                    let stream_count = active_streams_ref.lock().await.len();
-                    log::warn!(
-                        "[reconnect] cycle={} token expiring — reconnecting with {} active bidi session(s), {} active stream(s)",
-                        cycle,
-                        bidi_count,
-                        stream_count,
-                    );
-                    continue;
-                }
-                _ = async {
-                    while !shutdown_clone.load(Ordering::Relaxed) {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                    }
-                } => {
-                    log::info!("[reconnect] cycle={} shutdown requested", cycle);
-                    break;
-                }
+            } => {
+                log::info!("[livekit] shutdown requested");
             }
         }
-        if let Some(t) = metadata_task.take() {
+
+        if let Some(t) = metadata_task {
             t.abort();
         }
     }

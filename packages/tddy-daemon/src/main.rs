@@ -153,7 +153,7 @@ fn main() -> anyhow::Result<()> {
                 api_secret.clone(),
                 "daemon".to_string(),
                 "token-provider".to_string(),
-                std::time::Duration::from_secs(120),
+                std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
             ));
             let token_provider = tddy_daemon::token_provider::LiveKitTokenProvider(token_generator);
             let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);

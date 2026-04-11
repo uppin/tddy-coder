@@ -1380,7 +1380,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     args.livekit_api_secret.as_ref().unwrap().clone(),
                     args.livekit_room.as_ref().unwrap().clone(),
                     args.livekit_identity.as_ref().unwrap().clone(),
-                    std::time::Duration::from_secs(120),
+                    std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
                 ));
                 let token_provider = LiveKitTokenProvider(token_generator);
                 let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
@@ -1475,7 +1475,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     args.livekit_api_secret.as_ref().unwrap().clone(),
                     args.livekit_room.as_ref().unwrap().clone(),
                     args.livekit_identity.as_ref().unwrap().clone(),
-                    std::time::Duration::from_secs(120),
+                    std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
                 );
                 let codex_oauth_watch_for_reconnect = codex_oauth_watch.clone();
                 tokio::spawn(async move {
@@ -2247,7 +2247,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 args.livekit_api_secret.as_ref().unwrap().clone(),
                 args.livekit_room.as_ref().unwrap().clone(),
                 args.livekit_identity.as_ref().unwrap().clone(),
-                std::time::Duration::from_secs(120),
+                std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
             ));
             let token_provider = LiveKitTokenProvider(token_generator.clone());
             let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
@@ -2359,7 +2359,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 args.livekit_api_secret.as_ref().unwrap().clone(),
                 args.livekit_room.as_ref().unwrap().clone(),
                 args.livekit_identity.as_ref().unwrap().clone(),
-                std::time::Duration::from_secs(120),
+                std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
             ));
             let token_provider = LiveKitTokenProvider(token_generator);
             let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);

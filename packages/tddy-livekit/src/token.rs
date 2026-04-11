@@ -1,14 +1,20 @@
 //! LiveKit access token generation from API key and secret.
 //!
 //! Used when connecting with `--livekit-api-key` / `--livekit-api-secret` instead of
-//! a pre-generated `--livekit-token`. Supports automatic refresh by reconnecting
-//! 1 minute before expiry.
+//! a pre-generated `--livekit-token`.
+//!
+//! The LiveKit SDK keeps the signaling connection alive; the server may push refreshed
+//! JWTs on the signal channel without the application reconnecting the room.
 
 use livekit_api::access_token::{AccessToken, AccessTokenError, VideoGrants};
 use std::time::Duration;
 
+/// Default JWT TTL (seconds) for API-key–minted tokens in the daemon and coder.
+/// Matches [`livekit_api::access_token::DEFAULT_TTL`] so sessions are not cut short by JWT expiry
+/// under normal use (no application-level reconnect loop).
+pub const DEFAULT_LIVEKIT_JWT_TTL_SECS: u64 = livekit_api::access_token::DEFAULT_TTL.as_secs();
+
 /// Generates LiveKit JWT access tokens from API key and secret.
-/// Used for token refresh: generate a new token and reconnect before expiry.
 pub struct TokenGenerator {
     api_key: String,
     api_secret: String,
@@ -63,8 +69,8 @@ impl TokenGenerator {
         self.ttl
     }
 
-    /// Duration after which a new token should be generated and the connection refreshed.
-    /// Returns TTL minus 1 minute.
+    /// Duration before JWT expiry at which UIs may fetch a new token (e.g. Connect-RPC
+    /// `RefreshToken`) without dropping an existing room. Returns TTL minus one minute.
     pub fn time_until_refresh(&self) -> Duration {
         self.ttl.saturating_sub(Duration::from_secs(60))
     }
@@ -150,23 +156,10 @@ mod tests {
     }
 
     #[test]
-    fn livekit_coder_daemon_jwt_defaults_should_not_force_minute_scale_room_reconnects() {
-        const JWT_TTL_SECS_USED_BY_CODER_AND_DAEMON: u64 = 120;
-        const MIN_SECONDS_BETWEEN_TOKEN_REFRESH_RECONNECTS: u64 = 5 * 60;
-
-        let gen = TokenGenerator::new(
-            DEV_API_KEY.to_string(),
-            DEV_API_SECRET.to_string(),
-            "room".to_string(),
-            "identity".to_string(),
-            Duration::from_secs(JWT_TTL_SECS_USED_BY_CODER_AND_DAEMON),
-        );
-        assert!(
-            gen.time_until_refresh() >= Duration::from_secs(MIN_SECONDS_BETWEEN_TOKEN_REFRESH_RECONNECTS),
-            "JWT TTL {}s with a {}s pre-expiry slack reconnects every {}s (see TokenGenerator::time_until_refresh and LiveKitParticipant::run_with_reconnect); raise TTL or slack so dashboards do not show ~1/min participant churn",
-            JWT_TTL_SECS_USED_BY_CODER_AND_DAEMON,
-            60u64,
-            gen.time_until_refresh().as_secs()
+    fn default_livekit_jwt_ttl_matches_livekit_api_default() {
+        assert_eq!(
+            DEFAULT_LIVEKIT_JWT_TTL_SECS,
+            livekit_api::access_token::DEFAULT_TTL.as_secs()
         );
     }
 }

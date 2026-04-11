@@ -16,7 +16,7 @@ use serial_test::serial;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tddy_livekit::{LiveKitParticipant, RpcClient, TokenGenerator};
+use tddy_livekit::{LiveKitParticipant, RpcClient, TokenGenerator, DEFAULT_LIVEKIT_JWT_TTL_SECS};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Code;
 use tddy_service::proto::loopback_tunnel::TunnelChunk;
@@ -1083,17 +1083,11 @@ async fn rpc_scenarios() -> Result<()> {
     Ok(())
 }
 
-/// Bidi stream must survive server-side token refresh (run_with_reconnect).
-///
-/// Reproduces: terminal freezes after 10-40s because `run_with_reconnect` drops
-/// the entire `LiveKitParticipant` (and all active bidi sessions) on token refresh,
-/// then creates a fresh participant with empty `active_bidi_sessions`.
-///
-/// The client's in-flight bidi stream is orphaned — the server no longer recognises
-/// its continuation messages (sent without `call_metadata`), so terminal I/O stops.
+/// Bidi stream stays usable across a delay with `run_with_reconnect` (single room connection,
+/// no application timer reconnect).
 #[tokio::test]
 #[serial]
-async fn bidi_stream_survives_token_refresh() -> Result<()> {
+async fn bidi_stream_survives_delay_without_app_reconnect() -> Result<()> {
     let inner = env_logger::Builder::new()
         .parse_default_env()
         .is_test(true)
@@ -1110,14 +1104,12 @@ async fn bidi_stream_survives_token_refresh() -> Result<()> {
     let handler_count = Arc::new(AtomicUsize::new(0));
     let handler_count_clone = handler_count.clone();
 
-    // TTL=70s → time_until_refresh = 10s. Enough time for setup + first echo,
-    // then the refresh fires and kills the bidi stream.
     let token_gen = TokenGenerator::new(
         "devkey".to_string(),
         "secret".to_string(),
         room_name.to_string(),
         SERVER_IDENTITY.to_string(),
-        Duration::from_secs(70),
+        Duration::from_secs(DEFAULT_LIVEKIT_JWT_TTL_SECS),
     );
 
     let service = CountingEchoService {
@@ -1155,17 +1147,16 @@ async fn bidi_stream_survives_token_refresh() -> Result<()> {
         .start_bidi_stream("test.EchoService", "EchoBidiStream")
         .map_err(|e| anyhow::anyhow!("start bidi stream: {}", e))?;
 
-    // --- Before token refresh: send first message and receive echo ---
     sender
         .send(
             EchoRequest {
-                message: "before-refresh".to_string(),
+                message: "before-delay".to_string(),
             }
             .encode_to_vec(),
             false,
         )
         .await
-        .map_err(|e| anyhow::anyhow!("send before-refresh: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("send before-delay: {}", e))?;
 
     let first_echo = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -1183,27 +1174,24 @@ async fn bidi_stream_survives_token_refresh() -> Result<()> {
     .map_err(|_| anyhow::anyhow!("timeout waiting for first echo"))??;
     let first_response = EchoResponse::decode(&first_echo[..])?;
     assert!(
-        first_response.message.contains("before-refresh"),
-        "first echo should contain 'before-refresh', got: {}",
+        first_response.message.contains("before-delay"),
+        "first echo should contain 'before-delay', got: {}",
         first_response.message
     );
     log::info!("first echo OK: {}", first_response.message);
 
-    // --- Wait for token refresh (refresh_delay = 10s, add margin) ---
-    log::info!("waiting for server-side token refresh...");
-    tokio::time::sleep(Duration::from_secs(12)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
-    // --- After token refresh: send second message and expect echo ---
     sender
         .send(
             EchoRequest {
-                message: "after-refresh".to_string(),
+                message: "after-delay".to_string(),
             }
             .encode_to_vec(),
             true,
         )
         .await
-        .map_err(|e| anyhow::anyhow!("send after-refresh: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("send after-delay: {}", e))?;
 
     let second_echo = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -1220,15 +1208,14 @@ async fn bidi_stream_survives_token_refresh() -> Result<()> {
     .await
     .map_err(|_| {
         anyhow::anyhow!(
-            "timeout waiting for second echo after token refresh (bidi_handler_count={}); \
-             stream died when server reconnected — this is the terminal freeze bug",
+            "timeout waiting for second echo (bidi_handler_count={})",
             handler_count.load(Ordering::SeqCst)
         )
     })??;
     let second_response = EchoResponse::decode(&second_echo[..])?;
     assert!(
-        second_response.message.contains("after-refresh"),
-        "second echo should contain 'after-refresh', got: {}",
+        second_response.message.contains("after-delay"),
+        "second echo should contain 'after-delay', got: {}",
         second_response.message
     );
 
