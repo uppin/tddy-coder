@@ -1341,14 +1341,12 @@ export function ConnectionScreen({
             debugLogging: debugForSessionId(id),
           }),
         );
-        navigatePath(terminalPathForSessionId(id), "replace");
         const attachNew = nextPresentationFromAttach(terminalPresentation, "new");
         setTerminalPresentation(attachNew.presentation);
         if (attachNew.shouldPushTerminalRoute) {
-          const target = terminalPathForSessionId(id);
-          if (typeof window !== "undefined" && window.location.pathname !== target) {
-            navigatePath(target, "push");
-          }
+          navigatePath(terminalPathForSessionId(id), "push");
+        } else {
+          navigatePath("/", "replace");
         }
       } catch {
         try {
@@ -1363,9 +1361,13 @@ export function ConnectionScreen({
               debugLogging: debugForSessionId(id),
             }),
           );
-          navigatePath(terminalPathForSessionId(res.sessionId), "replace");
           const attachRe = nextPresentationFromAttach(terminalPresentation, "reconnect");
           setTerminalPresentation(attachRe.presentation);
+          if (attachRe.shouldPushTerminalRoute) {
+            navigatePath(terminalPathForSessionId(res.sessionId), "push");
+          } else {
+            navigatePath("/", "replace");
+          }
         } catch (e) {
           if (!cancelled && seq === terminalDeepLinkSeqRef.current) {
             setError(e instanceof Error ? e.message : "Failed to open session");
@@ -1463,7 +1465,7 @@ export function ConnectionScreen({
       if (attach.shouldPushTerminalRoute) {
         navigatePath(terminalPathForSessionId(res.sessionId), "push");
       } else {
-        navigatePath(terminalPathForSessionId(res.sessionId), "replace");
+        navigatePath("/", "replace");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start session");
@@ -1516,7 +1518,7 @@ export function ConnectionScreen({
       if (attach.shouldPushTerminalRoute) {
         navigatePath(terminalPathForSessionId(sessionId), "push");
       } else {
-        navigatePath(terminalPathForSessionId(sessionId), "replace");
+        navigatePath("/", "replace");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect to session");
@@ -1554,7 +1556,7 @@ export function ConnectionScreen({
       if (attach.shouldPushTerminalRoute) {
         navigatePath(terminalPathForSessionId(res.sessionId), "push");
       } else {
-        navigatePath(terminalPathForSessionId(res.sessionId), "replace");
+        navigatePath("/", "replace");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to resume session");

@@ -72,7 +72,7 @@ export function parseDevDesktopYamlForOAuthRelay(yaml: string): {
   };
 }
 
-/** Read repo-root desktop dev YAML and derive Connect-RPC + LiveKit settings for `runLiveKitOAuthRelay`. */
+/** Read repo-root desktop dev YAML and derive Connect-RPC + LiveKit settings for embedded daemon / web. */
 export function inferOAuthRelayEnvFromDevDesktop(repoRoot: string): {
   rpcBase: string;
   livekitUrl: string;

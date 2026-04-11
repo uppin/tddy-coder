@@ -2,7 +2,6 @@
  * Mock-room E2E: metadata → loopback listener → injectable tunnel (tests use HTTP callback stub).
  */
 import { describe, expect, test } from "bun:test";
-import { RoomEvent } from "@livekit/rtc-node";
 import type { Room } from "livekit-client";
 
 import { installLiveKitOAuthRelay } from "../../src/bun/livekit-oauth-relay";
@@ -42,7 +41,7 @@ describe("livekit oauth relay (mock room E2E)", () => {
   test("pending metadata starts listener; GET hits injectable tunnel stub", async () => {
     let delivered: { code: string; state: string } | null = null;
     const opened: string[] = [];
-    const daemon = { identity: "daemon-e2e", metadata: codexMetadataJson(0, "st-e2e") };
+    const daemon = { identity: "daemon-e2e", metadata: codexMetadataJson(38_471, "st-e2e") };
     const room = createMockRoom(daemon);
 
     const handle = await installLiveKitOAuthRelay(room, {
@@ -77,7 +76,7 @@ describe("livekit oauth relay (mock room E2E)", () => {
 
   test("state mismatch returns 403 and does not deliver", async () => {
     let delivered: { code: string; state: string } | null = null;
-    const daemon = { identity: "daemon-e2e", metadata: codexMetadataJson(0, "want-state") };
+    const daemon = { identity: "daemon-e2e", metadata: codexMetadataJson(38_472, "want-state") };
     const room = createMockRoom(daemon);
 
     const handle = await installLiveKitOAuthRelay(room, {
@@ -125,8 +124,8 @@ describe("livekit oauth relay (mock room E2E)", () => {
 
     try {
       expect(handle.getCallbackPort()).toBeNull();
-      daemon.metadata = codexMetadataJson(0, "late");
-      room.emit(RoomEvent.ParticipantMetadataChanged);
+      daemon.metadata = codexMetadataJson(38_473, "late");
+      room.emit("participantMetadataChanged");
       const deadline = Date.now() + 2_000;
       while (handle.getCallbackPort() === null && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 10));

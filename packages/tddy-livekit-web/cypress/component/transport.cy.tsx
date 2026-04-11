@@ -2,6 +2,9 @@ import React from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { TransportTestHarness } from "../support/TransportTestHarness";
 
+const livekitTestkitWsUrl = String(Cypress.env("LIVEKIT_TESTKIT_WS_URL") ?? "").trim();
+const describeTransport = livekitTestkitWsUrl ? describe : describe.skip;
+
 /** Deduplicate logs (e.g. from React Strict Mode double-mount) while preserving order. */
 function dedupeLogs(logs: string[]): string[] {
   const seen = new Set<string>();
@@ -12,7 +15,7 @@ function dedupeLogs(logs: string[]): string[] {
   });
 }
 
-describe("LiveKitTransport", () => {
+describeTransport("LiveKitTransport", () => {
   let serverUrl: string;
   let clientToken: string;
 
