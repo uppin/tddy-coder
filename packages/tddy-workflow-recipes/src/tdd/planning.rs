@@ -80,6 +80,16 @@ Please revise the PRD (including ## TODO section) accordingly for: {feature}"#,
     )
 }
 
+/// Appended on plan retries when the agent finishes without `tddy-tools submit` (tests assert `createPlan` marker).
+pub fn missing_submit_remediation_suffix(attempt: u32, max_attempts: u32) -> String {
+    format!(
+        r#"
+
+---
+**Retry {attempt}/{max_attempts} — missing submit:** The last turn completed without a relayed `tddy-tools submit --goal plan`. The workflow only accepts the PRD through that submit path (same structured JSON as a createPlan-style plan artifact). Re-read the system prompt and call `tddy-tools submit --goal plan` with `--data-stdin` and valid JSON."#
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

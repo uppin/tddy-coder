@@ -33,11 +33,12 @@
             # libstdc++.so.6 for prebuilt Node native addons and bindgen/libclang if host LLVM is probed.
             pkgs.stdenv.cc.cc.lib
             pkgs.libva
-            # xcap / libwayshot-xcap → wayland-sys needs wayland-client.pc at link time
+            # tddy-livekit-screen-capture → xcap → wayland-sys / gbm / drm (pkg-config)
             pkgs.wayland
-            # libspa-sys (via livekit / pipewire stack) needs libpipewire-0.3.pc
+            pkgs.wayland-protocols
+            pkgs.libdrm
             pkgs.pipewire
-            # khronos-egl (gbm / GPU capture path) needs egl.pc (libglvnd on current nixpkgs)
+            # khronos-egl (gbm / GPU capture path) needs egl.pc (libglvnd.dev on current nixpkgs)
             pkgs.libglvnd.dev
             # xcap → gbm-sys / X11 path: link needs libgbm and libxcb (-lgbm -lxcb)
             pkgs.libgbm
@@ -56,6 +57,9 @@
           ];
           shellHook = ''
             echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node"
+          '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+            export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
+          '' + ''
             if _tddy_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
               if [[ -d "$_tddy_root/node_modules/.bin" ]]; then
                 export PATH="$_tddy_root/node_modules/.bin:$PATH"
