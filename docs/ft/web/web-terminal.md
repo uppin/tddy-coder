@@ -166,9 +166,11 @@ See [daemon project concept](../daemon/project-concept.md).
 
 ### Shared LiveKit room (`livekit.common_room`)
 
-When the daemon sets **`livekit.common_room`** in YAML, that name is exposed to the web client as **`common_room`** in **`GET /api/config`** (with **`livekit_url`**). After GitHub sign-in, the browser joins that room with identity **`web-{githubLogin}`** and shows a **Connected participants** table on the session list screen (identity, role, joined time, metadata), refreshed from LiveKit participant events. **Connect** and **Resume** attach the coder terminal in **overlay** / **mini** first; **Expand** switches to **fullscreen** for the focused session — the presence connection stays active in the background while any terminal presentation is open.
+When the daemon sets **`livekit.common_room`** in YAML, that name is exposed to the web client as **`common_room`** in **`GET /api/config`** (with **`livekit_url`**). After GitHub sign-in, the browser joins that room with identity **`web-{githubLogin}`** and shows a **Connected participants** table on the session list screen (identity, role, joined time, **projects** — integer from participant metadata **`owned_project_count`**, or **—** when absent — **metadata**, Codex sign-in affordance, video column when applicable), refreshed from LiveKit participant events. **Connect** and **Resume** attach the coder terminal in **overlay** / **mini** first; **Expand** switches to **fullscreen** for the focused session — the presence connection stays active in the background while any terminal presentation is open.
 
 If **`common_room`** is unset or blank, that panel is not shown and no extra LiveKit connection is made for presence.
+
+Product reference for the count field and merge semantics: [livekit-participant-owned-projects.md](livekit-participant-owned-projects.md).
 
 Spawned **`tddy-*`** sessions use the same configured room for **`--livekit-room`** when **`common_room`** is set; each process still uses a distinct **`daemon-{session_id}`** LiveKit identity for terminal RPC. If **`common_room`** is unset, the room name is **`daemon-{session_id}`** per session. See [daemon changelog](../daemon/changelog.md).
 

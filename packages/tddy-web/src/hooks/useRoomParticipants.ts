@@ -8,6 +8,23 @@ import {
 
 export type ParticipantRole = "server" | "browser" | "unknown";
 
+/** Must match `OWNED_PROJECT_COUNT_METADATA_KEY` in `tddy-livekit` (`participant.rs`). */
+export const OWNED_PROJECT_COUNT_METADATA_KEY = "owned_project_count";
+
+/** Non-negative integer from LiveKit participant metadata JSON, when present. */
+export function parseOwnedProjectCount(metadata: string): number | null {
+  const t = metadata.trim();
+  if (!t.startsWith("{")) return null;
+  try {
+    const o = JSON.parse(t) as Record<string, unknown>;
+    const n = o[OWNED_PROJECT_COUNT_METADATA_KEY];
+    if (typeof n === "number" && Number.isInteger(n) && n >= 0) return n;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export interface RoomParticipant {
   identity: string;
   role: ParticipantRole;
@@ -15,6 +32,8 @@ export interface RoomParticipant {
   metadata: string;
   /** Structured Codex OAuth hint from metadata JSON, when present. */
   codexOAuth: CodexOAuthInfo | null;
+  /** From `owned_project_count` in metadata; omit in tests to parse from `metadata` in the UI. */
+  ownedProjectCount?: number | null;
 }
 
 /** Infer UI role from LiveKit identity (browser clients use `web-{github}`). */
@@ -32,12 +51,20 @@ export function inferParticipantRole(identity: string): ParticipantRole {
 
 function mapParticipant(p: Participant): RoomParticipant {
   const metadata = p.metadata ?? "";
+  const ownedProjectCount = parseOwnedProjectCount(metadata);
+  if (ownedProjectCount !== null) {
+    console.debug("[tddy-web:presence] participant owned_project_count", {
+      identity: p.identity,
+      ownedProjectCount,
+    });
+  }
   return {
     identity: p.identity,
     role: inferParticipantRole(p.identity),
     joinedAt: p.joinedAt?.getTime() ?? null,
     metadata,
     codexOAuth: parseCodexOAuthMetadata(metadata),
+    ownedProjectCount,
   };
 }
 

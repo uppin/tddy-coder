@@ -78,6 +78,7 @@ mod livekit_tests {
             TerminalServiceServer::new(terminal_service),
             RoomOptions::default(),
             None,
+            None,
         )
         .await?;
         let server_handle = tokio::spawn(async move { server.run().await });

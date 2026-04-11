@@ -165,6 +165,7 @@ impl CountingHarness {
             EchoServiceServer::new(service),
             RoomOptions::default(),
             None,
+            None,
         )
         .await?;
         let server_handle = tokio::spawn(async move { server.run().await });
@@ -210,6 +211,7 @@ impl TestHarness {
             &server_token,
             EchoServiceServer::new(EchoServiceImpl),
             RoomOptions::default(),
+            None,
             None,
         )
         .await?;
@@ -262,6 +264,7 @@ impl ThreeParticipantHarness {
             &server_token,
             EchoServiceServer::new(EchoServiceImpl),
             RoomOptions::default(),
+            None,
             None,
         )
         .await?;
@@ -900,6 +903,7 @@ async fn rpc_scenarios() -> Result<()> {
             EchoServiceServer::new(EchoServiceImpl),
             RoomOptions::default(),
             None,
+            None,
         )
         .await?;
         let server_handle = tokio::spawn(async move { server.run().await });
@@ -994,6 +998,7 @@ async fn bidi_stream_survives_token_refresh() -> Result<()> {
             EchoServiceServer::new(service),
             RoomOptions::default(),
             shutdown_clone,
+            None,
             None,
         )
         .await;

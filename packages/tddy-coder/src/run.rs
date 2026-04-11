@@ -1488,6 +1488,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         shutdown_clone,
                         Some(metadata_rx),
                         codex_oauth_watch_reconnect,
+                        None,
                     )
                     .await
                 });
@@ -1500,6 +1501,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         livekit_multi,
                         tddy_livekit::RoomOptions::default(),
                         codex_oauth_watch,
+                        None,
                     )
                     .await
                     {
@@ -1513,8 +1515,12 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         }
                     };
                     let local = participant.room().local_participant().clone();
-                    let meta_task =
-                        tddy_livekit::spawn_local_participant_metadata_watcher(metadata_rx, local);
+                    let meta_lock = participant.metadata_publish_lock();
+                    let meta_task = tddy_livekit::spawn_local_participant_metadata_watcher(
+                        metadata_rx,
+                        local,
+                        meta_lock,
+                    );
                     tokio::select! {
                         _ = participant.run() => {
                             log::info!("LiveKit participant disconnected");
@@ -2285,6 +2291,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         shutdown,
                         Some(metadata_rx),
                         codex_oauth_watch_reconnect,
+                        None,
                     )
                     .await
                 });
@@ -2320,15 +2327,18 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         livekit_multi,
                         tddy_livekit::RoomOptions::default(),
                         watch,
+                        None,
                     )
                     .await
                     {
                         Ok(participant) => {
                             log::info!("READY");
                             let local = participant.room().local_participant().clone();
+                            let meta_lock = participant.metadata_publish_lock();
                             let meta_task = tddy_livekit::spawn_local_participant_metadata_watcher(
                                 metadata_rx,
                                 local,
+                                meta_lock,
                             );
                             participant.run().await;
                             meta_task.abort();
