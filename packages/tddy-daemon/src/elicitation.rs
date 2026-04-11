@@ -14,6 +14,15 @@ use std::path::Path;
 use tddy_service::gen::app_mode_proto;
 use tddy_service::gen::ModeChanged;
 
+/// Whether [`ModeChanged`] represents a presenter gate that [`telegram_elicitation_line_for_mode_changed`] would surface on Telegram.
+///
+/// Used to detect transitions **out** of elicitation (e.g. user answered on web/LiveKit) so the daemon
+/// can rotate the per-chat elicitation FIFO — see [`crate::telegram_notifier::TelegramSessionWatcher`].
+pub fn mode_changed_requires_telegram_elicitation(mc: &ModeChanged) -> bool {
+    // Session label is only interpolated into message text; elicitation detection is independent.
+    telegram_elicitation_line_for_mode_changed("_", mc).is_some()
+}
+
 /// Stable dedupe key for identical [`ModeChanged`] payloads (Telegram anti-spam).
 pub fn elicitation_signature_for_mode_changed(mc: &ModeChanged) -> String {
     let mut out = String::from("mode_changed:v1:");
@@ -166,5 +175,34 @@ pub fn pending_elicitation_for_session_dir(session_dir: &Path) -> bool {
             );
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod mode_gate_tests {
+    use super::*;
+    use tddy_service::gen::app_mode_proto;
+    use tddy_service::gen::{AppModeProto, AppModeRunning, AppModeSelect, ModeChanged};
+
+    #[test]
+    fn mode_changed_requires_telegram_elicitation_select_true_running_false() {
+        let select = ModeChanged {
+            mode: Some(AppModeProto {
+                variant: Some(app_mode_proto::Variant::Select(AppModeSelect {
+                    question: None,
+                    question_index: 0,
+                    total_questions: 1,
+                    initial_selected: 0,
+                })),
+            }),
+        };
+        assert!(mode_changed_requires_telegram_elicitation(&select));
+
+        let running = ModeChanged {
+            mode: Some(AppModeProto {
+                variant: Some(app_mode_proto::Variant::Running(AppModeRunning {})),
+            }),
+        };
+        assert!(!mode_changed_requires_telegram_elicitation(&running));
     }
 }
