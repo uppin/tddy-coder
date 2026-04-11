@@ -2,7 +2,7 @@
 
 ## Role
 
-The **`tddy_daemon::codex_oauth_relay`** module validates **HTTPS** authorize URLs for Codex/OpenAI OAuth, shapes **`BROWSER`** hook argv into **`CodexOAuthAuthorizeCapture`**, and parses **OAuth callback** URLs into **`CodexOAuthCallbackDelivery`**. Higher layers use these types for session-scoped events and for forwarding query parameters toward the Codex CLI listener.
+The **`tddy_daemon::codex_oauth_relay`** module validates **HTTPS** authorize URLs for Codex/OpenAI OAuth, shapes **`BROWSER`** hook argv into **`CodexOAuthAuthorizeCapture`**, and parses **OAuth callback** URLs into **`CodexOAuthCallbackDelivery`**. Higher layers use these types for session-scoped events and for forwarding query parameters toward the Codex CLI listener. The **`codex-acp`** backend may surface the same authorize URL file via **`codex login`** when ACP session setup fails with auth-like errors; see [Codex ACP backend](../coder/codex-acp-backend.md).
 
 ## Validation
 
