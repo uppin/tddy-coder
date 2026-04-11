@@ -54,3 +54,5 @@ changeset.yaml
 .vscode/settings.json
 
 tmp/
+
+local.bun.lock
