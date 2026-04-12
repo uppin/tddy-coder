@@ -287,7 +287,7 @@ fn click_dynamic_area(
             view_state.select_selected = option_idx;
             view_state.last_select_click_option = Some(option_idx);
             if is_double_click && option_idx < question.options.len() {
-                Some(UserIntent::AnswerSelect(option_idx))
+                Some(UserIntent::answer_select(option_idx))
             } else {
                 None
             }
@@ -699,7 +699,7 @@ mod tests {
         let intent = handle_mouse_event(ev2, &mode, &mut vs, &areas, 0);
         assert_eq!(
             intent,
-            Some(UserIntent::AnswerSelect(0)),
+            Some(UserIntent::answer_select(0)),
             "double-click (two rapid clicks at same row) must confirm selection"
         );
     }
@@ -804,7 +804,7 @@ mod tests {
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
         assert_eq!(
             intent,
-            Some(UserIntent::AnswerSelect(0)),
+            Some(UserIntent::answer_select(0)),
             "click on vertical border left of the key must act like Enter"
         );
     }
@@ -824,7 +824,7 @@ mod tests {
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
         assert_eq!(
             intent,
-            Some(UserIntent::AnswerSelect(0)),
+            Some(UserIntent::answer_select(0)),
             "click on top-left corner of the ASCII frame must act like Enter"
         );
     }
@@ -857,7 +857,7 @@ mod tests {
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
         assert_eq!(
             intent,
-            Some(UserIntent::AnswerSelect(0)),
+            Some(UserIntent::answer_select(0)),
             "click on the U+23CE key cell must confirm the selected option"
         );
     }

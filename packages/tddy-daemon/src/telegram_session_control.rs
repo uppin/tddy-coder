@@ -270,16 +270,44 @@ pub fn parse_document_review_callback(callback_data: &str) -> Option<(char, Stri
     Some((action, sid.to_string()))
 }
 
-/// `eli:s:<session_id>:<option_index>` from clarification single-select inline keyboards.
-pub fn parse_elicitation_select_callback(callback_data: &str) -> Option<(String, usize)> {
+/// Parsed `eli:s:` single-select payload. Legacy: `eli:s:<session>:<option_index>`. Current:
+/// `eli:s:<session>:<clarification_question_index>:<option_index>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ElicitationSelectCallback {
+    pub session_key: String,
+    pub option_index: usize,
+    pub clarification_question_index: Option<usize>,
+}
+
+pub fn parse_elicitation_select_callback(callback_data: &str) -> Option<ElicitationSelectCallback> {
     let rest = callback_data.strip_prefix("eli:s:")?;
-    let (session_id, idx_s) = rest.rsplit_once(':')?;
-    let idx: usize = idx_s.parse().ok()?;
-    let sid = session_id.trim();
-    if sid.is_empty() {
+    let (before_last, opt_s) = rest.rsplit_once(':')?;
+    let option_index: usize = opt_s.parse().ok()?;
+    let before_last = before_last.trim();
+    if before_last.is_empty() {
         return None;
     }
-    Some((sid.to_string(), idx))
+    match before_last.rsplit_once(':') {
+        Some((session_key, q_s))
+            if !q_s.is_empty() && q_s.chars().all(|c| c.is_ascii_digit()) =>
+        {
+            let q: usize = q_s.parse().ok()?;
+            let session_key = session_key.trim();
+            if session_key.is_empty() {
+                return None;
+            }
+            Some(ElicitationSelectCallback {
+                session_key: session_key.to_string(),
+                option_index,
+                clarification_question_index: Some(q),
+            })
+        }
+        _ => Some(ElicitationSelectCallback {
+            session_key: before_last.to_string(),
+            option_index,
+            clarification_question_index: None,
+        }),
+    }
 }
 
 /// `eli:o:<session_id>` — user chose "Other"; next plain chat message is the custom answer.
@@ -1448,6 +1476,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         chat_id: i64,
         session_key: &str,
         option_index: usize,
+        clarification_question_index: Option<usize>,
     ) -> anyhow::Result<()> {
         self.ensure_authorized(chat_id)?;
         let deps = self
@@ -1464,8 +1493,12 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
             resolve_child_grpc_port(&map, session_key)?
         };
-        presenter_intent_client::answer_clarification_select_localhost(port, option_index as u32)
-            .await?;
+        presenter_intent_client::answer_clarification_select_localhost(
+            port,
+            option_index as u32,
+            clarification_question_index.map(|q| q as u32),
+        )
+        .await?;
         self.try_advance_elicitation_after_step(chat_id, &session_id, "handle_elicitation_select");
         let confirmation = {
             let guard = deps
@@ -2225,7 +2258,19 @@ mod unit_tests {
         let sid = "018f1234-5678-7abc-8def-123456789abc";
         assert_eq!(
             parse_elicitation_select_callback(&format!("eli:s:{sid}:2")),
-            Some((sid.to_string(), 2))
+            Some(ElicitationSelectCallback {
+                session_key: sid.to_string(),
+                option_index: 2,
+                clarification_question_index: None,
+            })
+        );
+        assert_eq!(
+            parse_elicitation_select_callback(&format!("eli:s:{sid}:1:0")),
+            Some(ElicitationSelectCallback {
+                session_key: sid.to_string(),
+                option_index: 0,
+                clarification_question_index: Some(1),
+            })
         );
         assert_eq!(parse_elicitation_select_callback("eli:s:bad"), None);
     }

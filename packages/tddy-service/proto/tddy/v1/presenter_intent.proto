@@ -26,6 +26,8 @@ message SubmitFeatureTextResponse {}
 
 message AnswerClarificationSelectRequest {
   uint32 option_index = 1;
+  // When set, must match the presenter clarification step (stale Telegram taps are dropped).
+  optional uint32 clarification_question_index = 2;
 }
 
 message AnswerClarificationMultiSelectRequest {

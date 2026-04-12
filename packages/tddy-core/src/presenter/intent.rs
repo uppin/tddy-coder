@@ -20,8 +20,12 @@ pub enum UserIntent {
     /// User moved the highlight in Select mode (Up/Down / mouse). Keeps presenter state in sync for
     /// `connect_view` / VirtualTui reconnect snapshots.
     SelectHighlightChanged(usize),
-    /// User selected option at index (Select mode).
-    AnswerSelect(usize),
+    /// User selected option at index (Select mode). `clarification_question_index` binds the tap to
+    /// a specific multi-step clarification step when set (remote / Telegram); `None` is local TUI.
+    AnswerSelect {
+        option_index: usize,
+        clarification_question_index: Option<usize>,
+    },
     /// User typed custom answer for "Other" (Select mode).
     AnswerOther(String),
     /// User submitted multi-select answer: checked indices + optional other text.
@@ -47,6 +51,16 @@ pub enum UserIntent {
     ContinueWithAgent,
 }
 
+impl UserIntent {
+    /// Select an option for the **current** prompt (TUI / legacy remote without step binding).
+    pub fn answer_select(option_index: usize) -> Self {
+        UserIntent::AnswerSelect {
+            option_index,
+            clarification_question_index: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -59,8 +73,14 @@ mod tests {
 
     #[test]
     fn user_intent_answer_select() {
-        let intent = UserIntent::AnswerSelect(2);
-        assert!(matches!(intent, UserIntent::AnswerSelect(2)));
+        let intent = UserIntent::answer_select(2);
+        assert!(matches!(
+            intent,
+            UserIntent::AnswerSelect {
+                option_index: 2,
+                clarification_question_index: None
+            }
+        ));
     }
 
     #[test]

@@ -20,9 +20,13 @@ pub fn client_message_to_intent(msg: ClientMessage) -> Option<UserIntent> {
         Intent::SubmitFeatureInput(SubmitFeatureInput { text }) => {
             Some(UserIntent::SubmitFeatureInput(text))
         }
-        Intent::AnswerSelect(AnswerSelect { index }) => {
-            Some(UserIntent::AnswerSelect(index as usize))
-        }
+        Intent::AnswerSelect(AnswerSelect {
+            index,
+            clarification_question_index,
+        }) => Some(UserIntent::AnswerSelect {
+            option_index: index as usize,
+            clarification_question_index: clarification_question_index.map(|q| q as usize),
+        }),
         Intent::AnswerOther(AnswerOther { text }) => Some(UserIntent::AnswerOther(text)),
         Intent::AnswerMultiSelect(AnswerMultiSelect { indices, other }) => {
             let indices: Vec<usize> = indices.into_iter().map(|i| i as usize).collect();
@@ -245,7 +249,13 @@ fn intent_to_client_message(intent: &UserIntent) -> Option<ClientMessage> {
         UserIntent::SubmitFeatureInput(text) => {
             Intent::SubmitFeatureInput(SubmitFeatureInput { text: text.clone() })
         }
-        UserIntent::AnswerSelect(idx) => Intent::AnswerSelect(AnswerSelect { index: *idx as u32 }),
+        UserIntent::AnswerSelect {
+            option_index,
+            clarification_question_index,
+        } => Intent::AnswerSelect(AnswerSelect {
+            index: *option_index as u32,
+            clarification_question_index: (*clarification_question_index).map(|q| q as u32),
+        }),
         UserIntent::AnswerOther(text) => Intent::AnswerOther(AnswerOther { text: text.clone() }),
         UserIntent::AnswerMultiSelect(indices, other) => {
             Intent::AnswerMultiSelect(AnswerMultiSelect {

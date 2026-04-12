@@ -92,5 +92,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/loopback_tunnel.proto"], &["proto"])?;
 
+    // Tunnel management (daemon Connect /rpc): advertisements, start/stop, browser open.
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+        }))
+        .compile_protos(&["proto/tunnel_management.proto"], &["proto"])?;
+
     Ok(())
 }

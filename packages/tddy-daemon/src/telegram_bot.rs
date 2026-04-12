@@ -425,12 +425,12 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
         return Ok(());
     }
 
-    if let Some((session_id, option_index)) = parse_elicitation_select_callback(&data) {
+    if let Some(parsed) = parse_elicitation_select_callback(&data) {
         if authorized_elicitation_surface_gate(
             &bot,
             &harness,
             chat_id,
-            &session_id,
+            &parsed.session_key,
             qid.clone(),
             "elicitation_select",
         )
@@ -441,7 +441,12 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
         if let Err(e) = h
-            .handle_elicitation_select(chat_id, &session_id, option_index)
+            .handle_elicitation_select(
+                chat_id,
+                &parsed.session_key,
+                parsed.option_index,
+                parsed.clarification_question_index,
+            )
             .await
         {
             bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;

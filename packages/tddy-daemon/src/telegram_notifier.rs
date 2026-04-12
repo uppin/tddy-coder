@@ -954,11 +954,12 @@ fn clarification_select_keyboard(
     if q.options.is_empty() {
         return None;
     }
+    let q_idx = sel.question_index as usize;
     let mut rows: InlineKeyboardRows = Vec::new();
     let mut row: Vec<(String, String)> = Vec::new();
     for i in 0..q.options.len() {
         let label = format!("{}", i + 1);
-        let cb = format!("eli:s:{session_id}:{i}");
+        let cb = format!("eli:s:{session_id}:{q_idx}:{i}");
         if cb.len() > 64 {
             log::warn!(
                 target: "tddy_daemon::telegram",
@@ -1294,6 +1295,74 @@ mod acceptance_unit_tests {
         assert!(
             labels.contains(&"2"),
             "compact numeric button; got {labels:?}"
+        );
+    }
+
+    /// Stale Telegram taps must not apply to the wrong clarification step: callback_data must carry
+    /// the presenter `question_index` alongside the option index (same session, multi-step flow).
+    #[tokio::test]
+    async fn mode_changed_select_second_question_keyboard_includes_question_index_in_callback() {
+        use tddy_service::gen::app_mode_proto::Variant;
+        use tddy_service::gen::server_message::Event;
+        use tddy_service::gen::{
+            AppModeProto, AppModeSelect, ClarificationQuestionProto, ModeChanged,
+            QuestionOptionProto, ServerMessage,
+        };
+
+        let mut watcher = TelegramSessionWatcher::new();
+        let mut cfg = DaemonConfig::default();
+        cfg.telegram = Some(crate::config::TelegramConfig {
+            enabled: true,
+            bot_token: "x".to_string(),
+            chat_ids: vec![42],
+        });
+        let mem = InMemoryTelegramSender::new();
+        let sid = "018f1234-5678-7abc-8def-123456789abc";
+        let msg = ServerMessage {
+            event: Some(Event::ModeChanged(ModeChanged {
+                mode: Some(AppModeProto {
+                    variant: Some(Variant::Select(AppModeSelect {
+                        question: Some(ClarificationQuestionProto {
+                            header: "Clarify".into(),
+                            question: "Second prompt".into(),
+                            options: vec![
+                                QuestionOptionProto {
+                                    label: "A".into(),
+                                    description: String::new(),
+                                },
+                                QuestionOptionProto {
+                                    label: "B".into(),
+                                    description: String::new(),
+                                },
+                            ],
+                            multi_select: false,
+                            allow_other: false,
+                        }),
+                        question_index: 1,
+                        total_questions: 2,
+                        initial_selected: 0,
+                    })),
+                }),
+            })),
+        };
+        watcher
+            .on_server_message(&cfg, &mem, sid, &msg)
+            .await
+            .unwrap();
+        let recorded = mem.recorded_with_keyboards();
+        let with_kb = recorded
+            .iter()
+            .find(|(_, _, kb)| !kb.is_empty())
+            .expect("select mode must include a keyboard");
+        let callbacks: Vec<&str> = with_kb
+            .2
+            .iter()
+            .flat_map(|r| r.iter().map(|(_, cb)| cb.as_str()))
+            .collect();
+        let expected_first = format!("eli:s:{sid}:1:0");
+        assert!(
+            callbacks.iter().any(|c| *c == expected_first.as_str()),
+            "first option callback must encode question_index=1 then option_index=0 (got {callbacks:?})"
         );
     }
 

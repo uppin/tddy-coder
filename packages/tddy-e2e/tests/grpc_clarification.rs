@@ -71,7 +71,10 @@ async fn clarification_flow_submit_answer_select_workflow_completes() {
 
                                     tx.send(ClientMessage {
                                         intent: Some(client_message::Intent::AnswerSelect(
-                                            AnswerSelect { index: 0 },
+                                            AnswerSelect {
+                                                index: 0,
+                                                clarification_question_index: None,
+                                            },
                                         )),
                                     })
                                     .await

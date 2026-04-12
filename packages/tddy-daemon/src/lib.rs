@@ -27,5 +27,8 @@ pub mod telegram_notifier;
 pub mod telegram_session_control;
 pub mod telegram_session_subscriber;
 pub mod token_provider;
+pub mod tunnel_management_rpc;
+pub mod tunnel_streambytes_bridge;
+pub mod tunnel_supervisor;
 pub mod user_sessions_path;
 pub mod worktrees;

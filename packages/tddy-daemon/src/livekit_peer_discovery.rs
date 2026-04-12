@@ -380,12 +380,14 @@ pub fn spawn_common_room_discovery_task(
     config: Arc<DaemonConfig>,
     registry: Arc<CommonRoomPeerRegistry>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    tunnel_supervisor: Arc<crate::tunnel_supervisor::TunnelSupervisor>,
 ) {
     if config.codex_oauth_loopback_proxy_eligible {
         let room_slot_oauth = room_slot.clone();
         tokio::spawn(async move {
             crate::oauth_loopback_tunnel::run_oauth_tunnel_supervisor_follow_room_slot(
                 room_slot_oauth,
+                tunnel_supervisor,
             )
             .await;
         });
@@ -621,9 +623,10 @@ async fn advance_daemon_adv_publish_on_tick(
         st.round_deadline = None;
         return;
     }
-    if !st.last_sdk_call.map_or(true, |t| {
-        now.saturating_duration_since(t) >= SET_METADATA_MIN_SDK_CALL_INTERVAL
-    }) {
+    if !st
+        .last_sdk_call
+        .is_none_or(|t| now.saturating_duration_since(t) >= SET_METADATA_MIN_SDK_CALL_INTERVAL)
+    {
         return;
     }
     st.sdk_attempt = st.sdk_attempt.saturating_add(1);
@@ -667,6 +670,7 @@ async fn advance_daemon_adv_publish_on_tick(
 ///
 /// Returns `Some(reason)` after `RoomEvent::Disconnected`, or `None` when the event channel
 /// ends. Always calls `Room::close` so the next discovery cycle starts from a clean engine state.
+#[allow(clippy::too_many_arguments)] // Spawn site passes room, buffers, registry, and policy knobs together.
 async fn run_common_room_registry_loop(
     room: Arc<Room>,
     mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,

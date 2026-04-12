@@ -59,6 +59,7 @@ message SubmitFeatureInput {
 
 message AnswerSelect {
   uint32 index = 1;
+  optional uint32 clarification_question_index = 2;
 }
 
 message AnswerOther {
