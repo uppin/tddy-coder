@@ -664,7 +664,9 @@ fn livekit_common_room_is_set(config: &DaemonConfig) -> bool {
 /// applies: only honor an explicit `daemon_instance_id` YAML override (no implicit hostname).
 pub fn livekit_spawn_daemon_instance_id(config: &DaemonConfig) -> Option<String> {
     if livekit_common_room_is_set(config) {
-        Some(crate::livekit_peer_discovery::local_instance_id_for_config(config))
+        Some(crate::livekit_peer_discovery::local_instance_id_for_config(
+            config,
+        ))
     } else {
         config
             .daemon_instance_id
@@ -781,14 +783,13 @@ mod child_log_yaml_tuning_tests {
     #[test]
     fn uses_daemon_default_level_and_logger_format() {
         let yaml = r#"
-log:
-  loggers:
-    default:
-      output: stderr
-      format: "[TEST] {level} {message}"
+loggers:
   default:
-    level: warn
-    logger: default
+    output: stderr
+    format: "[TEST] {level} {message}"
+default:
+  level: warn
+  logger: default
 "#;
         let cfg: LogConfig = serde_yaml::from_str(yaml).expect("parse");
         let (level, format) = child_log_yaml_tuning(Some(&cfg));

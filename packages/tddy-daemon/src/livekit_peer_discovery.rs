@@ -26,7 +26,34 @@
 //!
 //! We call [`CommonRoomPeerRegistry::sync_from_room`] on participant connect/disconnect events and
 //! also on a **500 ms** tick so transient SDK/event gaps do not leave stale peer rows indefinitely.
-//! Reconnect backoff after a dropped room is **2 s** before retrying [`common_room_discovery_cycle`].
+//! Reconnect backoff after a dropped room is **2 s** before retrying [`common_room_discovery_cycle`],
+//! or **6 s** after [`DisconnectReason::DuplicateIdentity`] so the server can release the identity.
+//!
+//! # Operator logs (troubleshooting reconnect loops)
+//!
+//! With `dev.daemon.yaml`, daemon lines go to **`tmp/logs/daemon`**; LiveKit / WebRTC selectors also
+//! write to **`tmp/logs/webrtc`**. Per-remote-participant metadata classification (**empty metadata**,
+//! **not valid daemon advertisement**) uses log target
+//! [`LOG_LIVEKIT_PEER_METADATA`] and is written to **`tmp/logs/daemon-livekit-peer-metadata`** when
+//! that target is configured (see `dev.daemon.yaml`). Watch common-room disconnects and duplicate-identity fights:
+//!
+//! `grep -E 'common_room_discovery|LiveKit connected|LiveKit disconnected|OAuth tunnel follower: supervisor ended' tmp/logs/daemon`
+//!
+//! Rapid **`DuplicateIdentity`** means two processes share the same LiveKit identity in
+//! `livekit.common_room` (often hostname, e.g. `udoo`). Use **`daemon_instance_id_append_startup_timestamp: true`**
+//! (see `dev.desktop.yaml`) or stop the extra daemon.
+//!
+//! **`set_metadata`** (daemon advertisement JSON) can return **timeout** even when other clients already see
+//! your metadata. In `livekit` **0.7.x**, [`LocalParticipant::set_metadata`](https://docs.rs/livekit/latest/livekit/prelude/struct.LocalParticipant.html#method.set_metadata)
+//! waits up to **5 s per attempt** for a **RequestResponse** on the signal channel; we **retry** on the
+//! **500 ms** registry tick (at most one SDK call every **5 s**) until
+//! **`livekit.common_room_set_metadata_timeout_secs`** elapses per round (default **60**), so room
+//! events still interleave. Your cached
+//! [`LocalParticipant::metadata`](https://docs.rs/livekit/latest/livekit/prelude/struct.LocalParticipant.html#method.metadata)
+//! can still update earlier via **ParticipantUpdate** from the server. Enable **DEBUG** for
+//! `common_room_discovery: set_metadata` lines to compare cached metadata vs intent after each attempt.
+//! Failures are **logged only**; the room stays connected and **`set_metadata` is retried every
+//! **10 s** after a failed round (and again after **`RoomEvent::Reconnected`** if needed).
 //!
 //! # Forwarding and `RpcClient`
 //!
@@ -37,17 +64,31 @@
 //! or **per-peer cached** clients with explicit lifecycle (today we prioritize correctness and
 //! simplicity).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use livekit::prelude::{RemoteParticipant, Room, RoomEvent, RoomOptions};
+use livekit::prelude::{
+    ConnectionState, RemoteParticipant, Room, RoomError, RoomEvent, RoomOptions,
+};
+use livekit::DisconnectReason;
 use prost::Message;
 use serde::Deserialize;
 use tddy_service::proto::connection::{StartSessionRequest, StartSessionResponse};
 
 use crate::config::DaemonConfig;
 use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
+
+/// After `RoomEvent::Connected`, yield before the first `set_metadata` attempt.
+const SET_METADATA_AFTER_CONNECTED_SETTLE_MS: u64 = 400;
+/// After a full `set_metadata` publish round fails (budget exhausted), retry while the room stays connected.
+const SET_METADATA_RETRY_INTERVAL_SECS: u64 = 10;
+/// Minimum spacing between SDK `set_metadata` calls (matches livekit **REQUEST_TIMEOUT** per attempt).
+const SET_METADATA_MIN_SDK_CALL_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Log target for classifying **remote** LiveKit participants (empty / non-advertisement metadata).
+/// Configure `log.policies` in daemon YAML to send this target to a dedicated file.
+pub const LOG_LIVEKIT_PEER_METADATA: &str = "tddy_daemon::livekit_peer_discovery::peer_metadata";
 
 /// LiveKit-backed eligible listing plus the shared common-room [`Room`] handle for **StartSession** forwarding.
 ///
@@ -178,6 +219,7 @@ impl CommonRoomPeerRegistry {
         for (_, participant) in room.remote_participants() {
             if let Some(info) = remote_participant_to_eligible(participant, local_instance_id) {
                 log::debug!(
+                    target: LOG_LIVEKIT_PEER_METADATA,
                     "CommonRoomPeerRegistry: sync sees remote instance_id={} label_len={}",
                     info.instance_id.0,
                     info.label.len()
@@ -225,6 +267,7 @@ fn remote_participant_to_eligible(
             Ok(a) => (a.instance_id, a.label),
             Err(e) => {
                 log::debug!(
+                    target: LOG_LIVEKIT_PEER_METADATA,
                     "peer {} metadata not valid daemon advertisement ({}), falling back to identity",
                     identity_str,
                     e
@@ -237,6 +280,7 @@ fn remote_participant_to_eligible(
         }
     } else {
         log::debug!(
+            target: LOG_LIVEKIT_PEER_METADATA,
             "peer {} has empty metadata; using LiveKit identity as instance_id",
             identity_str
         );
@@ -337,19 +381,35 @@ pub fn spawn_common_room_discovery_task(
     registry: Arc<CommonRoomPeerRegistry>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
 ) {
-    let room_slot_oauth = room_slot.clone();
-    tokio::spawn(async move {
-        crate::oauth_loopback_tunnel::run_oauth_tunnel_supervisor_follow_room_slot(room_slot_oauth)
+    if config.codex_oauth_loopback_proxy_eligible {
+        let room_slot_oauth = room_slot.clone();
+        tokio::spawn(async move {
+            crate::oauth_loopback_tunnel::run_oauth_tunnel_supervisor_follow_room_slot(
+                room_slot_oauth,
+            )
             .await;
-    });
+        });
+    } else {
+        log::info!(
+            target: "tddy_daemon::oauth_tunnel",
+            "OAuth loopback TCP proxy disabled (codex_oauth_loopback_proxy_eligible=false); no bind on 127.0.0.1 callback ports from this process"
+        );
+    }
     tokio::spawn(async move {
         loop {
-            if let Err(e) =
+            let local_id = local_instance_id_for_config(&config);
+            let outcome =
                 common_room_discovery_cycle(config.clone(), registry.clone(), room_slot.clone())
-                    .await
-            {
+                    .await;
+            let retry_secs: u64 = match &outcome {
+                Ok(Some(DisconnectReason::DuplicateIdentity)) => 6,
+                _ => 2,
+            };
+            if let Err(e) = &outcome {
                 log::warn!(
-                    "common_room_discovery_cycle ended: {e:#} — clearing room handle and retrying"
+                    "common_room_discovery_cycle ended: {e:#} — clearing room handle; retry in {}s (local_livekit_identity={})",
+                    retry_secs,
+                    local_id
                 );
             }
             {
@@ -357,7 +417,7 @@ pub fn spawn_common_room_discovery_task(
                 *g = None;
             }
             registry.clear();
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            tokio::time::sleep(Duration::from_secs(retry_secs)).await;
         }
     });
 }
@@ -401,61 +461,364 @@ fn livekit_common_room_connect_strings(
     Ok((room_name, url, api_key, api_secret))
 }
 
-/// Connects to the common room and publishes daemon advertisement metadata.
+/// Connects to the common room and waits for [`RoomEvent::Connected`].
+///
+/// Daemon advertisement metadata is published from [`run_common_room_registry_loop`] (retries on failure).
+/// Earlier room events are buffered and replayed into that loop.
 async fn connect_common_room_publish_metadata(
+    room_name: &str,
     url: &str,
     token: &str,
     local_id: &str,
-) -> anyhow::Result<(Arc<Room>, tokio::sync::mpsc::UnboundedReceiver<RoomEvent>)> {
-    let (room, events) = Room::connect(url, token, RoomOptions::default()).await?;
+) -> anyhow::Result<(
+    Arc<Room>,
+    tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
+    VecDeque<RoomEvent>,
+    String,
+)> {
+    let (room, mut events) = Room::connect(url, token, RoomOptions::default()).await?;
     let room = Arc::new(room);
+    let lp = room.local_participant();
+    log::info!(
+        "common_room_discovery: LiveKit connected room={} identity={} participant_sid={:?} connection_state={:?}",
+        room_name,
+        local_id,
+        lp.sid(),
+        room.connection_state()
+    );
     let adv = DaemonAdvertisement {
         instance_id: local_id.to_string(),
         label: format!("{local_id} (this daemon)"),
     };
     let meta_json = serde_json::to_string(&adv)?;
-    room.local_participant().set_metadata(meta_json).await?;
-    Ok((room, events))
+    let meta_len = meta_json.len();
+
+    let mut buffered = VecDeque::new();
+    log::info!(
+        "common_room_discovery: awaiting RoomEvent::Connected (metadata_len={} will publish in session loop)",
+        meta_len
+    );
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let ev = events
+                .recv()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("event channel closed before RoomEvent::Connected"))?;
+            match ev {
+                RoomEvent::Connected {
+                    participants_with_tracks,
+                } => {
+                    log::info!(
+                        "common_room_discovery: RoomEvent::Connected remote_participants_with_tracks={}",
+                        participants_with_tracks.len()
+                    );
+                    break;
+                }
+                other => buffered.push_back(other),
+            }
+        }
+        Ok::<(), anyhow::Error>(())
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("timeout waiting for RoomEvent::Connected (30s)"))??;
+
+    Ok((room, events, buffered, meta_json))
+}
+
+/// One [`LocalParticipant::set_metadata`] call with DEBUG context (SDK **5 s** timeout per call).
+async fn set_daemon_advertisement_metadata_once(
+    room: &Room,
+    phase: &'static str,
+    attempt: u32,
+    intent: String,
+) -> Result<(), RoomError> {
+    let lp = room.local_participant();
+    let cached_before = lp.metadata();
+    log::debug!(
+        "common_room_discovery: set_metadata attempt phase={phase} sdk_attempt={} connection_state={:?} participant_sid={:?} intent_len={} cached_len={} cached_eq_intent={}",
+        attempt,
+        room.connection_state(),
+        lp.sid(),
+        intent.len(),
+        cached_before.len(),
+        cached_before == intent,
+    );
+    let t0 = Instant::now();
+    let out = lp.set_metadata(intent.clone()).await;
+    let elapsed_ms = t0.elapsed().as_millis();
+    let cached_after = room.local_participant().metadata();
+    match &out {
+        Ok(()) => {
+            log::debug!(
+                "common_room_discovery: set_metadata ok phase={phase} sdk_attempt={} elapsed_ms={} cached_len_after={}",
+                attempt,
+                elapsed_ms,
+                cached_after.len(),
+            );
+        }
+        Err(e) => {
+            let after_matches = cached_after == intent;
+            log::debug!(
+                "common_room_discovery: set_metadata err phase={phase} sdk_attempt={} elapsed_ms={} err={e:?} cached_len_after={} cached_eq_intent_after_err={}",
+                attempt,
+                elapsed_ms,
+                cached_after.len(),
+                after_matches,
+            );
+            log::debug!(
+                "common_room_discovery: set_metadata err hint phase={phase} sdk_attempt={}: {}",
+                attempt,
+                if after_matches {
+                    "local participant cache already matches intent — server likely applied metadata (e.g. via ParticipantUpdate) but RequestResponse did not arrive within the SDK 5s timeout; safe to ignore if peers see the ad"
+                } else {
+                    "local cache still differs from intent — signaling ack likely missing and state not updated yet"
+                },
+            );
+        }
+    }
+    out
+}
+
+#[derive(Debug)]
+struct DaemonAdvPublishState {
+    on_server: bool,
+    /// Wall-clock end of the current publish round (`None` when published or between scheduled retries).
+    round_deadline: Option<Instant>,
+    last_sdk_call: Option<Instant>,
+    sdk_attempt: u32,
+}
+
+/// One step of daemon-advertisement publish: registry sync is done by the caller.
+async fn advance_daemon_adv_publish_on_tick(
+    room: &Room,
+    local_id: &str,
+    intent: &str,
+    budget: Duration,
+    st: &mut DaemonAdvPublishState,
+) {
+    if st.on_server {
+        return;
+    }
+    if room.local_participant().metadata() == intent {
+        log::info!(
+            "common_room_discovery: published daemon advertisement for instance_id={} (local cache matched intent)",
+            local_id
+        );
+        st.on_server = true;
+        st.round_deadline = None;
+        return;
+    }
+    let Some(deadline) = st.round_deadline else {
+        return;
+    };
+    let now = Instant::now();
+    if now >= deadline {
+        log::warn!(
+            "common_room_discovery: set_metadata publish round timed out (budget {}s; room stays connected; retry every {}s)",
+            budget.as_secs(),
+            SET_METADATA_RETRY_INTERVAL_SECS
+        );
+        st.round_deadline = None;
+        return;
+    }
+    if !st.last_sdk_call.map_or(true, |t| {
+        now.saturating_duration_since(t) >= SET_METADATA_MIN_SDK_CALL_INTERVAL
+    }) {
+        return;
+    }
+    st.sdk_attempt = st.sdk_attempt.saturating_add(1);
+    st.last_sdk_call = Some(now);
+    match set_daemon_advertisement_metadata_once(
+        room,
+        "publish",
+        st.sdk_attempt,
+        intent.to_string(),
+    )
+    .await
+    {
+        Ok(()) => {
+            log::info!(
+                "common_room_discovery: published daemon advertisement for instance_id={}",
+                local_id
+            );
+            st.on_server = true;
+            st.round_deadline = None;
+        }
+        Err(e) => {
+            if room.local_participant().metadata() == intent {
+                log::info!(
+                    "common_room_discovery: published daemon advertisement for instance_id={} (local cache matched after SDK error)",
+                    local_id
+                );
+                st.on_server = true;
+                st.round_deadline = None;
+            } else if Instant::now() >= deadline {
+                log::warn!(
+                    "common_room_discovery: set_metadata publish round ended after budget (last err: {e:#}; retry every {}s)",
+                    SET_METADATA_RETRY_INTERVAL_SECS
+                );
+                st.round_deadline = None;
+            }
+        }
+    }
 }
 
 /// Runs the periodic + event-driven registry sync until the room disconnects or the event channel ends.
+///
+/// Returns `Some(reason)` after `RoomEvent::Disconnected`, or `None` when the event channel
+/// ends. Always calls `Room::close` so the next discovery cycle starts from a clean engine state.
 async fn run_common_room_registry_loop(
     room: Arc<Room>,
     mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
+    mut event_buffer: VecDeque<RoomEvent>,
     registry: Arc<CommonRoomPeerRegistry>,
+    room_name: String,
     local_id: String,
-) {
+    daemon_adv_metadata: String,
+    set_metadata_budget: Duration,
+) -> Option<DisconnectReason> {
     registry.sync_from_room(room.as_ref(), &local_id);
+
+    tokio::time::sleep(Duration::from_millis(
+        SET_METADATA_AFTER_CONNECTED_SETTLE_MS,
+    ))
+    .await;
+
+    let mut publish_st = DaemonAdvPublishState {
+        on_server: room.local_participant().metadata() == daemon_adv_metadata,
+        round_deadline: None,
+        last_sdk_call: None,
+        sdk_attempt: 0,
+    };
+    if publish_st.on_server {
+        log::info!(
+            "common_room_discovery: daemon advertisement already in local participant metadata for instance_id={}",
+            local_id
+        );
+    } else {
+        publish_st.round_deadline = Some(Instant::now() + set_metadata_budget);
+        log::debug!(
+            "common_room_discovery: set_metadata publish round started budget_ms={}",
+            set_metadata_budget.as_millis()
+        );
+    }
+
+    let mut meta_tick =
+        tokio::time::interval(Duration::from_secs(SET_METADATA_RETRY_INTERVAL_SECS));
+    meta_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    meta_tick.tick().await;
+
     // 500 ms: safety net if participant events are delayed or missed; see module docs.
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     loop {
         tokio::select! {
-            _ = tick.tick() => {
+            _ = async {
+                tick.tick().await;
                 registry.sync_from_room(room.as_ref(), &local_id);
+                advance_daemon_adv_publish_on_tick(
+                    room.as_ref(),
+                    &local_id,
+                    &daemon_adv_metadata,
+                    set_metadata_budget,
+                    &mut publish_st,
+                )
+                .await;
+            } => {}
+            _ = meta_tick.tick(), if !publish_st.on_server => {
+                publish_st.round_deadline = Some(Instant::now() + set_metadata_budget);
+                publish_st.last_sdk_call = None;
+                log::debug!(
+                    "common_room_discovery: set_metadata scheduled retry round budget_ms={}",
+                    set_metadata_budget.as_millis()
+                );
             }
-            ev = events.recv() => {
+            ev = async {
+                if let Some(e) = event_buffer.pop_front() {
+                    Some(e)
+                } else {
+                    events.recv().await
+                }
+            } => {
                 let Some(ev) = ev else {
-                    log::info!("common_room_discovery: event channel closed");
-                    break;
+                    log::warn!(
+                        "common_room_discovery: LiveKit disconnected room={} identity={} (event channel closed)",
+                        room_name,
+                        local_id
+                    );
+                    let _ = room.close().await;
+                    return None;
                 };
                 match ev {
+                    RoomEvent::Connected {
+                        participants_with_tracks,
+                    } => {
+                        log::info!(
+                            "common_room_discovery: LiveKit session active room={} identity={} remote_participants_with_tracks={}",
+                            room_name,
+                            local_id,
+                            participants_with_tracks.len()
+                        );
+                    }
+                    RoomEvent::Reconnecting => {
+                        log::info!(
+                            "common_room_discovery: LiveKit reconnecting room={} identity={}",
+                            room_name,
+                            local_id
+                        );
+                    }
+                    RoomEvent::Reconnected => {
+                        log::info!(
+                            "common_room_discovery: LiveKit reconnected room={} identity={}",
+                            room_name,
+                            local_id
+                        );
+                        publish_st.on_server = false;
+                        publish_st.round_deadline = Some(Instant::now() + set_metadata_budget);
+                        publish_st.last_sdk_call = None;
+                        publish_st.sdk_attempt = 0;
+                    }
                     RoomEvent::ParticipantConnected(p) => {
-                        log::debug!(
-                            "common_room_discovery: ParticipantConnected {:?}",
+                        log::info!(
+                            "common_room_discovery: ParticipantConnected identity={:?}",
                             p.identity()
                         );
                         registry.sync_from_room(room.as_ref(), &local_id);
                     }
                     RoomEvent::ParticipantDisconnected(p) => {
-                        log::debug!(
-                            "common_room_discovery: ParticipantDisconnected {:?}",
-                            p.identity()
+                        log::info!(
+                            "common_room_discovery: ParticipantDisconnected identity={:?} reason={:?}",
+                            p.identity(),
+                            p.disconnect_reason()
                         );
                         registry.sync_from_room(room.as_ref(), &local_id);
                     }
+                    RoomEvent::ConnectionStateChanged(state) => {
+                        if state != ConnectionState::Connected {
+                            log::info!(
+                                "common_room_discovery: LiveKit connection state {:?} room={} identity={}",
+                                state,
+                                room_name,
+                                local_id
+                            );
+                        }
+                    }
                     RoomEvent::Disconnected { reason } => {
-                        log::info!("common_room_discovery: room Disconnected {:?}", reason);
-                        break;
+                        if reason == DisconnectReason::DuplicateIdentity {
+                            log::warn!(
+                                "common_room_discovery: LiveKit disconnected room={} identity={} reason=DuplicateIdentity — another client joined livekit.common_room with the same identity; stop the other process or set daemon_instance_id / daemon_instance_id_append_startup_timestamp (see dev.desktop.yaml)",
+                                room_name,
+                                local_id
+                            );
+                        } else {
+                            log::warn!(
+                                "common_room_discovery: LiveKit disconnected room={} identity={} reason={:?}",
+                                room_name,
+                                local_id,
+                                reason
+                            );
+                        }
+                        let _ = room.close().await;
+                        return Some(reason);
                     }
                     _ => {}
                 }
@@ -468,8 +831,9 @@ async fn common_room_discovery_cycle(
     config: Arc<DaemonConfig>,
     registry: Arc<CommonRoomPeerRegistry>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<DisconnectReason>> {
     let (room_name, url, api_key, api_secret) = livekit_common_room_connect_strings(&config)?;
+    let set_metadata_budget = config.common_room_set_metadata_attempt_budget();
     let local_id = local_instance_id_for_config(&config);
     let gen = tddy_livekit::TokenGenerator::new(
         api_key,
@@ -487,18 +851,29 @@ async fn common_room_discovery_cycle(
         local_id,
         url.len()
     );
-    let (room, events) = connect_common_room_publish_metadata(&url, &token, &local_id).await?;
+    let (room, events, event_buffer, daemon_adv_metadata) =
+        connect_common_room_publish_metadata(&room_name, &url, &token, &local_id).await?;
     {
         let mut g = room_slot.write().await;
         *g = Some(room.clone());
     }
     log::info!(
-        "common_room_discovery: published daemon advertisement for instance_id={}",
+        "common_room_discovery: common-room LiveKit session ready for instance_id={} (metadata publish is best-effort)",
         local_id
     );
 
-    run_common_room_registry_loop(room, events, registry, local_id).await;
-    Ok(())
+    let end = run_common_room_registry_loop(
+        room,
+        events,
+        event_buffer,
+        registry,
+        room_name,
+        local_id,
+        daemon_adv_metadata,
+        set_metadata_budget,
+    )
+    .await;
+    Ok(end)
 }
 
 /// Forward **StartSession** to another daemon in the common room via LiveKit data-channel RPC.

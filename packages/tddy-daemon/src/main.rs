@@ -12,6 +12,8 @@ use teloxide::prelude::Bot;
 use tokio::sync::Mutex;
 
 /// Apply environment variable overrides to config (e.g. from .env loaded by web-dev).
+///
+/// Also sets `codex_oauth_loopback_proxy_eligible` from `TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE` when present.
 fn apply_env_overrides(config: &mut tddy_daemon::config::DaemonConfig) {
     if let Some(v) = env_var("LIVEKIT_PUBLIC_URL") {
         if let Some(ref mut lk) = config.livekit {
@@ -58,6 +60,7 @@ fn apply_env_overrides(config: &mut tddy_daemon::config::DaemonConfig) {
             g.redirect_uri = Some(v);
         }
     }
+    config.apply_oauth_loopback_proxy_env_override();
     config.apply_telegram_env_overrides();
 }
 

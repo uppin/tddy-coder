@@ -13,6 +13,14 @@ fn default_spawn_worker_request_timeout_secs() -> u64 {
     300
 }
 
+fn default_common_room_set_metadata_timeout_secs() -> u64 {
+    60
+}
+
+fn default_codex_oauth_loopback_proxy_eligible() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DaemonConfig {
@@ -54,6 +62,11 @@ pub struct DaemonConfig {
     /// `common_room`. Intended for desktop dev / overlapping CLI embed + standalone runs.
     #[serde(default)]
     pub daemon_instance_id_append_startup_timestamp: bool,
+    /// When true (default), this daemon may bind the Codex OAuth loopback TCP port (e.g. 127.0.0.1:1455)
+    /// and relay browser callbacks to session hosts via LiveKit. Set false when another process
+    /// already uses that port or this instance must not act as the operator-side OAuth proxy.
+    #[serde(default = "default_codex_oauth_loopback_proxy_eligible")]
+    pub codex_oauth_loopback_proxy_eligible: bool,
     /// Optional Telegram bot notifications (see `telegram_notifier` module).
     #[serde(default)]
     pub telegram: Option<TelegramConfig>,
@@ -76,6 +89,7 @@ impl Default for DaemonConfig {
             spawn_worker_request_timeout_secs: default_spawn_worker_request_timeout_secs(),
             daemon_instance_id: None,
             daemon_instance_id_append_startup_timestamp: false,
+            codex_oauth_loopback_proxy_eligible: default_codex_oauth_loopback_proxy_eligible(),
             telegram: None,
         }
     }
@@ -101,7 +115,7 @@ pub struct ListenConfig {
     pub web_host: Option<String>,
 }
 
-#[derive(Debug, Default, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LiveKitConfig {
     #[serde(default)]
@@ -115,6 +129,24 @@ pub struct LiveKitConfig {
     /// Shared LiveKit room for presence (browser + tddy-* tools). Exposed to web as `common_room` in `/api/config`.
     #[serde(default)]
     pub common_room: Option<String>,
+    /// Total wall-clock time the daemon spends retrying `set_metadata` for the common-room advertisement
+    /// in one publish round. The LiveKit Rust SDK uses a fixed **5 s** timeout **per attempt**; this value
+    /// caps how long we keep trying before treating the round as failed (minimum effective **1** second).
+    #[serde(default = "default_common_room_set_metadata_timeout_secs")]
+    pub common_room_set_metadata_timeout_secs: u64,
+}
+
+impl Default for LiveKitConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            api_key: None,
+            api_secret: None,
+            public_url: None,
+            common_room: None,
+            common_room_set_metadata_timeout_secs: default_common_room_set_metadata_timeout_secs(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize)]
@@ -194,6 +226,18 @@ impl DaemonConfig {
         Duration::from_secs(secs)
     }
 
+    /// Wall-clock budget for one common-room daemon-advertisement `set_metadata` round (the LiveKit SDK
+    /// still uses **5 s per attempt**; we retry until this budget elapses or the publish succeeds).
+    pub fn common_room_set_metadata_attempt_budget(&self) -> Duration {
+        let secs = self
+            .livekit
+            .as_ref()
+            .map(|l| l.common_room_set_metadata_timeout_secs)
+            .unwrap_or_else(default_common_room_set_metadata_timeout_secs)
+            .max(1);
+        Duration::from_secs(secs)
+    }
+
     /// Merge Telegram settings from process environment (after YAML load).
     ///
     /// Variables:
@@ -216,6 +260,21 @@ impl DaemonConfig {
             chat_ids_csv.as_deref(),
             enabled.as_deref(),
         );
+    }
+
+    /// Override [`Self::codex_oauth_loopback_proxy_eligible`] from `TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE`
+    /// (`true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off`, case-insensitive). Call after YAML load.
+    pub fn apply_oauth_loopback_proxy_env_override(&mut self) {
+        if let Some(s) = non_empty_env("TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE") {
+            if let Some(b) = parse_env_bool(&s) {
+                self.codex_oauth_loopback_proxy_eligible = b;
+            } else {
+                log::warn!(
+                    target: "tddy_daemon::config",
+                    "TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE: expected true/false/1/0/yes/no/on/off, ignoring"
+                );
+            }
+        }
     }
 }
 
@@ -384,5 +443,41 @@ mod spawn_timeout_tests {
             ..Default::default()
         };
         assert_eq!(c.spawn_worker_request_timeout().as_secs(), 1);
+    }
+
+    #[test]
+    fn common_room_set_metadata_budget_defaults_to_60_seconds() {
+        let c = DaemonConfig::default();
+        assert_eq!(c.common_room_set_metadata_attempt_budget().as_secs(), 60);
+        let c = DaemonConfig {
+            livekit: Some(LiveKitConfig::default()),
+            ..Default::default()
+        };
+        assert_eq!(
+            c.livekit
+                .as_ref()
+                .unwrap()
+                .common_room_set_metadata_timeout_secs,
+            60
+        );
+        assert_eq!(c.common_room_set_metadata_attempt_budget().as_secs(), 60);
+    }
+
+    #[test]
+    fn common_room_set_metadata_budget_clamps_zero_to_one_second() {
+        let c = DaemonConfig {
+            livekit: Some(LiveKitConfig {
+                common_room_set_metadata_timeout_secs: 0,
+                ..LiveKitConfig::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(c.common_room_set_metadata_attempt_budget().as_secs(), 1);
+    }
+
+    #[test]
+    fn codex_oauth_loopback_proxy_eligible_defaults_true() {
+        let c = DaemonConfig::default();
+        assert!(c.codex_oauth_loopback_proxy_eligible);
     }
 }
