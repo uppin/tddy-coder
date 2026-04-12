@@ -9,16 +9,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use livekit::prelude::{ParticipantIdentity, Room, RoomEvent};
-use prost::Message;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 
 use crate::codex_oauth_participant_metadata::{
     parse_codex_oauth_metadata, resolved_codex_oauth_callback_port, CodexOAuthParticipantInfo,
 };
-use tddy_livekit::RpcClient;
-use tddy_service::proto::loopback_tunnel::TunnelChunk;
+use crate::tunnel_streambytes_bridge::run_tcp_accept_loop;
 
 const LOG: &str = "tddy_daemon::oauth_tunnel";
 
@@ -33,6 +29,8 @@ struct SupervisorState {
     listener: Option<JoinHandle<()>>,
     last_authorize: Option<String>,
     active_binding: Option<TunnelBinding>,
+    /// Last identity we published to [`crate::tunnel_supervisor::TunnelSupervisor`] for RPC list.
+    last_oauth_rpc_identity: Option<String>,
 }
 
 fn open_url_in_system_browser(url: &str) {
@@ -87,134 +85,38 @@ fn refresh_listener_finished(state: &mut SupervisorState) {
     }
 }
 
-fn stop_tunnel(state: &mut SupervisorState) {
+fn stop_tunnel(
+    state: &mut SupervisorState,
+    tunnel_supervisor: &Arc<crate::tunnel_supervisor::TunnelSupervisor>,
+) {
+    if let Some(id) = state.last_oauth_rpc_identity.take() {
+        tunnel_supervisor.remove_advertisement(&id);
+        log::debug!(
+            target: LOG,
+            "cleared tunnel RPC advertisement for session_correlation_id_len={}",
+            id.len()
+        );
+    }
     stop_listener(state);
     state.last_authorize = None;
 }
 
-async fn bridge_tcp_to_tunnel(
-    stream: TcpStream,
-    room: Arc<Room>,
-    target_identity: ParticipantIdentity,
-    remote_loopback_port: u16,
+async fn scan_and_update(
+    room: &Arc<Room>,
+    state: &mut SupervisorState,
+    tunnel_supervisor: &Arc<crate::tunnel_supervisor::TunnelSupervisor>,
 ) {
-    let events = room.subscribe();
-    let client = RpcClient::new_shared(room, target_identity.clone(), events);
-    let (mut sender, mut rx) =
-        match client.start_bidi_stream("loopback_tunnel.LoopbackTunnelService", "StreamBytes") {
-            Ok(x) => x,
-            Err(e) => {
-                log::error!(target: LOG, "start_bidi_stream failed: {}", e);
-                return;
-            }
-        };
-
-    let open = TunnelChunk {
-        open_port: u32::from(remote_loopback_port),
-        data: Vec::new(),
-    };
-    if let Err(e) = sender.send(open.encode_to_vec(), false).await {
-        log::error!(target: LOG, "tunnel open chunk: {}", e);
-        return;
-    }
-
-    let (mut rd, mut wr) = tokio::io::split(stream);
-    let mut buf = vec![0u8; 65536];
-
-    loop {
-        tokio::select! {
-            biased;
-            n = rd.read(&mut buf) => {
-                match n {
-                    Ok(0) => {
-                        let end = TunnelChunk {
-                            open_port: 0,
-                            data: Vec::new(),
-                        };
-                        let _ = sender.send(end.encode_to_vec(), true).await;
-                        break;
-                    }
-                    Ok(n) => {
-                        let chunk = TunnelChunk {
-                            open_port: 0,
-                            data: buf[..n].to_vec(),
-                        };
-                        if let Err(e) = sender.send(chunk.encode_to_vec(), false).await {
-                            log::debug!(target: LOG, "tunnel upstream send: {}", e);
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        log::debug!(target: LOG, "tcp read: {}", e);
-                        let end = TunnelChunk { open_port: 0, data: Vec::new() };
-                        let _ = sender.send(end.encode_to_vec(), true).await;
-                        break;
-                    }
-                }
-            }
-            msg = rx.recv() => {
-                match msg {
-                    Some(Ok(bytes)) => {
-                        let chunk = match TunnelChunk::decode(&bytes[..]) {
-                            Ok(c) => c,
-                            Err(e) => {
-                                log::debug!(target: LOG, "decode TunnelChunk: {}", e);
-                                break;
-                            }
-                        };
-                        if !chunk.data.is_empty() && wr.write_all(&chunk.data).await.is_err() {
-                            break;
-                        }
-                    }
-                    Some(Err(e)) => {
-                        log::debug!(target: LOG, "rpc stream error: {}", e);
-                        break;
-                    }
-                    None => break,
-                }
-            }
-        }
-    }
-}
-
-async fn run_tcp_accept_loop(
-    room: Arc<Room>,
-    target_identity: ParticipantIdentity,
-    listen_port: u16,
-    remote_loopback_port: u16,
-) -> std::io::Result<()> {
-    let addr = (std::net::Ipv4Addr::LOCALHOST, listen_port);
-    let listener = TcpListener::bind(addr).await?;
-    log::info!(
-        target: LOG,
-        "OAuth loopback TCP listening on 127.0.0.1:{} (tunnel → {:?} @ 127.0.0.1:{})",
-        listen_port,
-        target_identity,
-        remote_loopback_port
-    );
-    loop {
-        let (stream, _) = listener.accept().await?;
-        let room = room.clone();
-        let tid = target_identity.clone();
-        let rp = remote_loopback_port;
-        tokio::spawn(async move {
-            bridge_tcp_to_tunnel(stream, room, tid, rp).await;
-        });
-    }
-}
-
-async fn scan_and_update(room: &Arc<Room>, state: &mut SupervisorState) {
     refresh_listener_finished(state);
     let pick = pick_daemon_oauth_target(room.as_ref());
     let Some((target_identity, info)) = pick else {
-        stop_tunnel(state);
+        stop_tunnel(state, tunnel_supervisor);
         return;
     };
 
     let auth_url = match info.authorize_url.as_deref() {
         Some(u) if !u.is_empty() => u,
         _ => {
-            stop_tunnel(state);
+            stop_tunnel(state, tunnel_supervisor);
             return;
         }
     };
@@ -230,6 +132,15 @@ async fn scan_and_update(room: &Arc<Room>, state: &mut SupervisorState) {
         target_identity: target_identity.to_string(),
         listen_port,
     };
+
+    let id = target_identity.to_string();
+    if let Some(old) = state.last_oauth_rpc_identity.as_deref() {
+        if old != id.as_str() {
+            tunnel_supervisor.remove_advertisement(old);
+        }
+    }
+    state.last_oauth_rpc_identity = Some(id.clone());
+    tunnel_supervisor.ingest_pending_codex_oauth(&id, u32::from(listen_port), Some(auth_url));
 
     if state.active_binding.as_ref() != Some(&binding) {
         stop_listener(state);
@@ -258,6 +169,7 @@ async fn scan_and_update(room: &Arc<Room>, state: &mut SupervisorState) {
 /// [`run_oauth_tunnel_supervisor`]. Repeats after disconnect so OAuth works across discovery reconnects.
 pub async fn run_oauth_tunnel_supervisor_follow_room_slot(
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    tunnel_supervisor: Arc<crate::tunnel_supervisor::TunnelSupervisor>,
 ) {
     log::info!(
         target: LOG,
@@ -273,7 +185,7 @@ pub async fn run_oauth_tunnel_supervisor_follow_room_slot(
                 target: LOG,
                 "OAuth tunnel follower: room handle ready, starting supervisor"
             );
-            run_oauth_tunnel_supervisor(r).await;
+            run_oauth_tunnel_supervisor(r, tunnel_supervisor.clone()).await;
             log::info!(
                 target: LOG,
                 "OAuth tunnel follower: supervisor ended; waiting for next room handle"
@@ -286,7 +198,10 @@ pub async fn run_oauth_tunnel_supervisor_follow_room_slot(
 
 /// Watches the common-room [`Room`] for `daemon-*` participants publishing pending Codex OAuth metadata,
 /// opens the system browser, and accepts loopback TCP for tunneling to the session host.
-pub async fn run_oauth_tunnel_supervisor(room: Arc<Room>) {
+pub async fn run_oauth_tunnel_supervisor(
+    room: Arc<Room>,
+    tunnel_supervisor: Arc<crate::tunnel_supervisor::TunnelSupervisor>,
+) {
     let mut tick = tokio::time::interval(std::time::Duration::from_millis(400));
     let mut events = room.subscribe();
     let mut state = SupervisorState::default();
@@ -299,16 +214,16 @@ pub async fn run_oauth_tunnel_supervisor(room: Arc<Room>) {
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                scan_and_update(&room, &mut state).await;
+                scan_and_update(&room, &mut state, &tunnel_supervisor).await;
             }
             ev = events.recv() => {
                 match ev {
                     Some(RoomEvent::ParticipantConnected(_))
                     | Some(RoomEvent::ParticipantDisconnected(_)) => {
-                        scan_and_update(&room, &mut state).await;
+                        scan_and_update(&room, &mut state, &tunnel_supervisor).await;
                     }
                     Some(RoomEvent::Disconnected { .. }) | None => {
-                        stop_tunnel(&mut state);
+                        stop_tunnel(&mut state, &tunnel_supervisor);
                         log::info!(target: LOG, "OAuth tunnel supervisor stopping (room disconnected)");
                         break;
                     }

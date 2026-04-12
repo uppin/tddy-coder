@@ -57,6 +57,7 @@ fn spawn_common_room_discovery(
         config_arc,
         registry,
         room_slot.clone(),
+        std::sync::Arc::new(tddy_daemon::tunnel_supervisor::TunnelSupervisor::new()),
     );
     room_slot
 }

@@ -1224,3 +1224,73 @@ async fn bidi_stream_survives_delay_without_app_reconnect() -> Result<()> {
 
     Ok(())
 }
+
+/// Acceptance: `StreamBytes` loopback roundtrip remains correct after tunnel manager / supervisor extract.
+#[tokio::test]
+#[serial]
+async fn integration_loopback_tunnel_streambytes_roundtrip_after_tunnel_manager_extract(
+) -> Result<()> {
+    assert!(
+        tddy_service::LOOPBACK_TUNNEL_STREAMBYTES_VIA_GENERALIZED_SUPERVISOR,
+        "flip LOOPBACK_TUNNEL_STREAMBYTES_VIA_GENERALIZED_SUPERVISOR when oauth_loopback delegates to the generalized tunnel supervisor"
+    );
+
+    let livekit = LiveKitTestkit::start().await?;
+    let harness =
+        LoopbackTunnelHarness::start(&livekit, "loopback-after-tunnel-manager-extract").await?;
+
+    let first = TunnelChunk {
+        open_port: harness.loopback_port as u32,
+        data: vec![],
+    };
+    let second = TunnelChunk {
+        open_port: 0,
+        data: b"ping".to_vec(),
+    };
+
+    let mut rx = match harness
+        .rpc_client
+        .call_bidi_stream(
+            "loopback_tunnel.LoopbackTunnelService",
+            "StreamBytes",
+            vec![first.encode_to_vec(), second.encode_to_vec()],
+        )
+        .await
+    {
+        Ok(rx) => rx,
+        Err(e) => {
+            harness.teardown();
+            return Err(anyhow::anyhow!(
+                "loopback tunnel bidi after manager extract: {}",
+                e
+            ));
+        }
+    };
+
+    let mut acc = Vec::new();
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while acc.len() < 4 && std::time::Instant::now() < deadline {
+        let next = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await;
+        match next {
+            Ok(Some(Ok(bytes))) => {
+                let chunk = TunnelChunk::decode(&bytes[..])?;
+                acc.extend_from_slice(&chunk.data);
+            }
+            Ok(Some(Err(e))) => {
+                harness.teardown();
+                return Err(anyhow::anyhow!("loopback tunnel chunk error: {}", e));
+            }
+            Ok(None) => break,
+            Err(_) => {
+                harness.teardown();
+                return Err(anyhow::anyhow!(
+                    "timeout waiting for loopback tunnel response (post supervisor extract)"
+                ));
+            }
+        }
+    }
+
+    assert_eq!(acc.as_slice(), b"pong");
+    harness.teardown();
+    Ok(())
+}

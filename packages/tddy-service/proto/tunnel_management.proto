@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package tunnel_management;
+
+// Managed operator-side TCP tunnel advertisements and control (daemon /rpc).
+service TunnelManagementService {
+  rpc ListTunnelAdvertisements(ListTunnelAdvertisementsRequest) returns (ListTunnelAdvertisementsResponse);
+  rpc StartTunnel(StartTunnelRequest) returns (StartTunnelResponse);
+  rpc StopTunnel(StopTunnelRequest) returns (StopTunnelResponse);
+  rpc OpenBrowserForTunnel(OpenBrowserForTunnelRequest) returns (OpenBrowserForTunnelResponse);
+}
+
+enum TunnelKind {
+  TUNNEL_KIND_UNSPECIFIED = 0;
+  TUNNEL_KIND_CODEX_OAUTH = 1;
+  TUNNEL_KIND_CUSTOM = 2;
+}
+
+enum TunnelBindingState {
+  TUNNEL_BINDING_STATE_UNSPECIFIED = 0;
+  TUNNEL_BINDING_STATE_PENDING = 1;
+  TUNNEL_BINDING_STATE_ACTIVE = 2;
+  TUNNEL_BINDING_STATE_IDLE = 3;
+}
+
+message TunnelAdvertisement {
+  uint32 operator_loopback_port = 1;
+  string session_correlation_id = 2;
+  TunnelKind kind = 3;
+  TunnelBindingState state = 4;
+  // Optional OAuth authorize URL for UI / OpenBrowserForTunnel (empty when not applicable).
+  string authorize_url = 5;
+}
+
+message ListTunnelAdvertisementsRequest {}
+
+message ListTunnelAdvertisementsResponse {
+  repeated TunnelAdvertisement advertisements = 1;
+}
+
+message StartTunnelRequest {
+  string session_correlation_id = 1;
+  uint32 operator_bind_port = 2;
+  TunnelKind kind = 3;
+}
+
+message StartTunnelResponse {
+  TunnelAdvertisement advertisement = 1;
+}
+
+message StopTunnelRequest {
+  string session_correlation_id = 1;
+}
+
+message StopTunnelResponse {
+  TunnelBindingState state = 1;
+}
+
+message OpenBrowserForTunnelRequest {
+  string session_correlation_id = 1;
+  string url = 2;
+}
+
+message OpenBrowserForTunnelResponse {}

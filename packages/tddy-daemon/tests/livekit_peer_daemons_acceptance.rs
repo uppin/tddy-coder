@@ -70,6 +70,7 @@ fn connection_service_with_livekit_discovery(
         config_arc.clone(),
         registry.clone(),
         room_slot.clone(),
+        Arc::new(tddy_daemon::tunnel_supervisor::TunnelSupervisor::new()),
     );
     let eligible: Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource> = Arc::new(
         tddy_daemon::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(config_arc, registry),

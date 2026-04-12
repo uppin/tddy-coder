@@ -33,10 +33,6 @@ mod imp {
 mod imp {
     pub fn request_screen_capture_access() {}
 
-    pub fn screen_capture_granted() -> bool {
-        true
-    }
-
     pub fn warn_if_screen_capture_denied() {}
 }
 

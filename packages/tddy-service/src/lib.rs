@@ -9,6 +9,8 @@ pub mod codex_oauth_validate;
 pub mod convert;
 pub mod daemon_service;
 pub mod echo_service;
+pub mod implementation_contract;
+pub use implementation_contract::LOOPBACK_TUNNEL_STREAMBYTES_VIA_GENERALIZED_SUPERVISOR;
 pub mod loopback_tunnel_service;
 pub mod observer_service;
 pub mod presenter_intent_service;
@@ -31,6 +33,7 @@ pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
+pub use proto::tunnel_management::TunnelManagementServiceServer;
 pub use service::TddyRemoteService;
 pub use tddy_rpc::Status;
 pub use terminal_service::{
@@ -63,6 +66,9 @@ pub mod proto {
     }
     pub mod loopback_tunnel {
         include!(concat!(env!("OUT_DIR"), "/loopback_tunnel.rs"));
+    }
+    pub mod tunnel_management {
+        include!(concat!(env!("OUT_DIR"), "/tunnel_management.rs"));
     }
 }
 

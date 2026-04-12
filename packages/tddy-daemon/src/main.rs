@@ -266,6 +266,8 @@ fn main() -> anyhow::Result<()> {
     rt.block_on(async move {
         if let Some(user_resolver) = user_resolver_for_connection {
             let config_arc = Arc::new(config.clone());
+            let tunnel_supervisor =
+                Arc::new(tddy_daemon::tunnel_supervisor::TunnelSupervisor::new());
             let livekit_discovery: Option<
                 tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles,
             > = {
@@ -306,6 +308,7 @@ fn main() -> anyhow::Result<()> {
                         config_arc.clone(),
                         registry.clone(),
                         room_slot.clone(),
+                        tunnel_supervisor.clone(),
                     );
                     Some(tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles {
                         eligible_daemon_source: Arc::new(
@@ -333,6 +336,11 @@ fn main() -> anyhow::Result<()> {
                 name: "connection.ConnectionService",
                 service: Arc::new(connection_server) as Arc<dyn tddy_rpc::RpcService>,
             });
+            rpc_entries.push(
+                tddy_daemon::tunnel_management_rpc::tunnel_management_rpc_entry_with_supervisor(
+                    tunnel_supervisor.clone(),
+                ),
+            );
         }
 
         let inbound_task = if let Some((bot, harness)) = telegram_inbound {
