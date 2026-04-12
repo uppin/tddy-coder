@@ -1,6 +1,8 @@
 //! Operator-side OAuth callback: TCP on loopback bridged to session host via `LoopbackTunnelService.StreamBytes`.
 //!
 //! Replaces the desktop `Bun.listen` path when the daemon holds the common-room LiveKit [`Room`].
+//! Spawns only when [`DaemonConfig::codex_oauth_loopback_proxy_eligible`] is true (YAML or
+//! `TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE`); set false to avoid `127.0.0.1` port conflicts (e.g. 1455).
 
 use std::process::Command;
 use std::sync::Arc;

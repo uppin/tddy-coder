@@ -10,6 +10,9 @@ log:
     webrtc:
       output: { file: "tmp/logs/webrtc" }
       format: "{timestamp} [{level}] [{target}] {message}"
+    livekit_peer_metadata:
+      output: { file: "tmp/logs/daemon-livekit-peer-metadata" }
+      format: "{timestamp} [{level}] [{target}] {message}"
   default:
     level: debug
     logger: default
@@ -20,10 +23,17 @@ log:
       logger: webrtc
     - selector: { target: livekit_api* }
       logger: webrtc
+    - selector: { target: tddy_daemon::livekit_peer_discovery::peer_metadata }
+      logger: livekit_peer_metadata
 
 listen:
   web_port: 8899
   web_host: 127.0.0.1
+
+# Unique LiveKit identity per process in `livekit.common_room` (defaults to hostname, e.g. udoo).
+# Without this, a second tddy-daemon (web-dev + desktop, old PID, remote box) causes
+# DuplicateIdentity and rapid reconnect (~7s); see tmp/logs/webrtc LeaveRequest reason.
+daemon_instance_id_append_startup_timestamp: true
 
 # Production web bundle (used when hitting the daemon port directly). For live dev + HMR use
 # ./web-dev and open the Vite port (default 5173), not this port — see docs/ft/web/local-web-dev.md.
@@ -46,6 +56,10 @@ users:
 
 # When true (default), pass --mouse to spawned tddy-* (browser / touch terminals).
 spawn_mouse: true
+
+# When true (default), this daemon binds Codex OAuth loopback TCP (e.g. 127.0.0.1:1455) and tunnels
+# via LiveKit. Set false if another process already owns that port. Override: TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE.
+# codex_oauth_loopback_proxy_eligible: true
 
 # Inbound session control (/sessions, /delete, /start-workflow) uses teloxide long-polling when
 # enabled: true, bot_token is valid, and chat_ids match your Telegram chat. Sessions are read from

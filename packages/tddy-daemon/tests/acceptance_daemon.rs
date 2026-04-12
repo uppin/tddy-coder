@@ -61,6 +61,21 @@ users:
     );
 }
 
+/// Acceptance: codex_oauth_loopback_proxy_eligible can be disabled in YAML.
+#[test]
+fn acceptance_config_codex_oauth_loopback_proxy_eligible_false() {
+    let yaml = r#"
+users:
+  - github_user: "a"
+    os_user: "b"
+codex_oauth_loopback_proxy_eligible: false
+"#;
+    let path = std::env::temp_dir().join("tddy-daemon-acceptance-oauth-proxy.yaml");
+    std::fs::write(&path, yaml).unwrap();
+    let config = DaemonConfig::load(&path).expect("config should load");
+    assert!(!config.codex_oauth_loopback_proxy_eligible);
+}
+
 /// Acceptance: spawn_mouse can be disabled in YAML.
 #[test]
 fn acceptance_config_spawn_mouse_false() {

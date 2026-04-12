@@ -21,6 +21,9 @@ log:
     webrtc:
       output: { file: "tmp/logs/webrtc" }
       format: "{timestamp} [{level}] [{target}] {message}"
+    livekit_peer_metadata:
+      output: { file: "tmp/logs/daemon-livekit-peer-metadata" }
+      format: "{timestamp} [{level}] [{target}] {message}"
   default:
     level: debug
     logger: default
@@ -31,6 +34,8 @@ log:
       logger: webrtc
     - selector: { target: livekit_api* }
       logger: webrtc
+    - selector: { target: tddy_daemon::livekit_peer_discovery::peer_metadata }
+      logger: livekit_peer_metadata
 
 # Per-process suffix on LiveKit common_room identity (hostname or daemon_instance_id) so overlapping
 # embedded + CLI daemons on one machine do not hit DuplicateIdentity.
@@ -59,6 +64,9 @@ users:
     os_user: "CURRENT_USER" # Replaced before spawn (same as ./web-dev)
 
 spawn_mouse: true
+
+# When false, this daemon skips Codex OAuth loopback TCP (127.0.0.1:1455). Use with ./web-dev if two daemons share one machine. Env: TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE.
+# codex_oauth_loopback_proxy_eligible: true
 
 telegram:
   enabled: false
