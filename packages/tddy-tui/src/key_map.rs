@@ -163,7 +163,7 @@ fn select_key(
 
     match key.code {
         KeyCode::Enter if !vs.select_typing_other && vs.select_selected < other_idx => {
-            Some(UserIntent::AnswerSelect(vs.select_selected))
+            Some(UserIntent::answer_select(vs.select_selected))
         }
         KeyCode::Enter if !vs.select_typing_other && vs.select_selected == other_idx => {
             Some(UserIntent::AnswerOther(vs.select_other_text.clone()))

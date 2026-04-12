@@ -117,7 +117,10 @@ async fn pty_full_workflow_asserts_each_state_transition() {
                                 if let Some(app_mode_proto::Variant::Select(_)) = &mode.variant {
                                     tx.send(ClientMessage {
                                         intent: Some(client_message::Intent::AnswerSelect(
-                                            AnswerSelect { index: 0 },
+                                            AnswerSelect {
+                                                index: 0,
+                                                clarification_question_index: None,
+                                            },
                                         )),
                                     })
                                     .await

@@ -167,7 +167,7 @@ fn full_workflow_completes_with_stub_backend() {
         if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
             presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
@@ -267,7 +267,7 @@ fn tdd_workflow_starts_plan_after_feature_submit() {
         if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
             presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
@@ -332,7 +332,7 @@ fn bugfix_workflow_starts_reproduce_after_feature_submit() {
         if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
             presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
@@ -405,7 +405,7 @@ fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_di
             break;
         }
         if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         }
         iterations += 1;
         std::thread::sleep(Duration::from_millis(5));
@@ -562,7 +562,7 @@ fn submit_feature_input_after_completion_restarts_workflow() {
         if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
             presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
@@ -603,7 +603,7 @@ fn submit_feature_input_after_completion_restarts_workflow() {
         if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
             presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
@@ -673,7 +673,7 @@ fn session_dir_under_sessions_base_when_output_dir_is_dot() {
         if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
             presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
@@ -775,7 +775,7 @@ fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
                 presenter.handle_intent(UserIntent::ApproveSessionDocument);
             }
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if (matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
@@ -850,7 +850,7 @@ fn clarification_roundtrip_sends_answers() {
         if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
             presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
@@ -923,7 +923,7 @@ fn inbox_queue_and_dequeue() {
             queued = true;
         }
         if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         }
@@ -977,7 +977,7 @@ fn plan_approval_approve_proceeds_to_next_step() {
         if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
             presenter.handle_intent(UserIntent::ApproveSessionDocument);
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
@@ -1049,7 +1049,7 @@ fn plan_approval_view_then_approve() {
                 presenter.handle_intent(UserIntent::ViewSessionDocument);
             }
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
@@ -1117,7 +1117,7 @@ fn plan_view_refinement_submits_without_dismissing_markdown() {
                 presenter.state().mode
             );
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
@@ -1170,7 +1170,7 @@ fn plan_approval_refine_re_shows_approval() {
                 presenter.handle_intent(UserIntent::ApproveSessionDocument);
             }
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if (matches!(presenter.state().mode, AppMode::MarkdownViewer { .. })
@@ -1235,7 +1235,7 @@ fn plan_approval_from_markdown_viewer() {
             presenter.handle_intent(UserIntent::ApproveSessionDocument);
             approved_from_viewer = true;
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
-            presenter.handle_intent(UserIntent::AnswerSelect(0));
+            presenter.handle_intent(UserIntent::answer_select(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
             presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
         } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {

@@ -544,18 +544,31 @@ impl Presenter {
                     self.broadcast_mode_changed();
                 }
             }
-            UserIntent::AnswerSelect(idx) => {
+            UserIntent::AnswerSelect {
+                option_index,
+                clarification_question_index,
+            } => {
                 if self.backend_selection_pending {
-                    self.handle_backend_selection_answer(idx);
+                    self.handle_backend_selection_answer(option_index);
                     return;
                 }
                 if self.recipe_slash_selection_pending {
-                    self.handle_recipe_slash_selection_answer(idx);
+                    self.handle_recipe_slash_selection_answer(option_index);
                     return;
                 }
+                if let Some(expected_q) = clarification_question_index {
+                    if expected_q != self.current_question_index {
+                        log::info!(
+                            "AnswerSelect ignored: clarification step mismatch (got {}, current {})",
+                            expected_q,
+                            self.current_question_index
+                        );
+                        return;
+                    }
+                }
                 if let Some(q) = self.pending_questions.get(self.current_question_index) {
-                    if idx < q.options.len() {
-                        let answer = q.options[idx].label.clone();
+                    if option_index < q.options.len() {
+                        let answer = q.options[option_index].label.clone();
                         self.collected_answers.push(answer);
                         self.current_question_index += 1;
                         self.advance_to_next_question();
@@ -800,7 +813,11 @@ impl Presenter {
     }
 
     fn send_clarification_answers(&mut self) {
-        let answers = self.collect_answers();
+        let answers = if self.pending_tool_call_response.is_some() {
+            self.collect_answers()
+        } else {
+            self.collect_numbered_workflow_clarification_answers()
+        };
         let is_approve = matches!(
             self.pending_tool_call_response,
             Some(PendingToolCallResponse::Approve(_))
@@ -858,6 +875,15 @@ impl Presenter {
 
     fn collect_answers(&self) -> String {
         self.collected_answers.join("\n")
+    }
+
+    fn collect_numbered_workflow_clarification_answers(&self) -> String {
+        self.collected_answers
+            .iter()
+            .enumerate()
+            .map(|(i, a)| format!("{}. {}", i + 1, a))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     fn advance_to_next_question(&mut self) {
@@ -1571,6 +1597,13 @@ impl Presenter {
 }
 
 #[cfg(test)]
+impl Presenter {
+    pub(crate) fn test_set_answer_tx(&mut self, tx: mpsc::Sender<String>) {
+        self.answer_tx = Some(tx);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::presenter::state::AppMode;
@@ -2002,12 +2035,70 @@ mod tests {
         );
     }
 
+    /// Multi-step clarification answers must be labeled with a stable 1-based question prefix so
+    /// backends and UIs cannot mis-associate a delayed or out-of-order tap with the wrong prompt.
+    #[test]
+    fn clarification_submit_prefixes_each_answer_with_one_based_question_number() {
+        let mut p = make_presenter();
+        let (answer_tx, answer_rx) = mpsc::channel();
+        p.test_set_answer_tx(answer_tx);
+        inject_workflow_event(
+            &mut p,
+            WorkflowEvent::ClarificationNeeded {
+                questions: vec![
+                    ClarificationQuestion {
+                        header: "Q1".to_string(),
+                        question: "First?".to_string(),
+                        options: vec![
+                            QuestionOption {
+                                label: "RPC-only".to_string(),
+                                description: String::new(),
+                            },
+                            QuestionOption {
+                                label: "Event + RPC".to_string(),
+                                description: String::new(),
+                            },
+                        ],
+                        multi_select: false,
+                        allow_other: false,
+                    },
+                    ClarificationQuestion {
+                        header: "Q2".to_string(),
+                        question: "Second?".to_string(),
+                        options: vec![
+                            QuestionOption {
+                                label: "Prompt then open".to_string(),
+                                description: String::new(),
+                            },
+                            QuestionOption {
+                                label: "Open immediately".to_string(),
+                                description: String::new(),
+                            },
+                        ],
+                        multi_select: false,
+                        allow_other: false,
+                    },
+                ],
+            },
+        );
+        p.poll_workflow();
+        p.handle_intent(UserIntent::answer_select(0));
+        p.handle_intent(UserIntent::answer_select(1));
+        let got = answer_rx.recv().expect("clarification answers must be sent");
+        assert_eq!(
+            got,
+            "1. RPC-only\n2. Open immediately",
+            "expected one-based prefixes matching question order; got {:?}",
+            got
+        );
+    }
+
     #[test]
     fn backend_selection_answer_transitions_to_feature_input() {
         let mut p = make_presenter();
         let q = crate::backend::backend_selection_question();
         p.show_backend_selection(q, 0);
-        p.handle_intent(UserIntent::AnswerSelect(2));
+        p.handle_intent(UserIntent::answer_select(2));
         assert!(matches!(p.state().mode, AppMode::FeatureInput));
         assert!(!p.is_backend_selection_pending());
         assert_eq!(p.state().agent, "cursor");
@@ -2019,7 +2110,7 @@ mod tests {
         let mut p = make_presenter();
         let q = crate::backend::backend_selection_question();
         p.show_backend_selection(q, 0);
-        p.handle_intent(UserIntent::AnswerSelect(1));
+        p.handle_intent(UserIntent::answer_select(1));
         assert_eq!(p.state().agent, "claude-acp");
         assert_eq!(p.state().model, "opus");
     }

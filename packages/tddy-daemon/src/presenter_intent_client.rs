@@ -67,10 +67,14 @@ pub async fn reject_session_document_localhost(grpc_port: u16) -> anyhow::Result
 pub async fn answer_clarification_select_localhost(
     grpc_port: u16,
     option_index: u32,
+    clarification_question_index: Option<u32>,
 ) -> anyhow::Result<()> {
     let mut client = connect_presenter_intent(grpc_port).await?;
     client
-        .answer_clarification_select(AnswerClarificationSelectRequest { option_index })
+        .answer_clarification_select(AnswerClarificationSelectRequest {
+            option_index,
+            clarification_question_index,
+        })
         .await?;
     Ok(())
 }

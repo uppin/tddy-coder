@@ -86,8 +86,19 @@ impl PresenterIntent for PresenterIntentService {
         &self,
         request: Request<AnswerClarificationSelectRequest>,
     ) -> Result<Response<SubmitFeatureTextResponse>, Status> {
-        let idx = request.into_inner().option_index as usize;
-        send_empty_intent(&self.intent_tx, UserIntent::AnswerSelect(idx)).await
+        let inner = request.into_inner();
+        let option_index = inner.option_index as usize;
+        let clarification_question_index = inner
+            .clarification_question_index
+            .map(|q| q as usize);
+        send_empty_intent(
+            &self.intent_tx,
+            UserIntent::AnswerSelect {
+                option_index,
+                clarification_question_index,
+            },
+        )
+        .await
     }
 
     async fn answer_clarification_multi_select(

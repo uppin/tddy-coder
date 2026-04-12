@@ -7,8 +7,8 @@
 #   --build     Optional. Run ./release before copying binaries.
 #
 # Prerequisites (from repo root): ./dev bun install — installs @zed-industries/codex-acp and the
-# platform-specific native package under node_modules/. The install script copies that native
-# codex-acp binary to INSTALL_BIN_DIR alongside tddy-*.
+# platform-specific native package (npm hoisted path or Bun isolated store under node_modules/.bun/).
+# The install script copies that native codex-acp binary to INSTALL_BIN_DIR alongside tddy-*.
 #
 # Environment (install paths — override for tests or non-FHS layouts):
 #   INSTALL_PREFIX       Base prefix (default: /usr/local). Binaries go to INSTALL_PREFIX/bin
@@ -90,8 +90,10 @@ if [[ ! -f "${WEB_DIST_SRC}/index.html" ]]; then
 fi
 
 # Native codex-acp from bun/npm optional platform package (see package.json dependencies).
+# Bun’s isolated linker keeps the platform package under node_modules/.bun/… without a top-level
+# @zed-industries/codex-acp-* symlink; npm often hoists it next to codex-acp.
 resolve_codex_acp_native_src() {
-  local os arch
+  local os arch pkg hoisted
   case "$(uname -s)" in
     Linux) os=linux ;;
     Darwin) os=darwin ;;
@@ -108,15 +110,28 @@ resolve_codex_acp_native_src() {
       return 1
       ;;
   esac
-  echo "${ROOT_DIR}/node_modules/@zed-industries/codex-acp-${os}-${arch}/bin/codex-acp"
+  pkg="codex-acp-${os}-${arch}"
+  hoisted="${ROOT_DIR}/node_modules/@zed-industries/${pkg}/bin/codex-acp"
+  if [[ -f "$hoisted" ]]; then
+    echo "$hoisted"
+    return 0
+  fi
+  shopt -s nullglob
+  local -a bun_paths=(
+    "${ROOT_DIR}/node_modules/.bun/@zed-industries+${pkg}"@*/node_modules/@zed-industries/${pkg}/bin/codex-acp
+  )
+  shopt -u nullglob
+  if [[ ${#bun_paths[@]} -gt 0 && -f "${bun_paths[0]}" ]]; then
+    echo "${bun_paths[0]}"
+    return 0
+  fi
+  echo "install: missing codex-acp native binary: ${hoisted}" >&2
+  echo "install: (Bun also uses node_modules/.bun/@zed-industries+${pkg}@…/bin/codex-acp)" >&2
+  echo "install: run from repo root: ./dev bun install  (pulls @zed-industries/codex-acp + platform package)" >&2
+  return 1
 }
 
 CODEX_ACP_NATIVE="$(resolve_codex_acp_native_src)" || exit 1
-if [[ ! -f "$CODEX_ACP_NATIVE" ]]; then
-  echo "install: missing codex-acp native binary: ${CODEX_ACP_NATIVE}" >&2
-  echo "install: run from repo root: ./dev bun install  (pulls @zed-industries/codex-acp + platform package)" >&2
-  exit 1
-fi
 
 echo "install: paths — BIN_DIR=${BIN_DIR}"
 echo "install: paths — CONFIG_DIR=${CONFIG_DIR} (daemon.yaml)"
