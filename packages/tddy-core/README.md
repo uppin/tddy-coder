@@ -20,6 +20,10 @@ Core library providing: `CodingBackend` trait (async) for LLM backends, `Workflo
 
 ## Documentation
 
+### Product Requirements (What)
+- [Session actions (`tddy-tools`)](../../docs/ft/coder/session-actions.md)
+
+### Technical Implementation (How)
 - [Architecture](./docs/architecture.md) — Component structure and data flow
 - [Changesets](./docs/changesets.md) — Applied changeset history
 - [Tech Stack](../../docs/dev/guides/tech-stack.md) — Workspace layout, toolchain

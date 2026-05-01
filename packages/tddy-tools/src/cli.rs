@@ -15,6 +15,7 @@ use tddy_core::{read_changeset, write_changeset, ChangesetWorkflow};
 use tddy_tools::review_persist;
 use tddy_tools::schema;
 use tddy_tools::schema_manifest;
+use tddy_tools::session_actions_cli;
 use tddy_tools::session_context;
 
 /// Maximum bytes read from stdin or accepted inline `--data` for `submit` / `ask` (DoS guard).
@@ -71,6 +72,32 @@ pub struct PersistChangesetWorkflowArgs {
     /// JSON body for the `workflow` block (validated against `changeset-workflow` schema).
     #[arg(long)]
     pub data: Option<String>,
+}
+
+/// List session action manifests (JSON printed to stdout).
+#[derive(Parser)]
+#[command(name = "list-actions")]
+pub struct ListActionsArgs {
+    /// Directory containing session artifacts (`actions/` subtree).
+    #[arg(long)]
+    pub session_dir: PathBuf,
+}
+
+/// Invoke one session action with validated JSON (`--data`).
+#[derive(Parser)]
+#[command(name = "invoke-action")]
+pub struct InvokeActionArgs {
+    /// Directory containing session artifacts.
+    #[arg(long)]
+    pub session_dir: PathBuf,
+
+    /// Action manifest id (filename stem under `actions/`).
+    #[arg(long)]
+    pub action: String,
+
+    /// JSON object passed to the manifest input schema mapper.
+    #[arg(long)]
+    pub data: String,
 }
 
 /// Get JSON schema for a goal.
@@ -443,6 +470,14 @@ pub fn run_set_session_context(args: SetSessionContextArgs) -> Result<()> {
     })?;
     let workflow_dir = PathBuf::from(session_dir).join(".workflow");
     session_context::apply_session_context_merge(&workflow_dir, &session_id, &patch)
+}
+
+pub fn run_list_actions(args: ListActionsArgs) -> Result<()> {
+    session_actions_cli::run_list_actions(&args.session_dir)
+}
+
+pub fn run_invoke_action(args: InvokeActionArgs) -> Result<()> {
+    session_actions_cli::run_invoke_action(&args.session_dir, &args.action, &args.data)
 }
 
 pub fn run_get_schema(args: GetSchemaArgs) -> Result<()> {

@@ -115,6 +115,18 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **Exports**: Module is public; key symbols are re-exported from **`lib.rs`** for **`tddy-coder`** and tests.
 - **Feature doc**: [feature-prompt-agent-skills.md](../../../docs/ft/coder/feature-prompt-agent-skills.md).
 
+### Session actions (`session_actions/`)
+
+- **Purpose**: Library support for declarative **`actions/*.yaml`** manifests beside session **`changeset.yaml`** (see [session-actions.md](../../../docs/ft/coder/session-actions.md), [session-layout.md](../../../docs/ft/coder/session-layout.md)). **`tddy-tools`** wires **`list-actions`**, **`invoke-action`**, and JSON output on top of this module.
+- **ActionManifest**: Versioned YAML (**`serde`**, **`deny_unknown_fields`**); **`parse_action_manifest_file`** / **`parse_action_manifest_yaml`** load a single manifest.
+- **list_action_summaries**: Lists **`id`**, **`summary`**, and schema-presence flags for manifests under **`<session_dir>/actions/`**.
+- **validate_action_arguments_json**: Compiles **`input_schema`** when present and validates **`--data`** JSON (**`jsonschema`**, default draft aligned with toolchain) before any subprocess runs.
+- **resolve_allowlisted_path**: Resolves **`output_path_arg`** string fields inside the canonical session directory or optional **`repo_path`** from **`changeset.yaml`**; traversal outside those roots fails closed for callers that map the error to tool exit **`3`**.
+- **ensure_action_architecture**: Enforces **`architecture`**: **`native`** or rustc-style prefix matching **`std::env::consts::ARCH`** before spawn.
+- **parse_test_summary_from_process_output** / **`TestSummary`**: Parses cargo-style **`test result:`** totals from combined stdout/stderr when **`result_kind`** is **`test_summary`**.
+- **run_manifest_command**: Spawns **`command[0]`** with argv capture via **`std::process::Command`**; UTF-8 decode uses replacement for invalid bytes.
+- **Tests**: **`session_actions_red`**.
+
 ### Schema (tddy-tools)
 
 - **JSON Schema validation**: All schema logic lives in tddy-tools. Schemas are embedded via `include_dir`; no schema files are written to disk. `tddy-tools submit --goal <goal>` validates JSON against the embedded schema before relaying to tddy-coder. `tddy-tools get-schema <goal>` outputs the schema for inspection. On validation failure, tddy-tools returns errors with a tip to run `get-schema`. The `red` schema defines an optional `source_file` on each `markers[]` item (file path where the marker was placed); `packages/tddy-core/schemas/red.schema.json` matches the embedded schema for tests and parity checks.
