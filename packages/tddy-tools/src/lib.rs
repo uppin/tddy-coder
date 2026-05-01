@@ -10,4 +10,5 @@ pub mod github_pr;
 pub mod review_persist;
 pub mod schema;
 pub mod schema_manifest;
+pub mod session_actions_cli;
 pub mod session_context;

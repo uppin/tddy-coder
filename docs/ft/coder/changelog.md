@@ -4,6 +4,12 @@ Release note history for the Coder product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-05-01 — Session actions CLI (`tddy-tools`) and core module
+
+- **tddy-core**: **`session_actions`** module — **`ActionManifest`** YAML (**`serde`**, **`deny_unknown_fields`**), **`list_action_summaries`**, **`validate_action_arguments_json`** (**`jsonschema`**), **`resolve_allowlisted_path`**, **`ensure_action_architecture`** (**`native`** / host match), **`parse_test_summary_from_process_output`**, **`run_manifest_command`** (**`stdlib::process`** capture). Tests: **`session_actions_red`**. Package **[architecture.md](../../../packages/tddy-core/docs/architecture.md)** (**Session actions**); **[changesets.md](../../../packages/tddy-core/docs/changesets.md)**.
+- **tddy-tools**: **`list-actions`**, **`invoke-action`** (**`session_actions_cli`**) — exit code **`3`** for validation/path classes; structured JSON **`exit_code`** / **`stdout`** / **`stderr`**; **`result_kind: test_summary`** merges cargo-style totals. Tests: **`actions_cli_acceptance`**. Package **[changesets.md](../../../packages/tddy-tools/docs/changesets.md)**.
+- **Docs**: **[session-actions.md](session-actions.md)**, **[session-layout.md](session-layout.md)**; cross-package **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-04-11 — LiveKit LoopbackTunnel for Codex OAuth callback
 
 - **tddy-coder**: LiveKit **`MultiRpcService`** registers **`LoopbackTunnelService`** alongside **Terminal** (and **Token** when API key mode is used); **`codex_oauth` participant metadata** continues via **`terminal_and_codex_oauth_for_livekit`** watch path without unary **DeliverCallback** on the LiveKit surface. **tddy-service**: **`LoopbackTunnelServiceImpl`** (**`TunnelChunk`**, **`open_port` ≥ 1024**). Feature **[tddy-desktop-electrobun.md](../desktop/tddy-desktop-electrobun.md)**, **[codex-oauth-web-relay.md](../web/codex-oauth-web-relay.md)**. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
