@@ -7,9 +7,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 use tddy_core::session_actions::{
-    ensure_action_architecture, invocation_record_summary_value, list_action_summaries,
-    parse_action_manifest_file, parse_test_summary_from_process_output, resolve_allowlisted_path,
-    run_manifest_command, validate_action_arguments_json, SessionActionsError,
+    ensure_action_architecture, list_action_summaries, parse_action_manifest_file,
+    resolve_action_manifest_path, resolve_allowlisted_path, run_manifest_command,
+    validate_action_arguments_json, SessionActionsError,
 };
 use tddy_core::{read_changeset, WorkflowError};
 
@@ -71,7 +71,7 @@ fn invoke_action_inner(
     action_id: &str,
     data_json: &str,
 ) -> Result<Value, SessionActionsError> {
-    let manifest_path = resolve_manifest_path(session_dir, action_id)?;
+    let manifest_path = resolve_action_manifest_path(session_dir, action_id)?;
     let manifest = parse_action_manifest_file(&manifest_path)?;
     let args: Value = serde_json::from_str(data_json)
         .map_err(|e| SessionActionsError::InvalidInvokeJson(e.to_string()))?;
@@ -94,31 +94,12 @@ fn invoke_action_inner(
 
     ensure_action_architecture(&manifest.architecture)?;
 
-    let mut record = run_manifest_command(
+    let record = run_manifest_command(
         session_dir,
         repo_cached.as_deref(),
         &manifest,
         &args,
     )?;
-
-    if manifest.result_kind.as_deref() == Some("test_summary") {
-        let stdout = record
-            .get("stdout")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let stderr = record
-            .get("stderr")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let combined = format!("{stdout}{stderr}");
-        let summary = parse_test_summary_from_process_output(&combined)?;
-        if let Some(obj) = record.as_object_mut() {
-            obj.insert(
-                "summary".to_string(),
-                invocation_record_summary_value(&summary),
-            );
-        }
-    }
 
     Ok(record)
 }
@@ -149,13 +130,3 @@ fn load_repo_root(session_dir: &Path) -> Result<Option<PathBuf>, SessionActionsE
     }
 }
 
-fn resolve_manifest_path(session_dir: &Path, action_id: &str) -> Result<PathBuf, SessionActionsError> {
-    let actions_dir = session_dir.join("actions");
-    for ext in ["yaml", "yml"] {
-        let cand = actions_dir.join(format!("{action_id}.{ext}"));
-        if cand.is_file() {
-            return Ok(cand);
-        }
-    }
-    Err(SessionActionsError::UnknownActionId(action_id.to_string()))
-}
