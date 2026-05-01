@@ -13,6 +13,7 @@ pub mod presenter;
 pub mod session_lifecycle;
 pub mod session_metadata;
 pub mod session_actions;
+pub mod session_action_pipeline;
 pub mod source_path;
 pub mod stream;
 pub mod toolcall;

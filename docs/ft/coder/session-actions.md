@@ -53,6 +53,34 @@ Operational trust boundary: manifests live beside **`changeset.yaml`** under **`
 2. Path resolution combines canonical session roots with lexical normalization on absolutes to block obvious **`..`** escapes relative to **`--session-dir`** prior to traversal checks.
 3. Subprocess capture buffers full stdout/stderr in memory; oversized or infinitely chatty commands load the parent process accordingly—run long jobs behind dedicated wrappers if needed.
 
+## Session action pipeline (`session_action_pipeline`)
+
+The **`tddy_core::session_action_pipeline`** module provides library helpers for workflow-style **session actions** that need structured env merge, a canonical **`{"args","env"}`** invocation envelope, optional **input mapper** and **output transform** subprocesses, glob resolution for declared paths, and named **capture channels** (`stdout`, `stderr`, and extensions such as **`logs`**). It complements the declarative **`session_actions`** YAML manifests and **`tddy-tools invoke-action`**: callers embed or orchestrate these primitives when building custom pipelines outside the single-shot manifest invoke path.
+
+### Public surface
+
+| Concern | API |
+|--------|-----|
+| Default env + invocation overrides | **`merge_session_action_env`** — override map wins on duplicate keys. |
+| Canonical JSON without a mapper | **`build_invocation_envelope_direct`** — object with **`args`** (string array) and **`env`** (string-valued map). |
+| Glob resolution under a base directory | **`resolve_output_globs_sorted`** — sorted, deduplicated file paths; patterns are relative to **`base`**. |
+| Channel manifest | **`build_extended_channel_manifest`** — resolves **`stdout`**, **`stderr`**, and **`logs`** under the session directory; optional path overrides for stdout/stderr. |
+| Input mapper | **`run_input_mapper_for_envelope`** — writes structured JSON to the child stdin; child receives **`TDDY_SESSION_CHANNEL_MANIFEST_JSON`** (JSON object of channel id → path). Expects a single JSON object on stdout with **only** **`args`** and **`env`** keys; rejects extra keys. |
+| Primary command | **`run_primary_action_with_capture_paths`** — **`Command::new(program).args(args)`** (no shell); **`env_clear`** then **`envs`** from the supplied map; captures stdout/stderr to resolved paths (defaults under **`session_dir/capture/`** when omitted). |
+| Output transform | **`run_output_transform_and_validate`** — runs transform argv with null stdin and the same manifest env var; trims stdout and validates parsed JSON with **`jsonschema`** against the caller-supplied **`output_schema`**. |
+| Errors | **`SessionActionPipelineError`** — mapper/transform failures, envelope validation, glob paths, schema validation, I/O. |
+
+### Operational notes
+
+- Subprocesses for mapper, transform, and primary run with a cleared environment except for explicitly supplied keys (plus **`TDDY_SESSION_CHANNEL_MANIFEST_JSON`** where applicable). Callers supply any required variables (e.g. **`PATH`**) in the env map when needed.
+- Glob patterns passed to **`resolve_output_globs_sorted`** use paths representable as UTF-8 strings when joined with **`base`** for the underlying **`glob`** crate.
+- Integration coverage for this module lives in **`packages/tddy-tools/tests/session_action_pipeline_integration.rs`** (Unix file permissions in fixtures); unit coverage in **`packages/tddy-core/tests/session_action_resolve_unit.rs`**.
+
+### Related tests (pipeline module)
+
+- **`packages/tddy-core/tests/session_action_resolve_unit.rs`**
+- **`packages/tddy-tools/tests/session_action_pipeline_integration.rs`**
+
 ## Related tests
 
 Library coverage: **`packages/tddy-core/tests/session_actions_red.rs`**. Integration coverage: **`packages/tddy-tools/tests/actions_cli_acceptance.rs`**.
@@ -60,4 +88,4 @@ Library coverage: **`packages/tddy-core/tests/session_actions_red.rs`**. Integra
 ## Related documentation
 
 - [Session directory layout](session-layout.md)
-- **Implementation**: [`tddy_core::session_actions`](../../../packages/tddy-core/src/session_actions/mod.rs), **[`tddy_core` architecture — Session actions](../../../packages/tddy-core/docs/architecture.md#session-actions-session_actions)**; **`tddy_tools::session_actions_cli`** (binary wiring)
+- **Implementation**: [`tddy_core::session_actions`](../../../packages/tddy-core/src/session_actions/mod.rs), [`tddy_core::session_action_pipeline`](../../../packages/tddy-core/src/session_action_pipeline.rs), **[`tddy_core` architecture — Session actions](../../../packages/tddy-core/docs/architecture.md#session-actions-session_actions)**, **[Session action pipeline](../../../packages/tddy-core/docs/architecture.md#session-action-pipeline-session_action_pipeline)**; **`tddy_tools::session_actions_cli`** (binary wiring)

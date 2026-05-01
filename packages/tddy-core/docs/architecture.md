@@ -127,6 +127,13 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **run_manifest_command**: Spawns **`command[0]`** with argv capture via **`std::process::Command`**; UTF-8 decode uses replacement for invalid bytes.
 - **Tests**: **`session_actions_red`**.
 
+### Session action pipeline (`session_action_pipeline`)
+
+- **Purpose**: Helpers for env merge (override precedence), canonical **`args`/`env`** JSON value, glob resolution relative to a base path, channel manifests (**`stdout`**, **`stderr`**, **`logs`**), optional **input mapper** and **output transform** subprocesses with JSON Schema validation on transform output, and **primary** spawn with explicit argv and capture files. Complements **`session_actions`**; see [session-actions.md](../../../docs/ft/coder/session-actions.md) (**Session action pipeline** section).
+- **Subprocess contract**: Mapper and transform children receive **`TDDY_SESSION_CHANNEL_MANIFEST_JSON`**. Mapper stdin receives caller JSON; stdout must be a single JSON object with **only** **`args`** and **`env`**. Primary and subprocess paths use **`env_clear`** then caller-supplied **`envs`** (plus the manifest variable where set).
+- **Dependencies**: **`glob`**, **`jsonschema`**, **`serde_json`**, **`log`**.
+- **Tests**: **`session_action_resolve_unit`** (tddy-core), **`session_action_pipeline_integration`** (tddy-tools).
+
 ### Schema (tddy-tools)
 
 - **JSON Schema validation**: All schema logic lives in tddy-tools. Schemas are embedded via `include_dir`; no schema files are written to disk. `tddy-tools submit --goal <goal>` validates JSON against the embedded schema before relaying to tddy-coder. `tddy-tools get-schema <goal>` outputs the schema for inspection. On validation failure, tddy-tools returns errors with a tip to run `get-schema`. The `red` schema defines an optional `source_file` on each `markers[]` item (file path where the marker was placed); `packages/tddy-core/schemas/red.schema.json` matches the embedded schema for tests and parity checks.

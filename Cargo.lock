@@ -6592,6 +6592,7 @@ dependencies = [
  "chrono",
  "dashmap 6.1.0",
  "futures",
+ "glob",
  "jsonschema",
  "libc",
  "log",
