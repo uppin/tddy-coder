@@ -4,6 +4,12 @@ Release note history for the Coder product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-05-01 — Session action pipeline (`session_action_pipeline`)
+
+- **tddy-core**: **`session_action_pipeline`** — **`merge_session_action_env`**, **`build_invocation_envelope_direct`**, **`resolve_output_globs_sorted`** (**`glob`**), **`build_extended_channel_manifest`**, **`run_input_mapper_for_envelope`**, **`run_output_transform_and_validate`** (**`jsonschema`**), **`run_primary_action_with_capture_paths`**; structured errors **`SessionActionPipelineError`**. Tests: **`session_action_resolve_unit`**. Feature doc: **[session-actions.md](session-actions.md)**; **[architecture.md](../../../packages/tddy-core/docs/architecture.md)**.
+- **tddy-tools**: Integration tests **`session_action_pipeline_integration`** (mapper, transform schema, capture paths).
+- **Docs**: **[session-actions.md](session-actions.md)** (pipeline section); **[architecture.md](../../../packages/tddy-core/docs/architecture.md)**; package **[changesets.md](../../../packages/tddy-core/docs/changesets.md)**, **[changesets.md](../../../packages/tddy-tools/docs/changesets.md)**; cross-package **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-05-01 — Session actions CLI (`tddy-tools`) and core module
 
 - **tddy-core**: **`session_actions`** module — **`ActionManifest`** YAML (**`serde`**, **`deny_unknown_fields`**), **`list_action_summaries`**, **`validate_action_arguments_json`** (**`jsonschema`**), **`resolve_allowlisted_path`**, **`ensure_action_architecture`** (**`native`** / host match), **`parse_test_summary_from_process_output`**, **`run_manifest_command`** (**`stdlib::process`** capture). Tests: **`session_actions_red`**. Package **[architecture.md](../../../packages/tddy-core/docs/architecture.md)** (**Session actions**); **[changesets.md](../../../packages/tddy-core/docs/changesets.md)**.
