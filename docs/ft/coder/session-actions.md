@@ -23,7 +23,7 @@ Operational trust boundary: manifests live beside **`changeset.yaml`** under **`
 | **`command`** | Required | Non-empty argv vector: **`command[0]`** is the program; remaining elements are literal arguments (no templating from JSON yet). |
 | **`input_schema`** | Optional | JSON Schema object (**Draft 7** toolchain default) enforced against **`--data`** JSON before any process spawn. Absent schema skips argument validation aside from parsing a JSON object/string where applicable. |
 | **`output_schema`** | Optional | Declared shape for tooling; **`list-actions`** reports presence via **`has_output_schema`**. Runtime validation against process output remains a roadmap item. |
-| **`result_kind`** | Optional | When set to **`test_summary`**, **`invoke-action`** attaches a **`summary`** object with **`passed`**, **`failed`**, **`skipped`** parsed from combined stdout/stderr (cargo **`test result:`** totals line). |
+| **`result_kind`** | Optional | When set to **`test_summary`**, **`invoke-action`** and blocking **`invoke_session_action`** attach a **`summary`** object with **`passed`**, **`failed`**, **`skipped`** parsed from combined stdout/stderr (cargo **`test result:`** totals line), merged via **`finalize_invocation_record`**. |
 | **`output_path_arg`** | Optional | Names a string field in **`--data`**; the value is resolved inside the canonical session directory or **`repo_path`** before spawn. Escape outside those roots terminates with exit code **`3`** and does not execute the command. |
 
 ## CLI surface (`tddy-tools`)
@@ -52,6 +52,33 @@ Operational trust boundary: manifests live beside **`changeset.yaml`** under **`
 1. **`command`** executes with host permissions of the invoking user; manifests are intentionally powerful—treat **`actions/`** as sensitive configuration alongside **`changeset.yaml`**.
 2. Path resolution combines canonical session roots with lexical normalization on absolutes to block obvious **`..`** escapes relative to **`--session-dir`** prior to traversal checks.
 3. Subprocess capture buffers full stdout/stderr in memory; oversized or infinitely chatty commands load the parent process accordingly—run long jobs behind dedicated wrappers if needed.
+
+## Session action jobs (`session_action_jobs`)
+
+The **`tddy_core::session_action_jobs`** module runs the same **`actions/*.yaml`** manifests as **`invoke-action`**, with an optional **non-blocking** admission path: callers receive a **`job_id`**, filesystem paths for **stdout** and **stderr** logs, and can **`wait`** (with optional timeout) or **`stop`** a running job. Manifest resolution (**`resolve_action_manifest_path`**), **`--data`** validation, **`repo_path`** / **`output_path_arg`** checks, **`ensure_action_architecture`**, and **`result_kind: test_summary`** handling share the synchronous **`session_actions`** implementation.
+
+### On-disk layout
+
+- **Registry root**: `<session_dir>/session_action_jobs/`
+- **Per job**: `<session_dir>/session_action_jobs/jobs/<job_id>/` contains **`job.json`**, **`stdout.log`**, **`stderr.log`**.
+
+### Library API (`tddy_core::session_action_jobs`)
+
+| Entry point | Role |
+|-------------|------|
+| **`invoke_session_action`** | With **`SessionActionInvokeOptions { async_start: false }`**, blocks until the subprocess exits and returns the same JSON record shape as **`invoke-action`** (including **`summary`** when **`result_kind`** is **`test_summary`**). With **`async_start: true`**, creates log files, spawns the manifest command in a new process group on Unix, assigns a version-7 UUID **`job_id`**, and returns **`AsyncStarted`** (**`running`** status plus absolute **`stdout_path`** / **`stderr_path`**). |
+| **`wait_session_action_job`** | Polls for terminal state. **`timeout_ms: None`** or **`Some(0)`** waits without an upper bound; a positive bound returns **`TimedOut { still_running }`** when the deadline elapses first. |
+| **`stop_session_action_job`** | On Unix, sends **`SIGKILL`** to the child process group, reaps the child, and persists **`cancelled`** state. Returns **`UnknownJob`** when the job directory is missing (**`stable_code`** **`unknown_job`**), **`AlreadyFinished`** when the job is already terminal, and **`Stopped`** / **`AlreadyTerminal`** for live cancellation semantics. |
+| **`SessionActionJobRegistry::load`** | Ensures **`session_action_jobs/`** and **`jobs/`** exist under **`--session-dir`**. |
+
+### Platform notes
+
+**`wait`**, **`stop`**, and async spawn bookkeeping use **`libc`** on Unix. Non-Unix builds expose **`JobState`** errors for those entry points.
+
+### Related tests (jobs module)
+
+- **`packages/tddy-core/tests/toolcall_jobs.rs`**
+- **`packages/tddy-tools/tests/session_action_jobs_acceptance.rs`**
 
 ## Session action pipeline (`session_action_pipeline`)
 
@@ -83,9 +110,9 @@ The **`tddy_core::session_action_pipeline`** module provides library helpers for
 
 ## Related tests
 
-Library coverage: **`packages/tddy-core/tests/session_actions_red.rs`**. Integration coverage: **`packages/tddy-tools/tests/actions_cli_acceptance.rs`**.
+Library coverage: **`packages/tddy-core/tests/session_actions_red.rs`**, **`packages/tddy-core/tests/toolcall_jobs.rs`**. Integration coverage: **`packages/tddy-tools/tests/actions_cli_acceptance.rs`**, **`packages/tddy-tools/tests/session_action_jobs_acceptance.rs`**.
 
 ## Related documentation
 
 - [Session directory layout](session-layout.md)
-- **Implementation**: [`tddy_core::session_actions`](../../../packages/tddy-core/src/session_actions/mod.rs), [`tddy_core::session_action_pipeline`](../../../packages/tddy-core/src/session_action_pipeline.rs), **[`tddy_core` architecture — Session actions](../../../packages/tddy-core/docs/architecture.md#session-actions-session_actions)**, **[Session action pipeline](../../../packages/tddy-core/docs/architecture.md#session-action-pipeline-session_action_pipeline)**; **`tddy_tools::session_actions_cli`** (binary wiring)
+- **Implementation**: [`tddy_core::session_actions`](../../../packages/tddy-core/src/session_actions/mod.rs), [`tddy_core::session_action_jobs`](../../../packages/tddy-core/src/session_action_jobs/mod.rs), [`tddy_core::session_action_pipeline`](../../../packages/tddy-core/src/session_action_pipeline.rs), **[`tddy_core` architecture — Session actions](../../../packages/tddy-core/docs/architecture.md#session-actions-session_actions)**, **[Session action jobs](../../../packages/tddy-core/docs/architecture.md#session-action-jobs-session_action_jobs)**, **[Session action pipeline](../../../packages/tddy-core/docs/architecture.md#session-action-pipeline-session_action_pipeline)**; **`tddy_tools::session_actions_cli`** (binary wiring)

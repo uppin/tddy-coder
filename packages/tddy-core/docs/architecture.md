@@ -124,8 +124,19 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **resolve_allowlisted_path**: Resolves **`output_path_arg`** string fields inside the canonical session directory or optional **`repo_path`** from **`changeset.yaml`**; traversal outside those roots fails closed for callers that map the error to tool exit **`3`**.
 - **ensure_action_architecture**: Enforces **`architecture`**: **`native`** or rustc-style prefix matching **`std::env::consts::ARCH`** before spawn.
 - **parse_test_summary_from_process_output** / **`TestSummary`**: Parses cargo-style **`test result:`** totals from combined stdout/stderr when **`result_kind`** is **`test_summary`**.
-- **run_manifest_command**: Spawns **`command[0]`** with argv capture via **`std::process::Command`**; UTF-8 decode uses replacement for invalid bytes.
+- **run_manifest_command**: Spawns **`command[0]`** with argv capture via **`std::process::Command`**; UTF-8 decode uses replacement for invalid bytes. When **`result_kind`** is **`test_summary`**, the returned JSON includes a merged **`summary`** object (**`finalize_invocation_record`**).
+- **resolve_action_manifest_path**: Resolves **`actions/<action_id>.{yaml,yml}`** under **`--session-dir`**; mismatches surface as **`UnknownActionId`** for callers that map errors to tool exit semantics.
 - **Tests**: **`session_actions_red`**.
+
+### Session action jobs (`session_action_jobs/`)
+
+- **Purpose**: Optional **non-blocking** runs of the same declarative **`actions/*.yaml`** manifests, keyed by a **`job_id`**, with filesystem **stdout** / **stderr** capture paths and **`wait` / `stop`** operations. Shares manifest resolution (**`resolve_action_manifest_path`**), argument validation, **`repo_path`** / **`output_path_arg`** checks, and **`ensure_action_architecture`** with the synchronous **`invoke-action`** path. See [session-actions.md](../../../docs/ft/coder/session-actions.md) (**Session action jobs** section).
+- **On-disk layout**: **`<session_dir>/session_action_jobs/jobs/<job_id>/`** holds **`job.json`**, **`stdout.log`**, **`stderr.log`**. **`SessionActionJobRegistry::load`** creates **`<session_dir>/session_action_jobs/`** and **`jobs/`**.
+- **invoke_session_action**: With **`async_start: false`**, blocks until the subprocess exits and returns the same structured record shape as **`invoke-action`** (including **`test_summary`** when configured). With **`async_start: true`**, admits the job, creates log files before return, spawns the manifest command in a new process group on Unix, assigns a version-7 **UUID** as **`job_id`**, and returns **`running`** status plus absolute capture paths.
+- **wait_session_action_job**: Polls subprocess exit via **`waitpid`** (**`WNOHANG`**) while **`job.json`** reflects **`running`**; **`timeout_ms: None`** or **`0`** means unbounded wait; a positive bound yields **`TimedOut { still_running }`** when the deadline elapses first.
+- **stop_session_action_job**: Sends **`SIGKILL`** to the process group on Unix, reaps the child, persists **`cancelled`** state, returns **`UnknownJob`** when the job directory is absent, and **`AlreadyFinished`** when the job is already terminal. **`stable_code`** on **`SessionActionJobsError::UnknownJob`** is **`unknown_job`**.
+- **Platform notes**: Async **`wait` / `stop` / `reap`** use **`libc`** on Unix targets; non-Unix builds surface **`JobState`** errors for those entry points.
+- **Tests**: **`toolcall_jobs`** (tddy-core), **`session_action_jobs_acceptance`** (tddy-tools).
 
 ### Session action pipeline (`session_action_pipeline`)
 

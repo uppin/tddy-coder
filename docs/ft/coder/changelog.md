@@ -4,6 +4,12 @@ Release note history for the Coder product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-05-01 — Session action jobs (`session_action_jobs`)
+
+- **tddy-core**: **`session_action_jobs`** — **`invoke_session_action`** (**blocking** parity with **`invoke-action`**, **`async_start`** admission with UUID **`job_id`** and log paths), **`wait_session_action_job`** (**`TimedOut`** on positive timeout), **`stop_session_action_job`** (Unix process-group **`SIGKILL`**, **`unknown_job`** / **`AlreadyFinished`** outcomes), **`SessionActionJobRegistry::load`**; shares **`resolve_action_manifest_path`**, validation, and **`finalize_invocation_record`** / **`test_summary`** with **`session_actions`**. Tests: **`toolcall_jobs`**. Feature: **[session-actions.md](session-actions.md)** (**Session action jobs**); **[architecture.md](../../../packages/tddy-core/docs/architecture.md#session-action-jobs-session_action_jobs)**.
+- **tddy-tools**: Integration tests **`session_action_jobs_acceptance`** (blocking parity, async admission, wait/stop, unknown job).
+- **Docs**: **[session-actions.md](session-actions.md)**; **[architecture.md](../../../packages/tddy-core/docs/architecture.md)**; package **[changesets.md](../../../packages/tddy-core/docs/changesets.md)**, **[changesets.md](../../../packages/tddy-tools/docs/changesets.md)**; **[docs/dev/changesets.md](../../dev/changesets.md)**.
+
 ## 2026-05-01 — Session action pipeline (`session_action_pipeline`)
 
 - **tddy-core**: **`session_action_pipeline`** — **`merge_session_action_env`**, **`build_invocation_envelope_direct`**, **`resolve_output_globs_sorted`** (**`glob`**), **`build_extended_channel_manifest`**, **`run_input_mapper_for_envelope`**, **`run_output_transform_and_validate`** (**`jsonschema`**), **`run_primary_action_with_capture_paths`**; structured errors **`SessionActionPipelineError`**. Tests: **`session_action_resolve_unit`**. Feature doc: **[session-actions.md](session-actions.md)**; **[architecture.md](../../../packages/tddy-core/docs/architecture.md)**.

@@ -8,6 +8,34 @@ use serde_json::{json, Value};
 
 use super::error::SessionActionsError;
 use super::manifest::ActionManifest;
+use super::summary::{invocation_record_summary_value, parse_test_summary_from_process_output};
+
+/// Apply **`result_kind: test_summary`** post-processing to an invoke record (same contract as CLI).
+pub fn finalize_invocation_record(
+    manifest: &ActionManifest,
+    record: &mut Value,
+) -> Result<(), SessionActionsError> {
+    if manifest.result_kind.as_deref() != Some("test_summary") {
+        return Ok(());
+    }
+    let stdout = record
+        .get("stdout")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let stderr = record
+        .get("stderr")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let combined = format!("{stdout}{stderr}");
+    let summary = parse_test_summary_from_process_output(&combined)?;
+    if let Some(obj) = record.as_object_mut() {
+        obj.insert(
+            "summary".to_string(),
+            invocation_record_summary_value(&summary),
+        );
+    }
+    Ok(())
+}
 
 /// Execute the manifest’s declared `command` after arguments are validated and paths resolved.
 ///
@@ -61,9 +89,11 @@ pub fn run_manifest_command(
         stderr.len()
     );
 
-    Ok(json!({
+    let mut record = json!({
         "exit_code": code,
         "stdout": stdout,
         "stderr": stderr,
-    }))
+    });
+    finalize_invocation_record(manifest, &mut record)?;
+    Ok(record)
 }

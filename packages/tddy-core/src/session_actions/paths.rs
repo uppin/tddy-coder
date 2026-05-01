@@ -6,6 +6,27 @@ use log::debug;
 
 use super::error::SessionActionsError;
 
+/// Locate `actions/<action_id>.{yaml,yml}` under a session directory (same rules as `invoke-action` CLI).
+pub fn resolve_action_manifest_path(
+    session_dir: &Path,
+    action_id: &str,
+) -> Result<PathBuf, SessionActionsError> {
+    debug!(
+        target: "tddy_core::session_actions::paths",
+        "resolve_action_manifest_path action_id={} session_dir={}",
+        action_id,
+        session_dir.display()
+    );
+    let actions_dir = session_dir.join("actions");
+    for ext in ["yaml", "yml"] {
+        let cand = actions_dir.join(format!("{action_id}.{ext}"));
+        if cand.is_file() {
+            return Ok(cand);
+        }
+    }
+    Err(SessionActionsError::UnknownActionId(action_id.to_string()))
+}
+
 /// Ensure a path requested by JSON args stays within allowed roots (session + declared repo).
 pub fn resolve_allowlisted_path(
     session_dir: &Path,
