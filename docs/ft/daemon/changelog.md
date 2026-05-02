@@ -2,6 +2,13 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-05-02 — Telegram MultiSelect shortcuts (`eli:mn:` / `eli:mr:`)
+
+- **`tddy-daemon`**: **`telegram_multi_select_shortcuts`** — compact **Choose none** (**`eli:mn:`**) and **Choose recommended** (**`eli:mr:`**, when **`recommended_other`** is present) keyboards within Telegram’s **64-byte** **`callback_data`** limit; **`TelegramSessionWatcher`** **`MultiSelectShortcutElicitationMeta`** cache keyed by Telegram chat plus session (**`recommended_other`** for **Choose recommended**); **`telegram_bot`** dispatches **`eli:mn:`** / **`eli:mr:`** through **`authorized_elicitation_surface_gate`**; **`handle_elicitation_multi_select_shortcut`** submits **`PresenterIntent::AnswerClarificationMultiSelect`**. Integration tests **`telegram_multi_select_acceptance`**; **`telegram_concurrent_elicitation_integration`** asserts primary-keyboard alignment for MultiSelect shortcuts.
+- **`tddy-core`**: Presenter rejects **`AnswerClarificationMultiSelect`** with empty indices and no **Other** text when **`allow_other`** on the clarification is **false**.
+- **`tddy-service`**: **`ClarificationQuestionProto.recommended_other`** on MultiSelect wire events.
+- **Feature docs**: [telegram-session-control.md](telegram-session-control.md), [telegram-notifications.md](telegram-notifications.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-04-11 — Operator OAuth loopback tunnel (daemon)
 
 - **`tddy-daemon`**: **`oauth_loopback_tunnel`** — **`TcpListener`** on operator **`127.0.0.1:{callback_port}`**, **`RpcClient::start_bidi_stream`** **`loopback_tunnel.LoopbackTunnelService`/`StreamBytes`**, **`pick_daemon_oauth_target`** over common-room **`daemon-*`** metadata; **`run_oauth_tunnel_supervisor_follow_room_slot`** with **`livekit_peer_discovery`**; **`codex_oauth_participant_metadata`**. Package **[oauth-loopback-tunnel.md](../../packages/tddy-daemon/docs/oauth-loopback-tunnel.md)**; feature **[codex-oauth-relay.md](codex-oauth-relay.md)**, **[livekit-peer-discovery.md](livekit-peer-discovery.md)**. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
@@ -24,7 +31,7 @@
 
 - **Coordinator:** **`ActiveElicitationCoordinator`** maintains a per-chat FIFO queue of workflow sessions; the head session owns the **active elicitation token** for Telegram interactive surfaces.
 - **Outbound:** **`TelegramSessionWatcher`** registers elicitation requests on **`ModeChanged`**; sessions that are not primary for a chat receive a **deferred** text notice without a competing full **`eli:s:`** inline keyboard.
-- **Inbound:** **`telegram_bot`** applies the same **active-token** policy to **`eli:s:`**, **`eli:o:`**, and **`doc:`** callbacks; **`/answer-text`** and **`/answer-multi`** check the active session before **`PresenterIntent`** calls. **`telegram_session_control`** advances the queue after completion on select, Other follow-up, applicable document-review actions, and successful text/multi answers.
+- **Inbound:** **`telegram_bot`** applies the same **active-token** policy to **`eli:s:`**, **`eli:o:`**, **`eli:mn:`**, **`eli:mr:`**, and **`doc:`** callbacks; **`/answer-text`** and **`/answer-multi`** check the active session before **`PresenterIntent`** calls. **`telegram_session_control`** advances the queue after completion on select, Other follow-up, multi-select shortcuts, applicable document-review actions, and successful text/multi answers.
 - **Observability:** Deep per-chat queues trigger a **warning** log at a fixed depth threshold.
 - **Feature docs:** [telegram-session-control.md](telegram-session-control.md), [telegram-notifications.md](telegram-notifications.md). Package: [telegram-notifier.md](../../packages/tddy-daemon/docs/telegram-notifier.md), [changesets.md](../../packages/tddy-daemon/docs/changesets.md).
 

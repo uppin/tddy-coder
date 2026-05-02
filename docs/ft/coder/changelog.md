@@ -2,6 +2,10 @@
 
 Release note history for the Coder product area.
 
+## 2026-05-02 — Presenter clarification MultiSelect (empty answer guard)
+
+- **`tddy-core`**: **`AnswerClarificationMultiSelect`** validation rejects empty selected indices when **Other** text is absent and **`allow_other`** on the active clarification question is **false** (aligns Telegram **Choose none** / index-based **`/answer-multi`** semantics with presenter gating).
+
 ## 2026-04-06 — TDD interview unanswered elicitation recovery
 
 - **tddy-core**: **`workflow::interview_recovery`** (**`detect_unanswered_interview_elicitation`**, **`UnansweredInterviewBundle`**, probe constant); **`BackendInvokeTask`** stages **`output`** on **`Context`** before **`host_clarification_gate_after_no_submit_turn`** for no-submit goals.

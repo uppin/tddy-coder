@@ -56,6 +56,7 @@ fn harness_with_workflow_projects(
         telegram_hooks: None,
         child_grpc_by_session: Arc::new(Mutex::new(HashMap::new())),
         elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
+        elicitation_multi_select_meta: Arc::new(Mutex::new(HashMap::new())),
         pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
     });
     let h = TelegramSessionControlHarness::with_workflow_spawn(
@@ -1055,6 +1056,7 @@ fn harness_with_workflow_projects_and_agents(
         telegram_hooks: None,
         child_grpc_by_session: Arc::new(Mutex::new(HashMap::new())),
         elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
+        elicitation_multi_select_meta: Arc::new(Mutex::new(HashMap::new())),
         pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
     });
     let h = TelegramSessionControlHarness::with_workflow_spawn(

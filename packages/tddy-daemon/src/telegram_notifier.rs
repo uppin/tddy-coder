@@ -31,6 +31,17 @@ const TELEGRAM_MESSAGE_BODY_MAX_UTF8: usize = 4096;
 /// Session id → full confirmation strings per option index (for post-select Telegram message).
 pub type ElicitationSelectOptionsCache = Arc<StdMutex<HashMap<String, Vec<String>>>>;
 
+/// Stored when MultiSelect elicitation is emitted so **`Choose recommended`** can submit `recommended_other`
+/// without stuffing it into Telegram `callback_data`.
+#[derive(Clone, Debug)]
+pub struct MultiSelectShortcutElicitationMeta {
+    pub question_index: i32,
+    pub recommended_other: String,
+}
+
+pub type ElicitationMultiSelectMetaCache =
+    Arc<StdMutex<HashMap<String, MultiSelectShortcutElicitationMeta>>>;
+
 /// Development trace hook — logs structured scope for debugging (reduced in later phases).
 fn marker_json(marker_id: &str, scope: &str) {
     log::debug!(
@@ -303,6 +314,8 @@ pub struct TelegramSessionWatcher {
     last_elicitation_signature: HashMap<String, String>,
     /// Full labels for select elicitation (shared with [`crate::telegram_session_control::TelegramWorkflowSpawn`] for confirmations).
     elicitation_select_options: ElicitationSelectOptionsCache,
+    /// Multi-select shortcut metadata (**Choose recommended**) shared with inbound session control.
+    elicitation_multi_select_meta: ElicitationMultiSelectMetaCache,
     /// Per-chat elicitation queue / active token (shared with [`crate::telegram_session_control::TelegramSessionControlHarness`] in production).
     active_elicitation: SharedActiveElicitationCoordinator,
     /// Last observed presenter mode was a Telegram-surfaced elicitation gate (`Select`, document review, …).
@@ -332,6 +345,19 @@ impl TelegramSessionWatcher {
         elicitation_select_options: ElicitationSelectOptionsCache,
         active_elicitation: SharedActiveElicitationCoordinator,
     ) -> Self {
+        Self::with_elicitation_caches_and_coordinator(
+            elicitation_select_options,
+            Arc::new(StdMutex::new(HashMap::new())),
+            active_elicitation,
+        )
+    }
+
+    /// Share select-option cache, multi-select shortcut meta (for **`Choose recommended`**), and coordinator.
+    pub fn with_elicitation_caches_and_coordinator(
+        elicitation_select_options: ElicitationSelectOptionsCache,
+        elicitation_multi_select_meta: ElicitationMultiSelectMetaCache,
+        active_elicitation: SharedActiveElicitationCoordinator,
+    ) -> Self {
         marker_json(
             "M003",
             "tddy_daemon::telegram_notifier::TelegramSessionWatcher::new",
@@ -345,6 +371,7 @@ impl TelegramSessionWatcher {
             last_backend: HashMap::new(),
             last_elicitation_signature: HashMap::new(),
             elicitation_select_options,
+            elicitation_multi_select_meta,
             active_elicitation,
             last_presenter_elicitation: HashMap::new(),
             last_elicitation_mc: HashMap::new(),
@@ -479,6 +506,42 @@ impl TelegramSessionWatcher {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    fn cache_multi_select_meta_for_multi_select_mode(&self, session_id: &str, mc: &ModeChanged) {
+        use tddy_service::gen::app_mode_proto::Variant;
+        let Some(Variant::MultiSelect(m)) = mc.mode.as_ref().and_then(|mo| mo.variant.as_ref())
+        else {
+            return;
+        };
+        let Some(q) = m.question.as_ref() else {
+            return;
+        };
+        if !q.multi_select {
+            return;
+        }
+        let meta = MultiSelectShortcutElicitationMeta {
+            question_index: m.question_index as i32,
+            recommended_other: q.recommended_other.clone(),
+        };
+        match self.elicitation_multi_select_meta.lock() {
+            Ok(mut g) => {
+                g.insert(session_id.to_string(), meta.clone());
+                log::debug!(
+                    target: "tddy_daemon::telegram",
+                    "cache_multi_select_meta: session_id={} question_index={} recommended_len={}",
+                    session_id,
+                    meta.question_index,
+                    meta.recommended_other.trim().len()
+                );
+            }
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram",
+                    "send_mode_changed_elicitation: elicitation_multi_select_meta mutex poisoned: {e}"
+                );
             }
         }
     }
@@ -630,6 +693,7 @@ impl TelegramSessionWatcher {
         self.last_elicitation_mc
             .insert(session_id.to_string(), mc.clone());
         self.cache_select_options_for_select_mode(session_id, mc);
+        self.cache_multi_select_meta_for_multi_select_mode(session_id, mc);
         self.register_elicitation_surface_for_chats(&tg.chat_ids, session_id);
         let kb = mode_changed_keyboard(session_id, mc);
 
@@ -996,12 +1060,34 @@ fn clarification_select_keyboard(
     }
 }
 
+fn clarification_multi_select_shortcut_keyboard(
+    session_id: &str,
+    mc: &tddy_service::gen::ModeChanged,
+) -> Option<InlineKeyboardRows> {
+    use tddy_service::gen::app_mode_proto::Variant;
+    let v = mc.mode.as_ref()?.variant.as_ref()?;
+    let m = match v {
+        Variant::MultiSelect(ms) => ms,
+        _ => return None,
+    };
+    let q = m.question.as_ref()?;
+    if !q.multi_select {
+        return None;
+    }
+    crate::telegram_multi_select_shortcuts::build_multi_select_shortcut_keyboard_rows(
+        session_id,
+        m.question_index as u32,
+        q.recommended_other.trim(),
+    )
+}
+
 fn mode_changed_keyboard(
     session_id: &str,
     mc: &tddy_service::gen::ModeChanged,
 ) -> Option<InlineKeyboardRows> {
     document_review_keyboard(session_id, mc)
         .or_else(|| clarification_select_keyboard(session_id, mc))
+        .or_else(|| clarification_multi_select_shortcut_keyboard(session_id, mc))
 }
 
 impl Default for TelegramSessionWatcher {
@@ -1253,6 +1339,7 @@ mod acceptance_unit_tests {
                             ],
                             multi_select: false,
                             allow_other: false,
+                            recommended_other: String::new(),
                         }),
                         question_index: 0,
                         total_questions: 1,
@@ -1328,6 +1415,7 @@ mod acceptance_unit_tests {
                             }],
                             multi_select: false,
                             allow_other: true,
+                            recommended_other: String::new(),
                         }),
                         question_index: 0,
                         total_questions: 1,
@@ -1406,6 +1494,7 @@ mod acceptance_unit_tests {
                             ],
                             multi_select: false,
                             allow_other: false,
+                            recommended_other: String::new(),
                         }),
                         question_index: 0,
                         total_questions: 1,

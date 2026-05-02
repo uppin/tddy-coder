@@ -192,12 +192,15 @@ fn main() -> anyhow::Result<()> {
                     teloxide_sender.clone();
                 let elicitation_select_options: tddy_daemon::telegram_notifier::ElicitationSelectOptionsCache =
                     Arc::new(StdMutex::new(HashMap::new()));
+                let elicitation_multi_select_meta: tddy_daemon::telegram_notifier::ElicitationMultiSelectMetaCache =
+                    Arc::new(StdMutex::new(HashMap::new()));
                 let active_elicitation = Arc::new(StdMutex::new(
                     tddy_daemon::active_elicitation::ActiveElicitationCoordinator::new(),
                 ));
                 let watcher = Arc::new(Mutex::new(
-                    tddy_daemon::telegram_notifier::TelegramSessionWatcher::with_elicitation_select_options_and_coordinator(
+                    tddy_daemon::telegram_notifier::TelegramSessionWatcher::with_elicitation_caches_and_coordinator(
                         elicitation_select_options.clone(),
+                        elicitation_multi_select_meta.clone(),
                         active_elicitation.clone(),
                     ),
                 ));
@@ -227,6 +230,7 @@ fn main() -> anyhow::Result<()> {
                             telegram_hooks: Some(hooks.clone()),
                             child_grpc_by_session: Arc::new(StdMutex::new(HashMap::new())),
                             elicitation_select_options: elicitation_select_options.clone(),
+                            elicitation_multi_select_meta: elicitation_multi_select_meta.clone(),
                             pending_elicitation_other: Arc::new(StdMutex::new(HashMap::new())),
                         },
                     ));

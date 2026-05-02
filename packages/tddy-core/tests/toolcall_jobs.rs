@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 use tddy_core::session_action_jobs::{
-    invoke_session_action, stop_session_action_job, wait_session_action_job,
-    BlockingOutcomeBody, SessionActionInvokeOptions, SessionActionJobRegistry,
-    SessionActionJobsError, SessionActionInvokeOutcome, SessionActionWaitOutcome,
+    invoke_session_action, stop_session_action_job, wait_session_action_job, BlockingOutcomeBody,
+    SessionActionInvokeOptions, SessionActionInvokeOutcome, SessionActionJobRegistry,
+    SessionActionJobsError, SessionActionWaitOutcome,
 };
 
 fn unique_jobs_session_root(label: &str) -> PathBuf {
@@ -55,9 +55,8 @@ fn job_registry_round_trip_load_and_terminal_transition() {
 #[test]
 fn job_registry_timeout_bookkeeping_exposes_bounded_wait_deadline() {
     let session = unique_jobs_session_root("timeout_bookkeeping");
-    SessionActionJobRegistry::load(session.as_path()).expect(
-        "registry must initialize timeout metadata for bounded wait operations",
-    );
+    SessionActionJobRegistry::load(session.as_path())
+        .expect("registry must initialize timeout metadata for bounded wait operations");
 }
 
 /// Green: blocking invoke returns `Ok(Blocking(Record { exit_code: … }))` after subprocess terminal state.
@@ -70,9 +69,7 @@ fn invoke_blocking_returns_ok_with_exit_code_payload() {
         None,
         "unit-action",
         &json!({}),
-        SessionActionInvokeOptions {
-            async_start: false,
-        },
+        SessionActionInvokeOptions { async_start: false },
     )
     .expect("blocking invoke must succeed with structured terminal record");
 
@@ -97,9 +94,7 @@ fn wait_without_timeout_returns_completed_disposition() {
         None,
         "unit-action",
         &json!({}),
-        SessionActionInvokeOptions {
-            async_start: true,
-        },
+        SessionActionInvokeOptions { async_start: true },
     )
     .expect("async start for wait unit test")
     {

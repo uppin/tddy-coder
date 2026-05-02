@@ -84,14 +84,11 @@ fn resolve_invoke(
     let repo = resolve_repo_for_invoke(session_dir, repo_root_hint)?;
 
     if let Some(bind) = manifest.output_path_arg.as_deref() {
-        let v = args
-            .get(bind)
-            .and_then(|x| x.as_str())
-            .ok_or_else(|| {
-                SessionActionsError::ArgumentsViolateSchema(format!(
-                    "missing string field `{bind}` for output path binding (required by manifest)"
-                ))
-            })?;
+        let v = args.get(bind).and_then(|x| x.as_str()).ok_or_else(|| {
+            SessionActionsError::ArgumentsViolateSchema(format!(
+                "missing string field `{bind}` for output path binding (required by manifest)"
+            ))
+        })?;
         resolve_allowlisted_path(session_dir, repo.as_deref(), v, "output_binding")?;
     }
 
@@ -322,7 +319,9 @@ fn try_advance_running_job(
         return Ok(true);
     }
     let Some(pid) = job.pid else {
-        return Err(SessionActionJobsError::JobState("running job missing pid".into()));
+        return Err(SessionActionJobsError::JobState(
+            "running job missing pid".into(),
+        ));
     };
     if let Some(code) = reap_pid_nonblocking(pid)? {
         job.phase = JobPhase::Completed;
@@ -368,9 +367,9 @@ pub(crate) fn invoke_session_action(
     }
 
     let record = finish_blocking_record(session_dir, repo_ref, &manifest, args)?;
-    Ok(SessionActionInvokeOutcome::Blocking(BlockingOutcomeBody::Record(
-        record,
-    )))
+    Ok(SessionActionInvokeOutcome::Blocking(
+        BlockingOutcomeBody::Record(record),
+    ))
 }
 
 fn finish_blocking_record(
@@ -404,7 +403,10 @@ pub(crate) fn wait_session_action_job(
     );
     loop {
         let mut job = read_job(&job_dir)?.ok_or_else(|| {
-            SessionActionJobsError::JobState(format!("missing job.json under {}", job_dir.display()))
+            SessionActionJobsError::JobState(format!(
+                "missing job.json under {}",
+                job_dir.display()
+            ))
         })?;
         if job.phase != JobPhase::Running {
             return Ok(disposition(&job));

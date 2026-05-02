@@ -5,7 +5,9 @@ use log::{debug, info};
 use super::error::SessionActionsError;
 
 /// Verify `manifest.architecture` against the current host (or the `native` sentinel).
-pub fn ensure_action_architecture(manifest_triple_or_label: &str) -> Result<(), SessionActionsError> {
+pub fn ensure_action_architecture(
+    manifest_triple_or_label: &str,
+) -> Result<(), SessionActionsError> {
     let requested = manifest_triple_or_label.trim();
     if requested.is_empty() {
         let host = std::env::consts::ARCH.to_string();

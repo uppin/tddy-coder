@@ -109,8 +109,8 @@ pub fn resolve_output_globs_sorted(
             "resolve_output_globs_sorted pattern={}",
             pattern_str
         );
-        for entry in
-            glob::glob(&pattern_str).map_err(|e| SessionActionPipelineError::GlobPattern(e.to_string()))?
+        for entry in glob::glob(&pattern_str)
+            .map_err(|e| SessionActionPipelineError::GlobPattern(e.to_string()))?
         {
             let p = entry.map_err(|e| SessionActionPipelineError::GlobPattern(e.to_string()))?;
             if p.is_file() {
@@ -174,7 +174,9 @@ pub fn run_input_mapper_for_envelope(
     channels: &HashMap<String, PathBuf>,
 ) -> Result<(Vec<String>, HashMap<String, String>), SessionActionPipelineError> {
     let (program, args) = mapper_cmd.split_first().ok_or_else(|| {
-        SessionActionPipelineError::EnvelopeValidation("mapper command argv must be non-empty".into())
+        SessionActionPipelineError::EnvelopeValidation(
+            "mapper command argv must be non-empty".into(),
+        )
     })?;
 
     info!(
@@ -196,10 +198,7 @@ pub fn run_input_mapper_for_envelope(
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     cmd.env_clear();
-    cmd.env(
-        "TDDY_SESSION_CHANNEL_MANIFEST_JSON",
-        manifest_json.as_str(),
-    );
+    cmd.env("TDDY_SESSION_CHANNEL_MANIFEST_JSON", manifest_json.as_str());
 
     let mut child = cmd.spawn().map_err(SessionActionPipelineError::Io)?;
 
@@ -209,7 +208,9 @@ pub fn run_input_mapper_for_envelope(
         })?;
     }
 
-    let output = child.wait_with_output().map_err(SessionActionPipelineError::Io)?;
+    let output = child
+        .wait_with_output()
+        .map_err(SessionActionPipelineError::Io)?;
     let code = output.status.code().unwrap_or(-1);
     let stderr_lossy = String::from_utf8_lossy(&output.stderr).into_owned();
 
@@ -306,7 +307,9 @@ pub fn run_output_transform_and_validate(
     output_schema: &Value,
 ) -> Result<Value, SessionActionPipelineError> {
     let (program, args) = transform_cmd.split_first().ok_or_else(|| {
-        SessionActionPipelineError::EnvelopeValidation("transform command argv must be non-empty".into())
+        SessionActionPipelineError::EnvelopeValidation(
+            "transform command argv must be non-empty".into(),
+        )
     })?;
 
     info!(
@@ -328,10 +331,7 @@ pub fn run_output_transform_and_validate(
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     cmd.env_clear();
-    cmd.env(
-        "TDDY_SESSION_CHANNEL_MANIFEST_JSON",
-        manifest_json.as_str(),
-    );
+    cmd.env("TDDY_SESSION_CHANNEL_MANIFEST_JSON", manifest_json.as_str());
 
     let output = cmd.output().map_err(SessionActionPipelineError::Io)?;
     let code = output.status.code().unwrap_or(-1);
@@ -357,9 +357,9 @@ pub fn run_output_transform_and_validate(
         ))
     })?;
 
-    validator.validate(&parsed).map_err(|e| {
-        SessionActionPipelineError::TransformOutputSchema(e.to_string())
-    })?;
+    validator
+        .validate(&parsed)
+        .map_err(|e| SessionActionPipelineError::TransformOutputSchema(e.to_string()))?;
 
     debug!(
         target: "tddy_core::session_action_pipeline",

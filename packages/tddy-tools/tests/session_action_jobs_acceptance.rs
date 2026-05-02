@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 use tddy_core::session_action_jobs::{
     invoke_session_action, stop_session_action_job, wait_session_action_job, AsyncStartBody,
-    BlockingOutcomeBody, SessionActionInvokeOptions, SessionActionInvokeOutcome, SessionActionJobsError,
-    SessionActionStopOutcome, SessionActionWaitOutcome,
+    BlockingOutcomeBody, SessionActionInvokeOptions, SessionActionInvokeOutcome,
+    SessionActionJobsError, SessionActionStopOutcome, SessionActionWaitOutcome,
 };
 
 fn write_sample_action(session: &Path, body: &str) {
@@ -90,9 +90,7 @@ fn session_action_blocking_matches_legacy_semantics() {
         repo.as_ref().map(|p| p.as_path()),
         "sleep-touch",
         &json!({}),
-        SessionActionInvokeOptions {
-            async_start: false,
-        },
+        SessionActionInvokeOptions { async_start: false },
     )
     .expect("blocking invoke-session-action must succeed (parity with invoke-action)");
 
@@ -125,9 +123,7 @@ fn session_action_async_returns_job_and_log_paths() {
         None,
         "sleep-touch",
         &json!({}),
-        SessionActionInvokeOptions {
-            async_start: true,
-        },
+        SessionActionInvokeOptions { async_start: true },
     )
     .expect("async admission must succeed")
     {
@@ -187,9 +183,7 @@ fn session_action_wait_until_complete_without_timeout() {
         None,
         "sleep-touch",
         &json!({}),
-        SessionActionInvokeOptions {
-            async_start: true,
-        },
+        SessionActionInvokeOptions { async_start: true },
     )
     .expect("async start required for wait scenarios")
     {
@@ -207,9 +201,9 @@ fn session_action_wait_until_complete_without_timeout() {
         SessionActionWaitOutcome::Failed { .. } => {
             // Allowed if PRD maps non-zero exits to Failed with summary.
         }
-        other => panic!(
-            "expected Completed (or Failed) without timeout disposition; got {other:?}"
-        ),
+        other => {
+            panic!("expected Completed (or Failed) without timeout disposition; got {other:?}")
+        }
     }
 
     assert!(
@@ -228,9 +222,7 @@ fn session_action_wait_times_out_while_running() {
         None,
         "sleep-touch",
         &json!({}),
-        SessionActionInvokeOptions {
-            async_start: true,
-        },
+        SessionActionInvokeOptions { async_start: true },
     )
     .expect("async")
     {
@@ -251,7 +243,8 @@ fn session_action_wait_times_out_while_running() {
     }
 
     // Second wait until completion or stop observes allowed transitions.
-    let subsequent = wait_session_action_job(&session_dir, &job_id, Some(1500)).expect("subsequent wait");
+    let subsequent =
+        wait_session_action_job(&session_dir, &job_id, Some(1500)).expect("subsequent wait");
     assert!(
         matches!(
             subsequent,
@@ -272,9 +265,7 @@ fn session_action_stop_cancels_running_job() {
         None,
         "sleep-touch",
         &json!({}),
-        SessionActionInvokeOptions {
-            async_start: true,
-        },
+        SessionActionInvokeOptions { async_start: true },
     )
     .expect("async")
     {
@@ -282,17 +273,18 @@ fn session_action_stop_cancels_running_job() {
         other => panic!("expected AsyncStarted; got {other:?}"),
     };
 
-    let stop_out = stop_session_action_job(&session_dir, &job_id).expect("stop must succeed API-wise");
+    let stop_out =
+        stop_session_action_job(&session_dir, &job_id).expect("stop must succeed API-wise");
     assert!(
         matches!(stop_out, SessionActionStopOutcome::Stopped),
         "stop on running job must report Stopped; got {stop_out:?}"
     );
 
     match wait_session_action_job(&session_dir, &job_id, Some(2500)).expect("post-stop wait") {
-        SessionActionWaitOutcome::TimedOut { still_running }
-            if still_running =>
-        {
-            panic!("after stop wait must observe terminal/cooperative stop, not still running timeout")
+        SessionActionWaitOutcome::TimedOut { still_running } if still_running => {
+            panic!(
+                "after stop wait must observe terminal/cooperative stop, not still running timeout"
+            )
         }
         _ => {}
     }
@@ -310,9 +302,7 @@ fn session_action_stop_idempotent_after_terminal() {
         None,
         "sleep-touch",
         &json!({}),
-        SessionActionInvokeOptions {
-            async_start: true,
-        },
+        SessionActionInvokeOptions { async_start: true },
     )
     .expect("async")
     {
@@ -323,7 +313,8 @@ fn session_action_stop_idempotent_after_terminal() {
     wait_session_action_job(&session_dir, &job_id, Some(3500)).expect("let job settle");
 
     let first = stop_session_action_job(&session_dir, &job_id).expect("first stop succeeds");
-    let second = stop_session_action_job(&session_dir, &job_id).expect("second stop must not crash");
+    let second =
+        stop_session_action_job(&session_dir, &job_id).expect("second stop must not crash");
 
     assert!(
         matches!(
