@@ -2,6 +2,11 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-05-02 — Telegram tracked session gate and chat traffic logs
+
+- **`tddy-daemon`**: **`telegram_tracked_session`** — per-chat optional **`session_id`** binding (**`SharedTelegramTrackedSessionCoordinator`**) shared with **`TelegramSessionWatcher`** and **`telegram_session_control`**; presenter **`ModeChanged`** workflow keyboards suppress under **no / mismatched** tracking with **Enter session** fallback; **queue promotion replay** bypasses the gate; **Enter** binds + **elicitation replay**; clears on **WorkflowComplete**, matching **delete**, or explicit per-chat clear. Structured **`telegram_traffic`** logs on **`tddy_daemon::telegram`**; inbound message/callback summaries on **`tddy_daemon::telegram_bot`**. Integration **`telegram_tracked_session_acceptance`**; concurrent + multi-select suites bind tracking where full keyboards are asserted.
+- **Feature docs**: [telegram-session-control.md](telegram-session-control.md), [telegram-notifications.md](telegram-notifications.md). **Package**: [telegram-notifier.md](../../packages/tddy-daemon/docs/telegram-notifier.md), [changesets.md](../../packages/tddy-daemon/docs/changesets.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-05-02 — Telegram MultiSelect shortcuts (`eli:mn:` / `eli:mr:`)
 
 - **`tddy-daemon`**: **`telegram_multi_select_shortcuts`** — compact **Choose none** (**`eli:mn:`**) and **Choose recommended** (**`eli:mr:`**, when **`recommended_other`** is present) keyboards within Telegram’s **64-byte** **`callback_data`** limit; **`TelegramSessionWatcher`** **`MultiSelectShortcutElicitationMeta`** cache keyed by Telegram chat plus session (**`recommended_other`** for **Choose recommended**); **`telegram_bot`** dispatches **`eli:mn:`** / **`eli:mr:`** through **`authorized_elicitation_surface_gate`**; **`handle_elicitation_multi_select_shortcut`** submits **`PresenterIntent::AnswerClarificationMultiSelect`**. Integration tests **`telegram_multi_select_acceptance`**; **`telegram_concurrent_elicitation_integration`** asserts primary-keyboard alignment for MultiSelect shortcuts.

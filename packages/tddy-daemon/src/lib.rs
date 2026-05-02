@@ -27,6 +27,7 @@ pub mod telegram_multi_select_shortcuts;
 pub mod telegram_notifier;
 pub mod telegram_session_control;
 pub mod telegram_session_subscriber;
+pub mod telegram_tracked_session;
 pub mod token_provider;
 pub mod user_sessions_path;
 pub mod worktrees;

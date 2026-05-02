@@ -21,9 +21,14 @@ The **`telegram_notifier`** module implements session status notifications using
 | **`mask_bot_token_for_logs(token)`** | Returns a fixed-format string that does not embed the token (length-only metadata). |
 | **`send_telegram_via_teloxide(bot, chat_id, text)`** | **`Requester::send_message`**; maps teloxide errors to **`anyhow::Error`**. |
 | **`TelegramSender`** | Async trait: **`send_message(chat_id: i64, text: &str)`**. |
-| **`TelegramSessionWatcher`** | Holds **`last_status`**, transition dedupe maps for stream events, **`last_elicitation_signature`** for **`ModeChanged`** dedupe, and **`active_elicitation`**: a **`SharedActiveElicitationCoordinator`** (see below) shared with **`telegram_session_control`** so outbound registration and inbound gating refer to the same per-chat queue. **`on_metadata_tick`** implements the baseline / transition / inactive rules; **`on_server_message`** maps **`ServerMessage`** variants including presenter **`ModeChanged`** via **`tddy_daemon::elicitation`**. For **`Select`** modes, registers full per-option confirmation strings in **`elicitation_select_options`** (shared with **`telegram_session_control`** for inbound confirmations). **`send_mode_changed_elicitation`** registers each elicitation session per configured chat, sends document/clarification chunks, then either attaches the full inline keyboard for the **primary** token holder or sends a deferred text-only notice when the session is queued. Mutex locks on the coordinator and select-option cache use explicit poison handling in production paths (errors are logged; sends degrade rather than panicking on poison). |
+| **`TelegramSessionWatcher`** | Holds **`last_status`**, transition dedupe maps for stream events, **`last_elicitation_signature`** for **`ModeChanged`** dedupe, **`active_elicitation`**: a **`SharedActiveElicitationCoordinator`** shared with **`telegram_session_control`**, and **`telegram_tracked`**: a **`SharedTelegramTrackedSessionCoordinator`** (**`telegram_tracked_session`**) for per-chat **Enter session** binding and workflow-keyboard suppression. **`on_metadata_tick`** implements the baseline / transition / inactive rules; **`on_server_message`** maps **`ServerMessage`** variants including presenter **`ModeChanged`** via **`tddy_daemon::elicitation`**. For **`Select`** modes, registers full per-option confirmation strings in **`elicitation_select_options`** (shared with **`telegram_session_control`** for inbound confirmations). **`send_mode_changed_elicitation`** registers each elicitation session per configured chat, sends document/clarification chunks, then either attaches the full inline keyboard for the **primary** token holder (subject to **`TelegramTrackedSessionCoordinator`** policy) or sends a deferred text-only notice when the session is queued. Mutex locks on the coordinator, select-option cache, and tracked-session coordinator use explicit poison handling in production paths (errors are logged; sends degrade rather than panicking on poison). |
 | **`ElicitationSelectOptionsCache`** | **`Arc<Mutex<HashMap<session_id, Vec<String>>>>`** — one confirmation string per option index for **`Select`** elicitation. |
 | **`SharedActiveElicitationCoordinator`** / **`ActiveElicitationCoordinator`** | **`packages/tddy-daemon/src/active_elicitation.rs`**: per-chat **FIFO** of session ids awaiting elicitation; **`active_session_for_chat`**, **`elicitation_callback_permitted`**, **`register_elicitation_surface_request`**, **`advance_after_elicitation_completion`**. Helpers **`should_emit_primary_elicitation_keyboard`** decide whether the full **`eli:s:`** keyboard is attached for a given (**`chat_id`**, **`session_id`**) pair. |
+| **`SharedTelegramTrackedSessionCoordinator`** / **`TelegramTrackedSessionCoordinator`** | **`packages/tddy-daemon/src/telegram_tracked_session.rs`**: per-chat map Telegram **`chat_id`** → workflow **`session_id`** after **Enter**; **`should_suppress_workflow_keyboards_for_session`** encodes **no tracking** and **wrong-session** suppression. **`TelegramSessionWatcher::bind_telegram_tracked_session_for_chat`** supports tests and harnesses that assert full keyboards without driving **Enter** in a scenario. |
+
+## Telegram-tracked session gate (`telegram_tracked_session`)
+
+**`TelegramElicitationDispatch`** classifies presenter sends as **`Standard`** or **`QueuePromotionReplay`**. **`Standard`** sends consult **`should_suppress_workflow_keyboards_for_session`**: when suppression applies, **`send_mode_changed_action_lines`** attaches a single **Enter session** row instead of workflow **`callback_data`** prefixes. **`QueuePromotionReplay`** bypasses suppression so FIFO queue promotion still delivers a primary keyboard at promotion time. **`replay_telegram_elicitation_after_tracked_enter`** (with the session-control **`TelegramElicitationReplayBridge`** in integration tests) refreshes presenter elicitation after binding.
 
 ## MultiSelect shortcut keyboards (`telegram_multi_select_shortcuts`)
 
@@ -45,7 +50,7 @@ Inbound **`telegram_bot`** routes **`eli:mn:`** / **`eli:mr:`** through the same
 
 ## Logging
 
-Log target **`tddy_daemon::telegram`** carries **`info`** and **`debug`** lines for send dispatch, tick entry, baseline recording, unchanged status, and per-chat sends. **`marker_json`** emits **debug** trace lines keyed by marker id (development aid; safe to trim in later passes).
+Log target **`tddy_daemon::telegram`** carries **`info`** and **`debug`** lines for send dispatch, tick entry, baseline recording, unchanged status, per-chat sends, and structured **`telegram_traffic`** lines (**`direction`**, **`kind`**, **`chat_id`**, **`session_id`**) for presenter keyboard decisions. Inbound user messages and callback routing summaries use **`tddy_daemon::telegram_bot`**. **`marker_json`** emits **debug** trace lines keyed by marker id (development aid; safe to trim in later passes).
 
 ## Dependencies
 
@@ -53,7 +58,8 @@ Log target **`tddy_daemon::telegram`** carries **`info`** and **`debug`** lines 
 
 ## Tests
 
-- **Unit** (in-module): label extraction, terminal status, masking, inactive session behavior.
+- **Unit** (in-module): label extraction, terminal status, masking, inactive session behavior, **`telegram_tracked_session`** coordinator contracts.
 - **Integration** (**`tests/telegram_notifier.rs`**): disabled config (zero sends), single send on transition with label in body, no duplicate sends when terminal status repeats.
+- **Integration** (**`tests/telegram_tracked_session_acceptance.rs`**): tracked-session gate, **Enter** replay, structured log expectations.
 
 See **[changesets.md](./changesets.md)** for the wrapped changeset line.

@@ -98,6 +98,16 @@ async fn telegram_message_handler(bot: Bot, harness: Harness, msg: Message) -> H
     let chat_id = msg.chat.id.0;
     let user_id = msg.from.map(|u| u.id.0).unwrap_or(0);
 
+    log::info!(
+        target: "tddy_daemon::telegram_bot",
+        "{}",
+        crate::telegram_tracked_session::format_inbound_message_traffic_log(
+            chat_id,
+            text.len(),
+            None,
+        )
+    );
+
     if !text.trim_start().starts_with('/') {
         let h = harness.lock().await;
         if h.is_authorized(chat_id) {
@@ -214,6 +224,18 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     };
     let chat_id = m.chat().id.0;
     let user_id = q.from.id.0;
+
+    let cb_prefix = data.get(..48).unwrap_or(data.as_str());
+    log::info!(
+        target: "tddy_daemon::telegram_bot",
+        "{}",
+        crate::telegram_tracked_session::format_inbound_callback_traffic_log(
+            chat_id,
+            data.len(),
+            None,
+            cb_prefix,
+        )
+    );
 
     if let Some(action) = parse_session_control_callback(&data) {
         let h = harness.lock().await;

@@ -23,7 +23,10 @@ use tddy_service::gen::{ModeChanged, ServerMessage};
 
 use crate::active_elicitation::{ActiveElicitationCoordinator, SharedActiveElicitationCoordinator};
 use crate::config::DaemonConfig;
-use crate::telegram_session_control::chunk_telegram_text;
+use crate::telegram_session_control::{chunk_telegram_text, CB_ENTER};
+use crate::telegram_tracked_session::{
+    SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
+};
 
 /// Telegram Bot API maximum message length for outbound body text before splitting (`send_message`).
 const TELEGRAM_MESSAGE_BODY_MAX_UTF8: usize = 4096;
@@ -119,6 +122,16 @@ pub async fn send_telegram_via_teloxide(
         chat_id
     );
     Ok(())
+}
+
+/// How outbound elicitation keyboards interact with the **telegram-tracked session** gate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TelegramElicitationDispatch {
+    /// Normal presenter path: gate workflow keyboards until the chat Enter-tracks the session.
+    Standard,
+    /// FIFO queue promotion replay must surface the next session's full keyboard even when the
+    /// chat has not yet Enter-tracked that session (PRD: concurrent queue semantics).
+    QueuePromotionReplay,
 }
 
 /// Row-major inline keyboard for Telegram: each row is `(button label, callback_data)`.
@@ -318,6 +331,8 @@ pub struct TelegramSessionWatcher {
     elicitation_multi_select_meta: ElicitationMultiSelectMetaCache,
     /// Per-chat elicitation queue / active token (shared with [`crate::telegram_session_control::TelegramSessionControlHarness`] in production).
     active_elicitation: SharedActiveElicitationCoordinator,
+    /// Per-chat **telegram-tracked session** (Enter session opt-in; shared with harness in production).
+    telegram_tracked: SharedTelegramTrackedSessionCoordinator,
     /// Last observed presenter mode was a Telegram-surfaced elicitation gate (`Select`, document review, …).
     last_presenter_elicitation: HashMap<String, bool>,
     /// Latest user-elicitation [`ModeChanged`] per session — used to re-send the prompt with a primary keyboard when a queued session is promoted.
@@ -352,11 +367,41 @@ impl TelegramSessionWatcher {
         )
     }
 
+    /// Same as [`Self::with_elicitation_select_options_and_coordinator`], but shares the telegram-tracked
+    /// session coordinator with [`crate::telegram_session_control::TelegramSessionControlHarness`].
+    pub fn with_elicitation_select_options_coordinator_and_tracked(
+        elicitation_select_options: ElicitationSelectOptionsCache,
+        active_elicitation: SharedActiveElicitationCoordinator,
+        telegram_tracked: SharedTelegramTrackedSessionCoordinator,
+    ) -> Self {
+        Self::with_elicitation_caches_coordinator_and_tracked(
+            elicitation_select_options,
+            Arc::new(StdMutex::new(HashMap::new())),
+            active_elicitation,
+            telegram_tracked,
+        )
+    }
+
     /// Share select-option cache, multi-select shortcut meta (for **`Choose recommended`**), and coordinator.
     pub fn with_elicitation_caches_and_coordinator(
         elicitation_select_options: ElicitationSelectOptionsCache,
         elicitation_multi_select_meta: ElicitationMultiSelectMetaCache,
         active_elicitation: SharedActiveElicitationCoordinator,
+    ) -> Self {
+        Self::with_elicitation_caches_coordinator_and_tracked(
+            elicitation_select_options,
+            elicitation_multi_select_meta,
+            active_elicitation,
+            Arc::new(StdMutex::new(TelegramTrackedSessionCoordinator::new())),
+        )
+    }
+
+    /// Same as [`Self::with_elicitation_caches_and_coordinator`], but shares [`TelegramTrackedSessionCoordinator`].
+    pub fn with_elicitation_caches_coordinator_and_tracked(
+        elicitation_select_options: ElicitationSelectOptionsCache,
+        elicitation_multi_select_meta: ElicitationMultiSelectMetaCache,
+        active_elicitation: SharedActiveElicitationCoordinator,
+        telegram_tracked: SharedTelegramTrackedSessionCoordinator,
     ) -> Self {
         marker_json(
             "M003",
@@ -373,8 +418,25 @@ impl TelegramSessionWatcher {
             elicitation_select_options,
             elicitation_multi_select_meta,
             active_elicitation,
+            telegram_tracked,
             last_presenter_elicitation: HashMap::new(),
             last_elicitation_mc: HashMap::new(),
+        }
+    }
+
+    /// Associates `chat_id` with `session_id` for Telegram workflow keyboard gating — same state
+    /// transition as a successful **Enter session** callback (used by tests and control-plane hooks).
+    pub fn bind_telegram_tracked_session_for_chat(&mut self, chat_id: i64, session_id: &str) {
+        match self.telegram_tracked.lock() {
+            Ok(mut g) => {
+                g.bind_chat_to_session_for_telegram_tracking(chat_id, session_id);
+            }
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram",
+                    "bind_telegram_tracked_session_for_chat: telegram_tracked mutex poisoned: {e}"
+                );
+            }
         }
     }
 
@@ -595,16 +657,39 @@ impl TelegramSessionWatcher {
 
     async fn send_mode_changed_action_lines<S: TelegramSender + ?Sized>(
         &self,
+        _config: &DaemonConfig,
         sender: &S,
         chat_ids: &[i64],
         session_id: &str,
         action_line: &str,
         kb: &Option<InlineKeyboardRows>,
+        dispatch: TelegramElicitationDispatch,
     ) -> anyhow::Result<()> {
+        let sid = session_id.trim();
         for &cid in chat_ids {
+            let suppress = if dispatch == TelegramElicitationDispatch::QueuePromotionReplay {
+                log::debug!(
+                    target: "tddy_daemon::telegram",
+                    "send_mode_changed_elicitation: queue promotion replay — bypassing telegram-tracked gate chat_id={} session_id={}",
+                    cid,
+                    sid
+                );
+                false
+            } else {
+                match self.telegram_tracked.lock() {
+                    Ok(g) => g.should_suppress_workflow_keyboards_for_session(cid, sid),
+                    Err(e) => {
+                        log::error!(
+                            target: "tddy_daemon::telegram",
+                            "send_mode_changed_elicitation: telegram_tracked mutex poisoned (suppress check): {e}"
+                        );
+                        true
+                    }
+                }
+            };
             let primary = match self.active_elicitation.lock() {
                 Ok(coord) => crate::active_elicitation::should_emit_primary_elicitation_keyboard(
-                    &coord, cid, session_id,
+                    &coord, cid, sid,
                 ),
                 Err(e) => {
                     log::error!(
@@ -617,12 +702,39 @@ impl TelegramSessionWatcher {
             if let Some(ref rows) = kb {
                 if !rows.is_empty() {
                     if primary {
-                        sender
-                            .send_message_with_keyboard(cid, action_line, rows.clone())
-                            .await?;
+                        if suppress {
+                            let enter_data = format!("{CB_ENTER}{}", sid);
+                            let enter_rows: InlineKeyboardRows =
+                                vec![vec![("Enter session".to_string(), enter_data)]];
+                            log::info!(
+                                target: "tddy_daemon::telegram",
+                                "telegram_traffic direction=outbound kind=enter_only_keyboard chat_id={} session_id={}",
+                                cid,
+                                sid
+                            );
+                            log::info!(
+                                target: "tddy_daemon::telegram",
+                                "send_mode_changed_elicitation: gating workflow keyboards — enter-only row chat_id={} session_id={}",
+                                cid,
+                                sid
+                            );
+                            sender
+                                .send_message_with_keyboard(cid, action_line, enter_rows)
+                                .await?;
+                        } else {
+                            log::info!(
+                                target: "tddy_daemon::telegram",
+                                "telegram_traffic direction=outbound kind=workflow_keyboard chat_id={} session_id={}",
+                                cid,
+                                sid
+                            );
+                            sender
+                                .send_message_with_keyboard(cid, action_line, rows.clone())
+                                .await?;
+                        }
                     } else {
-                        let sid_label = session_telegram_label(session_id)
-                            .unwrap_or_else(|| session_id.to_string());
+                        let sid_label =
+                            session_telegram_label(sid).unwrap_or_else(|| sid.to_string());
                         let defer_text = format!(
                             "{action_line}\n\n⏳ Session {sid_label}: elicitation queued — this chat already has an active prompt. Use the web / LiveKit UI or wait until it is your turn."
                         );
@@ -630,7 +742,7 @@ impl TelegramSessionWatcher {
                             target: "tddy_daemon::telegram",
                             "send_mode_changed_elicitation: deferring inline keyboard (not primary elicitation token) chat_id={} session_id={}",
                             cid,
-                            session_id
+                            sid
                         );
                         sender.send_message(cid, &defer_text).await?;
                     }
@@ -651,6 +763,7 @@ impl TelegramSessionWatcher {
         session_id: &str,
         label: &str,
         mc: &tddy_service::gen::ModeChanged,
+        dispatch: TelegramElicitationDispatch,
     ) -> anyhow::Result<()> {
         let Some(tg) = config.telegram.as_ref() else {
             return Ok(());
@@ -688,8 +801,6 @@ impl TelegramSessionWatcher {
             session_id,
             sig.len()
         );
-        self.last_elicitation_signature
-            .insert(session_id.to_string(), sig);
         self.last_elicitation_mc
             .insert(session_id.to_string(), mc.clone());
         self.cache_select_options_for_select_mode(session_id, mc);
@@ -707,9 +818,77 @@ impl TelegramSessionWatcher {
             action_line.len()
         );
 
-        self.send_mode_changed_action_lines(sender, &tg.chat_ids, session_id, &action_line, &kb)
-            .await?;
+        self.send_mode_changed_action_lines(
+            config,
+            sender,
+            &tg.chat_ids,
+            session_id,
+            &action_line,
+            &kb,
+            dispatch,
+        )
+        .await?;
+        self.last_elicitation_signature
+            .insert(session_id.to_string(), sig);
         Ok(())
+    }
+
+    /// After **Enter session**, re-send pending elicitation / approval UI with full keyboards for this chat.
+    pub async fn replay_telegram_elicitation_after_tracked_enter<S: TelegramSender + ?Sized>(
+        &mut self,
+        config: &DaemonConfig,
+        sender: &S,
+        chat_id: i64,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        let sid = session_id.trim();
+        log::info!(
+            target: "tddy_daemon::telegram",
+            "replay_telegram_elicitation_after_tracked_enter: chat_id={} session_id={}",
+            chat_id,
+            sid
+        );
+        let tracked_ok = match self.telegram_tracked.lock() {
+            Ok(g) => g
+                .tracked_session_for_chat(chat_id)
+                .map(|s| s.trim() == sid)
+                .unwrap_or(false),
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram",
+                    "replay_telegram_elicitation_after_tracked_enter: telegram_tracked mutex poisoned: {e}"
+                );
+                false
+            }
+        };
+        if !tracked_ok {
+            log::warn!(
+                target: "tddy_daemon::telegram",
+                "replay_telegram_elicitation_after_tracked_enter: skip — chat_id={} not telegram-tracked for session_id={}",
+                chat_id,
+                sid
+            );
+            return Ok(());
+        }
+        self.last_elicitation_signature.remove(sid);
+        let Some(mc) = self.last_elicitation_mc.get(sid).cloned() else {
+            log::debug!(
+                target: "tddy_daemon::telegram",
+                "replay_telegram_elicitation_after_tracked_enter: no cached ModeChanged for session_id={}",
+                sid
+            );
+            return Ok(());
+        };
+        let label = session_telegram_label(sid).unwrap_or_else(|| sid.to_string());
+        self.send_mode_changed_elicitation(
+            config,
+            sender,
+            sid,
+            &label,
+            &mc,
+            TelegramElicitationDispatch::Standard,
+        )
+        .await
     }
 
     /// Handle a gRPC [`ServerMessage`] from the child `tddy-coder` Presenter observer stream.
@@ -744,6 +923,28 @@ impl TelegramSessionWatcher {
                     "on_server_message: ModeChanged for session_id={} (elicitation path)",
                     session_id
                 );
+                for &cid in &tg.chat_ids {
+                    log::info!(
+                        target: "tddy_daemon::telegram",
+                        "{}",
+                        crate::telegram_tracked_session::format_inbound_mode_changed_traffic_log(
+                            cid, session_id,
+                        )
+                    );
+                    match self.telegram_tracked.lock() {
+                        Ok(track) => {
+                            let preview =
+                                track.stub_structured_traffic_log_preview(cid, session_id);
+                            log::info!(target: "tddy_daemon::telegram", "{preview}");
+                        }
+                        Err(e) => {
+                            log::error!(
+                                target: "tddy_daemon::telegram",
+                                "on_server_message: telegram_tracked mutex poisoned: {e}"
+                            );
+                        }
+                    }
+                }
                 let now_eliciting =
                     crate::elicitation::mode_changed_requires_telegram_elicitation(mc);
                 let was_eliciting = self
@@ -802,6 +1003,7 @@ impl TelegramSessionWatcher {
                                         &next_sid,
                                         &next_label,
                                         &mc_replay,
+                                        TelegramElicitationDispatch::QueuePromotionReplay,
                                     )
                                     .await
                                 {
@@ -820,7 +1022,14 @@ impl TelegramSessionWatcher {
                     .insert(session_id.to_string(), now_eliciting);
 
                 return self
-                    .send_mode_changed_elicitation(config, sender, session_id, &label, mc)
+                    .send_mode_changed_elicitation(
+                        config,
+                        sender,
+                        session_id,
+                        &label,
+                        mc,
+                        TelegramElicitationDispatch::Standard,
+                    )
                     .await;
             }
             Event::StateChanged(sc) => {
@@ -833,6 +1042,9 @@ impl TelegramSessionWatcher {
                 Some((format!("Session {label}: {} -> {}", sc.from, sc.to), None))
             }
             Event::WorkflowComplete(wc) => {
+                if let Ok(mut g) = self.telegram_tracked.lock() {
+                    g.clear_all_chats_tracked_to_session(session_id);
+                }
                 self.last_presenter_elicitation.remove(session_id);
                 self.last_elicitation_mc.remove(session_id);
                 let key = (wc.ok, wc.message.clone());
@@ -1230,6 +1442,7 @@ mod acceptance_unit_tests {
         let msg = tddy_service::convert::session_document_approval_to_server_message(
             "doc-preview".to_string(),
         );
+        watcher.bind_telegram_tracked_session_for_chat(42, sid);
         watcher
             .on_server_message(&cfg, &mem, sid, &msg)
             .await
@@ -1348,6 +1561,7 @@ mod acceptance_unit_tests {
                 }),
             })),
         };
+        watcher.bind_telegram_tracked_session_for_chat(42, sid);
         watcher
             .on_server_message(&cfg, &mem, sid, &msg)
             .await
@@ -1424,6 +1638,7 @@ mod acceptance_unit_tests {
                 }),
             })),
         };
+        watcher.bind_telegram_tracked_session_for_chat(42, sid);
         watcher
             .on_server_message(&cfg, &mem, sid, &msg)
             .await
