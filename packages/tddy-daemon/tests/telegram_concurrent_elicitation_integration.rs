@@ -9,8 +9,8 @@ use tddy_daemon::telegram_session_control::TelegramSessionControlHarness;
 use tddy_service::gen::app_mode_proto::Variant;
 use tddy_service::gen::server_message::Event;
 use tddy_service::gen::{
-    AppModeProto, AppModeRunning, AppModeSelect, ClarificationQuestionProto, ModeChanged,
-    QuestionOptionProto, ServerMessage,
+    AppModeMultiSelect, AppModeProto, AppModeRunning, AppModeSelect, ClarificationQuestionProto,
+    ModeChanged, QuestionOptionProto, ServerMessage,
 };
 
 const AUTHORIZED_CHAT: i64 = 424_242;
@@ -23,6 +23,51 @@ fn running_mode_message() -> ServerMessage {
             }),
         })),
     }
+}
+
+fn multi_select_elicitation_message(question: &str, recommended_other: &str) -> ServerMessage {
+    ServerMessage {
+        event: Some(Event::ModeChanged(ModeChanged {
+            mode: Some(AppModeProto {
+                variant: Some(Variant::MultiSelect(AppModeMultiSelect {
+                    question: Some(ClarificationQuestionProto {
+                        header: "Clarify".into(),
+                        question: question.into(),
+                        options: vec![
+                            QuestionOptionProto {
+                                label: "X".into(),
+                                description: String::new(),
+                            },
+                            QuestionOptionProto {
+                                label: "Y".into(),
+                                description: String::new(),
+                            },
+                        ],
+                        multi_select: true,
+                        allow_other: true,
+                        recommended_other: recommended_other.into(),
+                    }),
+                    question_index: 0,
+                    total_questions: 1,
+                })),
+            }),
+        })),
+    }
+}
+
+/// Outbound messages whose keyboards expose MultiSelect shortcut (`Choose none`).
+fn count_primary_multi_shortcut_keyboards(sender: &InMemoryTelegramSender, chat_id: i64) -> usize {
+    sender
+        .recorded_with_keyboards()
+        .iter()
+        .filter(|(cid, _, rows)| {
+            *cid == chat_id
+                && rows
+                    .iter()
+                    .flatten()
+                    .any(|(_, cb)| cb.starts_with("eli:mn:"))
+        })
+        .count()
 }
 
 fn select_elicitation_message(question: &str, opt_a: &str, opt_b: &str) -> ServerMessage {
@@ -45,6 +90,7 @@ fn select_elicitation_message(question: &str, opt_a: &str, opt_b: &str) -> Serve
                         ],
                         multi_select: false,
                         allow_other: false,
+                        recommended_other: String::new(),
                     }),
                     question_index: 0,
                     total_questions: 1,
@@ -224,5 +270,45 @@ async fn telegram_regression_single_session_elicitation_still_works() {
         harness.active_elicitation_session_for_chat(AUTHORIZED_CHAT),
         Some(only_sid.to_string()),
         "single-session Telegram elicitation must still surface exactly one active token for the chat"
+    );
+}
+
+/// PRD MultiSelect: concurrent shortcut keyboards obey single primary interactive surface per chat.
+#[tokio::test]
+async fn telegram_concurrent_queue_unchanged_guarantees() {
+    let mut watcher = TelegramSessionWatcher::new();
+    let cfg = telegram_config();
+    let mem = InMemoryTelegramSender::new();
+    let sid_a = "01900000-0000-7000-8000-0000000000aa";
+    let sid_b = "01900000-0000-7000-8000-0000000000bb";
+
+    let msg_a = multi_select_elicitation_message("Question from session A", "");
+    let msg_b = multi_select_elicitation_message("Question from session B", "");
+
+    watcher
+        .on_server_message(&cfg, &mem, sid_a, &msg_a)
+        .await
+        .unwrap();
+    watcher
+        .on_server_message(&cfg, &mem, sid_b, &msg_b)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        count_primary_multi_shortcut_keyboards(&mem, AUTHORIZED_CHAT),
+        1,
+        "FIFO head must own the lone primary MultiSelect shortcut keyboard for this chat"
+    );
+
+    let running_a = running_mode_message();
+    watcher
+        .on_server_message(&cfg, &mem, sid_a, &running_a)
+        .await
+        .unwrap();
+
+    let total_shortcut_surfaces = count_primary_multi_shortcut_keyboards(&mem, AUTHORIZED_CHAT);
+    assert!(
+        total_shortcut_surfaces >= 2,
+        "after head clears elicitation, promoted MultiSelect session must emit another primary shortcut keyboard; expected>=2 got {total_shortcut_surfaces}"
     );
 }

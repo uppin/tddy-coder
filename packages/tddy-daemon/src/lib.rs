@@ -23,6 +23,7 @@ pub mod spawner;
 pub mod tddy_user_config;
 pub mod telegram_bot;
 pub mod telegram_github_link;
+pub mod telegram_multi_select_shortcuts;
 pub mod telegram_notifier;
 pub mod telegram_session_control;
 pub mod telegram_session_subscriber;

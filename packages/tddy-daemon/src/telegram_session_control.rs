@@ -26,9 +26,10 @@ use crate::session_list_enrichment::SessionListStatusDisplay;
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
 use crate::telegram_github_link::TelegramGithubMappingStore;
+use crate::telegram_multi_select_shortcuts::{CHOOSE_NONE_CB_PREFIX, CHOOSE_RECOMMENDED_CB_PREFIX};
 use crate::telegram_notifier::{
-    session_telegram_label, ElicitationSelectOptionsCache, InMemoryTelegramSender,
-    InlineKeyboardRows, TelegramSender,
+    session_telegram_label, ElicitationMultiSelectMetaCache, ElicitationSelectOptionsCache,
+    InMemoryTelegramSender, InlineKeyboardRows, TelegramSender,
 };
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
 use crate::user_sessions_path::projects_path_for_user;
@@ -289,6 +290,42 @@ pub fn parse_elicitation_other_callback(callback_data: &str) -> Option<String> {
         return None;
     }
     Some(sid.to_string())
+}
+
+/// Inbound multi-select Telegram shortcut taps (`eli:mn:` / `eli:mr:`), parallel to `/answer-multi`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ElicitationMultiSelectShortcutKind {
+    ChooseNone,
+    ChooseRecommended,
+}
+
+/// Parse `eli:mn:<session_id>:<question_index>` or `eli:mr:<session_id>:<question_index>`.
+///
+/// `session_id` is the opaque tail before the final `:index` (hyphenated UUID-shaped ids are supported).
+pub fn parse_elicitation_multi_select_shortcut(
+    callback_data: &str,
+) -> Option<(String, i32, ElicitationMultiSelectShortcutKind)> {
+    log::debug!(
+        target: "tddy_daemon::telegram_session_control",
+        "parse_elicitation_multi_select_shortcut: len={}",
+        callback_data.len()
+    );
+    let (kind, rest) = if let Some(rest) = callback_data.strip_prefix(CHOOSE_NONE_CB_PREFIX) {
+        (ElicitationMultiSelectShortcutKind::ChooseNone, rest)
+    } else if let Some(rest) = callback_data.strip_prefix(CHOOSE_RECOMMENDED_CB_PREFIX) {
+        (ElicitationMultiSelectShortcutKind::ChooseRecommended, rest)
+    } else {
+        return None;
+    };
+
+    let (session_id_raw, idx_s) = rest.rsplit_once(':')?;
+    let session_id = session_id_raw.trim();
+    if session_id.is_empty() {
+        return None;
+    }
+    let qi: i32 = idx_s.trim().parse().ok()?;
+
+    Some((session_id.to_string(), qi, kind))
 }
 
 /// Free-text answer for clarification / text-input mode: `/answer-text <session> <text…>`
@@ -695,6 +732,8 @@ pub struct TelegramWorkflowSpawn {
     pub child_grpc_by_session: Arc<Mutex<HashMap<String, u16>>>,
     /// Same cache as [`crate::telegram_notifier::TelegramSessionWatcher`] — full strings for select confirmations.
     pub elicitation_select_options: ElicitationSelectOptionsCache,
+    /// Multi-select **Choose recommended** metadata (recommended_other keyed by presenter session id).
+    pub elicitation_multi_select_meta: ElicitationMultiSelectMetaCache,
     /// Chat id → session id (full) when the user tapped "Other" and we await a free-text follow-up message.
     pub pending_elicitation_other: Arc<Mutex<HashMap<i64, String>>>,
 }
@@ -1659,6 +1698,119 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         Ok(())
     }
 
+    /// Inline **Choose none** / **Choose recommended** (`eli:mn:` / `eli:mr:`).
+    pub async fn handle_elicitation_multi_select_shortcut(
+        &self,
+        chat_id: i64,
+        session_key: &str,
+        question_index: i32,
+        kind: ElicitationMultiSelectShortcutKind,
+    ) -> anyhow::Result<()> {
+        log::info!(
+            target: "tddy_daemon::telegram_session_control",
+            "handle_elicitation_multi_select_shortcut: chat_id={} kind={:?} question_index={}",
+            chat_id,
+            kind,
+            question_index,
+        );
+        self.ensure_authorized(chat_id)?;
+        let deps = self
+            .workflow_spawn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?;
+        if let Ok(mut g) = deps.pending_elicitation_other.lock() {
+            g.remove(&chat_id);
+        }
+
+        let (session_id, port) = {
+            let map = deps
+                .child_grpc_by_session
+                .lock()
+                .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
+            resolve_child_grpc_port(&map, session_key)?
+        };
+        if !self.elicitation_callback_permitted(chat_id, &session_id) {
+            anyhow::bail!(
+                "That session is not the active elicitation for this chat. Finish the current prompt or use the web UI."
+            );
+        }
+
+        match kind {
+            ElicitationMultiSelectShortcutKind::ChooseNone => {
+                log::debug!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "shortcut ChooseNone → presenter empty indices session_id={}",
+                    session_id,
+                );
+                presenter_intent_client::answer_clarification_multi_select_localhost(
+                    port,
+                    Vec::new(),
+                    String::new(),
+                )
+                .await?;
+            }
+            ElicitationMultiSelectShortcutKind::ChooseRecommended => {
+                let meta = {
+                    let guard = deps
+                        .elicitation_multi_select_meta
+                        .lock()
+                        .map_err(|e| anyhow::anyhow!("elicitation_multi_select_meta lock: {e}"))?;
+                    guard.get(&session_id).cloned()
+                };
+
+                let Some(meta) = meta else {
+                    anyhow::bail!(
+                        "No shortcut metadata for this session — use /answer-multi or the web UI."
+                    );
+                };
+                if meta.question_index != question_index {
+                    log::warn!(
+                        target: "tddy_daemon::telegram_session_control",
+                        "shortcut question_index mismatch cached={} callback={}",
+                        meta.question_index,
+                        question_index
+                    );
+                    anyhow::bail!("That recommendation shortcut is stale for this question.");
+                }
+
+                let trimmed = meta.recommended_other.trim();
+                if trimmed.is_empty() {
+                    anyhow::bail!("No recommended answer is configured for this step.");
+                }
+
+                log::debug!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "shortcut ChooseRecommended → presenter Other len {}",
+                    trimmed.len(),
+                );
+
+                presenter_intent_client::answer_clarification_multi_select_localhost(
+                    port,
+                    Vec::new(),
+                    trimmed.to_string(),
+                )
+                .await?;
+            }
+        }
+
+        self.try_advance_elicitation_after_step(
+            chat_id,
+            &session_id,
+            "handle_elicitation_multi_select_shortcut",
+        );
+
+        let confirm = match kind {
+            ElicitationMultiSelectShortcutKind::ChooseNone => {
+                "You submitted an empty multi-select (Choose none)."
+            }
+            ElicitationMultiSelectShortcutKind::ChooseRecommended => {
+                "You submitted the recommended answer."
+            }
+        };
+        self.sender.send_message(chat_id, confirm).await?;
+        Ok(())
+    }
+
     /// Store `/start-workflow` text as [`Changeset::initial_prompt`] so `tddy-coder` does not block on
     /// [`WorkflowEvent::AwaitingFeatureInput`] when only Telegram drove session creation (no web prompt).
     async fn persist_initial_prompt_to_changeset(
@@ -2239,6 +2391,38 @@ mod unit_tests {
         );
         assert_eq!(parse_elicitation_other_callback("eli:o:"), None);
         assert_eq!(parse_elicitation_other_callback("eli:s:x:1"), None);
+    }
+
+    #[test]
+    fn parse_elicitation_multi_select_shortcut_round_trip_choose_none() {
+        let sid = "01900000-0000-7000-8000-0000000000aa";
+        let encoded = crate::telegram_multi_select_shortcuts::compose_choose_none_callback(sid, 0);
+        assert_eq!(
+            parse_elicitation_multi_select_shortcut(&encoded),
+            Some((
+                sid.to_string(),
+                0i32,
+                ElicitationMultiSelectShortcutKind::ChooseNone
+            )),
+            "`eli:mn:` GREEN must decode for presenter dispatch",
+        );
+    }
+
+    #[test]
+    fn parse_elicitation_multi_select_shortcut_round_trip_choose_recommended() {
+        let sid = "01900000-0000-7000-8000-0000000000bb";
+        let qi = 2u32;
+        let encoded =
+            crate::telegram_multi_select_shortcuts::compose_choose_recommended_callback(sid, qi);
+        assert_eq!(
+            parse_elicitation_multi_select_shortcut(&encoded),
+            Some((
+                sid.to_string(),
+                qi as i32,
+                ElicitationMultiSelectShortcutKind::ChooseRecommended,
+            )),
+            "`eli:mr:` GREEN must decode for presenter dispatch",
+        );
     }
 
     #[test]

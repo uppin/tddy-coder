@@ -2,6 +2,9 @@
 
 Release note history for the Coder product area.
 
+## 2026-05-02 — Presenter clarification MultiSelect (empty answer guard)
+
+- **`tddy-core`**: **`AnswerClarificationMultiSelect`** validation rejects empty selected indices when **Other** text is absent and **`allow_other`** on the active clarification question is **false** (aligns Telegram **Choose none** / index-based **`/answer-multi`** semantics with presenter gating).
 ## 2026-05-02 — Post-workflow GitHub PR + worktree elicitation (durable workflow + policy)
 
 - **tddy-workflow-recipes**: **`changeset-workflow`** JSON Schema — **`post_workflow_open_github_pr`**, **`post_workflow_remove_session_worktree`**, **`github_pr_status`** (**`phase`**, **`url`**, **`error`**, all required keys with explicit **`null`** allowed for absent URL/error).

@@ -8,7 +8,7 @@ This surface is **distinct** from **[Telegram session notifications](telegram-no
 
 ## Daemon binary (inbound)
 
-When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the daemon can resolve **`sessions_base`** for the current OS user (`USER` → `~/.tddy`), **`tddy-daemon`** starts a **teloxide long-polling** dispatcher (**`telegram_bot`**) alongside the web/RPC server. It handles the commands in the table above, inline **Enter** / **Delete** / **More** session-list callbacks (`enter:…`, `delete:…`, `more:…`), recipe / **branch-worktree intent** / project / **integration-base branch** / agent pick callbacks (`recipe:…`, `intent:…`, `tp:…`, `tb:…`, `ta:…`), document-review callbacks (`doc:…`), and elicitation select callbacks (`eli:s:…`). Commands and callbacks that drive the running **`tddy-coder`** child use **`PresenterIntent`** over **localhost** on the port registered for that session (see **`packages/tddy-daemon/src/presenter_intent_client.rs`**). The same **`TeloxideSender`** / **`Bot`** instance is shared with outbound notifications.
+When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the daemon can resolve **`sessions_base`** for the current OS user (`USER` → `~/.tddy`), **`tddy-daemon`** starts a **teloxide long-polling** dispatcher (**`telegram_bot`**) alongside the web/RPC server. It handles the commands in the table above, inline **Enter** / **Delete** / **More** session-list callbacks (`enter:…`, `delete:…`, `more:…`), recipe / **branch-worktree intent** / project / **integration-base branch** / agent pick callbacks (`recipe:…`, `intent:…`, `tp:…`, `tb:…`, `ta:…`), document-review callbacks (`doc:…`), elicitation select callbacks (`eli:s:…`), elicitation **Other** (`eli:o:…`), and multi-select shortcut callbacks (**`eli:mn:`** **Choose none**, **`eli:mr:`** **Choose recommended** when the presenter supplies non-empty **`recommended_other`** on the MultiSelect wire). Commands and callbacks that drive the running **`tddy-coder`** child use **`PresenterIntent`** over **localhost** on the port registered for that session (see **`packages/tddy-daemon/src/presenter_intent_client.rs`**). The same **`TeloxideSender`** / **`Bot`** instance is shared with outbound notifications.
 
 ## Telegram user ↔ GitHub identity
 
@@ -32,9 +32,9 @@ Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`T
 ### Concurrent elicitation (one Telegram chat, multiple sessions)
 
 - **Per-chat queue:** The daemon maintains a **FIFO queue** of workflow session ids per Telegram chat. The **first** session in the queue holds the **active elicitation token** for that chat. Only that session receives full interactive treatment consistent with the “single visible question” policy for inbound and outbound Telegram.
-- **Inbound gating:** **`eli:s:`**, **`eli:o:`**, and **`doc:`** (document-review) callbacks are accepted only when the callback’s session id matches the active token; other sessions receive a short alert. **`/answer-text`** and **`/answer-multi`** resolve the child gRPC target from the session key in the command, then apply the same active-token check before forwarding to **`PresenterIntent`**.
+- **Inbound gating:** **`eli:s:`**, **`eli:o:`**, **`eli:mn:`**, **`eli:mr:`**, and **`doc:`** (document-review) callbacks are accepted only when the callback’s session id matches the active token; other sessions receive a short alert. **`/answer-text`** and **`/answer-multi`** resolve the child gRPC target from the session key in the command, then apply the same active-token check before forwarding to **`PresenterIntent`**.
 - **Plain-text follow-up (“Other”):** After the operator taps **Other** on a select clarification, the next non-command message in the chat is routed to the pending session when it matches the active token policy (see harness **`handle_elicitation_other_followup_plain_message`**).
-- **Queue advancement:** After a successful step that completes the elicitation gate for the active session—including select confirmation, Other follow-up, terminal document-review actions where applicable, and successful **`/answer-text`** / **`/answer-multi`**—the coordinator removes the completed session from the head of the queue and exposes the next session as active (when present).
+- **Queue advancement:** After a successful step that completes the elicitation gate for the active session—including select confirmation, Other follow-up, multi-select shortcut answers (**`eli:mn:`** / **`eli:mr:`**), terminal document-review actions where applicable, and successful **`/answer-text`** / **`/answer-multi`**—the coordinator removes the completed session from the head of the queue and exposes the next session as active (when present).
 
 ### Session list behavior (`/sessions`)
 
@@ -69,7 +69,8 @@ Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`T
 ### Clarification (select, text, multi)
 
 - **Single-select** (**`Select`**): the outbound notification lists each option on its own line in the message body; inline buttons use compact numeric labels. After the operator taps a button, the bot sends a **confirmation message** with the **full** chosen option text (label and description as defined by the presenter). The daemon resolves the choice via **`PresenterIntent::AnswerClarificationSelect`** on the child’s localhost gRPC port (see **`presenter_intent.proto`**).
-- **Text** and **multi-select** use **`/answer-text`** and **`/answer-multi`** respectively (same **`PresenterIntent`** service).
+- **Multi-select** (**`MultiSelect`**): the outbound path attaches an inline row with **Choose none** (**`eli:mn:<session_id>:<question_index>`**) and, when the presenter provides non-empty **`recommended_other`** on the clarification proto, **Choose recommended** (**`eli:mr:…`**). Each **`callback_data`** stays within Telegram’s **64-byte** limit. **Choose none** submits **`AnswerClarificationMultiSelect`** with empty indices and empty **Other**. **Choose recommended** submits empty indices and the cached **`recommended_other`** string as **Other** (no placeholder when the field is absent—the button is omitted).
+- **Text** and index-based **multi-select** also use **`/answer-text`** and **`/answer-multi`** respectively (same **`PresenterIntent`** service).
 
 ### Document review on Telegram
 
@@ -106,6 +107,7 @@ The daemon binary runs **long-polling** inbound handling (see above). Durable **
 - **Integration tests** live in **`packages/tddy-daemon/tests/telegram_session_control_integration.rs`**: start workflow, recipe **`changeset.yaml`**, branch/worktree intent keyboard and persistence, plan chunk markers, elicitation mapping, unauthorized denial.
 - **Telegram ↔ GitHub linking** integration and unit tests live in **`packages/tddy-daemon/tests/telegram_github_link.rs`** and **`telegram_github_link.rs`** (`#[cfg(test)]`): OAuth state round-trip, mapping persistence, unlinked **`handle_start_workflow`** error path, stub exchange.
 - **Concurrent elicitation** scenarios (single chat, multiple sessions, active token) live in **`packages/tddy-daemon/tests/telegram_concurrent_elicitation_integration.rs`**.
+- **Multi-select shortcuts** (outbound keyboards, parser, metadata gating) live in **`packages/tddy-daemon/tests/telegram_multi_select_acceptance.rs`**.
 
 ## Related documentation
 

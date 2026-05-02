@@ -12,13 +12,13 @@ use tokio::sync::Mutex;
 use crate::telegram_notifier::TeloxideSender;
 use crate::telegram_session_control::{
     parse_answer_multi_command, parse_answer_text_command, parse_delete_command,
-    parse_document_review_callback, parse_elicitation_other_callback,
-    parse_elicitation_select_callback, parse_recipe_callback_session_dir,
-    parse_session_control_callback, parse_sessions_command, parse_start_workflow_prompt,
-    parse_submit_feature_command, parse_telegram_agent_callback, parse_telegram_branch_callback,
-    parse_telegram_branch_more_callback, parse_telegram_intent_callback,
-    parse_telegram_project_callback, SessionControlCallback, StartWorkflowCommand,
-    TelegramCallback, TelegramSessionControlHarness,
+    parse_document_review_callback, parse_elicitation_multi_select_shortcut,
+    parse_elicitation_other_callback, parse_elicitation_select_callback,
+    parse_recipe_callback_session_dir, parse_session_control_callback, parse_sessions_command,
+    parse_start_workflow_prompt, parse_submit_feature_command, parse_telegram_agent_callback,
+    parse_telegram_branch_callback, parse_telegram_branch_more_callback,
+    parse_telegram_intent_callback, parse_telegram_project_callback, SessionControlCallback,
+    StartWorkflowCommand, TelegramCallback, TelegramSessionControlHarness,
 };
 
 type Harness = Arc<Mutex<TelegramSessionControlHarness<TeloxideSender>>>;
@@ -26,7 +26,7 @@ type Harness = Arc<Mutex<TelegramSessionControlHarness<TeloxideSender>>>;
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 /// Authorize the chat and ensure `session_id` holds the active elicitation token for interactive
-/// surfaces (`eli:s:` / `eli:o:` / document-review). If not, answers `qid` and returns `true` (caller
+/// surfaces (`eli:s:` / `eli:o:` / `eli:mn:` / `eli:mr:` / document-review). If not, answers `qid` and returns `true` (caller
 /// should return `Ok(())`).
 async fn authorized_elicitation_surface_gate(
     bot: &Bot,
@@ -420,6 +420,37 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
         if let Err(e) = h.handle_elicitation_other(chat_id, &session_id).await {
+            bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
+        }
+        return Ok(());
+    }
+
+    if let Some((session_id_shortcut, qi, shortcut_kind)) =
+        parse_elicitation_multi_select_shortcut(&data)
+    {
+        if authorized_elicitation_surface_gate(
+            &bot,
+            &harness,
+            chat_id,
+            &session_id_shortcut,
+            qid.clone(),
+            "elicitation_multi_select_shortcut",
+        )
+        .await
+        {
+            return Ok(());
+        }
+        let _ = bot.answer_callback_query(qid.clone()).await;
+        let h = harness.lock().await;
+        if let Err(e) = h
+            .handle_elicitation_multi_select_shortcut(
+                chat_id,
+                &session_id_shortcut,
+                qi,
+                shortcut_kind,
+            )
+            .await
+        {
             bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
         }
         return Ok(());

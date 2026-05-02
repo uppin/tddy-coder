@@ -575,6 +575,16 @@ impl Presenter {
             }
             UserIntent::AnswerMultiSelect(indices, other) => {
                 if let Some(q) = self.pending_questions.get(self.current_question_index) {
+                    if q.multi_select
+                        && !q.allow_other
+                        && indices.is_empty()
+                        && other.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true)
+                    {
+                        log::debug!(
+                            "AnswerMultiSelect: rejected empty submission (allow_other=false)"
+                        );
+                        return;
+                    }
                     let mut parts: Vec<String> = indices
                         .iter()
                         .filter_map(|&i| q.options.get(i).map(|o| o.label.clone()))
@@ -1999,6 +2009,44 @@ mod tests {
             matches!(p.state().mode, AppMode::Select { .. }),
             "expected Select after ClarificationNeeded; got {:?}",
             p.state().mode
+        );
+    }
+
+    /// Telegram alignment: Choose none only applies when `allow_other` indicates multi-select channel semantics permit empty submissions.
+    #[test]
+    fn presenter_empty_multi_select_semantics() {
+        let mut p = make_presenter();
+        inject_workflow_event(
+            &mut p,
+            WorkflowEvent::ClarificationNeeded {
+                questions: vec![ClarificationQuestion {
+                    header: "Scope".into(),
+                    question: "Pick stacks".into(),
+                    options: vec![
+                        QuestionOption {
+                            label: "Tokio".into(),
+                            description: String::new(),
+                        },
+                        QuestionOption {
+                            label: "async-std".into(),
+                            description: String::new(),
+                        },
+                    ],
+                    multi_select: true,
+                    allow_other: false,
+                }],
+            },
+        );
+        p.poll_workflow();
+        assert!(
+            matches!(p.state().mode, AppMode::MultiSelect { .. }),
+            "fixture must enter MultiSelect mode"
+        );
+
+        p.handle_intent(UserIntent::AnswerMultiSelect(vec![], None));
+        assert!(
+            matches!(p.state().mode, AppMode::MultiSelect { .. }),
+            "when allow_other is false the presenter must reject empty multi-select (no silent Choose-none semantics)"
         );
     }
 

@@ -204,6 +204,8 @@ message ClarificationQuestionProto {
   bool multi_select = 4;
   // When true, Telegram shows an "Other" control; the user may send a custom answer (see daemon).
   bool allow_other = 5;
+  // Optional presenter-supplied aggregate suggested via "Choose recommended" on Telegram MultiSelect.
+  string recommended_other = 6;
 }
 
 message QuestionOptionProto {
