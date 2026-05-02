@@ -9,12 +9,13 @@ pub mod error;
 pub mod feature_start_slash;
 pub mod log_backend;
 pub mod output;
+pub mod post_workflow;
 pub mod presenter;
-pub mod session_lifecycle;
-pub mod session_metadata;
-pub mod session_actions;
 pub mod session_action_jobs;
 pub mod session_action_pipeline;
+pub mod session_actions;
+pub mod session_lifecycle;
+pub mod session_metadata;
 pub mod source_path;
 pub mod stream;
 pub mod toolcall;
@@ -44,7 +45,7 @@ pub use changeset::{
     read_changeset, resolve_agent_from_changeset, resolve_model, start_goal_for_session_continue,
     update_state, write_changeset, write_changeset_atomic, BranchWorktreeIntent, Changeset,
     ChangesetState, ChangesetWorkflow, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
-    QuestionOptionForQa, SessionEntry, StateTransition,
+    GithubPrStatus, QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use elapsed_format::format_elapsed_compact;
 pub use error::{BackendError, ParseError, WorkflowError};
@@ -59,6 +60,10 @@ pub use log_backend::{
     init_tddy_logger, init_tddy_logger_legacy, matches_selector, redirect_debug_output,
     resolve_log_defaults, resolve_logger, take_buffered_logs, DefaultLogPolicy, LogConfig,
     LogOutput, LogPolicy, LogRotation, LogSelector, LoggerDefinition, MatchedPolicy,
+};
+pub use post_workflow::{
+    post_workflow_elicitation_step_order, post_workflow_pr_status_display_line,
+    should_prompt_session_worktree_removal, should_reprompt_github_pr_on_resume,
 };
 pub use presenter::{
     format_worktree_for_status_bar, ActivityEntry, ActivityKind, AgentOutputActivityLogMerge,

@@ -189,6 +189,25 @@ pub struct ChangesetWorkflow {
     pub new_branch_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_branch_to_work_on: Option<String>,
+    /// Post-workflow: whether the operator opted into GitHub PR creation for the session branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_workflow_open_github_pr: Option<bool>,
+    /// Populated only after a successful PR publish path when elicitation runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_workflow_remove_session_worktree: Option<bool>,
+    /// Machine-readable PR automation lifecycle for resume and remote clients (`changeset.yaml` / Context).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_pr_status: Option<GithubPrStatus>,
+}
+
+/// Persisted GitHub PR automation status (phase, outcome URL, fatal error message).
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct GithubPrStatus {
+    pub phase: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 impl Changeset {
@@ -369,6 +388,44 @@ pub fn merge_persisted_workflow_into_context(
         );
     }
     crate::branch_worktree_intent::merge_branch_worktree_intent_into_context(wf, context);
+    merge_post_workflow_into_context(wf, context)?;
+    Ok(())
+}
+
+/// Copies post-workflow PR / worktree elicitation fields from persisted [`ChangesetWorkflow`] into
+/// [`Context`] so presenters, CLI, and graph predicates see the same durable state as `changeset.yaml`.
+fn merge_post_workflow_into_context(
+    wf: &ChangesetWorkflow,
+    context: &Context,
+) -> Result<(), WorkflowError> {
+    if let Some(flag) = wf.post_workflow_open_github_pr {
+        debug!(
+            target: "tddy_core::changeset",
+            "merge_post_workflow_into_context: post_workflow_open_github_pr={flag}"
+        );
+        context.set_sync("post_workflow_open_github_pr", flag);
+    }
+    if let Some(flag) = wf.post_workflow_remove_session_worktree {
+        debug!(
+            target: "tddy_core::changeset",
+            "merge_post_workflow_into_context: post_workflow_remove_session_worktree={flag}"
+        );
+        context.set_sync("post_workflow_remove_session_worktree", flag);
+    }
+    let Some(status) = &wf.github_pr_status else {
+        return Ok(());
+    };
+    let v = serde_json::to_value(status).map_err(|e| {
+        WorkflowError::ChangesetInvalid(format!(
+            "workflow.github_pr_status is not serializable for Context merge: {e}"
+        ))
+    })?;
+    info!(
+        target: "tddy_core::changeset",
+        "merge_post_workflow_into_context: github_pr_status phase={}",
+        status.phase
+    );
+    context.set_sync("github_pr_status", v);
     Ok(())
 }
 

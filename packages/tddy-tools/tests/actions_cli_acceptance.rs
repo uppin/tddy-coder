@@ -187,8 +187,7 @@ input_schema:
         String::from_utf8_lossy(&assert.get_output().stderr)
     );
     assert!(
-        combined.to_lowercase().contains("schema")
-            || combined.to_lowercase().contains("validat"),
+        combined.to_lowercase().contains("schema") || combined.to_lowercase().contains("validat"),
         "expected schema/validation error in output; got: {combined}"
     );
     assert!(
@@ -246,17 +245,10 @@ input_schema:
     ]);
     let out = cmd.assert().success();
     let stdout = String::from_utf8_lossy(&out.get_output().stdout);
-    let v: Value =
-        serde_json::from_str(stdout.trim()).expect("invoke-action stdout must be JSON");
+    let v: Value = serde_json::from_str(stdout.trim()).expect("invoke-action stdout must be JSON");
     assert_eq!(v.get("exit_code").and_then(|c| c.as_i64()), Some(42));
-    assert_eq!(
-        v.get("stdout").and_then(|s| s.as_str()),
-        Some("HELLO_OUT")
-    );
-    assert_eq!(
-        v.get("stderr").and_then(|s| s.as_str()),
-        Some("HELLO_ERR")
-    );
+    assert_eq!(v.get("stdout").and_then(|s| s.as_str()), Some("HELLO_OUT"));
+    assert_eq!(v.get("stderr").and_then(|s| s.as_str()), Some("HELLO_ERR"));
 }
 
 /// Action with `result_kind: test_summary` (or equivalent) parses stub output like `cargo test` totals.
@@ -313,8 +305,7 @@ input_schema:
     ]);
     let out = cmd.assert().success();
     let stdout = String::from_utf8_lossy(&out.get_output().stdout);
-    let v: Value =
-        serde_json::from_str(stdout.trim()).expect("invoke-action stdout must be JSON");
+    let v: Value = serde_json::from_str(stdout.trim()).expect("invoke-action stdout must be JSON");
     let summary = v
         .get("summary")
         .expect("structured record must include summary for test_summary actions");

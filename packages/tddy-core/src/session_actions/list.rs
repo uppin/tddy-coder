@@ -17,7 +17,9 @@ pub struct ActionSummary {
 }
 
 /// Discovery + metadata for `list-actions` JSON (`actions` sorted ascending by `id`).
-pub fn list_action_summaries(session_dir: &Path) -> Result<Vec<ActionSummary>, SessionActionsError> {
+pub fn list_action_summaries(
+    session_dir: &Path,
+) -> Result<Vec<ActionSummary>, SessionActionsError> {
     debug!(
         target: "tddy_core::session_actions::list",
         "list_action_summaries: session_dir={}",

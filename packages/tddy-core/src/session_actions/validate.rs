@@ -29,10 +29,11 @@ pub fn validate_action_arguments_json(
             .map(|o| o.keys().cloned().collect::<Vec<_>>())
     );
 
-    let validator =
-        jsonschema::Validator::new(schema).map_err(|e| SessionActionsError::InvalidSchemaShape(
-            format!("could not compile input_schema as JSON Schema: {e}"),
-        ))?;
+    let validator = jsonschema::Validator::new(schema).map_err(|e| {
+        SessionActionsError::InvalidSchemaShape(format!(
+            "could not compile input_schema as JSON Schema: {e}"
+        ))
+    })?;
 
     validator.validate(args).map_err(|e| {
         let detail = e.to_string();

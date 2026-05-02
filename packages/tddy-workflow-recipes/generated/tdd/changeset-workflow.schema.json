@@ -26,6 +26,18 @@
         }
       },
       "additionalProperties": false
+    },
+    "post_workflow_open_github_pr": { "type": "boolean" },
+    "post_workflow_remove_session_worktree": { "type": "boolean" },
+    "github_pr_status": {
+      "type": "object",
+      "properties": {
+        "phase": { "type": "string" },
+        "url": { "type": ["string", "null"] },
+        "error": { "type": ["string", "null"] }
+      },
+      "required": ["phase", "url", "error"],
+      "additionalProperties": false
     }
   },
   "additionalProperties": false
