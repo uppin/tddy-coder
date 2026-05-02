@@ -1,7 +1,7 @@
 //! E2E acceptance test: LiveKit connection via TokenGenerator (API key/secret).
 //!
 //! Verifies that a server participant can connect using TokenGenerator instead of
-//! a pre-generated token, and that run_with_reconnect establishes the connection.
+//! a pre-generated token, and that `run_with_reconnect` keeps one room session up.
 //!
 //! Run with: cargo test -p tddy-e2e --features livekit token_generation
 //! Requires: LiveKit testkit (testcontainers or LIVEKIT_TESTKIT_WS_URL)
@@ -40,7 +40,7 @@ mod livekit_tests {
             DEV_API_SECRET.to_string(),
             ROOM_NAME.to_string(),
             SERVER_IDENTITY.to_string(),
-            Duration::from_secs(120),
+            Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
         );
 
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -54,6 +54,8 @@ mod livekit_tests {
                     EchoServiceServer::new(EchoServiceImpl),
                     RoomOptions::default(),
                     shutdown,
+                    None,
+                    None,
                 )
                 .await
             }

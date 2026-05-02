@@ -20,8 +20,9 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Backend (`backend/`)
 
-- **CodingBackend**: Async trait for invoking LLM-based coders. Implementations: `ClaudeCodeBackend`, `CursorBackend`, `ClaudeAcpBackend`, `CodexBackend` (production), `MockBackend`, `StubBackend` (testing/demo). `AnyBackend` enum for CLI dispatch. `SharedBackend` wraps `Arc<dyn CodingBackend>`; backend created once per run.
+- **CodingBackend**: Async trait for invoking LLM-based coders. Implementations: `ClaudeCodeBackend`, `CursorBackend`, `ClaudeAcpBackend`, `CodexBackend`, `CodexAcpBackend` (production), `MockBackend`, `StubBackend` (testing/demo). `AnyBackend` enum for CLI dispatch. `SharedBackend` wraps `Arc<dyn CodingBackend>`; backend created once per run.
 - **CodexBackend**: OpenAI Codex CLI (`codex exec`, `codex exec resume <session>`) with `--json` JSONL on stdout. `build_codex_exec_argv` supplies `-C`, optional `-m`, and maps `GoalHints` to `--sandbox` (read-only vs workspace-write) and `--ask-for-approval never` for non-interactive runs. Prompt text merges like Cursor: `system_prompt_path` overrides inline `system_prompt`, then user prompt with a blank line between system and user sections. `crate::stream::codex` parses JSONL for session identifiers and completed-item text; subprocess exit status is reflected in `InvokeResponse::exit_code` on successful invocation when the process returns.
+- **CodexAcpBackend**: OpenAI Codex via the **`codex-acp`** stdio agent and ACP (`ClientSideConnection` on the child process). Same dedicated-thread + `LocalSet` pattern as `ClaudeAcpBackend`. `TddyCodexAcpClient` implements `acp::Client`: accumulates agent text, maps tool/plan updates to `ProgressSink`, auto-approves permission requests. Fresh sessions use `new_session`; resume uses `load_session` with the id stored as `codex_thread_id` (same file field as `CodexBackend`). On auth-like ACP errors with `session_dir` set, runs `codex login` via `CodexBackend::spawn_oauth_login` so `codex_oauth_authorize.url` and headless OAuth flows match `--agent codex`.
 - **ClaudeAcpBackend**: ACP (Agent Client Protocol) backend. Spawns subprocess (bunx claude-agent-acp or tddy-acp-stub for tests), speaks JSON-RPC 2.0 over stdio via `agent-client-protocol` SDK. Dedicated thread with LocalSet (SDK uses !Send futures). `TddyAcpClient` implements `acp::Client` (session_notification accumulator, permission auto-approve). Session mapping: Fresh → new_session, Resume → reuse stored ACP session ID. Progress events: AgentMessageChunk → TaskProgress, ToolCall → ToolUse, Plan → TaskStarted.
 - **StubBackend**: Stateful backend for demo and workflow tests. Uses `ToolExecutor` (InMemoryToolExecutor in tests, ProcessToolExecutor in tddy-demo). Magic catch-words: CLARIFY (returns questions), FAIL_PARSE (malformed response), FAIL_INVOKE (BackendError). Returns schema-valid structured responses per goal.
 - **ToolExecutor**: Trait for submitting structured results. `InMemoryToolExecutor` stores via `store_submit_result` (tests and tddy-demo StubBackend). `ProcessToolExecutor` runs `tddy-tools submit` for real agents. `BackendInvokeTask` prefers `take_submit_result_for_goal` over stream parsing.
@@ -113,6 +114,36 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **Cache hint**: `agents_skills_scan_cache_token` exposes directory mtime for callers that cache scan results.
 - **Exports**: Module is public; key symbols are re-exported from **`lib.rs`** for **`tddy-coder`** and tests.
 - **Feature doc**: [feature-prompt-agent-skills.md](../../../docs/ft/coder/feature-prompt-agent-skills.md).
+
+### Session actions (`session_actions/`)
+
+- **Purpose**: Library support for declarative **`actions/*.yaml`** manifests beside session **`changeset.yaml`** (see [session-actions.md](../../../docs/ft/coder/session-actions.md), [session-layout.md](../../../docs/ft/coder/session-layout.md)). **`tddy-tools`** wires **`list-actions`**, **`invoke-action`**, and JSON output on top of this module.
+- **ActionManifest**: Versioned YAML (**`serde`**, **`deny_unknown_fields`**); **`parse_action_manifest_file`** / **`parse_action_manifest_yaml`** load a single manifest.
+- **list_action_summaries**: Lists **`id`**, **`summary`**, and schema-presence flags for manifests under **`<session_dir>/actions/`**.
+- **validate_action_arguments_json**: Compiles **`input_schema`** when present and validates **`--data`** JSON (**`jsonschema`**, default draft aligned with toolchain) before any subprocess runs.
+- **resolve_allowlisted_path**: Resolves **`output_path_arg`** string fields inside the canonical session directory or optional **`repo_path`** from **`changeset.yaml`**; traversal outside those roots fails closed for callers that map the error to tool exit **`3`**.
+- **ensure_action_architecture**: Enforces **`architecture`**: **`native`** or rustc-style prefix matching **`std::env::consts::ARCH`** before spawn.
+- **parse_test_summary_from_process_output** / **`TestSummary`**: Parses cargo-style **`test result:`** totals from combined stdout/stderr when **`result_kind`** is **`test_summary`**.
+- **run_manifest_command**: Spawns **`command[0]`** with argv capture via **`std::process::Command`**; UTF-8 decode uses replacement for invalid bytes. When **`result_kind`** is **`test_summary`**, the returned JSON includes a merged **`summary`** object (**`finalize_invocation_record`**).
+- **resolve_action_manifest_path**: Resolves **`actions/<action_id>.{yaml,yml}`** under **`--session-dir`**; mismatches surface as **`UnknownActionId`** for callers that map errors to tool exit semantics.
+- **Tests**: **`session_actions_red`**.
+
+### Session action jobs (`session_action_jobs/`)
+
+- **Purpose**: Optional **non-blocking** runs of the same declarative **`actions/*.yaml`** manifests, keyed by a **`job_id`**, with filesystem **stdout** / **stderr** capture paths and **`wait` / `stop`** operations. Shares manifest resolution (**`resolve_action_manifest_path`**), argument validation, **`repo_path`** / **`output_path_arg`** checks, and **`ensure_action_architecture`** with the synchronous **`invoke-action`** path. See [session-actions.md](../../../docs/ft/coder/session-actions.md) (**Session action jobs** section).
+- **On-disk layout**: **`<session_dir>/session_action_jobs/jobs/<job_id>/`** holds **`job.json`**, **`stdout.log`**, **`stderr.log`**. **`SessionActionJobRegistry::load`** creates **`<session_dir>/session_action_jobs/`** and **`jobs/`**.
+- **invoke_session_action**: With **`async_start: false`**, blocks until the subprocess exits and returns the same structured record shape as **`invoke-action`** (including **`test_summary`** when configured). With **`async_start: true`**, admits the job, creates log files before return, spawns the manifest command in a new process group on Unix, assigns a version-7 **UUID** as **`job_id`**, and returns **`running`** status plus absolute capture paths.
+- **wait_session_action_job**: Polls subprocess exit via **`waitpid`** (**`WNOHANG`**) while **`job.json`** reflects **`running`**; **`timeout_ms: None`** or **`0`** means unbounded wait; a positive bound yields **`TimedOut { still_running }`** when the deadline elapses first.
+- **stop_session_action_job**: Sends **`SIGKILL`** to the process group on Unix, reaps the child, persists **`cancelled`** state, returns **`UnknownJob`** when the job directory is absent, and **`AlreadyFinished`** when the job is already terminal. **`stable_code`** on **`SessionActionJobsError::UnknownJob`** is **`unknown_job`**.
+- **Platform notes**: Async **`wait` / `stop` / `reap`** use **`libc`** on Unix targets; non-Unix builds surface **`JobState`** errors for those entry points.
+- **Tests**: **`toolcall_jobs`** (tddy-core), **`session_action_jobs_acceptance`** (tddy-tools).
+
+### Session action pipeline (`session_action_pipeline`)
+
+- **Purpose**: Helpers for env merge (override precedence), canonical **`args`/`env`** JSON value, glob resolution relative to a base path, channel manifests (**`stdout`**, **`stderr`**, **`logs`**), optional **input mapper** and **output transform** subprocesses with JSON Schema validation on transform output, and **primary** spawn with explicit argv and capture files. Complements **`session_actions`**; see [session-actions.md](../../../docs/ft/coder/session-actions.md) (**Session action pipeline** section).
+- **Subprocess contract**: Mapper and transform children receive **`TDDY_SESSION_CHANNEL_MANIFEST_JSON`**. Mapper stdin receives caller JSON; stdout must be a single JSON object with **only** **`args`** and **`env`**. Primary and subprocess paths use **`env_clear`** then caller-supplied **`envs`** (plus the manifest variable where set).
+- **Dependencies**: **`glob`**, **`jsonschema`**, **`serde_json`**, **`log`**.
+- **Tests**: **`session_action_resolve_unit`** (tddy-core), **`session_action_pipeline_integration`** (tddy-tools).
 
 ### Schema (tddy-tools)
 

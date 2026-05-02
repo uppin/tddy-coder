@@ -1,0 +1,11 @@
+# Same shape as tddy-coder LiveKit config.
+livekit:
+  url: ws://127.0.0.1:7880
+  api_key: devkey
+  api_secret: secret
+  room: screen-share
+  identity: screen-capturer
+  # Or use a pre-generated JWT instead of api_key/api_secret:
+  # token: eyJ...
+
+fps: 30

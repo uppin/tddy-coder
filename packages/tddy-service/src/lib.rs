@@ -4,22 +4,30 @@
 //! clients send UserIntent, receive PresenterView events.
 //! Also provides EchoServiceImpl and TerminalServiceVirtualTui for LiveKit/gRPC terminal streaming.
 
+pub mod codex_oauth_scan;
+pub mod codex_oauth_validate;
 pub mod convert;
 pub mod daemon_service;
 pub mod echo_service;
+pub mod loopback_tunnel_service;
 pub mod observer_service;
 pub mod presenter_intent_service;
 pub mod service;
 pub mod terminal_service;
 pub mod token_service;
 
+pub use codex_oauth_scan::{
+    CodexOAuthDetected, CodexOAuthPending, CodexOAuthSession, CodexOAuthSessionState,
+};
 pub use convert::{client_message_to_intent, event_to_server_message};
 pub use daemon_service::DaemonService;
 pub use echo_service::{create_echo_bridge, EchoServiceImpl};
+pub use loopback_tunnel_service::LoopbackTunnelServiceImpl;
 pub use observer_service::PresenterObserverService;
 pub use presenter_intent_service::PresenterIntentService;
 pub use proto::auth::AuthServiceServer;
 pub use proto::connection::ConnectionServiceServer;
+pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
@@ -52,6 +60,9 @@ pub mod proto {
     #[allow(unused_imports, unused_variables)]
     pub mod connection {
         include!(concat!(env!("OUT_DIR"), "/connection.rs"));
+    }
+    pub mod loopback_tunnel {
+        include!(concat!(env!("OUT_DIR"), "/loopback_tunnel.rs"));
     }
 }
 

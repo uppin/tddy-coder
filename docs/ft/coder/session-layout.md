@@ -10,9 +10,23 @@ Session state for the CLI, headless daemon (`tddy-service`), and `tddy-daemon` l
 
 `changeset.yaml`, logs, workflow artifacts, and recipe-specific files under `artifacts/` sit inside that directory.
 
+## Session actions subdirectory
+
+Declarative **`tddy-tools`** action manifests reside under **`actions/`**:
+
+`{sessions_base}/sessions/{session_id}/actions/*.yaml`
+
+Each YAML file conforms to **`ActionManifest`** (see **[Session actions feature](session-actions.md)**): stable **`id`**, **`summary`**, **`architecture`**, non-empty **`command`**, optional JSON **`input_schema`**, optional **`output_schema`**, optional **`result_kind`** (for structured summaries), optional **`output_path_arg`** referencing a **`--data`** string field constrained to safe paths inside the session tree or the declared **`repo_path`**.
+
+Listing and invocation use **`--session-dir`** pointing at **`{sessions_base}/sessions/{session_id}/`**; tooling reads manifests from **`actions/`** and optional **`repo_path`** from **`changeset.yaml`** when present.
+
 ## Engine identity
 
 When a backend reports a different agent thread id than the process-bound session id, the effective id for the workflow engine follows the **process-bound** session id. Policy lives in `tddy_core::session_lifecycle::resolve_effective_session_id`.
+
+## Codex session id (`codex_thread_id`)
+
+For **`--agent codex`** and **`--agent codex-acp`**, the workflow persists the agent’s thread / session identifier in **`codex_thread_id`** under the session directory. **`codex-acp`** resume uses ACP **`load_session`** with that same stored value. Product reference: [codex-acp-backend.md](codex-acp-backend.md).
 
 ## RPC and daemon validation
 
@@ -47,5 +61,6 @@ Always use validated `session_id` strings when constructing paths. APIs reject m
 
 ## Related documentation
 
+- [Session actions (`tddy-tools`)](session-actions.md) — manifest schema, **`list-actions`**, **`invoke-action`**, sandbox rules
 - [Daemon ConnectionService](../../../packages/tddy-daemon/docs/connection-service.md) — RPCs that resolve session paths
 - [Daemon project concept](../daemon/project-concept.md) — projects and `sessions_base` context

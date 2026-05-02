@@ -1,5 +1,38 @@
 # Daemon product area changelog
 
+**Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
+
+## 2026-04-11 — Operator OAuth loopback tunnel (daemon)
+
+- **`tddy-daemon`**: **`oauth_loopback_tunnel`** — **`TcpListener`** on operator **`127.0.0.1:{callback_port}`**, **`RpcClient::start_bidi_stream`** **`loopback_tunnel.LoopbackTunnelService`/`StreamBytes`**, **`pick_daemon_oauth_target`** over common-room **`daemon-*`** metadata; **`run_oauth_tunnel_supervisor_follow_room_slot`** with **`livekit_peer_discovery`**; **`codex_oauth_participant_metadata`**. Package **[oauth-loopback-tunnel.md](../../packages/tddy-daemon/docs/oauth-loopback-tunnel.md)**; feature **[codex-oauth-relay.md](codex-oauth-relay.md)**, **[livekit-peer-discovery.md](livekit-peer-discovery.md)**. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
+## 2026-04-11 — LiveKit common-room peer discovery and cross-daemon StartSession
+
+- **`tddy-daemon`**: Module **`livekit_peer_discovery`** — JSON metadata advertisement, **`CommonRoomPeerRegistry`**, **`LiveKitEligibleDaemonSource`**, **`LiveKitDiscoveryHandles`**, background join/sync for **`livekit.common_room`**, **StartSession** forward via **`tddy_livekit::RpcClient`** to peer identity; **`local_instance_id_for_config`** shared with **ConnectionService**; **`TDDY_PROJECTS_DIR`** test hook documented on **`projects_path_for_user`**. Integration tests **`livekit_peer_daemons_acceptance`**, **`multi_host_acceptance`** (remote routing). **`tddy-livekit`**: **`RpcClient::new_shared`** (**`Arc<Room>`**).
+- **Feature doc**: [livekit-peer-discovery.md](livekit-peer-discovery.md) (includes operator / CI notes). **Web**: [web-terminal.md](../web/web-terminal.md) (eligible daemons, host ordering). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+## 2026-04-11 — Connection service: project entries with owning daemon and peer row hook
+
+- **`connection.proto`**: **`ProjectEntry.daemon_instance_id`** identifies the registry row’s owning daemon.
+- **`tddy-daemon`**: **`list_projects`** merges local disk projects with **`EligibleDaemonSource::peer_project_entries(session_token)`**; the default **`EligibleDaemonSource`** supplies an empty peer list. Integration test **`list_projects_multi_daemon_aggregation`** exercises merge and per-row **`daemon_instance_id`**. Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**; web feature doc: **[web-terminal.md](../web/web-terminal.md)** (eligible daemons / **`ListProjects`**).
+
+## 2026-04-06 — Telegram user ↔ GitHub identity (library)
+
+- **`tddy-daemon`**: Module **`telegram_github_link`** — **`TelegramOAuthStateSigner`** (HMAC-SHA256 OAuth **`state`** bound to **`telegram_user_id`**), **`TelegramGithubMappingStore`** (JSON on disk, atomic replace), **`resolved_os_user_for_telegram_workflow`**, **`complete_telegram_link_via_stub_exchange`** (**`StubGitHubProvider`**). **`TelegramSessionControlHarness::with_telegram_github_link`** optional mapping path; **`handle_start_workflow`** rejects unlinked Telegram users when that path is set (error text references **`/link-github`** / web OAuth). Dependencies: **`base64`**, **`hmac`**, **`sha2`**, **`subtle`**.
+- **Feature doc**: [telegram-session-control.md](telegram-session-control.md). Package: [telegram-github-link.md](../../packages/tddy-daemon/docs/telegram-github-link.md), [changesets.md](../../packages/tddy-daemon/docs/changesets.md).
+
+## 2026-04-06 — Telegram: concurrent elicitation (one chat, active token)
+
+- **Coordinator:** **`ActiveElicitationCoordinator`** maintains a per-chat FIFO queue of workflow sessions; the head session owns the **active elicitation token** for Telegram interactive surfaces.
+- **Outbound:** **`TelegramSessionWatcher`** registers elicitation requests on **`ModeChanged`**; sessions that are not primary for a chat receive a **deferred** text notice without a competing full **`eli:s:`** inline keyboard.
+- **Inbound:** **`telegram_bot`** applies the same **active-token** policy to **`eli:s:`**, **`eli:o:`**, and **`doc:`** callbacks; **`/answer-text`** and **`/answer-multi`** check the active session before **`PresenterIntent`** calls. **`telegram_session_control`** advances the queue after completion on select, Other follow-up, applicable document-review actions, and successful text/multi answers.
+- **Observability:** Deep per-chat queues trigger a **warning** log at a fixed depth threshold.
+- **Feature docs:** [telegram-session-control.md](telegram-session-control.md), [telegram-notifications.md](telegram-notifications.md). Package: [telegram-notifier.md](../../packages/tddy-daemon/docs/telegram-notifier.md), [changesets.md](../../packages/tddy-daemon/docs/changesets.md).
+
+## 2026-04-06 — Telegram `/start-workflow`: branch/worktree intent step
+
+- **`tddy-daemon`**: After a recipe is saved (excluding **More recipes** follow-up), the bot prompts for **branch/worktree intent** (**New branch + worktree** vs **Work on existing branch**). The choice is written to **`changeset.yaml`** under **`workflow.branch_worktree_intent`** (`new_branch_from_base` / `work_on_selected_branch`) before project selection. Inline **`callback_data`** uses compact **`intent:nb|s:<session_id>`** and **`intent:ws|s:<session_id>`** so payloads stay within Telegram’s 64-byte limit with a UUID session id.
+- **Feature doc**: [telegram-session-control.md](telegram-session-control.md). Package history: [changesets.md](../../packages/tddy-daemon/docs/changesets.md).
+
 ## 2026-04-05 — Telegram: inbound session control, PresenterIntent, elicitation UX
 
 - **Inbound control**: Daemon runs **`telegram_bot`** (teloxide long-polling) when Telegram is configured and **`sessions_base`** resolves. Commands include **`/start-workflow`**, **`/sessions`**, **`/delete`**, **`/submit-feature`**, **`/answer-text`**, **`/answer-multi`**; callbacks cover session list, recipe/project/agent picks, document review (**`doc:`**), and elicitation select (**`eli:s:`**). **`TelegramSessionControlHarness`** and integration tests exercise the library; production uses **`TeloxideSender`** with the same bot as outbound notifications.

@@ -2,13 +2,20 @@
 .nix-profile
 .nix-profile-*
 
+# Optional local grill-me / plan copies at repo root (not tracked)
+/plans/
+
 # Agent verification output (when terminal capture is broken)
 .verify-result.txt
 packages/tddy-workflow-recipes/.tdd-small-red-test-output.txt
+packages/tddy-daemon/.red-test-output.txt
 .red-markers-test-output.txt
 .green-web-dev-test-output.txt
 .red-web-dev-test-output.txt
 .red-phase-test-output.txt
+.red-phase-submit.json
+.red-phase-daemon-test-output.txt
+.red-phase-*.txt
 .tddy-red-test-output.txt
 .red-session-lifecycle-test-output.txt
 .green-submit.json
@@ -23,6 +30,8 @@ packages/tddy-workflow-recipes/.tdd-small-red-test-output.txt
 .green-submit-payload.json
 .evaluate-submit-payload.json
 .red-phase-marker-capture.txt
+.github-red-phase-test-output.txt
+.verify-result-acceptance.txt
 
 # Build artifacts
 target/
@@ -54,3 +63,6 @@ changeset.yaml
 .vscode/settings.json
 
 tmp/
+
+local.bun.lock
+.local-install/

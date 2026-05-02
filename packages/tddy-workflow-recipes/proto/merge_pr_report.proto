@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// Structured output for **merge-pr-report** (merge-pr recipe finalize step).
+message MergePrReportOutput {
+  string goal = 1;
+  string summary = 2;
+  string sync_strategy = 3;
+  string push_ref = 4;
+  string github_merge_sha = 5;
+  string skip_reason = 6;
+}

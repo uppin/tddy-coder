@@ -61,6 +61,21 @@ users:
     );
 }
 
+/// Acceptance: codex_oauth_loopback_proxy_eligible can be disabled in YAML.
+#[test]
+fn acceptance_config_codex_oauth_loopback_proxy_eligible_false() {
+    let yaml = r#"
+users:
+  - github_user: "a"
+    os_user: "b"
+codex_oauth_loopback_proxy_eligible: false
+"#;
+    let path = std::env::temp_dir().join("tddy-daemon-acceptance-oauth-proxy.yaml");
+    std::fs::write(&path, yaml).unwrap();
+    let config = DaemonConfig::load(&path).expect("config should load");
+    assert!(!config.codex_oauth_loopback_proxy_eligible);
+}
+
 /// Acceptance: spawn_mouse can be disabled in YAML.
 #[test]
 fn acceptance_config_spawn_mouse_false() {
@@ -215,6 +230,9 @@ listen:
   web_port: {}
   web_host: "127.0.0.1"
 web_bundle_path: {}
+allowed_agents:
+  - id: codex-acp
+    label: "Codex ACP"
 "#,
         port,
         web_dist.display()
@@ -241,6 +259,16 @@ web_bundle_path: {}
             if resp.status().is_success() {
                 let json: serde_json::Value = resp.json().unwrap();
                 assert_eq!(json.get("daemon_mode"), Some(&serde_json::json!(true)));
+                let agents = json
+                    .get("allowed_agents")
+                    .and_then(|v| v.as_array())
+                    .expect("allowed_agents from YAML must appear in /api/config");
+                assert!(
+                    agents
+                        .iter()
+                        .any(|a| a.get("id") == Some(&serde_json::json!("codex-acp"))),
+                    "expected codex-acp in allowed_agents, got {agents:?}"
+                );
                 return;
             }
         }

@@ -232,6 +232,8 @@ fn connect_livekit(
             &server_token,
             TerminalServiceServer::new(terminal_service),
             RoomOptions::default(),
+            None,
+            None,
         )
         .await
         {

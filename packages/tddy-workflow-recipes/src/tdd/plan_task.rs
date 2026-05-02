@@ -15,6 +15,8 @@ use crate::parser::parse_planning_response_with_base;
 use crate::tdd::planning;
 use tddy_core::session_lifecycle::resolve_effective_session_id;
 
+const MAX_PLAN_SUBMIT_ATTEMPTS: u32 = 8;
+
 /// Plan step Task: invokes backend, parses response, writes PRD.md (with TODO section).
 pub struct PlanTask {
     backend: Arc<dyn CodingBackend>,
@@ -84,82 +86,102 @@ impl Task for PlanTask {
             .goal_hints(&gid)
             .expect("plan goal must have hints");
         let submit_key = self.recipe.submit_key(&gid);
-        let request = InvokeRequest {
-            prompt,
-            system_prompt: Some(system_prompt),
-            system_prompt_path: None,
-            goal_id: gid.clone(),
-            submit_key,
-            hints,
-            model: context.get_sync("model"),
-            session,
-            working_dir: Some(output_dir.clone()),
-            debug: context.get_sync::<bool>("debug").unwrap_or(false),
-            agent_output: context.get_sync::<bool>("agent_output").unwrap_or(false),
-            agent_output_sink: tddy_core::workflow::get_agent_sink(),
-            progress_sink: tddy_core::workflow::get_progress_sink(),
-            conversation_output_path: context.get_sync("conversation_output_path"),
-            inherit_stdin: context.get_sync::<bool>("inherit_stdin").unwrap_or(false),
-            extra_allowed_tools: context.get_sync("allowed_tools"),
-            socket_path: context.get_sync("socket_path"),
-            session_dir: context.get_sync("session_dir"),
-        };
+        let base_user_prompt = prompt;
 
-        let response = self.backend.invoke(request).await.map_err(
-            |e: BackendError| -> Box<dyn std::error::Error + Send + Sync> {
-                Box::new(WorkflowError::Backend(e))
-            },
-        )?;
+        for attempt in 1..=MAX_PLAN_SUBMIT_ATTEMPTS {
+            let prompt_text = if attempt > 1 {
+                format!(
+                    "{}{}",
+                    base_user_prompt,
+                    planning::missing_submit_remediation_suffix(attempt, MAX_PLAN_SUBMIT_ATTEMPTS)
+                )
+            } else {
+                base_user_prompt.clone()
+            };
 
-        let output_to_store = self
-            .backend
-            .submit_channel()
-            .and_then(|ch| ch.take_for_goal("plan"))
-            .or_else(|| take_submit_result_for_goal("plan"));
+            let request = InvokeRequest {
+                prompt: prompt_text,
+                system_prompt: Some(system_prompt.clone()),
+                system_prompt_path: None,
+                goal_id: gid.clone(),
+                submit_key: submit_key.clone(),
+                hints: hints.clone(),
+                model: context.get_sync("model"),
+                session: session.clone(),
+                working_dir: Some(output_dir.clone()),
+                debug: context.get_sync::<bool>("debug").unwrap_or(false),
+                agent_output: context.get_sync::<bool>("agent_output").unwrap_or(false),
+                agent_output_sink: tddy_core::workflow::get_agent_sink(),
+                progress_sink: tddy_core::workflow::get_progress_sink(),
+                conversation_output_path: context.get_sync("conversation_output_path"),
+                inherit_stdin: context.get_sync::<bool>("inherit_stdin").unwrap_or(false),
+                extra_allowed_tools: context.get_sync("allowed_tools"),
+                socket_path: context.get_sync("socket_path"),
+                session_dir: context.get_sync("session_dir"),
+            };
 
-        if let Some(output) = output_to_store {
-            context.set_sync("output", output.clone());
-            let planning = parse_planning_response_with_base(&output, &session_dir).map_err(
-                |e: ParseError| {
-                    Box::new(WorkflowError::ParseError(e))
-                        as Box<dyn std::error::Error + Send + Sync>
+            let response = self.backend.invoke(request).await.map_err(
+                |e: BackendError| -> Box<dyn std::error::Error + Send + Sync> {
+                    Box::new(WorkflowError::Backend(e))
                 },
             )?;
 
-            context.set_sync("parsed_planning", planning);
-            context.set_sync("session_dir", session_dir.clone());
-            if let Some(eff) = resolve_effective_session_id(
-                bound_process_session_id.as_deref(),
-                response.session_id.as_deref(),
-            ) {
-                log::info!(
-                    "PlanTask: engine session_id set to {} (backend reported {:?})",
-                    eff,
-                    response.session_id
-                );
-                context.set_sync("session_id", eff);
+            let output_to_store = self
+                .backend
+                .submit_channel()
+                .and_then(|ch| ch.take_for_goal("plan"))
+                .or_else(|| take_submit_result_for_goal("plan"));
+
+            if let Some(output) = output_to_store {
+                context.set_sync("output", output.clone());
+                let planning = parse_planning_response_with_base(&output, &session_dir).map_err(
+                    |e: ParseError| {
+                        Box::new(WorkflowError::ParseError(e))
+                            as Box<dyn std::error::Error + Send + Sync>
+                    },
+                )?;
+
+                context.set_sync("parsed_planning", planning);
+                context.set_sync("session_dir", session_dir.clone());
+                if let Some(eff) = resolve_effective_session_id(
+                    bound_process_session_id.as_deref(),
+                    response.session_id.as_deref(),
+                ) {
+                    log::info!(
+                        "PlanTask: engine session_id set to {} (backend reported {:?})",
+                        eff,
+                        response.session_id
+                    );
+                    context.set_sync("session_id", eff);
+                }
+
+                return Ok(TaskResult {
+                    response: format!("Plan complete for {}", session_dir.display()),
+                    next_action: NextAction::Continue,
+                    task_id: "plan".to_string(),
+                    status_message: Some("Plan complete".to_string()),
+                });
             }
 
-            return Ok(TaskResult {
-                response: format!("Plan complete for {}", session_dir.display()),
-                next_action: NextAction::Continue,
-                task_id: "plan".to_string(),
-                status_message: Some("Plan complete".to_string()),
-            });
+            if !response.questions.is_empty() {
+                context.set_sync("pending_questions", response.questions.clone());
+                return Ok(TaskResult {
+                    response: response.output,
+                    next_action: NextAction::WaitForInput,
+                    task_id: "plan".to_string(),
+                    status_message: Some("Clarification needed".to_string()),
+                });
+            }
+
+            if attempt == MAX_PLAN_SUBMIT_ATTEMPTS {
+                return Err(Box::new(WorkflowError::ParseError(ParseError::Malformed(
+                    format!(
+                        "Plan step failed after {MAX_PLAN_SUBMIT_ATTEMPTS} attempts without tddy-tools submit for goal plan. Ensure tddy-tools is on PATH and the agent follows the system prompt."
+                    ),
+                ))) as Box<dyn std::error::Error + Send + Sync>);
+            }
         }
 
-        if !response.questions.is_empty() {
-            context.set_sync("pending_questions", response.questions.clone());
-            return Ok(TaskResult {
-                response: response.output,
-                next_action: NextAction::WaitForInput,
-                task_id: "plan".to_string(),
-                status_message: Some("Clarification needed".to_string()),
-            });
-        }
-
-        Err(Box::new(WorkflowError::ParseError(ParseError::Malformed(
-            "Agent finished without calling tddy-tools submit. Ensure tddy-tools is on PATH and the agent follows the system prompt.".into(),
-        ))) as Box<dyn std::error::Error + Send + Sync>)
+        unreachable!("loop exits via return")
     }
 }

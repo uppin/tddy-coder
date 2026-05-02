@@ -1,0 +1,9 @@
+# Changelog and changeset indexes are append-only at the top (newest first). The union
+# merge driver combines non-overlapping line additions so parallel branches rarely conflict.
+# See docs/dev/guides/changelog-merge-hygiene.md
+docs/dev/changesets.md merge=union
+docs/dev/changesets.d/*.md merge=union
+docs/ft/coder/changelog.md merge=union
+docs/ft/daemon/changelog.md merge=union
+docs/ft/web/changelog.md merge=union
+packages/*/docs/changesets.md merge=union

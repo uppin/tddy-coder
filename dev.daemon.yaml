@@ -1,18 +1,39 @@
 # Dev config for tddy-daemon (default for ./web-dev when DAEMON_CONFIG is unset).
 # Maps stub user "testuser" to current OS user for local dev.
+# For Tddy Desktop (Electrobun), see dev.desktop.yaml at the repo root (default when TDDY_DAEMON_CONFIG is unset).
 
 log:
   loggers:
     default:
       output: { file: "tmp/logs/daemon" }
       format: "{timestamp} [{level}] [{target}] {message}"
+    webrtc:
+      output: { file: "tmp/logs/webrtc" }
+      format: "{timestamp} [{level}] [{target}] {message}"
+    livekit_peer_metadata:
+      output: { file: "tmp/logs/daemon-livekit-peer-metadata" }
+      format: "{timestamp} [{level}] [{target}] {message}"
   default:
     level: debug
     logger: default
+  policies:
+    - selector: { target: libwebrtc* }
+      logger: webrtc
+    - selector: { target: livekit* }
+      logger: webrtc
+    - selector: { target: livekit_api* }
+      logger: webrtc
+    - selector: { target: tddy_daemon::livekit_peer_discovery::peer_metadata }
+      logger: livekit_peer_metadata
 
 listen:
   web_port: 8899
   web_host: 127.0.0.1
+
+# Unique LiveKit identity per process in `livekit.common_room` (defaults to hostname, e.g. udoo).
+# Without this, a second tddy-daemon (web-dev + desktop, old PID, remote box) causes
+# DuplicateIdentity and rapid reconnect (~7s); see tmp/logs/webrtc LeaveRequest reason.
+daemon_instance_id_append_startup_timestamp: true
 
 # Production web bundle (used when hitting the daemon port directly). For live dev + HMR use
 # ./web-dev and open the Vite port (default 5173), not this port — see docs/ft/web/local-web-dev.md.
@@ -36,6 +57,10 @@ users:
 # When true (default), pass --mouse to spawned tddy-* (browser / touch terminals).
 spawn_mouse: true
 
+# When true (default), this daemon binds Codex OAuth loopback TCP (e.g. 127.0.0.1:1455) and tunnels
+# via LiveKit. Set false if another process already owns that port. Override: TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE.
+# codex_oauth_loopback_proxy_eligible: true
+
 # Inbound session control (/sessions, /delete, /start-workflow) uses teloxide long-polling when
 # enabled: true, bot_token is valid, and chat_ids match your Telegram chat. Sessions are read from
 # ~/.tddy/sessions/ for USER (see web-dev substitution for users.os_user).
@@ -46,6 +71,10 @@ telegram:
     - -5239346661
 
 # Backends shown in tddy-web (ConnectionScreen); ids are passed to StartSession / `tddy-coder --agent`.
+# For `codex-acp`: after `./dev bun install`, the nix dev shell prepends `node_modules/.bin` (Node shim).
+# Production: `sudo ./install --systemd` copies the native binary to INSTALL_BIN_DIR/codex-acp; spawned
+# users need that dir on PATH or `spawn_path_extra` in `~/.tddy/config.yaml`.
+# Overrides: `TDDY_CODEX_ACP_CLI`, `--codex-acp-cli-path`, or YAML from `-c` / `sessions/<id>/coder-config.yaml`.
 allowed_agents:
   - id: claude
     label: "Claude (opus)"
@@ -55,6 +84,10 @@ allowed_agents:
     label: "Cursor (composer-2)"
   - id: stub
     label: "Stub"
+  - id: codex
+    label: "Codex"
+  - id: codex-acp
+    label: "Codex ACP"
 
 allowed_tools:
   - path: "target/debug/tddy-coder"

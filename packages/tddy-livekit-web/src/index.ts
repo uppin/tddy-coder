@@ -7,3 +7,8 @@ export {
   TerminalService,
 } from "./gen/terminal_pb.js";
 export type { TerminalInput, TerminalOutput } from "./gen/terminal_pb.js";
+export {
+  LoopbackTunnelService,
+  TunnelChunkSchema,
+} from "./gen/loopback_tunnel_pb.js";
+export type { TunnelChunk } from "./gen/loopback_tunnel_pb.js";

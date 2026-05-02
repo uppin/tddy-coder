@@ -1,18 +1,31 @@
 //! Integration acceptance tests: Telegram inbound control plane → session + changeset + presenter inputs.
 //! Integration tests for [`tddy_daemon::telegram_session_control`] (harness + sender recording).
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
+use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent, Changeset};
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_core::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF;
+use tddy_daemon::config::{AllowedAgent, DaemonConfig};
+use tddy_daemon::project_storage::{self, ProjectData};
 use tddy_daemon::telegram_notifier::InMemoryTelegramSender;
 use tddy_daemon::telegram_session_control::{
     collect_outbound_messages, map_elicitation_callback_to_presenter_input,
     read_changeset_routing_snapshot, StartWorkflowCommand, TelegramCallback,
-    TelegramSessionControlHarness, WorkflowTransitionKind, SESSIONS_PAGE_SIZE,
+    TelegramSessionControlHarness, TelegramWorkflowSpawn, WorkflowTransitionKind,
+    SESSIONS_PAGE_SIZE,
 };
 
 const AUTHORIZED_CHAT: i64 = 424_242;
 const UNAUTHORIZED_CHAT: i64 = 999_001;
+
+/// True only for the branch-list **More…** pagination row (`tbm:`), not `origin/feature/more-*` labels.
+fn branch_keyboard_has_more_pagination_row(kb: &[Vec<(String, String)>]) -> bool {
+    kb.iter()
+        .flatten()
+        .any(|(l, d)| d.starts_with("tbm:") || l == "More…")
+}
 
 fn harness_with_sender(
     allowed: Vec<i64>,
@@ -23,6 +36,35 @@ fn harness_with_sender(
 ) {
     let sender = Arc::new(InMemoryTelegramSender::new());
     let h = TelegramSessionControlHarness::new(allowed, sessions_base, sender.clone());
+    (h, sender)
+}
+
+fn harness_with_workflow_projects(
+    allowed: Vec<i64>,
+    sessions_base: std::path::PathBuf,
+    projects_dir: std::path::PathBuf,
+) -> (
+    TelegramSessionControlHarness<InMemoryTelegramSender>,
+    Arc<InMemoryTelegramSender>,
+) {
+    let sender = Arc::new(InMemoryTelegramSender::new());
+    let workflow_spawn = Arc::new(TelegramWorkflowSpawn {
+        config: Arc::new(DaemonConfig::default()),
+        spawn_client: None,
+        os_user: "n/a".to_string(),
+        projects_dir_override: Some(projects_dir),
+        telegram_hooks: None,
+        child_grpc_by_session: Arc::new(Mutex::new(HashMap::new())),
+        elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
+        pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
+    });
+    let h = TelegramSessionControlHarness::with_workflow_spawn(
+        allowed,
+        sessions_base,
+        sender.clone(),
+        Some(workflow_spawn),
+        None,
+    );
     (h, sender)
 }
 
@@ -599,6 +641,262 @@ async fn telegram_delete_session_unauthorized_is_denied() {
 }
 
 // -------------------------------------------------------------------------
+// Branch/worktree intent (Telegram /start-workflow)
+// -------------------------------------------------------------------------
+
+/// After recipe selection, intent keyboard exposes both intent callbacks.
+#[tokio::test]
+async fn telegram_intent_pick_shown_after_recipe() {
+    let tmp = tempfile::tempdir().unwrap();
+    let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
+    let session_dir = unified_session_dir_path(tmp.path(), session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let mut cs = Changeset::default();
+    cs.recipe = Some("tdd".to_string());
+    write_changeset(&session_dir, &cs).expect("write changeset");
+
+    let (mut harness, sender) =
+        harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
+    let cb = TelegramCallback {
+        chat_id: AUTHORIZED_CHAT,
+        user_id: 77,
+        callback_data: format!("recipe:tdd|session:{session_id}"),
+    };
+    harness
+        .handle_recipe_callback(&session_dir, cb)
+        .await
+        .expect("recipe callback");
+    harness
+        .send_intent_pick_keyboard(AUTHORIZED_CHAT, session_id)
+        .await
+        .expect("intent keyboard");
+
+    let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
+    let intent_msg = sent
+        .iter()
+        .find(|m| m.text.contains("branch/worktree intent"))
+        .expect("intent prompt message");
+    let callbacks: Vec<&str> = intent_msg
+        .inline_keyboard
+        .iter()
+        .flatten()
+        .map(|(_, d)| d.as_str())
+        .collect();
+    let nb = format!("intent:nb|s:{session_id}");
+    let ws = format!("intent:ws|s:{session_id}");
+    assert!(
+        callbacks.iter().any(|d| *d == nb.as_str()),
+        "expected nb intent callback; got {callbacks:?}"
+    );
+    assert!(
+        callbacks.iter().any(|d| *d == ws.as_str()),
+        "expected ws intent callback; got {callbacks:?}"
+    );
+}
+
+#[tokio::test]
+async fn telegram_intent_persists_to_changeset() {
+    let tmp = tempfile::tempdir().unwrap();
+    let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
+    let session_dir = unified_session_dir_path(tmp.path(), session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let mut cs = Changeset::default();
+    cs.recipe = Some("tdd".to_string());
+    write_changeset(&session_dir, &cs).expect("write changeset");
+
+    let (harness, _sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
+    harness
+        .handle_telegram_intent_callback(
+            AUTHORIZED_CHAT,
+            BranchWorktreeIntent::NewBranchFromBase,
+            session_id,
+        )
+        .await
+        .expect("intent callback");
+
+    let snap = read_changeset_routing_snapshot(&session_dir).expect("read changeset.yaml");
+    assert_eq!(
+        snap.workflow
+            .as_ref()
+            .and_then(|w| w.branch_worktree_intent),
+        Some(BranchWorktreeIntent::NewBranchFromBase)
+    );
+}
+
+#[tokio::test]
+async fn telegram_intent_then_project_pick_continues_flow() {
+    let tmp = tempfile::tempdir().unwrap();
+    let projects_dir = tmp.path().join("proj-registry");
+    std::fs::create_dir_all(&projects_dir).unwrap();
+    let repo_path = tmp.path().join("fake-repo");
+    std::fs::create_dir_all(&repo_path).unwrap();
+    project_storage::write_projects(
+        &projects_dir,
+        &[ProjectData {
+            project_id: "proj-a".to_string(),
+            name: "Project A".to_string(),
+            git_url: "https://example.invalid/a.git".to_string(),
+            main_repo_path: repo_path.to_string_lossy().to_string(),
+            main_branch_ref: None,
+            host_repo_paths: HashMap::new(),
+        }],
+    )
+    .expect("write projects");
+
+    let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
+    let session_dir = unified_session_dir_path(tmp.path(), session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let mut cs = Changeset::default();
+    cs.recipe = Some("tdd".to_string());
+    write_changeset(&session_dir, &cs).expect("write changeset");
+
+    let (harness, sender) = harness_with_workflow_projects(
+        vec![AUTHORIZED_CHAT],
+        tmp.path().to_path_buf(),
+        projects_dir,
+    );
+    harness
+        .handle_telegram_intent_callback(
+            AUTHORIZED_CHAT,
+            BranchWorktreeIntent::WorkOnSelectedBranch,
+            session_id,
+        )
+        .await
+        .expect("intent callback");
+
+    let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
+    let proj_msg = sent
+        .iter()
+        .find(|m| m.text.contains("Choose a project"))
+        .expect("project pick message");
+    let tp = format!("tp:0|s:{session_id}");
+    assert!(
+        proj_msg
+            .inline_keyboard
+            .iter()
+            .flatten()
+            .any(|(_, d)| d == &tp),
+        "expected project callback {tp}; keyboards={:?}",
+        proj_msg.inline_keyboard
+    );
+}
+
+/// Branch selection lists at most 10 remotes per page; more than 10 requires a **More…** row (`tbm:`).
+#[tokio::test]
+async fn telegram_branch_pick_shows_more_when_more_than_ten_remote_branches() {
+    let tmp = tempfile::tempdir().unwrap();
+    let projects_dir = tmp.path().join("proj-registry");
+    std::fs::create_dir_all(&projects_dir).unwrap();
+    let clone = init_repo_with_n_origin_branches(tmp.path(), 11);
+    project_storage::write_projects(
+        &projects_dir,
+        &[ProjectData {
+            project_id: "proj-a".to_string(),
+            name: "Project A".to_string(),
+            git_url: "https://example.invalid/a.git".to_string(),
+            main_repo_path: clone.to_string_lossy().to_string(),
+            main_branch_ref: None,
+            host_repo_paths: HashMap::new(),
+        }],
+    )
+    .expect("write projects");
+
+    let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
+    let session_dir = unified_session_dir_path(tmp.path(), session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let mut cs = Changeset::default();
+    cs.recipe = Some("tdd".to_string());
+    write_changeset(&session_dir, &cs).expect("write changeset");
+
+    let (harness, sender) = harness_with_workflow_projects(
+        vec![AUTHORIZED_CHAT],
+        tmp.path().to_path_buf(),
+        projects_dir,
+    );
+    harness
+        .handle_telegram_intent_callback(
+            AUTHORIZED_CHAT,
+            BranchWorktreeIntent::NewBranchFromBase,
+            session_id,
+        )
+        .await
+        .expect("intent callback");
+    harness
+        .handle_telegram_project_callback(AUTHORIZED_CHAT, 0, session_id)
+        .await
+        .expect("project callback");
+
+    let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
+    let branch_msg = sent
+        .iter()
+        .find(|m| m.text.contains("Choose integration base"))
+        .expect("branch pick message");
+    let has_more = branch_keyboard_has_more_pagination_row(&branch_msg.inline_keyboard);
+    assert!(
+        has_more,
+        "must show More… when >10 origin branches; keyboards={:?}",
+        branch_msg.inline_keyboard
+    );
+}
+
+#[tokio::test]
+async fn telegram_branch_pick_no_more_when_at_most_ten_remote_branches() {
+    let tmp = tempfile::tempdir().unwrap();
+    let projects_dir = tmp.path().join("proj-registry");
+    std::fs::create_dir_all(&projects_dir).unwrap();
+    let clone = init_repo_with_n_origin_branches(tmp.path(), 10);
+    project_storage::write_projects(
+        &projects_dir,
+        &[ProjectData {
+            project_id: "proj-a".to_string(),
+            name: "Project A".to_string(),
+            git_url: "https://example.invalid/a.git".to_string(),
+            main_repo_path: clone.to_string_lossy().to_string(),
+            main_branch_ref: None,
+            host_repo_paths: HashMap::new(),
+        }],
+    )
+    .expect("write projects");
+
+    let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab3";
+    let session_dir = unified_session_dir_path(tmp.path(), session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let mut cs = Changeset::default();
+    cs.recipe = Some("tdd".to_string());
+    write_changeset(&session_dir, &cs).expect("write changeset");
+
+    let (harness, sender) = harness_with_workflow_projects(
+        vec![AUTHORIZED_CHAT],
+        tmp.path().to_path_buf(),
+        projects_dir,
+    );
+    harness
+        .handle_telegram_intent_callback(
+            AUTHORIZED_CHAT,
+            BranchWorktreeIntent::NewBranchFromBase,
+            session_id,
+        )
+        .await
+        .expect("intent callback");
+    harness
+        .handle_telegram_project_callback(AUTHORIZED_CHAT, 0, session_id)
+        .await
+        .expect("project callback");
+
+    let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
+    let branch_msg = sent
+        .iter()
+        .find(|m| m.text.contains("Choose integration base"))
+        .expect("branch pick message");
+    let has_more = branch_keyboard_has_more_pagination_row(&branch_msg.inline_keyboard);
+    assert!(
+        !has_more,
+        "no More… when at most 10 origin branches; keyboards={:?}",
+        branch_msg.inline_keyboard
+    );
+}
+
+// -------------------------------------------------------------------------
 // Enter workflow — connect to existing session
 // -------------------------------------------------------------------------
 
@@ -662,5 +960,262 @@ async fn telegram_enter_session_unauthorized_is_denied() {
     assert!(
         result.is_err(),
         "unauthorized chat must be denied entering a session"
+    );
+}
+
+// -------------------------------------------------------------------------
+// Branch callback — work_on_selected_branch must set selected_branch_to_work_on
+// -------------------------------------------------------------------------
+
+/// Bare remote + clone with `master` and `n - 1` `feature/more-*` branches (total `n` `origin/*` refs).
+fn init_repo_with_n_origin_branches(root: &std::path::Path, n: usize) -> std::path::PathBuf {
+    assert!(n >= 1);
+    let bare = root.join("origin-many.git");
+    let clone = root.join("work-many");
+    git(&["init", "--bare", bare.to_str().unwrap()], root);
+    git(&["clone", bare.to_str().unwrap(), "work-many"], root);
+    std::fs::write(clone.join("README.md"), "# init\n").unwrap();
+    git(&["config", "user.email", "test@test.com"], &clone);
+    git(&["config", "user.name", "test"], &clone);
+    git(&["add", "README.md"], &clone);
+    git(&["commit", "-m", "init"], &clone);
+    git(&["branch", "-M", "master"], &clone);
+    git(&["push", "-u", "origin", "master"], &clone);
+    for i in 0..n.saturating_sub(1) {
+        let name = format!("feature/more-{i}");
+        git(&["checkout", "-b", &name], &clone);
+        std::fs::write(clone.join("README.md"), format!("# {i}\n")).unwrap();
+        git(&["add", "README.md"], &clone);
+        git(&["commit", "-m", &format!("more {i}")], &clone);
+        git(&["push", "-u", "origin", &name], &clone);
+    }
+    git(&["checkout", "master"], &clone);
+    clone
+}
+
+fn git(args: &[&str], cwd: &std::path::Path) -> std::process::Output {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap_or_else(|e| panic!("run git {:?} in {}: {e}", args, cwd.display()));
+    assert!(
+        out.status.success(),
+        "git {:?} failed in {}:\nstdout={}\nstderr={}",
+        args,
+        cwd.display(),
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out
+}
+
+fn init_repo_with_remote_branch(root: &std::path::Path) -> std::path::PathBuf {
+    let bare = root.join("origin.git");
+    let clone = root.join("work");
+
+    git(&["init", "--bare", bare.to_str().unwrap()], root);
+    git(&["clone", bare.to_str().unwrap(), "work"], root);
+    std::fs::write(clone.join("README.md"), "# init\n").unwrap();
+    git(&["config", "user.email", "test@test.com"], &clone);
+    git(&["config", "user.name", "test"], &clone);
+    git(&["add", "README.md"], &clone);
+    git(&["commit", "-m", "init"], &clone);
+    git(&["branch", "-M", "master"], &clone);
+    git(&["push", "-u", "origin", "master"], &clone);
+
+    git(&["checkout", "-b", "feature/test-branch"], &clone);
+    std::fs::write(clone.join("README.md"), "# feature\n").unwrap();
+    git(&["add", "README.md"], &clone);
+    git(&["commit", "-m", "feature work"], &clone);
+    git(&["push", "-u", "origin", "feature/test-branch"], &clone);
+
+    git(&["checkout", "master"], &clone);
+
+    clone
+}
+
+fn harness_with_workflow_projects_and_agents(
+    allowed: Vec<i64>,
+    sessions_base: std::path::PathBuf,
+    projects_dir: std::path::PathBuf,
+    agents: Vec<AllowedAgent>,
+) -> (
+    TelegramSessionControlHarness<InMemoryTelegramSender>,
+    Arc<InMemoryTelegramSender>,
+) {
+    let sender = Arc::new(InMemoryTelegramSender::new());
+    let mut config = DaemonConfig::default();
+    config.allowed_agents = agents;
+    let workflow_spawn = Arc::new(TelegramWorkflowSpawn {
+        config: Arc::new(config),
+        spawn_client: None,
+        os_user: "n/a".to_string(),
+        projects_dir_override: Some(projects_dir),
+        telegram_hooks: None,
+        child_grpc_by_session: Arc::new(Mutex::new(HashMap::new())),
+        elicitation_select_options: Arc::new(Mutex::new(HashMap::new())),
+        pending_elicitation_other: Arc::new(Mutex::new(HashMap::new())),
+    });
+    let h = TelegramSessionControlHarness::with_workflow_spawn(
+        allowed,
+        sessions_base,
+        sender.clone(),
+        Some(workflow_spawn),
+        None,
+    );
+    (h, sender)
+}
+
+#[tokio::test]
+async fn telegram_branch_callback_work_on_selected_sets_selected_branch_to_work_on() {
+    let tmp = tempfile::tempdir().unwrap();
+    let sessions_base = tmp.path().join("sessions");
+    std::fs::create_dir_all(&sessions_base).unwrap();
+
+    let clone = init_repo_with_remote_branch(tmp.path());
+
+    let projects_dir = tmp.path().join("proj-registry");
+    std::fs::create_dir_all(&projects_dir).unwrap();
+    project_storage::write_projects(
+        &projects_dir,
+        &[ProjectData {
+            project_id: "proj-a".to_string(),
+            name: "Project A".to_string(),
+            git_url: "https://example.invalid/a.git".to_string(),
+            main_repo_path: clone.to_string_lossy().to_string(),
+            main_branch_ref: None,
+            host_repo_paths: HashMap::new(),
+        }],
+    )
+    .expect("write projects");
+
+    let session_id = "019d6392-3cff-0001-aaaa-000000000001";
+    let session_dir = unified_session_dir_path(&sessions_base, session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+
+    let mut cs = Changeset::default();
+    cs.recipe = Some("merge-pr".to_string());
+    write_changeset(&session_dir, &cs).expect("write changeset");
+
+    let dummy_agent = AllowedAgent {
+        id: "claude".to_string(),
+        label: Some("Claude".to_string()),
+    };
+    let (harness, _sender) = harness_with_workflow_projects_and_agents(
+        vec![AUTHORIZED_CHAT],
+        sessions_base,
+        projects_dir,
+        vec![dummy_agent],
+    );
+
+    harness
+        .handle_telegram_intent_callback(
+            AUTHORIZED_CHAT,
+            BranchWorktreeIntent::WorkOnSelectedBranch,
+            session_id,
+        )
+        .await
+        .expect("intent callback");
+
+    // branch_idx=1 selects the first remote branch (origin/feature/test-branch);
+    // the agent picker keyboard is shown instead of spawning (one allowed agent configured).
+    harness
+        .handle_telegram_branch_callback(AUTHORIZED_CHAT, 1, 0, 0, session_id)
+        .await
+        .expect("branch callback");
+
+    let cs = read_changeset(&session_dir).expect("read changeset after branch callback");
+
+    assert!(
+        cs.workflow
+            .as_ref()
+            .and_then(|w| w.selected_branch_to_work_on.as_deref())
+            .is_some(),
+        "when intent is work_on_selected_branch, handle_telegram_branch_callback must set \
+         workflow.selected_branch_to_work_on; changeset: worktree_integration_base_ref={:?}, \
+         workflow={:?}",
+        cs.worktree_integration_base_ref,
+        cs.workflow
+    );
+
+    let selected = cs
+        .workflow
+        .as_ref()
+        .and_then(|w| w.selected_branch_to_work_on.as_deref())
+        .unwrap();
+    assert!(
+        selected.contains("feature/test-branch"),
+        "selected_branch_to_work_on should contain the branch name; got {:?}",
+        selected
+    );
+}
+
+#[tokio::test]
+async fn telegram_branch_callback_new_branch_from_base_sets_selected_integration_base_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    let sessions_base = tmp.path().join("sessions");
+    std::fs::create_dir_all(&sessions_base).unwrap();
+
+    let clone = init_repo_with_remote_branch(tmp.path());
+
+    let projects_dir = tmp.path().join("proj-registry");
+    std::fs::create_dir_all(&projects_dir).unwrap();
+    project_storage::write_projects(
+        &projects_dir,
+        &[ProjectData {
+            project_id: "proj-a".to_string(),
+            name: "Project A".to_string(),
+            git_url: "https://example.invalid/a.git".to_string(),
+            main_repo_path: clone.to_string_lossy().to_string(),
+            main_branch_ref: None,
+            host_repo_paths: HashMap::new(),
+        }],
+    )
+    .expect("write projects");
+
+    let session_id = "a9f84aa1-8d9b-4c2e-9f00-000000000001";
+    let session_dir = unified_session_dir_path(&sessions_base, session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+
+    let mut cs = Changeset::default();
+    cs.recipe = Some("tdd".to_string());
+    write_changeset(&session_dir, &cs).expect("write changeset");
+
+    let dummy_agent = AllowedAgent {
+        id: "claude".to_string(),
+        label: Some("Claude".to_string()),
+    };
+    let (harness, _sender) = harness_with_workflow_projects_and_agents(
+        vec![AUTHORIZED_CHAT],
+        sessions_base,
+        projects_dir,
+        vec![dummy_agent],
+    );
+
+    harness
+        .handle_telegram_intent_callback(
+            AUTHORIZED_CHAT,
+            BranchWorktreeIntent::NewBranchFromBase,
+            session_id,
+        )
+        .await
+        .expect("intent callback");
+
+    harness
+        .handle_telegram_branch_callback(AUTHORIZED_CHAT, 0, 0, 0, session_id)
+        .await
+        .expect("branch callback default integration base");
+
+    let cs = read_changeset(&session_dir).expect("read changeset after branch callback");
+    let wf = cs.workflow.as_ref().expect("workflow block");
+    assert_eq!(
+        wf.selected_integration_base_ref.as_deref(),
+        Some(DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF),
+        "default branch row must persist project integration base ref"
+    );
+    assert!(
+        wf.new_branch_name.is_none(),
+        "new_branch_name comes from the LLM (plan or bugfix analyze submit), not Telegram"
     );
 }

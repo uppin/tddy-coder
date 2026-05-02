@@ -14,12 +14,15 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 livekit = "0.7"
 livekit-api = "0.4"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net", "fs", "time"] }
 tokio-stream = "0.1"
 async-trait = "0.1"
 dashmap = "5"
 log = { version = "0.4", features = ["std"] }
 anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
 
 [build-dependencies]
 prost-build = "0.13"
@@ -34,3 +37,6 @@ futures-util = "0.3"
 async-trait = "0.1"
 env_logger = "0.11"
 serial_test = "3"
+tempfile = "3"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"

@@ -18,6 +18,8 @@ use tddy_tui::run_virtual_tui;
 
 use crate::proto::terminal::{TerminalInput, TerminalOutput, TerminalService};
 
+type OutputChunkHook = Arc<dyn Fn(&[u8]) + Send + Sync>;
+
 /// A running VirtualTui session: send keyboard bytes via `input_tx`,
 /// receive ANSI output bytes via `output_rx`, signal `shutdown` to stop.
 pub struct VirtualTuiSession {
@@ -53,6 +55,8 @@ pub fn start_virtual_tui_session(
 pub struct TerminalServiceVirtualTui {
     factory: Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>,
     mouse: bool,
+    /// Optional hook for each outbound terminal chunk (e.g. Codex OAuth scan).
+    output_hook: Option<OutputChunkHook>,
 }
 
 impl TerminalServiceVirtualTui {
@@ -60,7 +64,23 @@ impl TerminalServiceVirtualTui {
         factory: Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>,
         mouse: bool,
     ) -> Self {
-        Self { factory, mouse }
+        Self {
+            factory,
+            mouse,
+            output_hook: None,
+        }
+    }
+
+    pub fn with_output_hook(
+        factory: Arc<dyn Fn() -> Option<ViewConnection> + Send + Sync>,
+        mouse: bool,
+        hook: OutputChunkHook,
+    ) -> Self {
+        Self {
+            factory,
+            mouse,
+            output_hook: Some(hook),
+        }
     }
 }
 
@@ -128,10 +148,14 @@ impl TerminalService for TerminalServiceVirtualTui {
         });
 
         let (tx, rx) = mpsc::channel(64);
+        let hook = self.output_hook.clone();
         tokio::spawn(async move {
             let mut output_count: u64 = 0;
             while let Some(bytes) = output_rx.recv().await {
                 output_count += 1;
+                if let Some(ref h) = hook {
+                    h(&bytes);
+                }
                 if tx.send(Ok(TerminalOutput { data: bytes })).await.is_err() {
                     log::debug!(
                         "[BIDI_TRACE] terminal_service: output consumer gone after {} chunks",
@@ -205,9 +229,13 @@ impl crate::tonic_terminal::terminal_service_server::TerminalService for Termina
             shutdown.store(true, Ordering::Relaxed);
         });
 
+        let hook = self.output_hook.clone();
         let (tx, rx) = mpsc::channel(64);
         tokio::spawn(async move {
             while let Some(bytes) = output_rx.recv().await {
+                if let Some(ref h) = hook {
+                    h(&bytes);
+                }
                 if tx.send(Ok(TerminalOutput { data: bytes })).await.is_err() {
                     break;
                 }

@@ -10,7 +10,7 @@ The Implementation Step is the TDD Red-Green phase of the tddy-coder workflow. T
 
 ## Background
 
-tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → green. The red and green goals form the implementation phase. Red creates skeletons and failing tests; green implements production code to make them pass. Both use the same agent session (red starts it, green resumes it) for context continuity. Backend is selected via `--agent` (`claude`, `claude-acp`, `cursor`, `codex`, or `stub`).
+tddy-coder follows a strict TDD workflow: plan → acceptance-tests → red → green. The red and green goals form the implementation phase. Red creates skeletons and failing tests; green implements production code to make them pass. Both use the same agent session (red starts it, green resumes it) for context continuity. Backend is selected via `--agent` (`claude`, `claude-acp`, `cursor`, `codex`, `codex-acp`, or `stub`).
 
 ## Requirements
 

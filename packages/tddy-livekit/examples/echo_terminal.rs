@@ -105,6 +105,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &token,
         TerminalServiceServer::new(EchoTerminalService),
         RoomOptions::default(),
+        None,
+        None,
     )
     .await
     .map_err(|e| format!("Connect failed: {}", e))?;

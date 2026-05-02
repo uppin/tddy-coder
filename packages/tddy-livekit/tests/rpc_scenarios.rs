@@ -2,6 +2,7 @@
 //!
 //! All scenarios run inside a **single** test function that owns the Docker
 //! container.  This guarantees cleanup via `Drop` when the test ends.
+//! Includes **loopback tunnel** (`LoopbackTunnelService.StreamBytes` → session-host TCP).
 //!
 //! Run with: cargo test -p tddy-livekit --test rpc_scenarios
 //! Debug:    RUST_LOG=debug cargo test -p tddy-livekit --test rpc_scenarios -- --nocapture
@@ -15,11 +16,16 @@ use serial_test::serial;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tddy_livekit::{LiveKitParticipant, RpcClient, TokenGenerator};
+use tddy_livekit::{LiveKitParticipant, RpcClient, TokenGenerator, DEFAULT_LIVEKIT_JWT_TTL_SECS};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Code;
+use tddy_service::proto::loopback_tunnel::TunnelChunk;
 use tddy_service::proto::test::{EchoRequest, EchoResponse, EchoService};
-use tddy_service::{EchoServiceImpl, EchoServiceServer};
+use tddy_service::{
+    EchoServiceImpl, EchoServiceServer, LoopbackTunnelServiceImpl, LoopbackTunnelServiceServer,
+};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -164,6 +170,8 @@ impl CountingHarness {
             &server_token,
             EchoServiceServer::new(service),
             RoomOptions::default(),
+            None,
+            None,
         )
         .await?;
         let server_handle = tokio::spawn(async move { server.run().await });
@@ -209,6 +217,8 @@ impl TestHarness {
             &server_token,
             EchoServiceServer::new(EchoServiceImpl),
             RoomOptions::default(),
+            None,
+            None,
         )
         .await?;
         let server_handle = tokio::spawn(async move { server.run().await });
@@ -240,6 +250,76 @@ impl TestHarness {
     }
 }
 
+/// `LoopbackTunnelService` dials `127.0.0.1:{port}` on the host running the server participant.
+struct LoopbackTunnelHarness {
+    rpc_client: RpcClient,
+    server_handle: tokio::task::JoinHandle<()>,
+    echo_task: tokio::task::JoinHandle<()>,
+    loopback_port: u16,
+}
+
+impl LoopbackTunnelHarness {
+    async fn start(livekit: &LiveKitTestkit, room_name: &str) -> Result<Self> {
+        let url = livekit.get_ws_url();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let loopback_port = listener.local_addr()?.port();
+        anyhow::ensure!(
+            loopback_port >= 1024,
+            "loopback tunnel test expects non-privileged ephemeral port"
+        );
+
+        let echo_task = tokio::spawn(async move {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 64];
+            let Ok(n) = stream.read(&mut buf).await else {
+                return;
+            };
+            if n > 0 && &buf[..n] == b"ping" {
+                let _ = stream.write_all(b"pong").await;
+            }
+        });
+
+        let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
+        let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
+
+        let server = LiveKitParticipant::connect(
+            &url,
+            &server_token,
+            LoopbackTunnelServiceServer::new(LoopbackTunnelServiceImpl),
+            RoomOptions::default(),
+            None,
+            None,
+        )
+        .await?;
+        let server_handle = tokio::spawn(async move { server.run().await });
+
+        let (client_room, mut client_events) =
+            Room::connect(&url, &client_token, RoomOptions::default())
+                .await
+                .map_err(|e| anyhow::anyhow!("loopback tunnel client connect: {}", e))?;
+
+        wait_for_participant(&client_room, &mut client_events, SERVER_IDENTITY).await?;
+
+        let rpc_events = client_room.subscribe();
+        let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
+
+        Ok(Self {
+            rpc_client,
+            server_handle,
+            echo_task,
+            loopback_port,
+        })
+    }
+
+    fn teardown(self) {
+        self.server_handle.abort();
+        self.echo_task.abort();
+    }
+}
+
 /// Harness with server + 2 clients. Client2 counts RPC DataReceived to verify it does not receive responses meant for client1.
 struct ThreeParticipantHarness {
     client1_rpc: RpcClient,
@@ -260,6 +340,8 @@ impl ThreeParticipantHarness {
             &server_token,
             EchoServiceServer::new(EchoServiceImpl),
             RoomOptions::default(),
+            None,
+            None,
         )
         .await?;
         let server_handle = tokio::spawn(async move { server.run().await });
@@ -880,6 +962,65 @@ async fn rpc_scenarios() -> Result<()> {
     }
 
     // -----------------------------------------------------------------------
+    // Loopback tunnel: bidi StreamBytes dials session-host TCP (Codex OAuth path)
+    // -----------------------------------------------------------------------
+    {
+        let harness = LoopbackTunnelHarness::start(&livekit, "loopback-tunnel-scenarios").await?;
+
+        log::debug!("scenario: loopback tunnel ping/pong over LiveKit bidi RPC");
+        let first = TunnelChunk {
+            open_port: harness.loopback_port as u32,
+            data: vec![],
+        };
+        let second = TunnelChunk {
+            open_port: 0,
+            data: b"ping".to_vec(),
+        };
+
+        let mut rx = match harness
+            .rpc_client
+            .call_bidi_stream(
+                "loopback_tunnel.LoopbackTunnelService",
+                "StreamBytes",
+                vec![first.encode_to_vec(), second.encode_to_vec()],
+            )
+            .await
+        {
+            Ok(rx) => rx,
+            Err(e) => {
+                harness.teardown();
+                return Err(anyhow::anyhow!("loopback tunnel bidi: {}", e));
+            }
+        };
+
+        let mut acc = Vec::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while acc.len() < 4 && std::time::Instant::now() < deadline {
+            let next = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await;
+            match next {
+                Ok(Some(Ok(bytes))) => {
+                    let chunk = TunnelChunk::decode(&bytes[..])?;
+                    acc.extend_from_slice(&chunk.data);
+                }
+                Ok(Some(Err(e))) => {
+                    harness.teardown();
+                    return Err(anyhow::anyhow!("loopback tunnel chunk error: {}", e));
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    harness.teardown();
+                    return Err(anyhow::anyhow!(
+                        "timeout waiting for loopback tunnel response"
+                    ));
+                }
+            }
+        }
+
+        assert_eq!(acc.as_slice(), b"pong");
+        harness.teardown();
+    }
+
+    // -----------------------------------------------------------------------
     // Duplicate identity: second client with same identity disconnects first
     // -----------------------------------------------------------------------
     //
@@ -896,6 +1037,8 @@ async fn rpc_scenarios() -> Result<()> {
             &server_token,
             EchoServiceServer::new(EchoServiceImpl),
             RoomOptions::default(),
+            None,
+            None,
         )
         .await?;
         let server_handle = tokio::spawn(async move { server.run().await });
@@ -940,17 +1083,11 @@ async fn rpc_scenarios() -> Result<()> {
     Ok(())
 }
 
-/// Bidi stream must survive server-side token refresh (run_with_reconnect).
-///
-/// Reproduces: terminal freezes after 10-40s because `run_with_reconnect` drops
-/// the entire `LiveKitParticipant` (and all active bidi sessions) on token refresh,
-/// then creates a fresh participant with empty `active_bidi_sessions`.
-///
-/// The client's in-flight bidi stream is orphaned — the server no longer recognises
-/// its continuation messages (sent without `call_metadata`), so terminal I/O stops.
+/// Bidi stream stays usable across a delay with `run_with_reconnect` (single room connection,
+/// no application timer reconnect).
 #[tokio::test]
 #[serial]
-async fn bidi_stream_survives_token_refresh() -> Result<()> {
+async fn bidi_stream_survives_delay_without_app_reconnect() -> Result<()> {
     let inner = env_logger::Builder::new()
         .parse_default_env()
         .is_test(true)
@@ -967,14 +1104,12 @@ async fn bidi_stream_survives_token_refresh() -> Result<()> {
     let handler_count = Arc::new(AtomicUsize::new(0));
     let handler_count_clone = handler_count.clone();
 
-    // TTL=70s → time_until_refresh = 10s. Enough time for setup + first echo,
-    // then the refresh fires and kills the bidi stream.
     let token_gen = TokenGenerator::new(
         "devkey".to_string(),
         "secret".to_string(),
         room_name.to_string(),
         SERVER_IDENTITY.to_string(),
-        Duration::from_secs(70),
+        Duration::from_secs(DEFAULT_LIVEKIT_JWT_TTL_SECS),
     );
 
     let service = CountingEchoService {
@@ -990,6 +1125,8 @@ async fn bidi_stream_survives_token_refresh() -> Result<()> {
             EchoServiceServer::new(service),
             RoomOptions::default(),
             shutdown_clone,
+            None,
+            None,
         )
         .await;
     });
@@ -1010,17 +1147,16 @@ async fn bidi_stream_survives_token_refresh() -> Result<()> {
         .start_bidi_stream("test.EchoService", "EchoBidiStream")
         .map_err(|e| anyhow::anyhow!("start bidi stream: {}", e))?;
 
-    // --- Before token refresh: send first message and receive echo ---
     sender
         .send(
             EchoRequest {
-                message: "before-refresh".to_string(),
+                message: "before-delay".to_string(),
             }
             .encode_to_vec(),
             false,
         )
         .await
-        .map_err(|e| anyhow::anyhow!("send before-refresh: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("send before-delay: {}", e))?;
 
     let first_echo = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -1038,27 +1174,24 @@ async fn bidi_stream_survives_token_refresh() -> Result<()> {
     .map_err(|_| anyhow::anyhow!("timeout waiting for first echo"))??;
     let first_response = EchoResponse::decode(&first_echo[..])?;
     assert!(
-        first_response.message.contains("before-refresh"),
-        "first echo should contain 'before-refresh', got: {}",
+        first_response.message.contains("before-delay"),
+        "first echo should contain 'before-delay', got: {}",
         first_response.message
     );
     log::info!("first echo OK: {}", first_response.message);
 
-    // --- Wait for token refresh (refresh_delay = 10s, add margin) ---
-    log::info!("waiting for server-side token refresh...");
-    tokio::time::sleep(Duration::from_secs(12)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
-    // --- After token refresh: send second message and expect echo ---
     sender
         .send(
             EchoRequest {
-                message: "after-refresh".to_string(),
+                message: "after-delay".to_string(),
             }
             .encode_to_vec(),
             true,
         )
         .await
-        .map_err(|e| anyhow::anyhow!("send after-refresh: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("send after-delay: {}", e))?;
 
     let second_echo = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -1075,15 +1208,14 @@ async fn bidi_stream_survives_token_refresh() -> Result<()> {
     .await
     .map_err(|_| {
         anyhow::anyhow!(
-            "timeout waiting for second echo after token refresh (bidi_handler_count={}); \
-             stream died when server reconnected — this is the terminal freeze bug",
+            "timeout waiting for second echo (bidi_handler_count={})",
             handler_count.load(Ordering::SeqCst)
         )
     })??;
     let second_response = EchoResponse::decode(&second_echo[..])?;
     assert!(
-        second_response.message.contains("after-refresh"),
-        "second echo should contain 'after-refresh', got: {}",
+        second_response.message.contains("after-delay"),
+        "second echo should contain 'after-delay', got: {}",
         second_response.message
     );
 

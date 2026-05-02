@@ -124,6 +124,9 @@ pub fn run_event_loop(
                 Ok(Event::Key(key)) => {
                     if key_is_ctrl_c_press(&key) {
                         ctrl_c_interrupt_session();
+                        // Raw mode usually delivers Ctrl+C as a key event, not SIGINT, so the ctrlc
+                        // handler may not run. Mirror SIGINT: stop the agent child (above) and exit.
+                        shutdown.store(true, Ordering::Relaxed);
                         continue;
                     }
 

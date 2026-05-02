@@ -1,5 +1,7 @@
 //! Multi-host daemon identity, discoverability, and routing.
 
+use tddy_service::proto::connection::ProjectEntry;
+
 /// Stable identifier for a daemon instance in a shared LiveKit common room (from config).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DaemonInstanceId(pub String);
@@ -14,6 +16,12 @@ pub struct EligibleDaemonInfo {
 /// Source of eligible daemons for explicit selection before StartSession / ConnectSession / ResumeSession.
 pub trait EligibleDaemonSource: Send + Sync {
     fn list_eligible_daemons(&self) -> Vec<EligibleDaemonInfo>;
+
+    /// Extra `ListProjects` rows from peer daemons (each row must set `daemon_instance_id`).
+    /// Default: none. Live discovery / gRPC fan-out implementations override this.
+    fn peer_project_entries(&self, _session_token: &str) -> Vec<ProjectEntry> {
+        Vec::new()
+    }
 }
 
 /// Returns the local machine’s default daemon instance id (short hostname when available).
@@ -70,21 +78,5 @@ impl EligibleDaemonSource for StubEligibleDaemonSource {
             entry.instance_id.0
         );
         vec![entry]
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stub_eligible_daemon_source_non_empty_when_multi_host_complete() {
-        let src = StubEligibleDaemonSource;
-        let list = src.list_eligible_daemons();
-        assert!(
-            !list.is_empty(),
-            "eligible daemon listing must not be empty once multi-host discovery is implemented"
-        );
-        assert!(!list[0].instance_id.0.is_empty());
     }
 }

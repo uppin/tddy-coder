@@ -14,8 +14,9 @@ fn supported_cli_names_includes_free_prompting_and_grill_me() {
         names.contains(&"free-prompting")
             && names.contains(&"grill-me")
             && names.contains(&"tdd-small")
-            && names.contains(&"review"),
-        "F5: supported CLI names must include free-prompting, grill-me, tdd-small, and review for resolver/daemon parity: {:?}",
+            && names.contains(&"review")
+            && names.contains(&"merge-pr"),
+        "F5: supported CLI names must include free-prompting, grill-me, tdd-small, review, and merge-pr for resolver/daemon parity: {:?}",
         names
     );
 }

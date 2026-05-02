@@ -4,6 +4,10 @@
 //! notification per **status transition** for **active** sessions when Telegram is enabled.
 //! The first observation for a session establishes a baseline (no message). Repeating the same
 //! status—especially terminal states—does not spam.
+//!
+//! **Concurrent sessions (one chat, multiple workflows):** acceptance scenarios for outbound
+//! elicitation coordination live in `tests/telegram_concurrent_elicitation_integration.rs` (see PRD
+//! Testing Plan).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
@@ -15,8 +19,9 @@ use teloxide::requests::Requester;
 use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
 
 use tddy_service::gen::server_message::Event;
-use tddy_service::gen::ServerMessage;
+use tddy_service::gen::{ModeChanged, ServerMessage};
 
+use crate::active_elicitation::{ActiveElicitationCoordinator, SharedActiveElicitationCoordinator};
 use crate::config::DaemonConfig;
 use crate::telegram_session_control::chunk_telegram_text;
 
@@ -298,6 +303,12 @@ pub struct TelegramSessionWatcher {
     last_elicitation_signature: HashMap<String, String>,
     /// Full labels for select elicitation (shared with [`crate::telegram_session_control::TelegramWorkflowSpawn`] for confirmations).
     elicitation_select_options: ElicitationSelectOptionsCache,
+    /// Per-chat elicitation queue / active token (shared with [`crate::telegram_session_control::TelegramSessionControlHarness`] in production).
+    active_elicitation: SharedActiveElicitationCoordinator,
+    /// Last observed presenter mode was a Telegram-surfaced elicitation gate (`Select`, document review, …).
+    last_presenter_elicitation: HashMap<String, bool>,
+    /// Latest user-elicitation [`ModeChanged`] per session — used to re-send the prompt with a primary keyboard when a queued session is promoted.
+    last_elicitation_mc: HashMap<String, ModeChanged>,
 }
 
 impl TelegramSessionWatcher {
@@ -308,6 +319,18 @@ impl TelegramSessionWatcher {
     /// Same as [`Self::new`], but shares the select-option cache with inbound Telegram session control (confirmations).
     pub fn with_elicitation_select_options(
         elicitation_select_options: ElicitationSelectOptionsCache,
+    ) -> Self {
+        Self::with_elicitation_select_options_and_coordinator(
+            elicitation_select_options,
+            Arc::new(StdMutex::new(ActiveElicitationCoordinator::new())),
+        )
+    }
+
+    /// Same as [`Self::with_elicitation_select_options`], but shares the active elicitation coordinator
+    /// with [`crate::telegram_session_control::TelegramSessionControlHarness`] so outbound and inbound agree.
+    pub fn with_elicitation_select_options_and_coordinator(
+        elicitation_select_options: ElicitationSelectOptionsCache,
+        active_elicitation: SharedActiveElicitationCoordinator,
     ) -> Self {
         marker_json(
             "M003",
@@ -322,6 +345,9 @@ impl TelegramSessionWatcher {
             last_backend: HashMap::new(),
             last_elicitation_signature: HashMap::new(),
             elicitation_select_options,
+            active_elicitation,
+            last_presenter_elicitation: HashMap::new(),
+            last_elicitation_mc: HashMap::new(),
         }
     }
 
@@ -429,6 +455,132 @@ impl TelegramSessionWatcher {
         Ok(())
     }
 
+    fn cache_select_options_for_select_mode(
+        &self,
+        session_id: &str,
+        mc: &tddy_service::gen::ModeChanged,
+    ) {
+        use tddy_service::gen::app_mode_proto::Variant;
+        if let Some(Variant::Select(s)) = mc.mode.as_ref().and_then(|m| m.variant.as_ref()) {
+            if let Some(q) = s.question.as_ref() {
+                let labels: Vec<String> = q
+                    .options
+                    .iter()
+                    .map(question_option_full_confirmation_text)
+                    .collect();
+                match self.elicitation_select_options.lock() {
+                    Ok(mut g) => {
+                        g.insert(session_id.to_string(), labels);
+                    }
+                    Err(e) => {
+                        log::error!(
+                            target: "tddy_daemon::telegram",
+                            "send_mode_changed_elicitation: elicitation_select_options mutex poisoned: {e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn register_elicitation_surface_for_chats(&self, chat_ids: &[i64], session_id: &str) {
+        match self.active_elicitation.lock() {
+            Ok(mut coord) => {
+                for &cid in chat_ids {
+                    coord.register_elicitation_surface_request(cid, session_id.to_string());
+                }
+            }
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram",
+                    "send_mode_changed_elicitation: active_elicitation mutex poisoned (register): {e}"
+                );
+            }
+        }
+    }
+
+    async fn send_mode_changed_supplemental_chunks<S: TelegramSender + ?Sized>(
+        &self,
+        sender: &S,
+        chat_ids: &[i64],
+        mc: &tddy_service::gen::ModeChanged,
+        label: &str,
+    ) -> anyhow::Result<()> {
+        if let Some(body) = document_body_for_mode_changed(mc) {
+            if !body.is_empty() {
+                let chunks = chunk_telegram_text(&body, TELEGRAM_MESSAGE_BODY_MAX_UTF8);
+                for &cid in chat_ids {
+                    for chunk in &chunks {
+                        sender.send_message(cid, chunk).await?;
+                    }
+                }
+            }
+        }
+
+        if let Some(detail) = clarification_detail_body(label, mc) {
+            if !detail.is_empty() {
+                let chunks = chunk_telegram_text(&detail, TELEGRAM_MESSAGE_BODY_MAX_UTF8);
+                for &cid in chat_ids {
+                    for chunk in &chunks {
+                        sender.send_message(cid, chunk).await?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn send_mode_changed_action_lines<S: TelegramSender + ?Sized>(
+        &self,
+        sender: &S,
+        chat_ids: &[i64],
+        session_id: &str,
+        action_line: &str,
+        kb: &Option<InlineKeyboardRows>,
+    ) -> anyhow::Result<()> {
+        for &cid in chat_ids {
+            let primary = match self.active_elicitation.lock() {
+                Ok(coord) => crate::active_elicitation::should_emit_primary_elicitation_keyboard(
+                    &coord, cid, session_id,
+                ),
+                Err(e) => {
+                    log::error!(
+                        target: "tddy_daemon::telegram",
+                        "send_mode_changed_elicitation: active_elicitation mutex poisoned (action line): {e}"
+                    );
+                    false
+                }
+            };
+            if let Some(ref rows) = kb {
+                if !rows.is_empty() {
+                    if primary {
+                        sender
+                            .send_message_with_keyboard(cid, action_line, rows.clone())
+                            .await?;
+                    } else {
+                        let sid_label = session_telegram_label(session_id)
+                            .unwrap_or_else(|| session_id.to_string());
+                        let defer_text = format!(
+                            "{action_line}\n\n⏳ Session {sid_label}: elicitation queued — this chat already has an active prompt. Use the web / LiveKit UI or wait until it is your turn."
+                        );
+                        log::info!(
+                            target: "tddy_daemon::telegram",
+                            "send_mode_changed_elicitation: deferring inline keyboard (not primary elicitation token) chat_id={} session_id={}",
+                            cid,
+                            session_id
+                        );
+                        sender.send_message(cid, &defer_text).await?;
+                    }
+                } else {
+                    sender.send_message(cid, action_line).await?;
+                }
+            } else {
+                sender.send_message(cid, action_line).await?;
+            }
+        }
+        Ok(())
+    }
+
     async fn send_mode_changed_elicitation<S: TelegramSender + ?Sized>(
         &mut self,
         config: &DaemonConfig,
@@ -475,43 +627,14 @@ impl TelegramSessionWatcher {
         );
         self.last_elicitation_signature
             .insert(session_id.to_string(), sig);
-        use tddy_service::gen::app_mode_proto::Variant;
-        if let Some(Variant::Select(s)) = mc.mode.as_ref().and_then(|m| m.variant.as_ref()) {
-            if let Some(q) = s.question.as_ref() {
-                let labels: Vec<String> = q
-                    .options
-                    .iter()
-                    .map(question_option_full_confirmation_text)
-                    .collect();
-                self.elicitation_select_options
-                    .lock()
-                    .unwrap()
-                    .insert(session_id.to_string(), labels);
-            }
-        }
+        self.last_elicitation_mc
+            .insert(session_id.to_string(), mc.clone());
+        self.cache_select_options_for_select_mode(session_id, mc);
+        self.register_elicitation_surface_for_chats(&tg.chat_ids, session_id);
         let kb = mode_changed_keyboard(session_id, mc);
 
-        if let Some(body) = document_body_for_mode_changed(mc) {
-            if !body.is_empty() {
-                let chunks = chunk_telegram_text(&body, TELEGRAM_MESSAGE_BODY_MAX_UTF8);
-                for &cid in &tg.chat_ids {
-                    for chunk in &chunks {
-                        sender.send_message(cid, chunk).await?;
-                    }
-                }
-            }
-        }
-
-        if let Some(detail) = clarification_detail_body(label, mc) {
-            if !detail.is_empty() {
-                let chunks = chunk_telegram_text(&detail, TELEGRAM_MESSAGE_BODY_MAX_UTF8);
-                for &cid in &tg.chat_ids {
-                    for chunk in &chunks {
-                        sender.send_message(cid, chunk).await?;
-                    }
-                }
-            }
-        }
+        self.send_mode_changed_supplemental_chunks(sender, &tg.chat_ids, mc, label)
+            .await?;
 
         log::info!(
             target: "tddy_daemon::telegram",
@@ -520,19 +643,8 @@ impl TelegramSessionWatcher {
             action_line.len()
         );
 
-        for &cid in &tg.chat_ids {
-            if let Some(ref rows) = kb {
-                if !rows.is_empty() {
-                    sender
-                        .send_message_with_keyboard(cid, &action_line, rows.clone())
-                        .await?;
-                } else {
-                    sender.send_message(cid, &action_line).await?;
-                }
-            } else {
-                sender.send_message(cid, &action_line).await?;
-            }
-        }
+        self.send_mode_changed_action_lines(sender, &tg.chat_ids, session_id, &action_line, &kb)
+            .await?;
         Ok(())
     }
 
@@ -568,6 +680,81 @@ impl TelegramSessionWatcher {
                     "on_server_message: ModeChanged for session_id={} (elicitation path)",
                     session_id
                 );
+                let now_eliciting =
+                    crate::elicitation::mode_changed_requires_telegram_elicitation(mc);
+                let was_eliciting = self
+                    .last_presenter_elicitation
+                    .get(session_id)
+                    .copied()
+                    .unwrap_or(false);
+
+                if was_eliciting && !now_eliciting {
+                    if let Some(tg) = config.telegram.as_ref() {
+                        if tg.enabled {
+                            let mut promoted: std::collections::HashSet<String> =
+                                std::collections::HashSet::new();
+                            for &cid in &tg.chat_ids {
+                                match self.active_elicitation.lock() {
+                                    Ok(mut coord) => {
+                                        let next = coord
+                                            .advance_after_elicitation_completion(cid, session_id);
+                                        log::info!(
+                                            target: "tddy_daemon::telegram",
+                                            "presenter left elicitation: advanced queue chat_id={} completed_session_id={} next_active={:?}",
+                                            cid,
+                                            session_id,
+                                            next
+                                        );
+                                        if let Some(s) = next {
+                                            promoted.insert(s);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::error!(
+                                            target: "tddy_daemon::telegram",
+                                            "presenter left elicitation: active_elicitation mutex poisoned: {e}"
+                                        );
+                                    }
+                                }
+                            }
+                            for next_sid in promoted {
+                                let Some(mc_replay) =
+                                    self.last_elicitation_mc.get(&next_sid).cloned()
+                                else {
+                                    continue;
+                                };
+                                self.last_elicitation_signature.remove(&next_sid);
+                                let next_label = session_telegram_label(&next_sid)
+                                    .unwrap_or_else(|| next_sid.clone());
+                                log::info!(
+                                    target: "tddy_daemon::telegram",
+                                    "promoted session {} — re-sending elicitation with primary keyboard",
+                                    next_sid
+                                );
+                                if let Err(e) = self
+                                    .send_mode_changed_elicitation(
+                                        config,
+                                        sender,
+                                        &next_sid,
+                                        &next_label,
+                                        &mc_replay,
+                                    )
+                                    .await
+                                {
+                                    log::warn!(
+                                        target: "tddy_daemon::telegram",
+                                        "promoted elicitation replay failed session_id={}: {e:#}",
+                                        next_sid
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
+                self.last_presenter_elicitation
+                    .insert(session_id.to_string(), now_eliciting);
+
                 return self
                     .send_mode_changed_elicitation(config, sender, session_id, &label, mc)
                     .await;
@@ -582,6 +769,8 @@ impl TelegramSessionWatcher {
                 Some((format!("Session {label}: {} -> {}", sc.from, sc.to), None))
             }
             Event::WorkflowComplete(wc) => {
+                self.last_presenter_elicitation.remove(session_id);
+                self.last_elicitation_mc.remove(session_id);
                 let key = (wc.ok, wc.message.clone());
                 if self.last_workflow.get(session_id) == Some(&key) {
                     return Ok(());

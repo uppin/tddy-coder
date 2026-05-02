@@ -11,7 +11,10 @@ impl ServiceGenerator for TddyServiceGenerator {
 
         // Trait imports and definition
         writeln!(buf, "use async_trait::async_trait;").unwrap();
-        writeln!(buf, "use futures_util::Stream;").unwrap();
+        let needs_stream_trait = service.methods.iter().any(|m| m.server_streaming);
+        if needs_stream_trait {
+            writeln!(buf, "use futures_util::Stream;").unwrap();
+        }
         writeln!(buf).unwrap();
 
         writeln!(
@@ -180,9 +183,20 @@ fn generate_server_struct(service: &Service, buf: &mut String, rpc: &str) {
     let server_name = format!("{}Server", service.name);
     let service_qualified = format!("{}.{}", service.package, service.name);
 
+    let needs_stream_ext = service.methods.iter().any(|m| m.server_streaming);
+    let needs_mpsc = service.methods.iter().any(|m| m.server_streaming)
+        || service
+            .methods
+            .iter()
+            .any(|m| m.client_streaming && m.server_streaming);
+
     writeln!(buf, "use std::sync::Arc;").unwrap();
-    writeln!(buf, "use futures_util::StreamExt;").unwrap();
-    writeln!(buf, "use tokio::sync::mpsc;").unwrap();
+    if needs_stream_ext {
+        writeln!(buf, "use futures_util::StreamExt;").unwrap();
+    }
+    if needs_mpsc {
+        writeln!(buf, "use tokio::sync::mpsc;").unwrap();
+    }
     writeln!(buf, "use prost::Message;").unwrap();
     writeln!(buf).unwrap();
 
@@ -501,14 +515,19 @@ fn generate_rpc_service_impl(service: &Service, buf: &mut String, rpc: &str) {
         service.name, rpc, server_name
     )
     .unwrap();
-    writeln!(
-        buf,
-        "    fn is_bidi_stream(&self, _service: &str, method: &str) -> bool {{"
-    )
-    .unwrap();
     if bidi_methods.is_empty() {
+        writeln!(
+            buf,
+            "    fn is_bidi_stream(&self, _service: &str, _method: &str) -> bool {{"
+        )
+        .unwrap();
         writeln!(buf, "        false").unwrap();
     } else {
+        writeln!(
+            buf,
+            "    fn is_bidi_stream(&self, _service: &str, method: &str) -> bool {{"
+        )
+        .unwrap();
         writeln!(
             buf,
             "        matches!(method, {})",

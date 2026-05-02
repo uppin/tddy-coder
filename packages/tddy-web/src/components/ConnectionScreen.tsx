@@ -4,6 +4,7 @@ import { GripVertical, Minus, Trash2 } from "lucide-react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
+  AgentInfoSchema,
   ConnectionService,
   DeleteSessionRequestSchema,
   Signal,
@@ -34,9 +35,10 @@ import {
   sessionPidDisplay,
 } from "../utils/sessionDisplay";
 import {
+  connectionProjectRowKey,
   isSessionOrphan,
   projectForUnscopedSession,
-  sortedSessionsForProjectTable,
+  sortedSessionsForProjectHostTable,
 } from "../utils/sessionProjectTable";
 import {
   computeHeaderCheckboxState,
@@ -82,6 +84,16 @@ import {
 } from "./connection/multiSessionState";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
+
+/** Host dropdown: local daemon first, then peers; stable order by `instanceId` (matches daemon list policy). */
+function sortEligibleDaemonsForDisplay(daemons: EligibleDaemonEntry[]): EligibleDaemonEntry[] {
+  return [...daemons].sort((a, b) => {
+    if (a.isLocal !== b.isLocal) {
+      return a.isLocal ? -1 : 1;
+    }
+    return a.instanceId.localeCompare(b.instanceId);
+  });
+}
 
 /** Full viewport width shell (session tables are not max-width capped). */
 const screenShellClassName =
@@ -153,7 +165,7 @@ function createTokenClient() {
 type ProjectSessionForm = {
   toolPath: string;
   agent: string;
-  /** Workflow recipe: `tdd`, `bugfix`, `free-prompting`, or `grill-me` (matches `WorkflowRecipe::name()`). */
+  /** Workflow recipe: `tdd`, `tdd-small`, `bugfix`, `free-prompting`, or `grill-me` (matches `WorkflowRecipe::name()`). */
   recipe: string;
   debugLogging: boolean;
   daemonInstanceId: string;
@@ -171,7 +183,7 @@ function defaultProjectSessionForm(
   return {
     toolPath: tools[0]?.path ?? "",
     agent: coalesceBackendAgentSelection(agentOptions, undefined),
-    recipe: "tdd",
+    recipe: "free-prompting",
     debugLogging: false,
     daemonInstanceId: localDaemon?.instanceId ?? daemons[0]?.instanceId ?? "",
   };
@@ -182,7 +194,7 @@ const sessionControlSelectClassName =
 
 /** Tool, backend, host, and browser-terminal debug for one project—per session / connection, not stored on the project. */
 function ProjectSessionOptions({
-  projectId,
+  fieldIdSuffix,
   tools,
   agents,
   daemons,
@@ -190,7 +202,8 @@ function ProjectSessionOptions({
   onChange,
   startSessionButton,
 }: {
-  projectId: string;
+  /** Unique per registry row (`projectId` or `projectId__daemonInstanceId`) for DOM ids / testids. */
+  fieldIdSuffix: string;
   tools: ToolInfo[];
   agents: AgentInfo[];
   daemons: EligibleDaemonEntry[];
@@ -198,11 +211,11 @@ function ProjectSessionOptions({
   onChange: (patch: Partial<ProjectSessionForm>) => void;
   startSessionButton: ReactNode;
 }) {
-  const toolId = `tool-select-${projectId}`;
-  const backendId = `backend-select-${projectId}`;
-  const hostId = `host-select-${projectId}`;
-  const recipeId = `recipe-select-${projectId}`;
-  const debugId = `debug-logging-${projectId}`;
+  const toolId = `tool-select-${fieldIdSuffix}`;
+  const backendId = `backend-select-${fieldIdSuffix}`;
+  const hostId = `host-select-${fieldIdSuffix}`;
+  const recipeId = `recipe-select-${fieldIdSuffix}`;
+  const debugId = `debug-logging-${fieldIdSuffix}`;
   const backendOptions = useMemo(
     () => buildAgentSelectOptionsFromRpc(agents.map((a) => ({ id: a.id, label: a.label }))),
     [agents],
@@ -280,6 +293,7 @@ function ProjectSessionOptions({
             className={sessionControlSelectClassName}
           >
             <option value="tdd">TDD (plan → implement)</option>
+            <option value="tdd-small">TDD small (plan → red → green)</option>
             <option value="bugfix">Bugfix (reproduce → fix)</option>
             <option value="free-prompting">Free prompting (open-ended)</option>
             <option value="grill-me">Grill me (Grill → Create plan)</option>
@@ -980,10 +994,13 @@ function ConnectedTerminal({
 export function ConnectionScreen({
   livekitUrl,
   commonRoom,
+  allowedAgentsFromConfig,
   onNavigate,
 }: {
   livekitUrl?: string;
   commonRoom?: string;
+  /** From GET /api/config (daemon `allowed_agents`); preferred over RPC until ListAgents hydrates. */
+  allowedAgentsFromConfig?: { id: string; label: string }[];
   /** Client-side navigation (daemon shell: Sessions ↔ Worktrees). */
   onNavigate?: (path: string) => void;
 } = {}) {
@@ -1006,6 +1023,14 @@ export function ConnectionScreen({
   const [newProjectUserRelativePath, setNewProjectUserRelativePath] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const effectiveAgents: AgentInfo[] = useMemo(() => {
+    if (allowedAgentsFromConfig && allowedAgentsFromConfig.length > 0) {
+      return allowedAgentsFromConfig.map((a) =>
+        create(AgentInfoSchema, { id: a.id, label: a.label }),
+      );
+    }
+    return agents;
+  }, [allowedAgentsFromConfig, agents]);
   const [sessionAttachments, setSessionAttachments] = useState<SessionAttachmentMap>(
     () => new Map(),
   );
@@ -1150,7 +1175,14 @@ export function ConnectionScreen({
 
     client
       .listEligibleDaemons({ sessionToken })
-      .then((res) => setDaemons(res.daemons))
+      .then((res) => {
+        const sorted = sortEligibleDaemonsForDisplay(res.daemons);
+        console.debug("[ConnectionScreen] ListEligibleDaemons", {
+          count: sorted.length,
+          order: sorted.map((d) => ({ id: d.instanceId, isLocal: d.isLocal })),
+        });
+        setDaemons(sorted);
+      })
       .catch(() => setDaemons([]));
 
     const loadProjects = () => {
@@ -1177,52 +1209,57 @@ export function ConnectionScreen({
   useEffect(() => {
     setProjectForms((prev) => {
       const next = { ...prev };
-      const def = defaultProjectSessionForm(tools, agents, daemons);
+      const def = defaultProjectSessionForm(tools, effectiveAgents, daemons);
       const agentOptions = buildAgentSelectOptionsFromRpc(
-        agents.map((a) => ({ id: a.id, label: a.label })),
+        effectiveAgents.map((a) => ({ id: a.id, label: a.label })),
       );
+      const validKeys = new Set(projects.map((p) => connectionProjectRowKey(p)));
+      for (const key of Object.keys(next)) {
+        if (!validKeys.has(key)) {
+          delete next[key];
+        }
+      }
       for (const p of projects) {
-        const existing = next[p.projectId];
+        const k = connectionProjectRowKey(p);
+        const preferredDaemon =
+          (p.daemonInstanceId ?? "").trim() || def.daemonInstanceId;
+        const existing = next[k];
         if (!existing) {
-          next[p.projectId] = { ...def };
+          next[k] = { ...def, daemonInstanceId: preferredDaemon };
         } else {
           const toolStillValid = tools.some((t) => t.path === existing.toolPath);
           if (!toolStillValid && tools[0]) {
-            next[p.projectId] = { ...existing, toolPath: tools[0].path };
+            next[k] = { ...existing, toolPath: tools[0].path };
           }
-          const agentStillValid = agents.some((a) => a.id === existing.agent);
+          const agentStillValid = effectiveAgents.some((a) => a.id === existing.agent);
           if (!agentStillValid) {
-            next[p.projectId] = {
-              ...next[p.projectId],
+            next[k] = {
+              ...next[k],
               agent: coalesceBackendAgentSelection(agentOptions, existing.agent),
             };
           }
-          if (!existing.daemonInstanceId && def.daemonInstanceId) {
-            next[p.projectId] = { ...next[p.projectId], daemonInstanceId: def.daemonInstanceId };
+          const daemonStillValid = daemons.some((d) => d.instanceId === existing.daemonInstanceId);
+          if (!daemonStillValid && preferredDaemon) {
+            next[k] = { ...next[k], daemonInstanceId: preferredDaemon };
           }
           if (!existing.recipe?.trim()) {
-            next[p.projectId] = { ...next[p.projectId], recipe: def.recipe };
+            next[k] = { ...next[k], recipe: def.recipe };
           }
         }
       }
       return next;
     });
-  }, [projects, tools, agents, daemons]);
+  }, [projects, tools, effectiveAgents, daemons]);
 
-  const updateProjectForm = (projectId: string, patch: Partial<ProjectSessionForm>) => {
+  const updateProjectForm = (rowKey: string, patch: Partial<ProjectSessionForm>) => {
     setProjectForms((prev) => ({
       ...prev,
-      [projectId]: {
-        ...(prev[projectId] ?? defaultProjectSessionForm(tools, agents, daemons)),
+      [rowKey]: {
+        ...(prev[rowKey] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons)),
         ...patch,
       },
     }));
   };
-
-  const knownProjectIds = useMemo(
-    () => new Set(projects.map((p) => p.projectId)),
-    [projects]
-  );
   const orphanSessions = useMemo(
     () => sortSessionsForDisplay(sessions.filter((s) => isSessionOrphan(s, projects))),
     [sessions, projects]
@@ -1239,18 +1276,25 @@ export function ConnectionScreen({
     (sessionId: string): boolean => {
       const sess = sessions.find((s) => s.sessionId === sessionId);
       if (!sess) return false;
-      if (knownProjectIds.has(sess.projectId)) {
-        return projectForms[sess.projectId]?.debugLogging ?? false;
-      }
-      if (sess.projectId.trim() === "") {
-        const matched = projectForUnscopedSession(sess, projects);
-        if (matched) {
-          return projectForms[matched.projectId]?.debugLogging ?? false;
+      const sd = (sess.daemonInstanceId ?? "").trim();
+      if (sess.projectId.trim() !== "") {
+        const row = projects.find(
+          (p) =>
+            p.projectId === sess.projectId && (p.daemonInstanceId ?? "").trim() === sd
+        );
+        if (row) {
+          return projectForms[connectionProjectRowKey(row)]?.debugLogging ?? false;
         }
+        return false;
+      }
+      const onHost = projects.filter((p) => (p.daemonInstanceId ?? "").trim() === sd);
+      const matched = projectForUnscopedSession(sess, onHost);
+      if (matched) {
+        return projectForms[connectionProjectRowKey(matched)]?.debugLogging ?? false;
       }
       return orphanSessionDebug;
     },
-    [sessions, projectForms, knownProjectIds, projects, orphanSessionDebug],
+    [sessions, projectForms, projects, orphanSessionDebug],
   );
 
   useEffect(() => {
@@ -1297,14 +1341,12 @@ export function ConnectionScreen({
             debugLogging: debugForSessionId(id),
           }),
         );
-        navigatePath(terminalPathForSessionId(id), "replace");
         const attachNew = nextPresentationFromAttach(terminalPresentation, "new");
         setTerminalPresentation(attachNew.presentation);
         if (attachNew.shouldPushTerminalRoute) {
-          const target = terminalPathForSessionId(id);
-          if (typeof window !== "undefined" && window.location.pathname !== target) {
-            navigatePath(target, "push");
-          }
+          navigatePath(terminalPathForSessionId(id), "push");
+        } else {
+          navigatePath("/", "replace");
         }
       } catch {
         try {
@@ -1319,9 +1361,13 @@ export function ConnectionScreen({
               debugLogging: debugForSessionId(id),
             }),
           );
-          navigatePath(terminalPathForSessionId(res.sessionId), "replace");
           const attachRe = nextPresentationFromAttach(terminalPresentation, "reconnect");
           setTerminalPresentation(attachRe.presentation);
+          if (attachRe.shouldPushTerminalRoute) {
+            navigatePath(terminalPathForSessionId(res.sessionId), "push");
+          } else {
+            navigatePath("/", "replace");
+          }
         } catch (e) {
           if (!cancelled && seq === terminalDeepLinkSeqRef.current) {
             setError(e instanceof Error ? e.message : "Failed to open session");
@@ -1388,15 +1434,18 @@ export function ConnectionScreen({
     });
   }, [sessions, navigatePath]);
 
-  const handleStartSession = async (projectId: string) => {
-    const form = projectForms[projectId] ?? defaultProjectSessionForm(tools, agents, daemons);
-    if (!sessionToken || !form.toolPath || !projectId.trim() || !form.agent) return;
+  const handleStartSession = async (project: ProjectEntry) => {
+    const rowKey = connectionProjectRowKey(project);
+    const form =
+      projectForms[rowKey] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons);
+    const projectId = project.projectId.trim();
+    if (!sessionToken || !form.toolPath || !projectId || !form.agent) return;
     setError(null);
     try {
       const res = await client.startSession({
         sessionToken,
         toolPath: form.toolPath,
-        projectId: projectId.trim(),
+        projectId,
         agent: form.agent,
         daemonInstanceId: form.daemonInstanceId,
         recipe: form.recipe,
@@ -1416,7 +1465,7 @@ export function ConnectionScreen({
       if (attach.shouldPushTerminalRoute) {
         navigatePath(terminalPathForSessionId(res.sessionId), "push");
       } else {
-        navigatePath(terminalPathForSessionId(res.sessionId), "replace");
+        navigatePath("/", "replace");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start session");
@@ -1469,7 +1518,7 @@ export function ConnectionScreen({
       if (attach.shouldPushTerminalRoute) {
         navigatePath(terminalPathForSessionId(sessionId), "push");
       } else {
-        navigatePath(terminalPathForSessionId(sessionId), "replace");
+        navigatePath("/", "replace");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect to session");
@@ -1507,7 +1556,7 @@ export function ConnectionScreen({
       if (attach.shouldPushTerminalRoute) {
         navigatePath(terminalPathForSessionId(res.sessionId), "push");
       } else {
-        navigatePath(terminalPathForSessionId(res.sessionId), "replace");
+        navigatePath("/", "replace");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to resume session");
@@ -1803,42 +1852,53 @@ export function ConnectionScreen({
         <p style={{ fontSize: 14, color: "#666" }}>No projects yet. Create one above.</p>
       ) : (
         projects.map((p) => {
-          const projectSessions = sortedSessionsForProjectTable(sessions, p, projects);
-          const tableKey = p.projectId;
+          const rowKey = connectionProjectRowKey(p);
+          const hostingDaemon = (p.daemonInstanceId ?? "").trim();
+          const projectsOnHost = projects.filter(
+            (x) => (x.daemonInstanceId ?? "").trim() === hostingDaemon
+          );
+          const projectSessions = sortedSessionsForProjectHostTable(
+            sessions,
+            p,
+            hostingDaemon,
+            projectsOnHost
+          );
+          const tableKey = rowKey;
           const selectedSet = tableSessionSelections[tableKey] ?? new Set<string>();
           const allProjectSessionIds = projectSessions.map((s) => s.sessionId);
+          const formForRow =
+            projectForms[rowKey] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons);
           return (
             <details
-              key={p.projectId}
-              data-testid={`project-accordion-${p.projectId}`}
+              key={rowKey}
+              data-testid={`project-accordion-${rowKey}`}
               style={{ marginBottom: 12, border: "1px solid #ddd", borderRadius: 4, padding: 8 }}
               open
             >
               <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-                {p.name}{" "}
+                {p.name}
+                {p.daemonInstanceId?.trim() ? (
+                  <span style={{ fontWeight: 500, fontSize: 12, color: "#444", marginLeft: 6 }}>
+                    ({p.daemonInstanceId})
+                  </span>
+                ) : null}{" "}
                 <span style={{ fontWeight: 400, fontSize: 12, color: "#666" }}> {p.gitUrl}</span>
               </summary>
               <p style={{ fontSize: 12, color: "#555", marginTop: 8 }}>{p.mainRepoPath}</p>
               <ProjectSessionOptions
-                projectId={p.projectId}
+                fieldIdSuffix={rowKey}
                 tools={tools}
-                agents={agents}
+                agents={effectiveAgents}
                 daemons={daemons}
-                form={
-                  projectForms[p.projectId] ?? defaultProjectSessionForm(tools, agents, daemons)
-                }
-                onChange={(patch) => updateProjectForm(p.projectId, patch)}
+                form={formForRow}
+                onChange={(patch) => updateProjectForm(rowKey, patch)}
                 startSessionButton={
                   <Button
                     type="button"
-                    data-testid={`start-session-${p.projectId}`}
-                    onClick={() => handleStartSession(p.projectId)}
+                    data-testid={`start-session-${rowKey}`}
+                    onClick={() => void handleStartSession(p)}
                     disabled={
-                      loading ||
-                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, agents, daemons))
-                        .toolPath ||
-                      !(projectForms[p.projectId] ?? defaultProjectSessionForm(tools, agents, daemons))
-                        .agent
+                      loading || !formForRow.toolPath || !formForRow.agent
                     }
                   >
                     Start New Session
@@ -1851,7 +1911,7 @@ export function ConnectionScreen({
                 <>
                   <div
                     className="mt-3 w-full min-w-0"
-                    data-testid={`sessions-table-${p.projectId}`}
+                    data-testid={`sessions-table-${rowKey}`}
                   >
                     <div className="flex justify-end">
                       <Button

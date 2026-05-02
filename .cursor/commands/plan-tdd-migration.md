@@ -501,8 +501,8 @@ Execute these steps in order to ensure code is production-ready:
 - [ ] Check off all completed milestones
 - [ ] If migration complete: wrap changeset into dev docs
   - Apply changeset to affected package READMEs and dev docs
-  - Archive changeset to `docs/dev/changesets/1-ARCHIVE/`
-  - Update package changesets.md history
+  - Archive changeset to `docs/dev/changesets/1-ARCHIVE/` (if used) or delete WIP per `/wrap-context-docs`
+  - Prepend one single-line entry to package `changesets.md` (see [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md))
 - [ ] Update dev docs to reflect State B architecture
 
 **Quality Gate**: Documentation reflects migrated state accurately

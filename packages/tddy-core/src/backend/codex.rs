@@ -3,13 +3,69 @@
 //! Spawns non-interactive `codex exec` with JSONL on stdout. Maps
 //! [`GoalHints::agent_cli_plan_mode`] + [`PermissionHint`] to explicit Codex flags
 //! (see [`build_codex_exec_argv`]).
+//!
+//! **Auth:** `codex exec` does **not** emit an OpenAI browser OAuth URL when credentials are
+//! missing — you get JSONL / stderr API errors (e.g. 401) only. The sign-in link is produced by
+//! **`codex login`** (stdout + `BROWSER`); see [`CodexBackend::spawn_oauth_login`] and the
+//! `tddy-coder` `BROWSER` hook for capturing that URL into the session dir.
 
 use super::{InvokeRequest, InvokeResponse, PermissionHint};
 use crate::error::BackendError;
-use crate::stream::codex::parse_codex_jsonl_output;
+use crate::stream::codex::{
+    codex_jsonl_last_error_message, codex_stderr_brief_for_user, parse_codex_jsonl_output,
+};
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+/// Basename under the TDDY artifact session directory; stores Codex CLI `thread_id` for `codex exec resume`.
+pub const CODEX_THREAD_ID_FILENAME: &str = "codex_thread_id";
+
+/// Basename written when Codex invokes `BROWSER` with the OpenAI authorize URL (`tddy-coder` hook).
+pub const CODEX_OAUTH_AUTHORIZE_URL_FILENAME: &str = "codex_oauth_authorize.url";
+
+/// Extract an `https://…` URL from a line of `codex login` output (or any single-line text).
+#[must_use]
+pub fn scrape_codex_oauth_authorize_url_from_text(s: &str) -> Option<String> {
+    let s = s.trim();
+    let start = s.find("https://")?;
+    let rest = &s[start..];
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let mut url = rest[..end].to_string();
+    while url.ends_with(')') || url.ends_with('"') || url.ends_with('\'') || url.ends_with(',') {
+        url.pop();
+    }
+    (url.len() > "https://".len()).then_some(url)
+}
+
+/// When Codex/OpenAI returns 401-style text, append a short fix hint for the TUI.
+fn codex_openai_auth_remediation(detail: &str) -> Option<&'static str> {
+    let d = detail.to_lowercase();
+    if !d.contains("401") {
+        return None;
+    }
+    if d.contains("unauthorized")
+        || d.contains("missing bearer")
+        || d.contains("authentication")
+        || d.contains("invalid api key")
+    {
+        Some(
+            "Fix: not signed in to OpenAI for Codex. `codex exec --json` does not print a login URL or start browser OAuth — only API errors.\n\
+             Run `codex login` first (URL on stdout + BROWSER), or `tddy-coder --session-dir <artifact_dir> --codex-oauth-login` to capture the link for the web UI.\n\
+             Or use an API key: `printenv OPENAI_API_KEY | codex login --with-api-key`.",
+        )
+    } else {
+        None
+    }
+}
+
+pub(crate) fn write_codex_thread_id_file(session_dir: &Path, thread_id: &str) {
+    let path = session_dir.join(CODEX_THREAD_ID_FILENAME);
+    match std::fs::write(&path, thread_id.trim()) {
+        Ok(()) => log::debug!("[tddy-codex] persisted thread id to {}", path.display()),
+        Err(e) => log::warn!("[tddy-codex] could not write {}: {}", path.display(), e),
+    }
+}
 
 /// Backend that invokes the Codex CLI (`codex` on PATH by default).
 #[derive(Debug, Clone)]
@@ -36,6 +92,91 @@ impl CodexBackend {
     #[must_use]
     pub fn with_path(path: PathBuf) -> Self {
         Self { binary_path: path }
+    }
+
+    /// Run `codex login` with **browser OAuth** (the default `codex login` flow, **not** `--device-auth`).
+    ///
+    /// On Unix, when [`std::env::current_exe`] succeeds, sets `BROWSER` to the current executable and
+    /// `TDDY_CODEX_OAUTH_OUT` to `{session_dir}/{[`CODEX_OAUTH_AUTHORIZE_URL_FILENAME`]}`, matching
+    /// [`invoke`](Self::invoke) so the `tddy-coder` pre-main hook records the authorize URL.
+    ///
+    /// Stdout is scanned in a background thread for an `https://` line as a fallback if the CLI only
+    /// prints the link.
+    ///
+    /// You must [`std::process::Child::wait`] on the returned child: Codex keeps a localhost callback
+    /// server until the user finishes signing in at `http://localhost:<port>/…`.
+    pub fn spawn_oauth_login(
+        &self,
+        session_dir: &Path,
+    ) -> Result<std::process::Child, BackendError> {
+        std::fs::create_dir_all(session_dir).map_err(|e| {
+            BackendError::InvocationFailed(format!(
+                "codex login: could not create session_dir {}: {}",
+                session_dir.display(),
+                e
+            ))
+        })?;
+        let oauth_out = session_dir.join(CODEX_OAUTH_AUTHORIZE_URL_FILENAME);
+        let mut cmd = Command::new(&self.binary_path);
+        cmd.arg("login");
+        cmd.env("PATH", super::path_with_exe_dir());
+        #[cfg(unix)]
+        if let Ok(exe) = std::env::current_exe() {
+            log::info!(
+                target: "tddy_core::backend::codex",
+                "[tddy-codex] codex login OAuth capture: BROWSER={}, TDDY_CODEX_OAUTH_OUT={}",
+                exe.display(),
+                oauth_out.display()
+            );
+            cmd.env("TDDY_CODEX_OAUTH_OUT", oauth_out.as_os_str());
+            cmd.env("BROWSER", exe.as_os_str());
+        }
+        cmd.env("TDDY_SESSION_DIR", session_dir.as_os_str());
+        cmd.current_dir(session_dir);
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+
+        let mut child = cmd.spawn().map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                BackendError::BinaryNotFound(self.binary_path.to_string_lossy().to_string())
+            } else {
+                BackendError::InvocationFailed(format!("codex login spawn: {}", e))
+            }
+        })?;
+
+        let out = child
+            .stdout
+            .take()
+            .ok_or_else(|| BackendError::InvocationFailed("codex login: no stdout".into()))?;
+        let err = child.stderr.take();
+        let oauth_clone = oauth_out.clone();
+        std::thread::spawn(move || {
+            let reader = std::io::BufReader::new(out);
+            for line in reader.lines().map_while(Result::ok) {
+                if let Some(url) = scrape_codex_oauth_authorize_url_from_text(&line) {
+                    if let Err(e) = std::fs::write(&oauth_clone, &url) {
+                        log::warn!(
+                            "[tddy-codex] codex login: could not write authorize URL to {}: {}",
+                            oauth_clone.display(),
+                            e
+                        );
+                    } else {
+                        log::debug!("[tddy-codex] codex login: captured URL from stdout");
+                    }
+                }
+            }
+        });
+        std::thread::spawn(move || {
+            if let Some(h) = err {
+                let reader = std::io::BufReader::new(h);
+                for line in reader.lines().map_while(Result::ok) {
+                    log::debug!("[tddy-codex] codex login stderr: {}", line);
+                }
+            }
+        });
+
+        Ok(child)
     }
 
     fn invoke_sync(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
@@ -76,6 +217,19 @@ impl CodexBackend {
         );
 
         cmd.env("PATH", super::path_with_exe_dir());
+        #[cfg(unix)]
+        if let Some(ref sd) = request.session_dir {
+            let oauth_out = sd.join(CODEX_OAUTH_AUTHORIZE_URL_FILENAME);
+            if let Ok(exe) = std::env::current_exe() {
+                log::info!(
+                    target: "tddy_core::backend::codex",
+                    "[tddy-codex] codex OAuth capture: BROWSER=re-exec, TDDY_CODEX_OAUTH_OUT={}",
+                    oauth_out.display()
+                );
+                cmd.env("TDDY_CODEX_OAUTH_OUT", oauth_out.as_os_str());
+                cmd.env("BROWSER", exe.as_os_str());
+            }
+        }
         if let Some(ref p) = request.socket_path {
             cmd.env("TDDY_SOCKET", p);
         }
@@ -183,6 +337,43 @@ impl CodexBackend {
         }
 
         let parsed = parse_codex_jsonl_output(&raw_lines);
+
+        if exit_code != 0 {
+            // Match Claude backend: plan-style goals may see nonzero exit despite usable stdout.
+            let tolerate_nonzero = request.hints.claude_nonzero_exit_ok_if_structured_response
+                && !parsed.result_text.trim().is_empty();
+            if tolerate_nonzero {
+                log::debug!(
+                    "[tddy-codex] CLI exited with code {} but non-empty parsed output; treating as success",
+                    exit_code
+                );
+            } else {
+                if !stderr_buf.trim().is_empty() {
+                    log::warn!("[tddy-codex] stderr: {}", stderr_buf.trim());
+                }
+                // JSONL `error` / `turn.failed` carry the real reason; stderr is often tracing noise.
+                let detail = codex_jsonl_last_error_message(&raw_lines)
+                    .or_else(|| codex_stderr_brief_for_user(&stderr_buf))
+                    .unwrap_or_default();
+                let mut msg = if detail.is_empty() {
+                    format!(
+                        "Codex CLI exited with code {} (no error detail). Invoked: {}",
+                        exit_code, cmd_str
+                    )
+                } else {
+                    format!(
+                        "Codex CLI exited with code {}: {}\nInvoked: {}",
+                        exit_code, detail, cmd_str
+                    )
+                };
+                if let Some(hint) = codex_openai_auth_remediation(&detail) {
+                    msg.push_str("\n\n");
+                    msg.push_str(hint);
+                }
+                return Err(BackendError::InvocationFailed(msg));
+            }
+        }
+
         let raw_stream = if raw_lines.is_empty() {
             None
         } else {
@@ -193,6 +384,13 @@ impl CodexBackend {
         } else {
             Some(stderr_buf)
         };
+
+        if let Some(ref sink) = request.progress_sink {
+            sink.emit(&crate::stream::ProgressEvent::AgentExited {
+                exit_code,
+                goal: request.submit_key.to_string(),
+            });
+        }
 
         Ok(InvokeResponse {
             output: parsed.result_text,
@@ -233,30 +431,34 @@ pub(crate) fn merge_codex_prompt(request: &InvokeRequest) -> Result<String, Back
 
 /// Arguments after the `codex` binary: `codex <these...>`.
 ///
-/// Shape:
-/// - Fresh: `exec`, `--json`, optional `-C` cwd, optional `-m` model, sandbox/approval flags, prompt.
-/// - Resume: `exec`, `resume`, `<session_id>`, then the same optionals, then prompt.
+/// Codex nests flags: **`exec`-level options** (`-C`, `-s`, `--json`) must appear **before** the
+/// `resume` subcommand. `resume` only accepts its own `[OPTIONS]` (e.g. `-m`); it does **not** accept
+/// `-C`, `--sandbox`, or `--ask-for-approval`.
 ///
-/// **Permission / plan mapping (Codex CLI):**
-/// - Plan-style goals (`agent_cli_plan_mode` + read-only): `--sandbox read-only` and
-///   `--ask-for-approval never` so non-interactive runs do not block on approvals.
-/// - Editing goals (default): `--sandbox workspace-write` and `--ask-for-approval never`.
+/// - Fresh: `exec [-C dir] [-s SANDBOX] --json [-m model] <PROMPT>`
+/// - Resume: `exec [-C dir] [-s SANDBOX] --json resume [-m model] <SESSION_ID> <PROMPT>`
+///
+/// **Sandbox:** `-s read-only` for plan-style read-only goals; `-s workspace-write` otherwise.
 pub(crate) fn build_codex_exec_argv(request: &InvokeRequest, merged_prompt: &str) -> Vec<String> {
     let mut args = vec!["exec".to_string()];
-
-    match &request.session {
-        Some(super::SessionMode::Resume(id)) => {
-            args.push("resume".to_string());
-            args.push(id.clone());
-        }
-        Some(super::SessionMode::Fresh(_)) | None => {}
-    }
-
-    args.push("--json".to_string());
 
     if let Some(ref wd) = request.working_dir {
         args.push("-C".to_string());
         args.push(wd.display().to_string());
+    }
+
+    if request.hints.agent_cli_plan_mode && request.hints.permission == PermissionHint::ReadOnly {
+        args.push("-s".to_string());
+        args.push("read-only".to_string());
+    } else {
+        args.push("-s".to_string());
+        args.push("workspace-write".to_string());
+    }
+
+    args.push("--json".to_string());
+
+    if matches!(&request.session, Some(super::SessionMode::Resume(_))) {
+        args.push("resume".to_string());
     }
 
     if let Some(ref m) = request.model {
@@ -264,15 +466,9 @@ pub(crate) fn build_codex_exec_argv(request: &InvokeRequest, merged_prompt: &str
         args.push(m.clone());
     }
 
-    if request.hints.agent_cli_plan_mode && request.hints.permission == PermissionHint::ReadOnly {
-        args.push("--sandbox".to_string());
-        args.push("read-only".to_string());
-    } else {
-        args.push("--sandbox".to_string());
-        args.push("workspace-write".to_string());
+    if let Some(super::SessionMode::Resume(id)) = &request.session {
+        args.push(id.clone());
     }
-    args.push("--ask-for-approval".to_string());
-    args.push("never".to_string());
 
     args.push(merged_prompt.to_string());
     log::debug!("[tddy-codex] argv len={} (prompt trailing)", args.len());
@@ -378,11 +574,34 @@ mod tests {
         req.session = Some(SessionMode::Resume("sess-resume-99".to_string()));
         let merged = merge_codex_prompt(&req).expect("merge");
         let args = build_codex_exec_argv(&req, &merged);
-        let pos_exec = args.iter().position(|a| a == "exec").expect("exec");
-        assert_eq!(args.get(pos_exec + 1).map(String::as_str), Some("resume"));
-        assert_eq!(
-            args.get(pos_exec + 2).map(String::as_str),
-            Some("sess-resume-99")
+        let pos_json = args.iter().position(|a| a == "--json").expect("--json");
+        let pos_resume = args.iter().position(|a| a == "resume").expect("resume");
+        let pos_sid = args
+            .iter()
+            .position(|a| a == "sess-resume-99")
+            .expect("session id");
+        assert!(
+            pos_json < pos_resume && pos_resume < pos_sid,
+            "exec-level --json before resume subcommand, then SESSION_ID; got {:?}",
+            args
+        );
+        assert_eq!(args.last().map(String::as_str), Some("continue"));
+    }
+
+    #[test]
+    fn codex_exec_argv_resume_model_before_session_id() {
+        let mut req = stub_request("go", "red", hints_tdd_red_goal());
+        req.session = Some(SessionMode::Resume("sid-1".to_string()));
+        req.model = Some("gpt-5".to_string());
+        let merged = merge_codex_prompt(&req).expect("merge");
+        let args = build_codex_exec_argv(&req, &merged);
+        let pos_resume = args.iter().position(|a| a == "resume").expect("resume");
+        let pos_m = args.iter().position(|a| a == "-m").expect("-m");
+        let pos_sid = args.iter().position(|a| a == "sid-1").expect("sid");
+        assert!(
+            pos_resume < pos_m && pos_m < pos_sid,
+            "resume then -m then SESSION_ID; got {:?}",
+            args
         );
     }
 
@@ -418,14 +637,38 @@ mod tests {
         let merged = merge_codex_prompt(&req).expect("merge");
         let args = build_codex_exec_argv(&req, &merged);
         assert!(
-            args.iter().any(|a| {
-                a.starts_with("--approval")
-                    || a.contains("approval")
-                    || a == "--sandbox"
-                    || a.contains("sandbox")
-            }),
-            "plan-mode read-only hints should produce documented codex sandbox/approval argv, got {:?}",
+            args.iter().any(|a| a == "-s") && args.iter().any(|a| a == "read-only"),
+            "plan-mode read-only hints should produce -s read-only, got {:?}",
             args
         );
+    }
+
+    #[test]
+    fn scrape_codex_oauth_url_from_login_line() {
+        let line = "https://auth.openai.com/oauth/authorize?x=1&y=2";
+        assert_eq!(
+            scrape_codex_oauth_authorize_url_from_text(line).as_deref(),
+            Some(line)
+        );
+    }
+
+    #[test]
+    fn scrape_codex_oauth_url_strips_trailing_punct() {
+        let line = r#"See: https://auth.openai.com/x?y=1)"#;
+        assert_eq!(
+            scrape_codex_oauth_authorize_url_from_text(line).as_deref(),
+            Some("https://auth.openai.com/x?y=1")
+        );
+    }
+
+    #[test]
+    fn codex_openai_auth_remediation_matches_401_missing_bearer() {
+        let d = "unexpected status 401 Unauthorized: Missing bearer or basic authentication";
+        assert!(super::codex_openai_auth_remediation(d).is_some());
+    }
+
+    #[test]
+    fn codex_openai_auth_remediation_ignores_unrelated_401() {
+        assert!(super::codex_openai_auth_remediation("HTTP 401").is_none());
     }
 }

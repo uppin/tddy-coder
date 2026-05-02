@@ -1,14 +1,20 @@
 //! LiveKit access token generation from API key and secret.
 //!
 //! Used when connecting with `--livekit-api-key` / `--livekit-api-secret` instead of
-//! a pre-generated `--livekit-token`. Supports automatic refresh by reconnecting
-//! 1 minute before expiry.
+//! a pre-generated `--livekit-token`.
+//!
+//! The LiveKit SDK keeps the signaling connection alive; the server may push refreshed
+//! JWTs on the signal channel without the application reconnecting the room.
 
 use livekit_api::access_token::{AccessToken, AccessTokenError, VideoGrants};
 use std::time::Duration;
 
+/// Default JWT TTL (seconds) for API-key–minted tokens in the daemon and coder.
+/// Matches [`livekit_api::access_token::DEFAULT_TTL`] so sessions are not cut short by JWT expiry
+/// under normal use (no application-level reconnect loop).
+pub const DEFAULT_LIVEKIT_JWT_TTL_SECS: u64 = livekit_api::access_token::DEFAULT_TTL.as_secs();
+
 /// Generates LiveKit JWT access tokens from API key and secret.
-/// Used for token refresh: generate a new token and reconnect before expiry.
 pub struct TokenGenerator {
     api_key: String,
     api_secret: String,
@@ -51,6 +57,8 @@ impl TokenGenerator {
                 can_publish: true,
                 can_subscribe: true,
                 can_publish_data: true,
+                // Required for `LocalParticipant::set_metadata` (e.g. Codex OAuth URL in dashboard).
+                can_update_own_metadata: true,
                 ..Default::default()
             })
             .to_jwt()
@@ -61,8 +69,8 @@ impl TokenGenerator {
         self.ttl
     }
 
-    /// Duration after which a new token should be generated and the connection refreshed.
-    /// Returns TTL minus 1 minute.
+    /// Duration before JWT expiry at which UIs may fetch a new token (e.g. Connect-RPC
+    /// `RefreshToken`) without dropping an existing room. Returns TTL minus one minute.
     pub fn time_until_refresh(&self) -> Duration {
         self.ttl.saturating_sub(Duration::from_secs(60))
     }
@@ -145,5 +153,13 @@ mod tests {
             Duration::from_secs(90),
         );
         assert_eq!(gen.ttl(), Duration::from_secs(90));
+    }
+
+    #[test]
+    fn default_livekit_jwt_ttl_matches_livekit_api_default() {
+        assert_eq!(
+            DEFAULT_LIVEKIT_JWT_TTL_SECS,
+            livekit_api::access_token::DEFAULT_TTL.as_secs()
+        );
     }
 }

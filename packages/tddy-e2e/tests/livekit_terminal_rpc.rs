@@ -88,6 +88,8 @@ mod livekit_tests {
             &server_token,
             TerminalServiceServer::new(terminal_service),
             RoomOptions::default(),
+            None,
+            None,
         )
         .await?;
         let server_handle = tokio::spawn(async move { server.run().await });
@@ -211,6 +213,8 @@ mod livekit_tests {
             &server_token,
             TerminalServiceServer::new(terminal_service),
             RoomOptions::default(),
+            None,
+            None,
         )
         .await?;
         let server_handle = tokio::spawn(async move { server.run().await });
@@ -370,6 +374,8 @@ mod livekit_tests {
             &server_token,
             tddy_service::TerminalServiceServer::new(terminal_service),
             RoomOptions::default(),
+            None,
+            None,
         )
         .await?;
         let server_handle = tokio::spawn(async move { server.run().await });
@@ -495,6 +501,8 @@ mod livekit_tests {
             &server_token,
             TerminalServiceServer::new(terminal_service),
             RoomOptions::default(),
+            None,
+            None,
         )
         .await?;
         let server_handle = tokio::spawn(async move { server.run().await });

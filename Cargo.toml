@@ -20,4 +20,5 @@ members = [
     "packages/tddy-workflow-recipes",
     "packages/tddy-workflow",
     "packages/tddy-integration-tests",
+    "packages/tddy-livekit-screen-capture",
 ]

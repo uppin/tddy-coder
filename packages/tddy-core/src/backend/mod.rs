@@ -3,6 +3,7 @@
 mod acp;
 mod claude;
 mod codex;
+pub mod codex_acp;
 mod cursor;
 mod mock;
 mod stub;
@@ -10,7 +11,9 @@ mod tool_executor;
 
 pub use acp::ClaudeAcpBackend;
 pub use claude::{build_claude_args, ClaudeCodeBackend, ClaudeInvokeConfig, PermissionMode};
-pub use codex::CodexBackend;
+pub(crate) use codex::write_codex_thread_id_file;
+pub use codex::{CodexBackend, CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_ID_FILENAME};
+pub use codex_acp::CodexAcpBackend;
 pub use cursor::CursorBackend;
 pub use mock::MockBackend;
 pub use stub::StubBackend;
@@ -25,6 +28,8 @@ pub enum AnyBackend {
     Cursor(CursorBackend),
     /// OpenAI Codex CLI (`codex exec`, `codex exec resume`, `--json`).
     Codex(CodexBackend),
+    /// OpenAI Codex via `codex-acp` (ACP over stdio).
+    CodexAcp(CodexAcpBackend),
     Stub(StubBackend),
 }
 
@@ -79,6 +84,7 @@ impl CodingBackend for AnyBackend {
             AnyBackend::ClaudeAcp(b) => b.invoke(request).await,
             AnyBackend::Cursor(b) => b.invoke(request).await,
             AnyBackend::Codex(b) => b.invoke(request).await,
+            AnyBackend::CodexAcp(b) => b.invoke(request).await,
             AnyBackend::Stub(b) => b.invoke(request).await,
         }
     }
@@ -89,6 +95,7 @@ impl CodingBackend for AnyBackend {
             AnyBackend::ClaudeAcp(b) => b.name(),
             AnyBackend::Cursor(b) => b.name(),
             AnyBackend::Codex(b) => b.name(),
+            AnyBackend::CodexAcp(b) => b.name(),
             AnyBackend::Stub(b) => b.name(),
         }
     }
@@ -99,6 +106,7 @@ impl CodingBackend for AnyBackend {
             AnyBackend::ClaudeAcp(b) => b.submit_channel(),
             AnyBackend::Cursor(b) => b.submit_channel(),
             AnyBackend::Codex(b) => b.submit_channel(),
+            AnyBackend::CodexAcp(b) => b.submit_channel(),
             AnyBackend::Stub(b) => b.submit_channel(),
         }
     }
@@ -365,6 +373,10 @@ pub fn backend_selection_question() -> ClarificationQuestion {
                 description: "OpenAI Codex CLI (default model: gpt-5)".to_string(),
             },
             QuestionOption {
+                label: "Codex ACP".to_string(),
+                description: "OpenAI Codex via codex-acp (default model: gpt-5)".to_string(),
+            },
+            QuestionOption {
                 label: "Stub".to_string(),
                 description: "Test backend with simulated responses".to_string(),
             },
@@ -423,6 +435,7 @@ pub fn backend_from_label(label: &str) -> (&'static str, &'static str) {
         "Claude ACP" => ("claude-acp", "opus"),
         "Cursor" => ("cursor", "composer-2"),
         "Codex" => ("codex", "gpt-5"),
+        "Codex ACP" => ("codex-acp", "gpt-5"),
         "Stub" => ("stub", "stub"),
         _ => ("claude", "opus"),
     }
@@ -434,6 +447,7 @@ pub fn default_model_for_agent(agent: &str) -> &'static str {
     match agent {
         "cursor" => "composer-2",
         "codex" => "gpt-5",
+        "codex-acp" => "gpt-5",
         "stub" => "stub",
         _ => "opus",
     }
@@ -447,7 +461,8 @@ pub fn preselected_index_for_agent(agent: &str) -> usize {
         "claude-acp" => 1,
         "cursor" => 2,
         "codex" => 3,
-        "stub" => 4,
+        "codex-acp" => 4,
+        "stub" => 5,
         _ => 0,
     }
 }
@@ -535,9 +550,9 @@ mod tests {
     }
 
     #[test]
-    fn backend_selection_question_returns_five_options_including_codex() {
+    fn backend_selection_question_returns_six_options_including_codex_variants() {
         let q = backend_selection_question();
-        assert_eq!(q.options.len(), 5);
+        assert_eq!(q.options.len(), 6);
         assert!(!q.multi_select);
         assert!(!q.allow_other);
     }
@@ -548,7 +563,14 @@ mod tests {
         let labels: Vec<&str> = q.options.iter().map(|o| o.label.as_str()).collect();
         assert_eq!(
             labels,
-            vec!["Claude", "Claude ACP", "Cursor", "Codex", "Stub"]
+            vec![
+                "Claude",
+                "Claude ACP",
+                "Cursor",
+                "Codex",
+                "Codex ACP",
+                "Stub"
+            ]
         );
     }
 
@@ -593,6 +615,11 @@ mod tests {
     }
 
     #[test]
+    fn backend_from_label_codex_acp() {
+        assert_eq!(backend_from_label("Codex ACP"), ("codex-acp", "gpt-5"));
+    }
+
+    #[test]
     fn backend_from_label_unknown_defaults_to_claude() {
         assert_eq!(backend_from_label("Unknown"), ("claude", "opus"));
     }
@@ -608,6 +635,11 @@ mod tests {
     }
 
     #[test]
+    fn default_model_for_agent_codex_acp() {
+        assert_eq!(default_model_for_agent("codex-acp"), "gpt-5");
+    }
+
+    #[test]
     fn default_model_for_agent_claude() {
         assert_eq!(default_model_for_agent("claude"), "opus");
     }
@@ -618,7 +650,8 @@ mod tests {
         assert_eq!(preselected_index_for_agent("claude-acp"), 1);
         assert_eq!(preselected_index_for_agent("cursor"), 2);
         assert_eq!(preselected_index_for_agent("codex"), 3);
-        assert_eq!(preselected_index_for_agent("stub"), 4);
+        assert_eq!(preselected_index_for_agent("codex-acp"), 4);
+        assert_eq!(preselected_index_for_agent("stub"), 5);
         assert_eq!(preselected_index_for_agent("unknown"), 0);
     }
 }

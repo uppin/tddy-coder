@@ -352,6 +352,7 @@ export function App() {
     daemonMode: boolean | null;
     livekitUrl?: string;
     commonRoom?: string;
+    allowedAgents?: { id: string; label: string }[];
   }>({ daemonMode: null });
 
   useEffect(() => {
@@ -362,11 +363,13 @@ export function App() {
           daemon_mode?: boolean;
           livekit_url?: string;
           common_room?: string;
+          allowed_agents?: { id: string; label: string }[];
         } | null) => {
           setAppConfig({
             daemonMode: config?.daemon_mode ?? false,
             livekitUrl: config?.livekit_url,
             commonRoom: config?.common_room,
+            allowedAgents: config?.allowed_agents,
           });
         }
       )
@@ -396,6 +399,7 @@ export function App() {
           <ConnectionScreen
             livekitUrl={appConfig.livekitUrl}
             commonRoom={appConfig.commonRoom}
+            allowedAgentsFromConfig={appConfig.allowedAgents}
             onNavigate={navigate}
           />
         )

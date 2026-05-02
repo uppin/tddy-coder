@@ -39,6 +39,29 @@ fn goals_json_matches_manifest_goal_count_and_names() {
 const KNOWN_RECIPES: &[&str] = &["tdd"];
 
 #[test]
+fn goals_json_includes_merge_pr_report_goal() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let goals_raw = fs::read_to_string(manifest_dir.join("goals.json")).expect("read goals.json");
+    let goals_root: serde_json::Value = serde_json::from_str(&goals_raw).expect("parse goals.json");
+    let names: Vec<&str> = goals_root["goals"]
+        .as_array()
+        .expect("goals array")
+        .iter()
+        .filter_map(|g| g["name"].as_str())
+        .collect();
+    assert!(
+        names.iter().any(|n| *n == "merge-pr-report"),
+        "goals.json must register merge-pr-report for structured finalize submit (PRD schema contract); got {:?}",
+        names
+    );
+    assert!(
+        names.iter().any(|n| *n == "merge-pr-analyze"),
+        "goals.json must register merge-pr-analyze for optional structured analyze submit (worktree_suggestion); got {:?}",
+        names
+    );
+}
+
+#[test]
 fn generated_schemas_are_namespaced_by_recipe() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let generated = manifest_dir.join("generated");

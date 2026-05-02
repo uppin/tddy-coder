@@ -2,15 +2,45 @@
 
 Release note history for the Web product area.
 
+**Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
+
+## 2026-04-11 — Codex OAuth: operator tunnel in tddy-daemon
+
+- **Docs**: **[codex-oauth-web-relay.md](codex-oauth-web-relay.md)** — operator callback TCP and **`StreamBytes`** run in **`tddy-daemon`** when using desktop + **`livekit.common_room`**; session-side **`LoopbackTunnelService`** semantics unchanged. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
+## 2026-04-11 — Codex OAuth: loopback tunnel documentation
+
+- **Docs**: **[codex-oauth-web-relay.md](codex-oauth-web-relay.md)** documents session-side **`LoopbackTunnelService`** semantics (privileged port refusal, first **`TunnelChunk`**); desktop flow cross-links **[tddy-desktop-electrobun.md](../desktop/tddy-desktop-electrobun.md)**. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
+## 2026-04-11 — Connection screen: multi-host eligible daemons (LiveKit common room)
+
+- **`tddy-web`**: **ConnectionScreen** sorts **ListEligibleDaemons** for the Host dropdown (**local** first, then **`instance_id`**); **StartSession** sends the selected **`daemonInstanceId`** when the daemon lists multiple eligible hosts. Cypress **ConnectionScreen** covers multi-row host list and multi-session disconnect scoping. **Feature docs**: [web-terminal.md](web-terminal.md), [livekit-peer-discovery.md](../daemon/livekit-peer-discovery.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+## 2026-04-11 — Connection screen: multi-daemon project rows and host-scoped sessions
+
+- **`tddy-web`**: **`ListProjects`** rows carry **`daemon_instance_id`**; **`ConnectionScreen`** renders one accordion and session table per row, with composite **`data-testid`** keys **`projectId__daemonInstanceId`** when the field is set; **`sessionProjectTable`** helpers (**`connectionProjectRowKey`**, **`sessionBelongsToProjectHost`**, **`sortedSessionsForProjectHostTable`**, **`isSessionOrphan`**) scope sessions and unscoped repo matching per host. Cypress **`ConnectionScreen.cy.tsx`** covers multi-host listing and collision cases; Bun **`sessionProjectTableMultiHost.test.ts`** covers table helpers. Feature doc: [web-terminal.md](web-terminal.md).
+
+## 2026-04-11 — LiveKit presence: owned project count
+
+- **tddy-web**: **`ParticipantList`** **Projects** column for **`owned_project_count`** in participant metadata (**`parseOwnedProjectCount`**, **`OWNED_PROJECT_COUNT_METADATA_KEY`**); em dash when the field is absent; **`useRoomParticipants`** supplies **`ownedProjectCount`** from LiveKit metadata; Cypress **`ParticipantList.cy.tsx`** covers render and metadata updates. Feature doc: [livekit-participant-owned-projects.md](livekit-participant-owned-projects.md).
+
+## 2026-04-10 — ParticipantList Codex OAuth presence
+
+- **tddy-web**: `parseCodexOAuthPending` in `ParticipantList` — "Codex sign-in" column with `ExternalLink` icon for pending OAuth; `codexOauthMetadata.ts` parser. Cypress `ParticipantList.cy.tsx` OAuth assertions; Bun `codexOauthMetadata.test.ts`. Feature doc: [codex-oauth-web-relay.md](codex-oauth-web-relay.md).
+
+## 2026-04-06 — Codex OAuth web relay (dialog + docs)
+
+- **tddy-web**: **`CodexOAuthDialog`** — modal (**`codex-oauth-dialog`**), dismiss (**`codex-oauth-dismiss`**), sandboxed authorize **iframe** when **`embeddingBlocked`** is false; **embedding-blocked** panel (**`codex-oauth-embedding-fallback`**) with external link (**`noopener`**, **`noreferrer`**) when **`embeddingBlocked`** is true. Cypress **`CodexOAuthDialog.cy.tsx`**, **`CodexOAuthIframeFallback.cy.tsx`**.
+- **Docs**: **[codex-oauth-web-relay.md](codex-oauth-web-relay.md)**; package **[codex-oauth-dialog.md](../../../packages/tddy-web/docs/codex-oauth-dialog.md)**. Cross-package: **[docs/dev/changesets.md](../../dev/changesets.md)**; **[packages/tddy-web/docs/changesets.md](../../../packages/tddy-web/docs/changesets.md)**.
+
 ## 2026-04-05 — Connection screen: concurrent terminal attachments
 
 - **`tddy-web`**: **`ConnectionScreen`** stores **`sessionAttachments`** (**`Map<sessionId, LiveKitConnectionParams>`**); **Connect** / **Resume** / **Start** merge attachments without dropping prior sessions; **`focusedSessionIdFromPathname`** aligns **fullscreen** focus with **`/terminal/{sessionId}`**; floating **overlay** / **mini** render one **`ConnectedTerminal`** per attachment under **`data-testid="connection-attached-terminal-{sessionId}"`**; inactive **`ListSessions`** rows prune matching attachments only; **Disconnect** removes one entry; **popstate** to `/` clears all. Pure helpers: **`multiSessionState.ts`**, **`multiSessionPresentation.ts`**. Bun **`multiSessionState.test.ts`**, **`multiSessionPresentation.test.ts`**; Cypress **`ConnectionScreen.cy.tsx`** (multi-session scenarios).
 - **Feature doc**: [web-terminal.md](web-terminal.md) (daemon mode — concurrent attachments, attach behavior). **Dev reference**: [terminal-presentation.md](../../../packages/tddy-web/docs/terminal-presentation.md). Cross-package note: **[docs/dev/changesets.md](../../dev/changesets.md)**.
 
-## 2026-04-05 — Workflow recipe control: `review`
+## 2026-04-05 — Connection screen: workflow recipe control
 
-- **ConnectionScreen**: The **Workflow recipe** options include **`review`** alongside existing recipe names; the value is sent on **`StartSession`** as for other recipes.
-- **Reference**: [workflow-recipes.md](../coder/workflow-recipes.md) (**ReviewRecipe**, **Selecting a recipe**).
+- **`ConnectionScreen`**: **Workflow recipe** lists **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**, **`review`**, and **`merge-pr`**; the default selection for **Start New Session** is **`free-prompting`**. **`StartSession.recipe`** sends the selected CLI name to the daemon.
+- **Feature doc**: [web-terminal.md](web-terminal.md) (Projects — collapsible sections). Package **[tddy-web](../../packages/tddy-web/docs/changesets.md)**.
 
 ## 2026-04-05 — Terminal connection status bar (chrome layouts)
 
