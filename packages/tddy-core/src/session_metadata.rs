@@ -26,6 +26,9 @@ pub struct SessionMetadata {
     /// When true, the workflow is waiting on the user (plan/doc approval, clarifications, etc.).
     #[serde(default)]
     pub pending_elicitation: bool,
+    /// Optional parent session when this session was created as a chain child (PRD: session chaining).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_session_id: Option<String>,
 }
 
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
@@ -38,6 +41,8 @@ pub struct InitialToolSessionMetadataOpts {
     pub pid: Option<u32>,
     pub tool: Option<String>,
     pub livekit_room: Option<String>,
+    /// When set, `.session.yaml` records the stacked-from parent session id.
+    pub previous_session_id: Option<String>,
 }
 
 /// Writes `.session.yaml` for a newly created session directory.
@@ -71,6 +76,7 @@ pub fn write_initial_tool_session_metadata(
         tool: opts.tool,
         livekit_room: opts.livekit_room,
         pending_elicitation: false,
+        previous_session_id: opts.previous_session_id,
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -118,6 +124,7 @@ mod tests {
                 pid: Some(4242),
                 tool: Some("tddy-coder".to_string()),
                 livekit_room: None,
+                previous_session_id: None,
             },
         )
         .unwrap();
@@ -131,7 +138,29 @@ mod tests {
         assert_eq!(read.tool.as_deref(), Some("tddy-coder"));
         assert!(read.livekit_room.is_none());
         assert!(!read.pending_elicitation);
+        assert!(read.previous_session_id.is_none());
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// **chain_child_metadata_records_previous_session_id** — `.session.yaml` must allow optional
+    /// `previous_session_id` on [`SessionMetadata`] (PRD: chain child observability).
+    #[test]
+    fn chain_child_metadata_records_previous_session_id() {
+        let sid = "018f1234-5678-7abc-8def-123456789abc";
+        let prev = "019f1234-5678-7abc-8def-123456789abc";
+        let yaml = format!(
+            r#"session_id: {sid}
+project_id: proj-chain
+created_at: "2026-05-01T12:00:00Z"
+updated_at: "2026-05-01T12:00:00Z"
+status: active
+previous_session_id: {prev}
+"#
+        );
+        assert!(
+            serde_yaml::from_str::<SessionMetadata>(&yaml).is_ok(),
+            "SessionMetadata must accept optional previous_session_id and deserialize from .session.yaml (PRD session chaining)"
+        );
     }
 }

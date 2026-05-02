@@ -189,6 +189,7 @@ mod tests {
             tool: None,
             livekit_room: None,
             pending_elicitation: false,
+            previous_session_id: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }

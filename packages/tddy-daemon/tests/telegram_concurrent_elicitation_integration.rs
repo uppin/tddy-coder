@@ -113,13 +113,14 @@ fn count_eli_s_primary_keyboards(sender: &InMemoryTelegramSender, chat_id: i64) 
 }
 
 fn telegram_config() -> tddy_daemon::config::DaemonConfig {
-    let mut cfg = tddy_daemon::config::DaemonConfig::default();
-    cfg.telegram = Some(tddy_daemon::config::TelegramConfig {
-        enabled: true,
-        bot_token: "x".to_string(),
-        chat_ids: vec![AUTHORIZED_CHAT],
-    });
-    cfg
+    tddy_daemon::config::DaemonConfig {
+        telegram: Some(tddy_daemon::config::TelegramConfig {
+            enabled: true,
+            bot_token: "x".to_string(),
+            chat_ids: vec![AUTHORIZED_CHAT],
+        }),
+        ..Default::default()
+    }
 }
 
 /// When the head session leaves elicitation (e.g. answered on web), the queue advances and the

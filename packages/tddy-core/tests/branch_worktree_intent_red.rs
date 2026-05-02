@@ -23,17 +23,19 @@ fn temp_dir(label: &str) -> std::path::PathBuf {
 #[test]
 fn merge_persisted_workflow_sets_branch_worktree_intent_context_key() {
     let dir = temp_dir("ctx");
-    let mut cs = Changeset::default();
-    cs.workflow = Some(ChangesetWorkflow {
-        run_optional_step_x: Some(false),
-        demo_options: vec![],
-        tool_schema_id: Some("urn:tddy:tool/changeset-workflow".into()),
-        branch_worktree_intent: Some(BranchWorktreeIntent::NewBranchFromBase),
-        selected_integration_base_ref: Some("origin/main".into()),
-        new_branch_name: Some("feature/x".into()),
-        selected_branch_to_work_on: None,
+    let cs = Changeset {
+        workflow: Some(ChangesetWorkflow {
+            run_optional_step_x: Some(false),
+            demo_options: vec![],
+            tool_schema_id: Some("urn:tddy:tool/changeset-workflow".into()),
+            branch_worktree_intent: Some(BranchWorktreeIntent::NewBranchFromBase),
+            selected_integration_base_ref: Some("origin/main".into()),
+            new_branch_name: Some("feature/x".into()),
+            selected_branch_to_work_on: None,
+            ..Default::default()
+        }),
         ..Default::default()
-    });
+    };
     write_changeset(&dir, &cs).unwrap();
 
     let ctx = Context::new();

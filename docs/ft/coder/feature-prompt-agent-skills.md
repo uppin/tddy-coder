@@ -1,11 +1,11 @@
 # Feature prompt: project agent skills and `/recipe`
 
 **Product area**: Coder (tddy-coder, tddy-core)  
-**Status**: Library, presenter, and TUI slash menu (**`/start-…`**, **`/recipe`**, skills); default compose is **reference-only** (no inlined `SKILL.md` body).
+**Status**: Library, presenter, and TUI slash menu (**`/recipe`**, **`/chain`**, **`/start-…`**, skills); default compose is **reference-only** (no inlined `SKILL.md` body).
 
 ## Summary
 
-The workflow discovers **project skills** under **`.agents/skills/<skill-folder>/SKILL.md`** (YAML frontmatter with **`name`** and **`description`**). Valid skills appear in the feature-prompt slash menu after built-in **`/start-…`** rows and **`/recipe`** (see [Workflow recipes](workflow-recipes.md)). In the **TUI feature field**, choosing a skill inserts a compact **`/<skill-name>`** token (one logical unit for navigation and Backspace), drawn with a **dark-navy** background fill and **white** label text on the token. On **Enter** / submit, that token is expanded to the **agent-facing reference string** (fully-qualified **`@.agents/skills/<skill-name>`** tag, path to **`SKILL.md`**, “not inlined” instruction, and **`User request:`** with surrounding free text) via **`compose_prompt_skill_reference`** — the markdown body is **not** inlined (avoids prompt bloat). Selecting **`/recipe`** drives **workflow recipe selection** (TDD vs Bugfix) through the presenter when the user confirms an option.
+The workflow discovers **project skills** under **`.agents/skills/<skill-folder>/SKILL.md`** (YAML frontmatter with **`name`** and **`description`**). Valid skills appear in the feature-prompt slash menu after built-in **`/recipe`**, the **`/chain`** row, the shipped **`/start-…`** rows, and each valid skill folder (see [Workflow recipes](workflow-recipes.md)). In the **TUI feature field**, choosing a skill inserts a compact **`/<skill-name>`** token (one logical unit for navigation and Backspace), drawn with a **dark-navy** background fill and **white** label text on the token. On **Enter** / submit, that token is expanded to the **agent-facing reference string** (fully-qualified **`@.agents/skills/<skill-name>`** tag, path to **`SKILL.md`**, “not inlined” instruction, and **`User request:`** with surrounding free text) via **`compose_prompt_skill_reference`** — the markdown body is **not** inlined (avoids prompt bloat). Selecting **`/recipe`** drives **workflow recipe selection** (TDD vs Bugfix) through the presenter when the user confirms an option. The **`/chain`** row inserts the literal **`/chain`** label for stacked-session flows (same **`SlashMenuEntry::StartRecipe`** mechanism as **`/start-…`**).
 
 ## On-disk layout
 
@@ -20,7 +20,7 @@ Re-exported from **`tddy_core`**:
 | Item | Role |
 |------|------|
 | **`scan_skills_at_project_root`** | Returns **`SkillScanReport`** (**`valid`**, **`invalid`**) for a project root path. |
-| **`slash_menu_items`** | Returns **`SlashMenuItem`** values: **`StartRecipe { label }`** rows for shipped recipes, **`BuiltinRecipe`**, plus **`Skill { name }`** for each valid discovery. |
+| **`slash_menu_items`** | Returns **`SlashMenuItem`** values: **`BuiltinRecipe`**, **`StartRecipe { label }`** for **`/chain`** then each shipped **`/start-…`** label, plus **`Skill { name }`** for each valid discovery. |
 | **`compose_prompt_skill_reference`** | Default outbound prompt: **`@.agents/skills/<name>`** tag, path to **`SKILL.md`**, explicit “not inlined” instruction, **`User request:`** tail. |
 | **`compose_prompt_with_selected_skill`** | Optional **full inline** compose (fenced `SKILL.md` body) for backends that cannot read the repo. |
 | **`parse_skill_frontmatter`**, **`folder_name_matches_frontmatter_name`** | Parsing and folder/name checks for tests and tooling. |
@@ -37,9 +37,10 @@ The reference string includes:
 
 **Inline variant** ([**`compose_prompt_with_selected_skill`**](#public-api-tddy-core)): same header style as before, plus a fenced block with the full markdown body after frontmatter.
 
-## Built-in `/start-…` and `/recipe`
+## Built-in `/recipe`, `/chain`, and `/start-…`
 
 - **`/start-…`** rows correspond to shipped workflow recipes (**`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**). Submitting a **`/start-<cli>`** line selects that recipe, updates **`changeset.yaml`**, and restarts the workflow (see **Feature prompt: `/start-<recipe>`** in [Workflow recipes](workflow-recipes.md)).
+- **`/chain`** is a **`StartRecipe`**-shaped slash row for stacked-session entry (label **`/chain`**); product wiring for session selection and bootstrap aligns with Telegram **`/chain-workflow`** and core **`session_chain`** helpers.
 - **`Presenter::apply_feature_slash_builtin_recipe`** (only from **`AppMode::FeatureInput`**) arms a single-select question built by **`workflow_recipe_selection_question`** for labeled recipe options.
 - **`Presenter::with_recipe_resolver`** supplies a resolver from **`tddy-coder`** (**`resolve_workflow_recipe_from_cli_name`**) so the active **`WorkflowRecipe`** matches the chosen CLI name.
 - **`Presenter::recipe_slash_selection_active`** is true while that selection UI is active.

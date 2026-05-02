@@ -655,6 +655,7 @@ impl TelegramSessionWatcher {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)] // Telegram send path bundles chat/session/kb/dispatch
     async fn send_mode_changed_action_lines<S: TelegramSender + ?Sized>(
         &self,
         _config: &DaemonConfig,
@@ -1288,7 +1289,7 @@ fn clarification_multi_select_shortcut_keyboard(
     }
     crate::telegram_multi_select_shortcuts::build_multi_select_shortcut_keyboard_rows(
         session_id,
-        m.question_index as u32,
+        m.question_index,
         q.recommended_other.trim(),
     )
 }
@@ -1311,9 +1312,21 @@ impl Default for TelegramSessionWatcher {
 #[cfg(test)]
 mod acceptance_unit_tests {
     use super::*;
+    use crate::config::DaemonConfig;
     use async_trait::async_trait;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+
+    fn daemon_cfg_with_test_telegram() -> DaemonConfig {
+        DaemonConfig {
+            telegram: Some(crate::config::TelegramConfig {
+                enabled: true,
+                bot_token: "x".to_string(),
+                chat_ids: vec![42],
+            }),
+            ..Default::default()
+        }
+    }
 
     #[derive(Clone, Default)]
     struct MockSender {
@@ -1380,12 +1393,7 @@ mod acceptance_unit_tests {
     #[tokio::test]
     async fn on_server_message_state_changed_sends_then_dedupes() {
         let mut watcher = TelegramSessionWatcher::new();
-        let mut cfg = DaemonConfig::default();
-        cfg.telegram = Some(crate::config::TelegramConfig {
-            enabled: true,
-            bot_token: "x".to_string(),
-            chat_ids: vec![42],
-        });
+        let cfg = daemon_cfg_with_test_telegram();
         let mem = InMemoryTelegramSender::new();
         let sid = "018f1234-5678-7abc-8def-123456789abc";
         let m1 = ServerMessage {
@@ -1431,12 +1439,7 @@ mod acceptance_unit_tests {
     #[tokio::test]
     async fn telegram_notifier_sends_elicitation_message_on_mode_changed_to_user_input() {
         let mut watcher = TelegramSessionWatcher::new();
-        let mut cfg = DaemonConfig::default();
-        cfg.telegram = Some(crate::config::TelegramConfig {
-            enabled: true,
-            bot_token: "x".to_string(),
-            chat_ids: vec![42],
-        });
+        let cfg = daemon_cfg_with_test_telegram();
         let mem = InMemoryTelegramSender::new();
         let sid = "018f1234-5678-7abc-8def-123456789abc";
         let msg = tddy_service::convert::session_document_approval_to_server_message(
@@ -1478,7 +1481,7 @@ mod acceptance_unit_tests {
             .collect();
         for required in ["Approve", "Reject", "Refine"] {
             assert!(
-                labels.iter().any(|l| *l == required),
+                labels.contains(&required),
                 "keyboard must include {required}; got {labels:?}"
             );
         }
@@ -1488,12 +1491,7 @@ mod acceptance_unit_tests {
     #[tokio::test]
     async fn telegram_notifier_dedupes_repeated_identical_elicitation_signals() {
         let mut watcher = TelegramSessionWatcher::new();
-        let mut cfg = DaemonConfig::default();
-        cfg.telegram = Some(crate::config::TelegramConfig {
-            enabled: true,
-            bot_token: "x".to_string(),
-            chat_ids: vec![42],
-        });
+        let cfg = daemon_cfg_with_test_telegram();
         let mem = InMemoryTelegramSender::new();
         let sid = "018faaaa-1111-7abc-8def-123456789abc";
         let msg = tddy_service::convert::session_document_approval_to_server_message(
@@ -1525,12 +1523,7 @@ mod acceptance_unit_tests {
         };
 
         let mut watcher = TelegramSessionWatcher::new();
-        let mut cfg = DaemonConfig::default();
-        cfg.telegram = Some(crate::config::TelegramConfig {
-            enabled: true,
-            bot_token: "x".to_string(),
-            chat_ids: vec![42],
-        });
+        let cfg = daemon_cfg_with_test_telegram();
         let mem = InMemoryTelegramSender::new();
         let sid = "018f1234-5678-7abc-8def-123456789abc";
         let msg = ServerMessage {
@@ -1608,12 +1601,7 @@ mod acceptance_unit_tests {
         };
 
         let mut watcher = TelegramSessionWatcher::new();
-        let mut cfg = DaemonConfig::default();
-        cfg.telegram = Some(crate::config::TelegramConfig {
-            enabled: true,
-            bot_token: "x".to_string(),
-            chat_ids: vec![42],
-        });
+        let cfg = daemon_cfg_with_test_telegram();
         let mem = InMemoryTelegramSender::new();
         let sid = "018f1234-5678-7abc-8def-123456789abc";
         let msg = ServerMessage {
@@ -1682,12 +1670,7 @@ mod acceptance_unit_tests {
 
         let cache: ElicitationSelectOptionsCache = Arc::new(StdMutex::new(HashMap::new()));
         let mut watcher = TelegramSessionWatcher::with_elicitation_select_options(cache.clone());
-        let mut cfg = DaemonConfig::default();
-        cfg.telegram = Some(crate::config::TelegramConfig {
-            enabled: true,
-            bot_token: "x".to_string(),
-            chat_ids: vec![42],
-        });
+        let cfg = daemon_cfg_with_test_telegram();
         let mem = InMemoryTelegramSender::new();
         let sid = "018f1234-5678-7abc-8def-123456789abc";
         let msg = ServerMessage {
@@ -1736,12 +1719,7 @@ mod acceptance_unit_tests {
     #[tokio::test]
     async fn document_review_telegram_includes_full_multiline_presenter_body() {
         let mut watcher = TelegramSessionWatcher::new();
-        let mut cfg = DaemonConfig::default();
-        cfg.telegram = Some(crate::config::TelegramConfig {
-            enabled: true,
-            bot_token: "x".to_string(),
-            chat_ids: vec![42],
-        });
+        let cfg = daemon_cfg_with_test_telegram();
         let mem = InMemoryTelegramSender::new();
         let sid = "018fbbbb-2222-7abc-8def-123456789abc";
         let body = "PRD_SECTION_A\nPRD_SECTION_B\nPRD_SECTION_C";
@@ -1770,12 +1748,7 @@ mod acceptance_unit_tests {
         use tddy_service::gen::{AppModeMarkdownViewer, AppModeProto, ModeChanged, ServerMessage};
 
         let mut watcher = TelegramSessionWatcher::new();
-        let mut cfg = DaemonConfig::default();
-        cfg.telegram = Some(crate::config::TelegramConfig {
-            enabled: true,
-            bot_token: "x".to_string(),
-            chat_ids: vec![42],
-        });
+        let cfg = daemon_cfg_with_test_telegram();
         let mem = InMemoryTelegramSender::new();
         let sid = "018fcccc-3333-7abc-8def-123456789abc";
         let body = "## Plan\n\n- step one\n- step two";
@@ -1813,12 +1786,7 @@ mod acceptance_unit_tests {
     #[tokio::test]
     async fn document_review_splits_body_exceeding_telegram_message_limit() {
         let mut watcher = TelegramSessionWatcher::new();
-        let mut cfg = DaemonConfig::default();
-        cfg.telegram = Some(crate::config::TelegramConfig {
-            enabled: true,
-            bot_token: "x".to_string(),
-            chat_ids: vec![42],
-        });
+        let cfg = daemon_cfg_with_test_telegram();
         let mem = InMemoryTelegramSender::new();
         let sid = "018fdddd-4444-7abc-8def-123456789abc";
         let body = "Z".repeat(5000);

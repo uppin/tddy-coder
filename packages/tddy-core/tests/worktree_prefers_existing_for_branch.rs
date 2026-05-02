@@ -111,9 +111,11 @@ fn work_on_selected_reuses_existing_worktree_at_branch_tip_instead_of_second_add
     let session_dir = base.join("session");
     fs::create_dir_all(&session_dir).unwrap();
 
-    let mut cs = Changeset::default();
-    cs.name = Some("MergePR".into());
-    cs.worktree_suggestion = Some("merge-pr-would-use-this-basename".into());
+    let cs = Changeset {
+        name: Some("MergePR".into()),
+        worktree_suggestion: Some("merge-pr-would-use-this-basename".into()),
+        ..Default::default()
+    };
     write_changeset(&session_dir, &cs).unwrap();
 
     let workflow_yaml = r#"
@@ -208,9 +210,11 @@ fn optional_chain_base_path_reuses_existing_worktree_for_work_on_selected() {
     let session_dir = base.join("session");
     fs::create_dir_all(&session_dir).unwrap();
 
-    let mut cs = Changeset::default();
-    cs.name = Some("MergePR".into());
-    cs.worktree_suggestion = Some("merge-pr-would-use-this-basename".into());
+    let cs = Changeset {
+        name: Some("MergePR".into()),
+        worktree_suggestion: Some("merge-pr-would-use-this-basename".into()),
+        ..Default::default()
+    };
     write_changeset(&session_dir, &cs).unwrap();
 
     let workflow_yaml = r#"

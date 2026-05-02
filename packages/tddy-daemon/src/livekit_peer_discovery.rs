@@ -621,9 +621,10 @@ async fn advance_daemon_adv_publish_on_tick(
         st.round_deadline = None;
         return;
     }
-    if !st.last_sdk_call.map_or(true, |t| {
-        now.saturating_duration_since(t) >= SET_METADATA_MIN_SDK_CALL_INTERVAL
-    }) {
+    if st
+        .last_sdk_call
+        .is_some_and(|t| now.saturating_duration_since(t) < SET_METADATA_MIN_SDK_CALL_INTERVAL)
+    {
         return;
     }
     st.sdk_attempt = st.sdk_attempt.saturating_add(1);
@@ -667,6 +668,7 @@ async fn advance_daemon_adv_publish_on_tick(
 ///
 /// Returns `Some(reason)` after `RoomEvent::Disconnected`, or `None` when the event channel
 /// ends. Always calls `Room::close` so the next discovery cycle starts from a clean engine state.
+#[allow(clippy::too_many_arguments)] // room/event/registry wiring; a struct would obscure call sites
 async fn run_common_room_registry_loop(
     room: Arc<Room>,
     mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
@@ -993,9 +995,11 @@ mod tests {
 
     #[test]
     fn local_instance_id_appends_stable_timestamp_suffix_when_configured() {
-        let mut cfg = DaemonConfig::default();
-        cfg.daemon_instance_id = Some("my-daemon".to_string());
-        cfg.daemon_instance_id_append_startup_timestamp = true;
+        let cfg = DaemonConfig {
+            daemon_instance_id: Some("my-daemon".to_string()),
+            daemon_instance_id_append_startup_timestamp: true,
+            ..Default::default()
+        };
         let a = local_instance_id_for_config(&cfg);
         let b = local_instance_id_for_config(&cfg);
         assert_eq!(a, b);

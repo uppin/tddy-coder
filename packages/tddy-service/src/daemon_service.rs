@@ -383,6 +383,7 @@ impl DaemonStreamHandler {
                 pid: Some(std::process::id()),
                 tool: Some("tddy-coder".to_string()),
                 livekit_room: None,
+                previous_session_id: None,
             },
         ) {
             send_workflow_complete(&self.tx, false, format!("write session metadata: {}", e)).await;

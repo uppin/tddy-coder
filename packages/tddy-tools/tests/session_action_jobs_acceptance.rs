@@ -21,7 +21,7 @@ fn write_sample_action(session: &Path, body: &str) {
 
 /// Session fixture: slow script + sentinel file so premature success is detectable.
 fn session_with_bounded_sleep_touch_action() -> PathBuf {
-    let session = PathBuf::from(std::env::temp_dir()).join(format!(
+    let session = std::env::temp_dir().join(format!(
         "tddy_sess_jobs_accept_{}_{}",
         std::process::id(),
         std::time::SystemTime::now()
@@ -78,7 +78,7 @@ fn parse_record(outcome: SessionActionInvokeOutcome) -> Value {
 }
 
 /// 1. Blocking path must mirror today's synchronous structured JSON (exit code + captured streams)
-/// after the subprocess exits — never report success (`exit_code` et al.) before sentinel exists.
+///    after the subprocess exits — never report success (`exit_code` et al.) before sentinel exists.
 #[test]
 fn session_action_blocking_matches_legacy_semantics() {
     let session_dir = session_with_bounded_sleep_touch_action();
@@ -87,7 +87,7 @@ fn session_action_blocking_matches_legacy_semantics() {
     let t0 = std::time::Instant::now();
     let outcome = invoke_session_action(
         &session_dir,
-        repo.as_ref().map(|p| p.as_path()),
+        repo.as_deref(),
         "sleep-touch",
         &json!({}),
         SessionActionInvokeOptions { async_start: false },

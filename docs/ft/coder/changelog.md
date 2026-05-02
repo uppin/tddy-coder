@@ -2,9 +2,15 @@
 
 Release note history for the Coder product area.
 
+## 2026-05-02 — Session chaining (stacked PR groundwork)
+
+- **`tddy-core`**: **`session_metadata`** — optional **`previous_session_id`** on **`.session.yaml`**; **`session_chain`** — **`resolve_chain_integration_base_ref_from_parent_session`**, **`integrate_chain_base_into_session_worktree_bootstrap`** (delegates to **`setup_worktree_for_session_with_optional_chain_base`**); **`agent_skills::slash_menu_entries`** — **`/chain`** row after **`/recipe`**. **`tddy-integration-tests`**: **`session_chain_acceptance`**. **`tddy-tui`**: slash menu test **`tui_chain_slash_offers_recent_sessions`**.
+- **Feature docs**: [git-integration-base-ref.md](git-integration-base-ref.md), [session-layout.md](session-layout.md), [feature-prompt-agent-skills.md](feature-prompt-agent-skills.md); daemon [telegram-session-control.md](../daemon/telegram-session-control.md). **WIP**: [2026-05-02-changeset-session-chaining.md](../../dev/1-WIP/2026-05-02-changeset-session-chaining.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-05-02 — Presenter clarification MultiSelect (empty answer guard)
 
 - **`tddy-core`**: **`AnswerClarificationMultiSelect`** validation rejects empty selected indices when **Other** text is absent and **`allow_other`** on the active clarification question is **false** (aligns Telegram **Choose none** / index-based **`/answer-multi`** semantics with presenter gating).
+
 ## 2026-05-02 — Post-workflow GitHub PR + worktree elicitation (durable workflow + policy)
 
 - **tddy-workflow-recipes**: **`changeset-workflow`** JSON Schema — **`post_workflow_open_github_pr`**, **`post_workflow_remove_session_worktree`**, **`github_pr_status`** (**`phase`**, **`url`**, **`error`**, all required keys with explicit **`null`** allowed for absent URL/error).

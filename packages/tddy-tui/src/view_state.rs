@@ -1232,6 +1232,37 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// **tui_chain_slash_offers_recent_sessions** — `/chain` must appear in the feature slash menu and
+    /// drive stacked-session selection (dropdown of recent sessions when wired).
+    #[test]
+    fn tui_chain_slash_offers_recent_sessions() {
+        use std::fs;
+        let mut vs = ViewState::new();
+        let root =
+            std::env::temp_dir().join(format!("tddy-chain-slash-menu-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".agents/skills")).expect("mkdir skills");
+        vs.on_mode_changed(&AppMode::FeatureInput);
+        let slash = KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty());
+        assert!(vs.handle_key_view_local(
+            slash,
+            &AppMode::FeatureInput,
+            0,
+            false,
+            Some(root.as_path())
+        ));
+        assert!(vs.feature_slash_open);
+        assert!(
+            vs.feature_slash_entries.iter().any(|e| matches!(
+                e,
+                tddy_core::SlashMenuEntry::StartRecipe { label } if label == "/chain"
+            )),
+            "slash menu must offer /chain for stacked workflow (PRD); got {:?}",
+            vs.feature_slash_entries
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn feature_slash_mid_word_does_not_open() {
         let mut vs = ViewState::new();

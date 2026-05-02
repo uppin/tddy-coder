@@ -14,6 +14,7 @@ pub mod presenter;
 pub mod session_action_jobs;
 pub mod session_action_pipeline;
 pub mod session_actions;
+pub mod session_chain;
 pub mod session_lifecycle;
 pub mod session_metadata;
 pub mod source_path;
@@ -70,6 +71,10 @@ pub use presenter::{
     AppMode, CriticalPresenterState, ExitAction, ModeChangedDetails, PendingWorkflowStart,
     Presenter, PresenterEvent, PresenterHandle, PresenterState, PresenterView, UserIntent,
     ViewConnection, WorkflowCompletePayload, WorkflowEvent,
+};
+pub use session_chain::{
+    integrate_chain_base_into_session_worktree_bootstrap,
+    resolve_chain_integration_base_ref_from_parent_session,
 };
 pub use session_lifecycle::{
     materialize_unified_session_directory, resolve_effective_session_id, unified_session_dir_path,

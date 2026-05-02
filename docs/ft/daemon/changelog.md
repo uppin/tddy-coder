@@ -2,6 +2,12 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-05-02 — Session chaining (`/chain-workflow` and core helpers)
+
+- **`tddy-daemon`**: **`handle_chain_workflow`** — child session creation, **`session_reader::list_sessions_in_dir`**-driven parent picker (**`tcp:<idx>|s:<child_session_id>`**), then recipe keyboard; **`CB_TELEGRAM_CHAIN_PARENT`**, **`parse_telegram_chain_parent_callback`**. Integration **`telegram_chain_workflow_shows_parent_pick_first`**.
+- **`tddy-core`**: **`session_chain`** (**`resolve_chain_integration_base_ref_from_parent_session`**, **`integrate_chain_base_into_session_worktree_bootstrap`**); **`SessionMetadata.previous_session_id`** / **`InitialToolSessionMetadataOpts`**; **`slash_menu_entries`** includes **`/chain`**. Tests: **`session_chain_acceptance`**, **`session_metadata::chain_child_metadata_records_previous_session_id`**, **`session_chain`** unit tests.
+- **Feature docs**: [telegram-session-control.md](telegram-session-control.md), [git-integration-base-ref.md](../coder/git-integration-base-ref.md), [session-layout.md](../coder/session-layout.md), [feature-prompt-agent-skills.md](../coder/feature-prompt-agent-skills.md). **WIP**: [2026-05-02-changeset-session-chaining.md](../../dev/1-WIP/2026-05-02-changeset-session-chaining.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-05-02 — Telegram tracked session gate and chat traffic logs
 
 - **`tddy-daemon`**: **`telegram_tracked_session`** — per-chat optional **`session_id`** binding (**`SharedTelegramTrackedSessionCoordinator`**) shared with **`TelegramSessionWatcher`** and **`telegram_session_control`**; presenter **`ModeChanged`** workflow keyboards suppress under **no / mismatched** tracking with **Enter session** fallback; **queue promotion replay** bypasses the gate; **Enter** binds + **elicitation replay**; clears on **WorkflowComplete**, matching **delete**, or explicit per-chat clear. Structured **`telegram_traffic`** logs on **`tddy_daemon::telegram`**; inbound message/callback summaries on **`tddy_daemon::telegram_bot`**. Integration **`telegram_tracked_session_acceptance`**; concurrent + multi-select suites bind tracking where full keyboards are asserted.

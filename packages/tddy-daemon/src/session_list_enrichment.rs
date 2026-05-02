@@ -404,6 +404,7 @@ state:
             tool: None,
             livekit_room: None,
             pending_elicitation: true,
+            previous_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(

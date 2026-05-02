@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use image::RgbaImage;
 use xcap::{Monitor, Window, XCapResult};
 
+#[cfg(target_os = "macos")]
 use crate::macos_access::{request_screen_capture_access, warn_if_screen_capture_denied};
 
 /// Parsed CLI target (before resolving against current `Monitor::all()` / `Window::all()`).

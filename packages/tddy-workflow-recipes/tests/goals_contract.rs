@@ -50,12 +50,12 @@ fn goals_json_includes_merge_pr_report_goal() {
         .filter_map(|g| g["name"].as_str())
         .collect();
     assert!(
-        names.iter().any(|n| *n == "merge-pr-report"),
+        names.contains(&"merge-pr-report"),
         "goals.json must register merge-pr-report for structured finalize submit (PRD schema contract); got {:?}",
         names
     );
     assert!(
-        names.iter().any(|n| *n == "merge-pr-analyze"),
+        names.contains(&"merge-pr-analyze"),
         "goals.json must register merge-pr-analyze for optional structured analyze submit (worktree_suggestion); got {:?}",
         names
     );

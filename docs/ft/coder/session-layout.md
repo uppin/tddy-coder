@@ -10,6 +10,10 @@ Session state for the CLI, headless daemon (`tddy-service`), and `tddy-daemon` l
 
 `changeset.yaml`, logs, workflow artifacts, and recipe-specific files under `artifacts/` sit inside that directory.
 
+## `.session.yaml` (daemon session metadata)
+
+Each session directory may include **`.session.yaml`** (**`SESSION_METADATA_FILENAME`** in **tddy-core**): **`session_id`**, **`project_id`**, timestamps, **`status`**, optional **`repo_path`**, **`pid`**, **`tool`**, optional **`livekit_room`**, **`pending_elicitation`**, and optional **`previous_session_id`**. When **`previous_session_id`** is present, the session is a **chain child** for stacked PR workflows; absent field means a standalone session with no parent pointer.
+
 ## Session actions subdirectory
 
 Declarative **`tddy-tools`** action manifests reside under **`actions/`**:

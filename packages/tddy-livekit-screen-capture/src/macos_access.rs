@@ -33,6 +33,7 @@ mod imp {
 mod imp {
     pub fn request_screen_capture_access() {}
 
+    #[allow(dead_code)] // macOS calls this from `warn_if_screen_capture_denied`; Linux stub is unused.
     pub fn screen_capture_granted() -> bool {
         true
     }
