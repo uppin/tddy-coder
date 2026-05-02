@@ -39,7 +39,7 @@ Actual REST calls, token requirements, and MCP tool wiring remain under **[githu
 
 ### Outstanding product work
 
-End-of-graph **presenter** flows (**`workflow_runner`**, plain mode, Telegram/daemon callback parity) still need to **collect** answers, **invoke** automation, **write** intermediate phases to **`changeset.yaml`**, and **fan out** status lines across channels. This document describes the **durable contract** and **policy surface** those layers consume.
+Ordered elicitation at **`WorkflowComplete`**, GitHub REST execution with phases written through **`persist-changeset-workflow`**, and session worktree removal follow **`tddy_core::worktree`** conventions. Presenters should align with **`demo_options`** / **`run_optional_step_x`** persistence patterns (same durable **`changeset.yaml`** **`workflow`** shape). End-of-graph **presenter** flows (**`workflow_runner`**, plain mode, Telegram/daemon callback parity) still need to **collect** answers, **invoke** automation, **fan out** status lines across channels, and reflect intermediate **`github_pr_status.phase`** updates in **`changeset.yaml`**. This document describes the **durable contract** and **policy surface** those layers consume.
 
 ## Related
 
