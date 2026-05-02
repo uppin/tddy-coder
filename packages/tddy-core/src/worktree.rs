@@ -1386,7 +1386,7 @@ mod chain_pr_red_tests {
         );
     }
 
-    /// Lower-level RED: resolve must read persisted `changeset.yaml` and return stored effective ref.
+    /// Lower-level regression: resolve must read persisted `changeset.yaml` and return stored effective ref.
     #[test]
     fn chain_pr_resolve_persisted_reads_changeset_red() {
         let base = std::env::temp_dir().join("tddy-core-chain-pr-resolve-red");
@@ -1397,9 +1397,11 @@ mod chain_pr_red_tests {
         let session_dir = base.join("session");
         fs::create_dir_all(&session_dir).unwrap();
 
-        let mut cs = crate::changeset::Changeset::default();
-        cs.effective_worktree_integration_base_ref = Some("origin/feature/pr-base".to_string());
-        cs.worktree_integration_base_ref = Some("origin/feature/pr-base".to_string());
+        let cs = crate::changeset::Changeset {
+            effective_worktree_integration_base_ref: Some("origin/feature/pr-base".to_string()),
+            worktree_integration_base_ref: Some("origin/feature/pr-base".to_string()),
+            ..Default::default()
+        };
         crate::changeset::write_changeset(&session_dir, &cs).unwrap();
 
         let resolved = resolve_persisted_worktree_integration_base_for_session(&session_dir, &repo);

@@ -203,9 +203,8 @@ pub fn run_input_mapper_for_envelope(
     let mut child = cmd.spawn().map_err(SessionActionPipelineError::Io)?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        serde_json::to_writer(&mut stdin, input).map_err(|e| {
-            SessionActionPipelineError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
-        })?;
+        serde_json::to_writer(&mut stdin, input)
+            .map_err(|e| SessionActionPipelineError::Io(std::io::Error::other(e)))?;
     }
 
     let output = child

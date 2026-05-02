@@ -1288,7 +1288,7 @@ fn clarification_multi_select_shortcut_keyboard(
     }
     crate::telegram_multi_select_shortcuts::build_multi_select_shortcut_keyboard_rows(
         session_id,
-        m.question_index as u32,
+        m.question_index,
         q.recommended_other.trim(),
     )
 }
@@ -1310,6 +1310,8 @@ impl Default for TelegramSessionWatcher {
 
 #[cfg(test)]
 mod acceptance_unit_tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use super::*;
     use async_trait::async_trait;
     use std::collections::HashMap;
@@ -1478,7 +1480,7 @@ mod acceptance_unit_tests {
             .collect();
         for required in ["Approve", "Reject", "Refine"] {
             assert!(
-                labels.iter().any(|l| *l == required),
+                labels.contains(&required),
                 "keyboard must include {required}; got {labels:?}"
             );
         }

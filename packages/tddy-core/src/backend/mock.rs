@@ -185,4 +185,8 @@ impl CodingBackend for MockBackend {
     fn submit_channel(&self) -> Option<&SubmitResultChannel> {
         Some(&self.submit_channel)
     }
+
+    fn action_invoke_cache_eligible(&self) -> bool {
+        false
+    }
 }

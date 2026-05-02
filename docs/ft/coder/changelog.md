@@ -2,9 +2,16 @@
 
 Release note history for the Coder product area.
 
+## 2026-05-02 — Session workflow action cache (`tddy-tools submit` replay)
+
+- **tddy-core**: **`workflow::action_cache`** — per-session **`.workflow/action-cache.json`**; **`BackendInvokeTask`** skips **`CodingBackend::invoke`** on cache hit; persists after successful **`submit`**; **`FlowRunner`** sets **`workflow_engine_graph_id`** / **`workflow_engine_current_task_id`** on **`Context`**; opt-out **`disable_action_cache`** / **`TDDY_DISABLE_ACTION_CACHE`**; **`CodingBackend::action_invoke_cache_eligible`** (**`MockBackend`** **false**). Tests: **`workflow::action_cache`** unit tests; **`tddy-integration-tests`** **`workflow_graph`** (**`action_cache_*`**).
+- **tddy-tools**: Acceptance tests **`actions_cli_acceptance`**, **`session_action_jobs_acceptance`** aligned with cache behavior.
+- **Docs**: **[session-actions.md](session-actions.md)** (Workflow action cache); **[architecture.md](../../../packages/tddy-core/docs/architecture.md#workflow-action-cache)**; **[docs/dev/changesets.md](../../dev/changesets.md)**; package **[changesets.md](../../../packages/tddy-core/docs/changesets.md)**, **[changesets.md](../../../packages/tddy-tools/docs/changesets.md)**.
+
 ## 2026-05-02 — Presenter clarification MultiSelect (empty answer guard)
 
 - **`tddy-core`**: **`AnswerClarificationMultiSelect`** validation rejects empty selected indices when **Other** text is absent and **`allow_other`** on the active clarification question is **false** (aligns Telegram **Choose none** / index-based **`/answer-multi`** semantics with presenter gating).
+
 ## 2026-05-02 — Post-workflow GitHub PR + worktree elicitation (durable workflow + policy)
 
 - **tddy-workflow-recipes**: **`changeset-workflow`** JSON Schema — **`post_workflow_open_github_pr`**, **`post_workflow_remove_session_worktree`**, **`github_pr_status`** (**`phase`**, **`url`**, **`error`**, all required keys with explicit **`null`** allowed for absent URL/error).

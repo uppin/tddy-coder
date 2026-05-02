@@ -23,20 +23,22 @@ fn temp_dir(label: &str) -> std::path::PathBuf {
 #[test]
 fn merge_persisted_workflow_writes_post_github_pr_fields_to_context() {
     let dir = temp_dir("merge-fields");
-    let mut cs = Changeset::default();
-    cs.workflow = Some(ChangesetWorkflow {
-        run_optional_step_x: Some(false),
-        demo_options: vec![],
-        tool_schema_id: Some("urn:tddy:tool/changeset-workflow".into()),
-        post_workflow_open_github_pr: Some(true),
-        post_workflow_remove_session_worktree: Some(false),
-        github_pr_status: Some(GithubPrStatus {
-            phase: "published".into(),
-            url: Some("https://github.com/example/repo/pull/7".into()),
-            error: None,
+    let cs = Changeset {
+        workflow: Some(ChangesetWorkflow {
+            run_optional_step_x: Some(false),
+            demo_options: vec![],
+            tool_schema_id: Some("urn:tddy:tool/changeset-workflow".into()),
+            post_workflow_open_github_pr: Some(true),
+            post_workflow_remove_session_worktree: Some(false),
+            github_pr_status: Some(GithubPrStatus {
+                phase: "published".into(),
+                url: Some("https://github.com/example/repo/pull/7".into()),
+                error: None,
+            }),
+            ..Default::default()
         }),
         ..Default::default()
-    });
+    };
     write_changeset(&dir, &cs).unwrap();
 
     let ctx = Context::new();

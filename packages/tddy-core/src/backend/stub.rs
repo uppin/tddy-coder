@@ -64,6 +64,11 @@ impl StubBackend {
         }
     }
 
+    /// Count of [`CodingBackend::invoke`] calls observed by this stub (for cache / integration assertions).
+    pub fn invocation_count_snapshot(&self) -> u32 {
+        self.invocation_count.load(Ordering::SeqCst)
+    }
+
     pub fn with_executor(tool_executor: Arc<dyn ToolExecutor>) -> Self {
         Self {
             invocation_count: AtomicU32::new(0),

@@ -6,6 +6,10 @@ use crate::backend::{
     CodingBackend, GoalHints, GoalId, InvokeRequest, SessionMode, WorkflowRecipe,
 };
 use crate::toolcall::take_submit_result_for_goal;
+use crate::workflow::action_cache::{
+    action_cache_disabled, fingerprint_action_inputs, lookup_cached_completed_submit,
+    persist_successful_submit_to_action_cache, stable_action_cache_key, ActionFingerprintParts,
+};
 use crate::workflow::context::Context;
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -260,7 +264,68 @@ impl Task for BackendInvokeTask {
         };
 
         let key = self.submit_key.as_str();
+
+        let graph_for_cache = context
+            .get_sync::<String>("workflow_engine_graph_id")
+            .unwrap_or_default();
+
+        let fingerprint_parts = ActionFingerprintParts {
+            goal_id: self.goal_id.to_string(),
+            effective_prompt: prompt.clone(),
+            system_prompt: context.get_sync("system_prompt"),
+            model: context.get_sync("model"),
+        };
+        let fingerprint_opt = fingerprint_action_inputs(&fingerprint_parts);
+
         let mut prompt_for_invoke = prompt;
+
+        if let Some(ref sd) = session_dir {
+            if !action_cache_disabled(&context) && self.backend.action_invoke_cache_eligible() {
+                if let Some(ref digest) = fingerprint_opt {
+                    let action_key = stable_action_cache_key(
+                        graph_for_cache.as_str(),
+                        self.id.as_str(),
+                        self.goal_id.as_str(),
+                    );
+                    log::debug!(
+                        target: "tddy_core::workflow::backend_invoke_task",
+                        "action-cache PRELOOKUP task={} ak={:?} fingerprint_len={}",
+                        self.id,
+                        action_key,
+                        digest.len()
+                    );
+                    if let Some(cached_output) =
+                        lookup_cached_completed_submit(sd.as_path(), &action_key, digest)
+                    {
+                        log::info!(
+                            target: "tddy_core::workflow::backend_invoke_task",
+                            "action-cache HIT skip backend invoke task={} goal={}",
+                            self.id,
+                            self.goal_id
+                        );
+                        context.set_sync("output", cached_output.clone());
+                        return Ok(TaskResult {
+                            response: cached_output,
+                            next_action: NextAction::Continue,
+                            task_id: self.id.clone(),
+                            status_message: Some(format!("{} step complete", self.id)),
+                        });
+                    }
+                    log::debug!(
+                        target: "tddy_core::workflow::backend_invoke_task",
+                        "action-cache miss task={} — invoking {}",
+                        self.id,
+                        self.backend.name()
+                    );
+                }
+            } else {
+                log::debug!(
+                    target: "tddy_core::workflow::backend_invoke_task",
+                    "action-cache disabled for task={}",
+                    self.id
+                );
+            }
+        }
 
         for attempt in 0..BACKEND_INVOKE_MAX_ATTEMPTS_WITHOUT_SUBMIT {
             let request = InvokeRequest {
@@ -309,6 +374,36 @@ impl Task for BackendInvokeTask {
 
             if let Some(output) = submit_output {
                 context.set_sync("output", output.clone());
+                if let (Some(sd), Some(digest)) = (session_dir.as_ref(), fingerprint_opt.as_ref()) {
+                    if !action_cache_disabled(&context)
+                        && self.backend.action_invoke_cache_eligible()
+                    {
+                        let action_key = stable_action_cache_key(
+                            graph_for_cache.as_str(),
+                            self.id.as_str(),
+                            self.goal_id.as_str(),
+                        );
+                        match persist_successful_submit_to_action_cache(
+                            sd.as_path(),
+                            self.goal_id.as_str(),
+                            &action_key,
+                            digest,
+                            output.as_str(),
+                        ) {
+                            Ok(()) => log::trace!(
+                                target: "tddy_core::workflow::backend_invoke_task",
+                                "action-cache persisted for task {}",
+                                self.id,
+                            ),
+                            Err(e) => log::warn!(
+                                target: "tddy_core::workflow::backend_invoke_task",
+                                "action-cache persist failed for task {}: {}",
+                                self.id,
+                                e,
+                            ),
+                        }
+                    }
+                }
                 let prior = context.get_sync::<String>("session_id");
                 if let Some(eff) = crate::session_lifecycle::resolve_effective_session_id(
                     prior.as_deref(),

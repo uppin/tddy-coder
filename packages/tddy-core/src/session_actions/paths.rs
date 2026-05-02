@@ -117,7 +117,7 @@ fn join_under_root(
 }
 
 fn split_path_parts(user: &str) -> Vec<String> {
-    user.split(|c| c == '/' || c == '\\')
+    user.split(['/', '\\'])
         .map(std::borrow::ToOwned::to_owned)
         .collect()
 }
@@ -133,7 +133,7 @@ fn lexical_normalize_path(path: &Path) -> PathBuf {
             }
             Component::CurDir => {}
             Component::ParentDir => {
-                if matches!(out.components().last(), Some(Component::Normal(_))) {
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
                     let _ = out.pop();
                 }
             }

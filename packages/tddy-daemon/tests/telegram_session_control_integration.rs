@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)]
+
 //! Integration acceptance tests: Telegram inbound control plane → session + changeset + presenter inputs.
 //! Integration tests for [`tddy_daemon::telegram_session_control`] (harness + sender recording).
 
@@ -686,11 +688,11 @@ async fn telegram_intent_pick_shown_after_recipe() {
     let nb = format!("intent:nb|s:{session_id}");
     let ws = format!("intent:ws|s:{session_id}");
     assert!(
-        callbacks.iter().any(|d| *d == nb.as_str()),
+        callbacks.contains(&nb.as_str()),
         "expected nb intent callback; got {callbacks:?}"
     );
     assert!(
-        callbacks.iter().any(|d| *d == ws.as_str()),
+        callbacks.contains(&ws.as_str()),
         "expected ws intent callback; got {callbacks:?}"
     );
 }

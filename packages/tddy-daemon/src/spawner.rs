@@ -749,13 +749,19 @@ mod livekit_spawn_instance_id_tests {
 
     #[test]
     fn without_common_room_only_yaml_instance_id_opt_in() {
-        let mut c = DaemonConfig::default();
-        c.livekit = Some(LiveKitConfig {
-            url: Some("ws://x".into()),
+        let base = DaemonConfig {
+            livekit: Some(LiveKitConfig {
+                url: Some("ws://x".into()),
+                ..Default::default()
+            }),
             ..Default::default()
-        });
-        assert_eq!(livekit_spawn_daemon_instance_id(&c), None);
-        c.daemon_instance_id = Some(" west ".into());
+        };
+        assert_eq!(livekit_spawn_daemon_instance_id(&base), None);
+        let c = DaemonConfig {
+            livekit: base.livekit.clone(),
+            daemon_instance_id: Some(" west ".into()),
+            ..Default::default()
+        };
         assert_eq!(
             livekit_spawn_daemon_instance_id(&c).as_deref(),
             Some("west")
@@ -764,12 +770,14 @@ mod livekit_spawn_instance_id_tests {
 
     #[test]
     fn with_common_room_uses_local_instance_id_even_without_yaml_override() {
-        let mut c = DaemonConfig::default();
-        c.livekit = Some(LiveKitConfig {
-            url: Some("ws://x".into()),
-            common_room: Some("lobby".into()),
+        let c = DaemonConfig {
+            livekit: Some(LiveKitConfig {
+                url: Some("ws://x".into()),
+                common_room: Some("lobby".into()),
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
         let id = livekit_spawn_daemon_instance_id(&c).expect("some");
         assert!(!id.is_empty());
     }

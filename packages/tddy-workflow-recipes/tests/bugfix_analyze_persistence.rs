@@ -46,12 +46,14 @@ fn bugfix_analyze_sets_workflow_new_branch_name_when_intent_is_new_branch_from_b
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("temp session dir");
 
-    let mut cs = Changeset::default();
-    cs.workflow = Some(ChangesetWorkflow {
-        branch_worktree_intent: Some(BranchWorktreeIntent::NewBranchFromBase),
-        selected_integration_base_ref: Some("origin/main".into()),
+    let cs = Changeset {
+        workflow: Some(ChangesetWorkflow {
+            branch_worktree_intent: Some(BranchWorktreeIntent::NewBranchFromBase),
+            selected_integration_base_ref: Some("origin/main".into()),
+            ..Default::default()
+        }),
         ..Default::default()
-    });
+    };
     write_changeset(&dir, &cs).expect("seed changeset.yaml");
 
     let hooks = BugfixWorkflowHooks::new(None);

@@ -3,6 +3,8 @@
 pub mod ids;
 pub mod recipe;
 
+pub mod action_cache;
+
 mod agent_output;
 
 pub use agent_output::{

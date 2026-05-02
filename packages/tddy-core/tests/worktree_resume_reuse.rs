@@ -69,10 +69,12 @@ fn setup_worktree_reuses_existing_linked_worktree_when_changeset_omits_worktree_
     let session_dir = base.join("session");
     fs::create_dir_all(&session_dir).unwrap();
 
-    let mut cs = Changeset::default();
-    cs.name = Some("ResumeReuse".into());
-    cs.branch_suggestion = Some("main".into());
-    cs.worktree_suggestion = Some("resume-wt".into());
+    let cs = Changeset {
+        name: Some("ResumeReuse".into()),
+        branch_suggestion: Some("main".into()),
+        worktree_suggestion: Some("resume-wt".into()),
+        ..Default::default()
+    };
     write_changeset(&session_dir, &cs).unwrap();
 
     let workflow_yaml = r#"

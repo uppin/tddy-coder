@@ -107,10 +107,12 @@ fn create_new_branch_intent_uses_base_ref_and_new_branch_name() {
     let session_dir = base.join("session");
     fs::create_dir_all(&session_dir).unwrap();
 
-    let mut cs = Changeset::default();
-    cs.name = Some("Acceptance".into());
-    cs.branch_suggestion = Some("feature/ignored-by-intent".into());
-    cs.worktree_suggestion = Some("intent-wt".into());
+    let cs = Changeset {
+        name: Some("Acceptance".into()),
+        branch_suggestion: Some("feature/ignored-by-intent".into()),
+        worktree_suggestion: Some("intent-wt".into()),
+        ..Default::default()
+    };
     write_changeset(&session_dir, &cs).unwrap();
 
     let workflow_yaml = r#"
@@ -161,10 +163,12 @@ fn work_on_selected_branch_intent_checks_out_existing_branch_in_new_worktree() {
     let session_dir = base.join("session");
     fs::create_dir_all(&session_dir).unwrap();
 
-    let mut cs = Changeset::default();
-    cs.name = Some("WorkOnSelected".into());
-    cs.branch_suggestion = Some("main".into());
-    cs.worktree_suggestion = Some("main-wt".into());
+    let cs = Changeset {
+        name: Some("WorkOnSelected".into()),
+        branch_suggestion: Some("main".into()),
+        worktree_suggestion: Some("main-wt".into()),
+        ..Default::default()
+    };
     write_changeset(&session_dir, &cs).unwrap();
 
     let workflow_yaml = r#"
