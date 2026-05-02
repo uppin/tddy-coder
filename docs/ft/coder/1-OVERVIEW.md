@@ -2,11 +2,11 @@
 
 **Type**: Technical Product (Developer Tool)
 **Status**: Active
-**Updated**: 2026-05-01
+**Updated**: 2026-05-02
 
 ## Summary
 
-tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backend (Claude Code CLI, Claude ACP, Cursor agent, OpenAI Codex CLI, OpenAI Codex via ACP (`codex-acp`), or Stub) through a strict workflow: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor → update-docs. It produces structured artifacts (PRD.md, TODO.md, acceptance-tests.md, progress.md, etc.) in a plan directory and maintains workflow state in changeset.yaml. The tool supports both TUI mode (interactive ratatui interface) and plain mode (linear output for piping and scripting).
+tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backend (Claude Code CLI, Claude ACP, Cursor agent, OpenAI Codex CLI, OpenAI Codex via ACP (`codex-acp`), or Stub) through a strict workflow: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor → update-docs. It produces structured artifacts (PRD.md, TODO.md, acceptance-tests.md, progress.md, etc.) in a plan directory and maintains workflow state in changeset.yaml. The **`workflow`** subsection of **`changeset.yaml`** persists post-green routing, branch/worktree intent, and (**when present**) optional post-workflow GitHub PR and session-worktree elicitation fields validated by **`changeset-workflow`**; see **[post-workflow-github-pr-elicitation.md](post-workflow-github-pr-elicitation.md)**. The tool supports both TUI mode (interactive ratatui interface) and plain mode (linear output for piping and scripting).
 
 ## Target Users
 
@@ -51,6 +51,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 |---------|-------------|
 | [Session actions](session-actions.md) | Declarative **`actions/*.yaml`** beside **`changeset.yaml`**; **`tddy-tools list-actions`** / **`invoke-action`**; JSON Schema inputs; optional cargo-style summaries; path sandbox aligned with **`repo_path`** |
 | [Workflow JSON Schemas](workflow-json-schemas.md) | JSON Schema contracts per goal; `goals.json` registry; `tddy-tools` `get-schema`, `list-schemas`, `submit` validation |
+| [Post-workflow GitHub PR and worktree elicitation](post-workflow-github-pr-elicitation.md) | Durable **`changeset.workflow`** post-workflow fields; **`persist-changeset-workflow`**; **`merge_persisted_workflow_into_context`**; **`post_workflow`** helpers for ordering, resume gating, and operator-facing PR status strings |
 | [GitHub pull request tools (MCP)](github-pr-tools-mcp.md) | **`github_create_pull_request`** / **`github_update_pull_request`** on **`tddy-tools --mcp`**; shared REST constants; merge-pr and **tdd-small** prompt gating |
 | [Workflow recipes](workflow-recipes.md) | Pluggable `WorkflowRecipe`; shipped recipes include **`TddRecipe`**, **`TddSmallRecipe`**, **`BugfixRecipe`**, **`FreePromptingRecipe`**, and **`GrillMeRecipe`**; **new sessions** default to **`free-prompting`** when no recipe is specified; `recipe_resolve` in `tddy-workflow-recipes`; `GoalId` / string states; **FeatureInput** **`/start-<recipe>`** and slash menu rows. **Grill me** **Create plan** brief: session `artifacts/grill-me-brief.md`; repo persistence per [AGENTS.md](../../../AGENTS.md) (`plans/` or feature-doc path). (Updated: 2026-04-05) |
 | [Planning Step](planning-step.md) | Plan goal, acceptance-tests goal, plan approval gate, CLI interface, LLM backend abstraction |

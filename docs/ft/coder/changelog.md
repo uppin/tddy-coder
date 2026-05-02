@@ -5,6 +5,14 @@ Release note history for the Coder product area.
 ## 2026-05-02 — Presenter clarification MultiSelect (empty answer guard)
 
 - **`tddy-core`**: **`AnswerClarificationMultiSelect`** validation rejects empty selected indices when **Other** text is absent and **`allow_other`** on the active clarification question is **false** (aligns Telegram **Choose none** / index-based **`/answer-multi`** semantics with presenter gating).
+## 2026-05-02 — Post-workflow GitHub PR + worktree elicitation (durable workflow + policy)
+
+- **tddy-workflow-recipes**: **`changeset-workflow`** JSON Schema — **`post_workflow_open_github_pr`**, **`post_workflow_remove_session_worktree`**, **`github_pr_status`** (**`phase`**, **`url`**, **`error`**, all required keys with explicit **`null`** allowed for absent URL/error).
+- **tddy-core**: **`GithubPrStatus`**, **`ChangesetWorkflow`** fields; **`merge_persisted_workflow_into_context`** exposes **`post_workflow_*`** and **`github_pr_status`** on **`Context`**; **`post_workflow`** — **`post_workflow_elicitation_step_order`**, **`should_prompt_session_worktree_removal`**, **`should_reprompt_github_pr_on_resume`**, **`post_workflow_pr_status_display_line`**. Tests: **`post_workflow_pr_elicitation_acceptance`**, **`post_workflow_pr_elicitation_merge_red`**.
+- **tddy-tools**: **`post_workflow_pr_elicitation_acceptance`** (`persist-changeset-workflow`, schema validation, YAML fragments, **`Context`** merge assertions).
+- **Docs**: **[post-workflow-github-pr-elicitation.md](post-workflow-github-pr-elicitation.md)**; **[workflow-json-schemas.md](workflow-json-schemas.md)**; cross-package **[docs/dev/changesets.md](../../dev/changesets.md)**. **`docs/dev/1-WIP/2026-05-02-changeset-post-workflow-pr-elicitation.md`** removed after wrap. Package **`changesets.md`** history for **tddy-core**, **tddy-tools**, **tddy-workflow-recipes** defers to this entry per AGENTS.md (`packages/*/docs/` workflow).
+
+**Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
 ## 2026-04-06 — TDD interview unanswered elicitation recovery
 
@@ -12,7 +20,6 @@ Release note history for the Coder product area.
 - **tddy-workflow-recipes**: **`host_gate_interview_recovery_after_no_submit`**, **`merge_interview_recovery_answers_into_handoff`**, **`persist_interview_recovery_workflow_fields`**; **`TddRecipe::host_clarification_gate_after_no_submit_turn`**; **`TddWorkflowHooks`** sets **`interview_recovery_ask_count`** after interview **`after_task`** on the clean path.
 - **Tests**: **`interview_unanswered_detection`**, **`interview_unanswered_recovery_acceptance`**.
 - **Docs**: [workflow-recipes.md](workflow-recipes.md); cross-package **[docs/dev/changesets.md](../../dev/changesets.md)**; WIP **[2026-04-06-changeset-tdd-interview-unanswered-recovery.md](../../dev/1-WIP/2026-04-06-changeset-tdd-interview-unanswered-recovery.md)**.
-**Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
 ## 2026-05-01 — Session action jobs (`session_action_jobs`)
 

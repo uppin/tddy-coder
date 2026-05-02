@@ -32,6 +32,7 @@ fn merge_persisted_workflow_sets_branch_worktree_intent_context_key() {
         selected_integration_base_ref: Some("origin/main".into()),
         new_branch_name: Some("feature/x".into()),
         selected_branch_to_work_on: None,
+        ..Default::default()
     });
     write_changeset(&dir, &cs).unwrap();
 
