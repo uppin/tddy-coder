@@ -2070,6 +2070,10 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             session_dir.display()
         );
 
+        if let Ok(mut g) = self.telegram_tracked.lock() {
+            g.bind_chat_to_session_for_telegram_tracking(cmd.chat_id, &session_id);
+        }
+
         let intro = format!(
             "Workflow started (session {}). Choose a recipe to continue.",
             &session_id[..8.min(session_id.len())]
