@@ -358,7 +358,7 @@ fn install_fails_without_binaries() {
 }
 
 #[test]
-fn install_fails_without_codex_acp_native_when_platform_supported() {
+fn install_succeeds_without_codex_acp_native_when_not_required() {
     let Some(_) = codex_acp_platform_pkg_dir() else {
         return;
     };
@@ -369,7 +369,61 @@ fn install_fails_without_codex_acp_native_when_platform_supported() {
 
     let st = run_install_in(root, &[("INSTALL_NO_SYSTEMCTL", "1")]);
     assert!(
+        st.success(),
+        "install should succeed when codex-acp is not required and node_modules native is absent; got {st:?}"
+    );
+}
+
+#[test]
+fn install_fails_when_config_lists_codex_acp_without_native() {
+    let Some(_) = codex_acp_platform_pkg_dir() else {
+        return;
+    };
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    copy_install_tree(root);
+    write_fake_release_binaries(root);
+
+    let cfg_dir = root.join("custom-etc");
+    fs::create_dir_all(&cfg_dir).unwrap();
+    fs::write(
+        cfg_dir.join("daemon.yaml"),
+        "allowed_agents:\n  - id: codex-acp\n    label: \"Codex ACP\"\n",
+    )
+    .unwrap();
+
+    let st = run_install_in(
+        root,
+        &[
+            ("INSTALL_NO_SYSTEMCTL", "1"),
+            ("INSTALL_CONFIG_DIR", cfg_dir.to_str().unwrap()),
+        ],
+    );
+    assert!(
         !st.success(),
-        "install should fail when codex-acp native package is missing from node_modules"
+        "install should fail when allowed_agents lists codex-acp but native package is missing"
+    );
+}
+
+#[test]
+fn install_fails_when_install_bundle_codex_acp_without_native() {
+    let Some(_) = codex_acp_platform_pkg_dir() else {
+        return;
+    };
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    copy_install_tree(root);
+    write_fake_release_binaries(root);
+
+    let st = run_install_in(
+        root,
+        &[
+            ("INSTALL_NO_SYSTEMCTL", "1"),
+            ("INSTALL_BUNDLE_CODEX_ACP", "1"),
+        ],
+    );
+    assert!(
+        !st.success(),
+        "install should fail when INSTALL_BUNDLE_CODEX_ACP=1 but native package is missing"
     );
 }

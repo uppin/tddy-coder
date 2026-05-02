@@ -102,15 +102,22 @@ pub fn verify_install_deploys_web_static_assets(
     );
 }
 
-/// Install copies the native `codex-acp` binary from `node_modules` after `./dev bun install`.
-pub fn verify_install_bundles_codex_acp_from_node_modules(install_contents: &str) {
+/// Install copies `codex-acp` from `node_modules` when present; mandatory only when daemon config
+/// lists agent id `codex-acp` or `INSTALL_BUNDLE_CODEX_ACP=1`.
+pub fn verify_install_conditional_codex_acp_bundling(install_contents: &str) {
     assert!(
         install_contents.contains("node_modules/@zed-industries/codex-acp-"),
         "install must resolve @zed-industries/codex-acp platform package under node_modules"
     );
     assert!(
-        install_contents.contains("${BIN_DIR}/codex-acp"),
-        "install must install codex-acp into BIN_DIR"
+        install_contents.contains("${BIN_DIR}/codex-acp")
+            || install_contents.contains("{BIN_DIR}/codex-acp"),
+        "install must install codex-acp into BIN_DIR when bundling"
+    );
+    assert!(
+        install_contents.contains("codex_acp_bundling_mandatory")
+            || install_contents.contains("INSTALL_BUNDLE_CODEX_ACP"),
+        "install must gate mandatory codex-acp bundling on config or INSTALL_BUNDLE_CODEX_ACP"
     );
 }
 
@@ -128,7 +135,7 @@ pub fn verify_install_script_contracts(path: &Path, daemon_yaml_production_path:
     let prod = fs::read_to_string(daemon_yaml_production_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", daemon_yaml_production_path.display()));
     verify_install_deploys_web_static_assets(&contents, &prod);
-    verify_install_bundles_codex_acp_from_node_modules(&contents);
+    verify_install_conditional_codex_acp_bundling(&contents);
 }
 
 #[cfg(test)]
@@ -204,7 +211,7 @@ mod granular_tests {
     }
 
     #[test]
-    fn install_bundles_codex_acp_granular() {
-        verify_install_bundles_codex_acp_from_node_modules(&read_repo_install());
+    fn install_conditional_codex_acp_granular() {
+        verify_install_conditional_codex_acp_bundling(&read_repo_install());
     }
 }
