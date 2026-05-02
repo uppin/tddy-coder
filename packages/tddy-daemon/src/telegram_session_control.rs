@@ -8,13 +8,16 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use chrono::Utc;
 use serde::Deserialize;
 use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent, Changeset};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::{
     list_recent_remote_branches_skip, read_session_metadata,
-    validate_chain_pr_integration_base_ref, WorkflowError, SESSION_METADATA_FILENAME,
+    validate_chain_pr_integration_base_ref, write_initial_tool_session_metadata,
+    write_session_metadata, InitialToolSessionMetadataOpts, WorkflowError,
+    SESSION_METADATA_FILENAME,
 };
 use uuid::Uuid;
 
@@ -47,6 +50,16 @@ pub struct StartWorkflowCommand {
     pub chat_id: i64,
     pub user_id: u64,
     /// Full text after `/start-workflow` (trimmed).
+    pub prompt: String,
+}
+
+/// Simulated Telegram `/chain-workflow` (stacked session) with feature text; parent session is
+/// selected in a first step before project / integration base / agent (PRD).
+#[derive(Debug, Clone)]
+pub struct ChainWorkflowCommand {
+    pub chat_id: i64,
+    pub user_id: u64,
+    /// Full text after `/chain-workflow` (trimmed) — same role as [`StartWorkflowCommand::prompt`].
     pub prompt: String,
 }
 
@@ -146,6 +159,7 @@ pub struct EnterSessionOutcome {
 // ---------------------------------------------------------------------------
 
 const START_WORKFLOW_CMD: &str = "/start-workflow";
+const CHAIN_WORKFLOW_CMD: &str = "/chain-workflow";
 /// Submit feature text to a running child `tddy-coder` presenter: `/submit-feature <session_id_or_prefix> <description…>`
 pub const SUBMIT_FEATURE_CMD: &str = "/submit-feature";
 const SESSIONS_CMD: &str = "/sessions";
@@ -173,6 +187,8 @@ pub const CB_TELEGRAM_BRANCH: &str = "tb:";
 pub const CB_TELEGRAM_BRANCH_MORE: &str = "tbm:";
 /// Branch/worktree intent (`nb` / `ws` — must fit Telegram `callback_data` byte limit with `|s:<uuid>`).
 pub const CB_TELEGRAM_INTENT: &str = "intent:";
+/// Chain workflow: parent session row for stacked work (`tcp:<parent_idx>|s:<child_session_id>`).
+pub const CB_TELEGRAM_CHAIN_PARENT: &str = "tcp:";
 
 /// Parsed [`CallbackQuery::data`](https://core.telegram.org/bots/api#callbackquery) for session list actions.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +222,13 @@ pub fn parse_session_control_callback(callback_data: &str) -> Option<SessionCont
         return Some(SessionControlCallback::More { offset });
     }
     None
+}
+
+/// Parse `/chain-workflow <prompt>` from a message body (prompt only; chat/user come from the update envelope).
+pub fn parse_chain_workflow_prompt(message_text: &str) -> Option<String> {
+    let trimmed = message_text.trim();
+    let rest = trimmed.strip_prefix(CHAIN_WORKFLOW_CMD)?;
+    Some(rest.trim().to_string())
 }
 
 /// Parse `/start-workflow <prompt>` from a message body (prompt only; chat/user come from the update envelope).
@@ -514,6 +537,18 @@ pub fn parse_telegram_project_callback(callback_data: &str) -> Option<(usize, St
         return None;
     }
     Some((proj_idx, session_id))
+}
+
+/// Decode `tcp:<parent_idx>|s:<child_session_id>` (chain workflow parent pick before project/branch steps).
+pub fn parse_telegram_chain_parent_callback(callback_data: &str) -> Option<(usize, String)> {
+    let rest = callback_data.strip_prefix(CB_TELEGRAM_CHAIN_PARENT)?;
+    let (idx_part, sess_part) = rest.split_once("|s:")?;
+    let parent_idx: usize = idx_part.parse().ok()?;
+    let session_id = sess_part.trim().to_string();
+    if session_id.is_empty() {
+        return None;
+    }
+    Some((parent_idx, session_id))
 }
 
 /// Decode `ta:<agent_idx>|p:<proj_idx>|s:<session_id>`.
@@ -2063,6 +2098,199 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             session_id,
             messages,
         })
+    }
+
+    /// `/chain-workflow`: first step is parent session selection, then the same project → base →
+    /// agent flow as [`Self::handle_start_workflow`] (PRD: session chaining).
+    pub async fn handle_chain_workflow(
+        &mut self,
+        cmd: ChainWorkflowCommand,
+    ) -> anyhow::Result<StartWorkflowOutcome> {
+        log::info!(
+            target: "tddy_daemon::telegram_session_control",
+            "handle_chain_workflow: chat_id={} user_id={} prompt_len={}",
+            cmd.chat_id,
+            cmd.user_id,
+            cmd.prompt.len()
+        );
+        self.ensure_authorized(cmd.chat_id)?;
+
+        if let Some(ref map_path) = self.telegram_github_mapping_path {
+            log::debug!(
+                target: "tddy_daemon::telegram_session_control",
+                "handle_chain_workflow: github link required; mapping_path={}",
+                map_path.display()
+            );
+            let store = TelegramGithubMappingStore::open(map_path)?;
+            if store.get_github_login(cmd.user_id).is_none() {
+                log::info!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "handle_chain_workflow: rejected — telegram user_id={} has no linked GitHub identity",
+                    cmd.user_id
+                );
+                anyhow::bail!(
+                    "Telegram account is not linked to GitHub. Use the bot's /link-github flow (or web OAuth) to connect your GitHub identity before starting a workflow."
+                );
+            }
+        }
+
+        let session_id = Uuid::new_v4().to_string();
+        let session_dir = unified_session_dir_path(&self.sessions_base, &session_id);
+        std::fs::create_dir_all(&session_dir)?;
+        self.persist_initial_prompt_to_changeset(&session_dir, &cmd.prompt)
+            .await?;
+        log::debug!(
+            target: "tddy_daemon::telegram_session_control",
+            "handle_chain_workflow: created session_dir={}",
+            session_dir.display()
+        );
+
+        let mut parent_candidates =
+            crate::session_reader::list_sessions_in_dir(&self.sessions_base)?;
+        parent_candidates.retain(|s| s.session_id != session_id);
+        parent_candidates.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        let parent_page: Vec<_> = parent_candidates
+            .into_iter()
+            .take(SESSIONS_PAGE_SIZE)
+            .collect();
+
+        let chain_intro = if parent_page.is_empty() {
+            format!(
+                "Chain workflow (stacked PR). Select a **parent** session to stack from — no prior sessions were found yet. New session prefix {}. Create a session with /start-workflow first, or pick below once sessions exist.",
+                &session_id[..8.min(session_id.len())]
+            )
+        } else {
+            format!(
+                "Chain workflow (stacked PR). **First:** pick the **parent** session to stack onto (branch chain). New child session prefix {}.",
+                &session_id[..8.min(session_id.len())]
+            )
+        };
+        log::info!(
+            target: "tddy_daemon::telegram_session_control",
+            "handle_chain_workflow: parent_picker candidates={}",
+            parent_page.len()
+        );
+
+        let mut parent_kb: InlineKeyboardRows = Vec::new();
+        for (idx, se) in parent_page.iter().enumerate() {
+            let label = format!("Parent: {}", telegram_label_for_session_id(&se.session_id));
+            let cb = format!("{CB_TELEGRAM_CHAIN_PARENT}{idx}|s:{session_id}");
+            debug_assert!(
+                cb.len() <= 64,
+                "Telegram callback_data exceeds 64 bytes: len={} data={cb:?}",
+                cb.len()
+            );
+            parent_kb.push(vec![(label, cb)]);
+        }
+
+        self.sender
+            .send_message_with_keyboard(cmd.chat_id, &chain_intro, parent_kb.clone())
+            .await?;
+
+        let mut messages = vec![CapturedTelegramMessage {
+            chat_id: cmd.chat_id,
+            text: chain_intro.clone(),
+            inline_keyboard: parent_kb,
+        }];
+
+        let intro = format!(
+            "Workflow started (session {}). Choose a recipe to continue.",
+            &session_id[..8.min(session_id.len())]
+        );
+        let keyboard: InlineKeyboardRows = vec![vec![
+            (
+                format!("Recipe: {TELEGRAM_DEFAULT_RECIPE_CLI}"),
+                format!("recipe:{TELEGRAM_DEFAULT_RECIPE_CLI}|session:{session_id}"),
+            ),
+            (
+                "More recipes…".to_string(),
+                format!("recipe:more|session:{session_id}"),
+            ),
+        ]];
+        self.sender
+            .send_message_with_keyboard(cmd.chat_id, &intro, keyboard.clone())
+            .await?;
+
+        messages.push(CapturedTelegramMessage {
+            chat_id: cmd.chat_id,
+            text: intro,
+            inline_keyboard: keyboard,
+        });
+
+        Ok(StartWorkflowOutcome {
+            session_id,
+            messages,
+        })
+    }
+
+    /// Handle `tcp:` parent picker callback: resolve the parent session and record
+    /// [`tddy_core::SessionMetadata::previous_session_id`] on the child session directory.
+    ///
+    /// Wired from [`crate::telegram_bot`] during the session-chaining follow-up when the operator
+    /// picks a parent row after [`Self::handle_chain_workflow`].
+    pub async fn handle_chain_parent_callback(
+        &mut self,
+        child_session_dir: &Path,
+        cb: TelegramCallback,
+    ) -> anyhow::Result<()> {
+        self.ensure_authorized(cb.chat_id)?;
+        let Some((parent_idx, child_id)) = parse_telegram_chain_parent_callback(&cb.callback_data)
+        else {
+            anyhow::bail!("not a chain parent callback (expected `tcp:` prefix)");
+        };
+
+        let mut parent_candidates =
+            crate::session_reader::list_sessions_in_dir(&self.sessions_base)?;
+        parent_candidates.retain(|s| s.session_id != child_id);
+        parent_candidates.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        let parent_page: Vec<_> = parent_candidates
+            .into_iter()
+            .take(SESSIONS_PAGE_SIZE)
+            .collect();
+
+        let Some(parent_entry) = parent_page.get(parent_idx) else {
+            anyhow::bail!(
+                "chain parent index {parent_idx} is out of range (page has {} candidate(s)); pick a visible parent row again",
+                parent_page.len()
+            );
+        };
+        let parent_id = parent_entry.session_id.as_str();
+
+        let expected_child_dir = unified_session_dir_path(&self.sessions_base, &child_id);
+        if child_session_dir != expected_child_dir.as_path() {
+            anyhow::bail!(
+                "child session directory mismatch for child_id={child_id}: expected {}",
+                expected_child_dir.display()
+            );
+        }
+
+        let mut meta = match read_session_metadata(child_session_dir) {
+            Ok(m) => m,
+            Err(_) => {
+                write_initial_tool_session_metadata(
+                    child_session_dir,
+                    InitialToolSessionMetadataOpts {
+                        project_id: "pending-project-selection".to_string(),
+                        ..Default::default()
+                    },
+                )
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+                read_session_metadata(child_session_dir).map_err(|e| anyhow::anyhow!("{e}"))?
+            }
+        };
+
+        meta.previous_session_id = Some(parent_id.to_string());
+        meta.updated_at = Utc::now().to_rfc3339();
+        write_session_metadata(child_session_dir, &meta).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        log::info!(
+            target: "tddy_daemon::telegram_session_control",
+            "handle_chain_parent_callback: persisted previous_session_id for child {} -> parent {}",
+            child_id,
+            parent_id
+        );
+
+        Ok(())
     }
 
     /// After recipe selection: persist `changeset.yaml` and continue workflow.

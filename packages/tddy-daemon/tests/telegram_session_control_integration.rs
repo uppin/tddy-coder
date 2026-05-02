@@ -14,7 +14,7 @@ use tddy_daemon::project_storage::{self, ProjectData};
 use tddy_daemon::telegram_notifier::InMemoryTelegramSender;
 use tddy_daemon::telegram_session_control::{
     collect_outbound_messages, map_elicitation_callback_to_presenter_input,
-    read_changeset_routing_snapshot, StartWorkflowCommand, TelegramCallback,
+    read_changeset_routing_snapshot, ChainWorkflowCommand, StartWorkflowCommand, TelegramCallback,
     TelegramSessionControlHarness, TelegramWorkflowSpawn, WorkflowTransitionKind,
     SESSIONS_PAGE_SIZE,
 };
@@ -121,6 +121,49 @@ async fn telegram_start_workflow_presents_recipe_keyboard_and_creates_session() 
         snap.initial_prompt.as_deref(),
         Some("implement Telegram session control"),
         "Telegram prompt after /start-workflow must persist as changeset initial_prompt so the child workflow does not block on feature input"
+    );
+}
+
+/// **telegram_chain_workflow_shows_parent_pick_first** — `/chain-workflow` must send parent session
+/// selection before project / recipe steps (message order).
+#[tokio::test]
+async fn telegram_chain_workflow_shows_parent_pick_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    let _ = create_fake_sessions(tmp.path(), 2);
+    let (mut harness, sender) =
+        harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
+
+    let cmd = ChainWorkflowCommand {
+        chat_id: AUTHORIZED_CHAT,
+        user_id: 77,
+        prompt: "stacked chain feature".to_string(),
+    };
+    let outcome = harness.handle_chain_workflow(cmd).await.expect(
+        "/chain-workflow must succeed: parent session picker first, then existing workflow steps",
+    );
+
+    assert!(
+        !outcome.session_id.is_empty(),
+        "chain-workflow must yield a session id"
+    );
+
+    let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
+    assert!(
+        !sent.is_empty(),
+        "must emit Telegram UI starting with parent/stack session selection"
+    );
+    let first = &sent[0];
+    let first_text = first.text.to_lowercase();
+    assert!(
+        first_text.contains("parent")
+            || first_text.contains("stack")
+            || first_text.contains("chain")
+            || first
+                .inline_keyboard
+                .iter()
+                .flatten()
+                .any(|(_l, cb)| cb.contains("chain") || cb.starts_with("tps:")),
+        "first outbound step must be parent session selection; got first={first:?}"
     );
 }
 
@@ -384,6 +427,7 @@ fn create_fake_sessions(base: &std::path::Path, count: usize) -> Vec<String> {
             tool: Some("tddy-coder".to_string()),
             livekit_room: None,
             pending_elicitation: false,
+            previous_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         ids.push(id);
@@ -654,8 +698,10 @@ async fn telegram_intent_pick_shown_after_recipe() {
     let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
     let session_dir = unified_session_dir_path(tmp.path(), session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
-    let mut cs = Changeset::default();
-    cs.recipe = Some("tdd".to_string());
+    let cs = Changeset {
+        recipe: Some("tdd".to_string()),
+        ..Default::default()
+    };
     write_changeset(&session_dir, &cs).expect("write changeset");
 
     let (mut harness, sender) =
@@ -703,8 +749,10 @@ async fn telegram_intent_persists_to_changeset() {
     let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
     let session_dir = unified_session_dir_path(tmp.path(), session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
-    let mut cs = Changeset::default();
-    cs.recipe = Some("tdd".to_string());
+    let cs = Changeset {
+        recipe: Some("tdd".to_string()),
+        ..Default::default()
+    };
     write_changeset(&session_dir, &cs).expect("write changeset");
 
     let (harness, _sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
@@ -749,8 +797,10 @@ async fn telegram_intent_then_project_pick_continues_flow() {
     let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
     let session_dir = unified_session_dir_path(tmp.path(), session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
-    let mut cs = Changeset::default();
-    cs.recipe = Some("tdd".to_string());
+    let cs = Changeset {
+        recipe: Some("tdd".to_string()),
+        ..Default::default()
+    };
     write_changeset(&session_dir, &cs).expect("write changeset");
 
     let (harness, sender) = harness_with_workflow_projects(
@@ -807,8 +857,10 @@ async fn telegram_branch_pick_shows_more_when_more_than_ten_remote_branches() {
     let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
     let session_dir = unified_session_dir_path(tmp.path(), session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
-    let mut cs = Changeset::default();
-    cs.recipe = Some("tdd".to_string());
+    let cs = Changeset {
+        recipe: Some("tdd".to_string()),
+        ..Default::default()
+    };
     write_changeset(&session_dir, &cs).expect("write changeset");
 
     let (harness, sender) = harness_with_workflow_projects(
@@ -864,8 +916,10 @@ async fn telegram_branch_pick_no_more_when_at_most_ten_remote_branches() {
     let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab3";
     let session_dir = unified_session_dir_path(tmp.path(), session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
-    let mut cs = Changeset::default();
-    cs.recipe = Some("tdd".to_string());
+    let cs = Changeset {
+        recipe: Some("tdd".to_string()),
+        ..Default::default()
+    };
     write_changeset(&session_dir, &cs).expect("write changeset");
 
     let (harness, sender) = harness_with_workflow_projects(
@@ -1048,8 +1102,10 @@ fn harness_with_workflow_projects_and_agents(
     Arc<InMemoryTelegramSender>,
 ) {
     let sender = Arc::new(InMemoryTelegramSender::new());
-    let mut config = DaemonConfig::default();
-    config.allowed_agents = agents;
+    let config = DaemonConfig {
+        allowed_agents: agents,
+        ..Default::default()
+    };
     let workflow_spawn = Arc::new(TelegramWorkflowSpawn {
         config: Arc::new(config),
         spawn_client: None,
@@ -1098,8 +1154,10 @@ async fn telegram_branch_callback_work_on_selected_sets_selected_branch_to_work_
     let session_dir = unified_session_dir_path(&sessions_base, session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
 
-    let mut cs = Changeset::default();
-    cs.recipe = Some("merge-pr".to_string());
+    let cs = Changeset {
+        recipe: Some("merge-pr".to_string()),
+        ..Default::default()
+    };
     write_changeset(&session_dir, &cs).expect("write changeset");
 
     let dummy_agent = AllowedAgent {
@@ -1182,8 +1240,10 @@ async fn telegram_branch_callback_new_branch_from_base_sets_selected_integration
     let session_dir = unified_session_dir_path(&sessions_base, session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
 
-    let mut cs = Changeset::default();
-    cs.recipe = Some("tdd".to_string());
+    let cs = Changeset {
+        recipe: Some("tdd".to_string()),
+        ..Default::default()
+    };
     write_changeset(&session_dir, &cs).expect("write changeset");
 
     let dummy_agent = AllowedAgent {
@@ -1222,4 +1282,42 @@ async fn telegram_branch_callback_new_branch_from_base_sets_selected_integration
         wf.new_branch_name.is_none(),
         "new_branch_name comes from the LLM (plan or bugfix analyze submit), not Telegram"
     );
+}
+
+// -------------------------------------------------------------------------
+// Chain parent `tcp:` tap → child `.session.yaml` previous_session_id
+// -------------------------------------------------------------------------
+
+/// After the operator picks a parent row (`tcp:` callback), the child session directory must
+/// record [`tddy_core::SessionMetadata::previous_session_id`] for observability and downstream
+/// chain-base wiring.
+#[tokio::test]
+async fn telegram_chain_parent_tap_persists_previous_session_id_on_child() {
+    let tmp = tempfile::tempdir().unwrap();
+    let _ids = create_fake_sessions(tmp.path(), 2);
+    let (mut harness, _sender) =
+        harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
+
+    let cmd = ChainWorkflowCommand {
+        chat_id: AUTHORIZED_CHAT,
+        user_id: 77,
+        prompt: "stack from parent".to_string(),
+    };
+    let outcome = harness
+        .handle_chain_workflow(cmd)
+        .await
+        .expect("chain workflow creates child session and parent picker");
+    let child_id = outcome.session_id;
+    let child_dir = unified_session_dir_path(tmp.path(), &child_id);
+
+    let cb = TelegramCallback {
+        chat_id: AUTHORIZED_CHAT,
+        user_id: 77,
+        callback_data: format!("tcp:0|s:{child_id}"),
+    };
+
+    harness
+        .handle_chain_parent_callback(&child_dir, cb)
+        .await
+        .expect("tcp parent pick must persist previous_session_id on child session metadata");
 }

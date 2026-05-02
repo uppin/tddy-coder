@@ -2,6 +2,10 @@
 
 Release note history for the Coder product area.
 
+## 2026-05-02 — Session chaining (stacked PR groundwork)
+
+- **`tddy-core`**: **`session_metadata`** — optional **`previous_session_id`** on **`.session.yaml`**; **`session_chain`** — **`resolve_chain_integration_base_ref_from_parent_session`** (parent **`repo_path`** required when a branch is present), **`integrate_chain_base_into_session_worktree_bootstrap`** (delegates to **`setup_worktree_for_session_with_optional_chain_base`**); **`agent_skills::slash_menu_entries`** — **`/chain`** row after **`/recipe`**. **`tddy-integration-tests`**: **`session_chain_acceptance`**. **`tddy-tui`**: slash menu test **`tui_chain_slash_offers_recent_sessions`**. **`tddy-daemon`**: **`/chain-workflow`** message dispatch; harness **`handle_chain_parent_callback`**; **live** **`tcp:`** callback wiring in **`telegram_bot`** remains Phase 2 (see **[telegram-session-control.md](../daemon/telegram-session-control.md)**).
+- **Feature docs**: [git-integration-base-ref.md](git-integration-base-ref.md), [session-layout.md](session-layout.md), [feature-prompt-agent-skills.md](feature-prompt-agent-skills.md); daemon [telegram-session-control.md](../daemon/telegram-session-control.md). **Phase 2 WIP**: [2026-05-02-changeset-session-chaining.md](../../dev/1-WIP/2026-05-02-changeset-session-chaining.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
 ## 2026-05-02 — Session workflow action cache (`tddy-tools submit` replay)
 
 - **tddy-core**: **`workflow::action_cache`** — per-session **`.workflow/action-cache.json`**; **`BackendInvokeTask`** skips **`CodingBackend::invoke`** on cache hit; persists after successful **`submit`**; **`FlowRunner`** sets **`workflow_engine_graph_id`** / **`workflow_engine_current_task_id`** on **`Context`**; opt-out **`disable_action_cache`** / **`TDDY_DISABLE_ACTION_CACHE`**; **`CodingBackend::action_invoke_cache_eligible`** (**`MockBackend`** **false**). Tests: **`workflow::action_cache`** unit tests; **`tddy-integration-tests`** **`workflow_graph`** (**`action_cache_*`**).

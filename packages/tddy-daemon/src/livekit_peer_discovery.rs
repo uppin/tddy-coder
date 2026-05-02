@@ -669,7 +669,7 @@ async fn advance_daemon_adv_publish_on_tick(
 ///
 /// Returns `Some(reason)` after `RoomEvent::Disconnected`, or `None` when the event channel
 /// ends. Always calls `Room::close` so the next discovery cycle starts from a clean engine state.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // room/event/registry wiring; a struct would obscure call sites
 async fn run_common_room_registry_loop(
     room: Arc<Room>,
     mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,

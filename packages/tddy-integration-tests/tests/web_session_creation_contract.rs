@@ -87,6 +87,7 @@ async fn session_yaml_and_changeset_yaml_must_be_in_same_directory() {
             pid: Some(std::process::id()),
             tool: Some("tddy-coder".to_string()),
             livekit_room: Some("room-1".to_string()),
+            previous_session_id: None,
         },
     )
     .expect("write .session.yaml");
@@ -195,6 +196,7 @@ async fn changeset_yaml_must_be_written_on_prompt_submission_not_deferred_to_bef
             pid: Some(std::process::id()),
             tool: Some("tddy-coder".to_string()),
             livekit_room: None,
+            previous_session_id: None,
         },
     )
     .expect("write .session.yaml");

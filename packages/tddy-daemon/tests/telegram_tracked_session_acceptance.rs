@@ -29,13 +29,14 @@ use tddy_service::gen::{
 const AUTHORIZED_CHAT: i64 = 424_242;
 
 fn telegram_config_with_token(bot_token: &str) -> DaemonConfig {
-    let mut cfg = DaemonConfig::default();
-    cfg.telegram = Some(TelegramConfig {
-        enabled: true,
-        bot_token: bot_token.to_string(),
-        chat_ids: vec![AUTHORIZED_CHAT],
-    });
-    cfg
+    DaemonConfig {
+        telegram: Some(TelegramConfig {
+            enabled: true,
+            bot_token: bot_token.to_string(),
+            chat_ids: vec![AUTHORIZED_CHAT],
+        }),
+        ..Default::default()
+    }
 }
 
 fn select_elicitation_server_message(question: &str, opt_a: &str, opt_b: &str) -> ServerMessage {
@@ -106,6 +107,7 @@ fn write_minimal_running_session(sessions_base: &std::path::Path, session_id: &s
         tool: Some("tddy-coder".to_string()),
         livekit_room: None,
         pending_elicitation: false,
+        previous_session_id: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 }

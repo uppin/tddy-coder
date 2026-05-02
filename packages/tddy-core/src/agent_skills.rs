@@ -300,8 +300,11 @@ pub fn slash_menu_entries(project_root: &Path) -> Vec<SlashMenuEntry> {
     );
     let scan = scan_skills_at_project_root(project_root);
     let start_labels = crate::feature_start_slash::feature_slash_menu_start_command_labels();
-    let mut items = Vec::with_capacity(1 + start_labels.len() + scan.valid.len());
+    let mut items = Vec::with_capacity(2 + start_labels.len() + scan.valid.len());
     items.push(SlashMenuEntry::BuiltinRecipe);
+    items.push(SlashMenuEntry::StartRecipe {
+        label: "/chain".to_string(),
+    });
     for label in start_labels {
         items.push(SlashMenuEntry::StartRecipe { label });
     }

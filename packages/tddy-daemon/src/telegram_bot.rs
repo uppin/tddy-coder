@@ -11,14 +11,14 @@ use tokio::sync::Mutex;
 
 use crate::telegram_notifier::TeloxideSender;
 use crate::telegram_session_control::{
-    parse_answer_multi_command, parse_answer_text_command, parse_delete_command,
-    parse_document_review_callback, parse_elicitation_multi_select_shortcut,
+    parse_answer_multi_command, parse_answer_text_command, parse_chain_workflow_prompt,
+    parse_delete_command, parse_document_review_callback, parse_elicitation_multi_select_shortcut,
     parse_elicitation_other_callback, parse_elicitation_select_callback,
     parse_recipe_callback_session_dir, parse_session_control_callback, parse_sessions_command,
     parse_start_workflow_prompt, parse_submit_feature_command, parse_telegram_agent_callback,
     parse_telegram_branch_callback, parse_telegram_branch_more_callback,
-    parse_telegram_intent_callback, parse_telegram_project_callback, SessionControlCallback,
-    StartWorkflowCommand, TelegramCallback, TelegramSessionControlHarness,
+    parse_telegram_intent_callback, parse_telegram_project_callback, ChainWorkflowCommand,
+    SessionControlCallback, StartWorkflowCommand, TelegramCallback, TelegramSessionControlHarness,
 };
 
 type Harness = Arc<Mutex<TelegramSessionControlHarness<TeloxideSender>>>;
@@ -136,6 +136,19 @@ async fn telegram_message_handler(bot: Bot, harness: Harness, msg: Message) -> H
             h.handle_start_workflow(cmd).await?;
         }
         // Not configured for this chat: ignore (multi-daemon — each instance has its own allowlist).
+        return Ok(());
+    }
+
+    if let Some(prompt) = parse_chain_workflow_prompt(&text) {
+        let cmd = ChainWorkflowCommand {
+            chat_id,
+            user_id,
+            prompt,
+        };
+        let mut h = harness.lock().await;
+        if h.is_authorized(chat_id) {
+            h.handle_chain_workflow(cmd).await?;
+        }
         return Ok(());
     }
 

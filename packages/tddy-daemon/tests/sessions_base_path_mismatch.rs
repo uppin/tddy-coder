@@ -87,6 +87,7 @@ async fn daemon_finds_sessions_created_by_tddy_coder() {
         tool: Some("tddy-coder".to_string()),
         livekit_room: None,
         pending_elicitation: false,
+        previous_session_id: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 

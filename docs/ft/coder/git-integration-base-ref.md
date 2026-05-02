@@ -69,6 +69,14 @@ Follow-up work can branch from an open remote branch (a **chain PR**) instead of
 
 - After recipe and project selection, **`telegram_session_control`** offers **Default** or a **recent remote branch** list; non-default choices set **`worktree_integration_base_ref`** before **`tddy-coder`** is spawned. See **[telegram-session-control.md](../daemon/telegram-session-control.md)** (**Integration base branch**).
 
+## Session chaining (parent session → `origin/<branch>`)
+
+**tddy-core** exposes **`resolve_chain_integration_base_ref_from_parent_session(sessions_root, parent_session_id, child_project_repo)`**: it reads the parent session directory under **`{sessions_root}/sessions/{parent_session_id}/`**, loads **`changeset.yaml`**, takes the persisted **branch** or **branch suggestion**, builds **`origin/<trimmed-path>`**, validates with **`validate_chain_pr_integration_base_ref`**, and compares canonical **`repo_path`** on the parent changeset with the child project repository when **`repo_path`** is present. When the parent names a branch (or branch suggestion), **`repo_path`** on the parent **`changeset.yaml`** is **required**; without it, resolution fails as **`WorkflowError::ChangesetInvalid`** before repository alignment.
+
+**`integrate_chain_base_into_session_worktree_bootstrap`** validates the resolved ref and calls **`setup_worktree_for_session_with_optional_chain_base(child_repo, child_session_dir, Some(resolved_ref))`** so **`changeset.yaml`** receives **`effective_worktree_integration_base_ref`** and **`worktree_integration_base_ref`** under the same rules as the existing chain-PR path.
+
+Product reference for Telegram ordering and **`tcp:`** wire format: **[telegram-session-control.md](../daemon/telegram-session-control.md)**. Session directory metadata field: **[session-layout.md](session-layout.md)**.
+
 ## Call-site behavior
 
 **`setup_worktree_for_session(repo_root, session_dir)`** resolves the integration base inside **tddy-core** using the default remote branch rules above. Registry helpers (**`effective_integration_base_ref_for_project`**) apply when a caller has loaded **`ProjectData`**; those callers pass the explicit ref into **`setup_worktree_for_session_with_integration_base`**. Layers that only supply repository root and session directory rely on default resolution. Workflow hooks that create worktrees after plan approval should prefer **`setup_worktree_for_session_with_optional_chain_base`** when **`changeset.yaml`** may carry **`worktree_integration_base_ref`** (Telegram chain selection, future RPC fields).
