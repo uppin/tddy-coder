@@ -320,8 +320,10 @@ fn invoke_action_rejects_disallowed_path_patterns() {
     let dir = tempfile::tempdir().expect("tempdir");
     let session = dir.path();
     let repo = tempfile::tempdir().expect("repo temp");
-    let mut cs = Changeset::default();
-    cs.repo_path = Some(repo.path().to_string_lossy().to_string());
+    let cs = Changeset {
+        repo_path: Some(repo.path().to_string_lossy().to_string()),
+        ..Default::default()
+    };
     write_changeset(session, &cs).expect("seed changeset");
 
     // Absolute path outside the session tree; resolver must reject before running the command.

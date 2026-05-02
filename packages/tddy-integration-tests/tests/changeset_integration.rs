@@ -688,7 +688,10 @@ async fn changeset_yaml_sessions_array_tracks_all_sessions() {
 
     let (output_dir, _) = temp_dir_with_git_repo("changeset-sessions");
 
-    let storage_dir = std::env::temp_dir().join("tddy-changeset-sessions-engine");
+    let storage_dir = std::env::temp_dir().join(format!(
+        "tddy-changeset-sessions-engine-{}",
+        uuid::Uuid::now_v7()
+    ));
     let _ = std::fs::remove_dir_all(&storage_dir);
     let engine = WorkflowEngine::new(
         common::tdd_recipe(),

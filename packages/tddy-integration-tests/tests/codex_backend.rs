@@ -97,7 +97,7 @@ exit 0
         lines
     );
     assert!(
-        lines.iter().any(|l| *l == "-s") && lines.iter().any(|l| *l == "read-only"),
+        lines.contains(&"-s") && lines.contains(&"read-only"),
         "plan goal should pass -s read-only, got: {}",
         captured
     );

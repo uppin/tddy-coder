@@ -1,4 +1,4 @@
-//! Acceptance tests (RED): Telegram MultiSelect shortcuts (`Choose none`, `Choose recommended`).
+//! Acceptance tests: Telegram MultiSelect shortcuts (`Choose none`, `Choose recommended`).
 //!
 //! Grounded in PRD Testing Plan — outbound keyboards + recommended metadata wiring.
 
@@ -16,13 +16,14 @@ use tddy_service::gen::{
 const AUTHORIZED_CHAT: i64 = 424_242;
 
 fn telegram_config() -> tddy_daemon::config::DaemonConfig {
-    let mut cfg = tddy_daemon::config::DaemonConfig::default();
-    cfg.telegram = Some(tddy_daemon::config::TelegramConfig {
-        enabled: true,
-        bot_token: "x".to_string(),
-        chat_ids: vec![AUTHORIZED_CHAT],
-    });
-    cfg
+    tddy_daemon::config::DaemonConfig {
+        telegram: Some(tddy_daemon::config::TelegramConfig {
+            enabled: true,
+            bot_token: "x".to_string(),
+            chat_ids: vec![AUTHORIZED_CHAT],
+        }),
+        ..Default::default()
+    }
 }
 
 fn multi_select_mode_changed(recommended_other: &str) -> ServerMessage {
