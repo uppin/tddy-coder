@@ -87,6 +87,8 @@ async fn telegram_multi_select_shortcuts_emit_expected_callbacks() {
     let sid = "01900000-0000-7000-8000-0000000000aa";
     let msg = multi_select_mode_changed("recommended aggregate text");
 
+    watcher.bind_telegram_tracked_session_for_chat(AUTHORIZED_CHAT, sid);
+
     watcher
         .on_server_message(&cfg, &mem, sid, &msg)
         .await
@@ -160,6 +162,7 @@ async fn telegram_choose_recommended_requires_metadata() {
     let mut watcher_b = TelegramSessionWatcher::new();
     let mem_b = InMemoryTelegramSender::new();
     let with_rec = multi_select_mode_changed("Use this recommendation");
+    watcher_b.bind_telegram_tracked_session_for_chat(AUTHORIZED_CHAT, sid);
     watcher_b
         .on_server_message(&cfg, &mem_b, sid, &with_rec)
         .await

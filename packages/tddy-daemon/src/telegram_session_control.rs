@@ -32,6 +32,9 @@ use crate::telegram_notifier::{
     InMemoryTelegramSender, InlineKeyboardRows, TelegramSender,
 };
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
+use crate::telegram_tracked_session::{
+    SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
+};
 use crate::user_sessions_path::projects_path_for_user;
 
 // ---------------------------------------------------------------------------
@@ -827,6 +830,15 @@ impl TelegramWorkflowSpawn {
 // Harness
 // ---------------------------------------------------------------------------
 
+/// Optional bridge so [`TelegramSessionControlHarness::handle_enter_session`] can replay elicitation
+/// through a shared [`crate::telegram_notifier::TelegramSessionWatcher`] when `workflow_spawn` has
+/// no `telegram_hooks` (integration tests).
+#[derive(Default)]
+pub struct TelegramElicitationReplayBridge {
+    pub config: Option<Arc<DaemonConfig>>,
+    pub watcher: Option<Arc<tokio::sync::Mutex<crate::telegram_notifier::TelegramSessionWatcher>>>,
+}
+
 /// Session control plane: authorized chats, sessions root, and a [`TelegramSender`] (in-memory in tests, teloxide in production).
 pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     allowed_chat_ids: Vec<i64>,
@@ -837,6 +849,10 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     telegram_github_mapping_path: Option<PathBuf>,
     /// Single active elicitation token per Telegram chat (shared with [`crate::telegram_notifier::TelegramSessionWatcher`] when wired in `main`).
     active_elicitation: SharedActiveElicitationCoordinator,
+    /// Telegram-tracked session per chat (Enter session opt-in; shared with notifier when wired in `main`).
+    telegram_tracked: SharedTelegramTrackedSessionCoordinator,
+    /// When `workflow_spawn` has no [`TelegramDaemonHooks`], tests may install watcher + config here for Enter replay.
+    elicitation_replay_bridge: Arc<Mutex<TelegramElicitationReplayBridge>>,
 }
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
@@ -859,6 +875,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             None,
             Some(github_mapping_path),
             None,
+            None,
         )
     }
 
@@ -876,6 +893,27 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             workflow_spawn,
             None,
             shared_elicitation,
+            None,
+        )
+    }
+
+    /// Same as [`Self::with_workflow_spawn`], but shares [`TelegramTrackedSessionCoordinator`] with the notifier.
+    pub fn with_workflow_spawn_and_telegram_tracked(
+        allowed_chat_ids: Vec<i64>,
+        sessions_base: PathBuf,
+        sender: Arc<S>,
+        workflow_spawn: Option<Arc<TelegramWorkflowSpawn>>,
+        shared_elicitation: Option<SharedActiveElicitationCoordinator>,
+        shared_tracked: Option<SharedTelegramTrackedSessionCoordinator>,
+    ) -> Self {
+        Self::with_workflow_spawn_and_github_mapping(
+            allowed_chat_ids,
+            sessions_base,
+            sender,
+            workflow_spawn,
+            None,
+            shared_elicitation,
+            shared_tracked,
         )
     }
 
@@ -886,18 +924,22 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         workflow_spawn: Option<Arc<TelegramWorkflowSpawn>>,
         telegram_github_mapping_path: Option<PathBuf>,
         shared_elicitation: Option<SharedActiveElicitationCoordinator>,
+        shared_tracked: Option<SharedTelegramTrackedSessionCoordinator>,
     ) -> Self {
         log::info!(
             target: "tddy_daemon::telegram_session_control",
-            "TelegramSessionControlHarness::with_workflow_spawn: allowed_chats={} sessions_base={} workflow_spawn={} github_mapping={} shared_elicitation={}",
+            "TelegramSessionControlHarness::with_workflow_spawn: allowed_chats={} sessions_base={} workflow_spawn={} github_mapping={} shared_elicitation={} shared_tracked={}",
             allowed_chat_ids.len(),
             sessions_base.display(),
             workflow_spawn.is_some(),
             telegram_github_mapping_path.is_some(),
-            shared_elicitation.is_some()
+            shared_elicitation.is_some(),
+            shared_tracked.is_some()
         );
         let active_elicitation = shared_elicitation
             .unwrap_or_else(|| Arc::new(Mutex::new(ActiveElicitationCoordinator::new())));
+        let telegram_tracked = shared_tracked
+            .unwrap_or_else(|| Arc::new(Mutex::new(TelegramTrackedSessionCoordinator::new())));
         Self {
             allowed_chat_ids,
             sessions_base,
@@ -905,10 +947,70 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             workflow_spawn,
             telegram_github_mapping_path,
             active_elicitation,
+            telegram_tracked,
+            elicitation_replay_bridge: Arc::new(Mutex::new(
+                TelegramElicitationReplayBridge::default(),
+            )),
         }
     }
 
-    /// Root passed at construction (`~/.tddy`); session dirs for listing live under [`SESSIONS_SUBDIR`].
+    /// Wire [`TelegramSessionWatcher`] + [`DaemonConfig`] for **Enter session** elicitation replay when
+    /// this harness is built without [`TelegramWorkflowSpawn::telegram_hooks`] (e.g. integration tests).
+    pub fn connect_telegram_elicitation_replay_bridge(
+        &self,
+        config: DaemonConfig,
+        watcher: Arc<tokio::sync::Mutex<crate::telegram_notifier::TelegramSessionWatcher>>,
+    ) {
+        let mut b = self
+            .elicitation_replay_bridge
+            .lock()
+            .expect("elicitation_replay_bridge poisoned");
+        b.config = Some(Arc::new(config));
+        b.watcher = Some(watcher);
+        log::info!(
+            target: "tddy_daemon::telegram_session_control",
+            "connect_telegram_elicitation_replay_bridge: installed"
+        );
+    }
+
+    async fn maybe_replay_elicitation_after_enter_session(
+        &self,
+        chat_id: i64,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        if let Some(spawn) = &self.workflow_spawn {
+            if let Some(hooks) = &spawn.telegram_hooks {
+                let mut w = hooks.watcher.lock().await;
+                w.replay_telegram_elicitation_after_tracked_enter(
+                    &hooks.config,
+                    self.sender.as_ref(),
+                    chat_id,
+                    session_id,
+                )
+                .await?;
+                return Ok(());
+            }
+        }
+        let (cfg_arc, watcher_arc) = {
+            let b = self
+                .elicitation_replay_bridge
+                .lock()
+                .expect("elicitation_replay_bridge poisoned");
+            (b.config.clone(), b.watcher.clone())
+        };
+        if let (Some(cfg), Some(w)) = (cfg_arc, watcher_arc) {
+            let mut wg = w.lock().await;
+            wg.replay_telegram_elicitation_after_tracked_enter(
+                cfg.as_ref(),
+                self.sender.as_ref(),
+                chat_id,
+                session_id,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
     pub fn sessions_base(&self) -> &Path {
         &self.sessions_base
     }
@@ -2176,6 +2278,12 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         crate::session_deletion::delete_session_directory(&self.sessions_base, session_id)
             .map_err(|s| anyhow::anyhow!("{}", s.message))?;
 
+        if let Ok(mut g) = self.telegram_tracked.lock() {
+            if g.tracked_session_for_chat(chat_id).as_deref() == Some(session_id.trim()) {
+                g.clear_telegram_tracked_session_for_chat(chat_id);
+            }
+        }
+
         let text = format!("Session {} deleted.", session_id);
         self.sender.send_message(chat_id, &text).await?;
 
@@ -2213,6 +2321,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         }
 
         let metadata = read_session_metadata(&session_dir).map_err(|e| anyhow::anyhow!("{e}"))?;
+        if let Ok(mut g) = self.telegram_tracked.lock() {
+            g.bind_chat_to_session_for_telegram_tracking(chat_id, session_id);
+            let _replay_scheduled =
+                g.notify_enter_session_elicitation_replay_skeleton(chat_id, session_id);
+        }
         let enrich = session_list_status_or_placeholders(&session_dir);
         let label = telegram_label_for_session_id(session_id);
         let text = format!(
@@ -2220,6 +2333,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             session_id, label, metadata.status, enrich.workflow_state, enrich.elapsed_display
         );
         self.sender.send_message(chat_id, &text).await?;
+
+        self.maybe_replay_elicitation_after_enter_session(chat_id, session_id)
+            .await?;
 
         let captured = CapturedTelegramMessage {
             chat_id,

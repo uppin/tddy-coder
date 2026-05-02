@@ -133,6 +133,8 @@ async fn telegram_queue_advances_when_head_leaves_elicitation_without_telegram()
     let sid_a = "01900000-0000-7000-8000-0000000000aa";
     let sid_b = "01900000-0000-7000-8000-0000000000bb";
 
+    watcher.bind_telegram_tracked_session_for_chat(AUTHORIZED_CHAT, sid_a);
+
     let msg_a = select_elicitation_message("Question from session A", "X", "Y");
     let msg_b = select_elicitation_message("Question from session B", "P", "Q");
 
@@ -282,6 +284,8 @@ async fn telegram_concurrent_queue_unchanged_guarantees() {
     let mem = InMemoryTelegramSender::new();
     let sid_a = "01900000-0000-7000-8000-0000000000aa";
     let sid_b = "01900000-0000-7000-8000-0000000000bb";
+
+    watcher.bind_telegram_tracked_session_for_chat(AUTHORIZED_CHAT, sid_a);
 
     let msg_a = multi_select_elicitation_message("Question from session A", "");
     let msg_b = multi_select_elicitation_message("Question from session B", "");

@@ -6,9 +6,13 @@
 #   --systemd   Required. Install release binaries, config template, unit file; enable+start service.
 #   --build     Optional. Run ./release before copying binaries.
 #
-# Prerequisites (from repo root): ./dev bun install — installs @zed-industries/codex-acp and the
-# platform-specific native package under node_modules/. The install script copies that native
-# codex-acp binary to INSTALL_BIN_DIR alongside tddy-*.
+# Optional (from repo root): ./dev bun install — installs @zed-industries/codex-acp and the
+# platform-specific native package under node_modules/. When that native binary exists, it is
+# copied to INSTALL_BIN_DIR/codex-acp. Install fails only if bundling is mandatory (see below).
+#
+# Mandatory bundling: daemon.yaml (existing or freshly created from daemon.yaml.production) must
+# list `id: codex-acp` under allowed_agents, or set INSTALL_BUNDLE_CODEX_ACP=1. Otherwise a missing
+# or unsupported-platform npm package is skipped (use TDDY_CODEX_ACP_CLI / PATH at runtime).
 #
 # Environment (install paths — override for tests or non-FHS layouts):
 #   INSTALL_PREFIX       Base prefix (default: /usr/local). Binaries go to INSTALL_PREFIX/bin
@@ -19,6 +23,9 @@
 #   INSTALL_WEB_BUNDLE_DIR  Directory for tddy-web static files (default: ${INSTALL_PREFIX}/share/tddy/web).
 #
 #   INSTALL_NO_SYSTEMCTL=1  Skip root check and systemctl (for automated tests).
+#
+#   INSTALL_BUNDLE_CODEX_ACP=1  Always install ${BIN_DIR}/codex-acp from node_modules; fail if the
+#                        platform package or native binary is missing.
 #
 #   INSTALL_OVERWRITE_SYSTEMD_UNIT=1  Replace tddy-daemon.service with the template from this script.
 #                        Default: if the unit file already exists, it is not overwritten (preserves
@@ -90,33 +97,64 @@ if [[ ! -f "${WEB_DIST_SRC}/index.html" ]]; then
 fi
 
 # Native codex-acp from bun/npm optional platform package (see package.json dependencies).
-resolve_codex_acp_native_src() {
+compute_codex_acp_native_src() {
   local os arch
   case "$(uname -s)" in
     Linux) os=linux ;;
     Darwin) os=darwin ;;
-    *)
-      echo "install: unsupported OS for bundled codex-acp: $(uname -s)" >&2
-      return 1
-      ;;
+    *) return 1 ;;
   esac
   case "$(uname -m)" in
     x86_64|amd64) arch=x64 ;;
     aarch64|arm64) arch=arm64 ;;
-    *)
-      echo "install: unsupported CPU for bundled codex-acp: $(uname -m)" >&2
-      return 1
-      ;;
+    *) return 1 ;;
   esac
   echo "${ROOT_DIR}/node_modules/@zed-industries/codex-acp-${os}-${arch}/bin/codex-acp"
+  return 0
 }
 
-CODEX_ACP_NATIVE="$(resolve_codex_acp_native_src)" || exit 1
-if [[ ! -f "$CODEX_ACP_NATIVE" ]]; then
-  echo "install: missing codex-acp native binary: ${CODEX_ACP_NATIVE}" >&2
-  echo "install: run from repo root: ./dev bun install  (pulls @zed-industries/codex-acp + platform package)" >&2
-  exit 1
-fi
+# True when install must place ${BIN_DIR}/codex-acp from node_modules (fail if missing/unsupported).
+codex_acp_bundling_mandatory() {
+  if [[ "${INSTALL_BUNDLE_CODEX_ACP:-0}" == "1" ]]; then
+    return 0
+  fi
+  local cfg
+  if [[ -f "$CONFIG_FILE" ]]; then
+    cfg="$CONFIG_FILE"
+  else
+    cfg="${ROOT_DIR}/daemon.yaml.production"
+  fi
+  [[ -f "$cfg" ]] || return 1
+  # Agent id line under allowed_agents (YAML: optional quotes).
+  grep -Eq '^[[:space:]]*id:[[:space:]]*['\''"]?codex-acp['\''"]?[[:space:]]*$' "$cfg"
+}
+
+install_codex_acp_from_node_modules() {
+  local src=""
+  if ! src="$(compute_codex_acp_native_src)"; then
+    if codex_acp_bundling_mandatory; then
+      echo "install: bundled codex-acp has no @zed-industries package mapping for $(uname -s)/$(uname -m)" >&2
+      exit 1
+    fi
+    echo "install: skipping codex-acp (no npm platform package for this OS/CPU)"
+    return 0
+  fi
+
+  if [[ -f "$src" ]]; then
+    install -m 0755 "$src" "${BIN_DIR}/codex-acp"
+    echo "install:   updated ${BIN_DIR}/codex-acp (from @zed-industries/codex-acp platform package)"
+    return 0
+  fi
+
+  if codex_acp_bundling_mandatory; then
+    echo "install: missing codex-acp native binary: ${src}" >&2
+    echo "install: run from repo root: ./dev bun install  (pulls @zed-industries/codex-acp + platform package)" >&2
+    echo "install: or drop codex-acp from allowed_agents / unset INSTALL_BUNDLE_CODEX_ACP if you do not use this backend" >&2
+    exit 1
+  fi
+
+  echo "install: skipping codex-acp (native binary not under node_modules; not required by daemon config)"
+}
 
 echo "install: paths — BIN_DIR=${BIN_DIR}"
 echo "install: paths — CONFIG_DIR=${CONFIG_DIR} (daemon.yaml)"
@@ -126,7 +164,7 @@ echo "install: logging — daemon process file log (from daemon.yaml.production)
 echo "install: logging — OAuth/token storage (auth_storage): ${AUTH_STORAGE_DIR}"
 echo "install: logging — spawned tddy-coder sessions write under each repo: <repo>/tmp/logs/coder and <repo>/tmp/logs/child/ (runtime; not created by this script)"
 echo "install: per–OS-user spawn PATH (e.g. Cursor agent): ~/.tddy/config.yaml on the target user (spawn_path_extra); not created by this script"
-echo "install: codex-acp — native binary from bun lock (see node_modules/@zed-industries/codex-acp-*) -> \${BIN_DIR}/codex-acp"
+echo "install: codex-acp — if present under node_modules, copied to \${BIN_DIR}/codex-acp (mandatory when allowed_agents lists id codex-acp or INSTALL_BUNDLE_CODEX_ACP=1)"
 
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR" "$WEB_BUNDLE_DIR"
 
@@ -142,8 +180,7 @@ install -m 0755 "${ROOT_DIR}/target/release/tddy-coder" "${BIN_DIR}/tddy-coder"
 echo "install:   updated ${BIN_DIR}/tddy-coder"
 install -m 0755 "${ROOT_DIR}/target/release/tddy-tools" "${BIN_DIR}/tddy-tools"
 echo "install:   updated ${BIN_DIR}/tddy-tools"
-install -m 0755 "$CODEX_ACP_NATIVE" "${BIN_DIR}/codex-acp"
-echo "install:   updated ${BIN_DIR}/codex-acp (from @zed-industries/codex-acp platform package)"
+install_codex_acp_from_node_modules
 
 echo "install: copying web static bundle ${WEB_DIST_SRC}/ -> ${WEB_BUNDLE_DIR}/"
 cp -a "${WEB_DIST_SRC}/." "$WEB_BUNDLE_DIR/"

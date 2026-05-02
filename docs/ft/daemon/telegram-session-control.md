@@ -66,6 +66,13 @@ Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`T
 - Bot presents the current workflow state and available actions (plan review, elicitation responses, etc.) using inline keyboards.
 - Presenter input from Telegram uses the same **`map_elicitation_callback_to_presenter_input`** encoding as the web client for legacy **`elicitation:`**-style payloads where applicable.
 
+### Telegram-tracked session (inbound binding + replay)
+
+- **`enter:<session_id>`** callbacks establish **per-chat tracking**: the Telegram **`chat_id`** binds to that workflow **`session_id`** inside a **`SharedTelegramTrackedSessionCoordinator`** shared with **`TelegramSessionWatcher`**, so outbound presenter keyboards and inbound elicitation gates agree on the operator’s chosen session.
+- After a successful **Enter**, the control path **replays** pending presenter elicitation for that session when cached presenter state indicates an outstanding gate (test harnesses may attach a **`TelegramElicitationReplayBridge`** for the same replay contract without the full daemon graph).
+- **Session delete** clears the tracked association when the deleted session id matches the chat’s tracked id. **WorkflowComplete** clears when the completed session matches the tracked pair.
+- Integration coverage lives in **`packages/tddy-daemon/tests/telegram_tracked_session_acceptance.rs`** together with existing concurrent-elicitation and multi-select suites that bind tracking where full keyboards are asserted.
+
 ### Clarification (select, text, multi)
 
 - **Single-select** (**`Select`**): the outbound notification lists each option on its own line in the message body; inline buttons use compact numeric labels. After the operator taps a button, the bot sends a **confirmation message** with the **full** chosen option text (label and description as defined by the presenter). The daemon resolves the choice via **`PresenterIntent::AnswerClarificationSelect`** on the child’s localhost gRPC port (see **`presenter_intent.proto`**).
@@ -108,6 +115,7 @@ The daemon binary runs **long-polling** inbound handling (see above). Durable **
 - **Telegram ↔ GitHub linking** integration and unit tests live in **`packages/tddy-daemon/tests/telegram_github_link.rs`** and **`telegram_github_link.rs`** (`#[cfg(test)]`): OAuth state round-trip, mapping persistence, unlinked **`handle_start_workflow`** error path, stub exchange.
 - **Concurrent elicitation** scenarios (single chat, multiple sessions, active token) live in **`packages/tddy-daemon/tests/telegram_concurrent_elicitation_integration.rs`**.
 - **Multi-select shortcuts** (outbound keyboards, parser, metadata gating) live in **`packages/tddy-daemon/tests/telegram_multi_select_acceptance.rs`**.
+- **Telegram-tracked session gate and replay** live in **`packages/tddy-daemon/tests/telegram_tracked_session_acceptance.rs`**.
 
 ## Related documentation
 

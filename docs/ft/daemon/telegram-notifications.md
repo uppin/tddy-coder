@@ -78,6 +78,18 @@ Outbound **`MultiSelect`** notifications append a shortcut row (**Choose none**,
 - **Deferred surface:** When a session is registered but is **not** at the head of its chat queue, the notifier sends the action line as **text** (with a short “queued” explanation) and **does not** attach the full primary inline keyboard for that session (including **`Select`** numeric rows, **`MultiSelect`** **`eli:mn:`** / **`eli:mr:`** shortcuts, **`doc:`** review rows — whichever applies), so only the head session attaches a competing primary **`ModeChanged`** keyboard in the chat.
 - **Depth monitoring:** When the per-chat queue length exceeds an internal threshold, the daemon emits a **warning** log line for operators (see **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)** and **`active_elicitation`**).
 
+### Telegram-tracked session (keyboard gate)
+
+Each configured Telegram **`chat_id`** holds an optional **tracked** workflow **`session_id`**: the session the operator chose to drive from Telegram for **workflow action** inline keyboards (elicitation **`eli:*`**, document review **`doc:*`**, plan / markdown approval rows, and related presenter **`ModeChanged`** surfaces).
+
+- **Binding:** Established when the operator completes **Enter session** for that workflow session (same **`enter:<session_id>`** callback schema as the session list; see **[telegram-session-control.md](telegram-session-control.md)**).
+- **Suppression:** When the chat has **no** tracked session, or the tracked session id **differs** from the outbound elicitation target, **`TelegramSessionWatcher`** sends the presenter action line with a single **Enter session** keyboard row instead of the full workflow keyboard. Plain text portions (document body, option listing in the message body) still follow the usual chunking rules; only **workflow action** inline keyboards are withheld under this policy.
+- **Primary queue token unchanged:** The **active elicitation token** / FIFO rules in **`ActiveElicitationCoordinator`** still decide whether a session is **primary** for a chat; the tracked-session gate applies in addition when the session **is** primary and would otherwise attach a workflow keyboard.
+- **Queue promotion replay:** Presenter **`ModeChanged`** sends classified as **queue promotion replay** bypass the tracked-session gate so promoted sessions attach their primary keyboards without requiring a second **Enter** after queue advancement.
+- **Replay after Enter:** After binding, the daemon **re-sends** the pending presenter elicitation surface for that session (dedupe signatures align with intentional replay so the operator receives the full keyboard).
+- **Clearing:** The association drops when the workflow reaches **WorkflowComplete** for that tracked pair, when **session delete** removes the tracked session, or when an explicit per-chat clear runs (leave / future control-plane hooks).
+- **Traffic logs:** Structured lines on **`tddy_daemon::telegram`** describe outbound keyboard classes (**`workflow_keyboard`**, **`enter_only_keyboard`**, **`mode_changed`** routing) with **`chat_id`** and **`session_id`**. Inbound user text and callback routing use **`tddy_daemon::telegram_bot`** (and related helpers); **`callback_data`** appears only as a **short prefix** in logs—payloads remain compact opaque tokens. Full bot tokens never appear in logs (**`mask_bot_token_for_logs`** and related helpers).
+
 ### Other elicitation modes
 
 For modes that are **not** full-document review (feature input, free-text **`TextInput`**), messages remain short hints: short session label and explicit **approval** or **input** wording. **`Select`** adds the numbered listing above; primary-queue **`MultiSelect`** adds the shortcut row described in **Clarification multi-select**; deferred-queue sessions omit competing primary keyboards while still emitting the queued explanatory text line.
@@ -86,7 +98,7 @@ Callers that read **`.session.yaml`** (or equivalent) on an interval can still u
 
 ## Tests
 
-Automated coverage includes unit tests for labels, terminal-status classification, token masking, and integration tests with a mock sender (no live Telegram network in CI).
+Automated coverage includes unit tests for labels, terminal-status classification, token masking, **telegram-tracked session** coordinator contracts, and integration tests with a mock sender (no live Telegram network in CI), including **`telegram_tracked_session_acceptance`** for gate, **Enter** replay, and log-shape assertions alongside existing concurrent-elicitation and multi-select suites.
 
 ## Telegram session control (library harness)
 

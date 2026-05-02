@@ -197,11 +197,15 @@ fn main() -> anyhow::Result<()> {
                 let active_elicitation = Arc::new(StdMutex::new(
                     tddy_daemon::active_elicitation::ActiveElicitationCoordinator::new(),
                 ));
+                let telegram_tracked = Arc::new(StdMutex::new(
+                    tddy_daemon::telegram_tracked_session::TelegramTrackedSessionCoordinator::new(),
+                ));
                 let watcher = Arc::new(Mutex::new(
-                    tddy_daemon::telegram_notifier::TelegramSessionWatcher::with_elicitation_caches_and_coordinator(
+                    tddy_daemon::telegram_notifier::TelegramSessionWatcher::with_elicitation_caches_coordinator_and_tracked(
                         elicitation_select_options.clone(),
                         elicitation_multi_select_meta.clone(),
                         active_elicitation.clone(),
+                        telegram_tracked.clone(),
                     ),
                 ));
                 let hooks = Arc::new(
@@ -235,12 +239,13 @@ fn main() -> anyhow::Result<()> {
                         },
                     ));
                     let harness = Arc::new(Mutex::new(
-                        tddy_daemon::telegram_session_control::TelegramSessionControlHarness::with_workflow_spawn(
+                        tddy_daemon::telegram_session_control::TelegramSessionControlHarness::with_workflow_spawn_and_telegram_tracked(
                             tg.chat_ids.clone(),
                             sessions_base,
                             teloxide_sender,
                             workflow_spawn,
                             Some(active_elicitation),
+                            Some(telegram_tracked),
                         ),
                     ));
                     telegram_inbound = Some((bot.clone(), harness));
