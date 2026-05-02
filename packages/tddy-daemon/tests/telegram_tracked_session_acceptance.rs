@@ -15,7 +15,9 @@ use tddy_daemon::config::{DaemonConfig, TelegramConfig};
 use tddy_daemon::telegram_notifier::{
     ElicitationSelectOptionsCache, InMemoryTelegramSender, TelegramSessionWatcher,
 };
-use tddy_daemon::telegram_session_control::{TelegramSessionControlHarness, CB_ENTER};
+use tddy_daemon::telegram_session_control::{
+    StartWorkflowCommand, TelegramSessionControlHarness, CB_ENTER,
+};
 use tddy_daemon::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
@@ -202,6 +204,73 @@ async fn telegram_untracked_chat_suppresses_workflow_keyboards_shows_enter_only(
     assert!(
         !transcript.contains(secret_token),
         "Telegram outbound must never embed raw bot_token substrings in message bodies"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn telegram_start_workflow_binds_tracked_chat_so_first_elicitation_shows_option_buttons() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opts: ElicitationSelectOptionsCache = Arc::new(std::sync::Mutex::new(HashMap::new()));
+    let coord: SharedActiveElicitationCoordinator =
+        Arc::new(Mutex::new(ActiveElicitationCoordinator::new()));
+    let tracked: SharedTelegramTrackedSessionCoordinator =
+        Arc::new(Mutex::new(TelegramTrackedSessionCoordinator::new()));
+
+    let cfg = telegram_config_with_token("start-workflow-tracked-session-token");
+
+    let watcher_inner =
+        TelegramSessionWatcher::with_elicitation_select_options_coordinator_and_tracked(
+            opts,
+            coord.clone(),
+            tracked.clone(),
+        );
+    let watcher_arc = Arc::new(tokio::sync::Mutex::new(watcher_inner));
+
+    let sender = Arc::new(InMemoryTelegramSender::new());
+    let mut harness = TelegramSessionControlHarness::with_workflow_spawn_and_telegram_tracked(
+        vec![AUTHORIZED_CHAT],
+        tmp.path().to_path_buf(),
+        sender.clone(),
+        None,
+        Some(coord),
+        Some(tracked),
+    );
+    harness.connect_telegram_elicitation_replay_bridge(cfg.clone(), watcher_arc.clone());
+
+    let outcome = harness
+        .handle_start_workflow(StartWorkflowCommand {
+            chat_id: AUTHORIZED_CHAT,
+            user_id: 77,
+            prompt: "feature started from Telegram".to_string(),
+        })
+        .await
+        .expect("handle_start_workflow");
+
+    let sid = outcome.session_id.as_str();
+    let msg = select_elicitation_server_message(
+        "First elicitation after start-workflow",
+        "Opt A",
+        "Opt B",
+    );
+    {
+        let mut w = watcher_arc.lock().await;
+        w.on_server_message(&cfg, sender.as_ref(), sid, &msg)
+            .await
+            .expect("on_server_message ModeChanged");
+    }
+
+    let recorded = sender.recorded_with_keyboards();
+    let has_eli_s = recorded.iter().any(|(_, _, rows)| {
+        rows.iter()
+            .flatten()
+            .any(|(_, cb)| cb.contains("eli:s:") && cb.contains(sid))
+    });
+    assert!(
+        has_eli_s,
+        "after /start-workflow from this chat, first presenter elicitation must show option \
+         buttons (eli:s:) for session {sid} without a separate Enter session step; \
+         recorded_with_keyboards={recorded:?}"
     );
 }
 

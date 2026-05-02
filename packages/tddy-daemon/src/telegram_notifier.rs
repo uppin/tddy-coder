@@ -45,24 +45,10 @@ pub struct MultiSelectShortcutElicitationMeta {
 pub type ElicitationMultiSelectMetaCache =
     Arc<StdMutex<HashMap<String, MultiSelectShortcutElicitationMeta>>>;
 
-/// Development trace hook — logs structured scope for debugging (reduced in later phases).
-fn marker_json(marker_id: &str, scope: &str) {
-    log::debug!(
-        target: "tddy_daemon::telegram",
-        "telegram_notifier trace marker marker_id={} scope={}",
-        marker_id,
-        scope
-    );
-}
-
 /// Short label for Telegram: first two hyphen-separated segments of `session_id` (UUID-shaped).
 ///
 /// Example: `018f1234-5678-7abc-8def-123456789abc` → `018f1234-5678`.
 pub fn session_telegram_label(session_id: &str) -> Option<String> {
-    marker_json(
-        "M001",
-        "tddy_daemon::telegram_notifier::session_telegram_label",
-    );
     let parts: Vec<&str> = session_id.split('-').collect();
     if parts.len() < 2 {
         log::debug!(
@@ -77,19 +63,11 @@ pub fn session_telegram_label(session_id: &str) -> Option<String> {
 
 /// Whether `status` is terminal (session finished; repeated reads should not notify).
 pub fn is_terminal_session_status(status: &str) -> bool {
-    marker_json(
-        "M002",
-        "tddy_daemon::telegram_notifier::is_terminal_session_status",
-    );
     status.eq_ignore_ascii_case("completed") || status.eq_ignore_ascii_case("failed")
 }
 
 /// Mask bot token for log lines — must never print the full secret.
 pub fn mask_bot_token_for_logs(token: &str) -> String {
-    marker_json(
-        "M006",
-        "tddy_daemon::telegram_notifier::mask_bot_token_for_logs",
-    );
     if token.is_empty() {
         return String::new();
     }
@@ -103,10 +81,6 @@ pub async fn send_telegram_via_teloxide(
     chat_id: ChatId,
     text: &str,
 ) -> anyhow::Result<()> {
-    marker_json(
-        "M007",
-        "tddy_daemon::telegram_notifier::send_telegram_via_teloxide",
-    );
     log::info!(
         target: "tddy_daemon::telegram",
         "send_telegram_via_teloxide: dispatching send_message chat_id={:?} text_len={}",
@@ -403,10 +377,6 @@ impl TelegramSessionWatcher {
         active_elicitation: SharedActiveElicitationCoordinator,
         telegram_tracked: SharedTelegramTrackedSessionCoordinator,
     ) -> Self {
-        marker_json(
-            "M003",
-            "tddy_daemon::telegram_notifier::TelegramSessionWatcher::new",
-        );
         log::info!(target: "tddy_daemon::telegram", "TelegramSessionWatcher: initialized");
         Self {
             last_status: HashMap::new(),
@@ -456,10 +426,6 @@ impl TelegramSessionWatcher {
         status: &str,
         is_active: bool,
     ) -> anyhow::Result<()> {
-        marker_json(
-            "M004",
-            "tddy_daemon::telegram_notifier::TelegramSessionWatcher::on_metadata_tick",
-        );
         log::debug!(
             target: "tddy_daemon::telegram",
             "on_metadata_tick: entry session_id={} status={} is_active={}",
