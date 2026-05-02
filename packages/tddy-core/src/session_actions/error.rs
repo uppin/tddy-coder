@@ -25,13 +25,13 @@ pub enum SessionActionsError {
         "session actions: invalid path binding ({purpose}): `{}` is outside session tree or declared repo",
         path
     )]
-    PathOutsideAllowlist {
-        path: String,
-        purpose: &'static str,
-    },
+    PathOutsideAllowlist { path: String, purpose: &'static str },
 
     #[error("session actions: invalid path ({purpose}): {reason}")]
-    PathTraversalAttempt { purpose: &'static str, reason: String },
+    PathTraversalAttempt {
+        purpose: &'static str,
+        reason: String,
+    },
 
     #[error("session actions: host architecture `{requested}` does not match this host ({host})")]
     ArchitectureMismatch { requested: String, host: String },
@@ -54,8 +54,5 @@ pub enum SessionActionsError {
     ChangesetRead(String),
 
     #[error("session actions: manifest program `{program}` ({detail})")]
-    CommandSpawn {
-        program: String,
-        detail: String,
-    },
+    CommandSpawn { program: String, detail: String },
 }

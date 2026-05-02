@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 use tddy_core::session_action_pipeline::{
-    run_input_mapper_for_envelope, run_output_transform_and_validate, run_primary_action_with_capture_paths,
-    SessionActionPipelineError,
+    run_input_mapper_for_envelope, run_output_transform_and_validate,
+    run_primary_action_with_capture_paths, SessionActionPipelineError,
 };
 
 fn session_root(label: &str) -> PathBuf {
@@ -52,9 +52,7 @@ printf '%s\n' '{"args":["/bin/sh","-c","echo mapper_ok"],"env":{"MAPPER":"1"}}'
 
     let channels = sample_channels(&session);
     let input = json!({"tool": "probe", "n": 1});
-    let mapper_cmd = vec![
-        mapper.to_string_lossy().into_owned(),
-    ];
+    let mapper_cmd = vec![mapper.to_string_lossy().into_owned()];
     let got = run_input_mapper_for_envelope(&mapper_cmd, &input, &channels);
     assert!(
         got.is_ok(),
@@ -64,7 +62,11 @@ printf '%s\n' '{"args":["/bin/sh","-c","echo mapper_ok"],"env":{"MAPPER":"1"}}'
     let (args, env) = got.unwrap();
     assert_eq!(
         args,
-        vec!["/bin/sh".to_string(), "-c".to_string(), "echo mapper_ok".to_string()]
+        vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "echo mapper_ok".to_string()
+        ]
     );
     assert_eq!(env.get("MAPPER").map(String::as_str), Some("1"));
 }
@@ -75,12 +77,7 @@ fn session_action_input_mapper_failure_surfaces_structured_error() {
     let session = session_root("mapper_fail");
     let channels = sample_channels(&session);
     let input = json!({});
-    let err = run_input_mapper_for_envelope(
-        &["/bin/false".into()],
-        &input,
-        &channels,
-    )
-    .unwrap_err();
+    let err = run_input_mapper_for_envelope(&["/bin/false".into()], &input, &channels).unwrap_err();
     assert!(
         matches!(err, SessionActionPipelineError::InputMapperFailed { .. }),
         "expected InputMapperFailed for non-zero mapper exit; got {err:?}"
@@ -111,7 +108,11 @@ fn session_action_output_transform_validates_against_output_schema() {
         .expect("transform must succeed and validate against output schema");
     assert_eq!(value, json!({"status": "ok"}));
 
-    let bad_transform = vec!["/bin/sh".into(), "-c".into(), "echo '{\"status\": 7}'".into()];
+    let bad_transform = vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        "echo '{\"status\": 7}'".into(),
+    ];
     let bad = run_output_transform_and_validate(&bad_transform, &channels, &output_schema)
         .expect_err("wrong JSON type must fail schema validation");
     assert!(
@@ -148,10 +149,7 @@ fn session_action_stdout_stderr_paths_default_and_override_round_trip() {
     run_primary_action_with_capture_paths(
         &session,
         Path::new("/bin/sh"),
-        &[
-            "-c".into(),
-            "echo -n err1 >&2; echo -n err2 >&2".into(),
-        ],
+        &["-c".into(), "echo -n err1 >&2; echo -n err2 >&2".into()],
         &HashMap::new(),
         None,
         Some(def_stderr.as_path()),

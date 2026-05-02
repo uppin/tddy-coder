@@ -1,7 +1,7 @@
 # Workflow JSON Schemas (structured agent output)
 
 **Product area:** Coder  
-**Updated:** 2026-04-06
+**Updated:** 2026-05-02
 
 ## Summary
 
@@ -45,9 +45,17 @@ The **`changeset-workflow`** schema includes post-green routing fields (**`run_o
 - **`new_branch_name`**: branch name for **`new_branch_from_base`**.
 - **`selected_branch_to_work_on`**: existing local branch name for **`work_on_selected_branch`**.
 
+Optional **post-workflow** fields (**`changeset.workflow`**) support durable tracking of GitHub PR elicitation and conditional session worktree removal intent:
+
+- **`post_workflow_open_github_pr`**: boolean — operator opted into automated GitHub PR creation for the session branch.
+- **`post_workflow_remove_session_worktree`**: boolean — operator answer for removing the session worktree after successful PR automation (eligible only after a **`published`** PR path).
+- **`github_pr_status`**: object with **`phase`** (string), **`url`** (string or **`null`**), **`error`** (string or **`null`**); **`required`** lists **`phase`**, **`url`**, and **`error`** so payloads carry explicit **`null`** where no URL or error applies.
+
 **`additionalProperties`** is **`false`** on the payload object: unknown keys fail validation.
 
-**`tddy_core::changeset::merge_persisted_workflow_into_context`** copies **`run_optional_step_x`**, **`demo_options`**, and intent-related keys (**`branch_worktree_intent`**, **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**) into the engine **`Context`** when present so hooks and resume logic read the same values as **`changeset.yaml`**.
+**`tddy_core::changeset::merge_persisted_workflow_into_context`** copies **`run_optional_step_x`**, **`demo_options`**, intent-related keys (**`branch_worktree_intent`**, **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**), **`post_workflow_open_github_pr`**, **`post_workflow_remove_session_worktree`**, and a JSON object **`github_pr_status`** into the engine **`Context`** when present so hooks and resume logic read the same values as **`changeset.yaml`**.
+
+Product behavior for end-of-session prompts, presenter wiring, GitHub REST execution, and worktree teardown lives in **[Post-workflow GitHub PR and worktree elicitation](post-workflow-github-pr-elicitation.md)**.
 
 **`tddy_core::worktree`** uses persisted workflow intent in **`setup_worktree_for_session_with_integration_base`** and **`setup_worktree_for_session_with_optional_chain_base`**: **`new_branch_from_base`** creates a new branch and worktree from the integration base; **`work_on_selected_branch`** attaches a worktree at the suggested directory name to an existing branch (including a detach-and-switch path when Git reports the branch is already checked out elsewhere).
 
@@ -55,6 +63,7 @@ The **`changeset-workflow`** schema includes post-green routing fields (**`run_o
 
 - [Workflow recipes](workflow-recipes.md) — `TddRecipe`, goals as strings, engine integration  
 - [GitHub pull request tools (tddy-tools MCP)](github-pr-tools-mcp.md) — optional **`github_pr_tools_metadata`** on **`changeset-workflow`**, MCP tool names, environment gating  
+- [Post-workflow GitHub PR and worktree elicitation](post-workflow-github-pr-elicitation.md) — **`changeset.workflow`** post-workflow fields, **`merge_persisted_workflow_into_context`**, **`post_workflow`** policy helpers  
 - `docs/dev/1-WIP/workflow-schema-pipeline.md` — build pipeline and editing workflow  
 - `packages/tddy-tools/docs/json-schema.md` — CLI and library technical details  
 - `packages/tddy-workflow-recipes/docs/workflow-schemas.md` — crate-owned schema and proto layout  

@@ -161,6 +161,7 @@ mod tests {
                 selected_integration_base_ref: Some("origin/main".into()),
                 new_branch_name: Some("feature/custom-from-intent".into()),
                 selected_branch_to_work_on: None,
+                ..Default::default()
             }),
             ..Default::default()
         }

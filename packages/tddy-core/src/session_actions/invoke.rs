@@ -18,14 +18,8 @@ pub fn finalize_invocation_record(
     if manifest.result_kind.as_deref() != Some("test_summary") {
         return Ok(());
     }
-    let stdout = record
-        .get("stdout")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let stderr = record
-        .get("stderr")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let stdout = record.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+    let stderr = record.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
     let combined = format!("{stdout}{stderr}");
     let summary = parse_test_summary_from_process_output(&combined)?;
     if let Some(obj) = record.as_object_mut() {
@@ -71,10 +65,12 @@ pub fn run_manifest_command(
     }
     cmd.current_dir(&cwd);
 
-    let output = cmd.output().map_err(|e| SessionActionsError::CommandSpawn {
-        program: program.to_string(),
-        detail: e.to_string(),
-    })?;
+    let output = cmd
+        .output()
+        .map_err(|e| SessionActionsError::CommandSpawn {
+            program: program.to_string(),
+            detail: e.to_string(),
+        })?;
 
     let code = output.status.code().unwrap_or(-1);
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();

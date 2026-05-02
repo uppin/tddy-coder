@@ -45,10 +45,17 @@ pub enum SessionActionInvokeOutcome {
 /// Result of `wait_session_action_job`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionActionWaitOutcome {
-    Completed { exit_code: Option<i32> },
-    Failed { exit_code: Option<i32>, error_summary: Option<String> },
+    Completed {
+        exit_code: Option<i32>,
+    },
+    Failed {
+        exit_code: Option<i32>,
+        error_summary: Option<String>,
+    },
     /// Positive timeout elapsed while job still running (PRD: agent may grep logs / extend wait).
-    TimedOut { still_running: bool },
+    TimedOut {
+        still_running: bool,
+    },
 }
 
 /// Result of `stop_session_action_job`.

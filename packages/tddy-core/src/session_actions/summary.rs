@@ -25,7 +25,9 @@ fn cargo_test_totals_re() -> &'static Regex {
 }
 
 /// Extract `[passed, failed, skipped]` from combined stdout/stderr (cargo-style `test result:` block).
-pub fn parse_test_summary_from_process_output(stdout_stderr: &str) -> Result<TestSummary, SessionActionsError> {
+pub fn parse_test_summary_from_process_output(
+    stdout_stderr: &str,
+) -> Result<TestSummary, SessionActionsError> {
     debug!(
         target: "tddy_core::session_actions::summary",
         "parse_test_summary_from_process_output: input_len={}",

@@ -81,25 +81,17 @@ fn invoke_action_inner(
     let repo_cached = load_repo_root(session_dir)?;
 
     if let Some(bind) = manifest.output_path_arg.as_deref() {
-        let v = args
-            .get(bind)
-            .and_then(|x| x.as_str())
-            .ok_or_else(|| {
-                SessionActionsError::ArgumentsViolateSchema(format!(
-                    "missing string field `{bind}` for output path binding (required by manifest)"
-                ))
-            })?;
+        let v = args.get(bind).and_then(|x| x.as_str()).ok_or_else(|| {
+            SessionActionsError::ArgumentsViolateSchema(format!(
+                "missing string field `{bind}` for output path binding (required by manifest)"
+            ))
+        })?;
         resolve_allowlisted_path(session_dir, repo_cached.as_deref(), v, "output_binding")?;
     }
 
     ensure_action_architecture(&manifest.architecture)?;
 
-    let record = run_manifest_command(
-        session_dir,
-        repo_cached.as_deref(),
-        &manifest,
-        &args,
-    )?;
+    let record = run_manifest_command(session_dir, repo_cached.as_deref(), &manifest, &args)?;
 
     Ok(record)
 }
@@ -129,4 +121,3 @@ fn load_repo_root(session_dir: &Path) -> Result<Option<PathBuf>, SessionActionsE
         Err(e) => Err(SessionActionsError::ChangesetRead(e.to_string())),
     }
 }
-
