@@ -1311,6 +1311,8 @@ impl Default for TelegramSessionWatcher {
 
 #[cfg(test)]
 mod acceptance_unit_tests {
+    #![allow(clippy::field_reassign_with_default)]
+
     use super::*;
     use crate::config::DaemonConfig;
     use async_trait::async_trait;

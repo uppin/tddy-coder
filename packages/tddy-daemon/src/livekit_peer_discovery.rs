@@ -621,10 +621,11 @@ async fn advance_daemon_adv_publish_on_tick(
         st.round_deadline = None;
         return;
     }
-    if st
-        .last_sdk_call
-        .is_some_and(|t| now.saturating_duration_since(t) < SET_METADATA_MIN_SDK_CALL_INTERVAL)
-    {
+    let allow_publish_sdk_call = match st.last_sdk_call {
+        None => true,
+        Some(t) => now.saturating_duration_since(t) >= SET_METADATA_MIN_SDK_CALL_INTERVAL,
+    };
+    if !allow_publish_sdk_call {
         return;
     }
     st.sdk_attempt = st.sdk_attempt.saturating_add(1);

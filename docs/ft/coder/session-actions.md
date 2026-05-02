@@ -108,6 +108,21 @@ The **`tddy_core::session_action_pipeline`** module provides library helpers for
 - **`packages/tddy-core/tests/session_action_resolve_unit.rs`**
 - **`packages/tddy-tools/tests/session_action_pipeline_integration.rs`**
 
+## Workflow action cache
+
+When a workflow run uses a **`session_dir`**, the engine may **reuse a prior successful `tddy-tools submit` result** for the same graph step instead of starting another backend round-trip. The workflow stores completed submit payloads under **`<session_dir>/.workflow/action-cache.json`**, keyed by workflow graph identity, task id, goal id, and a **fingerprint** of the effective user prompt (plus optional system prompt and model fields). **`FlowRunner`** supplies stable **`workflow_engine_graph_id`** and **`workflow_engine_current_task_id`** values on **`Context`** so keys stay consistent across steps.
+
+**Opt-out**: set context **`disable_action_cache`**, or environment **`TDDY_DISABLE_ACTION_CACHE`** to **`1`**, **`true`**, or **`yes`**.
+
+**Test harness**: **`MockBackend`** is not cache-eligible (**`action_invoke_cache_eligible` → false**), so mock-driven graphs keep strict submit ordering with the in-memory relay.
+
+**Implementation**: [`tddy_core::workflow::action_cache`](../../../packages/tddy-core/src/workflow/action_cache.rs), **`BackendInvokeTask`** in [`task.rs`](../../../packages/tddy-core/src/workflow/task.rs). **Architecture**: [`tddy-core` architecture — Workflow action cache](../../../packages/tddy-core/docs/architecture.md#workflow-action-cache).
+
+### Related tests (action cache)
+
+- **`packages/tddy-core`**: unit tests in **`workflow::action_cache`** (fingerprinting, opt-out, disk read/write).
+- **`packages/tddy-integration-tests`**: **`workflow_graph`** — **`action_cache_hit_skips_second_invoke`**, **`action_cache_miss_when_prompt_changes`**, **`action_cache_survives_process_restart`**, **`action_cache_no_entry_on_wait_for_input`**.
+
 ## Related tests
 
 Library coverage: **`packages/tddy-core/tests/session_actions_red.rs`**, **`packages/tddy-core/tests/toolcall_jobs.rs`**. Integration coverage: **`packages/tddy-tools/tests/actions_cli_acceptance.rs`**, **`packages/tddy-tools/tests/session_action_jobs_acceptance.rs`**.
@@ -115,4 +130,4 @@ Library coverage: **`packages/tddy-core/tests/session_actions_red.rs`**, **`pack
 ## Related documentation
 
 - [Session directory layout](session-layout.md)
-- **Implementation**: [`tddy_core::session_actions`](../../../packages/tddy-core/src/session_actions/mod.rs), [`tddy_core::session_action_jobs`](../../../packages/tddy-core/src/session_action_jobs/mod.rs), [`tddy_core::session_action_pipeline`](../../../packages/tddy-core/src/session_action_pipeline.rs), **[`tddy_core` architecture — Session actions](../../../packages/tddy-core/docs/architecture.md#session-actions-session_actions)**, **[Session action jobs](../../../packages/tddy-core/docs/architecture.md#session-action-jobs-session_action_jobs)**, **[Session action pipeline](../../../packages/tddy-core/docs/architecture.md#session-action-pipeline-session_action_pipeline)**; **`tddy_tools::session_actions_cli`** (binary wiring)
+- **Implementation**: [`tddy_core::session_actions`](../../../packages/tddy-core/src/session_actions/mod.rs), [`tddy_core::session_action_jobs`](../../../packages/tddy-core/src/session_action_jobs/mod.rs), [`tddy_core::session_action_pipeline`](../../../packages/tddy-core/src/session_action_pipeline.rs), **[`tddy_core` architecture — Session actions](../../../packages/tddy-core/docs/architecture.md#session-actions-session_actions)**, **[Session action jobs](../../../packages/tddy-core/docs/architecture.md#session-action-jobs-session_action_jobs)**, **[Session action pipeline](../../../packages/tddy-core/docs/architecture.md#session-action-pipeline-session_action_pipeline)**, **[Workflow action cache](../../../packages/tddy-core/docs/architecture.md#workflow-action-cache)**; **`tddy_tools::session_actions_cli`** (binary wiring)

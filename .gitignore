@@ -7,6 +7,9 @@
 
 # Agent verification output (when terminal capture is broken)
 .verify-result.txt
+.action-cache-red-test-output.txt
+.red-submit-session-action-cache.json
+.verify-green-full.txt
 packages/tddy-workflow-recipes/.tdd-small-red-test-output.txt
 packages/tddy-daemon/.red-test-output.txt
 .red-markers-test-output.txt

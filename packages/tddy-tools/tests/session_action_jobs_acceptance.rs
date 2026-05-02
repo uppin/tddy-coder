@@ -1,7 +1,7 @@
 //! Acceptance tests — PRD *Async session actions (jobs)*, Testing Plan §2 naming.
 //!
 //! Asserts orchestration semantics via [`tddy_core::session_action_jobs`] (blocking vs async admission,
-//! `wait`, `stop`, unknown id). Wired through `tddy-tools`/`presenter` in Green; Red phase exposes API only.
+//! `wait`, `stop`, unknown id). Exercises helpers wired through `tddy-tools` / presenter.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -78,6 +78,7 @@ fn parse_record(outcome: SessionActionInvokeOutcome) -> Value {
 }
 
 /// 1. Blocking path must mirror today's synchronous structured JSON (exit code + captured streams)
+///
 ///    after the subprocess exits — never report success (`exit_code` et al.) before sentinel exists.
 #[test]
 fn session_action_blocking_matches_legacy_semantics() {

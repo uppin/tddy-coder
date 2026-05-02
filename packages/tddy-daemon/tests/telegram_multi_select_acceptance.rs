@@ -1,4 +1,4 @@
-//! Acceptance tests (RED): Telegram MultiSelect shortcuts (`Choose none`, `Choose recommended`).
+//! Acceptance tests: Telegram MultiSelect shortcuts (`Choose none`, `Choose recommended`).
 //!
 //! Grounded in PRD Testing Plan — outbound keyboards + recommended metadata wiring.
 

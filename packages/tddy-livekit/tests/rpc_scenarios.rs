@@ -942,10 +942,10 @@ async fn rpc_scenarios() -> Result<()> {
                 N,
                 harness.handler_count.load(Ordering::SeqCst)
             );
-            for (i, response) in responses.iter().enumerate() {
+            for (i, response) in responses.iter().enumerate().take(N) {
                 let expected = format!("handler=1 seq={} msg=m{:03}", i + 1, i);
                 assert_eq!(
-                    response, &expected,
+                    *response, expected,
                     "response index {} should match sequential handler output",
                     i
                 );

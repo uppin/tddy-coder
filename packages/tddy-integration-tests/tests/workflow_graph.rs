@@ -13,11 +13,14 @@ use tddy_core::backend::{
 };
 use tddy_core::changeset::{merge_persisted_workflow_into_context, write_changeset, Changeset};
 use tddy_core::output::create_session_dir_in;
+use tddy_core::workflow::action_cache::action_cache_file_path;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::{ExecutionStatus, GraphBuilder};
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::runner::FlowRunner;
-use tddy_core::workflow::session::{FileSessionStorage, Session, SessionStorage};
+use tddy_core::workflow::session::{
+    workflow_engine_storage_dir, FileSessionStorage, Session, SessionStorage,
+};
 use tddy_core::workflow::task::EchoTask;
 use tddy_core::workflow::task::TaskResult;
 use tddy_core::workflow::task::{BackendInvokeTask, FailingTask, NextAction, Task};
@@ -1116,4 +1119,235 @@ async fn engine_run_workflow_from_returns_elicitation_needed() {
 
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&storage_dir);
+}
+
+// ── Session action-cache acceptance (PRD: BackendInvokeTask + FlowRunner + session_dir) ─
+
+async fn ac_reload_session(storage: Arc<FileSessionStorage>, id: &str) -> Session {
+    storage
+        .get(id)
+        .await
+        .expect("storage get")
+        .unwrap_or_else(|| panic!("missing session {}", id))
+}
+
+async fn ac_persist(storage: Arc<FileSessionStorage>, session: Session) {
+    storage.save(&session).await.expect("persist session");
+}
+
+async fn ac_swap_prompt(storage: Arc<FileSessionStorage>, id: &str, prompt: String) {
+    let session = ac_reload_session(storage.clone(), id).await;
+    session.context.set_sync("prompt", prompt);
+    ac_persist(storage, session).await;
+}
+
+fn ac_invoke_only_graph(backend: Arc<StubBackend>) -> Arc<tddy_core::workflow::graph::Graph> {
+    let recipe = common::tdd_recipe();
+    let task = Arc::new(BackendInvokeTask::from_recipe(
+        "accept_invoke",
+        GoalId::new("acceptance-tests"),
+        recipe,
+        backend,
+    ));
+    Arc::new(
+        GraphBuilder::new("action_cache_invoke_graph")
+            .add_task(task.clone())
+            .add_edge("accept_invoke", "accept_invoke")
+            .build(),
+    )
+}
+
+async fn ac_setup_flow(
+    backend: Arc<StubBackend>,
+    session_dir: std::path::PathBuf,
+    initial_prompt: String,
+) -> (
+    Arc<FileSessionStorage>,
+    Arc<tddy_core::workflow::graph::Graph>,
+    String,
+) {
+    use tddy_core::workflow::session::WORKFLOW_ENGINE_STORAGE_SUBDIR;
+    std::fs::create_dir_all(session_dir.join(WORKFLOW_ENGINE_STORAGE_SUBDIR))
+        .expect("workflow storage dir seed");
+
+    let storage = Arc::new(FileSessionStorage::new(workflow_engine_storage_dir(
+        &session_dir,
+    )));
+    let graph = ac_invoke_only_graph(backend);
+    let workflow_session_key = format!("acct-wf-{}", uuid::Uuid::now_v7());
+    let session = Session::new_from_task(
+        workflow_session_key.clone(),
+        "action_cache_invoke_graph".to_string(),
+        "accept_invoke".to_string(),
+    );
+    session.context.set_sync("session_dir", session_dir.clone());
+    session.context.set_sync("prompt", initial_prompt);
+    session.context.set_sync("is_resume", false);
+
+    ac_persist(storage.clone(), session).await;
+    (storage, graph, workflow_session_key)
+}
+
+/// AC-1: two identical fingerprints → one backend invoke; second restores structured submit JSON.
+#[tokio::test]
+async fn action_cache_hit_skips_second_invoke() {
+    let session_dir = common::session_dir_for_new_session();
+    let backend = Arc::new(StubBackend::new());
+    let prompt = "HERE ARE THE USER'S ANSWERS\nYes\nSKIP_QUESTIONS create acceptance tests stable"
+        .to_string();
+    let (storage, graph, sid) =
+        ac_setup_flow(backend.clone(), session_dir.clone(), prompt.clone()).await;
+
+    let runner = FlowRunner::new(graph, storage.clone());
+    let r1 = runner.run(&sid).await.expect("step 1");
+    assert!(
+        matches!(r1.status, ExecutionStatus::Paused { .. }),
+        "expected Paused after single-task Continue, got {:?}",
+        r1.status
+    );
+    let r2 = runner.run(&sid).await.expect("step 2");
+    assert!(
+        matches!(r2.status, ExecutionStatus::Paused { .. }),
+        "expected Paused after replay, got {:?}",
+        r2.status
+    );
+
+    assert_eq!(
+        backend.invocation_count_snapshot(),
+        1,
+        "identical fingerprints: first run invokes backend, second must skip (cache hit)"
+    );
+
+    let cache_path = action_cache_file_path(&session_dir);
+    assert!(
+        tokio::fs::try_exists(&cache_path).await.unwrap(),
+        "{:?} must exist after successful cached submit",
+        cache_path,
+    );
+
+    let cache_raw = tokio::fs::read_to_string(&cache_path).await.unwrap();
+    assert!(
+        cache_raw.contains("\"action_key\""),
+        "action-cache must expose action_key: {cache_raw}"
+    );
+    assert!(
+        cache_raw.contains("\"fingerprint\""),
+        "action-cache must expose fingerprint digest: {cache_raw}"
+    );
+
+    let sess = ac_reload_session(storage, &sid).await;
+    let output: Option<String> = sess.context.get_sync("output");
+    assert!(
+        output.is_some(),
+        "context.output must mirror structured submit JSON"
+    );
+    let parsed = parse_acceptance_tests_response(output.as_ref().unwrap()).expect("parse output");
+    assert_eq!(
+        parsed.summary.as_str(),
+        "Created 2 stub tests.",
+        "cache hit must replay StubBackend acceptance-tests submit verbatim"
+    );
+}
+
+/// AC-2 + cache reuse: alternating fingerprints consumes two invokes; revisit of first prompts cache replay.
+#[tokio::test]
+async fn action_cache_miss_when_prompt_changes() {
+    let session_dir = common::session_dir_for_new_session();
+    let backend = Arc::new(StubBackend::new());
+    let p1 =
+        "HERE ARE THE USER'S ANSWERS\nYes\nSKIP_QUESTIONS acceptance fingerprint alpha".to_string();
+    let p2 =
+        "HERE ARE THE USER'S ANSWERS\nYes\nSKIP_QUESTIONS acceptance fingerprint beta".to_string();
+
+    let (storage, graph, sid) =
+        ac_setup_flow(backend.clone(), session_dir.clone(), p1.clone()).await;
+    let runner = FlowRunner::new(graph, storage.clone());
+    runner.run(&sid).await.expect("prompt p1");
+
+    ac_swap_prompt(storage.clone(), &sid, p2.clone()).await;
+    runner.run(&sid).await.expect("prompt p2");
+
+    ac_swap_prompt(storage.clone(), &sid, p1.clone()).await;
+    runner.run(&sid).await.expect("prompt p1 cache replay");
+
+    assert_eq!(
+        backend.invocation_count_snapshot(),
+        2,
+        "p1 and p2 are distinct fingerprints (two invokes); revisiting p1 must hit disk cache (no net third invoke)",
+    );
+
+    assert!(
+        tokio::fs::try_exists(action_cache_file_path(&session_dir))
+            .await
+            .unwrap(),
+        "cache artifacts must persist on disk beside session JSON snapshots",
+    );
+}
+
+/// AC-3: new runner + StubBackend must hit persisted cache entries after restart without invoking backend.
+#[tokio::test]
+async fn action_cache_survives_process_restart() {
+    let session_dir = common::session_dir_for_new_session();
+    let backend_a = Arc::new(StubBackend::new());
+    let prompt = "HERE ARE THE USER'S ANSWERS\nYes\nSKIP_QUESTIONS persistence probe".to_string();
+
+    let (storage, graph_a, sid) =
+        ac_setup_flow(backend_a.clone(), session_dir.clone(), prompt.clone()).await;
+
+    let runner_a = FlowRunner::new(graph_a, storage.clone());
+    runner_a.run(&sid).await.expect("cold run");
+    runner_a.run(&sid).await.expect("replay same-process cache");
+
+    assert_eq!(
+        backend_a.invocation_count_snapshot(),
+        1,
+        "warm-up primes cache with exactly one StubBackend.invoke",
+    );
+
+    let backend_b = Arc::new(StubBackend::new());
+    let graph_b = ac_invoke_only_graph(backend_b.clone());
+    let runner_b = FlowRunner::new(graph_b, storage.clone());
+    runner_b.run(&sid).await.expect("post-restart replay");
+
+    assert_eq!(
+        backend_b.invocation_count_snapshot(),
+        0,
+        "restart must hydrate output from disk cache without hitting StubBackend.invoke",
+    );
+}
+
+/// AC-4: WaitForInput turns must skip cache writes; clarified success plus replay should cap invokes at two.
+#[tokio::test]
+async fn action_cache_no_entry_on_wait_for_input() {
+    let session_dir = common::session_dir_for_new_session();
+    let backend = Arc::new(StubBackend::new());
+    let prompting = "Please author acceptance-tests.md for the feature.".to_string();
+    let answered = "HERE ARE THE USER'S ANSWERS\nYes\nSKIP_QUESTIONS answered path".to_string();
+
+    let (storage, graph, sid) =
+        ac_setup_flow(backend.clone(), session_dir.clone(), prompting).await;
+
+    let runner = FlowRunner::new(graph, storage.clone());
+    let wait = runner
+        .run(&sid)
+        .await
+        .expect("permission gate expects answers");
+    assert!(
+        matches!(wait.status, ExecutionStatus::WaitingForInput { .. }),
+        "first turn must pause for clarification, got {:?}",
+        wait.status
+    );
+
+    ac_swap_prompt(storage.clone(), &sid, answered.clone()).await;
+    runner.run(&sid).await.expect("answered submit path");
+    runner
+        .run(&sid)
+        .await
+        .expect("replay clarified prompt cache hit");
+
+    assert_eq!(
+        backend.invocation_count_snapshot(),
+        2,
+        "clarification + answered submit ⇒ two invokes; identical replay ⇒ cache avoids third invoke",
+    );
 }

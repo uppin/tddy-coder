@@ -749,15 +749,19 @@ mod livekit_spawn_instance_id_tests {
 
     #[test]
     fn without_common_room_only_yaml_instance_id_opt_in() {
-        let mut c = DaemonConfig {
+        let base = DaemonConfig {
             livekit: Some(LiveKitConfig {
                 url: Some("ws://x".into()),
                 ..Default::default()
             }),
             ..Default::default()
         };
-        assert_eq!(livekit_spawn_daemon_instance_id(&c), None);
-        c.daemon_instance_id = Some(" west ".into());
+        assert_eq!(livekit_spawn_daemon_instance_id(&base), None);
+        let c = DaemonConfig {
+            livekit: base.livekit.clone(),
+            daemon_instance_id: Some(" west ".into()),
+            ..Default::default()
+        };
         assert_eq!(
             livekit_spawn_daemon_instance_id(&c).as_deref(),
             Some("west")

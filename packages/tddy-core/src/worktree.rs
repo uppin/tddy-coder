@@ -1386,7 +1386,7 @@ mod chain_pr_red_tests {
         );
     }
 
-    /// Lower-level RED: resolve must read persisted `changeset.yaml` and return stored effective ref.
+    /// Lower-level regression: resolve must read persisted `changeset.yaml` and return stored effective ref.
     #[test]
     fn chain_pr_resolve_persisted_reads_changeset_red() {
         let base = std::env::temp_dir().join("tddy-core-chain-pr-resolve-red");

@@ -53,7 +53,14 @@ impl FlowRunner {
             .get_task(&session.current_task_id)
             .ok_or("Task not found")?;
 
+        // Stable workflow identity for session-scoped subsystems (e.g. persisted action-cache keys).
+        // Mirrors top-level Session fields inside the serialized context snapshot.
         let ctx = session.context.clone();
+        ctx.set_sync("workflow_engine_graph_id", session.graph_id.clone());
+        ctx.set_sync(
+            "workflow_engine_current_task_id",
+            session.current_task_id.clone(),
+        );
 
         if let Some(ref hooks) = self.hooks {
             hooks.before_task(&session.current_task_id, &ctx)?;

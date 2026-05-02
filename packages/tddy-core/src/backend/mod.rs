@@ -57,6 +57,10 @@ impl CodingBackend for SharedBackend {
     fn submit_channel(&self) -> Option<&crate::toolcall::SubmitResultChannel> {
         self.0.submit_channel()
     }
+
+    fn action_invoke_cache_eligible(&self) -> bool {
+        self.0.action_invoke_cache_eligible()
+    }
 }
 
 impl SharedBackend {
@@ -108,6 +112,17 @@ impl CodingBackend for AnyBackend {
             AnyBackend::Codex(b) => b.submit_channel(),
             AnyBackend::CodexAcp(b) => b.submit_channel(),
             AnyBackend::Stub(b) => b.submit_channel(),
+        }
+    }
+
+    fn action_invoke_cache_eligible(&self) -> bool {
+        match self {
+            AnyBackend::Claude(b) => b.action_invoke_cache_eligible(),
+            AnyBackend::ClaudeAcp(b) => b.action_invoke_cache_eligible(),
+            AnyBackend::Cursor(b) => b.action_invoke_cache_eligible(),
+            AnyBackend::Codex(b) => b.action_invoke_cache_eligible(),
+            AnyBackend::CodexAcp(b) => b.action_invoke_cache_eligible(),
+            AnyBackend::Stub(b) => b.action_invoke_cache_eligible(),
         }
     }
 }
@@ -491,6 +506,15 @@ pub trait CodingBackend: Send + Sync {
     /// return their channel here so tasks can read without touching global state.
     fn submit_channel(&self) -> Option<&crate::toolcall::SubmitResultChannel> {
         None
+    }
+
+    /// When **`false`**, workflow tasks must call [`CodingBackend::invoke`] for every backend step,
+    /// even when a session action-cache entry would allow a replay.
+    ///
+    /// [`crate::workflow::task::BackendInvokeTask`] uses this to avoid skipping [`MockBackend`]
+    /// invocations — the mock advances a FIFO response queue synchronized with submits.
+    fn action_invoke_cache_eligible(&self) -> bool {
+        true
     }
 }
 

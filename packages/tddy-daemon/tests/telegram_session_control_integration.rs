@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)]
+
 //! Integration acceptance tests: Telegram inbound control plane → session + changeset + presenter inputs.
 //! Integration tests for [`tddy_daemon::telegram_session_control`] (harness + sender recording).
 
