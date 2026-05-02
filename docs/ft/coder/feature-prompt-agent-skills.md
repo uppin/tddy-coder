@@ -40,7 +40,7 @@ The reference string includes:
 ## Built-in `/recipe`, `/chain`, and `/start-…`
 
 - **`/start-…`** rows correspond to shipped workflow recipes (**`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**). Submitting a **`/start-<cli>`** line selects that recipe, updates **`changeset.yaml`**, and restarts the workflow (see **Feature prompt: `/start-<recipe>`** in [Workflow recipes](workflow-recipes.md)).
-- **`/chain`** is a **`StartRecipe`**-shaped slash row for stacked-session entry (label **`/chain`**); product wiring for session selection and bootstrap aligns with Telegram **`/chain-workflow`** and core **`session_chain`** helpers.
+- **`/chain`** is a **`StartRecipe`**-shaped slash row for stacked-session entry (label **`/chain`**); it matches the **`/chain-workflow`** Telegram command shape at the product level. Full picker + bootstrap parity with Telegram remains scheduled work (see **[Telegram session control](../daemon/telegram-session-control.md)**).
 - **`Presenter::apply_feature_slash_builtin_recipe`** (only from **`AppMode::FeatureInput`**) arms a single-select question built by **`workflow_recipe_selection_question`** for labeled recipe options.
 - **`Presenter::with_recipe_resolver`** supplies a resolver from **`tddy-coder`** (**`resolve_workflow_recipe_from_cli_name`**) so the active **`WorkflowRecipe`** matches the chosen CLI name.
 - **`Presenter::recipe_slash_selection_active`** is true while that selection UI is active.
