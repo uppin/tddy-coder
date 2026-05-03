@@ -13,8 +13,12 @@ use tddy_core::session_actions::{
 };
 use tddy_core::{read_changeset, WorkflowError};
 
+use crate::list_actions_contract::acceptance_tests_session_actions_contract_version;
+
 #[derive(Debug, Serialize)]
 pub struct ListActionsResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acceptance_tests_session_actions_contract_version: Option<u64>,
     pub actions: Vec<tddy_core::session_actions::ActionSummary>,
 }
 
@@ -25,7 +29,17 @@ pub fn run_list_actions(session_dir: &Path) -> anyhow::Result<()> {
         session_dir.display()
     );
     let actions = list_action_summaries(session_dir).map_err(anyhow::Error::from)?;
-    let out = ListActionsResponse { actions };
+    let contract = acceptance_tests_session_actions_contract_version();
+    debug!(
+        target: "tddy_tools::session_actions_cli",
+        "list-actions response fields action_count={} contract_version={:?}",
+        actions.len(),
+        contract
+    );
+    let out = ListActionsResponse {
+        acceptance_tests_session_actions_contract_version: contract,
+        actions,
+    };
     println!("{}", serde_json::to_string(&out)?);
     Ok(())
 }

@@ -1,7 +1,7 @@
 # Workflow recipes (pluggable workflows)
 
 **Product area:** Coder  
-**Updated:** 2026-04-06
+**Updated:** 2026-05-03
 
 ## Summary
 
@@ -35,6 +35,7 @@ When the workflow completes successfully after a **`/start-*`** session that tar
 - **Handoff:** Interview output is written to **`.workflow/tdd_interview_handoff.txt`** under the session directory; **`before_plan`** loads it into context as **`answers`** so **`PlanTask`** can build a follow-up prompt (same relay idea as grill-me’s persisted answers). Demo participation and options belong in **`changeset.yaml`** under **`workflow`** (see **Changeset workflow block** in **TDD (`tdd`)** under **Developer reference (shipped recipes)** below).
 - **Unanswered elicitation recovery:** When the model asks clarification in prose only (for example numbered markdown lists) and **`InvokeResponse.questions`** is empty, **`tddy_core::workflow::interview_recovery`** applies deterministic rules; **`TddRecipe::host_clarification_gate_after_no_submit_turn`** surfaces a single consolidated **`tddy-tools ask`**-shaped **`ClarificationQuestion`** batch via **`BackendInvokeTask`** (**`WaitForInput`**, **`pending_questions`**). The graph remains on **`interview`** until the user answers. Helpers **`merge_interview_recovery_answers_into_handoff`** and **`persist_interview_recovery_workflow_fields`** merge text into the handoff relay and reconcile **`changeset.yaml`** **`workflow`** fields (**`run_optional_step_x`**, **`demo_options`**, **`tool_schema_id`**). Context key **`interview_recovery_ask_count`** records **`0`** after a clean interview completion (no recovery round) for observability.
 - **Structured submit:** **`WorkflowRecipe::goal_requires_tddy_tools_submit`** is **`false`** for **`interview`** (elicitation turns complete without **`tddy-tools submit`**); **`plan`** and later structured goals keep the submit contract.
+- **Acceptance-tests session actions:** **`before_acceptance_tests`** seeds **`actions/*.yaml`** when the three canonical basenames are missing, materializes **`actions/`**, and leaves valid **`ActionManifest`** stubs (**`/bin/true`**) until the agent overwrites **`command`**. The acceptance-tests system prompt instructs **`tddy-tools list-actions`**, **`invoke-action`**, and scoped manifest work alongside **`tddy-tools submit --goal acceptance-tests --data-stdin`**. Optional **`coder-config.yaml`** block **`session_actions_specialist`** supplies **`agent`** / **`model`** strings merged into **`tddy-coder`** **`Args`** when CLI overrides are absent (see [session-actions.md](session-actions.md)).
 - **Plan refinement (PRD feedback):** **`WorkflowRecipe::plan_refinement_goal()`** selects the planning goal for refinement flows. For **`TddRecipe`** the value is **`plan`** (not **`interview`**). **`GrillMeRecipe`** uses **`create-plan`** (not **`grill`**). Recipes without a separate elicitation step inherit the default (**`start_goal()`**).
 - **Primary session document:** **`prd`** → **`PRD.md`** under the session artifact layout (see **`SessionArtifactManifest`**).
 - **Session document approval:** Hook-driven **`ElicitationEvent::DocumentApproval`** after the plan task when **`WorkflowRecipe::uses_primary_session_document`** is **`true`** and the primary document is readable; the presenter and plain CLI use the same recipe-driven gate.

@@ -3,6 +3,7 @@
 //! The config file mirrors CLI args in a structured YAML format.
 //! CLI args take precedence over config file values.
 
+use log::{debug, info};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -11,6 +12,17 @@ use tddy_core::LogConfig;
 
 /// File name for persisted CLI options inside a session directory (`sessions/<id>/`).
 pub const SESSION_CODER_CONFIG_FILE: &str = "coder-config.yaml";
+
+/// Optional backend selection for the session-actions specialist during the
+/// `acceptance-tests` goal (see PRD: session action manifests + `invoke-action` test-drives).
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SessionActionsSpecialistConfig {
+    #[serde(default)]
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
 
 /// Top-level config file structure.
 #[derive(Debug, Default, Deserialize)]
@@ -59,6 +71,9 @@ pub struct Config {
     /// Workflow recipe: `free-prompting` (default when omitted in CLI/changeset), `tdd`, `bugfix`, etc.
     #[serde(default)]
     pub recipe: Option<String>,
+    /// Specialist that authors `<session>/actions/*.yaml` and test-drives `tddy-tools invoke-action`.
+    #[serde(default)]
+    pub session_actions_specialist: Option<SessionActionsSpecialistConfig>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -235,6 +250,53 @@ pub fn merge_config_into_args(args: &mut Args, config: Config) {
     if args.recipe.is_none() {
         args.recipe = config.recipe;
     }
+
+    merge_session_actions_specialist_into_args(args, &config.session_actions_specialist);
+}
+
+/// Merge YAML `session_actions_specialist` into [`Args`] when specialist CLI fields are unset.
+/// CLI / explicit `Args` values always win (see `coder_config_parses_session_actions_specialist`).
+fn merge_session_actions_specialist_into_args(
+    args: &mut Args,
+    specialist: &Option<SessionActionsSpecialistConfig>,
+) {
+    let Some(spec) = specialist else {
+        debug!(
+            target: "tddy_coder::config",
+            "merge_session_actions_specialist_into_args: no session_actions_specialist block"
+        );
+        return;
+    };
+    if args.session_actions_specialist_agent.is_none() {
+        if let Some(ref a) = spec.agent {
+            info!(
+                target: "tddy_coder::config",
+                "merge_session_actions_specialist_into_args: applied specialist agent from YAML agent={}",
+                a
+            );
+            args.session_actions_specialist_agent = Some(a.clone());
+        }
+    } else {
+        debug!(
+            target: "tddy_coder::config",
+            "merge_session_actions_specialist_into_args: keeping CLI/session agent override"
+        );
+    }
+    if args.session_actions_specialist_model.is_none() {
+        if let Some(ref m) = spec.model {
+            info!(
+                target: "tddy_coder::config",
+                "merge_session_actions_specialist_into_args: applied specialist model from YAML model={}",
+                m
+            );
+            args.session_actions_specialist_model = Some(m.clone());
+        }
+    } else {
+        debug!(
+            target: "tddy_coder::config",
+            "merge_session_actions_specialist_into_args: keeping CLI/session model override"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -343,6 +405,8 @@ github:
             codex_oauth_login: false,
             recipe: None,
             tddy_data_dir: Some(cli_base.clone()),
+            session_actions_specialist_agent: None,
+            session_actions_specialist_model: None,
         };
         merge_config_into_args(&mut args, config);
         assert_eq!(args.tddy_data_dir.as_ref(), Some(&cli_base));
@@ -390,6 +454,8 @@ github:
             codex_oauth_login: false,
             recipe: None,
             tddy_data_dir: None,
+            session_actions_specialist_agent: None,
+            session_actions_specialist_model: None,
         };
         merge_config_into_args(&mut args, config);
         assert_eq!(
@@ -439,6 +505,8 @@ github:
             codex_oauth_login: false,
             recipe: Some("tdd".to_string()),
             tddy_data_dir: None,
+            session_actions_specialist_agent: None,
+            session_actions_specialist_model: None,
         };
         merge_config_into_args(&mut args, config);
         assert_eq!(args.recipe.as_deref(), Some("tdd"));
@@ -485,6 +553,8 @@ github:
             codex_oauth_login: false,
             recipe: None,
             tddy_data_dir: None,
+            session_actions_specialist_agent: None,
+            session_actions_specialist_model: None,
         };
         merge_config_into_args(&mut args, config);
         assert_eq!(args.recipe.as_deref(), Some("bugfix"));
@@ -594,11 +664,213 @@ log:
             codex_oauth_login: false,
             recipe: None,
             tddy_data_dir: None,
+            session_actions_specialist_agent: None,
+            session_actions_specialist_model: None,
         };
         merge_config_into_args(&mut args, config);
         // CLI set model=opus, config has model=sonnet → opus wins
         assert_eq!(args.model.as_deref(), Some("opus"));
         // CLI didn't set daemon, config has daemon=true → true
         assert!(args.daemon);
+    }
+
+    /// PRD Testing Plan: `coder_config_parses_session_actions_specialist` — YAML block, unknown-key
+    /// rejection, merge into [`Args`], and CLI-vs-YAML precedence for the specialist agent.
+    #[test]
+    fn coder_config_parses_session_actions_specialist() {
+        let yaml_block = r#"
+session_actions_specialist:
+  agent: session-actions
+  model: sonnet-acceptance
+"#;
+        let config: Config =
+            serde_yaml::from_str(yaml_block).expect("session_actions_specialist must deserialize");
+        let sas = config
+            .session_actions_specialist
+            .as_ref()
+            .expect("nested block present");
+        assert_eq!(sas.agent.as_deref(), Some("session-actions"));
+        assert_eq!(sas.model.as_deref(), Some("sonnet-acceptance"));
+
+        let bad_nested = r#"
+session_actions_specialist:
+  agent: a
+  bogus_nested_key: true
+"#;
+        assert!(
+            serde_yaml::from_str::<Config>(bad_nested).is_err(),
+            "deny_unknown_fields must reject unknown keys under session_actions_specialist"
+        );
+
+        let mut args = Args {
+            goal: None,
+            session_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: None,
+            prompt: None,
+            grpc: None,
+            session_id: None,
+            resume_from: None,
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+            codex_cli_path: None,
+            codex_acp_cli_path: None,
+            codex_oauth_login: false,
+            recipe: None,
+            tddy_data_dir: None,
+            session_actions_specialist_agent: None,
+            session_actions_specialist_model: None,
+        };
+        merge_config_into_args(&mut args, config);
+        assert_eq!(
+            args.session_actions_specialist_agent.as_deref(),
+            Some("session-actions"),
+            "YAML session_actions_specialist.agent must merge into Args when CLI left unset"
+        );
+        assert_eq!(
+            args.session_actions_specialist_model.as_deref(),
+            Some("sonnet-acceptance"),
+            "YAML session_actions_specialist.model must merge into Args when CLI left unset"
+        );
+
+        let yaml_override = r#"
+session_actions_specialist:
+  agent: yaml-agent
+  model: yaml-model
+"#;
+        let config2: Config = serde_yaml::from_str(yaml_override).unwrap();
+        let mut args2 = Args {
+            goal: None,
+            session_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: None,
+            prompt: None,
+            grpc: None,
+            session_id: None,
+            resume_from: None,
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+            codex_cli_path: None,
+            codex_acp_cli_path: None,
+            codex_oauth_login: false,
+            recipe: None,
+            tddy_data_dir: None,
+            session_actions_specialist_agent: Some("cli-specialist-agent".to_string()),
+            session_actions_specialist_model: None,
+        };
+        merge_config_into_args(&mut args2, config2);
+        assert_eq!(
+            args2.session_actions_specialist_agent.as_deref(),
+            Some("cli-specialist-agent"),
+            "explicit Args.session_actions_specialist_agent must win over YAML"
+        );
+        assert_eq!(
+            args2.session_actions_specialist_model.as_deref(),
+            Some("yaml-model"),
+            "unset specialist model must still be filled from YAML when merge is wired"
+        );
+    }
+
+    /// Granular RED: exercises [`super::merge_session_actions_specialist_into_args`] in isolation.
+    #[test]
+    fn merge_session_actions_specialist_into_args_applies_nested_config() {
+        let nested = SessionActionsSpecialistConfig {
+            agent: Some("nest-agent".into()),
+            model: Some("nest-model".into()),
+        };
+        let mut args = Args {
+            goal: None,
+            session_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: None,
+            prompt: None,
+            grpc: None,
+            session_id: None,
+            resume_from: None,
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+            codex_cli_path: None,
+            codex_acp_cli_path: None,
+            codex_oauth_login: false,
+            recipe: None,
+            tddy_data_dir: None,
+            session_actions_specialist_agent: None,
+            session_actions_specialist_model: None,
+        };
+        super::merge_session_actions_specialist_into_args(&mut args, &Some(nested));
+        assert_eq!(
+            args.session_actions_specialist_agent.as_deref(),
+            Some("nest-agent")
+        );
+        assert_eq!(
+            args.session_actions_specialist_model.as_deref(),
+            Some("nest-model")
+        );
     }
 }

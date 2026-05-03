@@ -2,6 +2,10 @@
 
 Release note history for the Coder product area.
 
+## 2026-05-03 — Acceptance-tests session actions and `list-actions` contract
+
+- **TDD recipe (`tddy-workflow-recipes`):** **`before_acceptance_tests`** seeds three **`actions/*.yaml`** manifests when missing (**`acceptance-single-test`**, **`acceptance-selected-tests`**, **`acceptance-package-tests`**) with safe **`/bin/true`** **`command`** stubs; acceptance-tests system prompt documents **`list-actions`**, **`invoke-action`**, scoped test runs, and **`get-schema`**. **`tddy-integration-tests`**: **`workflow_recipe_acceptance_actions`**. **Feature docs:** [session-actions.md](session-actions.md), [workflow-recipes.md](workflow-recipes.md). **Cross-package:** [docs/dev/changesets.md](../../dev/changesets.md); packages **[tddy-tools/docs/changesets.md](../../packages/tddy-tools/docs/changesets.md)**, **[tddy-workflow-recipes/docs/changesets.md](../../packages/tddy-workflow-recipes/docs/changesets.md)**, **[tddy-coder/docs/changesets.md](../../packages/tddy-coder/docs/changesets.md)**. **WIP:** [2026-05-03-changeset-session-action-acceptance.md](../../dev/1-WIP/2026-05-03-changeset-session-action-acceptance.md).
+
 ## 2026-05-02 — Session chaining (stacked PR groundwork)
 
 - **`tddy-core`**: **`session_metadata`** — optional **`previous_session_id`** on **`.session.yaml`**; **`session_chain`** — **`resolve_chain_integration_base_ref_from_parent_session`** (parent **`repo_path`** required when a branch is present), **`integrate_chain_base_into_session_worktree_bootstrap`** (delegates to **`setup_worktree_for_session_with_optional_chain_base`**); **`agent_skills::slash_menu_entries`** — **`/chain`** row after **`/recipe`**. **`tddy-integration-tests`**: **`session_chain_acceptance`**. **`tddy-tui`**: slash menu test **`tui_chain_slash_offers_recent_sessions`**. **`tddy-daemon`**: **`/chain-workflow`** message dispatch; harness **`handle_chain_parent_callback`**; **live** **`tcp:`** callback wiring in **`telegram_bot`** remains Phase 2 (see **[telegram-session-control.md](../daemon/telegram-session-control.md)**).

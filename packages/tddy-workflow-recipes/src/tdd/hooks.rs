@@ -9,7 +9,8 @@ use crate::parser::{
     parse_update_docs_response, parse_validate_subagents_response, PlanningOutput,
 };
 use crate::tdd::{
-    acceptance_tests, demo, evaluate, interview, red, refactor, update_docs, validate_subagents,
+    acceptance_tests, demo, evaluate, interview, red, refactor, session_actions_specialist,
+    update_docs, validate_subagents,
 };
 use crate::writer::{
     update_acceptance_tests_file, update_progress_file, write_acceptance_tests_file,
@@ -234,6 +235,7 @@ fn before_acceptance_tests(
             "before_acceptance_tests AcceptanceTesting",
         );
     }
+    session_actions_specialist::ensure_acceptance_tests_session_action_templates(session_dir)?;
     Ok(())
 }
 

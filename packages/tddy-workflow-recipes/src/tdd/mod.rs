@@ -18,6 +18,7 @@ mod plain_cli_output;
 mod planning;
 pub mod red;
 pub(crate) mod refactor;
+mod session_actions_specialist;
 pub(crate) mod update_docs;
 mod validate_subagents;
 

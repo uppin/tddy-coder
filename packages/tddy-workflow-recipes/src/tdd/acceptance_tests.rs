@@ -21,6 +21,15 @@ The call will block until the user answers. The response contains the user's ans
 
 Run `tddy-tools get-schema acceptance-tests` to see the expected output format. The JSON must be a single object starting with {"goal":"acceptance-tests",...} — no number, array, or numbered list items.
 
+**Session action manifests (required)** — In addition to acceptance test source files, write at least three distinct YAML manifests under `actions/` in the session directory. Each file MUST conform to the session action manifest schema (`version`, `id`, `summary`, `architecture`, `command`, optional `input_schema`, `output_schema`, `result_kind`, `output_path_arg`; unknown keys are rejected). Use `tddy-tools get-schema` against manifest tooling if needed, and keep `tddy-tools get-schema acceptance-tests` for your submit JSON shape.
+
+The three manifests MUST cover these scopes explicitly:
+- **single-test** — run one named test (e.g. filtered `cargo test` / `./dev cargo test <name>`).
+- **selected acceptance** — run exactly the acceptance tests you authored for this goal (filters matching tests listed in your submit `tests` array).
+- **package** or **crate** — run full tests per affected package (Rust: `cargo test -p <crate>` / `./dev cargo test -p …`; Node: workspace filter equivalent).
+
+After creating or editing each manifest, run `tddy-tools list-actions` to verify discovery, then `tddy-tools invoke-action` with minimal safe `--data` (`{}` when no schema fields are required) to test-drive the manifest before submit. Record any failures in prose in your summary.
+
 **CRITICAL**: You MUST call tddy-tools submit with your complete structured output (summary, tests array, test_command, etc.). Do NOT return a summary, meta-commentary, or description of what you created without calling submit. The submit call delivers the output to the workflow — if you do not call it, the workflow fails.
 
 The summary must describe what tests exist and confirm all are failing. The tests array must list each acceptance test with name, file, line, and status.
@@ -82,6 +91,45 @@ mod tests {
                 && prompt.contains("--goal acceptance-tests")
                 && prompt.contains("--data-stdin"),
             "system prompt must instruct agent to use tddy-tools submit --goal acceptance-tests with --data-stdin (heredoc), like plan"
+        );
+    }
+
+    #[test]
+    fn acceptance_tests_prompt_requires_three_session_actions() {
+        let prompt = system_prompt();
+        assert!(
+            prompt.contains("actions/"),
+            "system prompt must require writing manifests under actions/"
+        );
+        assert!(
+            prompt.contains("invoke-action"),
+            "system prompt must require tddy-tools invoke-action test-drives"
+        );
+        assert!(
+            prompt.contains("tddy-tools list-actions") || prompt.contains("list-actions"),
+            "system prompt must require enumerating manifests (list-actions)"
+        );
+        assert!(
+            prompt.contains("single-test") || prompt.contains("single test"),
+            "system prompt must call out single-test scope"
+        );
+        assert!(
+            prompt.contains("selected") && prompt.contains("acceptance"),
+            "system prompt must call out selected acceptance tests scope"
+        );
+        assert!(
+            prompt.contains("package") || prompt.contains("crate"),
+            "system prompt must call out package- or crate-scoped full test runs"
+        );
+        assert!(
+            prompt.contains("tddy-tools get-schema"),
+            "system prompt must reference get-schema for manifest or acceptance-tests JSON contract"
+        );
+        assert!(
+            prompt.contains("tddy-tools submit")
+                && prompt.contains("--goal acceptance-tests")
+                && prompt.contains("--data-stdin"),
+            "regression: submit path for acceptance-tests goal must remain documented"
         );
     }
 

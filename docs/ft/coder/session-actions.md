@@ -31,7 +31,15 @@ Operational trust boundary: manifests live beside **`changeset.yaml`** under **`
 ### `list-actions`
 
 - **Usage**: **`tddy-tools list-actions --session-dir <SESSION_DIR>`**
-- **Stdout**: JSON **`{ "actions": [ { id, summary, has_input_schema, has_output_schema }, ... ] }`**, sorted ascending by **`id`**.
+- **Stdout**: JSON object whose **`actions`** array lists summaries sorted ascending by **`id`**. Each element includes **`id`**, **`summary`**, **`has_input_schema`**, **`has_output_schema`**. The same object includes **`acceptance_tests_session_actions_contract_version`** with integer value **`1`**: automation uses this field to detect the envelope shape paired with the TDD **acceptance-tests** session-action deliverables (three scoped manifests under **`actions/`**; see **Acceptance-tests session actions** below).
+
+### Acceptance-tests session actions (TDD recipe)
+
+The **TDD** recipe **`acceptance-tests`** goal combines structured **`tddy-tools submit --goal acceptance-tests`** output with durable manifests under **`<session_dir>/actions/`**:
+
+- **Hook seeding:** Before the backend turn, **`before_acceptance_tests`** ensures the directory **`actions/`** exists and writes three basenames when each file is still absent: **`acceptance-single-test.yaml`**, **`acceptance-selected-tests.yaml`**, **`acceptance-package-tests.yaml`**. Each shipped stub uses **`architecture: native`**, **`command: [/bin/true]`**, and stable **`id`** / **`summary`** text aligned to single-test, selected-acceptance, and package-wide scopes. Operators and agents replace **`command`** (and optional schemas) with project-specific **`./dev cargo test`**, **`cargo test -p`**, or workspace equivalents.
+- **System prompt contract:** The acceptance-tests system prompt requires **`actions/`** manifests, **`tddy-tools list-actions`**, **`tddy-tools invoke-action`** test-drives with minimal **`--data`**, explicit coverage of **single-test**, **selected acceptance**, and **package**/**crate** scopes, and **`tddy-tools get-schema`** references (including **`tddy-tools get-schema acceptance-tests`** for submit JSON).
+- **Coder YAML:** Session **`coder-config.yaml`** accepts optional **`session_actions_specialist`** with **`agent`** and **`model`** strings. **`tddy-coder`** merges those into **`Args.session_actions_specialist_agent`** and **`Args.session_actions_specialist_model`** when the corresponding CLI fields are unset (CLI wins when set). These fields exist for specialist configuration surfaces; the primary acceptance-tests model selection continues to follow **`changeset.yaml`** / recipe defaults unless additional runtime wiring applies the specialist pair.
 
 ### `invoke-action`
 
@@ -125,7 +133,7 @@ When a workflow run uses a **`session_dir`**, the engine may **reuse a prior suc
 
 ## Related tests
 
-Library coverage: **`packages/tddy-core/tests/session_actions_red.rs`**, **`packages/tddy-core/tests/toolcall_jobs.rs`**. Integration coverage: **`packages/tddy-tools/tests/actions_cli_acceptance.rs`**, **`packages/tddy-tools/tests/session_action_jobs_acceptance.rs`**.
+Library coverage: **`packages/tddy-core/tests/session_actions_red.rs`**, **`packages/tddy-core/tests/toolcall_jobs.rs`**. Integration coverage: **`packages/tddy-tools/tests/actions_cli_acceptance.rs`**, **`packages/tddy-tools/tests/session_action_jobs_acceptance.rs`**, **`packages/tddy-integration-tests/tests/workflow_recipe_acceptance_actions.rs`** (TDD **`acceptance-tests`** hook and manifest round-trip).
 
 ## Related documentation
 

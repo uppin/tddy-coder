@@ -402,3 +402,131 @@ input_schema:
         "marker path must not be created; invocation must fail closed"
     );
 }
+
+/// Specialist-shaped fixture: three scopes, `list-actions` JSON contract, `invoke-action` record
+/// shape, and cargo filter echo for the selected-tests manifest (PRD Testing Plan).
+#[test]
+fn invoke_action_round_trip_for_fixture_manifests() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session = dir.path();
+
+    let echo_selected = session.join("echo-selected-filter.sh");
+    fs::write(
+        &echo_selected,
+        r#"#!/bin/sh
+printf '%s\n' 'cargo test -p tddy-workflow-recipes acceptance_tests_prompt_requires_three_session_actions' 1>&2
+exit 0
+"#,
+    )
+    .expect("write stub");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&echo_selected).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&echo_selected, perms).unwrap();
+    }
+
+    write_sample_action(
+        session,
+        "acceptance-package-tests.yaml",
+        r#"
+version: 1
+id: acceptance-package-tests
+summary: Run full package tests for each affected crate (package scope)
+architecture: native
+command: ["/bin/true"]
+input_schema:
+  type: object
+  additionalProperties: false
+"#,
+    );
+    write_sample_action(
+        session,
+        "acceptance-selected-tests.yaml",
+        &format!(
+            r#"
+version: 1
+id: acceptance-selected-tests
+summary: Run only acceptance tests from the acceptance-tests goal submit payload (selected scope)
+architecture: native
+command: ["{}"]
+input_schema:
+  type: object
+  additionalProperties: false
+"#,
+            echo_selected.display()
+        ),
+    );
+    write_sample_action(
+        session,
+        "acceptance-single-test.yaml",
+        r#"
+version: 1
+id: acceptance-single-test
+summary: Run one named test by filter (single-test scope)
+architecture: native
+command: ["/bin/true"]
+input_schema:
+  type: object
+  additionalProperties: false
+"#,
+    );
+
+    let mut list_cmd = tddy_tools_bin();
+    list_cmd.args([
+        "list-actions",
+        "--session-dir",
+        session.to_str().expect("utf8"),
+    ]);
+    let list_out = list_cmd.assert().success();
+    let list_stdout = String::from_utf8_lossy(&list_out.get_output().stdout);
+    let list_val: Value =
+        serde_json::from_str(list_stdout.trim()).expect("list-actions stdout must be JSON");
+    assert_eq!(
+        list_val
+            .get("acceptance_tests_session_actions_contract_version")
+            .and_then(|x| x.as_u64()),
+        Some(1),
+        "list-actions must expose acceptance_tests_session_actions_contract_version for automation (PRD)"
+    );
+    let actions = list_val
+        .get("actions")
+        .and_then(|a| a.as_array())
+        .expect("actions array");
+    assert!(
+        actions.len() >= 3,
+        "expected at least three manifests; got {}",
+        actions.len()
+    );
+
+    let mut inv = tddy_tools_bin();
+    inv.args([
+        "invoke-action",
+        "--session-dir",
+        session.to_str().expect("utf8"),
+        "--action",
+        "acceptance-selected-tests",
+        "--data",
+        "{}",
+    ]);
+    let inv_out = inv.assert().success();
+    let inv_stdout = String::from_utf8_lossy(&inv_out.get_output().stdout);
+    let inv_val: Value =
+        serde_json::from_str(inv_stdout.trim()).expect("invoke-action stdout must be JSON");
+    assert!(
+        inv_val.get("exit_code").is_some(),
+        "invoke JSON must include exit_code; got {inv_val}"
+    );
+    let stderr = inv_val.get("stderr").and_then(|s| s.as_str()).unwrap_or("");
+    let stdout = inv_val.get("stdout").and_then(|s| s.as_str()).unwrap_or("");
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        combined.contains("acceptance_tests_prompt_requires_three_session_actions"),
+        "selected-tests action output must echo the cargo test name filter; got: {combined:?}"
+    );
+    assert!(
+        combined.contains("-p tddy-workflow-recipes"),
+        "selected-tests action output must mention crate-scoped cargo invocation; got: {combined:?}"
+    );
+}
