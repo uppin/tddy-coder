@@ -276,6 +276,45 @@ async fn telegram_regression_single_session_elicitation_still_works() {
     );
 }
 
+#[tokio::test]
+async fn telegram_wrong_tracked_outbound_elicitation_does_not_block_tracked_session_fifo() {
+    let mut watcher = TelegramSessionWatcher::new();
+    let cfg = telegram_config();
+    let mem = InMemoryTelegramSender::new();
+    let sid_a = "01900000-0000-7000-8000-0000000000aa";
+    let sid_b = "01900000-0000-7000-8000-0000000000bb";
+
+    watcher.bind_telegram_tracked_session_for_chat(AUTHORIZED_CHAT, sid_b);
+
+    let msg_a = select_elicitation_message("Question from session A", "X", "Y");
+    let msg_b = select_elicitation_message("Question from tracked session B", "P", "Q");
+
+    watcher
+        .on_server_message(&cfg, &mem, sid_a, &msg_a)
+        .await
+        .unwrap();
+    watcher
+        .on_server_message(&cfg, &mem, sid_b, &msg_b)
+        .await
+        .unwrap();
+
+    let queued_snippet = "elicitation queued";
+    let any_queued = mem
+        .recorded()
+        .iter()
+        .any(|(_, t)| t.contains(queued_snippet));
+    assert!(
+        !any_queued,
+        "expected tracked session B to own the primary elicitation surface — recorded={:?}",
+        mem.recorded()
+    );
+    assert!(
+        count_eli_s_primary_keyboards(&mem, AUTHORIZED_CHAT) >= 1,
+        "tracked session must receive eli:s clarification keyboard — recorded={:?}",
+        mem.recorded_with_keyboards()
+    );
+}
+
 /// PRD MultiSelect: concurrent shortcut keyboards obey single primary interactive surface per chat.
 #[tokio::test]
 async fn telegram_concurrent_queue_unchanged_guarantees() {
