@@ -928,11 +928,12 @@ impl TelegramSessionWatcher {
                             for &cid in &tg.chat_ids {
                                 match self.active_elicitation.lock() {
                                     Ok(mut coord) => {
-                                        let next = coord
-                                            .advance_after_elicitation_completion(cid, session_id);
+                                        let next = coord.drain_elicitation_completion_for_session(
+                                            cid, session_id,
+                                        );
                                         log::info!(
                                             target: "tddy_daemon::telegram",
-                                            "presenter left elicitation: advanced queue chat_id={} completed_session_id={} next_active={:?}",
+                                            "presenter left elicitation: drained queue chat_id={} completed_session_id={} next_active={:?}",
                                             cid,
                                             session_id,
                                             next
