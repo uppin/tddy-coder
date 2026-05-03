@@ -198,6 +198,9 @@ pub struct ChangesetWorkflow {
     /// Machine-readable PR automation lifecycle for resume and remote clients (`changeset.yaml` / Context).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_pr_status: Option<GithubPrStatus>,
+    /// Operator answered "remove session worktree?" at post-workflow elicitation (`None` = not asked yet).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_remove_session_worktree: Option<bool>,
 }
 
 /// Persisted GitHub PR automation status (phase, outcome URL, fatal error message).
@@ -411,6 +414,13 @@ fn merge_post_workflow_into_context(
             "merge_post_workflow_into_context: post_workflow_remove_session_worktree={flag}"
         );
         context.set_sync("post_workflow_remove_session_worktree", flag);
+    }
+    if let Some(flag) = wf.operator_remove_session_worktree {
+        debug!(
+            target: "tddy_core::changeset",
+            "merge_post_workflow_into_context: operator_remove_session_worktree={flag}"
+        );
+        context.set_sync("operator_remove_session_worktree", flag);
     }
     let Some(status) = &wf.github_pr_status else {
         return Ok(());
