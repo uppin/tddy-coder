@@ -129,7 +129,6 @@ async fn acp_raw_pipe_initialize() {
     stdin.write_all(req.as_bytes()).await.unwrap();
     stdin.write_all(b"\n").await.unwrap();
     stdin.flush().await.unwrap();
-    drop(stdin);
     let mut reader = tokio::io::BufReader::new(stdout);
     let mut acc = String::new();
     let mut line = String::new();
@@ -150,6 +149,7 @@ async fn acp_raw_pipe_initialize() {
         acc
     );
     assert!(acc.contains("result"));
+    drop(stdin);
     let _ = child.kill().await;
 }
 
