@@ -10,15 +10,21 @@ fn cli_recipe_bugfix_selects_bugfix_recipe() {
     assert_eq!(r.name(), "bugfix");
 }
 
-/// Acceptance: bugfix recipe starts at `analyze` before `reproduce`.
+/// Acceptance: bugfix recipe starts at `interview`, then `analyze` / `reproduce`.
 #[test]
-fn cli_recipe_bugfix_start_goal_is_analyze() {
+fn cli_recipe_bugfix_start_goal_is_interview() {
     let r = WorkflowRecipeResolver::from_cli_name("bugfix").expect("resolve bugfix recipe");
-    assert_eq!(r.start_goal().as_str(), "analyze");
+    assert_eq!(r.start_goal().as_str(), "interview");
+    assert_eq!(r.plan_refinement_goal().as_str(), "analyze");
     assert_eq!(
         r.status_for_state(&WorkflowState::new("Analyzing")),
         "Analyzing",
         "CLI/presenter must agree on analyzing status label"
+    );
+    assert_eq!(
+        r.status_for_state(&WorkflowState::new("Interviewing")),
+        "Interviewing",
+        "bugfix interview phase exposes Interviewing status"
     );
 }
 

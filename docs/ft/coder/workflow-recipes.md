@@ -1,7 +1,7 @@
 # Workflow recipes (pluggable workflows)
 
 **Product area:** Coder  
-**Updated:** 2026-04-06
+**Updated:** 2026-05-03
 
 ## Summary
 
@@ -50,10 +50,16 @@ When the workflow completes successfully after a **`/start-*`** session that tar
 
 ## BugfixRecipe
 
-- **Start goal:** **`analyze`**
-- **Pipeline:** **`analyze` → `reproduce` → `end`**. The **`analyze`** goal uses structured **`tddy-tools submit`** output (JSON Schema goal **`analyze`**) to record **`branch_suggestion`**, **`worktree_suggestion`**, optional **`name`**, and optional **`summary`** on **`changeset.yaml`** (with **`summary`** also available for the **`reproduce`** prompt via **`changeset.artifacts["analyze_summary"]`**). The **`reproduce`** goal does not require **`tddy-tools submit`** by default (**`goal_requires_tddy_tools_submit`** is **`false`** for **`reproduce`**).
+- **Start goal:** **`interview`** (shared graph task id with **TDD** where safe for backend/stub behavior).
+- **Plan refinement:** **`plan_refinement_goal()`** returns **`analyze`** (not **`interview`**) so primary document review targets triage, mirroring **TDD**’s **`plan`** override after **`interview`**.
+- **Initial workflow state string:** **`Interview`** (resume semantics aligned with **`TddRecipe`**).
+- **Pipeline:** **`interview` → `analyze` → `reproduce` → `end`**. **`interview`** elicits bug clarification via **`tddy-tools ask`** (socket **`TDDY_SOCKET`**); persists relay text under **`.workflow/bugfix_interview_handoff.txt`** and sets **`changeset.yaml`** workflow states **`Interviewing`** / **`Interviewed`**. **`analyze`** merges that relay into the **`prompt`** before the triage system prompt, then uses structured **`tddy-tools submit`** (JSON Schema **`analyze`**) for branch/worktree/summary. **`reproduce`** does not require structured submit by default.
+- **Workflow fields (interview):** Prompts require persisting **`run_optional_step_x`**, **`demo_options`**, and **`tool_schema_id`** (when applicable) into **`changeset.yaml`** under **`workflow`** via **`tddy-tools persist-changeset-workflow`** so **`merge_persisted_workflow_into_context`** matches operator intent for optional post-fix **demo** routing.
+- **Host recovery:** When the model emits numbered markdown clarification without **`tddy-tools ask`**, **`BugfixRecipe::host_clarification_gate_after_no_submit_turn`** can return a consolidated **`ClarificationQuestion`** batch (**`WaitForInput`**) after **`output`** is staged on **`Context`**, analogous to **TDD** interview recovery (bugfix-specific helper in **`bugfix::interview`**). The probe requires **question-shaped** numbered lines (each numbered segment contains **`?`**) so plain numbered how-to steps do not trigger recovery.
+- **Recovery persistence:** Operator answers from a recovery batch follow the **`interview`** prompt contract (**`tddy-tools ask`**, **`persist-changeset-workflow`** for **`changeset.yaml`** **`workflow`** fields). **TDD**-scoped **`merge_interview_recovery_answers_into_handoff`** / **`persist_interview_recovery_workflow_fields`** apply to **`TddRecipe`** interview recovery, not to this bugfix gate.
+- **Legacy resume:** **`changeset.yaml`** states **`Init`** (and other unrecognized non-terminal strings) resolve to **`interview`** in **`next_goal_for_state`** so pre-interview bugfix sessions enter the graph at **`interview`**; operators who need to skip straight to **`analyze`** advance or edit persisted **`workflow.state`**, or start a fresh session.
 - **Primary session document:** The manifest registers **`fix_plan` → `fix-plan.md`** for tooling and prompts; **`BugfixRecipe::uses_primary_session_document`** is **`false`**, so the hook-driven PRD-style primary-document approval gate does not run for this recipe.
-- **Product alignment:** The workflow combines triage and branch/worktree naming (**`analyze`**) with **reproduce-then-fix** discipline (**`reproduce`**) and focused test repair (small verification loops).
+- **Product alignment:** Interview narrows ambiguous bug reports; **analyze**/**reproduce** keep naming discipline and reproduction-first verification.
 
 ## FreePromptingRecipe
 
@@ -65,7 +71,7 @@ When the workflow completes successfully after a **`/start-*`** session that tar
 - **Primary session document:** None in the manifest sense used for PRD-style approval; **`FreePromptingRecipe::uses_primary_session_document`** is **`false`**, so the primary-document approval gate for plan/fix-plan style review does not apply for this recipe.
 - **Policy helpers:** **`tddy_workflow_recipes::approval_policy`** exposes **`supported_workflow_recipe_cli_names`** and **`recipe_should_skip_session_document_approval`** for tests and tooling that document which CLI names participate in resolver errors and which recipes skip session-document approval in policy tables.
 
-## GrillMeRecipe (Updated: 2026-04-05)
+## GrillMeRecipe
 
 - **CLI / recipe name:** **`grill-me`** (**`WorkflowRecipe::name()`**).
 - **Goals:** **`grill`** (clarify) then **`create-plan`** (write brief). **Start goal:** **`grill`**; **initial workflow state string:** **`Grill`**.
@@ -86,7 +92,7 @@ When the workflow completes successfully after a **`/start-*`** session that tar
 - **Primary session document:** **`uses_primary_session_document`** **`false`**. **`approval_policy::recipe_should_skip_session_document_approval`** includes **`review`** with **free-prompting** and **grill-me**.
 - **Plan refinement:** **`plan_refinement_goal()`** returns **`branch-review`** so refinement targets the structured review step.
 
-## MergePrRecipe (Updated: 2026-04-06)
+## MergePrRecipe
 
 - **CLI / recipe name:** **`merge-pr`** (**`WorkflowRecipe::name()`**).
 - **Start goal:** **`analyze`** — read-only feasibility check: fetch from origin, diff against the integration branch, report whether the merge is clean or has conflicts; **initial workflow state string:** **`Analyze`**.
@@ -110,7 +116,7 @@ When the workflow completes successfully after a **`/start-*`** session that tar
 | **`WorkflowRecipe`** | Trait: graph, hooks, state machine helpers, permissions, artifacts, backend hints (`GoalHints` / `PermissionHint`). |
 | **`TddRecipe`** | Full TDD workflow graph, `TddWorkflowHooks`, parsers, plan task wiring. |
 | **`TddSmallRecipe`** | Shortened TDD graph (`plan` → merged **`red`** → **`green`** → **`post-green-review`** → **`refactor`** → **`update-docs`**), `TddSmallWorkflowHooks`, merged red and post-green prompts. |
-| **`BugfixRecipe`** | Bugfix workflow graph (**`analyze` → `reproduce` → `end`**) hooks, and artifact manifest for **`analyze`**, **`reproduce`**, and fix-plan. |
+| **`BugfixRecipe`** | Bugfix workflow graph (**`interview` → `analyze` → `reproduce` → `end`**), relay **`.workflow/bugfix_interview_handoff.txt`**, hooks, and artifact manifest for **`analyze`**, **`reproduce`**, and fix-plan. |
 | **`FreePromptingRecipe`** | Minimal graph and hooks for the **Prompting** loop without TDD gates. |
 | **`GrillMeRecipe`** | Two goals (**`grill`** → **`create-plan`**); session **`artifacts/grill-me-brief.md`**; repo copy per **AGENTS.md** / **`plans/`** default. |
 | **`ReviewRecipe`** | **`inspect` → `branch-review` → `end`**; **`ReviewWorkflowHooks`**; session **`review.md`**; JSON goal **`branch-review`**. |
@@ -154,10 +160,8 @@ This section records how the shipped recipes map to the same product philosophy 
 - **Typical selection:** **`tdd`** when **`--recipe tdd`** is set or **`changeset.yaml`** records **`recipe: tdd`**. **New sessions** without an explicit recipe use **`free-prompting`** unless the CLI or **`changeset.yaml`** supplies a different name (see **Summary**).
 - **Start goal:** **`interview`** — clarification before PRD/plan; **`plan`** follows with PRD/TODO-style artifacts; full graph continues with acceptance-tests → red → green → ….
 - **Spirit:** Discovery-style elicitation (interview), then structured planning, then tests and implementation.
-- **Changeset workflow block:** **`changeset.yaml`** includes an optional **`workflow`** object: **`run_optional_step_x`** (boolean for the post-green branch), **`demo_options`** (strings describing how to run an optional **demo** goal), and optional **`tool_schema_id`** (URN tying the block to the **`changeset-workflow`** JSON Schema). **`tddy-tools persist-changeset-workflow`** validates a JSON payload against that schema and replaces the **`workflow`** section using an atomic write. **`tddy_core::changeset::merge_persisted_workflow_into_context`** copies persisted values into the engine **`Context`** so graph **`goal_conditions`** (e.g. **`run_optional_step_x`**) match the manifest; call sites pass the plan session directory.
+- **Changeset workflow block:** **`changeset.yaml`** includes an optional **`workflow`** object: **`run_optional_step_x`** (boolean for the post-green branch), **`demo_options`** (strings describing how to run an optional **demo** goal), optional **`tool_schema_id`** (URN tying the block to the **`changeset-workflow`** JSON Schema), and optional branch/worktree fields: **`branch_worktree_intent`** (**`new_branch_from_base`** | **`work_on_selected_branch`**), **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**. **`tddy-tools persist-changeset-workflow`** validates a JSON payload against that schema and replaces the **`workflow`** section using an atomic write. **`tddy_core::changeset::merge_persisted_workflow_into_context`** copies persisted values into the engine **`Context`** (including intent keys for hooks and resume) so graph **`goal_conditions`** (e.g. **`run_optional_step_x`**) match the manifest; call sites pass the plan session directory. **`tddy_core::worktree`** applies **`branch_worktree_intent`** during **`setup_worktree_for_session_with_integration_base`** (and the optional chain-base variant): new branch creation from the integration base versus checking out an existing branch in a new worktree path under **`.worktrees/`**.
 - **Interview:** System and user prompts require **`tddy-tools ask`** for whether the **demo** goal runs after **green**, for demo execution options, and for persisting **`run_optional_step_x`** / **`demo_options`** (via **`persist-changeset-workflow`**) into **`changeset.yaml`** before PRD-driven planning completes. If the model emits clarification only in assistant text without **`tddy-tools ask`**, the recipe host gate (after **`output`** is staged on **`Context`**) can block with **`WaitForInput`** until the operator answers the recovery batch; answers merge into **`.workflow/tdd_interview_handoff.txt`** and **`changeset.yaml`** **`workflow`** through the same helpers the interview phase uses for structured recovery.
-- **Changeset workflow block:** **`changeset.yaml`** includes an optional **`workflow`** object: **`run_optional_step_x`** (boolean for the post-green branch), **`demo_options`** (strings describing how to run an optional **demo** goal), optional **`tool_schema_id`** (URN tying the block to the **`changeset-workflow`** JSON Schema), and optional branch/worktree fields: **`branch_worktree_intent`** (**`new_branch_from_base`** | **`work_on_selected_branch`**), **`selected_integration_base_ref`**, **`new_branch_name`**, **`selected_branch_to_work_on`**. **`tddy-tools persist-changeset-workflow`** validates a JSON payload against that schema and replaces the **`workflow`** section using an atomic write. **`tddy_core::changeset::merge_persisted_workflow_into_context`** copies persisted values into the engine **`Context`** (including intent keys for hooks and resume) so graph **`goal_conditions`** (e.g. **`run_optional_step_x`**) match the manifest; call sites pass the plan session directory. **`tddy_core::worktree`** applies **`branch_worktree_intent`** during **`setup_worktree_for_session_with_integration_base`** (and the optional chain-base variant): new branch creation from the integration base vs checking out an existing branch in a new worktree path under **`.worktrees/`**.
-- **Interview:** System and user prompts require **`tddy-tools ask`** for whether the **demo** goal runs after **green**, for demo execution options, and for persisting **`run_optional_step_x`** / **`demo_options`** (via **`persist-changeset-workflow`**) into **`changeset.yaml`** before PRD-driven planning completes.
 
 ### TDD-small (`tdd-small`)
 
@@ -168,11 +172,12 @@ This section records how the shipped recipes map to the same product philosophy 
 
 ### Bugfix (`bugfix`)
 
-- **Start goal:** **`analyze`** — derive branch name, worktree directory name, optional changeset title, and optional short triage summary from the bug report (structured **`tddy-tools submit`** for **`analyze`**).
-- **Pipeline:** **`analyze` → `reproduce` → `end`**. **`reproduce`** confirms or creates a failing test / deterministic reproduction before deeper fix work.
-- **Artifacts:** **fix-plan** content (e.g. **`fix-plan.md`** under the session artifact layout) and **`changeset.yaml`** fields populated from **`analyze`** submit.
-- **Spirit:** Combines naming discipline with **`.cursor/commands/reproduce.md`** (reproduction discipline) and **`.cursor/commands/fix-tests.md`** (focused diagnosis and fix, small verification loops).
-- **Session document approval:** **`uses_primary_session_document`** is **`false`** for **bugfix**, so the automatic PRD-style document-approval step does not run; **`fix-plan.md`** remains a manifest artifact for context and tooling.
+- **Start goal:** **`interview`** — bug-focused elicitation ( **`tddy-tools ask`** via **`TDDY_SOCKET`** ) before **analyze** triage; **`plan_refinement_goal()`** is **`analyze`**.
+- **Pipeline:** **`interview` → `analyze` → `reproduce` → `end`**. Relay **`.workflow/bugfix_interview_handoff.txt`** is merged into the **analyze** **`prompt`** in hooks. **`analyze`** uses structured **`tddy-tools submit`**; **`reproduce`** confirms or creates a failing test / deterministic reproduction.
+- **Artifacts:** **fix-plan** content (e.g. **`fix-plan.md`**) and **`changeset.yaml`** fields from **`analyze`** submit; optional **`workflow.run_optional_step_x`** / **`demo_options`** / **`tool_schema_id`** when elicited in **interview** and persisted.
+- **Spirit:** Interview narrows ambiguous reports; combines naming discipline with **`.cursor/commands/reproduce.md`** and **`.cursor/commands/fix-tests.md`** style loops.
+- **Session document approval:** **`uses_primary_session_document`** is **`false`** for **bugfix**; **`fix-plan.md`** remains a manifest artifact for context and tooling.
+- **Legacy resume:** Persisted **`Init`** (or unknown non-terminal workflow strings) resumes at **`interview`**; advance **`changeset.yaml`** state or start a new session to skip directly to **`analyze`** when appropriate.
 
 ### Free prompting (`free-prompting`)
 
@@ -194,7 +199,7 @@ This section records how the shipped recipes map to the same product philosophy 
 - **Artifacts:** **`review.md`** on the manifest for session file lists and previews.
 - **Spirit:** Branch-oriented code review with operator elicitation, then a single persisted markdown review aligned with the same merge-base scope as **`inspect`**.
 
-### Merge PR (`merge-pr`) (Updated: 2026-04-06)
+### Merge PR (`merge-pr`)
 
 - **Start goal:** **`analyze`** — read-only merge feasibility check: fetch origin, diff against integration branch, report whether merge is clean or has conflicts, recommend auto vs manual resolution.
 - **Pipeline:** **`analyze` → `sync-main` → `finalize` → `end`**.
@@ -207,6 +212,7 @@ This section records how the shipped recipes map to the same product philosophy 
 ### Tests
 
 - **Rust:** **`./test`** from the repo root is the primary gate (builds required binaries including **`tddy-acp-stub`**, then runs **`cargo test`** with **`--test-threads=1`**).
+- **Bugfix interview:** **`tddy-workflow-recipes`** integration targets **`bugfix_interview_acceptance`** and **`bugfix_interview_granular`** cover graph order, submit opt-out on **`interview`**, prompt and handoff contracts, and host-recovery gating; **`tddy-coder`** **`presenter_integration`** includes **`bugfix_workflow_emits_interview_before_reproduce`** for presenter **`GoalStarted`** ordering.
 - **Web:** Cypress component/e2e for **`tddy-web`** are **not** included in **`./test`**; run from the repo via **`bun run cypress:component`** / **`cypress:e2e`** under **`packages/tddy-web`** (or root scripts that filter **`tddy-web`**). Ensure workspace install so **`tddy-livekit-web`** resolves (Vite aliases **`tddy-livekit-web`** to package source for dev/Cypress).
 
 ## Session context and conditional transitions

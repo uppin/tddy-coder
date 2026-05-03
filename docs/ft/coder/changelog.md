@@ -2,6 +2,12 @@
 
 Release note history for the Coder product area.
 
+## 2026-05-03 — Bugfix recipe: interview-first graph
+
+- **`tddy-workflow-recipes`**: **`BugfixRecipe`** graph **`interview` → `analyze` → `reproduce` → `end`**; **`bugfix::interview`** (**`system_prompt`**, relay **`.workflow/bugfix_interview_handoff.txt`**, **`Interviewing`** / **`Interviewed`** on **`changeset.yaml`**, **`host_clarification_gate_after_no_submit_turn`** with question-shaped numbered-line probe); **`BugfixWorkflowHooks`** **`before_bugfix_interview`** / **`before_bugfix_analyze`** handoff merge. Tests: **`bugfix_interview_acceptance`**, **`bugfix_interview_granular`**.
+- **`tddy-coder`**: Resolver and **`cli_recipe`** contract for bugfix start goal **`interview`**; **`presenter_integration`** **`bugfix_workflow_emits_interview_before_reproduce`**.
+- **Feature docs**: [workflow-recipes.md](workflow-recipes.md), [1-OVERVIEW.md](1-OVERVIEW.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md); package **[changesets.md](../../../packages/tddy-workflow-recipes/docs/changesets.md)**, **[changesets.md](../../../packages/tddy-coder/docs/changesets.md)**. **Repository hygiene:** root **`.gitignore`** patterns for agent scratch logs and submit JSON artifacts.
+
 ## 2026-05-02 — Session chaining (stacked PR groundwork)
 
 - **`tddy-core`**: **`session_metadata`** — optional **`previous_session_id`** on **`.session.yaml`**; **`session_chain`** — **`resolve_chain_integration_base_ref_from_parent_session`** (parent **`repo_path`** required when a branch is present), **`integrate_chain_base_into_session_worktree_bootstrap`** (delegates to **`setup_worktree_for_session_with_optional_chain_base`**); **`agent_skills::slash_menu_entries`** — **`/chain`** row after **`/recipe`**. **`tddy-integration-tests`**: **`session_chain_acceptance`**. **`tddy-tui`**: slash menu test **`tui_chain_slash_offers_recent_sessions`**. **`tddy-daemon`**: **`/chain-workflow`** message dispatch; harness **`handle_chain_parent_callback`**; **live** **`tcp:`** callback wiring in **`telegram_bot`** remains Phase 2 (see **[telegram-session-control.md](../daemon/telegram-session-control.md)**).

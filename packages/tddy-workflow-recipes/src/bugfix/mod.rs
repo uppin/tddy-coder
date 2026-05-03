@@ -1,7 +1,8 @@
-//! Bug-fix workflow: **analyze** → **reproduce** with clarification questions (demo-ready recipe).
+//! Bug-fix workflow: **interview** → **analyze** → **reproduce** with clarification (demo-ready recipe).
 
 mod analyze;
 mod hooks;
+pub mod interview;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -9,16 +10,18 @@ use std::sync::Arc;
 
 pub use hooks::BugfixWorkflowHooks;
 
-use tddy_core::backend::{CodingBackend, GoalHints, GoalId, PermissionHint};
+use tddy_core::backend::{ClarificationQuestion, CodingBackend, GoalHints, GoalId, PermissionHint};
+use tddy_core::workflow::context::Context;
 use tddy_core::workflow::graph::{Graph, GraphBuilder};
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::recipe::{WorkflowEventSender, WorkflowRecipe};
 use tddy_core::workflow::task::{BackendInvokeTask, EndTask};
 
+use crate::permissions;
 use crate::SessionArtifactManifest;
 
-/// Bug-fix recipe: **`analyze`** then **`reproduce`** with agent output and clarification questions.
+/// Bug-fix recipe: **`interview`** then **`analyze`** then **`reproduce`** with agent output and clarification.
 #[derive(Clone, Copy, Default, Debug)]
 pub struct BugfixRecipe;
 
@@ -28,8 +31,14 @@ impl WorkflowRecipe for BugfixRecipe {
     }
 
     fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
-        log::debug!("[bugfix recipe] build_graph: analyze → reproduce → end");
+        log::debug!("[bugfix recipe] build_graph: interview → analyze → reproduce → end");
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
+        let interview = Arc::new(BackendInvokeTask::from_recipe(
+            "interview",
+            GoalId::new("interview"),
+            recipe.clone(),
+            backend.clone(),
+        ));
         let analyze = Arc::new(BackendInvokeTask::from_recipe(
             "analyze",
             GoalId::new("analyze"),
@@ -45,9 +54,11 @@ impl WorkflowRecipe for BugfixRecipe {
         let end = Arc::new(EndTask::new("end"));
 
         GraphBuilder::new("bugfix")
+            .add_task(interview)
             .add_task(analyze)
             .add_task(reproduce)
             .add_task(end)
+            .add_edge("interview", "analyze")
             .add_edge("analyze", "reproduce")
             .add_edge("reproduce", "end")
             .build()
@@ -59,6 +70,15 @@ impl WorkflowRecipe for BugfixRecipe {
 
     fn goal_hints(&self, goal_id: &GoalId) -> Option<GoalHints> {
         match goal_id.as_str() {
+            "interview" => Some(GoalHints {
+                display_name: "Interview".to_string(),
+                permission: PermissionHint::ReadOnly,
+                allowed_tools: permissions::plan_allowlist(),
+                default_model: None,
+                agent_output: true,
+                agent_cli_plan_mode: false,
+                claude_nonzero_exit_ok_if_structured_response: false,
+            }),
             "analyze" => {
                 log::debug!("[bugfix recipe] goal_hints(analyze)");
                 Some(GoalHints {
@@ -85,7 +105,11 @@ impl WorkflowRecipe for BugfixRecipe {
     }
 
     fn goal_ids(&self) -> Vec<GoalId> {
-        vec![GoalId::new("analyze"), GoalId::new("reproduce")]
+        vec![
+            GoalId::new("interview"),
+            GoalId::new("analyze"),
+            GoalId::new("reproduce"),
+        ]
     }
 
     fn submit_key(&self, goal_id: &GoalId) -> GoalId {
@@ -94,14 +118,15 @@ impl WorkflowRecipe for BugfixRecipe {
 
     /// Resume goal for persisted [`WorkflowState`].
     ///
-    /// **`Reproducing`** means analyze completed successfully (changeset updated to that state);
-    /// the next runnable goal is **`reproduce`**. Any other non-**`Failed`** state—including
-    /// **`Init`**, **`Analyzing`**, or legacy/unknown strings—maps to **`analyze`** so partial or
-    /// upgraded sessions still land on the first step unless we are clearly in the reproduce phase.
+    /// Resume mapping extended for **interview** states (analogous to [`crate::tdd::TddRecipe`]).
+    /// Legacy sessions without interview states still resume sensibly: **`Analyzing`** → **analyze**,
+    /// **`Reproducing`** → **reproduce**; unknown non-failed states default to **analyze** (prior behavior).
     fn next_goal_for_state(&self, state: &WorkflowState) -> Option<GoalId> {
         match state.as_str() {
             "Failed" => None,
             "Reproducing" => Some(GoalId::new("reproduce")),
+            "Interviewed" | "Analyzing" => Some(GoalId::new("analyze")),
+            "Init" | "Interview" | "Interviewing" => Some(GoalId::new("interview")),
             _ => Some(GoalId::new("analyze")),
         }
     }
@@ -109,6 +134,8 @@ impl WorkflowRecipe for BugfixRecipe {
     fn status_for_state(&self, state: &WorkflowState) -> &'static str {
         match state.as_str() {
             "Failed" => "Failed",
+            "Interviewing" => "Interviewing",
+            "Interviewed" => "Interviewed",
             "Analyzing" => "Analyzing",
             "Reproducing" => "Reproducing",
             _ => "Active",
@@ -116,12 +143,31 @@ impl WorkflowRecipe for BugfixRecipe {
     }
 
     fn initial_state(&self) -> WorkflowState {
-        WorkflowState::new("Init")
+        log::debug!(
+            "[bugfix recipe] initial_state = Interview (interview-first, TddRecipe-aligned)"
+        );
+        WorkflowState::new("Interview")
     }
 
     fn start_goal(&self) -> GoalId {
-        log::debug!("[bugfix recipe] start_goal = analyze");
+        log::debug!("[bugfix recipe] start_goal = interview");
+        GoalId::new("interview")
+    }
+
+    fn plan_refinement_goal(&self) -> GoalId {
         GoalId::new("analyze")
+    }
+
+    fn host_clarification_gate_after_no_submit_turn(
+        &self,
+        goal_id: &GoalId,
+        context: &Context,
+    ) -> Option<Vec<ClarificationQuestion>> {
+        log::debug!(
+            "[bugfix recipe] host_clarification_gate_after_no_submit_turn goal={}",
+            goal_id.as_str()
+        );
+        interview::host_gate_bugfix_interview_recovery_after_no_submit(goal_id, context)
     }
 
     fn default_models(&self) -> BTreeMap<GoalId, String> {
@@ -184,13 +230,18 @@ mod tests {
     use tddy_core::workflow::ids::WorkflowState;
     use tddy_core::WorkflowRecipe;
 
-    /// Acceptance: graph must be `analyze` → `reproduce` → `end` (task ids match goal ids).
+    /// Graph: `interview` → `analyze` → `reproduce` → `end`.
     #[test]
     fn bugfix_graph_orders_analyze_before_reproduce() {
         let backend = Arc::new(StubBackend::new());
         let recipe = BugfixRecipe;
         let graph = recipe.build_graph(backend);
         let ctx = Context::new();
+        assert_eq!(
+            graph.next_task_id("interview", &ctx),
+            Some("analyze".to_string()),
+            "edge interview → analyze"
+        );
         assert_eq!(
             graph.next_task_id("analyze", &ctx),
             Some("reproduce".to_string()),
@@ -212,12 +263,13 @@ mod tests {
     fn bugfix_recipe_is_valid_plugin() {
         let r: std::sync::Arc<dyn WorkflowRecipe> = std::sync::Arc::new(BugfixRecipe);
         assert_eq!(r.name(), "bugfix");
-        assert_eq!(r.start_goal().as_str(), "analyze");
+        assert_eq!(r.start_goal().as_str(), "interview");
+        assert_eq!(r.plan_refinement_goal().as_str(), "analyze");
         let goal_ids = r.goal_ids();
         let ids: Vec<&str> = goal_ids.iter().map(|g| g.as_str()).collect();
         assert!(
-            ids.contains(&"analyze") && ids.contains(&"reproduce"),
-            "goal_ids must include analyze and reproduce: {:?}",
+            ids.contains(&"interview") && ids.contains(&"analyze") && ids.contains(&"reproduce"),
+            "goal_ids must include interview, analyze, reproduce: {:?}",
             ids
         );
         assert_eq!(
