@@ -43,7 +43,6 @@ impl WorkflowRecipe for ReviewRecipe {
     }
 
     fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
-        log::debug!("review::ReviewRecipe::build_graph marker_id=M001 scope=review::ReviewRecipe::build_graph");
         log::info!("ReviewRecipe::build_graph: inspect -> branch-review -> end");
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
         let inspect = Arc::new(BackendInvokeTask::from_recipe(

@@ -1,7 +1,7 @@
 //! Per-chat **telegram-tracked session** gate and structured traffic logging (PRD).
 //!
 //! **Lifecycle (tracked session):**
-//! - **Set:** when the operator completes **Enter session** for a workflow session (`bind_chat_to_session_for_telegram_tracking`).
+//! - **Set:** when the operator starts a workflow from Telegram (**`handle_start_workflow`**) for that chat, or completes **Enter session** (**`bind_chat_to_session_for_telegram_tracking`**).
 //! - **Clear:** when that chat’s tracked session id matches and the workflow hits **WorkflowComplete** (success or failure),
 //!   when **handle_delete_session** removes that session, or when `clear_telegram_tracked_session_for_chat` is invoked
 //!   for an explicit leave / future control-plane hook.
@@ -14,16 +14,6 @@ use std::sync::{Arc, Mutex as StdMutex};
 /// Shared coordinator between teloxide dispatch, session control harness, and notifier.
 pub type SharedTelegramTrackedSessionCoordinator = Arc<StdMutex<TelegramTrackedSessionCoordinator>>;
 
-/// Development trace hook (structured target; safe to trim in later passes).
-pub fn emit_tddy_marker(marker_id: &str, scope: &str) {
-    log::debug!(
-        target: "tddy_daemon::telegram",
-        "telegram_trace_marker marker_id={} scope={}",
-        marker_id,
-        scope
-    );
-}
-
 /// One-line structured log for **inbound** Telegram user messages (no raw secrets).
 pub fn format_inbound_message_traffic_log(
     chat_id: i64,
@@ -34,6 +24,24 @@ pub fn format_inbound_message_traffic_log(
     format!(
         "telegram_traffic direction=inbound kind=message chat_id={chat_id} session_id={sid} text_len={text_len}"
     )
+}
+
+/// Log [`log::Record`] target for inbound Telegram **message text** (route in daemon `log:` policies).
+pub const TELEGRAM_INBOUND_MESSAGE_BODY_LOG_TARGET: &str =
+    "tddy_daemon::telegram_bot::message-body";
+
+/// One-line structured log for **inbound** Telegram message body (full text; route to a restricted sink).
+pub fn format_inbound_telegram_message_body_log(chat_id: i64, text: &str) -> String {
+    format!("telegram_inbound_message_body chat_id={chat_id} text={text}")
+}
+
+/// Emit full inbound message text on [`TELEGRAM_INBOUND_MESSAGE_BODY_LOG_TARGET`] for YAML logger routing.
+pub fn log_inbound_telegram_message_body(chat_id: i64, text: &str) {
+    log::info!(
+        target: TELEGRAM_INBOUND_MESSAGE_BODY_LOG_TARGET,
+        "{}",
+        format_inbound_telegram_message_body_log(chat_id, text)
+    );
 }
 
 /// One-line structured log for **inbound** Telegram callback queries.
@@ -65,19 +73,11 @@ pub struct TelegramTrackedSessionCoordinator {
 
 impl TelegramTrackedSessionCoordinator {
     pub fn new() -> Self {
-        emit_tddy_marker(
-            "M101",
-            "tddy_daemon::telegram_tracked_session::TelegramTrackedSessionCoordinator::new",
-        );
         Self::default()
     }
 
     /// Establish tracking after **Enter session** (same `session_id` string as metadata / callbacks).
     pub fn bind_chat_to_session_for_telegram_tracking(&mut self, chat_id: i64, session_id: &str) {
-        emit_tddy_marker(
-            "M102",
-            "tddy_daemon::telegram_tracked_session::TelegramTrackedSessionCoordinator::bind_chat_to_session_for_telegram_tracking",
-        );
         let sid = session_id.trim().to_string();
         log::info!(
             target: "tddy_daemon::telegram",
@@ -89,10 +89,6 @@ impl TelegramTrackedSessionCoordinator {
     }
 
     pub fn tracked_session_for_chat(&self, chat_id: i64) -> Option<String> {
-        emit_tddy_marker(
-            "M103",
-            "tddy_daemon::telegram_tracked_session::TelegramTrackedSessionCoordinator::tracked_session_for_chat",
-        );
         self.tracked.get(&chat_id).cloned()
     }
 
@@ -105,10 +101,6 @@ impl TelegramTrackedSessionCoordinator {
         chat_id: i64,
         target_session_id: &str,
     ) -> bool {
-        emit_tddy_marker(
-            "M104",
-            "tddy_daemon::telegram_tracked_session::TelegramTrackedSessionCoordinator::should_suppress_workflow_keyboards_for_session",
-        );
         let target = target_session_id.trim();
         match self.tracked.get(&chat_id) {
             None => {
@@ -144,10 +136,6 @@ impl TelegramTrackedSessionCoordinator {
 
     /// Clear tracking for a chat (explicit leave / reset hooks).
     pub fn clear_telegram_tracked_session_for_chat(&mut self, chat_id: i64) {
-        emit_tddy_marker(
-            "M105",
-            "tddy_daemon::telegram_tracked_session::TelegramTrackedSessionCoordinator::clear_telegram_tracked_session_for_chat",
-        );
         if self.tracked.remove(&chat_id).is_some() {
             log::info!(
                 target: "tddy_daemon::telegram",
@@ -183,10 +171,6 @@ impl TelegramTrackedSessionCoordinator {
 
     /// Structured preview line for **outbound** Telegram traffic (tests + log capture under `tddy_daemon::telegram`).
     pub fn stub_structured_traffic_log_preview(&self, chat_id: i64, session_id: &str) -> String {
-        emit_tddy_marker(
-            "M106",
-            "tddy_daemon::telegram_tracked_session::TelegramTrackedSessionCoordinator::stub_structured_traffic_log_preview",
-        );
         format!(
             "telegram_traffic direction=outbound kind=mode_changed_preview chat_id={chat_id} session_id={}",
             session_id.trim()
@@ -199,10 +183,6 @@ impl TelegramTrackedSessionCoordinator {
         chat_id: i64,
         session_id: &str,
     ) -> bool {
-        emit_tddy_marker(
-            "M107",
-            "tddy_daemon::telegram_tracked_session::TelegramTrackedSessionCoordinator::notify_enter_session_elicitation_replay_skeleton",
-        );
         log::info!(
             target: "tddy_daemon::telegram",
             "telegram_tracked_session: enter session requests elicitation replay chat_id={} session_id={}",
@@ -249,6 +229,24 @@ mod unit_tests {
         assert!(
             line.contains("direction=outbound"),
             "green: structured telegram traffic must label outbound events; got {line:?}"
+        );
+    }
+
+    #[test]
+    fn inbound_message_body_log_target_ends_with_message_body_suffix() {
+        assert!(
+            TELEGRAM_INBOUND_MESSAGE_BODY_LOG_TARGET.ends_with("message-body"),
+            "green: YAML log policies match this suffix; got {:?}",
+            TELEGRAM_INBOUND_MESSAGE_BODY_LOG_TARGET
+        );
+    }
+
+    #[test]
+    fn inbound_message_body_log_line_includes_chat_id_and_text() {
+        let line = format_inbound_telegram_message_body_log(-99, "ping");
+        assert!(
+            line.contains("chat_id=-99") && line.contains("text=ping"),
+            "green: message-body log must carry chat_id and full text; got {line:?}"
         );
     }
 

@@ -14,7 +14,10 @@ use tddy_coder::{ActivityEntry, AppMode, Presenter, UserIntent};
 use tddy_core::{
     backend::{CodingBackend, InvokeRequest, InvokeResponse},
     output::{SESSIONS_SUBDIR, TDDY_SESSIONS_DIR_ENV},
-    BackendError, PresenterEvent, SharedBackend, StubBackend, WorkflowCompletePayload,
+    post_workflow_github_pr_operator_elicitation_pending, read_changeset,
+    should_reprompt_github_pr_on_resume, write_changeset, write_initial_tool_session_metadata,
+    BackendError, ChangesetWorkflow, InitialToolSessionMetadataOpts, PresenterEvent, SharedBackend,
+    StubBackend, WorkflowCompletePayload,
 };
 use tddy_workflow_recipes::{BugfixRecipe, TddRecipe};
 use tokio::sync::broadcast;
@@ -1322,6 +1325,151 @@ fn workflow_error_propagates() {
             .any(|t| t.to_lowercase().contains("fail") || t.to_lowercase().contains("error")),
         "expected activity log to contain an entry indicating the workflow failure, got: {:?}",
         activity_texts
+    );
+}
+
+#[test]
+#[serial]
+fn github_pr_post_workflow_elicitation_precedes_workflow_complete_when_opted_in() {
+    let session_dir = common::isolated_presenter_session_dir("presenter-post-wf-pr");
+    let session_id = session_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .expect("session id from dir basename")
+        .to_string();
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-post-wf-pr-repo");
+    common::write_changeset_for_session(&session_dir, &session_id, &output_dir);
+
+    let mut cs = read_changeset(&session_dir).expect("read seeded changeset");
+    cs.workflow = Some(ChangesetWorkflow {
+        post_workflow_open_github_pr: Some(true),
+        post_workflow_remove_session_worktree: Some(false),
+        ..Default::default()
+    });
+    write_changeset(&session_dir, &cs).expect("write changeset with post-workflow workflow");
+
+    std::fs::write(
+        session_dir.join("PRD.md"),
+        "# PRD\n\n## Summary\nMinimal PRD for presenter post-workflow integration test.\n",
+    )
+    .expect("write PRD.md for resume-from-Planned session");
+
+    write_initial_tool_session_metadata(
+        &session_dir,
+        InitialToolSessionMetadataOpts {
+            project_id: "test-proj".to_string(),
+            repo_path: Some(
+                output_dir
+                    .canonicalize()
+                    .unwrap_or(output_dir.clone())
+                    .display()
+                    .to_string(),
+            ),
+            ..Default::default()
+        },
+    )
+    .expect("write session metadata");
+
+    assert!(
+        post_workflow_github_pr_operator_elicitation_pending(cs.workflow.as_ref()),
+        "seeded changeset must request the post-workflow GitHub PR operator prompt"
+    );
+
+    let (mut presenter, mut events) = presenter_with_events();
+    let backend = create_stub_backend();
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
+    presenter.start_workflow(
+        backend,
+        output_dir,
+        Some(session_dir.clone()),
+        Some("Build auth".to_string()),
+        None,
+        None,
+        false,
+        Some(session_id.clone()),
+        None,
+        None,
+    );
+
+    let mut iterations = 0;
+    let max_iterations = 4000;
+    while !presenter.is_done() && iterations < max_iterations {
+        presenter.poll_workflow();
+        events.drain();
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        presenter.is_done(),
+        "workflow should complete within {} iterations; last mode: {:?}",
+        max_iterations,
+        presenter.state().mode
+    );
+
+    events.drain();
+    let evs: Vec<TestEvent> = events.events().to_vec();
+
+    let payload = evs
+        .iter()
+        .find_map(|e| {
+            if let TestEvent::WorkflowComplete(Ok(p)) = e {
+                Some(p.clone())
+            } else {
+                None
+            }
+        })
+        .expect("WorkflowComplete(Ok) payload");
+
+    let out_session_dir = payload
+        .session_dir
+        .as_ref()
+        .expect("WorkflowComplete must carry session_dir");
+
+    assert_eq!(
+        out_session_dir, &session_dir,
+        "workflow must complete in the pre-seeded session directory"
+    );
+
+    let persisted_pr_phase = read_changeset(&session_dir)
+        .expect("read_changeset after workflow")
+        .workflow
+        .as_ref()
+        .and_then(|w| w.github_pr_status.as_ref().map(|s| s.phase.clone()));
+
+    assert!(
+        should_reprompt_github_pr_on_resume(persisted_pr_phase.as_deref()),
+        "expected non-terminal github_pr_status.phase after operator consented to PR automation; got persisted_pr_phase={persisted_pr_phase:?}"
+    );
+
+    let wc_idx = evs
+        .iter()
+        .position(|e| matches!(e, TestEvent::WorkflowComplete(Ok(_))))
+        .expect("WorkflowComplete(Ok) index");
+
+    let has_post_workflow_github_select = evs[..wc_idx].iter().any(|e| {
+        if let TestEvent::ModeChanged(AppMode::Select { question, .. }) = e {
+            let blob = format!("{} {}", question.header, question.question);
+            blob.to_ascii_lowercase().contains("github")
+        } else {
+            false
+        }
+    });
+
+    assert!(
+        has_post_workflow_github_select,
+        "expected a presenter Select gate mentioning GitHub before WorkflowComplete(Ok); events: {:?}",
+        evs
     );
 }
 

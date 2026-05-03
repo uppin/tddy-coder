@@ -14,8 +14,14 @@ const ELICITATION_QUEUE_WARN_DEPTH: usize = 10;
 pub type SharedActiveElicitationCoordinator = Arc<StdMutex<ActiveElicitationCoordinator>>;
 
 /// Owns, per Telegram `chat_id`, an ordered queue of workflow `session_id` values waiting for
-/// elicitation. The **first** entry is the session that may show the primary interactive surface
-/// (full `eli:s:` inline keyboard where applicable).
+/// elicitation surface. The **first** entry is the session that may show the primary interactive
+/// surface (full `eli:s:` inline keyboard where applicable).
+///
+/// The same `session_id` may appear **multiple times** when the presenter emits several elicitation
+/// [`ModeChanged`](tddy_service::gen::ModeChanged) events in a row (multi-step clarification): each
+/// outbound registration pushes one token; completing one step must not rotate the queue away from
+/// that session until all its tokens are drained when elicitation ends (see
+/// [`Self::drain_elicitation_completion_for_session`]).
 #[derive(Debug, Default)]
 pub struct ActiveElicitationCoordinator {
     /// FIFO per chat: front = active token holder.
@@ -27,18 +33,13 @@ impl ActiveElicitationCoordinator {
         Self::default()
     }
 
-    /// Record that `session_id` needs elicitation surface for `chat_id` (outbound path).
+    /// Record that `session_id` needs one elicitation surface slot for `chat_id` (outbound path).
+    ///
+    /// Pushes even when `session_id` is already queued so multi-step clarification reserves one
+    /// token per presenter prompt; duplicate Telegram payloads are still suppressed upstream via
+    /// signature dedupe before registration.
     pub fn register_elicitation_surface_request(&mut self, chat_id: i64, session_id: String) {
         let q = self.queues.entry(chat_id).or_default();
-        if q.iter().any(|s| s == &session_id) {
-            log::debug!(
-                target: "tddy_daemon::active_elicitation",
-                "register_elicitation_surface_request: session already in queue chat_id={} session_id={}",
-                chat_id,
-                session_id
-            );
-            return;
-        }
         q.push(session_id.clone());
         let len = q.len();
         log::info!(
@@ -73,8 +74,9 @@ impl ActiveElicitationCoordinator {
             .unwrap_or(false)
     }
 
-    /// After `completed_session_id` finishes its elicitation gate, pop it and return the new active
-    /// session id, if any.
+    /// Pop **one** queued surface token from the front when it matches `completed_session_id`, and
+    /// return the new active session id (see [`Self::drain_elicitation_completion_for_session`] for
+    /// clearing every token when presenter elicitation ends).
     pub fn advance_after_elicitation_completion(
         &mut self,
         chat_id: i64,
@@ -122,6 +124,22 @@ impl ActiveElicitationCoordinator {
             }
         }
         next
+    }
+
+    /// After `completed_session_id` **fully** leaves presenter elicitation, remove every consecutive
+    /// queued surface token for that session from the front (see [`Self::register_elicitation_surface_request`]).
+    ///
+    /// Used when [`crate::telegram_notifier::TelegramSessionWatcher`] observes `was_eliciting &&
+    /// !now_eliciting` so all tokens for a multi-step clarification clear in one transition.
+    pub fn drain_elicitation_completion_for_session(
+        &mut self,
+        chat_id: i64,
+        completed_session_id: &str,
+    ) -> Option<String> {
+        while self.active_session_for_chat(chat_id).as_deref() == Some(completed_session_id) {
+            self.advance_after_elicitation_completion(chat_id, completed_session_id);
+        }
+        self.active_session_for_chat(chat_id)
     }
 }
 
@@ -198,6 +216,26 @@ mod tests {
         assert!(
             !should_emit_primary_elicitation_keyboard(&c, 424242, sid_b),
             "queued session must not emit a competing primary eli:s keyboard"
+        );
+    }
+
+    /// When the same workflow sends a second clarification [`ModeChanged`], outbound Telegram calls
+    /// `register_elicitation_surface_request` again — pushing a **second** queue token for that
+    /// session (signature dedupe still suppresses identical repeats upstream). If an inbound path
+    /// incorrectly ran `advance_after_elicitation_completion` after only the first answer, the queue
+    /// must not be fully drained — `should_emit_primary_elicitation_keyboard` must stay true for the
+    /// next prompt of that session (operators otherwise see **elicitation queued** with no buttons).
+    #[test]
+    fn primary_keyboard_survives_duplicate_register_then_advance_same_session_multi_question() {
+        let mut c = ActiveElicitationCoordinator::new();
+        let chat = 424242_i64;
+        let sid = "01900000-0000-7000-8000-0000000000aa";
+        c.register_elicitation_surface_request(chat, sid.into());
+        c.register_elicitation_surface_request(chat, sid.into());
+        c.advance_after_elicitation_completion(chat, sid);
+        assert!(
+            should_emit_primary_elicitation_keyboard(&c, chat, sid),
+            "same-session multi-step clarification must keep the primary Telegram surface until the session truly finishes elicitation"
         );
     }
 }

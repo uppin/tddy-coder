@@ -222,6 +222,7 @@ async fn telegram_message_handler(bot: Bot, harness: Harness, msg: Message) -> H
             None,
         )
     );
+    crate::telegram_tracked_session::log_inbound_telegram_message_body(chat_id, &text);
 
     if !text.trim_start().starts_with('/') {
         let h = harness.lock().await;

@@ -29,6 +29,7 @@
     },
     "post_workflow_open_github_pr": { "type": "boolean" },
     "post_workflow_remove_session_worktree": { "type": "boolean" },
+    "operator_remove_session_worktree": { "type": "boolean" },
     "github_pr_status": {
       "type": "object",
       "properties": {

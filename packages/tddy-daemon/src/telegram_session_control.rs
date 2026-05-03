@@ -1226,31 +1226,6 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         }
     }
 
-    fn try_advance_elicitation_after_step(
-        &self,
-        chat_id: i64,
-        completed_session_id: &str,
-        context: &'static str,
-    ) {
-        let next = match self.active_elicitation.lock() {
-            Ok(mut g) => g.advance_after_elicitation_completion(chat_id, completed_session_id),
-            Err(e) => {
-                log::error!(
-                    target: "tddy_daemon::telegram_session_control",
-                    "{context}: active elicitation mutex poisoned: {e}"
-                );
-                None
-            }
-        };
-        log::info!(
-            target: "tddy_daemon::telegram_session_control",
-            "{context}: elicitation queue advanced chat_id={} completed_session_id={} next_active_session_id={:?}",
-            chat_id,
-            completed_session_id,
-            next
-        );
-    }
-
     fn ensure_authorized(&self, chat_id: i64) -> anyhow::Result<()> {
         if self.allowed_chat_ids.contains(&chat_id) {
             return Ok(());
@@ -1732,7 +1707,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             .workflow_spawn
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?;
-        let (session_id, port) = {
+        let (_session_id, port) = {
             let map = deps
                 .child_grpc_by_session
                 .lock()
@@ -1747,14 +1722,6 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             'j' => presenter_intent_client::reject_session_document_localhost(port).await,
             _ => anyhow::bail!("unknown document action {action:?}"),
         }?;
-        // Rotate queue only when the document-review gate is decisively completed (approve/reject).
-        if matches!(action, 'a' | 'j') {
-            self.try_advance_elicitation_after_step(
-                chat_id,
-                &session_id,
-                "handle_document_review_action",
-            );
-        }
         Ok(())
     }
 
@@ -1782,7 +1749,6 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         };
         presenter_intent_client::answer_clarification_select_localhost(port, option_index as u32)
             .await?;
-        self.try_advance_elicitation_after_step(chat_id, &session_id, "handle_elicitation_select");
         let confirmation = {
             let guard = deps
                 .elicitation_select_options
@@ -1894,11 +1860,6 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 .insert(chat_id, session_key);
             return Err(e);
         }
-        self.try_advance_elicitation_after_step(
-            chat_id,
-            &session_id,
-            "handle_elicitation_other_followup_plain_message",
-        );
         let text = format!("You selected:\n{trimmed}");
         self.sender.send_message(chat_id, &text).await?;
         Ok(true)
@@ -1932,7 +1893,6 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             );
         }
         presenter_intent_client::answer_clarification_text_localhost(port, text).await?;
-        self.try_advance_elicitation_after_step(chat_id, &session_id, "handle_answer_text_command");
         Ok(())
     }
 
@@ -1967,11 +1927,6 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             String::new(),
         )
         .await?;
-        self.try_advance_elicitation_after_step(
-            chat_id,
-            &session_id,
-            "handle_answer_multi_command",
-        );
         Ok(())
     }
 
@@ -2069,12 +2024,6 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 .await?;
             }
         }
-
-        self.try_advance_elicitation_after_step(
-            chat_id,
-            &session_id,
-            "handle_elicitation_multi_select_shortcut",
-        );
 
         let confirm = match kind {
             ElicitationMultiSelectShortcutKind::ChooseNone => {
@@ -2209,6 +2158,10 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             "handle_start_workflow: created session_dir={}",
             session_dir.display()
         );
+
+        if let Ok(mut g) = self.telegram_tracked.lock() {
+            g.bind_chat_to_session_for_telegram_tracking(cmd.chat_id, &session_id);
+        }
 
         let intro = format!(
             "Workflow started (session {}). Choose a recipe to continue.",
