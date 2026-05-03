@@ -63,8 +63,11 @@ pub use log_backend::{
     LogOutput, LogPolicy, LogRotation, LogSelector, LoggerDefinition, MatchedPolicy,
 };
 pub use post_workflow::{
-    post_workflow_elicitation_step_order, post_workflow_pr_status_display_line,
+    github_pr_operator_question, post_workflow_elicitation_step_order,
+    post_workflow_github_pr_operator_elicitation_pending, post_workflow_pr_status_display_line,
+    post_workflow_session_worktree_elicitation_pending, session_worktree_removal_question,
     should_prompt_session_worktree_removal, should_reprompt_github_pr_on_resume,
+    GITHUB_PR_OPERATOR_LABEL_YES, SESSION_WORKTREE_LABEL_YES,
 };
 pub use presenter::{
     format_worktree_for_status_bar, ActivityEntry, ActivityKind, AgentOutputActivityLogMerge,

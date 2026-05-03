@@ -12,7 +12,8 @@ use std::sync::mpsc;
 use crate::backend::WorkflowRecipe;
 use crate::workflow::graph::{ElicitationEvent, ExecutionResult, ExecutionStatus};
 use crate::{
-    get_session_for_tag, read_changeset, ClarificationQuestion, SharedBackend, WorkflowEngine,
+    get_session_for_tag, read_changeset, write_changeset_atomic, ClarificationQuestion,
+    GithubPrStatus, SharedBackend, WorkflowEngine,
 };
 
 use super::{WorkflowCompletePayload, WorkflowEvent};
@@ -130,6 +131,86 @@ fn handle_clarification_round(
             Err(())
         }
     }
+}
+
+/// After the engine reports success, optionally run post-workflow operator prompts (GitHub PR, worktree)
+/// before [`WorkflowEvent::WorkflowComplete`]. Persists answers to `changeset.yaml`.
+fn run_post_workflow_elicitation_rounds(
+    session_dir: &Path,
+    event_tx: &mpsc::Sender<WorkflowEvent>,
+    answer_rx: &mpsc::Receiver<String>,
+) -> Result<(), ()> {
+    use crate::post_workflow::{
+        github_pr_operator_question, post_workflow_github_pr_operator_elicitation_pending,
+        post_workflow_session_worktree_elicitation_pending, session_worktree_removal_question,
+        GITHUB_PR_OPERATOR_LABEL_YES, SESSION_WORKTREE_LABEL_YES,
+    };
+
+    let mut cs = match read_changeset(session_dir) {
+        Ok(c) => c,
+        Err(e) => {
+            log::debug!(
+                target: "tddy_core::presenter::workflow_runner",
+                "post-workflow elicitation: skip — read_changeset: {e}"
+            );
+            return Ok(());
+        }
+    };
+
+    let mut user_consented_github_pr = false;
+
+    if post_workflow_github_pr_operator_elicitation_pending(cs.workflow.as_ref()) {
+        let _ = event_tx.send(WorkflowEvent::ClarificationNeeded {
+            questions: vec![github_pr_operator_question()],
+        });
+        let answers = answer_rx.recv().map_err(|_| ())?;
+        let first = answers.lines().next().unwrap_or("").trim();
+        user_consented_github_pr = first == GITHUB_PR_OPERATOR_LABEL_YES;
+
+        let wf = cs.workflow.get_or_insert_with(Default::default);
+        wf.github_pr_status = Some(GithubPrStatus {
+            phase: if user_consented_github_pr {
+                "in_progress".into()
+            } else {
+                "skipped_no_pr".into()
+            },
+            url: None,
+            error: None,
+        });
+        if let Err(e) = write_changeset_atomic(session_dir, &cs) {
+            log::warn!(
+                target: "tddy_core::presenter::workflow_runner",
+                "post-workflow: persist github_pr_status failed: {e}"
+            );
+        }
+    } else if let Some(wf) = &cs.workflow {
+        if let Some(st) = &wf.github_pr_status {
+            let p = st.phase.as_str();
+            user_consented_github_pr = !p.is_empty() && p != "skipped_no_pr" && p != "failed";
+        }
+    }
+
+    if post_workflow_session_worktree_elicitation_pending(
+        cs.workflow.as_ref(),
+        user_consented_github_pr,
+    ) {
+        let _ = event_tx.send(WorkflowEvent::ClarificationNeeded {
+            questions: vec![session_worktree_removal_question()],
+        });
+        let answers = answer_rx.recv().map_err(|_| ())?;
+        let first = answers.lines().next().unwrap_or("").trim();
+        let remove = first == SESSION_WORKTREE_LABEL_YES;
+        let wf = cs.workflow.get_or_insert_with(Default::default);
+        wf.operator_remove_session_worktree = Some(remove);
+        if let Err(e) = write_changeset_atomic(session_dir, &cs) {
+            log::warn!(
+                target: "tddy_core::presenter::workflow_runner",
+                "post-workflow: persist operator_remove_session_worktree failed: {e}"
+            );
+        }
+    }
+
+    Ok(())
 }
 
 /// Handle an ElicitationNeeded result: show approval UI, handle refinement loop.
@@ -815,6 +896,11 @@ pub fn run_workflow(
     loop {
         match &result.status {
             ExecutionStatus::Completed => {
+                if run_post_workflow_elicitation_rounds(&session_dir, &event_tx, &answer_rx)
+                    .is_err()
+                {
+                    return;
+                }
                 let session_opt = rt
                     .block_on(engine.get_session(&result.session_id))
                     .ok()
