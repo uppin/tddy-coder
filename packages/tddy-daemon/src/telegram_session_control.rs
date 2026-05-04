@@ -12,9 +12,10 @@ use chrono::Utc;
 use serde::Deserialize;
 use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent, Changeset};
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_core::{
-    list_recent_remote_branches_skip, read_session_metadata,
+    integrate_chain_base_into_session_worktree_bootstrap, list_recent_remote_branches_skip,
+    read_session_metadata, resolve_chain_integration_base_ref_from_parent_session,
     validate_chain_pr_integration_base_ref, write_initial_tool_session_metadata,
     write_session_metadata, InitialToolSessionMetadataOpts, WorkflowError,
     SESSION_METADATA_FILENAME,
@@ -169,6 +170,20 @@ const TELEGRAM_CONTINUATION: &str = "\n(continued)";
 /// Number of sessions shown per Telegram page.
 pub const SESSIONS_PAGE_SIZE: usize = 10;
 
+/// Parent-picker page rows for chain workflow: newest first, excluding one session id (typically the child).
+pub fn parent_candidates_page_for_chain_picker(
+    sessions_base: &Path,
+    exclude_session_id: &str,
+) -> anyhow::Result<Vec<crate::session_reader::SessionEntry>> {
+    let mut parent_candidates = crate::session_reader::list_sessions_in_dir(sessions_base)?;
+    parent_candidates.retain(|s| s.session_id != exclude_session_id);
+    parent_candidates.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(parent_candidates
+        .into_iter()
+        .take(SESSIONS_PAGE_SIZE)
+        .collect())
+}
+
 /// Remote branches listed per Telegram page (plus one row for project default integration base).
 pub const BRANCH_PAGE_SIZE: usize = 10;
 
@@ -189,6 +204,94 @@ pub const CB_TELEGRAM_BRANCH_MORE: &str = "tbm:";
 pub const CB_TELEGRAM_INTENT: &str = "intent:";
 /// Chain workflow: parent session row for stacked work (`tcp:<parent_idx>|s:<child_session_id>`).
 pub const CB_TELEGRAM_CHAIN_PARENT: &str = "tcp:";
+
+// ---------------------------------------------------------------------------
+// Session chaining Phase 2 — chain integration base merge
+// ---------------------------------------------------------------------------
+
+/// **Phase 2**: `true` when Telegram spawn applies [`merge_chain_integration_base_with_explicit_operator_overrides`]
+/// for chained children before [`TelegramWorkflowSpawn::spawn_blocking`].
+pub fn session_chaining_phase2_chain_base_merge_ready() -> bool {
+    true
+}
+
+/// Merge parent-derived chain integration base with explicit operator overrides (`changeset.yaml` /
+/// `worktree_integration_base_ref`).
+///
+/// **Merge rules (PRD):**
+/// 1. If the operator set a non-empty `worktree_integration_base_ref` on the child changeset (remote branch
+///    pick), validate it as a chain PR ref and **return it unchanged** — explicit choice wins.
+/// 2. Otherwise resolve `origin/<parent-branch>` via [`resolve_chain_integration_base_ref_from_parent_session`]
+///    (parent must have branch + `repo_path` aligned with `child_project_repo`).
+/// 3. When the child session directory and project repo exist on disk, apply the resolved ref through
+///    [`integrate_chain_base_into_session_worktree_bootstrap`] so worktree bootstrap matches [`session_chain_acceptance`].
+pub fn merge_chain_integration_base_with_explicit_operator_overrides(
+    sessions_root: &Path,
+    parent_session_id: &str,
+    child_session_dir: &Path,
+    child_project_repo: &Path,
+    explicit_worktree_integration_base_ref: Option<&str>,
+) -> anyhow::Result<String> {
+    log::info!(
+        target: "tddy_daemon::telegram_session_control",
+        "merge_chain_integration_base_with_explicit_operator_overrides: parent={} child_dir={} child_repo={} explicit={:?}",
+        parent_session_id,
+        child_session_dir.display(),
+        child_project_repo.display(),
+        explicit_worktree_integration_base_ref
+    );
+
+    if let Some(raw) = explicit_worktree_integration_base_ref {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            validate_chain_pr_integration_base_ref(trimmed).map_err(|e| anyhow::anyhow!(e))?;
+            log::debug!(
+                target: "tddy_daemon::telegram_session_control",
+                "merge_chain_integration_base: using explicit operator worktree_integration_base_ref={}",
+                trimmed
+            );
+            return Ok(trimmed.to_string());
+        }
+    }
+
+    let resolved = resolve_chain_integration_base_ref_from_parent_session(
+        sessions_root,
+        parent_session_id,
+        child_project_repo,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    log::debug!(
+        target: "tddy_daemon::telegram_session_control",
+        "merge_chain_integration_base: resolved parent-derived ref={}",
+        resolved
+    );
+
+    if child_session_dir.is_dir() && child_project_repo.exists() {
+        integrate_chain_base_into_session_worktree_bootstrap(
+            sessions_root,
+            parent_session_id,
+            child_session_dir,
+            child_project_repo,
+            &resolved,
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        log::info!(
+            target: "tddy_daemon::telegram_session_control",
+            "merge_chain_integration_base: integrated chain base into worktree bootstrap child_dir={}",
+            child_session_dir.display()
+        );
+    } else {
+        log::debug!(
+            target: "tddy_daemon::telegram_session_control",
+            "merge_chain_integration_base: skip integrate (child_dir or repo missing) child_dir_is_dir={} repo_exists={}",
+            child_session_dir.is_dir(),
+            child_project_repo.exists()
+        );
+    }
+
+    Ok(resolved)
+}
 
 /// Parsed [`CallbackQuery::data`](https://core.telegram.org/bots/api#callbackquery) for session list actions.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1483,6 +1586,43 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         let child_grpc_registry = deps.child_grpc_by_session.clone();
         let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
         let recipe = read_recipe_from_changeset(&session_dir)?;
+        let projects_dir = projects_dir_for_telegram_workflow_spawn(&deps)?;
+        let project = project_storage::find_project(&projects_dir, project_id)?
+            .ok_or_else(|| anyhow::anyhow!("project not found"))?;
+        let repo_path = Path::new(&project.main_repo_path);
+
+        if let Ok(meta) = read_session_metadata(&session_dir) {
+            if let Some(ref parent_id) = meta.previous_session_id {
+                let stored_explicit = read_changeset(&session_dir)
+                    .ok()
+                    .and_then(|cs| cs.worktree_integration_base_ref);
+                let explicit_owned: Option<String> = stored_explicit
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                log::info!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "spawn_telegram_workflow: chain child parent_session_id={} explicit_worktree_integration_base_ref={:?}",
+                    parent_id,
+                    explicit_owned.as_deref()
+                );
+                let sessions_base = self.sessions_base.clone();
+                let parent_id = parent_id.clone();
+                let session_dir = session_dir.clone();
+                let repo_path = repo_path.to_path_buf();
+                tokio::task::spawn_blocking(move || {
+                    merge_chain_integration_base_with_explicit_operator_overrides(
+                        &sessions_base,
+                        parent_id.as_str(),
+                        &session_dir,
+                        &repo_path,
+                        explicit_owned.as_deref(),
+                    )
+                })
+                .await
+                .map_err(|e| anyhow::anyhow!("chain merge spawn_blocking join: {e}"))??;
+            }
+        }
+
         let timeout = deps.config.spawn_worker_request_timeout();
         let session_id_owned = session_id.to_string();
         let project_id_owned = project_id.to_string();
@@ -2098,14 +2238,8 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             session_dir.display()
         );
 
-        let mut parent_candidates =
-            crate::session_reader::list_sessions_in_dir(&self.sessions_base)?;
-        parent_candidates.retain(|s| s.session_id != session_id);
-        parent_candidates.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        let parent_page: Vec<_> = parent_candidates
-            .into_iter()
-            .take(SESSIONS_PAGE_SIZE)
-            .collect();
+        let parent_page =
+            parent_candidates_page_for_chain_picker(&self.sessions_base, &session_id)?;
 
         let chain_intro = if parent_page.is_empty() {
             format!(
@@ -2192,14 +2326,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             anyhow::bail!("not a chain parent callback (expected `tcp:` prefix)");
         };
 
-        let mut parent_candidates =
-            crate::session_reader::list_sessions_in_dir(&self.sessions_base)?;
-        parent_candidates.retain(|s| s.session_id != child_id);
-        parent_candidates.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        let parent_page: Vec<_> = parent_candidates
-            .into_iter()
-            .take(SESSIONS_PAGE_SIZE)
-            .collect();
+        validate_session_id_segment(&child_id).map_err(|e| {
+            anyhow::anyhow!("invalid child session id in tcp: callback: {}", e.message())
+        })?;
+
+        let parent_page = parent_candidates_page_for_chain_picker(&self.sessions_base, &child_id)?;
 
         let Some(parent_entry) = parent_page.get(parent_idx) else {
             anyhow::bail!(

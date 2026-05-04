@@ -14,9 +14,9 @@ use tddy_daemon::project_storage::{self, ProjectData};
 use tddy_daemon::telegram_notifier::InMemoryTelegramSender;
 use tddy_daemon::telegram_session_control::{
     collect_outbound_messages, map_elicitation_callback_to_presenter_input,
-    read_changeset_routing_snapshot, ChainWorkflowCommand, StartWorkflowCommand, TelegramCallback,
-    TelegramSessionControlHarness, TelegramWorkflowSpawn, WorkflowTransitionKind,
-    SESSIONS_PAGE_SIZE,
+    parent_candidates_page_for_chain_picker, read_changeset_routing_snapshot, ChainWorkflowCommand,
+    StartWorkflowCommand, TelegramCallback, TelegramSessionControlHarness, TelegramWorkflowSpawn,
+    WorkflowTransitionKind, SESSIONS_PAGE_SIZE,
 };
 
 const AUTHORIZED_CHAT: i64 = 424_242;
@@ -1320,4 +1320,39 @@ async fn telegram_chain_parent_tap_persists_previous_session_id_on_child() {
         .handle_chain_parent_callback(&child_dir, cb)
         .await
         .expect("tcp parent pick must persist previous_session_id on child session metadata");
+}
+
+#[test]
+fn parent_candidates_page_for_chain_picker_excludes_child_and_caps_page() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ids = create_fake_sessions(tmp.path(), SESSIONS_PAGE_SIZE + 3);
+    let exclude = &ids[2];
+    let page = parent_candidates_page_for_chain_picker(tmp.path(), exclude.as_str())
+        .expect("parent_candidates_page_for_chain_picker");
+    assert_eq!(page.len(), SESSIONS_PAGE_SIZE);
+    assert!(!page.iter().any(|e| e.session_id == *exclude));
+}
+
+#[tokio::test]
+async fn telegram_chain_parent_callback_rejects_invalid_child_session_id_segment() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (mut harness, _) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
+    let child_dir = unified_session_dir_path(tmp.path(), "child0001");
+    std::fs::create_dir_all(&child_dir).unwrap();
+
+    let cb = TelegramCallback {
+        chat_id: AUTHORIZED_CHAT,
+        user_id: 1,
+        callback_data: "tcp:0|s:bad/id".to_string(),
+    };
+
+    let err = harness
+        .handle_chain_parent_callback(&child_dir, cb)
+        .await
+        .expect_err("invalid child id in tcp payload must fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("invalid") || msg.contains("segment") || msg.contains("session id"),
+        "unexpected error: {msg}"
+    );
 }

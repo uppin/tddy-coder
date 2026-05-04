@@ -367,7 +367,25 @@ fn install_succeeds_without_codex_acp_native_when_not_required() {
     copy_install_tree(root);
     write_fake_release_binaries(root);
 
-    let st = run_install_in(root, &[("INSTALL_NO_SYSTEMCTL", "1")]);
+    let bin_dir = root.join("bin");
+    let cfg_dir = root.join("etc");
+    let sys_dir = root.join("systemd");
+    let web_dir = root.join("web");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&cfg_dir).unwrap();
+    fs::create_dir_all(&sys_dir).unwrap();
+    fs::create_dir_all(&web_dir).unwrap();
+
+    let st = run_install_in(
+        root,
+        &[
+            ("INSTALL_NO_SYSTEMCTL", "1"),
+            ("INSTALL_BIN_DIR", bin_dir.to_str().unwrap()),
+            ("INSTALL_CONFIG_DIR", cfg_dir.to_str().unwrap()),
+            ("INSTALL_SYSTEMD_DIR", sys_dir.to_str().unwrap()),
+            ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
+        ],
+    );
     assert!(
         st.success(),
         "install should succeed when codex-acp is not required and node_modules native is absent; got {st:?}"

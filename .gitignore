@@ -72,7 +72,6 @@ cypress-debug.log
 changeset.yaml
 .vscode/settings.json
 
-tmp/
-
-local.bun.lock
+# Optional workflow phase-2 scratch artifacts at repo root (local validation / harness output)
+/phase2-*
 .local-install/
