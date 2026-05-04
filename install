@@ -125,8 +125,8 @@ codex_acp_bundling_mandatory() {
     cfg="${ROOT_DIR}/daemon.yaml.production"
   fi
   [[ -f "$cfg" ]] || return 1
-  # Agent id line under allowed_agents (YAML: optional quotes).
-  grep -Eq '^[[:space:]]*id:[[:space:]]*['\''"]?codex-acp['\''"]?[[:space:]]*$' "$cfg"
+  # Agent id line under allowed_agents (YAML: optional quotes; list items use leading "-").
+  grep -Eq '^[[:space:]]*(-[[:space:]]+)?id:[[:space:]]*['\''"]?codex-acp['\''"]?[[:space:]]*$' "$cfg"
 }
 
 install_codex_acp_from_node_modules() {

@@ -1,5 +1,5 @@
 //! Acceptance-tests goal must materialize session action manifests (`actions/*.yaml`) and support
-//! `invoke-action`-style records per PRD Testing Plan (`acceptance_tests_hook_sets_specialist_context`).
+//! `invoke-action`-style records per PRD Testing Plan (`acceptance_tests_hook_materializes_default_action_manifests`).
 
 mod common;
 
@@ -13,10 +13,10 @@ use tddy_core::{GoalId, MockBackend, SharedBackend, WorkflowEngine};
 
 use common::{ctx_acceptance_tests, temp_dir_with_git_repo, write_changeset_for_session};
 
-const ACCEPTANCE_TESTS_JSON_OUTPUT: &str = r#"{"goal":"acceptance-tests","summary":"Created 4 acceptance tests. All failing (Red state).","tests":[{"name":"acceptance_tests_prompt_requires_three_session_actions","file":"packages/tddy-workflow-recipes/src/tdd/acceptance_tests.rs","line":89,"status":"failing"},{"name":"coder_config_parses_session_actions_specialist","file":"packages/tddy-coder/src/config.rs","line":636,"status":"failing"},{"name":"acceptance_tests_hook_sets_specialist_context","file":"packages/tddy-integration-tests/tests/workflow_recipe_acceptance_actions.rs","line":19,"status":"failing"},{"name":"invoke_action_round_trip_for_fixture_manifests","file":"packages/tddy-tools/tests/actions_cli_acceptance.rs","line":409,"status":"failing"}]}"#;
+const ACCEPTANCE_TESTS_JSON_OUTPUT: &str = r#"{"goal":"acceptance-tests","summary":"Created 3 acceptance tests. All failing (Red state).","tests":[{"name":"acceptance_tests_prompt_requires_three_session_actions","file":"packages/tddy-workflow-recipes/src/tdd/acceptance_tests.rs","line":98,"status":"failing"},{"name":"acceptance_tests_hook_materializes_default_action_manifests","file":"packages/tddy-integration-tests/tests/workflow_recipe_acceptance_actions.rs","line":19,"status":"failing"},{"name":"invoke_action_round_trip_for_fixture_manifests","file":"packages/tddy-tools/tests/actions_cli_acceptance.rs","line":409,"status":"failing"}]}"#;
 
 #[tokio::test]
-async fn acceptance_tests_hook_sets_specialist_context() {
+async fn acceptance_tests_hook_materializes_default_action_manifests() {
     let (output_dir, session_dir) = temp_dir_with_git_repo("at-session-actions-hook");
     fs::write(
         session_dir.join("PRD.md"),

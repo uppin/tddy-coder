@@ -1,4 +1,4 @@
-//! Session action templates for the acceptance-tests goal (`<session>/actions/*.yaml`).
+//! Default session action manifests for the acceptance-tests goal (`<session>/actions/*.yaml`).
 //!
 //! Ensures three scope manifests exist so agents and CI can `tddy-tools list-actions` /
 //! `invoke-action` before submit (PRD).
@@ -44,13 +44,13 @@ command:
 
 /// Ensures the three canonical scope manifests exist under `session_dir/actions/`.
 ///
-/// Missing files are written; existing files are left unchanged so a specialist or user can
+/// Missing files are written; existing files are left unchanged so the agent or operator can
 /// replace commands without this hook overwriting on every resume.
 pub fn ensure_acceptance_tests_session_action_templates(session_dir: &Path) -> std::io::Result<()> {
     let actions_dir = session_dir.join("actions");
     fs::create_dir_all(&actions_dir)?;
     info!(
-        target: "tddy_workflow_recipes::tdd::session_actions_specialist",
+        target: "tddy_workflow_recipes::tdd::acceptance_tests_action_templates",
         "ensure_acceptance_tests_session_action_templates: session_dir={}",
         session_dir.display()
     );
@@ -60,7 +60,7 @@ pub fn ensure_acceptance_tests_session_action_templates(session_dir: &Path) -> s
         let path = actions_dir.join(basename);
         if path.is_file() {
             debug!(
-                target: "tddy_workflow_recipes::tdd::session_actions_specialist",
+                target: "tddy_workflow_recipes::tdd::acceptance_tests_action_templates",
                 "template manifest already present path={}",
                 path.display()
             );
@@ -69,7 +69,7 @@ pub fn ensure_acceptance_tests_session_action_templates(session_dir: &Path) -> s
         fs::write(&path, yaml)?;
         wrote += 1;
         info!(
-            target: "tddy_workflow_recipes::tdd::session_actions_specialist",
+            target: "tddy_workflow_recipes::tdd::acceptance_tests_action_templates",
             "wrote default session action manifest path={}",
             path.display()
         );
@@ -77,7 +77,7 @@ pub fn ensure_acceptance_tests_session_action_templates(session_dir: &Path) -> s
 
     let n = count_action_manifest_yaml(session_dir)?;
     debug!(
-        target: "tddy_workflow_recipes::tdd::session_actions_specialist",
+        target: "tddy_workflow_recipes::tdd::acceptance_tests_action_templates",
         "ensure_acceptance_tests_session_action_templates done yaml_files={} files_written_this_call={}",
         n,
         wrote

@@ -11,6 +11,7 @@ pub(crate) mod session_dir_resolve;
 pub use hooks::TddWorkflowHooks;
 pub use plan_task::PlanTask;
 mod acceptance_tests;
+mod acceptance_tests_action_templates;
 mod demo;
 mod evaluate;
 pub(crate) mod green;
@@ -18,7 +19,6 @@ mod plain_cli_output;
 mod planning;
 pub mod red;
 pub(crate) mod refactor;
-mod session_actions_specialist;
 pub(crate) mod update_docs;
 mod validate_subagents;
 

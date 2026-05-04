@@ -392,10 +392,6 @@ pub struct Args {
     pub codex_oauth_login: bool,
     /// Workflow recipe name (`tdd`, `tdd-small`, `bugfix`, `free-prompting`, `grill-me`, `review`, `merge-pr`). `None` means default `free-prompting` or recipe from changeset on resume.
     pub recipe: Option<String>,
-    /// Session-actions specialist agent id (from YAML `session_actions_specialist.agent` when merged).
-    pub session_actions_specialist_agent: Option<String>,
-    /// Session-actions specialist model id (from YAML `session_actions_specialist.model` when merged).
-    pub session_actions_specialist_model: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -773,8 +769,6 @@ impl From<CoderArgs> for Args {
             codex_acp_cli_path: a.codex_acp_cli_path,
             codex_oauth_login: a.codex_oauth_login,
             recipe: a.recipe,
-            session_actions_specialist_agent: None,
-            session_actions_specialist_model: None,
         }
     }
 }
@@ -819,8 +813,6 @@ impl From<DemoArgs> for Args {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: a.recipe,
-            session_actions_specialist_agent: None,
-            session_actions_specialist_model: None,
         }
     }
 }
@@ -2936,8 +2928,6 @@ mod resume_session_config_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
-            session_actions_specialist_agent: None,
-            session_actions_specialist_model: None,
         };
 
         merge_session_coder_config_for_resume(&mut args).expect("merge");
@@ -2999,8 +2989,6 @@ mod resume_session_identity_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
-            session_actions_specialist_agent: None,
-            session_actions_specialist_model: None,
         };
 
         assign_default_session_id(&mut args);
@@ -3065,8 +3053,6 @@ mod session_dir_sync_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
-            session_actions_specialist_agent: None,
-            session_actions_specialist_model: None,
         };
 
         sync_session_dir_from_args(&mut args).expect("apply");
@@ -3145,8 +3131,6 @@ mod changeset_agent_resume_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
-            session_actions_specialist_agent: None,
-            session_actions_specialist_model: None,
         };
 
         apply_agent_from_changeset_if_needed(&mut args).expect("apply");
@@ -3242,8 +3226,6 @@ mod post_tui_workflow_exit_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
-            session_actions_specialist_agent: None,
-            session_actions_specialist_model: None,
         }
     }
 

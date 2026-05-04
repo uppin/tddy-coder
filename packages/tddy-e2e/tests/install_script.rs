@@ -367,7 +367,21 @@ fn install_succeeds_without_codex_acp_native_when_not_required() {
     copy_install_tree(root);
     write_fake_release_binaries(root);
 
-    let st = run_install_in(root, &[("INSTALL_NO_SYSTEMCTL", "1")]);
+    let bin_dir = root.join("i-bin");
+    let cfg_dir = root.join("i-etc");
+    let sys_dir = root.join("i-systemd");
+    let web_dir = root.join("i-web");
+
+    let st = run_install_in(
+        root,
+        &[
+            ("INSTALL_NO_SYSTEMCTL", "1"),
+            ("INSTALL_BIN_DIR", bin_dir.to_str().unwrap()),
+            ("INSTALL_CONFIG_DIR", cfg_dir.to_str().unwrap()),
+            ("INSTALL_SYSTEMD_DIR", sys_dir.to_str().unwrap()),
+            ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
+        ],
+    );
     assert!(
         st.success(),
         "install should succeed when codex-acp is not required and node_modules native is absent; got {st:?}"
@@ -384,7 +398,10 @@ fn install_fails_when_config_lists_codex_acp_without_native() {
     copy_install_tree(root);
     write_fake_release_binaries(root);
 
+    let bin_dir = root.join("i-bin");
     let cfg_dir = root.join("custom-etc");
+    let sys_dir = root.join("i-systemd");
+    let web_dir = root.join("i-web");
     fs::create_dir_all(&cfg_dir).unwrap();
     fs::write(
         cfg_dir.join("daemon.yaml"),
@@ -396,7 +413,10 @@ fn install_fails_when_config_lists_codex_acp_without_native() {
         root,
         &[
             ("INSTALL_NO_SYSTEMCTL", "1"),
+            ("INSTALL_BIN_DIR", bin_dir.to_str().unwrap()),
             ("INSTALL_CONFIG_DIR", cfg_dir.to_str().unwrap()),
+            ("INSTALL_SYSTEMD_DIR", sys_dir.to_str().unwrap()),
+            ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
         ],
     );
     assert!(
@@ -415,10 +435,19 @@ fn install_fails_when_install_bundle_codex_acp_without_native() {
     copy_install_tree(root);
     write_fake_release_binaries(root);
 
+    let bin_dir = root.join("i-bin");
+    let cfg_dir = root.join("i-etc");
+    let sys_dir = root.join("i-systemd");
+    let web_dir = root.join("i-web");
+
     let st = run_install_in(
         root,
         &[
             ("INSTALL_NO_SYSTEMCTL", "1"),
+            ("INSTALL_BIN_DIR", bin_dir.to_str().unwrap()),
+            ("INSTALL_CONFIG_DIR", cfg_dir.to_str().unwrap()),
+            ("INSTALL_SYSTEMD_DIR", sys_dir.to_str().unwrap()),
+            ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
             ("INSTALL_BUNDLE_CODEX_ACP", "1"),
         ],
     );
