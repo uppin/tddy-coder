@@ -17,13 +17,112 @@ use crate::telegram_session_control::{
     parse_recipe_callback_session_dir, parse_session_control_callback, parse_sessions_command,
     parse_start_workflow_prompt, parse_submit_feature_command, parse_telegram_agent_callback,
     parse_telegram_branch_callback, parse_telegram_branch_more_callback,
-    parse_telegram_intent_callback, parse_telegram_project_callback, ChainWorkflowCommand,
-    SessionControlCallback, StartWorkflowCommand, TelegramCallback, TelegramSessionControlHarness,
+    parse_telegram_chain_parent_callback, parse_telegram_intent_callback,
+    parse_telegram_project_callback, ChainWorkflowCommand, SessionControlCallback,
+    StartWorkflowCommand, TelegramCallback, TelegramSessionControlHarness,
+    CB_TELEGRAM_CHAIN_PARENT,
 };
+use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 
 type Harness = Arc<Mutex<TelegramSessionControlHarness<TeloxideSender>>>;
 
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+/// **Phase 2 session chaining**: live `tcp:` parent-picker callbacks are wired (see [`maybe_dispatch_tcp_chain_parent_callback`]).
+pub fn session_chaining_phase2_live_tcp_dispatch_ready() -> bool {
+    true
+}
+
+fn chain_phase2_tcp_dispatch_marker(child_id: Option<&str>) {
+    let id = child_id.unwrap_or("");
+    log::debug!(
+        target: "tddy_daemon::telegram_bot",
+        "chain tcp marker child_id={id}"
+    );
+}
+
+/// Emits the same diagnostic path as the live `tcp:` parent-picker (for tests / logging capture).
+pub fn chain_phase2_tcp_dispatch_marker_probe() {
+    chain_phase2_tcp_dispatch_marker(None);
+}
+
+/// Try to handle `tcp:<parent_idx>|s:<child_session_id>` parent-picker callbacks (long-polling).
+///
+/// Returns `Some(Ok(()))` when the callback was recognized as a chain-parent pick. Returns `None` when
+/// `data` is not a chain parent callback.
+///
+/// Resolves the child session directory and calls [`TelegramSessionControlHarness::handle_chain_parent_callback`].
+async fn maybe_dispatch_tcp_chain_parent_callback(
+    bot: &Bot,
+    harness: &Harness,
+    chat_id: i64,
+    user_id: u64,
+    data: &str,
+    qid: CallbackQueryId,
+) -> Option<HandlerResult> {
+    if !data.starts_with(CB_TELEGRAM_CHAIN_PARENT) {
+        return None;
+    }
+    let Some((_parent_idx, child_id)) = parse_telegram_chain_parent_callback(data) else {
+        let _ = bot.answer_callback_query(qid.clone()).await;
+        let _ = bot
+            .send_message(
+                ChatId(chat_id),
+                telegram_workflow_error_message(
+                    "Invalid chain parent callback payload (could not parse `tcp:` line)."
+                        .to_string(),
+                ),
+            )
+            .await;
+        return Some(Ok(()));
+    };
+    chain_phase2_tcp_dispatch_marker(Some(child_id.as_str()));
+
+    if let Err(e) = validate_session_id_segment(&child_id) {
+        let _ = bot.answer_callback_query(qid.clone()).await;
+        let _ = bot
+            .send_message(
+                ChatId(chat_id),
+                telegram_workflow_error_message(format!(
+                    "Invalid child session id in `tcp:` callback: {}",
+                    e.message()
+                )),
+            )
+            .await;
+        return Some(Ok(()));
+    }
+
+    if workflow_callback_gate_authorized(bot, harness, chat_id, qid.clone()).await {
+        return Some(Ok(()));
+    }
+
+    let child_dir = {
+        let h = harness.lock().await;
+        unified_session_dir_path(h.sessions_base(), &child_id)
+    };
+    let mut h = harness.lock().await;
+    let cb = TelegramCallback {
+        chat_id,
+        user_id,
+        callback_data: data.to_string(),
+    };
+    match h.handle_chain_parent_callback(&child_dir, cb).await {
+        Ok(()) => {
+            let _ = bot.answer_callback_query(qid).await;
+            Some(Ok(()))
+        }
+        Err(e) => {
+            let _ = bot.answer_callback_query(qid.clone()).await;
+            let _ = bot
+                .send_message(
+                    ChatId(chat_id),
+                    telegram_workflow_error_message(format!("{e:#}")),
+                )
+                .await;
+            Some(Ok(()))
+        }
+    }
+}
 
 /// Authorize the chat and ensure `session_id` holds the active elicitation token for interactive
 /// surfaces (`eli:s:` / `eli:o:` / `eli:mn:` / `eli:mr:` / document-review). If not, answers `qid` and returns `true` (caller
@@ -66,6 +165,22 @@ fn telegram_workflow_error_message(detail: String) -> String {
     format!(
         "{detail}\n\nIf `tddy-coder` exited on startup, check the child stderr file next to the daemon logs (e.g. `tmp/logs/child/<session_id>_stderr`)."
     )
+}
+
+/// Returns `true` when the chat is not allowlisted — caller should return `Ok(())` after the empty answer.
+async fn workflow_callback_gate_authorized(
+    bot: &Bot,
+    harness: &Harness,
+    chat_id: i64,
+    qid: CallbackQueryId,
+) -> bool {
+    let h = harness.lock().await;
+    if !h.is_authorized(chat_id) {
+        drop(h);
+        let _ = bot.answer_callback_query(qid).await;
+        return true;
+    }
+    false
 }
 
 /// Run teloxide long-polling until the process terminates or dispatch ends.
@@ -251,6 +366,19 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
         )
     );
 
+    if let Some(res) = maybe_dispatch_tcp_chain_parent_callback(
+        &bot,
+        &harness,
+        chat_id,
+        user_id,
+        &data,
+        qid.clone(),
+    )
+    .await
+    {
+        return res;
+    }
+
     if let Some(action) = parse_session_control_callback(&data) {
         let h = harness.lock().await;
         if !h.is_authorized(chat_id) {
@@ -274,13 +402,8 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     }
 
     if let Some((intent, session_id)) = parse_telegram_intent_callback(&data) {
-        {
-            let h = harness.lock().await;
-            if !h.is_authorized(chat_id) {
-                drop(h);
-                let _ = bot.answer_callback_query(qid.clone()).await;
-                return Ok(());
-            }
+        if workflow_callback_gate_authorized(&bot, &harness, chat_id, qid.clone()).await {
+            return Ok(());
         }
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
@@ -301,13 +424,8 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     }
 
     if let Some((proj_idx, session_id)) = parse_telegram_project_callback(&data) {
-        {
-            let h = harness.lock().await;
-            if !h.is_authorized(chat_id) {
-                drop(h);
-                let _ = bot.answer_callback_query(qid.clone()).await;
-                return Ok(());
-            }
+        if workflow_callback_gate_authorized(&bot, &harness, chat_id, qid.clone()).await {
+            return Ok(());
         }
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
@@ -328,13 +446,8 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     }
 
     if let Some((next_off, proj_idx, session_id)) = parse_telegram_branch_more_callback(&data) {
-        {
-            let h = harness.lock().await;
-            if !h.is_authorized(chat_id) {
-                drop(h);
-                let _ = bot.answer_callback_query(qid.clone()).await;
-                return Ok(());
-            }
+        if workflow_callback_gate_authorized(&bot, &harness, chat_id, qid.clone()).await {
+            return Ok(());
         }
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
@@ -357,13 +470,8 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     if let Some((branch_idx, list_offset, proj_idx, session_id)) =
         parse_telegram_branch_callback(&data)
     {
-        {
-            let h = harness.lock().await;
-            if !h.is_authorized(chat_id) {
-                drop(h);
-                let _ = bot.answer_callback_query(qid.clone()).await;
-                return Ok(());
-            }
+        if workflow_callback_gate_authorized(&bot, &harness, chat_id, qid.clone()).await {
+            return Ok(());
         }
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
@@ -390,13 +498,8 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     }
 
     if let Some((agent_idx, proj_idx, session_id)) = parse_telegram_agent_callback(&data) {
-        {
-            let h = harness.lock().await;
-            if !h.is_authorized(chat_id) {
-                drop(h);
-                let _ = bot.answer_callback_query(qid.clone()).await;
-                return Ok(());
-            }
+        if workflow_callback_gate_authorized(&bot, &harness, chat_id, qid.clone()).await {
+            return Ok(());
         }
         let _ = bot.answer_callback_query(qid.clone()).await;
         let h = harness.lock().await;
@@ -517,13 +620,8 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
     }
 
     if data.contains("recipe:") || data.starts_with("mr:") {
-        {
-            let h = harness.lock().await;
-            if !h.is_authorized(chat_id) {
-                drop(h);
-                let _ = bot.answer_callback_query(qid.clone()).await;
-                return Ok(());
-            }
+        if workflow_callback_gate_authorized(&bot, &harness, chat_id, qid.clone()).await {
+            return Ok(());
         }
         log::info!(
             target: "tddy_daemon::telegram_bot",

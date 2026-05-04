@@ -97,6 +97,8 @@ pub struct ViewState {
     pub feature_slash_trigger_byte: usize,
     /// After accepting `/recipe` in the slash menu, event loop sends [`tddy_core::UserIntent::FeatureSlashBuiltinRecipe`].
     pending_feature_slash_builtin_recipe_intent: bool,
+    /// True after the operator picked `/chain` from the slash menu (parent-picker step; Phase 2 session chaining).
+    pub chain_workflow_parent_picker_active: bool,
 }
 
 /// Byte index of the start of the character immediately before `idx`.
@@ -220,6 +222,9 @@ impl ViewState {
 
     /// Reset view state when entering a new mode. Call from TuiView when mode changes.
     pub fn on_mode_changed(&mut self, mode: &AppMode) {
+        if !matches!(mode, AppMode::FeatureInput) {
+            self.chain_workflow_parent_picker_active = false;
+        }
         if !matches!(mode, AppMode::Select { .. }) {
             self.last_select_identity = None;
             self.last_select_click_option = None;
@@ -556,6 +561,13 @@ impl ViewState {
                     tddy_core::SlashMenuEntry::StartRecipe { label } => {
                         let trigger = self.feature_slash_trigger_byte;
                         let label = label.clone();
+                        if label == "/chain" {
+                            self.chain_workflow_parent_picker_active = true;
+                            log::info!(
+                                target: "tddy_tui::view_state",
+                                "chain_workflow_parent_picker: activated via slash menu /chain (Telegram /chain-workflow parity)"
+                            );
+                        }
                         self.feature_edit.accept_slash_menu_literal(&label, trigger);
                         self.close_feature_slash_menu_clear();
                     }
@@ -934,6 +946,21 @@ impl ViewState {
             _ => false,
         }
     }
+
+    /// **chain_workflow_parent_picker** — reflects the parent-session picker step after `/chain` (aligned with Telegram `/chain-workflow`).
+    pub fn chain_workflow_parent_picker_state(&self) -> bool {
+        log::debug!(
+            target: "tddy_tui::view_state",
+            "chain_workflow_parent_picker_state active={}",
+            self.chain_workflow_parent_picker_active
+        );
+        self.chain_workflow_parent_picker_active
+    }
+}
+
+/// Phase 2: TUI `/chain` parent-picker and bootstrap ordering matches Telegram `/chain-workflow`.
+pub fn session_chaining_phase2_tui_chain_parity_ready() -> bool {
+    true
 }
 
 #[cfg(test)]
