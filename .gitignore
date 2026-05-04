@@ -6,6 +6,13 @@
 /plans/
 
 # Agent verification output (when terminal capture is broken)
+.bugfix-interview-red-test.log
+.green-submit-bugfix-interview.json
+.red-submit-bugfix-interview.json
+.evaluate-changes-submit.json
+plans/.validate-submit.json
+plans/.evaluate-changes-submit.json
+
 .verify-result.txt
 .action-cache-red-test-output.txt
 .red-submit-session-action-cache.json

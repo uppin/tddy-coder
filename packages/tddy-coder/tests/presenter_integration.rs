@@ -355,7 +355,91 @@ fn bugfix_workflow_starts_reproduce_after_feature_submit() {
     );
 }
 
-/// Simulates UI lag where `WorkflowComplete` is not polled before the user sends their first typed
+/// Bugfix graph starts at **`interview`**: presenter must emit **`GoalStarted(interview)`** before **`reproduce`**.
+#[test]
+#[serial]
+fn bugfix_workflow_emits_interview_before_reproduce() {
+    let sessions_base = std::env::temp_dir().join("tddy-presenter-bugfix-interview-order");
+    let _ = std::fs::remove_dir_all(&sessions_base);
+    std::fs::create_dir_all(&sessions_base).expect("sessions base");
+    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
+
+    let (mut presenter, mut events) = bugfix_presenter_with_events();
+    let backend = create_stub_backend();
+    let (output_dir, _) = common::temp_dir_with_git_repo("presenter-bugfix-interview-order");
+
+    presenter.start_workflow(
+        backend, output_dir, None, None, None, None, false, None, None, None,
+    );
+
+    presenter.handle_intent(UserIntent::SubmitFeatureInput(
+        "repro the crash".to_string(),
+    ));
+
+    let mut iterations = 0;
+    const MAX: usize = 4000;
+    let mut saw_reproduce = false;
+    while iterations < MAX {
+        presenter.poll_workflow();
+        events.drain();
+        for e in events.events() {
+            if let TestEvent::WorkflowComplete(Err(msg)) = e {
+                std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+                panic!("bugfix workflow failed before reproduce goal: {}", msg);
+            }
+        }
+        if events
+            .events()
+            .iter()
+            .any(|e| matches!(e, TestEvent::GoalStarted(g) if g.as_str() == "reproduce"))
+        {
+            saw_reproduce = true;
+            break;
+        }
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+    assert!(
+        saw_reproduce,
+        "expected GoalStarted(reproduce); last mode {:?}, events: {:?}",
+        presenter.state().mode,
+        events.events()
+    );
+    let ev = events.events();
+    let first_interview = ev
+        .iter()
+        .position(|e| matches!(e, TestEvent::GoalStarted(g) if g.as_str() == "interview"));
+    let first_reproduce = ev
+        .iter()
+        .position(|e| matches!(e, TestEvent::GoalStarted(g) if g.as_str() == "reproduce"));
+    assert!(
+        first_interview.is_some(),
+        "expected GoalStarted(interview); events: {:?}",
+        ev
+    );
+    assert!(
+        first_reproduce.is_some(),
+        "expected GoalStarted(reproduce); events: {:?}",
+        ev
+    );
+    assert!(
+        first_interview.unwrap() < first_reproduce.unwrap(),
+        "interview must precede reproduce in emitted GoalStarted order; events: {:?}",
+        ev
+    );
+}
+
 /// feature: a preloaded `--prompt` lets the worker thread finish and drop `answer_rx` while
 /// `workflow_result` is still unset. The next `SubmitFeatureInput` gets `SendError` on `answer_tx`
 /// and is misrouted through `restart_workflow` (must reuse `workflow_session_dir` so no extra folder).
