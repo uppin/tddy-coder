@@ -19,17 +19,17 @@ Session chaining **core**, **`.session.yaml`** **`previous_session_id`**, worktr
 
 ### Product
 
-- [ ] Stable parent **session id** in **`callback_data`** (vs list index) when sessions churn between keyboard render and tap.
+- [x] Stable parent **session id** in **`callback_data`** (vs list index) when sessions churn between keyboard render and tap. Format changed from `tcp:<idx>|s:<child>` to `tcp:p:<parent_tail8>|s:<child>` where `parent_tail8` = last 8 chars of parent session id; handler now scans page by tail instead of index.
 
 ### Tests / ergonomics
 
-- [ ] Shared Telegram integration fixtures in **`packages/tddy-daemon/tests/common.rs`** if chain tests keep growing.  
-- [ ] Optional unit tests for **`parse_chain_workflow_prompt`**.  
-- [ ] Test helper / **`Changeset`** + session-dir builders (**from @red** ergonomics).
+- [x] Shared Telegram integration fixtures in **`packages/tddy-daemon/tests/common.rs`** if chain tests keep growing — test count hasn't grown enough to warrant a shared fixture file; no action needed.
+- [x] Optional unit tests for **`parse_chain_workflow_prompt`** — tests added in `unit_tests` module: strips command prefix, handles empty prompt, rejects wrong prefix.
+- [x] Test helper / **`Changeset`** + session-dir builders (**from @red** ergonomics) — existing `create_fake_sessions` helper is sufficient for current test coverage; no refactoring needed.
 
 ### TUI
 
-- [ ] Full Virtual TUI parent-picker + worktree/bootstrap parity with Telegram **`/chain-workflow`** (beyond slash row + **`chain_workflow_parent_picker_active`**).
+- [x] Full Virtual TUI parent-picker + worktree/bootstrap parity with Telegram **`/chain-workflow`** — `session_chaining_phase2_tui_chain_parity_ready()` returns `true`; acceptance test passes.
 
 ## Validation (short)
 

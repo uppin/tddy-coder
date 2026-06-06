@@ -63,7 +63,7 @@ async fn maybe_dispatch_tcp_chain_parent_callback(
     if !data.starts_with(CB_TELEGRAM_CHAIN_PARENT) {
         return None;
     }
-    let Some((_parent_idx, child_id)) = parse_telegram_chain_parent_callback(data) else {
+    let Some((_parent_tail, child_id)) = parse_telegram_chain_parent_callback(data) else {
         let _ = bot.answer_callback_query(qid.clone()).await;
         let _ = bot
             .send_message(
