@@ -53,7 +53,7 @@ impl ClaudeCliSessionManager {
         let (stdout_tx, _stdout_rx) = broadcast::channel::<Bytes>(OUTPUT_BROADCAST_CAPACITY);
 
         let mut child = self
-            .spawn_child(binary_path, model, &worktree_path)
+            .spawn_child(binary_path, model, session_id, &worktree_path)
             .await?;
         let pid = child.id().ok_or_else(|| anyhow::anyhow!("child has no pid"))?;
 
@@ -133,12 +133,14 @@ impl ClaudeCliSessionManager {
         &self,
         binary_path: &str,
         model: &str,
+        session_id: &str,
         worktree_path: &PathBuf,
     ) -> anyhow::Result<tokio::process::Child> {
         let mut cmd = tokio::process::Command::new(binary_path);
         if !model.is_empty() {
             cmd.arg("--model").arg(model);
         }
+        cmd.arg("--session-id").arg(session_id);
         cmd.current_dir(worktree_path)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
