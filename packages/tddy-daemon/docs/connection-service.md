@@ -14,8 +14,9 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | `ListEligibleDaemons` | Eligible daemon instances for host selection (`instance_id`, `label`, `is_local`); sourced from `EligibleDaemonSource` |
 | `ListSessionWorkflowFiles` | Lists workflow file **basenames** present on disk under `{sessions_base}/sessions/{session_id}/` using a **fixed server allowlist** (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`). Requires the same **`session_token`** → user → **`sessions_base`** resolution as **`ListSessions`**; **`session_id`** is validated with **`validate_session_id_segment`** before path construction. Entries whose canonical path falls outside the canonical session directory (e.g. symlink escape) are omitted from the list. |
 | `ReadSessionWorkflowFile` | Returns UTF-8 text for one allowlisted **basename** under the same resolved session directory. Rejects empty, non-allowlisted, or path-segment-unsafe **`basename`** values (`..`, `/`, `\`). Uses canonical path checks so resolved file paths cannot sit outside the session root. |
-| `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. |
-| `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata); `session_id` is validated as a single path segment before resolving `{sessions_base}/sessions/{session_id}/` |
+| `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. When `session_type == "claude-cli"`, the tool-spawn path is bypassed entirely — see [Claude Code CLI sessions](#claude-code-cli-sessions) below. |
+| `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata); `session_id` is validated as a single path segment before resolving `{sessions_base}/sessions/{session_id}/`. For `session_type == "claude-cli"` sessions, `ConnectSession` returns empty LiveKit fields immediately (no token RPC). |
+| `StreamSessionTerminalIO` | Bidi stream for raw terminal I/O with a running `claude` CLI process. First client message must carry `session_token` + `session_id` for auth. Subsequent messages carry raw stdin bytes; the server forwards them to the child process stdin and broadcasts stdout/stderr back as `SessionTerminalOutput` messages. Resize: if the input starts with `\x1b]resize;{cols};{rows}\x07`, the daemon updates the terminal size instead of forwarding to stdin. Session must have `session_type == "claude-cli"`; returns `FAILED_PRECONDITION` when no active process is found. |
 | `DeleteSession` | Removes **`{sessions_base}/sessions/{session_id}/`**. If **`.session.yaml`** records a live PID, the daemon sends **SIGTERM**, waits, then **SIGKILL** as needed (Linux zombie sessions are treated as stopped), then removes the directory. Directories without readable metadata are still removed when the path resolves safely. Rejects unknown ids and path-unsafe ids (implementation in **`session_deletion`**) |
 | `SignalSession` | Send Unix signal to recorded PID for an active session; `session_id` validated before path resolution |
 
@@ -61,6 +62,34 @@ Session **status** strings in metadata drive workflow display; optional Telegram
 | `CreateProject.user_relative_path` | Optional: clone/adopt at `~/<path>` instead (e.g. `Code/foo` or `~/Code/foo`); must stay under home |
 
 Project rows in **`projects.yaml`** may include optional **`main_branch_ref`** (`origin/<branch>`). **`effective_integration_base_ref_for_project`** in **`project_storage`** returns that value or the documented default **`origin/master`**. Invalid values fail **`add_project`** before the file is written. See [git-integration-base-ref.md](../../../../docs/ft/coder/git-integration-base-ref.md) and [project-concept.md](../../../../docs/ft/daemon/project-concept.md).
+
+## Claude Code CLI sessions
+
+When `StartSessionRequest.session_type == "claude-cli"`, the standard tool-spawn path is bypassed. Instead:
+
+1. A dedicated git worktree is created under `{sessions_base}/worktrees/claude-cli-{short_id}/` (branch `claude-cli/{short_id}`).
+2. `.session.yaml` is written with `session_type = "claude-cli"` and `model = <requested model>`. `repo_path` is set to the worktree path for later cleanup.
+3. `ClaudeCliSessionManager::start()` spawns the `claude` binary (resolved from `claude_cli.binary_path` in config, default `"claude"`) with `--model <model> --session-id <session_id>` in the worktree directory.
+4. `StartSessionResponse` returns empty LiveKit fields (`livekit_room`, `livekit_url`, `livekit_server_identity` all empty); the web client detects this and routes to `ConnectedClaudeCliTerminal`.
+
+**`ClaudeCliSessionManager`** (`claude_cli_session.rs`): in-memory registry (`HashMap<String, Arc<PtyHandle>>`) mapping session id to the active child process. `PtyHandle` holds:
+- `stdin_tx`: `mpsc::UnboundedSender<Bytes>` — feed bytes into the child stdin
+- `stdout_tx`: `broadcast::Sender<Bytes>` — subscribe for stdout/stderr chunks
+- `worktree_path`: for deletion
+- `pid`: for signal delivery
+
+A background task monitors the child with `child.wait()`; on exit the entry is removed from the registry. `resume()` calls `start()` in the same worktree — the worktree's file state is preserved.
+
+**`StreamSessionTerminalIO`**: The bidi gRPC stream calls `ClaudeCliSessionManager::get(session_id)` to look up the live `PtyHandle`. A write task reads `SessionTerminalInput` messages from the client stream and sends bytes to `stdin_tx`. A read task subscribes to `stdout_tx` and forwards chunks as `SessionTerminalOutput` to the client stream. Resize sequences (`\x1b]resize;...`) are intercepted before forwarding (no actual pty resize is performed; the sequence is dropped). Auth: `session_token` validated on the first message via the same GitHub → OS user path as other RPCs.
+
+**`DeleteSession` for claude-cli**: After PID termination (SIGTERM / SIGKILL), the daemon also calls `remove_dir_all` on the worktree path stored in `metadata.repo_path`. The session directory is then removed as usual.
+
+**`config.rs`**: Optional `claude_cli:` block:
+
+```yaml
+claude_cli:
+  binary_path: /usr/local/bin/claude   # default: "claude" (PATH lookup)
+```
 
 ## Spawn worker
 
