@@ -2,6 +2,10 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-06 — Session chaining: stable parent id in Telegram callback
+
+- **`tddy-daemon`**: **`telegram_session_control`** — **`tcp:`** chain callback format changed from `tcp:<idx>|s:<child>` to `tcp:p:<parent_tail8>|s:<child>` (last 8 chars of parent session id); **`handle_chain_parent_callback`** scans candidates by tail instead of index position — stable across session churn between keyboard render and tap; **`session_tail8()`** helper; **`parse_telegram_chain_parent_callback`** signature updated to return `(String, String)`. Unit tests: **`parse_chain_workflow_prompt`** (strip/trim/wrong-prefix), **`parse_telegram_chain_parent_callback`** round-trip, empty-tail rejection, **`session_tail8`** boundary cases. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-06-06 — Claude Code CLI session type
 
 - **`tddy-service`**: **`connection.proto`**: `session_type` (field 7) and `model` (field 8) on **`StartSessionRequest`**; **`StreamSessionTerminalIO`** bidi RPC, **`SessionTerminalInput`** and **`SessionTerminalOutput`** messages.
