@@ -428,6 +428,8 @@ fn create_fake_sessions(base: &std::path::Path, count: usize) -> Vec<String> {
             livekit_room: None,
             pending_elicitation: false,
             previous_session_id: None,
+            session_type: None,
+            model: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         ids.push(id);
@@ -1310,10 +1312,15 @@ async fn telegram_chain_parent_tap_persists_previous_session_id_on_child() {
     let child_id = outcome.session_id;
     let child_dir = unified_session_dir_path(tmp.path(), &child_id);
 
+    // Use the actual parent candidate's session id tail so the callback is format-stable.
+    let parent_page = parent_candidates_page_for_chain_picker(tmp.path(), &child_id)
+        .expect("parent page must load");
+    let parent = parent_page.first().expect("at least one parent candidate");
+    let parent_tail = &parent.session_id[parent.session_id.len().saturating_sub(8)..];
     let cb = TelegramCallback {
         chat_id: AUTHORIZED_CHAT,
         user_id: 77,
-        callback_data: format!("tcp:0|s:{child_id}"),
+        callback_data: format!("tcp:p:{parent_tail}|s:{child_id}"),
     };
 
     harness
@@ -1343,7 +1350,7 @@ async fn telegram_chain_parent_callback_rejects_invalid_child_session_id_segment
     let cb = TelegramCallback {
         chat_id: AUTHORIZED_CHAT,
         user_id: 1,
-        callback_data: "tcp:0|s:bad/id".to_string(),
+        callback_data: "tcp:p:somtail|s:bad/id".to_string(),
     };
 
     let err = harness

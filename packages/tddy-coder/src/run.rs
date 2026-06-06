@@ -1125,6 +1125,8 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             tool: Some("tddy-coder".to_string()),
             livekit_room: None,
             previous_session_id: None,
+            session_type: None,
+            model: None,
         },
     )
     .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
@@ -1275,6 +1277,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 tool: Some("tddy-coder".to_string()),
                 livekit_room: args.livekit_room.clone(),
                 previous_session_id: None,
+                session_type: None,
+                model: None,
             },
         )
         .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
@@ -2733,6 +2737,8 @@ fn run_plan_bootstrap_in_session_dir(
             tool: Some("tddy-coder".to_string()),
             livekit_room: None,
             previous_session_id: None,
+            session_type: None,
+            model: None,
         },
     )
     .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;

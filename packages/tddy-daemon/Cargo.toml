@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
+futures-util = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 async-trait = "0.1"
 axum = "0.8"
@@ -26,7 +27,8 @@ serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10"
 subtle = "2.6"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal", "process", "io-util"] }
+bytes = "1"
 tonic = { version = "0.12", default-features = false, features = ["transport"] }
 livekit = "0.7"
 prost = "0.13"

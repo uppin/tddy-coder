@@ -15,7 +15,7 @@ fn telegram_session_control_rs() -> &'static str {
 }
 
 /// **live_telegram_bot_dispatches_tcp_chain_parent_callback** — long-polling `telegram_callback_handler`
-/// must parse `tcp:<idx>|s:<child_uuid>`, authorize the chat, resolve the child session directory under
+/// must parse `tcp:p:<parent_tail8>|s:<child_uuid>`, authorize the chat, resolve the child session directory under
 /// `sessions_base`, and call [`TelegramSessionControlHarness::handle_chain_parent_callback`] (same as harness).
 #[test]
 fn live_telegram_bot_dispatches_tcp_chain_parent_callback() {

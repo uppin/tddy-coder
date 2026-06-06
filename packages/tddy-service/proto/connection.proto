@@ -18,6 +18,7 @@ service ConnectionService {
   rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
   rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
   rpc RemoveWorktree(RemoveWorktreeRequest) returns (RemoveWorktreeResponse);
+  rpc StreamSessionTerminalIO(stream SessionTerminalInput) returns (stream SessionTerminalOutput);
 }
 
 message ListToolsRequest {}
@@ -104,6 +105,10 @@ message StartSessionRequest {
   string daemon_instance_id = 5;
   // Workflow recipe for the new session ("tdd" or "bugfix"). Empty means default (tdd).
   string recipe = 6;
+  // Session type: "tool" (default/empty) spawns tddy-coder; "claude-cli" spawns the Claude Code CLI in a PTY.
+  string session_type = 7;
+  // Model id for claude-cli sessions (e.g. "claude-opus-4-8"). Required when session_type = "claude-cli".
+  string model = 8;
 }
 message StartSessionResponse {
   string session_id = 1;
@@ -229,4 +234,16 @@ message RemoveWorktreeRequest {
 message RemoveWorktreeResponse {
   bool ok = 1;
   string message = 2;
+}
+
+// --- Claude Code CLI terminal I/O streaming ---
+
+message SessionTerminalInput {
+  string session_token = 1;
+  string session_id    = 2;
+  bytes  data          = 3;
+}
+
+message SessionTerminalOutput {
+  bytes data = 1;
 }

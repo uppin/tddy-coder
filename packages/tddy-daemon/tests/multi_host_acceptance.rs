@@ -117,6 +117,8 @@ fn write_exited_session(session_dir: &std::path::Path, session_id: &str, pid: u3
         livekit_room: Some("room".to_string()),
         pending_elicitation: false,
         previous_session_id: None,
+        session_type: None,
+        model: None,
     };
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }
@@ -199,6 +201,8 @@ async fn start_session_unknown_daemon_instance_id_returns_clear_error() {
         agent: String::new(),
         daemon_instance_id: "fabricated-peer-not-in-discovery".to_string(),
         recipe: String::new(),
+        session_type: String::new(),
+        model: String::new(),
     });
     let err = service
         .start_session(request)
@@ -379,6 +383,8 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         agent: String::new(),
         daemon_instance_id: REMOTE_PEER_INSTANCE_ID.to_string(),
         recipe: String::new(),
+        session_type: String::new(),
+        model: String::new(),
     });
     let response = service_a.start_session(request).await.unwrap_or_else(|e| {
         panic!(

@@ -29,6 +29,12 @@ pub struct SessionMetadata {
     /// Optional parent session when this session was created as a chain child (PRD: session chaining).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_session_id: Option<String>,
+    /// Session type: "tool" (default/empty) or "claude-cli". Absent in legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_type: Option<String>,
+    /// Model id for claude-cli sessions (e.g. "claude-opus-4-8"). Absent in legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
@@ -43,6 +49,10 @@ pub struct InitialToolSessionMetadataOpts {
     pub livekit_room: Option<String>,
     /// When set, `.session.yaml` records the stacked-from parent session id.
     pub previous_session_id: Option<String>,
+    /// Session type: "tool" (default/empty) or "claude-cli".
+    pub session_type: Option<String>,
+    /// Model id for claude-cli sessions.
+    pub model: Option<String>,
 }
 
 /// Writes `.session.yaml` for a newly created session directory.
@@ -77,6 +87,8 @@ pub fn write_initial_tool_session_metadata(
         livekit_room: opts.livekit_room,
         pending_elicitation: false,
         previous_session_id: opts.previous_session_id,
+        session_type: opts.session_type,
+        model: opts.model,
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -125,6 +137,8 @@ mod tests {
                 tool: Some("tddy-coder".to_string()),
                 livekit_room: None,
                 previous_session_id: None,
+                session_type: None,
+                model: None,
             },
         )
         .unwrap();
@@ -139,6 +153,71 @@ mod tests {
         assert!(read.livekit_room.is_none());
         assert!(!read.pending_elicitation);
         assert!(read.previous_session_id.is_none());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// **claude_cli_metadata_round_trip** — `.session.yaml` must preserve `session_type` and
+    /// `model` through a write/read cycle.
+    ///
+    /// FAILS: `SessionMetadata` has no `session_type` / `model` fields yet; the struct literal
+    /// below does not compile until both are added with `#[serde(default)]`.
+    #[test]
+    fn claude_cli_metadata_round_trip() {
+        let tmp = std::env::temp_dir()
+            .join(format!("tddy-session-meta-claude-cli-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let sid = "01900000-0000-7000-8000-000000000cli";
+        let session_dir = tmp.join("sessions").join(sid);
+        fs::create_dir_all(&session_dir).unwrap();
+
+        write_initial_tool_session_metadata(
+            &session_dir,
+            InitialToolSessionMetadataOpts {
+                project_id: "proj-claude".to_string(),
+                repo_path: Some("/tmp/worktrees/claude-cli-01900000".to_string()),
+                pid: Some(7777),
+                tool: None,
+                livekit_room: None,
+                previous_session_id: None,
+                session_type: Some("claude-cli".to_string()), // NEW FIELD — compile error
+                model: Some("claude-sonnet-4-6".to_string()), // NEW FIELD — compile error
+            },
+        )
+        .unwrap();
+
+        let read = read_session_metadata(&session_dir).unwrap();
+        assert_eq!(
+            read.session_type.as_deref(),
+            Some("claude-cli"),
+            "session_type must survive write/read round-trip"
+        );
+        assert_eq!(
+            read.model.as_deref(),
+            Some("claude-sonnet-4-6"),
+            "model must survive write/read round-trip"
+        );
+
+        // Verify that legacy .session.yaml without session_type/model still deserializes (backward
+        // compatibility: both fields must have #[serde(default)]).
+        let legacy_yaml = format!(
+            r#"session_id: {sid}
+project_id: proj-legacy
+created_at: "2026-01-01T00:00:00Z"
+updated_at: "2026-01-01T00:00:00Z"
+status: active
+"#
+        );
+        let legacy: SessionMetadata = serde_yaml::from_str(&legacy_yaml)
+            .expect("legacy .session.yaml without session_type/model must deserialize");
+        assert!(
+            legacy.session_type.is_none(),
+            "session_type must default to None for legacy sessions"
+        );
+        assert!(
+            legacy.model.is_none(),
+            "model must default to None for legacy sessions"
+        );
 
         let _ = fs::remove_dir_all(&tmp);
     }

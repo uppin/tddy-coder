@@ -384,6 +384,8 @@ impl DaemonStreamHandler {
                 tool: Some("tddy-coder".to_string()),
                 livekit_room: None,
                 previous_session_id: None,
+                session_type: None,
+                model: None,
             },
         ) {
             send_workflow_complete(&self.tx, false, format!("write session metadata: {}", e)).await;

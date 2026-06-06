@@ -115,6 +115,17 @@ pub fn session_list_status_from_session_dir(
         }
     };
 
+    // Claude CLI sessions have no changeset — read agent/model from session metadata.
+    if meta.session_type.as_deref() == Some("claude-cli") {
+        return Ok(SessionListStatusDisplay {
+            workflow_goal: String::new(),
+            workflow_state: String::new(),
+            elapsed_display: String::new(),
+            agent: "claude-cli".to_string(),
+            model: meta.model.unwrap_or_default(),
+        });
+    }
+
     let changeset = match read_changeset(session_dir) {
         Ok(c) => c,
         Err(e) => {
@@ -387,6 +398,65 @@ state:
         assert_ne!(proto.elapsed_display, "—");
     }
 
+    /// **claude_cli_session_enrichment_uses_metadata_not_changeset**: when `.session.yaml` has
+    /// `session_type = "claude-cli"` and no `changeset.yaml` is present,
+    /// `session_list_status_from_session_dir` must return `agent = "claude-cli"` and
+    /// `model` from metadata — not `all_placeholders()` dashes.
+    ///
+    /// FAILS:
+    /// 1. `SessionMetadata` has `deny_unknown_fields` and no `session_type`/`model` fields →
+    ///    the struct literal below does not compile until the struct is extended.
+    /// 2. Even with the struct extended, the function returns `all_placeholders()` when
+    ///    changeset.yaml is absent, without any claude-cli fallback branch.
+    #[test]
+    fn claude_cli_session_enrichment_uses_metadata_not_changeset() {
+        use tddy_core::SessionMetadata;
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path().join("sess-claude-cli-enrich-1");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        // Write .session.yaml with session_type and model — new fields, compile error until added.
+        let metadata = SessionMetadata {
+            session_id: "sess-claude-cli-enrich-1".to_string(),
+            project_id: "proj-x".to_string(),
+            created_at: "2026-06-06T10:00:00Z".to_string(),
+            updated_at: "2026-06-06T10:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: Some("/tmp/worktrees/claude-cli-abc".to_string()),
+            pid: Some(12345),
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some("claude-opus-4-8".to_string()),
+        };
+        tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
+        // Intentionally NO changeset.yaml — claude-cli sessions never have one.
+
+        let got = session_list_status_from_session_dir(&session_dir)
+            .expect("enrichment must not error for claude-cli session without changeset");
+
+        assert_eq!(
+            got.agent, "claude-cli",
+            "agent must be 'claude-cli' read from session_type metadata, not '—'"
+        );
+        assert_eq!(
+            got.model, "claude-opus-4-8",
+            "model must be read from .session.yaml model field, not '—'"
+        );
+        assert!(
+            got.workflow_goal.is_empty() || got.workflow_goal == "—",
+            "workflow_goal must be empty/dash for sessions without changeset; got: {}",
+            got.workflow_goal
+        );
+        assert!(
+            got.workflow_state.is_empty() || got.workflow_state == "—",
+            "workflow_state must be empty/dash for sessions without changeset; got: {}",
+            got.workflow_state
+        );
+    }
+
     #[test]
     fn pending_elicitation_for_session_dir_reads_metadata_flag() {
         use tddy_core::SessionMetadata;
@@ -405,6 +475,8 @@ state:
             livekit_room: None,
             pending_elicitation: true,
             previous_session_id: None,
+            session_type: None,
+            model: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(

@@ -140,6 +140,12 @@ pub fn delete_session_directory(sessions_base: &Path, session_id: &str) -> Resul
         }
     };
 
+    // Extract the claude-cli worktree path before the cfg blocks consume or shadow `metadata`.
+    let claude_cli_worktree = metadata
+        .as_ref()
+        .filter(|m| m.session_type.as_deref() == Some("claude-cli"))
+        .and_then(|m| m.repo_path.clone());
+
     #[cfg(unix)]
     {
         if let Some(ref m) = metadata {
@@ -155,6 +161,16 @@ pub fn delete_session_directory(sessions_base: &Path, session_id: &str) -> Resul
     }
     #[cfg(not(unix))]
     let _ = metadata;
+
+    // For claude-cli sessions, also remove the dedicated worktree directory.
+    if let Some(worktree) = claude_cli_worktree {
+        let _ = std::fs::remove_dir_all(&worktree);
+        log::info!(
+            "delete_session_directory: removed claude-cli worktree {:?} for {}",
+            worktree,
+            session_id
+        );
+    }
 
     std::fs::remove_dir_all(&session_dir).map_err(|e| {
         log::error!(
@@ -190,6 +206,8 @@ mod tests {
             livekit_room: None,
             pending_elicitation: false,
             previous_session_id: None,
+            session_type: None,
+            model: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }

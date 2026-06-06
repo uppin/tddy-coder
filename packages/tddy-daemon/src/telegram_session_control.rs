@@ -202,7 +202,10 @@ pub const CB_TELEGRAM_BRANCH: &str = "tb:";
 pub const CB_TELEGRAM_BRANCH_MORE: &str = "tbm:";
 /// Branch/worktree intent (`nb` / `ws` — must fit Telegram `callback_data` byte limit with `|s:<uuid>`).
 pub const CB_TELEGRAM_INTENT: &str = "intent:";
-/// Chain workflow: parent session row for stacked work (`tcp:<parent_idx>|s:<child_session_id>`).
+/// Chain workflow: parent session row for stacked work (`tcp:p:<parent_tail8>|s:<child_session_id>`).
+///
+/// `parent_tail8` = last 8 chars of the parent session id — stable regardless of list order.
+/// The child session id is validated by [`validate_session_id_segment`] on callback dispatch.
 pub const CB_TELEGRAM_CHAIN_PARENT: &str = "tcp:";
 
 // ---------------------------------------------------------------------------
@@ -642,16 +645,27 @@ pub fn parse_telegram_project_callback(callback_data: &str) -> Option<(usize, St
     Some((proj_idx, session_id))
 }
 
-/// Decode `tcp:<parent_idx>|s:<child_session_id>` (chain workflow parent pick before project/branch steps).
-pub fn parse_telegram_chain_parent_callback(callback_data: &str) -> Option<(usize, String)> {
+/// Decode `tcp:p:<parent_tail8>|s:<child_session_id>`.
+///
+/// `parent_tail8` is the last 8 characters of the parent session id — used to locate the parent
+/// in the candidate page without depending on list position (stable across session churn).
+/// Returns `(parent_tail8, child_session_id)`.
+pub fn parse_telegram_chain_parent_callback(callback_data: &str) -> Option<(String, String)> {
     let rest = callback_data.strip_prefix(CB_TELEGRAM_CHAIN_PARENT)?;
-    let (idx_part, sess_part) = rest.split_once("|s:")?;
-    let parent_idx: usize = idx_part.parse().ok()?;
+    let rest = rest.strip_prefix("p:")?;
+    let (tail_part, sess_part) = rest.split_once("|s:")?;
+    let parent_tail = tail_part.trim().to_string();
     let session_id = sess_part.trim().to_string();
-    if session_id.is_empty() {
+    if parent_tail.is_empty() || session_id.is_empty() {
         return None;
     }
-    Some((parent_idx, session_id))
+    Some((parent_tail, session_id))
+}
+
+/// Last 8 chars of `session_id` — used as the stable parent discriminator in chain callbacks.
+fn session_tail8(session_id: &str) -> &str {
+    let len = session_id.len();
+    &session_id[len.saturating_sub(8)..]
 }
 
 /// Decode `ta:<agent_idx>|p:<proj_idx>|s:<session_id>`.
@@ -2259,9 +2273,10 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         );
 
         let mut parent_kb: InlineKeyboardRows = Vec::new();
-        for (idx, se) in parent_page.iter().enumerate() {
+        for se in parent_page.iter() {
             let label = format!("Parent: {}", telegram_label_for_session_id(&se.session_id));
-            let cb = format!("{CB_TELEGRAM_CHAIN_PARENT}{idx}|s:{session_id}");
+            let parent_tail = session_tail8(&se.session_id);
+            let cb = format!("{CB_TELEGRAM_CHAIN_PARENT}p:{parent_tail}|s:{session_id}");
             debug_assert!(
                 cb.len() <= 64,
                 "Telegram callback_data exceeds 64 bytes: len={} data={cb:?}",
@@ -2321,9 +2336,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         cb: TelegramCallback,
     ) -> anyhow::Result<()> {
         self.ensure_authorized(cb.chat_id)?;
-        let Some((parent_idx, child_id)) = parse_telegram_chain_parent_callback(&cb.callback_data)
+        let Some((parent_tail, child_id)) = parse_telegram_chain_parent_callback(&cb.callback_data)
         else {
-            anyhow::bail!("not a chain parent callback (expected `tcp:` prefix)");
+            anyhow::bail!("not a chain parent callback (expected `tcp:p:` prefix)");
         };
 
         validate_session_id_segment(&child_id).map_err(|e| {
@@ -2332,9 +2347,12 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
 
         let parent_page = parent_candidates_page_for_chain_picker(&self.sessions_base, &child_id)?;
 
-        let Some(parent_entry) = parent_page.get(parent_idx) else {
+        let Some(parent_entry) = parent_page
+            .iter()
+            .find(|e| e.session_id.ends_with(parent_tail.as_str()))
+        else {
             anyhow::bail!(
-                "chain parent index {parent_idx} is out of range (page has {} candidate(s)); pick a visible parent row again",
+                "no parent candidate matching tail {parent_tail:?} found (page has {} candidate(s)); pick again",
                 parent_page.len()
             );
         };
@@ -3111,6 +3129,66 @@ mod unit_tests {
             Some((10, 2, sid.to_string()))
         );
         assert_eq!(parse_telegram_branch_callback("tb:11|p:0|s:x"), None);
+    }
+
+    #[test]
+    fn parse_chain_workflow_prompt_strips_command_and_trims() {
+        assert_eq!(
+            parse_chain_workflow_prompt("/chain-workflow  stack on top of auth PR  ").as_deref(),
+            Some("stack on top of auth PR"),
+            "must strip /chain-workflow prefix and trim whitespace"
+        );
+        assert_eq!(
+            parse_chain_workflow_prompt("/chain-workflow").as_deref(),
+            Some(""),
+            "command with no prompt returns empty string"
+        );
+        assert_eq!(
+            parse_chain_workflow_prompt("/start-workflow foo"),
+            None,
+            "wrong command prefix must return None"
+        );
+    }
+
+    #[test]
+    fn parse_telegram_chain_parent_callback_round_trip() {
+        let child = "018fbbba-1234-7abc-9abc-123456789abc";
+        let parent_tail = "56789abc"; // last 8 chars of parent UUID
+        let cb = format!("tcp:p:{parent_tail}|s:{child}");
+        assert!(
+            cb.len() <= 64,
+            "callback_data must fit 64-byte Telegram limit: len={} data={cb:?}",
+            cb.len()
+        );
+        assert_eq!(
+            parse_telegram_chain_parent_callback(&cb),
+            Some((parent_tail.to_string(), child.to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_telegram_chain_parent_callback_rejects_old_index_format() {
+        // Old `tcp:0|s:<child>` format must not parse with the new `p:` prefix scheme.
+        assert_eq!(
+            parse_telegram_chain_parent_callback("tcp:0|s:018fbbba-1234-7abc-9abc-123456789abc"),
+            None,
+            "legacy index format must return None"
+        );
+    }
+
+    #[test]
+    fn parse_telegram_chain_parent_callback_rejects_empty_tail() {
+        assert_eq!(
+            parse_telegram_chain_parent_callback("tcp:p:|s:018fbbba-1234-7abc-9abc-123456789abc"),
+            None
+        );
+    }
+
+    #[test]
+    fn session_tail8_returns_last_8_chars() {
+        assert_eq!(session_tail8("018fbbba-1234-7abc-9abc-123456789abc"), "56789abc");
+        assert_eq!(session_tail8("sess-0001"), "ess-0001");
+        assert_eq!(session_tail8("short"), "short"); // shorter than 8 → full string
     }
 
     #[test]
