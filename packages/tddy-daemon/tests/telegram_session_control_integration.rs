@@ -428,6 +428,8 @@ fn create_fake_sessions(base: &std::path::Path, count: usize) -> Vec<String> {
             livekit_room: None,
             pending_elicitation: false,
             previous_session_id: None,
+            session_type: None,
+            model: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         ids.push(id);

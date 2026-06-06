@@ -110,6 +110,8 @@ fn write_minimal_running_session(sessions_base: &std::path::Path, session_id: &s
         livekit_room: None,
         pending_elicitation: false,
         previous_session_id: None,
+        session_type: None,
+        model: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 }

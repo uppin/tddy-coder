@@ -67,6 +67,8 @@ async fn list_sessions_includes_workflow_fields_from_changeset() {
         livekit_room: None,
         pending_elicitation: false,
         previous_session_id: None,
+        session_type: None,
+        model: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -134,6 +136,8 @@ async fn list_sessions_sets_pending_elicitation_from_session_metadata() {
         livekit_room: None,
         pending_elicitation: true,
         previous_session_id: None,
+        session_type: None,
+        model: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 

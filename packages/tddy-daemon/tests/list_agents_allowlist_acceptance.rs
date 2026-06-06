@@ -176,6 +176,8 @@ allowed_agents:
         agent: "unknown-agent-id".to_string(),
         daemon_instance_id: String::new(),
         recipe: String::new(),
+        session_type: String::new(),
+        model: String::new(),
     });
     let err = service
         .start_session(request)

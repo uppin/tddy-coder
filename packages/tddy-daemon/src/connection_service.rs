@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::stream::{Stream, StreamExt};
 use livekit::prelude::Room;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
-use tddy_rpc::{Request, Response, Status};
+use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
     AgentInfo, ConnectSessionRequest, ConnectSessionResponse,
     ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
@@ -19,13 +20,14 @@ use tddy_service::proto::connection::{
     ListToolsResponse, ListWorktreesForProjectRequest, ListWorktreesForProjectResponse,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
     ReadSessionWorkflowFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SessionEntry as ProtoSessionEntry, Signal,
-    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
-    ToolInfo, WorkflowFileEntry, WorktreeRow,
+    ResumeSessionRequest, ResumeSessionResponse, SessionEntry as ProtoSessionEntry,
+    SessionTerminalInput, SessionTerminalOutput, Signal, SignalSessionRequest, SignalSessionResponse,
+    StartSessionRequest, StartSessionResponse, ToolInfo, WorkflowFileEntry, WorktreeRow,
 };
 use uuid::Uuid;
 
 use crate::agent_list_mapping::agent_allowlist_rows;
+use crate::claude_cli_session::ClaudeCliSessionManager;
 use crate::config::DaemonConfig;
 use crate::livekit_peer_discovery::{local_instance_id_for_config, LiveKitDiscoveryHandles};
 use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
@@ -75,6 +77,54 @@ pub type SessionUserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>
 /// Resolves OS user to sessions base path.
 pub type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 
+/// Stream adapter that yields [`SessionTerminalOutput`] from a broadcast receiver.
+///
+/// Implements [`futures_util::stream::Stream`] so it can be returned from
+/// [`ConnectionServiceTrait::stream_session_terminal_io`].
+pub struct TerminalOutputStream {
+    rx: tokio::sync::broadcast::Receiver<bytes::Bytes>,
+}
+
+impl Stream for TerminalOutputStream {
+    type Item = Result<SessionTerminalOutput, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        use tokio::sync::broadcast::error::TryRecvError;
+        loop {
+            match self.rx.try_recv() {
+                Ok(chunk) => {
+                    return std::task::Poll::Ready(Some(Ok(SessionTerminalOutput {
+                        data: chunk.to_vec(),
+                    })));
+                }
+                Err(TryRecvError::Lagged(_)) => {
+                    // Skip lagged messages and try again.
+                    continue;
+                }
+                Err(TryRecvError::Closed) => {
+                    return std::task::Poll::Ready(None);
+                }
+                Err(TryRecvError::Empty) => {
+                    // Register the waker with a new future so we get notified when data arrives.
+                    let mut rx_clone = self.rx.resubscribe();
+                    let waker = cx.waker().clone();
+                    tokio::spawn(async move {
+                        // Wait for the next message, then wake the task.
+                        let _ = rx_clone.recv().await;
+                        waker.wake();
+                    });
+                    return std::task::Poll::Pending;
+                }
+            }
+        }
+    }
+}
+
+impl Unpin for TerminalOutputStream {}
+
 /// ConnectionService implementation.
 pub struct ConnectionServiceImpl {
     config: DaemonConfig,
@@ -86,6 +136,7 @@ pub struct ConnectionServiceImpl {
     common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
     telegram: Option<Arc<TelegramDaemonHooks>>,
     worktree_stats_cache: Arc<WorktreeStatsCache>,
+    claude_cli_manager: Arc<ClaudeCliSessionManager>,
 }
 
 impl ConnectionServiceImpl {
@@ -108,6 +159,7 @@ impl ConnectionServiceImpl {
         let worktree_stats_cache = Arc::new(WorktreeStatsCache::new(
             worktrees::projects_stats_cache_root(),
         ));
+        let claude_cli_manager = Arc::new(ClaudeCliSessionManager::new());
         Self {
             config,
             sessions_base_for_user,
@@ -117,6 +169,7 @@ impl ConnectionServiceImpl {
             common_room_livekit_room,
             telegram,
             worktree_stats_cache,
+            claude_cli_manager,
         }
     }
 
@@ -124,6 +177,160 @@ impl ConnectionServiceImpl {
         if let Some(ref tg) = self.telegram {
             tg.spawn_presenter_observer_task(session_id, grpc_port);
         }
+    }
+
+    /// Handle `StartSession` for `session_type = "claude-cli"` sessions.
+    ///
+    /// Unlike tool sessions, claude-cli sessions do not need LiveKit and do not look up
+    /// the project registry for a repo path. They create their own worktree directory under
+    /// the sessions base and spawn the `claude` binary there.
+    async fn start_claude_cli_session(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        sessions_base: PathBuf,
+        model: &str,
+        project_id: &str,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        if model.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "model is required for claude-cli sessions",
+            ));
+        }
+
+        // Create session directory under sessions_base/<os_user>/sessions/<id>/.
+        // For start_session, we receive the full sessions root; the per-user sessions are nested
+        // under an os_user subdirectory so that all users share one common sessions root.
+        let session_dir = sessions_base
+            .join(os_user)
+            .join(SESSIONS_SUBDIR)
+            .join(session_id);
+        std::fs::create_dir_all(&session_dir).map_err(|e| {
+            Status::internal(format!("failed to create session dir: {}", e))
+        })?;
+
+        // Create a dedicated worktree directory for the claude CLI to run in.
+        let short_id = &session_id[..8.min(session_id.len())];
+        let worktree_path = sessions_base
+            .join(os_user)
+            .join("worktrees")
+            .join(format!("claude-cli-{}", short_id));
+        std::fs::create_dir_all(&worktree_path).map_err(|e| {
+            Status::internal(format!("failed to create worktree dir: {}", e))
+        })?;
+
+        // Spawn the claude CLI process.
+        let binary_path = self
+            .config
+            .claude_cli
+            .as_ref()
+            .map(|c| c.binary_path.as_str())
+            .unwrap_or("claude");
+
+        let manager = Arc::clone(&self.claude_cli_manager);
+        let session_id_owned = session_id.to_string();
+        let model_owned = model.to_string();
+        let binary_owned = binary_path.to_string();
+        let worktree_clone = worktree_path.clone();
+
+        let handle = manager
+            .start(&session_id_owned, worktree_clone, &model_owned, &binary_owned)
+            .await
+            .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
+
+        let pid = handle.pid;
+
+        // Write .session.yaml
+        let now = chrono::Utc::now().to_rfc3339();
+        let meta = tddy_core::SessionMetadata {
+            session_id: session_id.to_string(),
+            project_id: project_id.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            status: "active".to_string(),
+            repo_path: Some(worktree_path.to_string_lossy().to_string()),
+            pid: Some(pid),
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some(model.to_string()),
+        };
+        tddy_core::write_session_metadata(&session_dir, &meta).map_err(|e| {
+            Status::internal(format!("failed to write session metadata: {}", e))
+        })?;
+
+        log::info!(
+            target: "tddy_daemon::connection_service",
+            "started claude-cli session {} pid={} worktree={} user={}",
+            session_id, pid, worktree_path.display(), os_user
+        );
+
+        Ok(Response::new(StartSessionResponse {
+            session_id: session_id.to_string(),
+            livekit_room: String::new(),
+            livekit_url: String::new(),
+            livekit_server_identity: String::new(),
+        }))
+    }
+
+    /// Handle `ResumeSession` for `session_type = "claude-cli"` sessions.
+    async fn resume_claude_cli_session(
+        &self,
+        session_id: &str,
+        session_dir: PathBuf,
+        meta: tddy_core::SessionMetadata,
+    ) -> Result<Response<ResumeSessionResponse>, Status> {
+        let model = meta.model.clone().unwrap_or_default();
+        let worktree_path = meta
+            .repo_path
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| session_dir.clone());
+
+        let binary_path = self
+            .config
+            .claude_cli
+            .as_ref()
+            .map(|c| c.binary_path.as_str())
+            .unwrap_or("claude");
+
+        let manager = Arc::clone(&self.claude_cli_manager);
+        let session_id_owned = session_id.to_string();
+        let binary_owned = binary_path.to_string();
+
+        let handle = manager
+            .resume(&session_id_owned, worktree_path, &model, &binary_owned)
+            .await
+            .map_err(|e| Status::internal(format!("failed to relaunch claude-cli: {}", e)))?;
+
+        let pid = handle.pid;
+
+        // Update .session.yaml with new pid and active status.
+        let now = chrono::Utc::now().to_rfc3339();
+        let updated = tddy_core::SessionMetadata {
+            updated_at: now,
+            status: "active".to_string(),
+            pid: Some(pid),
+            ..meta
+        };
+        tddy_core::write_session_metadata(&session_dir, &updated).map_err(|e| {
+            Status::internal(format!("failed to update session metadata: {}", e))
+        })?;
+
+        log::info!(
+            target: "tddy_daemon::connection_service",
+            "resumed claude-cli session {} pid={}",
+            session_id, pid
+        );
+
+        Ok(Response::new(ResumeSessionResponse {
+            session_id: session_id.to_string(),
+            livekit_room: String::new(),
+            livekit_url: String::new(),
+            livekit_server_identity: String::new(),
+        }))
     }
 }
 
@@ -449,6 +656,22 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
         }
 
+        // --- claude-cli branch: no LiveKit, no project registry lookup ---
+        if req.session_type.trim() == "claude-cli" {
+            let sessions_base = (self.sessions_base_for_user)(os_user)
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            let session_id = Uuid::now_v7().to_string();
+            return self
+                .start_claude_cli_session(
+                    os_user,
+                    &session_id,
+                    sessions_base,
+                    req.model.trim(),
+                    req.project_id.trim(),
+                )
+                .await;
+        }
+
         let livekit = spawner::livekit_creds_from_config(&self.config)
             .ok_or_else(|| Status::failed_precondition("LiveKit not configured"))?;
 
@@ -617,6 +840,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
+
+        // --- claude-cli branch: resume without LiveKit ---
+        if metadata.session_type.as_deref() == Some("claude-cli") {
+            return self
+                .resume_claude_cli_session(&req.session_id, session_dir, metadata)
+                .await;
+        }
+
         let repo_path = metadata
             .repo_path
             .as_ref()
@@ -978,6 +1209,57 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(ListWorktreesForProjectResponse { worktrees }))
     }
 
+    /// Associated output stream type for [`stream_session_terminal_io`].
+    type StreamSessionTerminalIoStream = TerminalOutputStream;
+
+    async fn stream_session_terminal_io(
+        &self,
+        request: Request<Streaming<SessionTerminalInput>>,
+    ) -> Result<Response<Self::StreamSessionTerminalIoStream>, Status> {
+        let mut in_stream = request.into_inner();
+
+        // Read the first message to get session_id and session_token for auth.
+        let first: SessionTerminalInput = in_stream
+            .next()
+            .await
+            .ok_or_else(|| Status::invalid_argument("stream ended before first message"))?
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let github_user = (self.user_resolver)(&first.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let session_id = first.session_id.clone();
+        let handle = self
+            .claude_cli_manager
+            .get(&session_id)
+            .await
+            .ok_or_else(|| Status::not_found("claude-cli session not found or not running"))?;
+
+        let stdin_tx = handle.stdin_tx.clone();
+        let stdout_rx = handle.stdout_tx.subscribe();
+
+        // Forward the first data chunk (if any).
+        if !first.data.is_empty() {
+            let _ = stdin_tx.send(bytes::Bytes::from(first.data));
+        }
+
+        // Spawn a task to forward subsequent input chunks to stdin.
+        let stdin_tx2 = stdin_tx.clone();
+        tokio::spawn(async move {
+            while let Some(Ok(msg)) = in_stream.next().await {
+                if !msg.data.is_empty() {
+                    let _ = stdin_tx2.send(bytes::Bytes::from(msg.data));
+                }
+            }
+        });
+
+        Ok(Response::new(TerminalOutputStream { rx: stdout_rx }))
+    }
+
     async fn remove_worktree(
         &self,
         request: Request<RemoveWorktreeRequest>,
@@ -1113,6 +1395,8 @@ mod signal_session_unit_tests {
             livekit_room: None,
             pending_elicitation: false,
             previous_session_id: None,
+            session_type: None,
+            model: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }

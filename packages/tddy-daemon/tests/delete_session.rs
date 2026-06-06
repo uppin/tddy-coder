@@ -70,6 +70,8 @@ fn write_session_yaml(session_dir: &std::path::Path, pid: u32) {
         livekit_room: Some("test-room".to_string()),
         pending_elicitation: false,
         previous_session_id: None,
+        session_type: None,
+        model: None,
     };
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }

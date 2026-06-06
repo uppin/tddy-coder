@@ -190,6 +190,8 @@ mod tests {
             livekit_room: None,
             pending_elicitation: false,
             previous_session_id: None,
+            session_type: None,
+            model: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }

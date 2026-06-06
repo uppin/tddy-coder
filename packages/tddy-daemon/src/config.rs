@@ -70,6 +70,9 @@ pub struct DaemonConfig {
     /// Optional Telegram bot notifications (see `telegram_notifier` module).
     #[serde(default)]
     pub telegram: Option<TelegramConfig>,
+    /// Claude Code CLI session configuration (spawning interactive `claude` processes in PTYs).
+    #[serde(default)]
+    pub claude_cli: Option<ClaudeCliConfig>,
 }
 
 impl Default for DaemonConfig {
@@ -91,6 +94,7 @@ impl Default for DaemonConfig {
             daemon_instance_id_append_startup_timestamp: false,
             codex_oauth_loopback_proxy_eligible: default_codex_oauth_loopback_proxy_eligible(),
             telegram: None,
+            claude_cli: None,
         }
     }
 }
@@ -104,6 +108,19 @@ pub struct TelegramConfig {
     pub bot_token: String,
     #[serde(default)]
     pub chat_ids: Vec<i64>,
+}
+
+fn default_claude_cli_binary_path() -> String {
+    "claude".to_string()
+}
+
+/// Claude Code CLI session configuration. Loaded from daemon YAML under `claude_cli:`.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClaudeCliConfig {
+    /// Path to the `claude` binary. Defaults to "claude" (resolved from PATH).
+    #[serde(default = "default_claude_cli_binary_path")]
+    pub binary_path: String,
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize)]
