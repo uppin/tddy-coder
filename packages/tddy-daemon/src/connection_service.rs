@@ -198,11 +198,9 @@ impl ConnectionServiceImpl {
             ));
         }
 
-        // Create session directory under sessions_base/<os_user>/sessions/<id>/.
-        // For start_session, we receive the full sessions root; the per-user sessions are nested
-        // under an os_user subdirectory so that all users share one common sessions root.
+        // Create session directory under sessions_base/sessions/<id>/.
+        // sessions_base is already user-specific (resolved via sessions_base_for_user(os_user)).
         let session_dir = sessions_base
-            .join(os_user)
             .join(SESSIONS_SUBDIR)
             .join(session_id);
         std::fs::create_dir_all(&session_dir).map_err(|e| {
@@ -212,7 +210,6 @@ impl ConnectionServiceImpl {
         // Create a dedicated worktree directory for the claude CLI to run in.
         let short_id = &session_id[..8.min(session_id.len())];
         let worktree_path = sessions_base
-            .join(os_user)
             .join("worktrees")
             .join(format!("claude-cli-{}", short_id));
         std::fs::create_dir_all(&worktree_path).map_err(|e| {
@@ -797,6 +794,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
+
+        // claude-cli sessions do not use LiveKit — return empty fields immediately.
+        if metadata.session_type.as_deref() == Some("claude-cli") {
+            return Ok(Response::new(ConnectSessionResponse {
+                livekit_room: String::new(),
+                livekit_url: String::new(),
+                livekit_server_identity: String::new(),
+            }));
+        }
+
         let livekit_url = self
             .config
             .livekit

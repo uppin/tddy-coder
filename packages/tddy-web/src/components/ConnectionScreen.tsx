@@ -7,13 +7,18 @@ import {
   AgentInfoSchema,
   ConnectionService,
   DeleteSessionRequestSchema,
+  SessionTerminalInputSchema,
   Signal,
   type AgentInfo,
   type ProjectEntry,
   type SessionEntry,
+  type SessionTerminalInput,
+  type SessionTerminalOutput,
   type ToolInfo,
   type EligibleDaemonEntry,
 } from "../gen/connection_pb";
+import { GhosttyTerminalGrpc, type GrpcStream } from "./GhosttyTerminalGrpc";
+import { CLAUDE_CLI_MODELS, isClaudeCliSession } from "../constants/claudeCliModels";
 import {
   buildAgentSelectOptionsFromRpc,
   coalesceBackendAgentSelection,
@@ -169,6 +174,10 @@ type ProjectSessionForm = {
   recipe: string;
   debugLogging: boolean;
   daemonInstanceId: string;
+  /** "tool" (default) or "claude-cli" */
+  sessionType: "tool" | "claude-cli";
+  /** Model id for claude-cli sessions (e.g. "claude-opus-4-8") */
+  model: string;
 };
 
 function defaultProjectSessionForm(
@@ -186,6 +195,8 @@ function defaultProjectSessionForm(
     recipe: "free-prompting",
     debugLogging: false,
     daemonInstanceId: localDaemon?.instanceId ?? daemons[0]?.instanceId ?? "",
+    sessionType: "tool",
+    model: CLAUDE_CLI_MODELS[0]?.id ?? "",
   };
 }
 
@@ -216,6 +227,8 @@ function ProjectSessionOptions({
   const hostId = `host-select-${fieldIdSuffix}`;
   const recipeId = `recipe-select-${fieldIdSuffix}`;
   const debugId = `debug-logging-${fieldIdSuffix}`;
+  const modelId = `model-${fieldIdSuffix}`;
+  const sessionTypeId = `session-type-${fieldIdSuffix}`;
   const backendOptions = useMemo(
     () => buildAgentSelectOptionsFromRpc(agents.map((a) => ({ id: a.id, label: a.label }))),
     [agents],
@@ -227,6 +240,21 @@ function ProjectSessionOptions({
         <strong>Connect / Resume</strong> in this project—not saved on the project.
       </p>
       <div className="flex min-w-0 flex-nowrap items-end gap-3 overflow-x-auto pb-1 pt-1 [scrollbar-width:thin]">
+        <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
+          <label className="text-sm font-medium leading-none" htmlFor={sessionTypeId}>
+            Session type
+          </label>
+          <select
+            id={sessionTypeId}
+            data-testid={`session-type-select-${fieldIdSuffix}`}
+            value={form.sessionType}
+            onChange={(e) => onChange({ sessionType: e.target.value as "tool" | "claude-cli" })}
+            className={sessionControlSelectClassName}
+          >
+            <option value="tool">Managed tool</option>
+            <option value="claude-cli">Claude Code CLI</option>
+          </select>
+        </div>
         <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
           <label className="text-sm font-medium leading-none" htmlFor={hostId}>
             Host (this session)
@@ -245,60 +273,81 @@ function ProjectSessionOptions({
             ))}
           </select>
         </div>
-        <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
-          <label className="text-sm font-medium leading-none" htmlFor={toolId}>
-            Tool (this session)
-          </label>
-          <select
-            id={toolId}
-            data-testid={toolId}
-            value={form.toolPath}
-            onChange={(e) => onChange({ toolPath: e.target.value })}
-            className={sessionControlSelectClassName}
-          >
-            {tools.map((t) => (
-              <option key={t.path} value={t.path}>
-                {t.label || t.path}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
-          <label className="text-sm font-medium leading-none" htmlFor={backendId}>
-            Backend (this session)
-          </label>
-          <select
-            id={backendId}
-            data-testid={backendId}
-            value={form.agent}
-            onChange={(e) => onChange({ agent: e.target.value })}
-            className={sessionControlSelectClassName}
-          >
-            {backendOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex min-w-[10rem] shrink-0 flex-col gap-1">
-          <label className="text-sm font-medium leading-none" htmlFor={recipeId}>
-            Workflow recipe (this session)
-          </label>
-          <select
-            id={recipeId}
-            data-testid={recipeId}
-            value={form.recipe}
-            onChange={(e) => onChange({ recipe: e.target.value })}
-            className={sessionControlSelectClassName}
-          >
-            <option value="tdd">TDD (plan → implement)</option>
-            <option value="tdd-small">TDD small (plan → red → green)</option>
-            <option value="bugfix">Bugfix (reproduce → fix)</option>
-            <option value="free-prompting">Free prompting (open-ended)</option>
-            <option value="grill-me">Grill me (Grill → Create plan)</option>
-          </select>
-        </div>
+        {form.sessionType === "claude-cli" ? (
+          <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
+            <label className="text-sm font-medium leading-none" htmlFor={modelId}>
+              Model
+            </label>
+            <select
+              id={modelId}
+              data-testid={`model-select-${fieldIdSuffix}`}
+              value={form.model}
+              onChange={(e) => onChange({ model: e.target.value })}
+              className={sessionControlSelectClassName}
+            >
+              {CLAUDE_CLI_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <>
+            <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
+              <label className="text-sm font-medium leading-none" htmlFor={toolId}>
+                Tool (this session)
+              </label>
+              <select
+                id={toolId}
+                data-testid={toolId}
+                value={form.toolPath}
+                onChange={(e) => onChange({ toolPath: e.target.value })}
+                className={sessionControlSelectClassName}
+              >
+                {tools.map((t) => (
+                  <option key={t.path} value={t.path}>
+                    {t.label || t.path}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
+              <label className="text-sm font-medium leading-none" htmlFor={backendId}>
+                Backend (this session)
+              </label>
+              <select
+                id={backendId}
+                data-testid={backendId}
+                value={form.agent}
+                onChange={(e) => onChange({ agent: e.target.value })}
+                className={sessionControlSelectClassName}
+              >
+                {backendOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex min-w-[10rem] shrink-0 flex-col gap-1">
+              <label className="text-sm font-medium leading-none" htmlFor={recipeId}>
+                Workflow recipe (this session)
+              </label>
+              <select
+                id={recipeId}
+                data-testid={recipeId}
+                value={form.recipe}
+                onChange={(e) => onChange({ recipe: e.target.value })}
+                className={sessionControlSelectClassName}
+              >
+                <option value="tdd">TDD (plan → implement)</option>
+                <option value="tdd-small">TDD small (plan → red → green)</option>
+                <option value="bugfix">Bugfix (reproduce → fix)</option>
+                <option value="free-prompting">Free prompting (open-ended)</option>
+                <option value="grill-me">Grill me (Grill → Create plan)</option>
+              </select>
+            </div>
+          </>
+        )}
         <label
           className="flex shrink-0 cursor-pointer items-center gap-2 pb-2 text-sm leading-tight"
           htmlFor={debugId}
@@ -991,6 +1040,107 @@ function ConnectedTerminal({
   );
 }
 
+function ConnectedClaudeCliTerminal({
+  sessionId,
+  sessionToken,
+  onDisconnect,
+}: {
+  sessionId: string;
+  sessionToken: string;
+  onDisconnect: () => void;
+}) {
+  const client = useMemo(() => createConnectionClient(), []);
+  const [stream, setStream] = useState<GrpcStream | null>(null);
+
+  useEffect(() => {
+    const inputQueue: Uint8Array[] = [];
+    const outputListeners: Array<(data: Uint8Array) => void> = [];
+    let closed = false;
+
+    let resolveReady: (() => void) | null = null;
+    const ready = new Promise<void>((r) => {
+      resolveReady = r;
+    });
+    let isReady = false;
+    void ready; // suppress unused-variable lint
+
+    const grpcStream: GrpcStream = {
+      send(data: Uint8Array) {
+        inputQueue.push(data);
+        if (!isReady && resolveReady) {
+          isReady = true;
+          resolveReady();
+        }
+      },
+      onMessage(fn: (data: Uint8Array) => void) {
+        outputListeners.push(fn);
+      },
+      close() {
+        closed = true;
+      },
+    };
+    setStream(grpcStream);
+
+    async function* inputGen(): AsyncIterable<SessionTerminalInput> {
+      // First message authenticates
+      yield create(SessionTerminalInputSchema, {
+        sessionToken,
+        sessionId,
+        data: new Uint8Array(0),
+      });
+      while (!closed) {
+        if (inputQueue.length > 0) {
+          const chunks = inputQueue.splice(0);
+          const total = chunks.reduce((s, c) => s + c.length, 0);
+          const merged = new Uint8Array(total);
+          let off = 0;
+          for (const c of chunks) {
+            merged.set(c, off);
+            off += c.length;
+          }
+          yield create(SessionTerminalInputSchema, {
+            sessionToken: "",
+            sessionId,
+            data: merged,
+          });
+        } else {
+          await new Promise((r) => setTimeout(r, 20));
+        }
+      }
+    }
+
+    void (async () => {
+      try {
+        for await (const output of client.streamSessionTerminalIO(
+          inputGen(),
+        ) as AsyncIterable<SessionTerminalOutput>) {
+          if (output.data.length > 0) {
+            outputListeners.forEach((fn) => fn(output.data));
+          }
+        }
+      } catch {
+        // stream closed
+      }
+    })();
+
+    return () => {
+      closed = true;
+    };
+  }, [client, sessionId, sessionToken]);
+
+  if (!stream) return null;
+
+  return (
+    <GhosttyTerminalGrpc
+      sessionToken={sessionToken}
+      sessionId={sessionId}
+      stream={stream}
+      connectionOverlay
+      onDisconnect={onDisconnect}
+    />
+  );
+}
+
 export function ConnectionScreen({
   livekitUrl,
   commonRoom,
@@ -1332,6 +1482,8 @@ export function ConnectionScreen({
       try {
         const res = await client.connectSession({ sessionToken, sessionId: id });
         if (cancelled || seq !== terminalDeepLinkSeqRef.current) return;
+        const sessForLink = sessions.find((s) => s.sessionId === id);
+        const isClaudeCliLink = isClaudeCliSession(sessForLink?.agent ?? "");
         setSessionAttachments((prev) =>
           addSessionAttachment(prev, id, {
             livekitUrl: res.livekitUrl,
@@ -1339,6 +1491,7 @@ export function ConnectionScreen({
             identity: `browser-${id}-${Date.now()}`,
             serverIdentity: res.livekitServerIdentity,
             debugLogging: debugForSessionId(id),
+            claudeCli: isClaudeCliLink ? { sessionId: id, sessionToken } : undefined,
           }),
         );
         const attachNew = nextPresentationFromAttach(terminalPresentation, "new");
@@ -1352,6 +1505,8 @@ export function ConnectionScreen({
         try {
           const res = await client.resumeSession({ sessionToken, sessionId: id });
           if (cancelled || seq !== terminalDeepLinkSeqRef.current) return;
+          const sessForLink = sessions.find((s) => s.sessionId === id);
+          const isClaudeCliLink = isClaudeCliSession(sessForLink?.agent ?? "");
           setSessionAttachments((prev) =>
             addSessionAttachment(prev, res.sessionId, {
               livekitUrl: res.livekitUrl,
@@ -1359,6 +1514,7 @@ export function ConnectionScreen({
               identity: `browser-${res.sessionId}-${Date.now()}`,
               serverIdentity: res.livekitServerIdentity,
               debugLogging: debugForSessionId(id),
+              claudeCli: isClaudeCliLink ? { sessionId: res.sessionId, sessionToken } : undefined,
             }),
           );
           const attachRe = nextPresentationFromAttach(terminalPresentation, "reconnect");
@@ -1439,16 +1595,20 @@ export function ConnectionScreen({
     const form =
       projectForms[rowKey] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons);
     const projectId = project.projectId.trim();
-    if (!sessionToken || !form.toolPath || !projectId || !form.agent) return;
+    if (!sessionToken || !projectId) return;
+    // For claude-cli sessions, only model is needed (no toolPath/agent required).
+    if (form.sessionType !== "claude-cli" && (!form.toolPath || !form.agent)) return;
     setError(null);
     try {
       const res = await client.startSession({
         sessionToken,
-        toolPath: form.toolPath,
+        toolPath: form.sessionType === "claude-cli" ? "" : form.toolPath,
         projectId,
-        agent: form.agent,
+        agent: form.sessionType === "claude-cli" ? "" : form.agent,
         daemonInstanceId: form.daemonInstanceId,
-        recipe: form.recipe,
+        recipe: form.sessionType === "claude-cli" ? "" : form.recipe,
+        sessionType: form.sessionType === "claude-cli" ? "claude-cli" : "",
+        model: form.sessionType === "claude-cli" ? form.model : "",
       });
       console.info("[ConnectionScreen] startSession: new attachment", { sessionId: res.sessionId });
       setSessionAttachments((prev) =>
@@ -1458,6 +1618,10 @@ export function ConnectionScreen({
           identity: `browser-${res.sessionId}-${Date.now()}`,
           serverIdentity: res.livekitServerIdentity,
           debugLogging: form.debugLogging,
+          claudeCli:
+            form.sessionType === "claude-cli"
+              ? { sessionId: res.sessionId, sessionToken: sessionToken }
+              : undefined,
         }),
       );
       const attach = nextPresentationFromAttach(terminalPresentation, "new");
@@ -1504,6 +1668,8 @@ export function ConnectionScreen({
     try {
       const res = await client.connectSession({ sessionToken, sessionId });
       console.info("[ConnectionScreen] connectSession: new attachment", { sessionId });
+      const sess = sessions.find((s) => s.sessionId === sessionId);
+      const isClaudeCli = isClaudeCliSession(sess?.agent ?? "");
       setSessionAttachments((prev) =>
         addSessionAttachment(prev, sessionId, {
           livekitUrl: res.livekitUrl,
@@ -1511,6 +1677,7 @@ export function ConnectionScreen({
           identity: `browser-${sessionId}-${Date.now()}`,
           serverIdentity: res.livekitServerIdentity,
           debugLogging: debugForSessionId(sessionId),
+          claudeCli: isClaudeCli ? { sessionId, sessionToken } : undefined,
         }),
       );
       const attach = nextPresentationFromAttach(terminalPresentation, "new");
@@ -1542,6 +1709,8 @@ export function ConnectionScreen({
         )
       );
       console.info("[ConnectionScreen] resumeSession: new attachment", { sessionId: res.sessionId });
+      const sess = sessions.find((s) => s.sessionId === sessionId);
+      const isClaudeCli = isClaudeCliSession(sess?.agent ?? "");
       setSessionAttachments((prev) =>
         addSessionAttachment(prev, res.sessionId, {
           livekitUrl: res.livekitUrl,
@@ -1549,6 +1718,7 @@ export function ConnectionScreen({
           identity: `browser-${res.sessionId}-${Date.now()}`,
           serverIdentity: res.livekitServerIdentity,
           debugLogging: debugForSessionId(sessionId),
+          claudeCli: isClaudeCli ? { sessionId: res.sessionId, sessionToken } : undefined,
         }),
       );
       const attach = nextPresentationFromAttach(terminalPresentation, "reconnect");
@@ -1690,6 +1860,19 @@ export function ConnectionScreen({
   if (terminalPresentation === "full" && focusedSessionId) {
     const focusedAttachment = sessionAttachments.get(focusedSessionId);
     if (focusedAttachment) {
+      if (focusedAttachment.claudeCli) {
+        return (
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0 }}>
+            <ConnectedClaudeCliTerminal
+              sessionId={focusedAttachment.claudeCli.sessionId}
+              sessionToken={focusedAttachment.claudeCli.sessionToken}
+              onDisconnect={() =>
+                removeAttachmentForSession(focusedSessionId, "userDisconnectFullscreen")
+              }
+            />
+          </div>
+        );
+      }
       return (
         <ConnectedTerminal
           livekitUrl={focusedAttachment.livekitUrl}
@@ -1898,7 +2081,9 @@ export function ConnectionScreen({
                     data-testid={`start-session-${rowKey}`}
                     onClick={() => void handleStartSession(p)}
                     disabled={
-                      loading || !formForRow.toolPath || !formForRow.agent
+                      loading ||
+                      (formForRow.sessionType !== "claude-cli" &&
+                        (!formForRow.toolPath || !formForRow.agent))
                     }
                   >
                     Start New Session
@@ -2213,25 +2398,33 @@ export function ConnectionScreen({
               className="relative"
               style={{ zIndex: 50 + index, marginBottom: 12 }}
             >
-              <ConnectedTerminal
-                livekitUrl={att.livekitUrl}
-                roomName={att.roomName}
-                identity={att.identity}
-                serverIdentity={att.serverIdentity}
-                debugLogging={att.debugLogging}
-                terminalLayout={terminalPresentation === "overlay" ? "overlay" : "mini"}
-                paneSessionLabel={sessionIdFirstSegment(sessionId)}
-                onExpandTerminal={() => {
-                  navigatePath(terminalPathForSessionId(sessionId), "push");
-                  setTerminalPresentation("full");
-                }}
-                onMinimizePane={() => setTerminalOverlayMinimized(true)}
-                onDisconnect={() => removeAttachmentForSession(sessionId, "userDisconnectOverlay")}
-                onTerminate={() => void handleSignalSession(sessionId, Signal.SIGTERM)}
-                onRemoteSessionEnded={() =>
-                  removeAttachmentForSession(sessionId, "remoteSessionEndedOverlay")
-                }
-              />
+              {att.claudeCli ? (
+                <ConnectedClaudeCliTerminal
+                  sessionId={att.claudeCli.sessionId}
+                  sessionToken={att.claudeCli.sessionToken}
+                  onDisconnect={() => removeAttachmentForSession(sessionId, "userDisconnectOverlay")}
+                />
+              ) : (
+                <ConnectedTerminal
+                  livekitUrl={att.livekitUrl}
+                  roomName={att.roomName}
+                  identity={att.identity}
+                  serverIdentity={att.serverIdentity}
+                  debugLogging={att.debugLogging}
+                  terminalLayout={terminalPresentation === "overlay" ? "overlay" : "mini"}
+                  paneSessionLabel={sessionIdFirstSegment(sessionId)}
+                  onExpandTerminal={() => {
+                    navigatePath(terminalPathForSessionId(sessionId), "push");
+                    setTerminalPresentation("full");
+                  }}
+                  onMinimizePane={() => setTerminalOverlayMinimized(true)}
+                  onDisconnect={() => removeAttachmentForSession(sessionId, "userDisconnectOverlay")}
+                  onTerminate={() => void handleSignalSession(sessionId, Signal.SIGTERM)}
+                  onRemoteSessionEnded={() =>
+                    removeAttachmentForSession(sessionId, "remoteSessionEndedOverlay")
+                  }
+                />
+              )}
             </div>
           ))}
         </div>

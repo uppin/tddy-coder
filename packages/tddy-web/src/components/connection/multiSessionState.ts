@@ -14,6 +14,11 @@ export type LiveKitConnectionParams = {
   identity: string;
   serverIdentity: string;
   debugLogging: boolean;
+  /** Present when session_type is "claude-cli"; absent for normal LiveKit sessions. */
+  claudeCli?: {
+    sessionId: string;
+    sessionToken: string;
+  };
 };
 
 /** Map: sessionId → LiveKit params for that attachment (insertion order = connect order). */
