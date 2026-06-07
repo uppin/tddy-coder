@@ -10,7 +10,9 @@ use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::Status;
 
+use crate::project_storage;
 use crate::session_reader::is_pid_alive;
+use crate::worktrees;
 
 /// After SIGKILL the child may be a zombie until its parent reaps it; `kill(pid, 0)` still succeeds.
 #[cfg(all(unix, target_os = "linux"))]
@@ -108,7 +110,15 @@ fn wait_until_pid_stopped(pid: u32, total: Duration, step: Duration) -> bool {
 }
 
 /// Deletes a session directory. On Unix, terminates a live recorded PID first.
-pub fn delete_session_directory(sessions_base: &Path, session_id: &str) -> Result<(), Status> {
+///
+/// `projects_dir` is optional but recommended for claude-cli sessions: when provided, the
+/// linked git worktree is removed via `git worktree remove` (git-aware). When absent, the
+/// directory is removed with `std::fs::remove_dir_all` (leaving a dangling git worktree registration).
+pub fn delete_session_directory(
+    sessions_base: &Path,
+    session_id: &str,
+    projects_dir: Option<&Path>,
+) -> Result<(), Status> {
     let session_id = session_id.trim();
     let session_dir = resolve_session_directory_for_delete(sessions_base, session_id)?;
     log::debug!(
@@ -162,14 +172,65 @@ pub fn delete_session_directory(sessions_base: &Path, session_id: &str) -> Resul
     #[cfg(not(unix))]
     let _ = metadata;
 
-    // For claude-cli sessions, also remove the dedicated worktree directory.
-    if let Some(worktree) = claude_cli_worktree {
-        let _ = std::fs::remove_dir_all(&worktree);
-        log::info!(
-            "delete_session_directory: removed claude-cli worktree {:?} for {}",
-            worktree,
-            session_id
-        );
+    // For claude-cli sessions, remove the linked git worktree.
+    if let Some(ref worktree_str) = claude_cli_worktree {
+        let worktree = PathBuf::from(worktree_str);
+        // Attempt git-aware removal when we have a projects_dir and a project_id.
+        let removed_git_aware = if let (Some(pd), Some(ref project_id)) = (
+            projects_dir,
+            metadata.as_ref().map(|m| m.project_id.as_str()),
+        ) {
+            match project_storage::find_project(pd, project_id) {
+                Ok(Some(ref project)) => {
+                    let repo_root = PathBuf::from(&project.main_repo_path);
+                    match worktrees::remove_worktree_under_repo(&repo_root, &worktree) {
+                        Ok(()) => {
+                            log::info!(
+                                "delete_session_directory: git worktree remove {:?} for {}",
+                                worktree,
+                                session_id
+                            );
+                            true
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "delete_session_directory: git worktree remove failed for {:?} ({:?}); falling back to remove_dir_all",
+                                worktree,
+                                e
+                            );
+                            false
+                        }
+                    }
+                }
+                Ok(None) => {
+                    log::warn!(
+                        "delete_session_directory: project {} not found; falling back to remove_dir_all for {:?}",
+                        project_id,
+                        worktree
+                    );
+                    false
+                }
+                Err(e) => {
+                    log::warn!(
+                        "delete_session_directory: find_project error ({}); falling back to remove_dir_all for {:?}",
+                        e,
+                        worktree
+                    );
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        if !removed_git_aware {
+            let _ = std::fs::remove_dir_all(&worktree);
+            log::info!(
+                "delete_session_directory: removed claude-cli worktree {:?} for {} (remove_dir_all fallback)",
+                worktree,
+                session_id
+            );
+        }
     }
 
     std::fs::remove_dir_all(&session_dir).map_err(|e| {
@@ -240,7 +301,7 @@ mod tests {
         let dir = unified_session_dir_path(&base, sid);
         std::fs::create_dir_all(dir.join("logs")).unwrap();
 
-        let r = delete_session_directory(&base, sid);
+        let r = delete_session_directory(&base, sid, None);
         assert!(r.is_ok(), "expected delete to succeed without metadata");
         assert!(!dir.exists(), "directory should be removed");
     }
@@ -259,7 +320,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         write_dead_pid_session(&dir, sid, pid);
 
-        let r = delete_session_directory(&base, sid);
+        let r = delete_session_directory(&base, sid, None);
         assert!(r.is_ok(), "expected delete to succeed for inactive session");
         assert!(!dir.exists(), "directory should be removed");
     }
@@ -282,7 +343,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let base = temp.path().join("sessions_this_daemon");
         std::fs::create_dir_all(&base).unwrap();
-        let err = delete_session_directory(&base, "session-owned-on-another-daemon").unwrap_err();
+        let err = delete_session_directory(&base, "session-owned-on-another-daemon", None).unwrap_err();
         assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
     }
 }

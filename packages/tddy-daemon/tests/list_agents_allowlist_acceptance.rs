@@ -178,6 +178,10 @@ allowed_agents:
         recipe: String::new(),
         session_type: String::new(),
         model: String::new(),
+        branch_worktree_intent: String::new(),
+        new_branch_name: String::new(),
+        selected_integration_base_ref: String::new(),
+        selected_branch_to_work_on: String::new(),
     });
     let err = service
         .start_session(request)

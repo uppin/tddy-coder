@@ -19,6 +19,7 @@ service ConnectionService {
   rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
   rpc RemoveWorktree(RemoveWorktreeRequest) returns (RemoveWorktreeResponse);
   rpc StreamSessionTerminalIO(stream SessionTerminalInput) returns (stream SessionTerminalOutput);
+  rpc ListProjectBranches(ListProjectBranchesRequest) returns (ListProjectBranchesResponse);
 }
 
 message ListToolsRequest {}
@@ -109,6 +110,16 @@ message StartSessionRequest {
   string session_type = 7;
   // Model id for claude-cli sessions (e.g. "claude-opus-4-8"). Required when session_type = "claude-cli".
   string model = 8;
+  // Branch/worktree intent for claude-cli sessions. One of: "new_branch_from_base",
+  // "work_on_selected_branch". Empty defaults to "new_branch_from_base" with a generated name.
+  string branch_worktree_intent = 9;
+  // Required when branch_worktree_intent = "new_branch_from_base". Name for the new branch.
+  string new_branch_name = 10;
+  // Optional override for the integration base ref (e.g. "origin/master"). When empty, the project's
+  // main_branch_ref (or the daemon default) is used.
+  string selected_integration_base_ref = 11;
+  // Required when branch_worktree_intent = "work_on_selected_branch". The existing branch to check out.
+  string selected_branch_to_work_on = 12;
 }
 message StartSessionResponse {
   string session_id = 1;
@@ -234,6 +245,18 @@ message RemoveWorktreeRequest {
 message RemoveWorktreeResponse {
   bool ok = 1;
   string message = 2;
+}
+
+// --- Project branch listing (for claude-cli branch selection dropdown) ---
+
+message ListProjectBranchesRequest {
+  string session_token = 1;
+  string project_id = 2;
+  string daemon_instance_id = 3;
+}
+
+message ListProjectBranchesResponse {
+  repeated string branches = 1;
 }
 
 // --- Claude Code CLI terminal I/O streaming ---

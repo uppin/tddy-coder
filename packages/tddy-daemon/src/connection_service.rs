@@ -9,15 +9,17 @@ use livekit::prelude::Room;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+use tddy_core::{BranchWorktreeIntent, Changeset, ChangesetWorkflow};
 use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
     AgentInfo, ConnectSessionRequest, ConnectSessionResponse,
     ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, EligibleDaemonEntry, ListAgentsRequest,
     ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
-    ListProjectsRequest, ListProjectsResponse, ListSessionWorkflowFilesRequest,
-    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse, ListToolsRequest,
-    ListToolsResponse, ListWorktreesForProjectRequest, ListWorktreesForProjectResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
+    ListSessionsRequest, ListSessionsResponse, ListToolsRequest, ListToolsResponse,
+    ListWorktreesForProjectRequest, ListWorktreesForProjectResponse,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
     ReadSessionWorkflowFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
     ResumeSessionRequest, ResumeSessionResponse, SessionEntry as ProtoSessionEntry,
@@ -181,9 +183,10 @@ impl ConnectionServiceImpl {
 
     /// Handle `StartSession` for `session_type = "claude-cli"` sessions.
     ///
-    /// Unlike tool sessions, claude-cli sessions do not need LiveKit and do not look up
-    /// the project registry for a repo path. They create their own worktree directory under
-    /// the sessions base and spawn the `claude` binary there.
+    /// Requires a valid, registered project. Creates a real git worktree under the project's
+    /// main repo (via `tddy_core::setup_worktree_for_session_with_optional_chain_base`), then
+    /// spawns the `claude` binary in a PTY.
+    #[allow(clippy::too_many_arguments)]
     async fn start_claude_cli_session(
         &self,
         os_user: &str,
@@ -191,6 +194,10 @@ impl ConnectionServiceImpl {
         sessions_base: PathBuf,
         model: &str,
         project_id: &str,
+        branch_worktree_intent: &str,
+        new_branch_name: &str,
+        selected_integration_base_ref: &str,
+        selected_branch_to_work_on: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -198,25 +205,107 @@ impl ConnectionServiceImpl {
             ));
         }
 
+        // Require a valid, registered project — claude-cli always runs in a real worktree.
+        let project_id = project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument(
+                "project_id is required for claude-cli sessions",
+            ));
+        }
+        let projects_dir = projects_path_for_user(os_user)
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        let project = project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+        let repo_root = PathBuf::from(&project.main_repo_path);
+        if !repo_root.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
         // Create session directory under sessions_base/sessions/<id>/.
-        // sessions_base is already user-specific (resolved via sessions_base_for_user(os_user)).
-        let session_dir = sessions_base
-            .join(SESSIONS_SUBDIR)
-            .join(session_id);
+        let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir).map_err(|e| {
             Status::internal(format!("failed to create session dir: {}", e))
         })?;
 
-        // Create a dedicated worktree directory for the claude CLI to run in.
+        // Build branch intent and write a minimal changeset so the worktree setup fn can read it.
         let short_id = &session_id[..8.min(session_id.len())];
-        let worktree_path = sessions_base
-            .join("worktrees")
-            .join(format!("claude-cli-{}", short_id));
-        std::fs::create_dir_all(&worktree_path).map_err(|e| {
-            Status::internal(format!("failed to create worktree dir: {}", e))
+        let (intent, resolved_new_branch, resolved_selected_branch) =
+            match branch_worktree_intent.trim() {
+                "new_branch_from_base" => {
+                    if new_branch_name.trim().is_empty() {
+                        return Err(Status::invalid_argument(
+                            "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
+                        ));
+                    }
+                    (
+                        BranchWorktreeIntent::NewBranchFromBase,
+                        Some(new_branch_name.trim().to_string()),
+                        None,
+                    )
+                }
+                "work_on_selected_branch" => {
+                    if selected_branch_to_work_on.trim().is_empty() {
+                        return Err(Status::invalid_argument(
+                            "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
+                        ));
+                    }
+                    (
+                        BranchWorktreeIntent::WorkOnSelectedBranch,
+                        None,
+                        Some(selected_branch_to_work_on.trim().to_string()),
+                    )
+                }
+                _ => {
+                    // Default: create a new branch from the integration base with a generated name.
+                    (
+                        BranchWorktreeIntent::NewBranchFromBase,
+                        Some(format!("claude-cli/{}", short_id)),
+                        None,
+                    )
+                }
+            };
+
+        let cs_workflow = ChangesetWorkflow {
+            branch_worktree_intent: Some(intent),
+            new_branch_name: resolved_new_branch,
+            selected_integration_base_ref: if selected_integration_base_ref.trim().is_empty() {
+                None
+            } else {
+                Some(selected_integration_base_ref.trim().to_string())
+            },
+            selected_branch_to_work_on: resolved_selected_branch,
+            ..ChangesetWorkflow::default()
+        };
+        let cs = Changeset {
+            workflow: Some(cs_workflow),
+            ..Changeset::default()
+        };
+        tddy_core::write_changeset(&session_dir, &cs).map_err(|e| {
+            Status::internal(format!("failed to write changeset: {}", e))
         })?;
 
-        // Spawn the claude CLI process.
+        // Create the real git worktree (blocking: involves git fetch + git worktree add).
+        let repo_root_clone = repo_root.clone();
+        let session_dir_clone = session_dir.clone();
+        let timeout = self.config.spawn_worker_request_timeout();
+        let worktree_path = spawn_blocking_with_timeout(
+            timeout,
+            "start_claude_cli_session: create worktree",
+            move || {
+                tddy_core::setup_worktree_for_session_with_optional_chain_base(
+                    &repo_root_clone,
+                    &session_dir_clone,
+                    None,
+                )
+                .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
+            },
+        )
+        .await?;
+
+        // Spawn the claude CLI process in a PTY inside the real worktree.
         let binary_path = self
             .config
             .claude_cli
@@ -237,7 +326,7 @@ impl ConnectionServiceImpl {
 
         let pid = handle.pid;
 
-        // Write .session.yaml
+        // Write .session.yaml.
         let now = chrono::Utc::now().to_rfc3339();
         let meta = tddy_core::SessionMetadata {
             session_id: session_id.to_string(),
@@ -261,7 +350,10 @@ impl ConnectionServiceImpl {
         log::info!(
             target: "tddy_daemon::connection_service",
             "started claude-cli session {} pid={} worktree={} user={}",
-            session_id, pid, worktree_path.display(), os_user
+            session_id,
+            pid,
+            worktree_path.display(),
+            os_user
         );
 
         Ok(Response::new(StartSessionResponse {
@@ -653,7 +745,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
         }
 
-        // --- claude-cli branch: no LiveKit, no project registry lookup ---
+        // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
         if req.session_type.trim() == "claude-cli" {
             let sessions_base = (self.sessions_base_for_user)(os_user)
                 .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
@@ -665,6 +757,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     sessions_base,
                     req.model.trim(),
                     req.project_id.trim(),
+                    req.branch_worktree_intent.trim(),
+                    req.new_branch_name.trim(),
+                    req.selected_integration_base_ref.trim(),
+                    req.selected_branch_to_work_on.trim(),
                 )
                 .await;
         }
@@ -1038,7 +1134,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             sessions_base,
             os_user
         );
-        session_deletion::delete_session_directory(&sessions_base, session_id)?;
+        let projects_dir_opt = projects_path_for_user(os_user);
+        session_deletion::delete_session_directory(
+            &sessions_base,
+            session_id,
+            projects_dir_opt.as_deref(),
+        )?;
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
     }
@@ -1331,6 +1432,58 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 timeout.as_secs()
             ))),
         }
+    }
+
+    async fn list_project_branches(
+        &self,
+        request: Request<ListProjectBranchesRequest>,
+    ) -> Result<Response<ListProjectBranchesResponse>, Status> {
+        const BRANCH_LIST_LIMIT: usize = 50;
+
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let project_id = req.project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+
+        let projects_dir = projects_path_for_user(os_user)
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        let project = project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+        let repo_root = PathBuf::from(&project.main_repo_path);
+        if !repo_root.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
+        let timeout = self.config.spawn_worker_request_timeout();
+        let branches = spawn_blocking_with_timeout(
+            timeout,
+            "ListProjectBranches: git remote refs",
+            move || {
+                tddy_core::list_recent_remote_branches(&repo_root, BRANCH_LIST_LIMIT)
+                    .map_err(|e| anyhow::anyhow!("list_recent_remote_branches failed: {}", e))
+            },
+        )
+        .await?;
+
+        log::debug!(
+            target: "tddy_daemon::connection_service",
+            "list_project_branches: project_id={} returned {} branches",
+            project_id,
+            branches.len()
+        );
+
+        Ok(Response::new(ListProjectBranchesResponse { branches }))
     }
 }
 

@@ -178,6 +178,14 @@ type ProjectSessionForm = {
   sessionType: "tool" | "claude-cli";
   /** Model id for claude-cli sessions (e.g. "claude-opus-4-8") */
   model: string;
+  /** Branch/worktree intent for claude-cli sessions: "new_branch_from_base" or "work_on_selected_branch". Empty = daemon default. */
+  branchWorktreeIntent: "new_branch_from_base" | "work_on_selected_branch" | "";
+  /** New branch name when branchWorktreeIntent = "new_branch_from_base". */
+  newBranchName: string;
+  /** Integration base ref override (e.g. "origin/master") for "new_branch_from_base". */
+  selectedIntegrationBaseRef: string;
+  /** Existing branch to check out when branchWorktreeIntent = "work_on_selected_branch". */
+  selectedBranchToWorkOn: string;
 };
 
 function defaultProjectSessionForm(
@@ -197,11 +205,17 @@ function defaultProjectSessionForm(
     daemonInstanceId: localDaemon?.instanceId ?? daemons[0]?.instanceId ?? "",
     sessionType: "tool",
     model: CLAUDE_CLI_MODELS[0]?.id ?? "",
+    branchWorktreeIntent: "new_branch_from_base",
+    newBranchName: "",
+    selectedIntegrationBaseRef: "",
+    selectedBranchToWorkOn: "",
   };
 }
 
 const sessionControlSelectClassName =
   "box-border w-full min-w-[9rem] max-w-[16rem] rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+type ConnectionClient = ReturnType<typeof createConnectionClient>;
 
 /** Tool, backend, host, and browser-terminal debug for one project—per session / connection, not stored on the project. */
 function ProjectSessionOptions({
@@ -212,6 +226,9 @@ function ProjectSessionOptions({
   form,
   onChange,
   startSessionButton,
+  client,
+  sessionToken,
+  projectId,
 }: {
   /** Unique per registry row (`projectId` or `projectId__daemonInstanceId`) for DOM ids / testids. */
   fieldIdSuffix: string;
@@ -221,6 +238,9 @@ function ProjectSessionOptions({
   form: ProjectSessionForm;
   onChange: (patch: Partial<ProjectSessionForm>) => void;
   startSessionButton: ReactNode;
+  client: ConnectionClient;
+  sessionToken: string | null;
+  projectId: string;
 }) {
   const toolId = `tool-select-${fieldIdSuffix}`;
   const backendId = `backend-select-${fieldIdSuffix}`;
@@ -229,10 +249,34 @@ function ProjectSessionOptions({
   const debugId = `debug-logging-${fieldIdSuffix}`;
   const modelId = `model-${fieldIdSuffix}`;
   const sessionTypeId = `session-type-${fieldIdSuffix}`;
+  const branchIntentId = `branch-intent-${fieldIdSuffix}`;
+  const newBranchNameId = `new-branch-name-${fieldIdSuffix}`;
+  const baseRefId = `base-ref-${fieldIdSuffix}`;
+  const branchToWorkOnId = `branch-to-work-on-${fieldIdSuffix}`;
   const backendOptions = useMemo(
     () => buildAgentSelectOptionsFromRpc(agents.map((a) => ({ id: a.id, label: a.label }))),
     [agents],
   );
+
+  // Fetch available remote branches when session type is claude-cli.
+  const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  useEffect(() => {
+    if (form.sessionType !== "claude-cli" || !sessionToken || !projectId) return;
+    let cancelled = false;
+    setBranchesLoading(true);
+    client.listProjectBranches({ sessionToken, projectId, daemonInstanceId: "" })
+      .then((res) => {
+        if (!cancelled) setRemoteBranches(res.branches);
+      })
+      .catch(() => {
+        if (!cancelled) setRemoteBranches([]);
+      })
+      .finally(() => {
+        if (!cancelled) setBranchesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [form.sessionType, sessionToken, projectId, client]);
   return (
     <>
       <p className="mb-2 mt-2 text-xs text-muted-foreground">
@@ -274,22 +318,98 @@ function ProjectSessionOptions({
           </select>
         </div>
         {form.sessionType === "claude-cli" ? (
-          <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
-            <label className="text-sm font-medium leading-none" htmlFor={modelId}>
-              Model
-            </label>
-            <select
-              id={modelId}
-              data-testid={`model-select-${fieldIdSuffix}`}
-              value={form.model}
-              onChange={(e) => onChange({ model: e.target.value })}
-              className={sessionControlSelectClassName}
-            >
-              {CLAUDE_CLI_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>{m.label}</option>
-              ))}
-            </select>
-          </div>
+          <>
+            <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
+              <label className="text-sm font-medium leading-none" htmlFor={modelId}>
+                Model
+              </label>
+              <select
+                id={modelId}
+                data-testid={`model-select-${fieldIdSuffix}`}
+                value={form.model}
+                onChange={(e) => onChange({ model: e.target.value })}
+                className={sessionControlSelectClassName}
+              >
+                {CLAUDE_CLI_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex min-w-[10rem] shrink-0 flex-col gap-1">
+              <label className="text-sm font-medium leading-none" htmlFor={branchIntentId}>
+                Branch mode
+              </label>
+              <select
+                id={branchIntentId}
+                data-testid={`branch-intent-select-${fieldIdSuffix}`}
+                value={form.branchWorktreeIntent}
+                onChange={(e) =>
+                  onChange({
+                    branchWorktreeIntent: e.target.value as ProjectSessionForm["branchWorktreeIntent"],
+                  })
+                }
+                className={sessionControlSelectClassName}
+              >
+                <option value="new_branch_from_base">New branch from base</option>
+                <option value="work_on_selected_branch">Work on existing branch</option>
+              </select>
+            </div>
+            {form.branchWorktreeIntent === "new_branch_from_base" ? (
+              <>
+                <div className="flex min-w-[10rem] shrink-0 flex-col gap-1">
+                  <label className="text-sm font-medium leading-none" htmlFor={newBranchNameId}>
+                    New branch name
+                  </label>
+                  <input
+                    id={newBranchNameId}
+                    data-testid={`new-branch-name-${fieldIdSuffix}`}
+                    type="text"
+                    placeholder="(auto-generated)"
+                    value={form.newBranchName}
+                    onChange={(e) => onChange({ newBranchName: e.target.value })}
+                    className={sessionControlSelectClassName}
+                  />
+                </div>
+                <div className="flex min-w-[10rem] shrink-0 flex-col gap-1">
+                  <label className="text-sm font-medium leading-none" htmlFor={baseRefId}>
+                    Base ref
+                  </label>
+                  <select
+                    id={baseRefId}
+                    data-testid={`base-ref-select-${fieldIdSuffix}`}
+                    value={form.selectedIntegrationBaseRef}
+                    onChange={(e) => onChange({ selectedIntegrationBaseRef: e.target.value })}
+                    className={sessionControlSelectClassName}
+                    disabled={branchesLoading}
+                  >
+                    <option value="">(project default)</option>
+                    {remoteBranches.map((b) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            ) : (
+              <div className="flex min-w-[10rem] shrink-0 flex-col gap-1">
+                <label className="text-sm font-medium leading-none" htmlFor={branchToWorkOnId}>
+                  Branch to work on
+                </label>
+                <select
+                  id={branchToWorkOnId}
+                  data-testid={`branch-to-work-on-select-${fieldIdSuffix}`}
+                  value={form.selectedBranchToWorkOn}
+                  onChange={(e) => onChange({ selectedBranchToWorkOn: e.target.value })}
+                  className={sessionControlSelectClassName}
+                  disabled={branchesLoading}
+                >
+                  <option value="">{branchesLoading ? "Loading…" : "(select branch)"}</option>
+                  {remoteBranches.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </>
         ) : (
           <>
             <div className="flex min-w-[9rem] shrink-0 flex-col gap-1">
@@ -1609,6 +1729,10 @@ export function ConnectionScreen({
         recipe: form.sessionType === "claude-cli" ? "" : form.recipe,
         sessionType: form.sessionType === "claude-cli" ? "claude-cli" : "",
         model: form.sessionType === "claude-cli" ? form.model : "",
+        branchWorktreeIntent: form.sessionType === "claude-cli" ? form.branchWorktreeIntent : "",
+        newBranchName: form.sessionType === "claude-cli" ? form.newBranchName : "",
+        selectedIntegrationBaseRef: form.sessionType === "claude-cli" ? form.selectedIntegrationBaseRef : "",
+        selectedBranchToWorkOn: form.sessionType === "claude-cli" ? form.selectedBranchToWorkOn : "",
       });
       console.info("[ConnectionScreen] startSession: new attachment", { sessionId: res.sessionId });
       setSessionAttachments((prev) =>
@@ -2075,6 +2199,9 @@ export function ConnectionScreen({
                 daemons={daemons}
                 form={formForRow}
                 onChange={(patch) => updateProjectForm(rowKey, patch)}
+                client={client}
+                sessionToken={sessionToken}
+                projectId={p.projectId}
                 startSessionButton={
                   <Button
                     type="button"
