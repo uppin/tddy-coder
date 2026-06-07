@@ -131,38 +131,46 @@ async fn handle_rpc<S: tddy_rpc::RpcService>(
                 .into_response()
         }
         Ok(tddy_rpc::ResponseBody::Streaming(rx)) => {
-            let mut body_bytes = Vec::new();
-            let mut had_error = false;
-            let mut stream = ReceiverStream::new(rx);
-            while let Some(item) = stream.next().await {
-                match item {
-                    Ok(payload) => {
-                        body_bytes.extend_from_slice(&wrap_envelope(&payload, false));
-                    }
-                    Err(status) => {
-                        had_error = true;
-                        let err_json = serde_json::json!({
-                            "error": {
-                                "code": code_to_connect_str(&status.code),
-                                "message": status.message
-                            }
-                        });
-                        body_bytes
-                            .extend_from_slice(&wrap_end_stream(err_json.to_string().as_bytes()));
-                        break;
+            // Stream frames to the client as they arrive rather than buffering everything first.
+            // Without this, long-lived streams (e.g. terminal output) never deliver data until
+            // the session ends.
+            let (body_tx, body_rx) =
+                tokio::sync::mpsc::unbounded_channel::<Result<bytes::Bytes, std::convert::Infallible>>();
+            tokio::spawn(async move {
+                let mut had_error = false;
+                let mut stream = ReceiverStream::new(rx);
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(payload) => {
+                            let _ = body_tx.send(Ok(bytes::Bytes::from(wrap_envelope(&payload, false))));
+                        }
+                        Err(status) => {
+                            had_error = true;
+                            let err_json = serde_json::json!({
+                                "error": {
+                                    "code": code_to_connect_str(&status.code),
+                                    "message": status.message
+                                }
+                            });
+                            let _ = body_tx.send(Ok(bytes::Bytes::from(
+                                wrap_end_stream(err_json.to_string().as_bytes()),
+                            )));
+                            break;
+                        }
                     }
                 }
-            }
-            if !had_error {
-                body_bytes.extend_from_slice(&wrap_end_stream(b"{}"));
-            }
+                if !had_error {
+                    let _ = body_tx.send(Ok(bytes::Bytes::from(wrap_end_stream(b"{}"))));
+                }
+                // body_tx drop closes the stream, signalling end of HTTP response body.
+            });
             (
                 axum::http::StatusCode::OK,
                 [(
                     header::CONTENT_TYPE,
                     protocol.streaming_response_content_type(),
                 )],
-                Body::from(body_bytes),
+                Body::from_stream(tokio_stream::wrappers::UnboundedReceiverStream::new(body_rx)),
             )
                 .into_response()
         }

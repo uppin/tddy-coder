@@ -43,6 +43,8 @@ url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 teloxide = { version = "0.17.0", features = ["macros", "rustls"], default-features = false }
 
+portable-pty = "0.9"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

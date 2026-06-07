@@ -2605,7 +2605,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         );
         self.ensure_authorized(chat_id)?;
 
-        crate::session_deletion::delete_session_directory(&self.sessions_base, session_id)
+        crate::session_deletion::delete_session_directory(&self.sessions_base, session_id, None)
             .map_err(|s| anyhow::anyhow!("{}", s.message))?;
 
         if let Ok(mut g) = self.telegram_tracked.lock() {

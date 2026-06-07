@@ -9,20 +9,23 @@ use livekit::prelude::Room;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+use tddy_core::{BranchWorktreeIntent, Changeset, ChangesetWorkflow};
 use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
     AgentInfo, ConnectSessionRequest, ConnectSessionResponse,
     ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, EligibleDaemonEntry, ListAgentsRequest,
     ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
-    ListProjectsRequest, ListProjectsResponse, ListSessionWorkflowFilesRequest,
-    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse, ListToolsRequest,
-    ListToolsResponse, ListWorktreesForProjectRequest, ListWorktreesForProjectResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
+    ListSessionsRequest, ListSessionsResponse, ListToolsRequest, ListToolsResponse,
+    ListWorktreesForProjectRequest, ListWorktreesForProjectResponse,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
     ReadSessionWorkflowFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SessionEntry as ProtoSessionEntry,
-    SessionTerminalInput, SessionTerminalOutput, Signal, SignalSessionRequest, SignalSessionResponse,
-    StartSessionRequest, StartSessionResponse, ToolInfo, WorkflowFileEntry, WorktreeRow,
+    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse,
+    SessionEntry as ProtoSessionEntry, SessionTerminalInput, SessionTerminalOutput, Signal,
+    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
+    StreamTerminalOutputRequest, ToolInfo, WorkflowFileEntry, WorktreeRow,
 };
 use uuid::Uuid;
 
@@ -125,6 +128,36 @@ impl Stream for TerminalOutputStream {
 
 impl Unpin for TerminalOutputStream {}
 
+/// Stream adapter backed by an mpsc channel — used for `StreamTerminalOutput` (browser-compatible
+/// server-streaming RPC).
+///
+/// Unlike `TerminalOutputStream` (broadcast-based), this correctly registers the waker via
+/// `poll_recv` so the stream is woken as soon as data arrives. A background task bridges the
+/// broadcast channel into the mpsc sender so no messages can be lost between `try_recv()` and
+/// waker registration.
+pub struct MpscTerminalOutputStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<bytes::Bytes>,
+}
+
+impl Stream for MpscTerminalOutputStream {
+    type Item = Result<SessionTerminalOutput, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.rx.poll_recv(cx) {
+            std::task::Poll::Ready(Some(chunk)) => std::task::Poll::Ready(Some(Ok(
+                SessionTerminalOutput { data: chunk.to_vec() },
+            ))),
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl Unpin for MpscTerminalOutputStream {}
+
 /// ConnectionService implementation.
 pub struct ConnectionServiceImpl {
     config: DaemonConfig,
@@ -181,9 +214,10 @@ impl ConnectionServiceImpl {
 
     /// Handle `StartSession` for `session_type = "claude-cli"` sessions.
     ///
-    /// Unlike tool sessions, claude-cli sessions do not need LiveKit and do not look up
-    /// the project registry for a repo path. They create their own worktree directory under
-    /// the sessions base and spawn the `claude` binary there.
+    /// Requires a valid, registered project. Creates a real git worktree under the project's
+    /// main repo (via `tddy_core::setup_worktree_for_session_with_optional_chain_base`), then
+    /// spawns the `claude` binary in a PTY.
+    #[allow(clippy::too_many_arguments)]
     async fn start_claude_cli_session(
         &self,
         os_user: &str,
@@ -191,6 +225,10 @@ impl ConnectionServiceImpl {
         sessions_base: PathBuf,
         model: &str,
         project_id: &str,
+        branch_worktree_intent: &str,
+        new_branch_name: &str,
+        selected_integration_base_ref: &str,
+        selected_branch_to_work_on: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -198,25 +236,107 @@ impl ConnectionServiceImpl {
             ));
         }
 
+        // Require a valid, registered project — claude-cli always runs in a real worktree.
+        let project_id = project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument(
+                "project_id is required for claude-cli sessions",
+            ));
+        }
+        let projects_dir = projects_path_for_user(os_user)
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        let project = project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+        let repo_root = PathBuf::from(&project.main_repo_path);
+        if !repo_root.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
         // Create session directory under sessions_base/sessions/<id>/.
-        // sessions_base is already user-specific (resolved via sessions_base_for_user(os_user)).
-        let session_dir = sessions_base
-            .join(SESSIONS_SUBDIR)
-            .join(session_id);
+        let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir).map_err(|e| {
             Status::internal(format!("failed to create session dir: {}", e))
         })?;
 
-        // Create a dedicated worktree directory for the claude CLI to run in.
+        // Build branch intent and write a minimal changeset so the worktree setup fn can read it.
         let short_id = &session_id[..8.min(session_id.len())];
-        let worktree_path = sessions_base
-            .join("worktrees")
-            .join(format!("claude-cli-{}", short_id));
-        std::fs::create_dir_all(&worktree_path).map_err(|e| {
-            Status::internal(format!("failed to create worktree dir: {}", e))
+        let (intent, resolved_new_branch, resolved_selected_branch) =
+            match branch_worktree_intent.trim() {
+                "new_branch_from_base" => {
+                    if new_branch_name.trim().is_empty() {
+                        return Err(Status::invalid_argument(
+                            "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
+                        ));
+                    }
+                    (
+                        BranchWorktreeIntent::NewBranchFromBase,
+                        Some(new_branch_name.trim().to_string()),
+                        None,
+                    )
+                }
+                "work_on_selected_branch" => {
+                    if selected_branch_to_work_on.trim().is_empty() {
+                        return Err(Status::invalid_argument(
+                            "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
+                        ));
+                    }
+                    (
+                        BranchWorktreeIntent::WorkOnSelectedBranch,
+                        None,
+                        Some(selected_branch_to_work_on.trim().to_string()),
+                    )
+                }
+                _ => {
+                    // Default: create a new branch from the integration base with a generated name.
+                    (
+                        BranchWorktreeIntent::NewBranchFromBase,
+                        Some(format!("claude-cli/{}", short_id)),
+                        None,
+                    )
+                }
+            };
+
+        let cs_workflow = ChangesetWorkflow {
+            branch_worktree_intent: Some(intent),
+            new_branch_name: resolved_new_branch,
+            selected_integration_base_ref: if selected_integration_base_ref.trim().is_empty() {
+                None
+            } else {
+                Some(selected_integration_base_ref.trim().to_string())
+            },
+            selected_branch_to_work_on: resolved_selected_branch,
+            ..ChangesetWorkflow::default()
+        };
+        let cs = Changeset {
+            workflow: Some(cs_workflow),
+            ..Changeset::default()
+        };
+        tddy_core::write_changeset(&session_dir, &cs).map_err(|e| {
+            Status::internal(format!("failed to write changeset: {}", e))
         })?;
 
-        // Spawn the claude CLI process.
+        // Create the real git worktree (blocking: involves git fetch + git worktree add).
+        let repo_root_clone = repo_root.clone();
+        let session_dir_clone = session_dir.clone();
+        let timeout = self.config.spawn_worker_request_timeout();
+        let worktree_path = spawn_blocking_with_timeout(
+            timeout,
+            "start_claude_cli_session: create worktree",
+            move || {
+                tddy_core::setup_worktree_for_session_with_optional_chain_base(
+                    &repo_root_clone,
+                    &session_dir_clone,
+                    None,
+                )
+                .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
+            },
+        )
+        .await?;
+
+        // Spawn the claude CLI process in a PTY inside the real worktree.
         let binary_path = self
             .config
             .claude_cli
@@ -237,7 +357,7 @@ impl ConnectionServiceImpl {
 
         let pid = handle.pid;
 
-        // Write .session.yaml
+        // Write .session.yaml.
         let now = chrono::Utc::now().to_rfc3339();
         let meta = tddy_core::SessionMetadata {
             session_id: session_id.to_string(),
@@ -258,17 +378,67 @@ impl ConnectionServiceImpl {
             Status::internal(format!("failed to write session metadata: {}", e))
         })?;
 
+        // Optionally expose the PTY via a per-session LiveKit participant so that LiveKit
+        // clients (web UI, pty-relay --livekit-url) can use the same bidi-stream path as
+        // tool sessions. Falls back gracefully: if LiveKit is not configured the session is
+        // still usable via the gRPC connectrpc endpoints.
+        let (lk_room, lk_url, lk_server_identity) =
+            if let Some(lk) = spawner::livekit_creds_from_config(&self.config) {
+                let room_name = spawner::resolve_livekit_room_name(
+                    lk.common_room.as_deref(),
+                    session_id,
+                );
+                let server_identity = spawner::livekit_server_identity_for_session(
+                    lk.daemon_instance_id.as_deref(),
+                    session_id,
+                );
+                match crate::claude_cli_session::spawn_livekit_bridge(
+                    Arc::clone(&handle),
+                    &lk.url,
+                    &room_name,
+                    &lk.api_key,
+                    &lk.api_secret,
+                    &server_identity,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        log::info!(
+                            target: "tddy_daemon::connection_service",
+                            "claude-cli session {}: LiveKit bridge started (identity={})",
+                            session_id,
+                            server_identity
+                        );
+                        (room_name, lk.url.clone(), server_identity)
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            target: "tddy_daemon::connection_service",
+                            "claude-cli session {}: LiveKit bridge failed ({}); gRPC path still works",
+                            session_id,
+                            e
+                        );
+                        (String::new(), String::new(), String::new())
+                    }
+                }
+            } else {
+                (String::new(), String::new(), String::new())
+            };
+
         log::info!(
             target: "tddy_daemon::connection_service",
             "started claude-cli session {} pid={} worktree={} user={}",
-            session_id, pid, worktree_path.display(), os_user
+            session_id,
+            pid,
+            worktree_path.display(),
+            os_user
         );
 
         Ok(Response::new(StartSessionResponse {
             session_id: session_id.to_string(),
-            livekit_room: String::new(),
-            livekit_url: String::new(),
-            livekit_server_identity: String::new(),
+            livekit_room: lk_room,
+            livekit_url: lk_url,
+            livekit_server_identity: lk_server_identity,
         }))
     }
 
@@ -653,7 +823,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
         }
 
-        // --- claude-cli branch: no LiveKit, no project registry lookup ---
+        // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
         if req.session_type.trim() == "claude-cli" {
             let sessions_base = (self.sessions_base_for_user)(os_user)
                 .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
@@ -665,6 +835,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     sessions_base,
                     req.model.trim(),
                     req.project_id.trim(),
+                    req.branch_worktree_intent.trim(),
+                    req.new_branch_name.trim(),
+                    req.selected_integration_base_ref.trim(),
+                    req.selected_branch_to_work_on.trim(),
                 )
                 .await;
         }
@@ -1038,7 +1212,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             sessions_base,
             os_user
         );
-        session_deletion::delete_session_directory(&sessions_base, session_id)?;
+        let projects_dir_opt = projects_path_for_user(os_user);
+        session_deletion::delete_session_directory(
+            &sessions_base,
+            session_id,
+            projects_dir_opt.as_deref(),
+        )?;
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
     }
@@ -1240,14 +1419,31 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
         let session_id = first.session_id.clone();
+        log::info!(
+            target: "tddy_daemon::connection_service",
+            "stream_session_terminal_io: session_id={}",
+            session_id
+        );
         let handle = self
             .claude_cli_manager
             .get(&session_id)
             .await
-            .ok_or_else(|| Status::not_found("claude-cli session not found or not running"))?;
+            .ok_or_else(|| {
+                log::warn!(
+                    target: "tddy_daemon::connection_service",
+                    "stream_session_terminal_io: session {} not found in registry",
+                    session_id
+                );
+                Status::not_found("claude-cli session not found or not running")
+            })?;
 
         let stdin_tx = handle.stdin_tx.clone();
         let stdout_rx = handle.stdout_tx.subscribe();
+
+        // Trigger a SIGWINCH so claude redraws its full screen onto the now-subscribed channel.
+        // The initial render happens before the browser's first stream call arrives (network RTT),
+        // so without this the terminal would be blank until the user sends input.
+        handle.trigger_redraw();
 
         // Forward the first data chunk (if any).
         if !first.data.is_empty() {
@@ -1265,6 +1461,130 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         });
 
         Ok(Response::new(TerminalOutputStream { rx: stdout_rx }))
+    }
+
+    /// Associated output stream type for [`stream_terminal_output`].
+    type StreamTerminalOutputStream = MpscTerminalOutputStream;
+
+    /// Server-streaming output — browser-compatible alternative to the bidi `StreamSessionTerminalIO`.
+    /// connect-web's Fetch transport cannot send streaming request bodies, so bidi streaming never
+    /// reaches the daemon from a browser. This RPC provides the output half; input goes via the
+    /// unary `SendTerminalInput`.
+    async fn stream_terminal_output(
+        &self,
+        request: Request<StreamTerminalOutputRequest>,
+    ) -> Result<Response<Self::StreamTerminalOutputStream>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let session_id = req.session_id.trim().to_string();
+        log::info!(
+            target: "tddy_daemon::connection_service",
+            "stream_terminal_output: session_id={}",
+            session_id
+        );
+        let handle = self
+            .claude_cli_manager
+            .get(&session_id)
+            .await
+            .ok_or_else(|| {
+                log::warn!(
+                    target: "tddy_daemon::connection_service",
+                    "stream_terminal_output: session {} not found in registry",
+                    session_id
+                );
+                Status::not_found("claude-cli session not found or not running")
+            })?;
+
+        // Subscribe to broadcast BEFORE reading the capture buffer so there is no gap:
+        // bytes produced between the capture snapshot and the first bridge recv() are
+        // covered by the broadcast subscription.
+        let (mpsc_tx, mpsc_rx) = tokio::sync::mpsc::unbounded_channel::<bytes::Bytes>();
+        let mut broadcast_rx = handle.stdout_tx.subscribe();
+
+        // Replay capture buffer first — this contains all PTY output since session start,
+        // including the initial TUI render that arrived before the browser subscribed.
+        // The broadcast channel cannot buffer for receivers that didn't exist yet
+        // (send() silently fails with 0 receivers), so the capture is the only way to see
+        // historical output.
+        {
+            let historical = handle
+                .capture
+                .lock()
+                .map(|cap| bytes::Bytes::copy_from_slice(&cap))
+                .unwrap_or_default();
+            if !historical.is_empty() {
+                log::debug!(
+                    target: "tddy_daemon::connection_service",
+                    "stream_terminal_output: replaying {} capture bytes for session {}",
+                    historical.len(),
+                    session_id
+                );
+                let _ = mpsc_tx.send(historical);
+            }
+        }
+
+        // Bridge broadcast → mpsc for all future output.
+        // Also breaks when pty_done fires so the HTTP stream ends when the process exits.
+        let mpsc_tx_bridge = mpsc_tx.clone();
+        let mut pty_done = handle.pty_done.clone();
+        tokio::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                tokio::select! {
+                    result = broadcast_rx.recv() => {
+                        match result {
+                            Ok(chunk) => {
+                                if mpsc_tx_bridge.send(chunk).is_err() {
+                                    break; // receiver dropped (stream closed)
+                                }
+                            }
+                            Err(RecvError::Closed) => break,
+                            Err(RecvError::Lagged(_)) => continue, // skip lagged; resume from latest
+                        }
+                    }
+                    _ = pty_done.changed() => break,
+                }
+            }
+        });
+
+        // Trigger a redraw so if the initial TUI render was before session start logging, we
+        // get a fresh frame regardless. (The capture replay above already covers the common
+        // case, but SIGWINCH is a cheap belt-and-suspenders.)
+        handle.trigger_redraw();
+
+        Ok(Response::new(MpscTerminalOutputStream { rx: mpsc_rx }))
+    }
+
+    /// Unary input — browser-compatible alternative to the client-streaming half of `StreamSessionTerminalIO`.
+    async fn send_terminal_input(
+        &self,
+        request: Request<SessionTerminalInput>,
+    ) -> Result<Response<SendTerminalInputResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let session_id = req.session_id.trim().to_string();
+        let handle = self
+            .claude_cli_manager
+            .get(&session_id)
+            .await
+            .ok_or_else(|| Status::not_found("claude-cli session not found or not running"))?;
+
+        if !req.data.is_empty() {
+            let _ = handle.stdin_tx.send(bytes::Bytes::from(req.data));
+        }
+        Ok(Response::new(SendTerminalInputResponse {}))
     }
 
     async fn remove_worktree(
@@ -1331,6 +1651,58 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 timeout.as_secs()
             ))),
         }
+    }
+
+    async fn list_project_branches(
+        &self,
+        request: Request<ListProjectBranchesRequest>,
+    ) -> Result<Response<ListProjectBranchesResponse>, Status> {
+        const BRANCH_LIST_LIMIT: usize = 50;
+
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let project_id = req.project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+
+        let projects_dir = projects_path_for_user(os_user)
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        let project = project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+        let repo_root = PathBuf::from(&project.main_repo_path);
+        if !repo_root.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
+        let timeout = self.config.spawn_worker_request_timeout();
+        let branches = spawn_blocking_with_timeout(
+            timeout,
+            "ListProjectBranches: git remote refs",
+            move || {
+                tddy_core::list_recent_remote_branches(&repo_root, BRANCH_LIST_LIMIT)
+                    .map_err(|e| anyhow::anyhow!("list_recent_remote_branches failed: {}", e))
+            },
+        )
+        .await?;
+
+        log::debug!(
+            target: "tddy_daemon::connection_service",
+            "list_project_branches: project_id={} returned {} branches",
+            project_id,
+            branches.len()
+        );
+
+        Ok(Response::new(ListProjectBranchesResponse { branches }))
     }
 }
 

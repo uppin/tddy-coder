@@ -203,6 +203,10 @@ async fn start_session_unknown_daemon_instance_id_returns_clear_error() {
         recipe: String::new(),
         session_type: String::new(),
         model: String::new(),
+        branch_worktree_intent: String::new(),
+        new_branch_name: String::new(),
+        selected_integration_base_ref: String::new(),
+        selected_branch_to_work_on: String::new(),
     });
     let err = service
         .start_session(request)
@@ -385,6 +389,10 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         recipe: String::new(),
         session_type: String::new(),
         model: String::new(),
+        branch_worktree_intent: String::new(),
+        new_branch_name: String::new(),
+        selected_integration_base_ref: String::new(),
+        selected_branch_to_work_on: String::new(),
     });
     let response = service_a.start_session(request).await.unwrap_or_else(|e| {
         panic!(

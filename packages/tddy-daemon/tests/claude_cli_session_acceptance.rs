@@ -3,22 +3,16 @@
 //! These tests define the desired behaviour of `session_type = "claude-cli"` sessions:
 //! session metadata persistence, enrichment without changeset.yaml, LiveKit-free responses,
 //! and resume in the existing worktree.
-//!
-//! All tests currently fail because the implementation does not yet exist:
-//! - `StartSessionRequest` has no `session_type` / `model` fields (proto not yet extended)
-//! - `SessionMetadata` has no `session_type` / `model` fields (`deny_unknown_fields` guards)
-//! - `ConnectionServiceImpl::start_session` does not branch on `session_type = "claude-cli"`
-//! - `session_list_enrichment` always falls back to `all_placeholders()` when changeset.yaml is
-//!   absent; it does not read `session_type`/`model` from `.session.yaml`
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_core::session_metadata::{
-    read_session_metadata, write_session_metadata, SessionMetadata, SESSION_METADATA_FILENAME,
+    read_session_metadata, write_session_metadata, SessionMetadata,
 };
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::user_sessions_path::TDDY_PROJECTS_DIR_ENV;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListSessionsRequest, ResumeSessionRequest,
@@ -65,32 +59,64 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionSe
     ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None, None)
 }
 
+/// Create a git repo with an origin remote pointing at itself so that
+/// `git fetch origin` / `setup_worktree_for_session_with_optional_chain_base` succeed.
+fn create_test_repo_with_origin(dir: &std::path::Path) {
+    let run = |args: &[&str], envs: &[(&str, &str)]| {
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(args).current_dir(dir);
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        cmd.output().expect("git command failed");
+    };
+    let author_env = &[
+        ("GIT_AUTHOR_NAME", "Test"),
+        ("GIT_AUTHOR_EMAIL", "t@t.com"),
+        ("GIT_COMMITTER_NAME", "Test"),
+        ("GIT_COMMITTER_EMAIL", "t@t.com"),
+    ];
+    run(&["init", "-b", "main"], &[]);
+    run(&["config", "user.email", "t@t.com"], &[]);
+    run(&["config", "user.name", "Test"], &[]);
+    run(&["commit", "--allow-empty", "-m", "init"], author_env);
+    // Add the repo itself as origin so git fetch origin works without a real server.
+    run(
+        &["remote", "add", "origin", dir.to_str().unwrap()],
+        &[],
+    );
+    run(&["push", "-u", "origin", "main"], &[]);
+}
+
+/// Write a `projects.yaml` in `projects_dir` registering the given repo as TEST_PROJECT_ID.
+fn register_project(projects_dir: &std::path::Path, repo_path: &std::path::Path) {
+    std::fs::create_dir_all(projects_dir).unwrap();
+    let yaml = format!(
+        "projects:\n  - project_id: {}\n    name: test-project\n    git_url: \"\"\n    main_repo_path: {}\n",
+        TEST_PROJECT_ID,
+        repo_path.to_str().unwrap()
+    );
+    std::fs::write(projects_dir.join("projects.yaml"), yaml).unwrap();
+}
+
 /// **claude_cli_session_metadata_fields_persisted**: after `StartSession` with
 /// `session_type = "claude-cli"` succeeds, `.session.yaml` under the new session directory must
-/// contain `session_type = "claude-cli"` and `model = TEST_MODEL`.
-///
-/// FAILS: `StartSessionRequest` has no `session_type` / `model` fields (proto not extended).
+/// contain `session_type = "claude-cli"` and `model = TEST_MODEL`. The `repo_path` must point to
+/// a real linked git worktree of the project repo (visible in `git worktree list`).
 #[tokio::test]
+#[serial_test::serial]
 async fn claude_cli_session_metadata_fields_persisted() {
     let repo_dir = tempfile::tempdir().unwrap();
-    // Initialise as a git repo so the daemon can create a worktree.
-    std::process::Command::new("git")
-        .args(["init", "-b", "main"])
-        .current_dir(repo_dir.path())
-        .output()
-        .unwrap();
-    std::process::Command::new("git")
-        .args(["commit", "--allow-empty", "-m", "init"])
-        .current_dir(repo_dir.path())
-        .env("GIT_AUTHOR_NAME", "Test")
-        .env("GIT_AUTHOR_EMAIL", "t@t.com")
-        .env("GIT_COMMITTER_NAME", "Test")
-        .env("GIT_COMMITTER_EMAIL", "t@t.com")
-        .output()
-        .unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+
+    // Register the project and override the projects path via env var.
+    let projects_tmp = tempfile::tempdir().unwrap();
+    register_project(projects_tmp.path(), repo_dir.path());
+    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
+    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
 
     let sessions_tmp = tempfile::tempdir().unwrap();
-    // `echo` as a stub for `claude` so the PTY spawns successfully without the real binary.
+    // `/bin/cat` as a stub for `claude` — works in a PTY without the real binary.
     let (_cfg_dir, config) = write_config_with_claude_cli_binary("/bin/cat");
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
@@ -102,8 +128,12 @@ async fn claude_cli_session_metadata_fields_persisted() {
             agent: String::new(),
             daemon_instance_id: String::new(),
             recipe: String::new(),
-            session_type: "claude-cli".to_string(), // NEW FIELD — compile error until proto extended
-            model: TEST_MODEL.to_string(),           // NEW FIELD — compile error until proto extended
+            session_type: "claude-cli".to_string(),
+            model: TEST_MODEL.to_string(),
+            branch_worktree_intent: String::new(), // default: new_branch_from_base with generated name
+            new_branch_name: String::new(),
+            selected_integration_base_ref: String::new(),
+            selected_branch_to_work_on: String::new(),
         }))
         .await
         .expect("StartSession with session_type=claude-cli must succeed");
@@ -111,9 +141,10 @@ async fn claude_cli_session_metadata_fields_persisted() {
     let session_id = resp.into_inner().session_id;
     assert!(!session_id.is_empty(), "session_id must be non-empty");
 
+    // sessions_base_resolver returns sessions_tmp.path() directly (no username segment);
+    // the daemon appends SESSIONS_SUBDIR ("sessions") and session_id.
     let session_dir = sessions_tmp
         .path()
-        .join("testuser")
         .join("sessions")
         .join(&session_id);
     let meta = read_session_metadata(&session_dir)
@@ -139,30 +170,38 @@ async fn claude_cli_session_metadata_fields_persisted() {
         "worktree directory must exist at repo_path: {}",
         worktree_path.display()
     );
+
+    // Assert it is a real git worktree (appears in `git worktree list` for the project repo).
+    let wt_list = std::process::Command::new("git")
+        .args(["worktree", "list"])
+        .current_dir(repo_dir.path())
+        .output()
+        .expect("git worktree list must run");
+    let wt_stdout = String::from_utf8_lossy(&wt_list.stdout);
+    assert!(
+        wt_stdout
+            .lines()
+            .any(|l| l.starts_with(worktree_path.to_str().unwrap())),
+        "worktree must appear in 'git worktree list' for the project repo;\n\
+         worktree_path={}\ngit worktree list:\n{}",
+        worktree_path.display(),
+        wt_stdout
+    );
 }
 
 /// **claude_cli_session_livekit_fields_empty**: `StartSessionResponse` for
 /// `session_type = "claude-cli"` must return empty `livekit_room`, `livekit_url`, and
 /// `livekit_server_identity` — no LiveKit room is created for these sessions.
-///
-/// FAILS: `StartSessionRequest` has no `session_type` / `model` fields (proto not extended).
 #[tokio::test]
+#[serial_test::serial]
 async fn claude_cli_session_livekit_fields_empty() {
     let repo_dir = tempfile::tempdir().unwrap();
-    std::process::Command::new("git")
-        .args(["init", "-b", "main"])
-        .current_dir(repo_dir.path())
-        .output()
-        .unwrap();
-    std::process::Command::new("git")
-        .args(["commit", "--allow-empty", "-m", "init"])
-        .current_dir(repo_dir.path())
-        .env("GIT_AUTHOR_NAME", "Test")
-        .env("GIT_AUTHOR_EMAIL", "t@t.com")
-        .env("GIT_COMMITTER_NAME", "Test")
-        .env("GIT_COMMITTER_EMAIL", "t@t.com")
-        .output()
-        .unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+
+    let projects_tmp = tempfile::tempdir().unwrap();
+    register_project(projects_tmp.path(), repo_dir.path());
+    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
+    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
 
     let sessions_tmp = tempfile::tempdir().unwrap();
     let (_cfg_dir, config) = write_config_with_claude_cli_binary("/bin/cat");
@@ -176,8 +215,12 @@ async fn claude_cli_session_livekit_fields_empty() {
             agent: String::new(),
             daemon_instance_id: String::new(),
             recipe: String::new(),
-            session_type: "claude-cli".to_string(), // NEW FIELD
-            model: TEST_MODEL.to_string(),           // NEW FIELD
+            session_type: "claude-cli".to_string(),
+            model: TEST_MODEL.to_string(),
+            branch_worktree_intent: String::new(),
+            new_branch_name: String::new(),
+            selected_integration_base_ref: String::new(),
+            selected_branch_to_work_on: String::new(),
         }))
         .await
         .expect("StartSession must succeed")
@@ -203,13 +246,6 @@ async fn claude_cli_session_livekit_fields_empty() {
 /// **claude_cli_session_enrichment_reads_from_metadata**: when a session directory contains
 /// `.session.yaml` with `session_type = "claude-cli"` and no `changeset.yaml`, `ListSessions`
 /// must return `agent = "claude-cli"` and `model` from the metadata — not placeholder dashes.
-///
-/// FAILS:
-/// 1. `SessionMetadata` has `deny_unknown_fields` and no `session_type`/`model` fields →
-///    writing the YAML below fails to deserialise, meaning the test fixture itself cannot be
-///    constructed until the struct is extended.
-/// 2. Even with the struct extended, `session_list_enrichment` returns `all_placeholders()` when
-///    changeset.yaml is absent instead of reading from metadata.
 #[tokio::test]
 async fn claude_cli_session_enrichment_reads_from_metadata() {
     let sessions_tmp = tempfile::tempdir().unwrap();
@@ -221,8 +257,7 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
         .join(session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
 
-    // Write a .session.yaml with session_type and model — new fields that do not yet exist on
-    // SessionMetadata (deny_unknown_fields will reject this YAML until the struct is extended).
+    // Write a .session.yaml with session_type and model.
     let meta = SessionMetadata {
         session_id: session_id.to_string(),
         project_id: TEST_PROJECT_ID.to_string(),
@@ -235,8 +270,8 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
         livekit_room: None,
         pending_elicitation: false,
         previous_session_id: None,
-        session_type: Some("claude-cli".to_string()), // NEW FIELD — compile error until struct extended
-        model: Some(TEST_MODEL.to_string()),           // NEW FIELD — compile error until struct extended
+        session_type: Some("claude-cli".to_string()),
+        model: Some(TEST_MODEL.to_string()),
     };
     write_session_metadata(&session_dir, &meta).unwrap();
     // No changeset.yaml — intentionally absent to test the claude-cli fallback path.
@@ -289,8 +324,6 @@ users:
 /// **claude_cli_session_resume_relaunches_in_worktree**: after a claude-cli session becomes
 /// inactive (process exits), `ResumeSession` must relaunch `claude --model <model>` in the
 /// existing worktree and mark the session active again.
-///
-/// FAILS: `ResumeSession` does not yet branch on `session_type = "claude-cli"`.
 #[tokio::test]
 async fn claude_cli_session_resume_relaunches_in_worktree() {
     let worktree_dir = tempfile::tempdir().unwrap();
@@ -316,8 +349,8 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
         livekit_room: None,
         pending_elicitation: false,
         previous_session_id: None,
-        session_type: Some("claude-cli".to_string()), // NEW FIELD
-        model: Some(TEST_MODEL.to_string()),           // NEW FIELD
+        session_type: Some("claude-cli".to_string()),
+        model: Some(TEST_MODEL.to_string()),
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 
@@ -358,8 +391,6 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
 
 /// **claude_cli_start_session_requires_model**: `StartSession` with `session_type = "claude-cli"`
 /// and an empty `model` must return `INVALID_ARGUMENT`.
-///
-/// FAILS: validation logic does not yet exist.
 #[tokio::test]
 async fn claude_cli_start_session_requires_model() {
     let sessions_tmp = tempfile::tempdir().unwrap();
@@ -382,8 +413,12 @@ users:
             agent: String::new(),
             daemon_instance_id: String::new(),
             recipe: String::new(),
-            session_type: "claude-cli".to_string(), // NEW FIELD
-            model: String::new(),                    // empty — must be rejected
+            session_type: "claude-cli".to_string(),
+            model: String::new(), // empty — must be rejected before project lookup
+            branch_worktree_intent: String::new(),
+            new_branch_name: String::new(),
+            selected_integration_base_ref: String::new(),
+            selected_branch_to_work_on: String::new(),
         }))
         .await
         .expect_err("StartSession with claude-cli and empty model must fail");
@@ -398,5 +433,70 @@ users:
         msg.contains("model"),
         "error message must mention 'model'; got: {}",
         err.message
+    );
+}
+
+/// **claude_cli_start_session_requires_project**: `StartSession` with `session_type = "claude-cli"`
+/// and an empty `project_id` must return `INVALID_ARGUMENT`.
+#[tokio::test]
+#[serial_test::serial]
+async fn claude_cli_start_session_requires_project() {
+    // Point TDDY_PROJECTS_DIR at an empty temp dir so find_project returns None cleanly.
+    let projects_tmp = tempfile::tempdir().unwrap();
+    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
+    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
+
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary("/bin/cat");
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    // Empty project_id → InvalidArgument.
+    let err = service
+        .start_session(Request::new(StartSessionRequest {
+            session_token: VALID_TOKEN.to_string(),
+            tool_path: String::new(),
+            project_id: String::new(), // empty
+            agent: String::new(),
+            daemon_instance_id: String::new(),
+            recipe: String::new(),
+            session_type: "claude-cli".to_string(),
+            model: TEST_MODEL.to_string(),
+            branch_worktree_intent: String::new(),
+            new_branch_name: String::new(),
+            selected_integration_base_ref: String::new(),
+            selected_branch_to_work_on: String::new(),
+        }))
+        .await
+        .expect_err("StartSession with empty project_id must fail");
+
+    assert_eq!(
+        err.code,
+        Code::InvalidArgument,
+        "empty project_id for claude-cli must yield INVALID_ARGUMENT"
+    );
+
+    // Unknown project_id → NotFound.
+    let err2 = service
+        .start_session(Request::new(StartSessionRequest {
+            session_token: VALID_TOKEN.to_string(),
+            tool_path: String::new(),
+            project_id: "no-such-project".to_string(),
+            agent: String::new(),
+            daemon_instance_id: String::new(),
+            recipe: String::new(),
+            session_type: "claude-cli".to_string(),
+            model: TEST_MODEL.to_string(),
+            branch_worktree_intent: String::new(),
+            new_branch_name: String::new(),
+            selected_integration_base_ref: String::new(),
+            selected_branch_to_work_on: String::new(),
+        }))
+        .await
+        .expect_err("StartSession with unknown project_id must fail");
+
+    assert_eq!(
+        err2.code,
+        Code::NotFound,
+        "unknown project_id for claude-cli must yield NOT_FOUND"
     );
 }
