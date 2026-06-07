@@ -32,7 +32,24 @@ pub struct PtyHandle {
     /// PID of the spawned process.
     pub pid: u32,
     /// PTY master — kept alive for the session's lifetime to avoid SIGHUP; also allows resize.
-    _master: Arc<std::sync::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+    master: Arc<std::sync::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+}
+
+impl PtyHandle {
+    /// Send a SIGWINCH (window resize) to the child process to force a full-screen redraw.
+    ///
+    /// Useful when a new `streamSessionTerminalIO` subscriber connects and has missed the
+    /// initial render: after subscribing, call this so claude repaints to the live channel.
+    pub fn trigger_redraw(&self) {
+        if let Ok(m) = self.master.lock() {
+            let _ = m.resize(PtySize {
+                rows: DEFAULT_TERM_ROWS,
+                cols: DEFAULT_TERM_COLS,
+                pixel_width: 0,
+                pixel_height: 0,
+            });
+        }
+    }
 }
 
 /// Manages a registry of active Claude CLI sessions (session_id → PtyHandle).
@@ -93,7 +110,7 @@ impl ClaudeCliSessionManager {
             stdin_tx,
             stdout_tx,
             pid,
-            _master: master,
+            master,
         });
 
         // Insert into the registry BEFORE returning so that a racing streamSessionTerminalIO

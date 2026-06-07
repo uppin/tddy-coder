@@ -1341,14 +1341,31 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
         let session_id = first.session_id.clone();
+        log::info!(
+            target: "tddy_daemon::connection_service",
+            "stream_session_terminal_io: session_id={}",
+            session_id
+        );
         let handle = self
             .claude_cli_manager
             .get(&session_id)
             .await
-            .ok_or_else(|| Status::not_found("claude-cli session not found or not running"))?;
+            .ok_or_else(|| {
+                log::warn!(
+                    target: "tddy_daemon::connection_service",
+                    "stream_session_terminal_io: session {} not found in registry",
+                    session_id
+                );
+                Status::not_found("claude-cli session not found or not running")
+            })?;
 
         let stdin_tx = handle.stdin_tx.clone();
         let stdout_rx = handle.stdout_tx.subscribe();
+
+        // Trigger a SIGWINCH so claude redraws its full screen onto the now-subscribed channel.
+        // The initial render happens before the browser's first stream call arrives (network RTT),
+        // so without this the terminal would be blank until the user sends input.
+        handle.trigger_redraw();
 
         // Forward the first data chunk (if any).
         if !first.data.is_empty() {
