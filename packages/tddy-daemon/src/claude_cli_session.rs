@@ -83,29 +83,27 @@ impl ClaudeCliSessionManager {
             let _ = result_tx.send(res);
         });
 
-        result_rx
+        let (pid, master) = result_rx
             .await
-            .map_err(|_| anyhow::anyhow!("PTY spawn thread did not respond"))?
-            .map(|(pid, master)| {
-                Arc::new(PtyHandle {
-                    worktree_path,
-                    model: model.to_string(),
-                    stdin_tx,
-                    stdout_tx,
-                    pid,
-                    _master: master,
-                })
-            })
-            .and_then(|handle| {
-                // Register synchronously from the async side since we have the result.
-                let reg = Arc::clone(&self.registry);
-                let handle_clone = Arc::clone(&handle);
-                let sid = session_id.to_string();
-                tokio::spawn(async move {
-                    reg.write().await.insert(sid, handle_clone);
-                });
-                Ok(handle)
-            })
+            .map_err(|_| anyhow::anyhow!("PTY spawn thread did not respond"))??;
+
+        let handle = Arc::new(PtyHandle {
+            worktree_path,
+            model: model.to_string(),
+            stdin_tx,
+            stdout_tx,
+            pid,
+            _master: master,
+        });
+
+        // Insert into the registry BEFORE returning so that a racing streamSessionTerminalIO
+        // call (browser connects immediately after startSession returns) can find the handle.
+        self.registry
+            .write()
+            .await
+            .insert(session_id.to_string(), Arc::clone(&handle));
+
+        Ok(handle)
     }
 
     /// Resume (relaunch) an existing session by spawning a new process in the same worktree.
