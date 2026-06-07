@@ -128,6 +128,36 @@ impl Stream for TerminalOutputStream {
 
 impl Unpin for TerminalOutputStream {}
 
+/// Stream adapter backed by an mpsc channel — used for `StreamTerminalOutput` (browser-compatible
+/// server-streaming RPC).
+///
+/// Unlike `TerminalOutputStream` (broadcast-based), this correctly registers the waker via
+/// `poll_recv` so the stream is woken as soon as data arrives. A background task bridges the
+/// broadcast channel into the mpsc sender so no messages can be lost between `try_recv()` and
+/// waker registration.
+pub struct MpscTerminalOutputStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<bytes::Bytes>,
+}
+
+impl Stream for MpscTerminalOutputStream {
+    type Item = Result<SessionTerminalOutput, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.rx.poll_recv(cx) {
+            std::task::Poll::Ready(Some(chunk)) => std::task::Poll::Ready(Some(Ok(
+                SessionTerminalOutput { data: chunk.to_vec() },
+            ))),
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl Unpin for MpscTerminalOutputStream {}
+
 /// ConnectionService implementation.
 pub struct ConnectionServiceImpl {
     config: DaemonConfig,
@@ -348,6 +378,53 @@ impl ConnectionServiceImpl {
             Status::internal(format!("failed to write session metadata: {}", e))
         })?;
 
+        // Optionally expose the PTY via a per-session LiveKit participant so that LiveKit
+        // clients (web UI, pty-relay --livekit-url) can use the same bidi-stream path as
+        // tool sessions. Falls back gracefully: if LiveKit is not configured the session is
+        // still usable via the gRPC connectrpc endpoints.
+        let (lk_room, lk_url, lk_server_identity) =
+            if let Some(lk) = spawner::livekit_creds_from_config(&self.config) {
+                let room_name = spawner::resolve_livekit_room_name(
+                    lk.common_room.as_deref(),
+                    session_id,
+                );
+                let server_identity = spawner::livekit_server_identity_for_session(
+                    lk.daemon_instance_id.as_deref(),
+                    session_id,
+                );
+                match crate::claude_cli_session::spawn_livekit_bridge(
+                    Arc::clone(&handle),
+                    &lk.url,
+                    &room_name,
+                    &lk.api_key,
+                    &lk.api_secret,
+                    &server_identity,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        log::info!(
+                            target: "tddy_daemon::connection_service",
+                            "claude-cli session {}: LiveKit bridge started (identity={})",
+                            session_id,
+                            server_identity
+                        );
+                        (room_name, lk.url.clone(), server_identity)
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            target: "tddy_daemon::connection_service",
+                            "claude-cli session {}: LiveKit bridge failed ({}); gRPC path still works",
+                            session_id,
+                            e
+                        );
+                        (String::new(), String::new(), String::new())
+                    }
+                }
+            } else {
+                (String::new(), String::new(), String::new())
+            };
+
         log::info!(
             target: "tddy_daemon::connection_service",
             "started claude-cli session {} pid={} worktree={} user={}",
@@ -359,9 +436,9 @@ impl ConnectionServiceImpl {
 
         Ok(Response::new(StartSessionResponse {
             session_id: session_id.to_string(),
-            livekit_room: String::new(),
-            livekit_url: String::new(),
-            livekit_server_identity: String::new(),
+            livekit_room: lk_room,
+            livekit_url: lk_url,
+            livekit_server_identity: lk_server_identity,
         }))
     }
 
@@ -1387,7 +1464,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     }
 
     /// Associated output stream type for [`stream_terminal_output`].
-    type StreamTerminalOutputStream = TerminalOutputStream;
+    type StreamTerminalOutputStream = MpscTerminalOutputStream;
 
     /// Server-streaming output — browser-compatible alternative to the bidi `StreamSessionTerminalIO`.
     /// connect-web's Fetch transport cannot send streaming request bodies, so bidi streaming never
@@ -1424,10 +1501,64 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 Status::not_found("claude-cli session not found or not running")
             })?;
 
-        let stdout_rx = handle.stdout_tx.subscribe();
+        // Subscribe to broadcast BEFORE reading the capture buffer so there is no gap:
+        // bytes produced between the capture snapshot and the first bridge recv() are
+        // covered by the broadcast subscription.
+        let (mpsc_tx, mpsc_rx) = tokio::sync::mpsc::unbounded_channel::<bytes::Bytes>();
+        let mut broadcast_rx = handle.stdout_tx.subscribe();
+
+        // Replay capture buffer first — this contains all PTY output since session start,
+        // including the initial TUI render that arrived before the browser subscribed.
+        // The broadcast channel cannot buffer for receivers that didn't exist yet
+        // (send() silently fails with 0 receivers), so the capture is the only way to see
+        // historical output.
+        {
+            let historical = handle
+                .capture
+                .lock()
+                .map(|cap| bytes::Bytes::copy_from_slice(&cap))
+                .unwrap_or_default();
+            if !historical.is_empty() {
+                log::debug!(
+                    target: "tddy_daemon::connection_service",
+                    "stream_terminal_output: replaying {} capture bytes for session {}",
+                    historical.len(),
+                    session_id
+                );
+                let _ = mpsc_tx.send(historical);
+            }
+        }
+
+        // Bridge broadcast → mpsc for all future output.
+        // Also breaks when pty_done fires so the HTTP stream ends when the process exits.
+        let mpsc_tx_bridge = mpsc_tx.clone();
+        let mut pty_done = handle.pty_done.clone();
+        tokio::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                tokio::select! {
+                    result = broadcast_rx.recv() => {
+                        match result {
+                            Ok(chunk) => {
+                                if mpsc_tx_bridge.send(chunk).is_err() {
+                                    break; // receiver dropped (stream closed)
+                                }
+                            }
+                            Err(RecvError::Closed) => break,
+                            Err(RecvError::Lagged(_)) => continue, // skip lagged; resume from latest
+                        }
+                    }
+                    _ = pty_done.changed() => break,
+                }
+            }
+        });
+
+        // Trigger a redraw so if the initial TUI render was before session start logging, we
+        // get a fresh frame regardless. (The capture replay above already covers the common
+        // case, but SIGWINCH is a cheap belt-and-suspenders.)
         handle.trigger_redraw();
 
-        Ok(Response::new(TerminalOutputStream { rx: stdout_rx }))
+        Ok(Response::new(MpscTerminalOutputStream { rx: mpsc_rx }))
     }
 
     /// Unary input — browser-compatible alternative to the client-streaming half of `StreamSessionTerminalIO`.

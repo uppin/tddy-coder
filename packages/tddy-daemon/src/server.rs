@@ -8,6 +8,7 @@ use tddy_connectrpc::connect_router;
 use tddy_rpc::{MultiRpcService, RpcBridge};
 
 use crate::config::DaemonConfig;
+use crate::livekit_peer_discovery::local_instance_id_for_config;
 use crate::telegram_notifier::{send_daemon_lifecycle_message, TelegramSender};
 
 /// Start the web server with static bundle and RPC services.
@@ -23,7 +24,9 @@ pub async fn run_server(
     lifecycle_telegram: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
 ) -> anyhow::Result<()> {
     if let Some((ref cfg, ref sender)) = lifecycle_telegram {
-        send_daemon_lifecycle_message(cfg, sender.as_ref(), "tddy-daemon started").await?;
+        let instance_id = local_instance_id_for_config(cfg);
+        let msg = format!("tddy-daemon started ({})", instance_id);
+        send_daemon_lifecycle_message(cfg, sender.as_ref(), &msg).await?;
     }
 
     let rpc_router = if rpc_entries.is_empty() {
