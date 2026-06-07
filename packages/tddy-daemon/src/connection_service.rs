@@ -22,9 +22,10 @@ use tddy_service::proto::connection::{
     ListWorktreesForProjectRequest, ListWorktreesForProjectResponse,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
     ReadSessionWorkflowFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SessionEntry as ProtoSessionEntry,
-    SessionTerminalInput, SessionTerminalOutput, Signal, SignalSessionRequest, SignalSessionResponse,
-    StartSessionRequest, StartSessionResponse, ToolInfo, WorkflowFileEntry, WorktreeRow,
+    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse,
+    SessionEntry as ProtoSessionEntry, SessionTerminalInput, SessionTerminalOutput, Signal,
+    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
+    StreamTerminalOutputRequest, ToolInfo, WorkflowFileEntry, WorktreeRow,
 };
 use uuid::Uuid;
 
@@ -1383,6 +1384,76 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         });
 
         Ok(Response::new(TerminalOutputStream { rx: stdout_rx }))
+    }
+
+    /// Associated output stream type for [`stream_terminal_output`].
+    type StreamTerminalOutputStream = TerminalOutputStream;
+
+    /// Server-streaming output — browser-compatible alternative to the bidi `StreamSessionTerminalIO`.
+    /// connect-web's Fetch transport cannot send streaming request bodies, so bidi streaming never
+    /// reaches the daemon from a browser. This RPC provides the output half; input goes via the
+    /// unary `SendTerminalInput`.
+    async fn stream_terminal_output(
+        &self,
+        request: Request<StreamTerminalOutputRequest>,
+    ) -> Result<Response<Self::StreamTerminalOutputStream>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let session_id = req.session_id.trim().to_string();
+        log::info!(
+            target: "tddy_daemon::connection_service",
+            "stream_terminal_output: session_id={}",
+            session_id
+        );
+        let handle = self
+            .claude_cli_manager
+            .get(&session_id)
+            .await
+            .ok_or_else(|| {
+                log::warn!(
+                    target: "tddy_daemon::connection_service",
+                    "stream_terminal_output: session {} not found in registry",
+                    session_id
+                );
+                Status::not_found("claude-cli session not found or not running")
+            })?;
+
+        let stdout_rx = handle.stdout_tx.subscribe();
+        handle.trigger_redraw();
+
+        Ok(Response::new(TerminalOutputStream { rx: stdout_rx }))
+    }
+
+    /// Unary input — browser-compatible alternative to the client-streaming half of `StreamSessionTerminalIO`.
+    async fn send_terminal_input(
+        &self,
+        request: Request<SessionTerminalInput>,
+    ) -> Result<Response<SendTerminalInputResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let session_id = req.session_id.trim().to_string();
+        let handle = self
+            .claude_cli_manager
+            .get(&session_id)
+            .await
+            .ok_or_else(|| Status::not_found("claude-cli session not found or not running"))?;
+
+        if !req.data.is_empty() {
+            let _ = handle.stdin_tx.send(bytes::Bytes::from(req.data));
+        }
+        Ok(Response::new(SendTerminalInputResponse {}))
     }
 
     async fn remove_worktree(

@@ -7,12 +7,10 @@ import {
   AgentInfoSchema,
   ConnectionService,
   DeleteSessionRequestSchema,
-  SessionTerminalInputSchema,
   Signal,
   type AgentInfo,
   type ProjectEntry,
   type SessionEntry,
-  type SessionTerminalInput,
   type SessionTerminalOutput,
   type ToolInfo,
   type EligibleDaemonEntry,
@@ -1173,24 +1171,13 @@ function ConnectedClaudeCliTerminal({
   const [stream, setStream] = useState<GrpcStream | null>(null);
 
   useEffect(() => {
-    const inputQueue: Uint8Array[] = [];
     const outputListeners: Array<(data: Uint8Array) => void> = [];
     let closed = false;
 
-    let resolveReady: (() => void) | null = null;
-    const ready = new Promise<void>((r) => {
-      resolveReady = r;
-    });
-    let isReady = false;
-    void ready; // suppress unused-variable lint
-
     const grpcStream: GrpcStream = {
       send(data: Uint8Array) {
-        inputQueue.push(data);
-        if (!isReady && resolveReady) {
-          isReady = true;
-          resolveReady();
-        }
+        // Fire-and-forget unary call — no streaming request body required.
+        void client.sendTerminalInput({ sessionToken, sessionId, data });
       },
       onMessage(fn: (data: Uint8Array) => void) {
         outputListeners.push(fn);
@@ -1201,45 +1188,20 @@ function ConnectedClaudeCliTerminal({
     };
     setStream(grpcStream);
 
-    async function* inputGen(): AsyncIterable<SessionTerminalInput> {
-      // First message authenticates
-      yield create(SessionTerminalInputSchema, {
-        sessionToken,
-        sessionId,
-        data: new Uint8Array(0),
-      });
-      while (!closed) {
-        if (inputQueue.length > 0) {
-          const chunks = inputQueue.splice(0);
-          const total = chunks.reduce((s, c) => s + c.length, 0);
-          const merged = new Uint8Array(total);
-          let off = 0;
-          for (const c of chunks) {
-            merged.set(c, off);
-            off += c.length;
-          }
-          yield create(SessionTerminalInputSchema, {
-            sessionToken: "",
-            sessionId,
-            data: merged,
-          });
-        } else {
-          await new Promise((r) => setTimeout(r, 20));
-        }
-      }
-    }
-
+    // Server-streaming output — works in all browsers via connect-web Fetch transport.
     void (async () => {
       try {
-        for await (const output of client.streamSessionTerminalIO(
-          inputGen(),
-        ) as AsyncIterable<SessionTerminalOutput>) {
+        for await (const output of client.streamTerminalOutput({
+          sessionToken,
+          sessionId,
+        }) as AsyncIterable<SessionTerminalOutput>) {
+          if (closed) break;
           if (output.data.length > 0) {
             outputListeners.forEach((fn) => fn(output.data));
           }
         }
       } catch {
-        // stream closed
+        // stream closed or session ended
       }
     })();
 

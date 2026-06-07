@@ -19,6 +19,10 @@ service ConnectionService {
   rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
   rpc RemoveWorktree(RemoveWorktreeRequest) returns (RemoveWorktreeResponse);
   rpc StreamSessionTerminalIO(stream SessionTerminalInput) returns (stream SessionTerminalOutput);
+  // Browser-compatible alternative: server-streaming output + separate unary input.
+  // (connect-web fetch transport cannot send streaming request bodies required for bidi streaming.)
+  rpc StreamTerminalOutput(StreamTerminalOutputRequest) returns (stream SessionTerminalOutput);
+  rpc SendTerminalInput(SessionTerminalInput) returns (SendTerminalInputResponse);
   rpc ListProjectBranches(ListProjectBranchesRequest) returns (ListProjectBranchesResponse);
 }
 
@@ -270,3 +274,12 @@ message SessionTerminalInput {
 message SessionTerminalOutput {
   bytes data = 1;
 }
+
+// Used by StreamTerminalOutput (browser-compatible server-streaming variant).
+message StreamTerminalOutputRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+// Empty response for SendTerminalInput.
+message SendTerminalInputResponse {}
