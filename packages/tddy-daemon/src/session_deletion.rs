@@ -343,7 +343,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let base = temp.path().join("sessions_this_daemon");
         std::fs::create_dir_all(&base).unwrap();
-        let err = delete_session_directory(&base, "session-owned-on-another-daemon", None).unwrap_err();
+        let err =
+            delete_session_directory(&base, "session-owned-on-another-daemon", None).unwrap_err();
         assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
     }
 }

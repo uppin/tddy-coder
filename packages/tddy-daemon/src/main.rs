@@ -169,6 +169,11 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Create one shared ClaudeCliSessionManager — injected into both the Telegram spawn path and
+    // ConnectionServiceImpl so that Telegram-launched sessions are attachable via the terminal RPCs.
+    let shared_claude_cli_manager =
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new());
+
     let mut telegram_inbound: Option<(
         Bot,
         Arc<
@@ -236,6 +241,7 @@ fn main() -> anyhow::Result<()> {
                             elicitation_select_options: elicitation_select_options.clone(),
                             elicitation_multi_select_meta: elicitation_multi_select_meta.clone(),
                             pending_elicitation_other: Arc::new(StdMutex::new(HashMap::new())),
+                            claude_cli_manager: Arc::clone(&shared_claude_cli_manager),
                         },
                     ));
                     let harness = Arc::new(Mutex::new(
@@ -336,6 +342,7 @@ fn main() -> anyhow::Result<()> {
                 spawn_client,
                 livekit_discovery,
                 telegram_hooks.clone(),
+                Arc::clone(&shared_claude_cli_manager),
             );
             let connection_server = tddy_service::ConnectionServiceServer::new(connection_impl);
             rpc_entries.push(tddy_rpc::ServiceEntry {
