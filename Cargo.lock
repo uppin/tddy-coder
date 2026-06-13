@@ -6671,6 +6671,7 @@ dependencies = [
  "chrono",
  "clap",
  "futures-util",
+ "glob",
  "hmac",
  "libc",
  "livekit",

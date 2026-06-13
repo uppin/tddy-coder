@@ -38,13 +38,20 @@ use crate::project_storage::{self, ProjectData};
 use crate::session_deletion;
 use crate::session_list_enrichment;
 use crate::session_reader;
+use crate::shell_job_registry::ShellJobRegistry;
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
+use crate::tool_catalog;
+use crate::tool_engine;
 use crate::user_sessions_path::{
     project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
 };
+use crate::workspace_session;
 use crate::worktrees::{self, RemoveWorktreeError, WorktreeStatsCache};
+use tddy_service::proto::connection::{
+    ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse,
+};
 
 /// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
 async fn spawn_blocking_with_timeout<T: Send + 'static>(
@@ -147,9 +154,11 @@ impl Stream for MpscTerminalOutputStream {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(chunk)) => std::task::Poll::Ready(Some(Ok(
-                SessionTerminalOutput { data: chunk.to_vec() },
-            ))),
+            std::task::Poll::Ready(Some(chunk)) => {
+                std::task::Poll::Ready(Some(Ok(SessionTerminalOutput {
+                    data: chunk.to_vec(),
+                })))
+            }
             std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
             std::task::Poll::Pending => std::task::Poll::Pending,
         }
@@ -170,6 +179,8 @@ pub struct ConnectionServiceImpl {
     telegram: Option<Arc<TelegramDaemonHooks>>,
     worktree_stats_cache: Arc<WorktreeStatsCache>,
     claude_cli_manager: Arc<ClaudeCliSessionManager>,
+    /// Registry for background shell jobs spawned by the `Shell` tool (block_until_ms=0).
+    shell_jobs: Arc<ShellJobRegistry>,
 }
 
 impl ConnectionServiceImpl {
@@ -193,6 +204,7 @@ impl ConnectionServiceImpl {
             worktrees::projects_stats_cache_root(),
         ));
         let claude_cli_manager = Arc::new(ClaudeCliSessionManager::new());
+        let shell_jobs = Arc::new(ShellJobRegistry::new());
         Self {
             config,
             sessions_base_for_user,
@@ -203,6 +215,7 @@ impl ConnectionServiceImpl {
             telegram,
             worktree_stats_cache,
             claude_cli_manager,
+            shell_jobs,
         }
     }
 
@@ -257,47 +270,47 @@ impl ConnectionServiceImpl {
 
         // Create session directory under sessions_base/sessions/<id>/.
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-        std::fs::create_dir_all(&session_dir).map_err(|e| {
-            Status::internal(format!("failed to create session dir: {}", e))
-        })?;
+        std::fs::create_dir_all(&session_dir)
+            .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
 
         // Build branch intent and write a minimal changeset so the worktree setup fn can read it.
         let short_id = &session_id[..8.min(session_id.len())];
-        let (intent, resolved_new_branch, resolved_selected_branch) =
-            match branch_worktree_intent.trim() {
-                "new_branch_from_base" => {
-                    if new_branch_name.trim().is_empty() {
-                        return Err(Status::invalid_argument(
+        let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
+            .trim()
+        {
+            "new_branch_from_base" => {
+                if new_branch_name.trim().is_empty() {
+                    return Err(Status::invalid_argument(
                             "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
                         ));
-                    }
-                    (
-                        BranchWorktreeIntent::NewBranchFromBase,
-                        Some(new_branch_name.trim().to_string()),
-                        None,
-                    )
                 }
-                "work_on_selected_branch" => {
-                    if selected_branch_to_work_on.trim().is_empty() {
-                        return Err(Status::invalid_argument(
+                (
+                    BranchWorktreeIntent::NewBranchFromBase,
+                    Some(new_branch_name.trim().to_string()),
+                    None,
+                )
+            }
+            "work_on_selected_branch" => {
+                if selected_branch_to_work_on.trim().is_empty() {
+                    return Err(Status::invalid_argument(
                             "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
                         ));
-                    }
-                    (
-                        BranchWorktreeIntent::WorkOnSelectedBranch,
-                        None,
-                        Some(selected_branch_to_work_on.trim().to_string()),
-                    )
                 }
-                _ => {
-                    // Default: create a new branch from the integration base with a generated name.
-                    (
-                        BranchWorktreeIntent::NewBranchFromBase,
-                        Some(format!("claude-cli/{}", short_id)),
-                        None,
-                    )
-                }
-            };
+                (
+                    BranchWorktreeIntent::WorkOnSelectedBranch,
+                    None,
+                    Some(selected_branch_to_work_on.trim().to_string()),
+                )
+            }
+            _ => {
+                // Default: create a new branch from the integration base with a generated name.
+                (
+                    BranchWorktreeIntent::NewBranchFromBase,
+                    Some(format!("claude-cli/{}", short_id)),
+                    None,
+                )
+            }
+        };
 
         let cs_workflow = ChangesetWorkflow {
             branch_worktree_intent: Some(intent),
@@ -314,9 +327,8 @@ impl ConnectionServiceImpl {
             workflow: Some(cs_workflow),
             ..Changeset::default()
         };
-        tddy_core::write_changeset(&session_dir, &cs).map_err(|e| {
-            Status::internal(format!("failed to write changeset: {}", e))
-        })?;
+        tddy_core::write_changeset(&session_dir, &cs)
+            .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
         // Create the real git worktree (blocking: involves git fetch + git worktree add).
         let repo_root_clone = repo_root.clone();
@@ -351,7 +363,12 @@ impl ConnectionServiceImpl {
         let worktree_clone = worktree_path.clone();
 
         let handle = manager
-            .start(&session_id_owned, worktree_clone, &model_owned, &binary_owned)
+            .start(
+                &session_id_owned,
+                worktree_clone,
+                &model_owned,
+                &binary_owned,
+            )
             .await
             .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
 
@@ -374,56 +391,54 @@ impl ConnectionServiceImpl {
             session_type: Some("claude-cli".to_string()),
             model: Some(model.to_string()),
         };
-        tddy_core::write_session_metadata(&session_dir, &meta).map_err(|e| {
-            Status::internal(format!("failed to write session metadata: {}", e))
-        })?;
+        tddy_core::write_session_metadata(&session_dir, &meta)
+            .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
 
         // Optionally expose the PTY via a per-session LiveKit participant so that LiveKit
         // clients (web UI, pty-relay --livekit-url) can use the same bidi-stream path as
         // tool sessions. Falls back gracefully: if LiveKit is not configured the session is
         // still usable via the gRPC connectrpc endpoints.
-        let (lk_room, lk_url, lk_server_identity) =
-            if let Some(lk) = spawner::livekit_creds_from_config(&self.config) {
-                let room_name = spawner::resolve_livekit_room_name(
-                    lk.common_room.as_deref(),
-                    session_id,
-                );
-                let server_identity = spawner::livekit_server_identity_for_session(
-                    lk.daemon_instance_id.as_deref(),
-                    session_id,
-                );
-                match crate::claude_cli_session::spawn_livekit_bridge(
-                    Arc::clone(&handle),
-                    &lk.url,
-                    &room_name,
-                    &lk.api_key,
-                    &lk.api_secret,
-                    &server_identity,
-                )
-                .await
-                {
-                    Ok(()) => {
-                        log::info!(
-                            target: "tddy_daemon::connection_service",
-                            "claude-cli session {}: LiveKit bridge started (identity={})",
-                            session_id,
-                            server_identity
-                        );
-                        (room_name, lk.url.clone(), server_identity)
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            target: "tddy_daemon::connection_service",
-                            "claude-cli session {}: LiveKit bridge failed ({}); gRPC path still works",
-                            session_id,
-                            e
-                        );
-                        (String::new(), String::new(), String::new())
-                    }
+        let (lk_room, lk_url, lk_server_identity) = if let Some(lk) =
+            spawner::livekit_creds_from_config(&self.config)
+        {
+            let room_name =
+                spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id);
+            let server_identity = spawner::livekit_server_identity_for_session(
+                lk.daemon_instance_id.as_deref(),
+                session_id,
+            );
+            match crate::claude_cli_session::spawn_livekit_bridge(
+                Arc::clone(&handle),
+                &lk.url,
+                &room_name,
+                &lk.api_key,
+                &lk.api_secret,
+                &server_identity,
+            )
+            .await
+            {
+                Ok(()) => {
+                    log::info!(
+                        target: "tddy_daemon::connection_service",
+                        "claude-cli session {}: LiveKit bridge started (identity={})",
+                        session_id,
+                        server_identity
+                    );
+                    (room_name, lk.url.clone(), server_identity)
                 }
-            } else {
-                (String::new(), String::new(), String::new())
-            };
+                Err(e) => {
+                    log::warn!(
+                        target: "tddy_daemon::connection_service",
+                        "claude-cli session {}: LiveKit bridge failed ({}); gRPC path still works",
+                        session_id,
+                        e
+                    );
+                    (String::new(), String::new(), String::new())
+                }
+            }
+        } else {
+            (String::new(), String::new(), String::new())
+        };
 
         log::info!(
             target: "tddy_daemon::connection_service",
@@ -482,9 +497,8 @@ impl ConnectionServiceImpl {
             pid: Some(pid),
             ..meta
         };
-        tddy_core::write_session_metadata(&session_dir, &updated).map_err(|e| {
-            Status::internal(format!("failed to update session metadata: {}", e))
-        })?;
+        tddy_core::write_session_metadata(&session_dir, &updated)
+            .map_err(|e| Status::internal(format!("failed to update session metadata: {}", e)))?;
 
         log::info!(
             target: "tddy_daemon::connection_service",
@@ -823,6 +837,22 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
         }
 
+        // --- workspace branch: no LiveKit, no PTY; resolves project, creates a git worktree ---
+        if req.session_type.trim() == "workspace" {
+            let sessions_base = (self.sessions_base_for_user)(os_user)
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            let session_id = Uuid::now_v7().to_string();
+            let timeout = self.config.spawn_worker_request_timeout();
+            return workspace_session::start_workspace_session(
+                os_user,
+                &session_id,
+                sessions_base,
+                req.project_id.trim(),
+                timeout,
+            )
+            .await;
+        }
+
         // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
         if req.session_type.trim() == "claude-cli" {
             let sessions_base = (self.sessions_base_for_user)(os_user)
@@ -969,8 +999,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
 
-        // claude-cli sessions do not use LiveKit — return empty fields immediately.
-        if metadata.session_type.as_deref() == Some("claude-cli") {
+        // claude-cli and workspace sessions do not use LiveKit — return empty fields immediately.
+        if metadata.session_type.as_deref() == Some("claude-cli")
+            || metadata.session_type.as_deref() == Some("workspace")
+        {
             return Ok(Response::new(ConnectSessionResponse {
                 livekit_room: String::new(),
                 livekit_url: String::new(),
@@ -1703,6 +1735,86 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         );
 
         Ok(Response::new(ListProjectBranchesResponse { branches }))
+    }
+
+    async fn execute_tool(
+        &self,
+        request: Request<ExecuteToolRequest>,
+    ) -> Result<Response<ExecuteToolResponse>, Status> {
+        let req = request.into_inner();
+
+        // Authenticate caller.
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        // Validate session ID.
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        // Resolve the sessions base and the session's worktree root.
+        let sessions_base = (self.sessions_base_for_user)(os_user)
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+
+        let worktree_root =
+            workspace_session::resolve_worktree_root_for_session(&sessions_base, &req.session_id)?;
+
+        // For path-bearing tools, perform an upfront path traversal check.
+        if matches!(
+            req.tool_name.as_str(),
+            "Read" | "Write" | "StrReplace" | "Delete"
+        ) {
+            let args_val: serde_json::Value =
+                serde_json::from_str(&req.args_json).unwrap_or(serde_json::Value::Null);
+            if let Some(path_str) = args_val.get("path").and_then(|v| v.as_str()) {
+                // Reject obvious traversal before any I/O.
+                let p = std::path::Path::new(path_str);
+                if p.components().any(|c| c == std::path::Component::ParentDir) {
+                    return Err(Status::permission_denied(
+                        "path contains '..' components (traversal rejected)",
+                    ));
+                }
+            }
+        }
+
+        // Dispatch.
+        let outcome = tool_engine::execute_tool(
+            &worktree_root,
+            &req.tool_name,
+            &req.args_json,
+            &self.shell_jobs,
+        )
+        .await;
+
+        Ok(Response::new(ExecuteToolResponse {
+            result_json: outcome.result_json,
+            is_error: outcome.is_error,
+            error_message: outcome.error_message,
+            job_id: outcome.job_id,
+            job_running: outcome.job_running,
+        }))
+    }
+
+    async fn list_exec_tools(
+        &self,
+        request: Request<ListExecToolsRequest>,
+    ) -> Result<Response<ListExecToolsResponse>, Status> {
+        let req = request.into_inner();
+
+        // Minimal auth — verify caller is a known user.
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        Ok(Response::new(ListExecToolsResponse {
+            tools: tool_catalog::tool_catalog(),
+        }))
     }
 }
 

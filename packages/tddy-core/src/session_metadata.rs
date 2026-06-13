@@ -164,8 +164,10 @@ mod tests {
     /// below does not compile until both are added with `#[serde(default)]`.
     #[test]
     fn claude_cli_metadata_round_trip() {
-        let tmp = std::env::temp_dir()
-            .join(format!("tddy-session-meta-claude-cli-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "tddy-session-meta-claude-cli-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&tmp);
         let sid = "01900000-0000-7000-8000-000000000cli";
         let session_dir = tmp.join("sessions").join(sid);

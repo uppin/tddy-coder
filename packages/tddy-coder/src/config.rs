@@ -342,6 +342,7 @@ github:
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
             tddy_data_dir: Some(cli_base.clone()),
         };
         merge_config_into_args(&mut args, config);
@@ -389,6 +390,7 @@ github:
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
@@ -438,6 +440,7 @@ github:
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: Some("tdd".to_string()),
+            remote: false,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
@@ -484,6 +487,7 @@ github:
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
@@ -593,6 +597,7 @@ log:
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);

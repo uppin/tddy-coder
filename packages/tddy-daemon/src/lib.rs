@@ -1,9 +1,9 @@
 //! tddy-daemon library — shared by binary and tests.
 
 pub mod active_elicitation;
-pub mod claude_cli_session;
 pub mod agent_list_mapping;
 pub mod auth;
+pub mod claude_cli_session;
 mod codex_oauth_participant_metadata;
 pub mod codex_oauth_relay;
 pub mod config;
@@ -19,6 +19,7 @@ pub mod session_deletion;
 pub mod session_list_enrichment;
 pub mod session_reader;
 pub mod session_workflow_files;
+pub mod shell_job_registry;
 pub mod spawn_worker;
 pub mod spawner;
 pub mod tddy_user_config;
@@ -30,5 +31,8 @@ pub mod telegram_session_control;
 pub mod telegram_session_subscriber;
 pub mod telegram_tracked_session;
 pub mod token_provider;
+pub mod tool_catalog;
+pub mod tool_engine;
 pub mod user_sessions_path;
+pub mod workspace_session;
 pub mod worktrees;

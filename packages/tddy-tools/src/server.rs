@@ -1,5 +1,9 @@
 //! Permission server implementing the approval_prompt MCP tool and GitHub PR REST tools.
 
+use crate::github_pr::{
+    create_pull_request_via_rest_api, update_pull_request_via_rest_api, CreatePullRequestParams,
+    UpdatePullRequestParams,
+};
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{ServerCapabilities, ServerInfo},
@@ -8,10 +12,6 @@ use rmcp::{
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::PathBuf;
-use tddy_tools::github_pr::{
-    create_pull_request_via_rest_api, update_pull_request_via_rest_api, CreatePullRequestParams,
-    UpdatePullRequestParams,
-};
 
 /// Unix socket for relaying approval prompts to the tddy-coder TUI. In `cfg(test)` builds this is
 /// disabled unless `TDDY_TOOLS_TEST_ALLOW_SOCKET=1`, so unit tests never hit a live session when
@@ -405,6 +405,85 @@ impl rmcp::ServerHandler for PermissionServer {
              **github_create_pull_request** and **github_update_pull_request** (REST via curl to api.github.com).",
         )
     }
+}
+
+// --- Remote-codebase mode: dynamic tool catalog helpers ---
+
+/// A tool definition fetched from the relay daemon (or configured statically for testing).
+pub struct RemoteToolDef {
+    pub name: String,
+    pub description: String,
+    pub input_schema_json: String,
+}
+
+/// Returns the names of tools that are always statically registered and never forwarded to a relay.
+pub fn static_tool_names() -> Vec<&'static str> {
+    vec!["approval_prompt", "submit"]
+}
+
+/// Build the full MCP tool list: static tools + dynamically-discovered remote tools from `catalog`.
+///
+/// Static tools (`approval_prompt`, `submit`) are always included first. Dynamic tools are
+/// appended in catalog order. If `input_schema_json` is not a valid JSON object, the tool is
+/// skipped and an error is returned.
+pub async fn build_dynamic_tool_list(
+    catalog: &[RemoteToolDef],
+) -> anyhow::Result<Vec<rmcp::model::Tool>> {
+    let mut tools = vec![];
+
+    // Static tools — always present.
+    tools.push(rmcp::model::Tool::new(
+        "approval_prompt",
+        "Permission approval prompt for tddy-coder.",
+        std::sync::Arc::new(serde_json::Map::new()),
+    ));
+    tools.push(rmcp::model::Tool::new(
+        "submit",
+        "Submit structured workflow output.",
+        std::sync::Arc::new(serde_json::Map::new()),
+    ));
+
+    // Dynamic tools from catalog.
+    for def in catalog {
+        let schema_value: serde_json::Value = serde_json::from_str(&def.input_schema_json)
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "RemoteToolDef '{}': invalid input_schema_json: {}",
+                    def.name,
+                    e
+                )
+            })?;
+        let schema_map = schema_value.as_object().cloned().unwrap_or_default();
+        tools.push(rmcp::model::Tool::new(
+            def.name.clone(),
+            def.description.clone(),
+            std::sync::Arc::new(schema_map),
+        ));
+    }
+
+    Ok(tools)
+}
+
+/// Dispatch a call to a dynamic (non-static) tool via the relay daemon.
+///
+/// When `TDDY_REMOTE_SESSION_ID` or `TDDY_REMOTE_DAEMON_URL` are not set, returns an
+/// error-shaped JSON string without panicking (the caller must handle the error result).
+pub async fn dispatch_dynamic_tool(tool_name: &str, _args: serde_json::Value) -> String {
+    let session_id = std::env::var("TDDY_REMOTE_SESSION_ID").ok();
+    let daemon_url = std::env::var("TDDY_REMOTE_DAEMON_URL").ok();
+    if session_id.is_none() || daemon_url.is_none() {
+        return serde_json::json!({
+            "error": "remote toolset not configured: TDDY_REMOTE_SESSION_ID and TDDY_REMOTE_DAEMON_URL must be set",
+            "is_error": true
+        })
+        .to_string();
+    }
+    // TODO: implement actual relay forwarding via ExecuteTool RPC
+    serde_json::json!({
+        "error": format!("tool '{}' relay not yet implemented", tool_name),
+        "is_error": true
+    })
+    .to_string()
 }
 
 #[cfg(test)]

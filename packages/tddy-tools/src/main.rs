@@ -5,11 +5,12 @@
 
 mod cli;
 mod pty_relay;
-mod server;
+mod remote_cli;
 
 use anyhow::Result;
 use clap::Parser;
 use rmcp::ServiceExt;
+use tddy_tools::server::PermissionServer;
 
 #[derive(Parser)]
 #[command(name = "tddy-tools")]
@@ -54,7 +55,10 @@ enum Subcommand {
     /// Spawn a command in a PTY and relay keyboard+output — same wiring as the daemon uses
     /// for claude-cli sessions. Useful for verifying the PTY pipeline independently.
     /// Example: tddy-tools pty-relay -- claude --model claude-opus-4-8
-    PtyRelay(pty_relay::PtyRelayArgs),
+    PtyRelay(Box<pty_relay::PtyRelayArgs>),
+
+    /// Remote codebase mode helpers: list-tools, etc.
+    Remote(remote_cli::RemoteArgs),
 }
 
 #[tokio::main]
@@ -77,7 +81,8 @@ async fn main() -> Result<()> {
         Some(Subcommand::PersistChangesetWorkflow(s)) => cli::run_persist_changeset_workflow(s)?,
         Some(Subcommand::ListActions(s)) => cli::run_list_actions(s)?,
         Some(Subcommand::InvokeAction(s)) => cli::run_invoke_action(s)?,
-        Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(s).await?,
+        Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
+        Some(Subcommand::Remote(s)) => remote_cli::run_remote(s)?,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);
@@ -87,7 +92,7 @@ async fn main() -> Result<()> {
 }
 
 async fn run_mcp_server() -> Result<()> {
-    let service = server::PermissionServer::new();
+    let service = PermissionServer::new();
     let server = service.serve(rmcp::transport::stdio()).await?;
     server.waiting().await?;
     Ok(())
