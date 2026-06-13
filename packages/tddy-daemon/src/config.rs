@@ -121,6 +121,15 @@ pub struct ClaudeCliConfig {
     /// Path to the `claude` binary. Defaults to "claude" (resolved from PATH).
     #[serde(default = "default_claude_cli_binary_path")]
     pub binary_path: String,
+    /// Absolute path to the `tddy-tools` binary for per-worktree hook commands.
+    /// When absent, the daemon resolves it from `current_exe` sibling or falls back to
+    /// `"tddy-tools"` (PATH lookup).
+    #[serde(default)]
+    pub tddy_tools_path: Option<String>,
+    /// HTTP base URL the per-worktree hook command uses to call `ReportSessionStatus`.
+    /// When absent, defaults to `http://127.0.0.1:{web_port}` derived from the listen config.
+    #[serde(default)]
+    pub daemon_url: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize)]
@@ -496,5 +505,62 @@ mod spawn_timeout_tests {
     fn codex_oauth_loopback_proxy_eligible_defaults_true() {
         let c = DaemonConfig::default();
         assert!(c.codex_oauth_loopback_proxy_eligible);
+    }
+}
+
+#[cfg(test)]
+mod claude_cli_config_tests {
+    use super::*;
+
+    /// When `claude_cli:` is omitted from YAML entirely, `DaemonConfig::claude_cli` is `None`.
+    #[test]
+    fn claude_cli_absent_when_not_in_yaml() {
+        let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
+        assert!(
+            c.claude_cli.is_none(),
+            "claude_cli must be absent when not configured"
+        );
+    }
+
+    /// `tddy_tools_path` and `daemon_url` both default to `None` when the section is present
+    /// but the new fields are not specified.
+    #[test]
+    fn claude_cli_config_defaults_new_paths_to_none() {
+        let yaml = "
+users:
+  - github_user: u
+    os_user: u
+claude_cli:
+  binary_path: /usr/local/bin/claude
+";
+        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
+        let cli = c.claude_cli.as_ref().expect("claude_cli must be present");
+        assert_eq!(
+            cli.tddy_tools_path, None,
+            "tddy_tools_path must default to None"
+        );
+        assert_eq!(cli.daemon_url, None, "daemon_url must default to None");
+    }
+
+    /// When both new fields are explicit, they round-trip correctly through YAML parsing.
+    #[test]
+    fn claude_cli_config_parses_explicit_tddy_tools_path_and_daemon_url() {
+        let yaml = "
+users:
+  - github_user: u
+    os_user: u
+claude_cli:
+  binary_path: claude
+  tddy_tools_path: /usr/local/bin/tddy-tools
+  daemon_url: http://127.0.0.1:9000
+";
+        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
+        let cli = c.claude_cli.as_ref().expect("claude_cli must be present");
+        assert_eq!(
+            cli.tddy_tools_path.as_deref(),
+            Some("/usr/local/bin/tddy-tools")
+        );
+        assert_eq!(cli.daemon_url.as_deref(), Some("http://127.0.0.1:9000"));
     }
 }

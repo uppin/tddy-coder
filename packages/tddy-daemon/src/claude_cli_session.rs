@@ -93,6 +93,7 @@ pub struct ClaudeCliSessionManager {
 }
 
 impl ClaudeCliSessionManager {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             registry: Arc::new(RwLock::new(HashMap::new())),
@@ -235,6 +236,8 @@ impl ClaudeCliSessionManager {
     ///
     /// Returns `(pid, Arc<Mutex<MasterPty>>)` on success. Launches background threads for I/O
     /// forwarding and exit monitoring. The registry `Arc` is used for cleanup on exit.
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::type_complexity)]
     fn spawn_in_pty(
         session_id: &str,
         worktree_path: PathBuf,

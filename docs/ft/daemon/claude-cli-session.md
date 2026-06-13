@@ -145,6 +145,48 @@ New `GhosttyTerminalGrpc` component wraps `GhosttyTerminal` and connects `onData
 | Model | selected model label |
 | Elapsed | `—` |
 | Status | `active` / `inactive` |
+| Activity | `Started` / `Running` / `ExecutingTool` / `WaitingForInput` / `Done` / `Ended` (see below) |
+
+## Session activity status via per-worktree hooks
+
+When the daemon starts a claude-cli session it writes `.claude/settings.local.json` into the git
+worktree configuring six Claude Code lifecycle hooks. Each hook invokes
+`tddy-tools session-hook` which maps the event to a granular `SessionActivityStatus` and calls the
+new `ReportSessionStatus` gRPC RPC. The daemon validates the per-session `hook_token`, writes
+`activity_status` to `.session.yaml`, and surfaces it via `ListSessions.SessionEntry.activity_status`.
+
+### Status mapping
+
+| Claude hook event | `notification_type` | `activity_status` |
+|---|---|---|
+| `SessionStart` | — | `Started` |
+| `UserPromptSubmit` | — | `Running` |
+| `PostToolUse` | — | `ExecutingTool` |
+| `Notification` | `permission_prompt` / `elicitation_dialog` / `idle_prompt` | `WaitingForInput` |
+| `Stop` | — | `Done` |
+| `SessionEnd` | — | `Ended` |
+| anything else | — | no-op (hook exits 0, no RPC) |
+
+### Hook wiring
+
+`start_claude_cli_session` generates a per-session UUID `hook_token` and calls
+`tddy_core::build_claude_hooks_settings(&HookCommandParams { tddy_tools_path, daemon_url, session_id, os_user, hook_token })`.
+The resulting JSON is written to `<worktree>/.claude/settings.local.json`. The `hook_token` is also
+stored in `.session.yaml` for validation on inbound `ReportSessionStatus` calls.
+
+Config (`claude_cli:` block) may override `tddy_tools_path` (default: `current_exe` sibling → `"tddy-tools"`) and `daemon_url` (default: `http://127.0.0.1:{web_port}`).
+
+### Fail-quiet contract
+
+`tddy-tools session-hook` always exits 0. A 2-second reqwest timeout prevents a dead daemon from blocking Claude. On no-op events (unrecognized event names, unrecognized `notification_type`) the tool exits immediately without making any network call.
+
+### Auth model
+
+The hook has no web session token. A per-session random `hook_token` (UUID) is generated at session start, persisted in `.session.yaml`, and baked into each hook command line. `ReportSessionStatus` resolves `sessions_base` directly from `os_user` (bypasses the GitHub OAuth path) and constant-time-compares the token. Sessions with no `hook_token` (e.g. Telegram-started) silently ignore inbound hook reports.
+
+### Web UI
+
+Web-side rendering of `activity_status` (badge in the session list) is a follow-up; this changeset surfaces the field in the `ListSessions` response but does not yet display it in the UI.
 
 ## Proto delta (connection.proto)
 
@@ -166,6 +208,23 @@ message SessionTerminalInput {
 message SessionTerminalOutput {
   bytes data = 1;
 }
+
+// --- Activity status hooks ---
+rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);
+
+message ReportSessionStatusRequest {
+  string session_id  = 1;
+  string hook_token  = 2;
+  string os_user     = 3;
+  string status      = 4;  // one of the SessionActivityStatus wire strings
+}
+
+message ReportSessionStatusResponse {
+  bool ok = 1;
+}
+
+// SessionEntry (in ListSessionsResponse) gains:
+//   string activity_status = 15;
 ```
 
 `StartSessionResponse`, `ConnectSessionResponse`, and `ResumeSessionResponse` are unchanged — LiveKit fields are returned as empty strings for Claude CLI sessions. The web client detects `agent == "claude-cli"` from `ListSessions` to decide which terminal component to mount.

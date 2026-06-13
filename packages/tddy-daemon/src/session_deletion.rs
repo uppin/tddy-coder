@@ -269,6 +269,8 @@ mod tests {
             previous_session_id: None,
             session_type: None,
             model: None,
+            activity_status: None,
+            hook_token: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }
@@ -277,10 +279,7 @@ mod tests {
     #[test]
     fn validate_accepts_typical_session_id() {
         let r = validate_session_id_for_delete("inactive-delete-me");
-        assert!(
-            r.is_ok(),
-            "expected valid session id to pass validation (green phase)"
-        );
+        assert!(r.is_ok(), "expected valid session id to pass validation");
     }
 
     /// Lower-level: resolution should yield a directory under the base for safe ids.
