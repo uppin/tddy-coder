@@ -120,6 +120,7 @@ async fn workspace_session_creates_worktree_with_no_pty() {
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
             initial_prompt: String::new(),
+            permission_mode: String::new(),
         }))
         .await
         .expect("StartSession with session_type=workspace must succeed");
