@@ -101,6 +101,7 @@ fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
         None,
         None,
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     )
 }
 
@@ -119,6 +120,8 @@ fn write_exited_session(session_dir: &std::path::Path, session_id: &str, pid: u3
         previous_session_id: None,
         session_type: None,
         model: None,
+        activity_status: None,
+        hook_token: None,
     };
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }
@@ -207,6 +210,7 @@ async fn start_session_unknown_daemon_instance_id_returns_clear_error() {
         new_branch_name: String::new(),
         selected_integration_base_ref: String::new(),
         selected_branch_to_work_on: String::new(),
+        initial_prompt: String::new(),
     });
     let err = service
         .start_session(request)
@@ -302,6 +306,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         None,
         None,
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     );
 
     let token_b = livekit
@@ -356,6 +361,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
             },
         ),
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     );
 
     tokio::time::timeout(Duration::from_secs(45), async {
@@ -393,6 +399,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         new_branch_name: String::new(),
         selected_integration_base_ref: String::new(),
         selected_branch_to_work_on: String::new(),
+        initial_prompt: String::new(),
     });
     let response = service_a.start_session(request).await.unwrap_or_else(|e| {
         panic!(

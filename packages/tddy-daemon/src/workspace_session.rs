@@ -99,6 +99,8 @@ pub async fn start_workspace_session(
         previous_session_id: None,
         session_type: Some("workspace".to_string()),
         model: None,
+        activity_status: None,
+        hook_token: None,
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;

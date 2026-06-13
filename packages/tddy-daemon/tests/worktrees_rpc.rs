@@ -50,6 +50,7 @@ fn test_service(sessions_base: PathBuf, os_user: &str) -> ConnectionServiceImpl 
         None,
         None,
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     )
 }
 

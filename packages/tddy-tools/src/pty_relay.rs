@@ -755,7 +755,7 @@ impl Drop for RawMode {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "livekit"))]
 mod tests {
     #[cfg(feature = "livekit")]
     use super::*;

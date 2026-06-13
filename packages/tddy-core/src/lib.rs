@@ -4,6 +4,7 @@ pub mod agent_skills;
 pub mod backend;
 pub mod branch_worktree_intent;
 pub mod changeset;
+pub mod claude_hooks;
 pub mod elapsed_format;
 pub mod error;
 pub mod feature_start_slash;
@@ -14,6 +15,7 @@ pub mod presenter;
 pub mod session_action_jobs;
 pub mod session_action_pipeline;
 pub mod session_actions;
+pub mod session_activity;
 pub mod session_chain;
 pub mod session_lifecycle;
 pub mod session_metadata;
@@ -49,6 +51,7 @@ pub use changeset::{
     ChangesetState, ChangesetWorkflow, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
     GithubPrStatus, QuestionOptionForQa, SessionEntry, StateTransition,
 };
+pub use claude_hooks::{build_claude_hooks_settings, HookCommandParams};
 pub use elapsed_format::format_elapsed_compact;
 pub use error::{BackendError, ParseError, WorkflowError};
 pub use feature_start_slash::{
@@ -76,6 +79,9 @@ pub use presenter::{
     Presenter, PresenterEvent, PresenterHandle, PresenterState, PresenterView, UserIntent,
     ViewConnection, WorkflowCompletePayload, WorkflowEvent,
 };
+pub use session_activity::{
+    activity_status_from_hook, parse_hook_event, HookEvent, SessionActivityStatus,
+};
 pub use session_chain::{
     integrate_chain_base_into_session_worktree_bootstrap,
     resolve_chain_integration_base_ref_from_parent_session,
@@ -86,8 +92,9 @@ pub use session_lifecycle::{
     UnifiedSessionTreeBootstrap,
 };
 pub use session_metadata::{
-    read_session_metadata, write_initial_tool_session_metadata, write_session_metadata,
-    InitialToolSessionMetadataOpts, SessionMetadata, SESSION_METADATA_FILENAME,
+    read_session_metadata, update_activity_status, write_initial_tool_session_metadata,
+    write_session_metadata, InitialToolSessionMetadataOpts, SessionMetadata,
+    SESSION_METADATA_FILENAME,
 };
 pub use source_path::{classify_rust_source_path, RustSourcePathKind};
 pub use stream::ProgressEvent;

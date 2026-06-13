@@ -6,6 +6,7 @@
 mod cli;
 mod pty_relay;
 mod remote_cli;
+mod session_hook;
 
 use anyhow::Result;
 use clap::Parser;
@@ -59,6 +60,10 @@ enum Subcommand {
 
     /// Remote codebase mode helpers: list-tools, etc.
     Remote(remote_cli::RemoteArgs),
+
+    /// Report granular session activity status to the daemon (invoked by Claude Code hooks).
+    /// Reads hook event JSON from stdin; fails quietly — always exits 0.
+    SessionHook(session_hook::SessionHookArgs),
 }
 
 #[tokio::main]
@@ -83,6 +88,7 @@ async fn main() -> Result<()> {
         Some(Subcommand::InvokeAction(s)) => cli::run_invoke_action(s)?,
         Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
         Some(Subcommand::Remote(s)) => remote_cli::run_remote(s)?,
+        Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);

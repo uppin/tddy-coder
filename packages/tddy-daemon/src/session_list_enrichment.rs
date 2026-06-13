@@ -29,6 +29,9 @@ pub struct SessionListStatusDisplay {
     pub elapsed_display: String,
     pub agent: String,
     pub model: String,
+    /// Granular activity status for claude-cli sessions (e.g. "Running", "WaitingForInput").
+    /// Empty string for tool/workflow sessions.
+    pub activity_status: String,
 }
 
 impl SessionListStatusDisplay {
@@ -40,6 +43,7 @@ impl SessionListStatusDisplay {
             elapsed_display: p.clone(),
             agent: p.clone(),
             model: p,
+            activity_status: String::new(),
         }
     }
 }
@@ -115,14 +119,15 @@ pub fn session_list_status_from_session_dir(
         }
     };
 
-    // Claude CLI sessions have no changeset — read agent/model from session metadata.
+    // Claude CLI sessions have no changeset — read agent/model/activity_status from metadata.
     if meta.session_type.as_deref() == Some("claude-cli") {
         return Ok(SessionListStatusDisplay {
             workflow_goal: String::new(),
             workflow_state: String::new(),
             elapsed_display: String::new(),
             agent: "claude-cli".to_string(),
-            model: meta.model.unwrap_or_default(),
+            model: meta.model.clone().unwrap_or_default(),
+            activity_status: meta.activity_status.clone().unwrap_or_default(),
         });
     }
 
@@ -153,6 +158,7 @@ pub fn session_list_status_from_session_dir(
             elapsed_display,
             agent: "—".to_string(),
             model: "—".to_string(),
+            activity_status: String::new(),
         });
     };
 
@@ -178,6 +184,7 @@ pub fn session_list_status_from_session_dir(
         elapsed_display,
         agent,
         model,
+        activity_status: String::new(),
     })
 }
 
@@ -207,6 +214,7 @@ pub fn apply_session_list_status_to_proto(
     entry.elapsed_display = status.elapsed_display;
     entry.agent = status.agent;
     entry.model = status.model;
+    entry.activity_status = status.activity_status;
     entry.pending_elicitation =
         crate::elicitation::pending_elicitation_for_session_dir(session_dir);
     Ok(())
@@ -389,6 +397,7 @@ state:
             agent: String::new(),
             model: String::new(),
             pending_elicitation: false,
+            activity_status: String::new(),
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -402,12 +411,6 @@ state:
     /// `session_type = "claude-cli"` and no `changeset.yaml` is present,
     /// `session_list_status_from_session_dir` must return `agent = "claude-cli"` and
     /// `model` from metadata — not `all_placeholders()` dashes.
-    ///
-    /// FAILS:
-    /// 1. `SessionMetadata` has `deny_unknown_fields` and no `session_type`/`model` fields →
-    ///    the struct literal below does not compile until the struct is extended.
-    /// 2. Even with the struct extended, the function returns `all_placeholders()` when
-    ///    changeset.yaml is absent, without any claude-cli fallback branch.
     #[test]
     fn claude_cli_session_enrichment_uses_metadata_not_changeset() {
         use tddy_core::SessionMetadata;
@@ -430,6 +433,8 @@ state:
             previous_session_id: None,
             session_type: Some("claude-cli".to_string()),
             model: Some("claude-opus-4-8".to_string()),
+            activity_status: None,
+            hook_token: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         // Intentionally NO changeset.yaml — claude-cli sessions never have one.
@@ -457,6 +462,195 @@ state:
         );
     }
 
+    /// `claude_cli_enrichment_surfaces_activity_status_from_metadata` — when `.session.yaml` has
+    /// `activity_status = "WaitingForInput"` for a claude-cli session, the enrichment function
+    /// must return that string in `SessionListStatusDisplay.activity_status`.
+    #[test]
+    fn claude_cli_enrichment_surfaces_activity_status_from_metadata() {
+        use tddy_core::SessionMetadata;
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path().join("sess-act-enrich-1");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let metadata = SessionMetadata {
+            session_id: "sess-act-enrich-1".to_string(),
+            project_id: "proj-x".to_string(),
+            created_at: "2026-06-13T10:00:00Z".to_string(),
+            updated_at: "2026-06-13T10:05:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: Some("/tmp/worktrees/claude-cli-act".to_string()),
+            pid: Some(11111),
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some("claude-sonnet-4-6".to_string()),
+            activity_status: Some("WaitingForInput".to_string()),
+            hook_token: None,
+        };
+        tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
+
+        let got =
+            session_list_status_from_session_dir(&session_dir).expect("enrichment must not error");
+
+        assert_eq!(
+            got.activity_status, "WaitingForInput",
+            "activity_status must be read from .session.yaml"
+        );
+        assert_eq!(got.agent, "claude-cli");
+    }
+
+    /// `claude_cli_enrichment_empty_activity_status_when_absent` — when `.session.yaml` has no
+    /// `activity_status`, the enrichment must return an empty string (not an error or a dash).
+    #[test]
+    fn claude_cli_enrichment_empty_activity_status_when_absent() {
+        use tddy_core::SessionMetadata;
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path().join("sess-act-absent-1");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let metadata = SessionMetadata {
+            session_id: "sess-act-absent-1".to_string(),
+            project_id: "proj-x".to_string(),
+            created_at: "2026-06-13T10:00:00Z".to_string(),
+            updated_at: "2026-06-13T10:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: Some("/tmp/wt".to_string()),
+            pid: None,
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some("claude-opus-4-8".to_string()),
+            activity_status: None,
+            hook_token: None,
+        };
+        tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
+
+        let got =
+            session_list_status_from_session_dir(&session_dir).expect("enrichment must not error");
+
+        assert_eq!(
+            got.activity_status, "",
+            "activity_status must be empty string when absent in .session.yaml"
+        );
+    }
+
+    /// `tool_session_enrichment_has_empty_activity_status` — tool/workflow sessions must always
+    /// have `activity_status = ""` (never populated from changeset data).
+    #[test]
+    fn tool_session_enrichment_has_empty_activity_status() {
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path().join("sess-tool-act-1");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        // Write a standard tool session + changeset
+        use tddy_core::SessionMetadata;
+        let metadata = SessionMetadata {
+            session_id: "sess-tool-act-1".to_string(),
+            project_id: "proj-t".to_string(),
+            created_at: "2026-06-13T10:00:00Z".to_string(),
+            updated_at: "2026-06-13T10:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: Some("/tmp/repo".to_string()),
+            pid: Some(22222),
+            tool: Some("tddy-coder".to_string()),
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: None,
+            model: None,
+            activity_status: None,
+            hook_token: None,
+        };
+        tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
+
+        std::fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models:
+  acceptance-tests: sonnet-4
+state:
+  current: Red
+  updated_at: '2026-06-13T10:00:00Z'
+  history:
+    - state: Red
+      at: '2026-06-13T10:00:00Z'
+sessions:
+  - tag: acceptance-tests
+    agent: claude
+    session_id: sess-tool-act-1
+",
+        )
+        .unwrap();
+
+        let got = session_list_status_from_session_dir(&session_dir)
+            .expect("enrichment must not error for tool session");
+
+        assert_eq!(
+            got.activity_status, "",
+            "tool sessions must have empty activity_status"
+        );
+    }
+
+    /// `apply_session_list_status_to_proto_sets_activity_status` — when a claude-cli session has
+    /// `activity_status` in `.session.yaml`, `apply_session_list_status_to_proto` must copy it
+    /// to `proto.activity_status`. Tool/changeset sessions must produce an empty string.
+    /// `entry.activity_status`.
+    #[test]
+    fn apply_session_list_status_to_proto_sets_activity_status() {
+        use tddy_core::SessionMetadata;
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path().join("sess-proto-act-1");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let metadata = SessionMetadata {
+            session_id: "sess-proto-act-1".to_string(),
+            project_id: "proj-z".to_string(),
+            created_at: "2026-06-13T10:00:00Z".to_string(),
+            updated_at: "2026-06-13T10:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: Some("/tmp/wt-proto".to_string()),
+            pid: None,
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some("claude-sonnet-4-6".to_string()),
+            activity_status: Some("Done".to_string()),
+            hook_token: None,
+        };
+        tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
+
+        let mut proto = ProtoSessionEntry {
+            session_id: "sess-proto-act-1".to_string(),
+            created_at: String::new(),
+            status: String::new(),
+            repo_path: String::new(),
+            pid: 0,
+            is_active: false,
+            project_id: String::new(),
+            daemon_instance_id: String::new(),
+            workflow_goal: String::new(),
+            workflow_state: String::new(),
+            elapsed_display: String::new(),
+            agent: String::new(),
+            model: String::new(),
+            pending_elicitation: false,
+            activity_status: String::new(),
+        };
+        apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
+        assert_eq!(
+            proto.activity_status, "Done",
+            "activity_status must be propagated from .session.yaml into proto SessionEntry"
+        );
+        // agent field must also be populated for claude-cli
+        assert_eq!(proto.agent, "claude-cli");
+    }
+
     #[test]
     fn pending_elicitation_for_session_dir_reads_metadata_flag() {
         use tddy_core::SessionMetadata;
@@ -477,6 +671,8 @@ state:
             previous_session_id: None,
             session_type: None,
             model: None,
+            activity_status: None,
+            hook_token: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(
