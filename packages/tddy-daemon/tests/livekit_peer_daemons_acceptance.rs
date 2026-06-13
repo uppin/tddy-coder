@@ -86,6 +86,7 @@ fn connection_service_with_livekit_discovery(
             },
         ),
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     );
     (service, sessions_tmp)
 }

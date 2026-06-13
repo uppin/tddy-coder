@@ -124,6 +124,10 @@ message StartSessionRequest {
   string selected_integration_base_ref = 11;
   // Required when branch_worktree_intent = "work_on_selected_branch". The existing branch to check out.
   string selected_branch_to_work_on = 12;
+  // Optional first prompt to pass as a positional argument to the claude CLI process on launch
+  // (e.g. `claude "build feature X"`). Only used when session_type = "claude-cli". Empty = no prompt.
+  // The session is still started interactively; the prompt seeds the first user turn.
+  string initial_prompt = 13;
 }
 message StartSessionResponse {
   string session_id = 1;

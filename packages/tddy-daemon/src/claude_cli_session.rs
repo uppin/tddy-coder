@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use prost::Message as _;
 use tddy_livekit::{LiveKitParticipant, RpcResult, RpcService, TokenGenerator};
 use tddy_rpc::{BidiStreamOutput, ResponseBody, RpcMessage};
@@ -81,16 +81,53 @@ impl ClaudeCliSessionManager {
         }
     }
 
+    /// Build the argv for the `claude` process.
+    ///
+    /// Exported so tests can assert the argument list without spawning a real PTY.
+    ///
+    /// Arg order: `[binary, "--model", model, "--session-id", id, prompt?]`.
+    /// `model` is omitted when empty. `initial_prompt` is appended as a positional arg only
+    /// when non-empty (trimmed); an empty/whitespace prompt is treated as absent so the
+    /// process is started interactively without an injected first turn.
+    pub fn build_claude_argv(
+        binary_path: &str,
+        model: &str,
+        session_id: &str,
+        initial_prompt: Option<&str>,
+    ) -> Vec<String> {
+        let mut argv = vec![binary_path.to_string()];
+        if !model.is_empty() {
+            argv.push("--model".to_string());
+            argv.push(model.to_string());
+        }
+        argv.push("--session-id".to_string());
+        argv.push(session_id.to_string());
+        if let Some(p) = initial_prompt {
+            let p = p.trim();
+            if !p.is_empty() {
+                argv.push(p.to_string());
+            }
+        }
+        argv
+    }
+
     /// Spawn a new claude CLI process for `session_id` in `worktree_path`.
     ///
     /// Returns an `Arc<PtyHandle>` on success. The child process is monitored in a background
     /// std thread; when it exits the session is removed from the registry.
+    ///
+    /// `initial_prompt` — when `Some` and non-empty, appended as a positional CLI argument so
+    /// that `claude` receives it as the first user turn. Pass `None` (or `Some("")`) for an
+    /// interactive session with no seeded prompt. **Resume** (`resume()`) always passes `None`
+    /// because the session is continued via `--session-id`; re-injecting the original prompt
+    /// would create a duplicate user turn.
     pub async fn start(
         &self,
         session_id: &str,
         worktree_path: PathBuf,
         model: &str,
         binary_path: &str,
+        initial_prompt: Option<&str>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<Bytes>();
         let (stdout_tx, _stdout_rx) = broadcast::channel::<Bytes>(OUTPUT_BROADCAST_CAPACITY);
@@ -99,6 +136,7 @@ impl ClaudeCliSessionManager {
         let session_id_owned = session_id.to_string();
         let model_owned = model.to_string();
         let binary_owned = binary_path.to_string();
+        let initial_prompt_owned = initial_prompt.map(str::to_owned);
         let worktree_clone = worktree_path.clone();
         let stdout_tx_clone = stdout_tx.clone();
         let capture_clone = Arc::clone(&capture);
@@ -112,6 +150,7 @@ impl ClaudeCliSessionManager {
                 worktree_clone,
                 &model_owned,
                 &binary_owned,
+                initial_prompt_owned.as_deref(),
                 stdin_rx,
                 stdout_tx_clone,
                 capture_clone,
@@ -146,6 +185,9 @@ impl ClaudeCliSessionManager {
     }
 
     /// Resume (relaunch) an existing session by spawning a new process in the same worktree.
+    ///
+    /// Always passes `initial_prompt = None`: a resumed session continues via `--session-id`
+    /// and must not replay the original prompt (that would inject a duplicate user turn).
     pub async fn resume(
         &self,
         session_id: &str,
@@ -153,8 +195,8 @@ impl ClaudeCliSessionManager {
         model: &str,
         binary_path: &str,
     ) -> anyhow::Result<Arc<PtyHandle>> {
-        // Start a fresh process in the same worktree.
-        self.start(session_id, worktree_path, model, binary_path)
+        // Start a fresh process in the same worktree; never replay the initial prompt on resume.
+        self.start(session_id, worktree_path, model, binary_path, None)
             .await
     }
 
@@ -174,11 +216,16 @@ impl ClaudeCliSessionManager {
         worktree_path: PathBuf,
         model: &str,
         binary_path: &str,
+        initial_prompt: Option<&str>,
         stdin_rx: mpsc::UnboundedReceiver<Bytes>,
         stdout_tx: broadcast::Sender<Bytes>,
         capture: Arc<std::sync::Mutex<Vec<u8>>>,
         reg: Arc<RwLock<HashMap<String, Arc<PtyHandle>>>>,
-    ) -> anyhow::Result<(u32, Arc<std::sync::Mutex<Box<dyn portable_pty::MasterPty + Send>>>, watch::Receiver<bool>)> {
+    ) -> anyhow::Result<(
+        u32,
+        Arc<std::sync::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+        watch::Receiver<bool>,
+    )> {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -189,13 +236,12 @@ impl ClaudeCliSessionManager {
             })
             .map_err(|e| anyhow::anyhow!("openpty failed: {}", e))?;
 
-        let mut cmd = CommandBuilder::new(binary_path);
-        if !model.is_empty() {
-            cmd.arg("--model");
-            cmd.arg(model);
+        // Build argv via the shared helper so it is testable without a real PTY.
+        let argv = Self::build_claude_argv(binary_path, model, session_id, initial_prompt);
+        let mut cmd = CommandBuilder::new(&argv[0]);
+        for arg in &argv[1..] {
+            cmd.arg(arg);
         }
-        cmd.arg("--session-id");
-        cmd.arg(session_id);
         cmd.cwd(&worktree_path);
         // Ensure the child sees a proper terminal type for TUI rendering.
         cmd.env("TERM", "xterm-256color");
@@ -203,10 +249,9 @@ impl ClaudeCliSessionManager {
 
         // Spawn the child on the slave side. The slave is consumed/closed after spawn so the
         // master sees EOF when the child exits.
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| anyhow::anyhow!("failed to spawn claude-cli binary {:?}: {}", binary_path, e))?;
+        let child = pair.slave.spawn_command(cmd).map_err(|e| {
+            anyhow::anyhow!("failed to spawn claude-cli binary {:?}: {}", binary_path, e)
+        })?;
         // Drop slave so master sees EOF on child exit.
         drop(pair.slave);
 
@@ -368,7 +413,10 @@ impl RpcService for PtyLiveKitService {
         mut input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, tddy_rpc::Status> {
         if service != "terminal.TerminalService" || method != "StreamTerminalIO" {
-            return Err(tddy_rpc::Status::not_found(format!("{}/{}", service, method)));
+            return Err(tddy_rpc::Status::not_found(format!(
+                "{}/{}",
+                service, method
+            )));
         }
 
         let (out_tx, out_rx) = mpsc::channel::<Result<Vec<u8>, tddy_rpc::Status>>(256);

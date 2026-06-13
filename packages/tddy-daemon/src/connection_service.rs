@@ -147,9 +147,11 @@ impl Stream for MpscTerminalOutputStream {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(chunk)) => std::task::Poll::Ready(Some(Ok(
-                SessionTerminalOutput { data: chunk.to_vec() },
-            ))),
+            std::task::Poll::Ready(Some(chunk)) => {
+                std::task::Poll::Ready(Some(Ok(SessionTerminalOutput {
+                    data: chunk.to_vec(),
+                })))
+            }
             std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
             std::task::Poll::Pending => std::task::Poll::Pending,
         }
@@ -180,6 +182,7 @@ impl ConnectionServiceImpl {
         spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
         livekit_discovery: Option<LiveKitDiscoveryHandles>,
         telegram: Option<Arc<TelegramDaemonHooks>>,
+        claude_cli_manager: Arc<ClaudeCliSessionManager>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
         let (eligible_daemon_source, common_room_livekit_room) = match livekit_discovery {
@@ -192,7 +195,6 @@ impl ConnectionServiceImpl {
         let worktree_stats_cache = Arc::new(WorktreeStatsCache::new(
             worktrees::projects_stats_cache_root(),
         ));
-        let claude_cli_manager = Arc::new(ClaudeCliSessionManager::new());
         Self {
             config,
             sessions_base_for_user,
@@ -217,6 +219,9 @@ impl ConnectionServiceImpl {
     /// Requires a valid, registered project. Creates a real git worktree under the project's
     /// main repo (via `tddy_core::setup_worktree_for_session_with_optional_chain_base`), then
     /// spawns the `claude` binary in a PTY.
+    ///
+    /// `initial_prompt` — when non-empty, passed as a positional argument to `claude` so it
+    /// receives the first user turn on startup (e.g. `claude "build feature X"`).
     #[allow(clippy::too_many_arguments)]
     async fn start_claude_cli_session(
         &self,
@@ -229,6 +234,7 @@ impl ConnectionServiceImpl {
         new_branch_name: &str,
         selected_integration_base_ref: &str,
         selected_branch_to_work_on: &str,
+        initial_prompt: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -257,47 +263,47 @@ impl ConnectionServiceImpl {
 
         // Create session directory under sessions_base/sessions/<id>/.
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-        std::fs::create_dir_all(&session_dir).map_err(|e| {
-            Status::internal(format!("failed to create session dir: {}", e))
-        })?;
+        std::fs::create_dir_all(&session_dir)
+            .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
 
         // Build branch intent and write a minimal changeset so the worktree setup fn can read it.
         let short_id = &session_id[..8.min(session_id.len())];
-        let (intent, resolved_new_branch, resolved_selected_branch) =
-            match branch_worktree_intent.trim() {
-                "new_branch_from_base" => {
-                    if new_branch_name.trim().is_empty() {
-                        return Err(Status::invalid_argument(
+        let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
+            .trim()
+        {
+            "new_branch_from_base" => {
+                if new_branch_name.trim().is_empty() {
+                    return Err(Status::invalid_argument(
                             "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
                         ));
-                    }
-                    (
-                        BranchWorktreeIntent::NewBranchFromBase,
-                        Some(new_branch_name.trim().to_string()),
-                        None,
-                    )
                 }
-                "work_on_selected_branch" => {
-                    if selected_branch_to_work_on.trim().is_empty() {
-                        return Err(Status::invalid_argument(
+                (
+                    BranchWorktreeIntent::NewBranchFromBase,
+                    Some(new_branch_name.trim().to_string()),
+                    None,
+                )
+            }
+            "work_on_selected_branch" => {
+                if selected_branch_to_work_on.trim().is_empty() {
+                    return Err(Status::invalid_argument(
                             "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
                         ));
-                    }
-                    (
-                        BranchWorktreeIntent::WorkOnSelectedBranch,
-                        None,
-                        Some(selected_branch_to_work_on.trim().to_string()),
-                    )
                 }
-                _ => {
-                    // Default: create a new branch from the integration base with a generated name.
-                    (
-                        BranchWorktreeIntent::NewBranchFromBase,
-                        Some(format!("claude-cli/{}", short_id)),
-                        None,
-                    )
-                }
-            };
+                (
+                    BranchWorktreeIntent::WorkOnSelectedBranch,
+                    None,
+                    Some(selected_branch_to_work_on.trim().to_string()),
+                )
+            }
+            _ => {
+                // Default: create a new branch from the integration base with a generated name.
+                (
+                    BranchWorktreeIntent::NewBranchFromBase,
+                    Some(format!("claude-cli/{}", short_id)),
+                    None,
+                )
+            }
+        };
 
         let cs_workflow = ChangesetWorkflow {
             branch_worktree_intent: Some(intent),
@@ -314,9 +320,8 @@ impl ConnectionServiceImpl {
             workflow: Some(cs_workflow),
             ..Changeset::default()
         };
-        tddy_core::write_changeset(&session_dir, &cs).map_err(|e| {
-            Status::internal(format!("failed to write changeset: {}", e))
-        })?;
+        tddy_core::write_changeset(&session_dir, &cs)
+            .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
         // Create the real git worktree (blocking: involves git fetch + git worktree add).
         let repo_root_clone = repo_root.clone();
@@ -350,8 +355,22 @@ impl ConnectionServiceImpl {
         let binary_owned = binary_path.to_string();
         let worktree_clone = worktree_path.clone();
 
+        let initial_prompt_opt = {
+            let p = initial_prompt.trim();
+            if p.is_empty() {
+                None
+            } else {
+                Some(p.to_string())
+            }
+        };
         let handle = manager
-            .start(&session_id_owned, worktree_clone, &model_owned, &binary_owned)
+            .start(
+                &session_id_owned,
+                worktree_clone,
+                &model_owned,
+                &binary_owned,
+                initial_prompt_opt.as_deref(),
+            )
             .await
             .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
 
@@ -374,56 +393,54 @@ impl ConnectionServiceImpl {
             session_type: Some("claude-cli".to_string()),
             model: Some(model.to_string()),
         };
-        tddy_core::write_session_metadata(&session_dir, &meta).map_err(|e| {
-            Status::internal(format!("failed to write session metadata: {}", e))
-        })?;
+        tddy_core::write_session_metadata(&session_dir, &meta)
+            .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
 
         // Optionally expose the PTY via a per-session LiveKit participant so that LiveKit
         // clients (web UI, pty-relay --livekit-url) can use the same bidi-stream path as
         // tool sessions. Falls back gracefully: if LiveKit is not configured the session is
         // still usable via the gRPC connectrpc endpoints.
-        let (lk_room, lk_url, lk_server_identity) =
-            if let Some(lk) = spawner::livekit_creds_from_config(&self.config) {
-                let room_name = spawner::resolve_livekit_room_name(
-                    lk.common_room.as_deref(),
-                    session_id,
-                );
-                let server_identity = spawner::livekit_server_identity_for_session(
-                    lk.daemon_instance_id.as_deref(),
-                    session_id,
-                );
-                match crate::claude_cli_session::spawn_livekit_bridge(
-                    Arc::clone(&handle),
-                    &lk.url,
-                    &room_name,
-                    &lk.api_key,
-                    &lk.api_secret,
-                    &server_identity,
-                )
-                .await
-                {
-                    Ok(()) => {
-                        log::info!(
-                            target: "tddy_daemon::connection_service",
-                            "claude-cli session {}: LiveKit bridge started (identity={})",
-                            session_id,
-                            server_identity
-                        );
-                        (room_name, lk.url.clone(), server_identity)
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            target: "tddy_daemon::connection_service",
-                            "claude-cli session {}: LiveKit bridge failed ({}); gRPC path still works",
-                            session_id,
-                            e
-                        );
-                        (String::new(), String::new(), String::new())
-                    }
+        let (lk_room, lk_url, lk_server_identity) = if let Some(lk) =
+            spawner::livekit_creds_from_config(&self.config)
+        {
+            let room_name =
+                spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id);
+            let server_identity = spawner::livekit_server_identity_for_session(
+                lk.daemon_instance_id.as_deref(),
+                session_id,
+            );
+            match crate::claude_cli_session::spawn_livekit_bridge(
+                Arc::clone(&handle),
+                &lk.url,
+                &room_name,
+                &lk.api_key,
+                &lk.api_secret,
+                &server_identity,
+            )
+            .await
+            {
+                Ok(()) => {
+                    log::info!(
+                        target: "tddy_daemon::connection_service",
+                        "claude-cli session {}: LiveKit bridge started (identity={})",
+                        session_id,
+                        server_identity
+                    );
+                    (room_name, lk.url.clone(), server_identity)
                 }
-            } else {
-                (String::new(), String::new(), String::new())
-            };
+                Err(e) => {
+                    log::warn!(
+                        target: "tddy_daemon::connection_service",
+                        "claude-cli session {}: LiveKit bridge failed ({}); gRPC path still works",
+                        session_id,
+                        e
+                    );
+                    (String::new(), String::new(), String::new())
+                }
+            }
+        } else {
+            (String::new(), String::new(), String::new())
+        };
 
         log::info!(
             target: "tddy_daemon::connection_service",
@@ -482,9 +499,8 @@ impl ConnectionServiceImpl {
             pid: Some(pid),
             ..meta
         };
-        tddy_core::write_session_metadata(&session_dir, &updated).map_err(|e| {
-            Status::internal(format!("failed to update session metadata: {}", e))
-        })?;
+        tddy_core::write_session_metadata(&session_dir, &updated)
+            .map_err(|e| Status::internal(format!("failed to update session metadata: {}", e)))?;
 
         log::info!(
             target: "tddy_daemon::connection_service",
@@ -839,6 +855,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     req.new_branch_name.trim(),
                     req.selected_integration_base_ref.trim(),
                     req.selected_branch_to_work_on.trim(),
+                    req.initial_prompt.trim(),
                 )
                 .await;
         }
@@ -1752,6 +1769,7 @@ mod signal_session_unit_tests {
             None,
             None,
             None,
+            Arc::new(ClaudeCliSessionManager::new()),
         )
     }
 
@@ -1870,6 +1888,7 @@ mod delete_session_unit_tests {
             None,
             None,
             None,
+            Arc::new(ClaudeCliSessionManager::new()),
         )
     }
 

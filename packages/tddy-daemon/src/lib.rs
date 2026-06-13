@@ -1,9 +1,9 @@
 //! tddy-daemon library — shared by binary and tests.
 
 pub mod active_elicitation;
-pub mod claude_cli_session;
 pub mod agent_list_mapping;
 pub mod auth;
+pub mod claude_cli_session;
 mod codex_oauth_participant_metadata;
 pub mod codex_oauth_relay;
 pub mod config;
