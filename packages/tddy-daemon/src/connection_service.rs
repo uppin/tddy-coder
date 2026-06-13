@@ -22,10 +22,11 @@ use tddy_service::proto::connection::{
     ListWorktreesForProjectRequest, ListWorktreesForProjectResponse,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
     ReadSessionWorkflowFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse,
-    SessionEntry as ProtoSessionEntry, SessionTerminalInput, SessionTerminalOutput, Signal,
-    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
-    StreamTerminalOutputRequest, ToolInfo, WorkflowFileEntry, WorktreeRow,
+    ReportSessionStatusRequest, ReportSessionStatusResponse, ResumeSessionRequest,
+    ResumeSessionResponse, SendTerminalInputResponse, SessionEntry as ProtoSessionEntry,
+    SessionTerminalInput, SessionTerminalOutput, Signal, SignalSessionRequest,
+    SignalSessionResponse, StartSessionRequest, StartSessionResponse, StreamTerminalOutputRequest,
+    ToolInfo, WorkflowFileEntry, WorktreeRow,
 };
 use uuid::Uuid;
 
@@ -147,9 +148,11 @@ impl Stream for MpscTerminalOutputStream {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(chunk)) => std::task::Poll::Ready(Some(Ok(
-                SessionTerminalOutput { data: chunk.to_vec() },
-            ))),
+            std::task::Poll::Ready(Some(chunk)) => {
+                std::task::Poll::Ready(Some(Ok(SessionTerminalOutput {
+                    data: chunk.to_vec(),
+                })))
+            }
             std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
             std::task::Poll::Pending => std::task::Poll::Pending,
         }
@@ -257,47 +260,47 @@ impl ConnectionServiceImpl {
 
         // Create session directory under sessions_base/sessions/<id>/.
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-        std::fs::create_dir_all(&session_dir).map_err(|e| {
-            Status::internal(format!("failed to create session dir: {}", e))
-        })?;
+        std::fs::create_dir_all(&session_dir)
+            .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
 
         // Build branch intent and write a minimal changeset so the worktree setup fn can read it.
         let short_id = &session_id[..8.min(session_id.len())];
-        let (intent, resolved_new_branch, resolved_selected_branch) =
-            match branch_worktree_intent.trim() {
-                "new_branch_from_base" => {
-                    if new_branch_name.trim().is_empty() {
-                        return Err(Status::invalid_argument(
+        let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
+            .trim()
+        {
+            "new_branch_from_base" => {
+                if new_branch_name.trim().is_empty() {
+                    return Err(Status::invalid_argument(
                             "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
                         ));
-                    }
-                    (
-                        BranchWorktreeIntent::NewBranchFromBase,
-                        Some(new_branch_name.trim().to_string()),
-                        None,
-                    )
                 }
-                "work_on_selected_branch" => {
-                    if selected_branch_to_work_on.trim().is_empty() {
-                        return Err(Status::invalid_argument(
+                (
+                    BranchWorktreeIntent::NewBranchFromBase,
+                    Some(new_branch_name.trim().to_string()),
+                    None,
+                )
+            }
+            "work_on_selected_branch" => {
+                if selected_branch_to_work_on.trim().is_empty() {
+                    return Err(Status::invalid_argument(
                             "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
                         ));
-                    }
-                    (
-                        BranchWorktreeIntent::WorkOnSelectedBranch,
-                        None,
-                        Some(selected_branch_to_work_on.trim().to_string()),
-                    )
                 }
-                _ => {
-                    // Default: create a new branch from the integration base with a generated name.
-                    (
-                        BranchWorktreeIntent::NewBranchFromBase,
-                        Some(format!("claude-cli/{}", short_id)),
-                        None,
-                    )
-                }
-            };
+                (
+                    BranchWorktreeIntent::WorkOnSelectedBranch,
+                    None,
+                    Some(selected_branch_to_work_on.trim().to_string()),
+                )
+            }
+            _ => {
+                // Default: create a new branch from the integration base with a generated name.
+                (
+                    BranchWorktreeIntent::NewBranchFromBase,
+                    Some(format!("claude-cli/{}", short_id)),
+                    None,
+                )
+            }
+        };
 
         let cs_workflow = ChangesetWorkflow {
             branch_worktree_intent: Some(intent),
@@ -314,9 +317,8 @@ impl ConnectionServiceImpl {
             workflow: Some(cs_workflow),
             ..Changeset::default()
         };
-        tddy_core::write_changeset(&session_dir, &cs).map_err(|e| {
-            Status::internal(format!("failed to write changeset: {}", e))
-        })?;
+        tddy_core::write_changeset(&session_dir, &cs)
+            .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
         // Create the real git worktree (blocking: involves git fetch + git worktree add).
         let repo_root_clone = repo_root.clone();
@@ -336,6 +338,56 @@ impl ConnectionServiceImpl {
         )
         .await?;
 
+        // Resolve tddy-tools path: config → current_exe sibling → PATH fallback.
+        let tddy_tools_path = self
+            .config
+            .claude_cli
+            .as_ref()
+            .and_then(|c| c.tddy_tools_path.as_deref())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|d| d.join("tddy-tools")))
+                    .map(|p| p.to_string_lossy().to_string())
+            })
+            .unwrap_or_else(|| "tddy-tools".to_string());
+
+        // Resolve daemon URL: config → http://127.0.0.1:{web_port}.
+        let daemon_url = self
+            .config
+            .claude_cli
+            .as_ref()
+            .and_then(|c| c.daemon_url.as_deref())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                let port = self.config.listen.web_port.unwrap_or(8899);
+                format!("http://127.0.0.1:{port}")
+            });
+
+        // Generate a per-session hook token and write .claude/settings.local.json into the
+        // worktree. Claude Code reads this file on startup and wires the six lifecycle hooks.
+        // Write failure is warn-and-continue so it never blocks the session from starting.
+        let hook_token = Uuid::new_v4().to_string();
+        let hooks_settings =
+            tddy_core::build_claude_hooks_settings(&tddy_core::HookCommandParams {
+                tddy_tools_path: &tddy_tools_path,
+                daemon_url: &daemon_url,
+                session_id,
+                os_user,
+                hook_token: &hook_token,
+            });
+        let claude_dir = worktree_path.join(".claude");
+        if let Err(e) = std::fs::create_dir_all(&claude_dir).and_then(|_| {
+            serde_json::to_string_pretty(&hooks_settings)
+                .map_err(|e| std::io::Error::other(e.to_string()))
+                .and_then(|json| std::fs::write(claude_dir.join("settings.local.json"), json))
+        }) {
+            log::warn!(
+                "session {session_id}: failed to write .claude/settings.local.json — hooks will not fire: {e}"
+            );
+        }
+
         // Spawn the claude CLI process in a PTY inside the real worktree.
         let binary_path = self
             .config
@@ -351,7 +403,12 @@ impl ConnectionServiceImpl {
         let worktree_clone = worktree_path.clone();
 
         let handle = manager
-            .start(&session_id_owned, worktree_clone, &model_owned, &binary_owned)
+            .start(
+                &session_id_owned,
+                worktree_clone,
+                &model_owned,
+                &binary_owned,
+            )
             .await
             .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
 
@@ -373,57 +430,57 @@ impl ConnectionServiceImpl {
             previous_session_id: None,
             session_type: Some("claude-cli".to_string()),
             model: Some(model.to_string()),
+            activity_status: None,
+            hook_token: Some(hook_token),
         };
-        tddy_core::write_session_metadata(&session_dir, &meta).map_err(|e| {
-            Status::internal(format!("failed to write session metadata: {}", e))
-        })?;
+        tddy_core::write_session_metadata(&session_dir, &meta)
+            .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
 
         // Optionally expose the PTY via a per-session LiveKit participant so that LiveKit
         // clients (web UI, pty-relay --livekit-url) can use the same bidi-stream path as
         // tool sessions. Falls back gracefully: if LiveKit is not configured the session is
         // still usable via the gRPC connectrpc endpoints.
-        let (lk_room, lk_url, lk_server_identity) =
-            if let Some(lk) = spawner::livekit_creds_from_config(&self.config) {
-                let room_name = spawner::resolve_livekit_room_name(
-                    lk.common_room.as_deref(),
-                    session_id,
-                );
-                let server_identity = spawner::livekit_server_identity_for_session(
-                    lk.daemon_instance_id.as_deref(),
-                    session_id,
-                );
-                match crate::claude_cli_session::spawn_livekit_bridge(
-                    Arc::clone(&handle),
-                    &lk.url,
-                    &room_name,
-                    &lk.api_key,
-                    &lk.api_secret,
-                    &server_identity,
-                )
-                .await
-                {
-                    Ok(()) => {
-                        log::info!(
-                            target: "tddy_daemon::connection_service",
-                            "claude-cli session {}: LiveKit bridge started (identity={})",
-                            session_id,
-                            server_identity
-                        );
-                        (room_name, lk.url.clone(), server_identity)
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            target: "tddy_daemon::connection_service",
-                            "claude-cli session {}: LiveKit bridge failed ({}); gRPC path still works",
-                            session_id,
-                            e
-                        );
-                        (String::new(), String::new(), String::new())
-                    }
+        let (lk_room, lk_url, lk_server_identity) = if let Some(lk) =
+            spawner::livekit_creds_from_config(&self.config)
+        {
+            let room_name =
+                spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id);
+            let server_identity = spawner::livekit_server_identity_for_session(
+                lk.daemon_instance_id.as_deref(),
+                session_id,
+            );
+            match crate::claude_cli_session::spawn_livekit_bridge(
+                Arc::clone(&handle),
+                &lk.url,
+                &room_name,
+                &lk.api_key,
+                &lk.api_secret,
+                &server_identity,
+            )
+            .await
+            {
+                Ok(()) => {
+                    log::info!(
+                        target: "tddy_daemon::connection_service",
+                        "claude-cli session {}: LiveKit bridge started (identity={})",
+                        session_id,
+                        server_identity
+                    );
+                    (room_name, lk.url.clone(), server_identity)
                 }
-            } else {
-                (String::new(), String::new(), String::new())
-            };
+                Err(e) => {
+                    log::warn!(
+                        target: "tddy_daemon::connection_service",
+                        "claude-cli session {}: LiveKit bridge failed ({}); gRPC path still works",
+                        session_id,
+                        e
+                    );
+                    (String::new(), String::new(), String::new())
+                }
+            }
+        } else {
+            (String::new(), String::new(), String::new())
+        };
 
         log::info!(
             target: "tddy_daemon::connection_service",
@@ -482,9 +539,8 @@ impl ConnectionServiceImpl {
             pid: Some(pid),
             ..meta
         };
-        tddy_core::write_session_metadata(&session_dir, &updated).map_err(|e| {
-            Status::internal(format!("failed to update session metadata: {}", e))
-        })?;
+        tddy_core::write_session_metadata(&session_dir, &updated)
+            .map_err(|e| Status::internal(format!("failed to update session metadata: {}", e)))?;
 
         log::info!(
             target: "tddy_daemon::connection_service",
@@ -610,6 +666,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         agent: String::new(),
                         model: String::new(),
                         pending_elicitation: false,
+                        activity_status: String::new(),
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,
@@ -1704,6 +1761,57 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         Ok(Response::new(ListProjectBranchesResponse { branches }))
     }
+
+    async fn report_session_status(
+        &self,
+        request: Request<ReportSessionStatusRequest>,
+    ) -> Result<Response<ReportSessionStatusResponse>, Status> {
+        let req = request.into_inner();
+
+        // Validate session_id segment to prevent path traversal.
+        tddy_core::validate_session_id_segment(&req.session_id)
+            .map_err(|_| Status::invalid_argument("invalid session_id"))?;
+
+        // Validate status string before any IO.
+        tddy_core::SessionActivityStatus::from_wire(&req.status)
+            .ok_or_else(|| Status::invalid_argument(format!("unknown status: {}", req.status)))?;
+
+        // Resolve sessions_base from os_user (no web session token available for hooks).
+        let sessions_base = (self.sessions_base_for_user)(&req.os_user)
+            .ok_or_else(|| Status::not_found("unknown os_user or sessions_base not found"))?;
+
+        let session_dir = tddy_core::unified_session_dir_path(&sessions_base, &req.session_id);
+
+        // Read session metadata — not found if the directory/yaml doesn't exist.
+        let meta = tddy_core::read_session_metadata(&session_dir)
+            .map_err(|_| Status::not_found("session not found"))?;
+
+        // Only claude-cli sessions support hook status reporting.
+        if meta.session_type.as_deref() != Some("claude-cli") {
+            return Err(Status::failed_precondition(
+                "session_type is not claude-cli",
+            ));
+        }
+
+        // Validate hook_token (constant-time string comparison acceptable here — local process).
+        let stored_token = meta.hook_token.as_deref().unwrap_or("");
+        if stored_token != req.hook_token {
+            return Err(Status::permission_denied("invalid hook_token"));
+        }
+
+        // Persist the activity status.
+        tddy_core::update_activity_status(&session_dir, &req.status)
+            .map_err(|e| Status::internal(format!("failed to update activity status: {}", e)))?;
+
+        log::debug!(
+            target: "tddy_daemon::connection_service",
+            "report_session_status: session={} status={}",
+            req.session_id,
+            req.status
+        );
+
+        Ok(Response::new(ReportSessionStatusResponse { ok: true }))
+    }
 }
 
 fn map_remove_worktree_error(e: RemoveWorktreeError) -> Status {
@@ -1776,6 +1884,8 @@ mod signal_session_unit_tests {
             previous_session_id: None,
             session_type: None,
             model: None,
+            activity_status: None,
+            hook_token: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -1885,5 +1995,219 @@ mod delete_session_unit_tests {
         let result = service.delete_session(request).await;
         assert!(result.is_err(), "invalid token should return error");
         assert_eq!(result.unwrap_err().code, tddy_rpc::Code::Unauthenticated);
+    }
+}
+
+#[cfg(test)]
+mod report_session_status_unit_tests {
+    use super::*;
+    use tddy_core::session_lifecycle::unified_session_dir_path;
+    use tddy_core::SessionMetadata;
+    use tddy_service::proto::connection::ReportSessionStatusRequest;
+
+    const TEST_HOOK_TOKEN: &str = "tok-unit-hook-abc123";
+    const TEST_OS_USER: &str = "u";
+
+    fn make_unit_config() -> crate::config::DaemonConfig {
+        let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        crate::config::DaemonConfig::load(&path).unwrap()
+    }
+
+    fn make_unit_service(sessions_base: std::path::PathBuf) -> ConnectionServiceImpl {
+        let config = make_unit_config();
+        let base = sessions_base.clone();
+        let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |os_user| {
+            if os_user == TEST_OS_USER {
+                Some(base.clone())
+            } else {
+                None
+            }
+        });
+        let user_resolver: SessionUserResolver = Arc::new(|token| {
+            if token == "valid" {
+                Some("u".to_string())
+            } else {
+                None
+            }
+        });
+        ConnectionServiceImpl::new(
+            config,
+            sessions_base_resolver,
+            user_resolver,
+            None,
+            None,
+            None,
+        )
+    }
+
+    fn write_claude_cli_session(session_dir: &std::path::Path, hook_token: &str) {
+        let session_id = session_dir
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let metadata = SessionMetadata {
+            session_id,
+            project_id: "proj-hook-unit".to_string(),
+            created_at: "2026-06-13T10:00:00Z".to_string(),
+            updated_at: "2026-06-13T10:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: Some("/tmp/worktrees/hook-test".to_string()),
+            pid: None,
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some("claude-sonnet-4-6".to_string()),
+            activity_status: None,
+            hook_token: Some(hook_token.to_string()),
+        };
+        tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
+    }
+
+    /// Happy path: valid hook_token, claude-cli session, known status → activity_status written
+    /// to `.session.yaml`.
+    #[tokio::test]
+    async fn report_session_status_writes_activity_status_to_session_yaml() {
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "hook-writes-status-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
+
+        let service = make_unit_service(sessions_base);
+        let request = Request::new(ReportSessionStatusRequest {
+            session_id: session_id.to_string(),
+            hook_token: TEST_HOOK_TOKEN.to_string(),
+            os_user: TEST_OS_USER.to_string(),
+            status: "Running".to_string(),
+        });
+        let response = service.report_session_status(request).await.unwrap();
+        assert!(response.into_inner().ok, "ok must be true on success");
+
+        let meta = tddy_core::read_session_metadata(&session_dir).unwrap();
+        assert_eq!(
+            meta.activity_status.as_deref(),
+            Some("Running"),
+            "activity_status must be written to .session.yaml"
+        );
+    }
+
+    /// Missing session → NotFound.
+    #[tokio::test]
+    async fn report_session_status_rejects_unknown_session() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = make_unit_service(temp.path().to_path_buf());
+        let request = Request::new(ReportSessionStatusRequest {
+            session_id: "no-such-session".to_string(),
+            hook_token: TEST_HOOK_TOKEN.to_string(),
+            os_user: TEST_OS_USER.to_string(),
+            status: "Running".to_string(),
+        });
+        let err = service.report_session_status(request).await.unwrap_err();
+        assert_eq!(err.code, tddy_rpc::Code::NotFound);
+    }
+
+    /// Wrong hook_token → PermissionDenied.
+    #[tokio::test]
+    async fn report_session_status_rejects_bad_hook_token() {
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "hook-bad-token-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
+
+        let service = make_unit_service(sessions_base);
+        let request = Request::new(ReportSessionStatusRequest {
+            session_id: session_id.to_string(),
+            hook_token: "wrong-token".to_string(),
+            os_user: TEST_OS_USER.to_string(),
+            status: "Running".to_string(),
+        });
+        let err = service.report_session_status(request).await.unwrap_err();
+        assert_eq!(err.code, tddy_rpc::Code::PermissionDenied);
+    }
+
+    /// Non-claude-cli session (tool session) → FailedPrecondition.
+    #[tokio::test]
+    async fn report_session_status_rejects_non_claude_cli_session() {
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "hook-non-cli-session-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+
+        // Tool session — no session_type = "claude-cli", no hook_token.
+        let metadata = SessionMetadata {
+            session_id: session_id.to_string(),
+            project_id: "proj-hook-unit".to_string(),
+            created_at: "2026-06-13T10:00:00Z".to_string(),
+            updated_at: "2026-06-13T10:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: None,
+            pid: Some(99999),
+            tool: Some("tddy-coder".to_string()),
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: None,
+            model: None,
+            activity_status: None,
+            hook_token: None,
+        };
+        tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
+
+        let service = make_unit_service(sessions_base);
+        let request = Request::new(ReportSessionStatusRequest {
+            session_id: session_id.to_string(),
+            hook_token: TEST_HOOK_TOKEN.to_string(),
+            os_user: TEST_OS_USER.to_string(),
+            status: "Running".to_string(),
+        });
+        let err = service.report_session_status(request).await.unwrap_err();
+        assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
+    }
+
+    /// Unknown status string (not in the known set) → InvalidArgument.
+    #[tokio::test]
+    async fn report_session_status_rejects_unknown_status_string() {
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "hook-bad-status-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
+
+        let service = make_unit_service(sessions_base);
+        let request = Request::new(ReportSessionStatusRequest {
+            session_id: session_id.to_string(),
+            hook_token: TEST_HOOK_TOKEN.to_string(),
+            os_user: TEST_OS_USER.to_string(),
+            status: "UnknownBadStatus".to_string(),
+        });
+        let err = service.report_session_status(request).await.unwrap_err();
+        assert_eq!(err.code, tddy_rpc::Code::InvalidArgument);
+    }
+
+    /// Path-traversal in session_id (`../../etc`) → InvalidArgument before any IO.
+    #[tokio::test]
+    async fn report_session_status_rejects_session_id_path_traversal() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = make_unit_service(temp.path().to_path_buf());
+        let request = Request::new(ReportSessionStatusRequest {
+            session_id: "../../etc/passwd".to_string(),
+            hook_token: TEST_HOOK_TOKEN.to_string(),
+            os_user: TEST_OS_USER.to_string(),
+            status: "Running".to_string(),
+        });
+        let err = service.report_session_status(request).await.unwrap_err();
+        assert_eq!(err.code, tddy_rpc::Code::InvalidArgument);
     }
 }

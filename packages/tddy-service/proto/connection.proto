@@ -24,6 +24,9 @@ service ConnectionService {
   rpc StreamTerminalOutput(StreamTerminalOutputRequest) returns (stream SessionTerminalOutput);
   rpc SendTerminalInput(SessionTerminalInput) returns (SendTerminalInputResponse);
   rpc ListProjectBranches(ListProjectBranchesRequest) returns (ListProjectBranchesResponse);
+  // Per-worktree hooks (claude-cli sessions only) report granular activity status.
+  // Auth: `hook_token` is a per-session random token written to .session.yaml at session start.
+  rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);
 }
 
 message ListToolsRequest {}
@@ -69,6 +72,9 @@ message SessionEntry {
   string model = 13;
   // True when the session is blocked waiting for human input (elicitation).
   bool pending_elicitation = 14;
+  // Granular activity status for claude-cli sessions (Started, Running, ExecutingTool,
+  // WaitingForInput, Done, Ended). Empty string for tool/changeset sessions.
+  string activity_status = 15;
 }
 
 message ProjectEntry {
@@ -283,3 +289,21 @@ message StreamTerminalOutputRequest {
 
 // Empty response for SendTerminalInput.
 message SendTerminalInputResponse {}
+
+// --- Session activity status reporting from per-worktree hooks ---
+
+/// Sent by `tddy-tools session-hook`; bearer is the per-session hook_token.
+message ReportSessionStatusRequest {
+  // Daemon session id (baked into the hook command at worktree-prep time).
+  string session_id = 1;
+  // Per-session random token — validated against .session.yaml hook_token field.
+  string hook_token = 2;
+  // OS user (resolves the sessions_base path on the daemon).
+  string os_user = 3;
+  // Wire status string: one of Started, Running, ExecutingTool, WaitingForInput, Done, Ended.
+  string status = 4;
+}
+
+message ReportSessionStatusResponse {
+  bool ok = 1;
+}

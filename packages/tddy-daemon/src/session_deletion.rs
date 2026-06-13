@@ -269,6 +269,8 @@ mod tests {
             previous_session_id: None,
             session_type: None,
             model: None,
+            activity_status: None,
+            hook_token: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }
@@ -277,10 +279,7 @@ mod tests {
     #[test]
     fn validate_accepts_typical_session_id() {
         let r = validate_session_id_for_delete("inactive-delete-me");
-        assert!(
-            r.is_ok(),
-            "expected valid session id to pass validation (green phase)"
-        );
+        assert!(r.is_ok(), "expected valid session id to pass validation");
     }
 
     /// Lower-level: resolution should yield a directory under the base for safe ids.
@@ -343,7 +342,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let base = temp.path().join("sessions_this_daemon");
         std::fs::create_dir_all(&base).unwrap();
-        let err = delete_session_directory(&base, "session-owned-on-another-daemon", None).unwrap_err();
+        let err =
+            delete_session_directory(&base, "session-owned-on-another-daemon", None).unwrap_err();
         assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
     }
 }

@@ -430,6 +430,8 @@ fn create_fake_sessions(base: &std::path::Path, count: usize) -> Vec<String> {
             previous_session_id: None,
             session_type: None,
             model: None,
+            activity_status: None,
+            hook_token: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         ids.push(id);

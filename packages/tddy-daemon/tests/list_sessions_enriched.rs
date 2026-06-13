@@ -69,6 +69,8 @@ async fn list_sessions_includes_workflow_fields_from_changeset() {
         previous_session_id: None,
         session_type: None,
         model: None,
+        activity_status: None,
+        hook_token: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -138,6 +140,8 @@ async fn list_sessions_sets_pending_elicitation_from_session_metadata() {
         previous_session_id: None,
         session_type: None,
         model: None,
+        activity_status: None,
+        hook_token: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
