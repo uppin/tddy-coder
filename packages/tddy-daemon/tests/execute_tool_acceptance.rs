@@ -49,6 +49,7 @@ fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
         None,
         None,
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     )
 }
 
@@ -75,6 +76,8 @@ fn seed_session(sessions_base: &std::path::Path, session_id: &str, repo_path: &s
         previous_session_id: None,
         session_type: Some("workspace".to_string()),
         model: None,
+        activity_status: None,
+        hook_token: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata)
         .expect("failed to write session metadata in test");
@@ -306,6 +309,8 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
         previous_session_id: None,
         session_type: Some("claude-cli".to_string()), // existing CLI session, not workspace
         model: Some("claude-opus-4-8".to_string()),
+        activity_status: None,
+        hook_token: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 

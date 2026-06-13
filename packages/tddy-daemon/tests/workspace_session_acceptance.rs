@@ -53,6 +53,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionSe
         None,
         None,
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     )
 }
 
@@ -118,6 +119,7 @@ async fn workspace_session_creates_worktree_with_no_pty() {
             new_branch_name: String::new(),
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
+            initial_prompt: String::new(),
         }))
         .await
         .expect("StartSession with session_type=workspace must succeed");
