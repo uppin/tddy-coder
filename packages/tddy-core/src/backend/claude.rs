@@ -397,6 +397,11 @@ impl ClaudeCodeBackend {
         if let Some(ref p) = request.session_dir {
             cmd.env("TDDY_SESSION_DIR", p);
         }
+        if let Some(ref remote) = request.remote {
+            for (key, value) in remote.env_pairs() {
+                cmd.env(key, value);
+            }
+        }
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.stdin(if request.inherit_stdin {
@@ -656,6 +661,7 @@ mod claude_config_tests {
             extra_allowed_tools: None,
             socket_path: None,
             session_dir: None,
+            remote: None,
         }
     }
 

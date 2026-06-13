@@ -347,6 +347,7 @@ impl Task for BackendInvokeTask {
                 extra_allowed_tools: context.get_sync("allowed_tools"),
                 socket_path: context.get_sync("socket_path"),
                 session_dir: session_dir.clone(),
+                remote: None,
             };
 
             let response = self

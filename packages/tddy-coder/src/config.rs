@@ -112,6 +112,15 @@ pub struct GitHubConfig {
     pub stub_codes: Option<String>,
 }
 
+/// CLI flags for remote-codebase mode (`--remote-daemon-url`, `--remote-session-id`, etc.).
+#[derive(Debug, Clone, Default)]
+pub struct RemoteConfig {
+    pub daemon_url: Option<String>,
+    pub session_id: Option<String>,
+    pub session_token: Option<String>,
+    pub daemon_instance_id: Option<String>,
+}
+
 /// Load a config file from the given path.
 pub fn load_config(path: &Path) -> anyhow::Result<Config> {
     let contents = std::fs::read_to_string(path)

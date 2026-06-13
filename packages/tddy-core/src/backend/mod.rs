@@ -281,6 +281,54 @@ impl SessionMode {
     }
 }
 
+/// Environment for remote-codebase mode: the relay daemon address + session credentials.
+///
+/// When set on `InvokeRequest`, the Claude backend exports these as `TDDY_REMOTE_*` env vars
+/// before spawning the subprocess so that the inherited `tddy-tools --mcp` routes correctly.
+#[derive(Debug, Clone)]
+pub struct RemoteToolEnv {
+    pub daemon_url: String,
+    pub session_id: String,
+    pub session_token: String,
+    pub daemon_instance_id: Option<String>,
+    pub livekit_url: Option<String>,
+    pub livekit_room: Option<String>,
+    pub server_identity: Option<String>,
+}
+
+impl RemoteToolEnv {
+    /// Returns all TDDY_REMOTE_* key-value pairs to be set as environment variables.
+    pub fn env_pairs(&self) -> Vec<(String, String)> {
+        let mut pairs = vec![
+            (
+                "TDDY_REMOTE_DAEMON_URL".to_string(),
+                self.daemon_url.clone(),
+            ),
+            (
+                "TDDY_REMOTE_SESSION_ID".to_string(),
+                self.session_id.clone(),
+            ),
+            (
+                "TDDY_REMOTE_SESSION_TOKEN".to_string(),
+                self.session_token.clone(),
+            ),
+        ];
+        if let Some(v) = &self.daemon_instance_id {
+            pairs.push(("TDDY_REMOTE_DAEMON_INSTANCE_ID".to_string(), v.clone()));
+        }
+        if let Some(v) = &self.livekit_url {
+            pairs.push(("TDDY_REMOTE_LIVEKIT_URL".to_string(), v.clone()));
+        }
+        if let Some(v) = &self.livekit_room {
+            pairs.push(("TDDY_REMOTE_LIVEKIT_ROOM".to_string(), v.clone()));
+        }
+        if let Some(v) = &self.server_identity {
+            pairs.push(("TDDY_REMOTE_SERVER_IDENTITY".to_string(), v.clone()));
+        }
+        pairs
+    }
+}
+
 /// Request to invoke the coding backend.
 #[derive(Debug, Clone)]
 pub struct InvokeRequest {
@@ -316,6 +364,43 @@ pub struct InvokeRequest {
     pub socket_path: Option<PathBuf>,
     /// When set, backend sets TDDY_SESSION_DIR and TDDY_REPO_DIR for tddy-tools path pre-allow.
     pub session_dir: Option<PathBuf>,
+    /// When set, backend exports TDDY_REMOTE_* env vars for remote-codebase mode routing.
+    pub remote: Option<RemoteToolEnv>,
+}
+
+impl Default for InvokeRequest {
+    fn default() -> Self {
+        use crate::workflow::recipe::{GoalHints, PermissionHint};
+        Self {
+            prompt: String::new(),
+            system_prompt: None,
+            system_prompt_path: None,
+            goal_id: GoalId::new(""),
+            submit_key: GoalId::new(""),
+            hints: GoalHints {
+                display_name: String::new(),
+                permission: PermissionHint::ReadOnly,
+                allowed_tools: Vec::new(),
+                default_model: None,
+                agent_output: false,
+                agent_cli_plan_mode: false,
+                claude_nonzero_exit_ok_if_structured_response: false,
+            },
+            model: None,
+            session: None,
+            working_dir: None,
+            debug: false,
+            agent_output: false,
+            agent_output_sink: None,
+            progress_sink: None,
+            conversation_output_path: None,
+            inherit_stdin: false,
+            extra_allowed_tools: None,
+            socket_path: None,
+            session_dir: None,
+            remote: None,
+        }
+    }
 }
 
 fn default_allow_other() -> bool {

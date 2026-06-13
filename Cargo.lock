@@ -6604,11 +6604,13 @@ dependencies = [
  "tddy-service",
  "tddy-tui",
  "tddy-workflow-recipes",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tonic 0.12.3",
  "tower-http",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

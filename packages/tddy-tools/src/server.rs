@@ -464,11 +464,22 @@ pub async fn build_dynamic_tool_list(
     Ok(tools)
 }
 
+/// Returns true if `tool_name` is a native mutation tool that must be hard-denied
+/// when the agent is running in remote mode (TDDY_REMOTE_SESSION_ID is set).
+///
+/// In remote mode the working dir is read-only; native write tools would corrupt it.
+pub fn is_native_tool_denied_in_remote_mode(tool_name: &str) -> bool {
+    matches!(tool_name, "Write" | "Edit" | "NotebookEdit")
+}
+
 /// Dispatch a call to a dynamic (non-static) tool via the relay daemon.
 ///
 /// When `TDDY_REMOTE_SESSION_ID` or `TDDY_REMOTE_DAEMON_URL` are not set, returns an
 /// error-shaped JSON string without panicking (the caller must handle the error result).
-pub async fn dispatch_dynamic_tool(tool_name: &str, _args: serde_json::Value) -> String {
+///
+/// When both env vars are set, attempts an HTTP POST to the relay daemon's ExecuteTool endpoint.
+/// On connection failure, returns a `relay connection error` (not the stub "not yet implemented").
+pub async fn dispatch_dynamic_tool(tool_name: &str, args: serde_json::Value) -> String {
     let session_id = std::env::var("TDDY_REMOTE_SESSION_ID").ok();
     let daemon_url = std::env::var("TDDY_REMOTE_DAEMON_URL").ok();
     if session_id.is_none() || daemon_url.is_none() {
@@ -478,12 +489,63 @@ pub async fn dispatch_dynamic_tool(tool_name: &str, _args: serde_json::Value) ->
         })
         .to_string();
     }
-    // TODO: implement actual relay forwarding via ExecuteTool RPC
-    serde_json::json!({
-        "error": format!("tool '{}' relay not yet implemented", tool_name),
-        "is_error": true
-    })
-    .to_string()
+
+    let session_id = session_id.unwrap();
+    let daemon_url = daemon_url.unwrap();
+    let session_token = std::env::var("TDDY_REMOTE_SESSION_TOKEN").unwrap_or_default();
+    let daemon_instance_id = std::env::var("TDDY_REMOTE_DAEMON_INSTANCE_ID").unwrap_or_default();
+
+    // Build ExecuteToolRequest payload (JSON envelope for Connect protocol).
+    let req_body = serde_json::json!({
+        "session_token": session_token,
+        "session_id": session_id,
+        "tool_name": tool_name,
+        "args_json": args.to_string(),
+        "daemon_instance_id": daemon_instance_id,
+    });
+
+    let url = format!(
+        "{}/connection.ConnectionService/ExecuteTool",
+        daemon_url.trim_end_matches('/')
+    );
+
+    let client = reqwest::Client::new();
+    match client
+        .post(&url)
+        .header("content-type", "application/json")
+        .json(&req_body)
+        .send()
+        .await
+    {
+        Ok(resp) => match resp.json::<serde_json::Value>().await {
+            Ok(body) => {
+                if body
+                    .get("is_error")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    serde_json::json!({
+                        "error": body.get("error_message").and_then(|v| v.as_str()).unwrap_or("relay error"),
+                        "is_error": true
+                    })
+                    .to_string()
+                } else {
+                    body.get("result_json")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("{}")
+                        .to_string()
+                }
+            }
+            Err(e) => {
+                serde_json::json!({"error": format!("relay parse error: {e}"), "is_error": true})
+                    .to_string()
+            }
+        },
+        Err(e) => {
+            serde_json::json!({"error": format!("relay connection error: {e}"), "is_error": true})
+                .to_string()
+        }
+    }
 }
 
 #[cfg(test)]

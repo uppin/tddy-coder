@@ -21,6 +21,29 @@ fn default_codex_oauth_loopback_proxy_eligible() -> bool {
     true
 }
 
+fn default_relay_idle_timeout_secs() -> u64 {
+    1800
+}
+
+/// Configuration for relay daemon mode (`--relay` / `relay:` YAML section).
+///
+/// In relay mode the daemon forwards RPCs to a remote peer via LiveKit, does not require a
+/// `web_bundle_path`, and shuts down automatically after `idle_timeout_secs` of inactivity.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelayConfig {
+    #[serde(default = "default_relay_idle_timeout_secs")]
+    pub idle_timeout_secs: u64,
+}
+
+impl Default for RelayConfig {
+    fn default() -> Self {
+        Self {
+            idle_timeout_secs: default_relay_idle_timeout_secs(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DaemonConfig {
@@ -73,6 +96,10 @@ pub struct DaemonConfig {
     /// Claude Code CLI session configuration (spawning interactive `claude` processes in PTYs).
     #[serde(default)]
     pub claude_cli: Option<ClaudeCliConfig>,
+    /// When set, this daemon runs in relay mode: no web bundle, idle-timeout auto-shutdown,
+    /// forwards RPCs to a remote peer via LiveKit.
+    #[serde(default)]
+    pub relay: Option<RelayConfig>,
 }
 
 impl Default for DaemonConfig {
@@ -95,6 +122,7 @@ impl Default for DaemonConfig {
             codex_oauth_loopback_proxy_eligible: default_codex_oauth_loopback_proxy_eligible(),
             telegram: None,
             claude_cli: None,
+            relay: None,
         }
     }
 }

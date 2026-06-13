@@ -38,8 +38,9 @@ pub use backend::{
     AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend, ClaudeCodeBackend,
     ClaudeInvokeConfig, CodexAcpBackend, CodexBackend, CodingBackend, CursorBackend, GoalHints,
     GoalId, InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, PermissionHint,
-    PermissionMode, ProcessToolExecutor, QuestionOption, SessionMode, SharedBackend, StubBackend,
-    ToolExecutor, WorkflowRecipe, CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_ID_FILENAME,
+    PermissionMode, ProcessToolExecutor, QuestionOption, RemoteToolEnv, SessionMode, SharedBackend,
+    StubBackend, ToolExecutor, WorkflowRecipe, CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
+    CODEX_THREAD_ID_FILENAME,
 };
 pub use changeset::{
     append_session_and_update_state, get_session_for_tag, merge_persisted_workflow_into_context,
