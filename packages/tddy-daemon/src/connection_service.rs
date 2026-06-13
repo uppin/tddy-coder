@@ -39,13 +39,20 @@ use crate::project_storage::{self, ProjectData};
 use crate::session_deletion;
 use crate::session_list_enrichment;
 use crate::session_reader;
+use crate::shell_job_registry::ShellJobRegistry;
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
+use crate::tool_catalog;
+use crate::tool_engine;
 use crate::user_sessions_path::{
     project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
 };
+use crate::workspace_session;
 use crate::worktrees::{self, RemoveWorktreeError, WorktreeStatsCache};
+use tddy_service::proto::connection::{
+    ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse,
+};
 
 /// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
 async fn spawn_blocking_with_timeout<T: Send + 'static>(
@@ -173,6 +180,10 @@ pub struct ConnectionServiceImpl {
     telegram: Option<Arc<TelegramDaemonHooks>>,
     worktree_stats_cache: Arc<WorktreeStatsCache>,
     claude_cli_manager: Arc<ClaudeCliSessionManager>,
+    /// Registry for background shell jobs spawned by the `Shell` tool (block_until_ms=0).
+    shell_jobs: Arc<ShellJobRegistry>,
+    /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
+    idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
 }
 
 impl ConnectionServiceImpl {
@@ -196,6 +207,7 @@ impl ConnectionServiceImpl {
         let worktree_stats_cache = Arc::new(WorktreeStatsCache::new(
             worktrees::projects_stats_cache_root(),
         ));
+        let shell_jobs = Arc::new(ShellJobRegistry::new());
         Self {
             config,
             sessions_base_for_user,
@@ -206,6 +218,27 @@ impl ConnectionServiceImpl {
             telegram,
             worktree_stats_cache,
             claude_cli_manager,
+            shell_jobs,
+            idle_tracker: None,
+        }
+    }
+
+    /// Attach an idle-timeout tracker to this service (builder pattern).
+    ///
+    /// When set, every RPC handler calls `tracker.record_activity()` so the relay daemon does
+    /// not self-terminate while a client is actively using the service.
+    pub fn with_idle_tracker(
+        mut self,
+        tracker: Arc<crate::relay_idle::IdleTimeoutTracker>,
+    ) -> Self {
+        self.idle_tracker = Some(tracker);
+        self
+    }
+
+    /// Record RPC activity in the idle-timeout tracker, if one is attached.
+    fn record_rpc_activity(&self) {
+        if let Some(ref tracker) = self.idle_tracker {
+            tracker.record_activity();
         }
     }
 
@@ -612,6 +645,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         &self,
         _request: Request<ListToolsRequest>,
     ) -> Result<Response<ListToolsResponse>, Status> {
+        self.record_rpc_activity();
         let tools: Vec<ToolInfo> = self
             .config
             .allowed_tools()
@@ -903,6 +937,22 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
         }
 
+        // --- workspace branch: no LiveKit, no PTY; resolves project, creates a git worktree ---
+        if req.session_type.trim() == "workspace" {
+            let sessions_base = (self.sessions_base_for_user)(os_user)
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            let session_id = Uuid::now_v7().to_string();
+            let timeout = self.config.spawn_worker_request_timeout();
+            return workspace_session::start_workspace_session(
+                os_user,
+                &session_id,
+                sessions_base,
+                req.project_id.trim(),
+                timeout,
+            )
+            .await;
+        }
+
         // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
         if req.session_type.trim() == "claude-cli" {
             let sessions_base = (self.sessions_base_for_user)(os_user)
@@ -1051,8 +1101,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
 
-        // claude-cli sessions do not use LiveKit — return empty fields immediately.
-        if metadata.session_type.as_deref() == Some("claude-cli") {
+        // claude-cli and workspace sessions do not use LiveKit — return empty fields immediately.
+        if metadata.session_type.as_deref() == Some("claude-cli")
+            || metadata.session_type.as_deref() == Some("workspace")
+        {
             return Ok(Response::new(ConnectSessionResponse {
                 livekit_room: String::new(),
                 livekit_url: String::new(),
@@ -1792,6 +1844,87 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         );
 
         Ok(Response::new(ListProjectBranchesResponse { branches }))
+    }
+
+    async fn execute_tool(
+        &self,
+        request: Request<ExecuteToolRequest>,
+    ) -> Result<Response<ExecuteToolResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        // Authenticate caller.
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        // Validate session ID.
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        // Resolve the sessions base and the session's worktree root.
+        let sessions_base = (self.sessions_base_for_user)(os_user)
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+
+        let worktree_root =
+            workspace_session::resolve_worktree_root_for_session(&sessions_base, &req.session_id)?;
+
+        // For path-bearing tools, perform an upfront path traversal check.
+        if matches!(
+            req.tool_name.as_str(),
+            "Read" | "Write" | "StrReplace" | "Delete"
+        ) {
+            let args_val: serde_json::Value =
+                serde_json::from_str(&req.args_json).unwrap_or(serde_json::Value::Null);
+            if let Some(path_str) = args_val.get("path").and_then(|v| v.as_str()) {
+                // Reject obvious traversal before any I/O.
+                let p = std::path::Path::new(path_str);
+                if p.components().any(|c| c == std::path::Component::ParentDir) {
+                    return Err(Status::permission_denied(
+                        "path contains '..' components (traversal rejected)",
+                    ));
+                }
+            }
+        }
+
+        // Dispatch.
+        let outcome = tool_engine::execute_tool(
+            &worktree_root,
+            &req.tool_name,
+            &req.args_json,
+            &self.shell_jobs,
+        )
+        .await;
+
+        Ok(Response::new(ExecuteToolResponse {
+            result_json: outcome.result_json,
+            is_error: outcome.is_error,
+            error_message: outcome.error_message,
+            job_id: outcome.job_id,
+            job_running: outcome.job_running,
+        }))
+    }
+
+    async fn list_exec_tools(
+        &self,
+        request: Request<ListExecToolsRequest>,
+    ) -> Result<Response<ListExecToolsResponse>, Status> {
+        let req = request.into_inner();
+
+        // Minimal auth — verify caller is a known user.
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        Ok(Response::new(ListExecToolsResponse {
+            tools: tool_catalog::tool_catalog(),
+        }))
     }
 
     async fn report_session_status(

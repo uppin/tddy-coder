@@ -90,9 +90,14 @@ impl PtyHandle {
 
 
 /// Manages a registry of active Claude CLI sessions (session_id → PtyHandle).
-#[derive(Default)]
 pub struct ClaudeCliSessionManager {
     registry: Arc<RwLock<HashMap<String, Arc<PtyHandle>>>>,
+}
+
+impl Default for ClaudeCliSessionManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ClaudeCliSessionManager {

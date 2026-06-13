@@ -134,6 +134,15 @@ pub fn update_docs_allowlist() -> Vec<String> {
     ]
 }
 
+/// Base allowlist for remote-codebase mode. tddy-coder appends the discovered
+/// `mcp__tddy-tools__*` tool names to this list before invoking the agent.
+///
+/// Excludes all native filesystem and shell tools (Read, Write, Glob, Grep, etc.) because
+/// in remote mode the agent MUST use the `mcp__tddy-tools__*` MCP tools instead.
+pub fn remote_codebase_allowlist() -> Vec<String> {
+    vec!["AskUserQuestion".to_string()]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,5 +171,9 @@ mod tests {
         assert_allowlist_contains_ask_user_question(&refactor_allowlist(), "refactor");
         assert_allowlist_contains_ask_user_question(&update_docs_allowlist(), "update-docs");
         assert_allowlist_contains_ask_user_question(&merge_pr_allowlist(), "merge-pr");
+        assert_allowlist_contains_ask_user_question(
+            &remote_codebase_allowlist(),
+            "remote-codebase",
+        );
     }
 }

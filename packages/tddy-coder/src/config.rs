@@ -112,6 +112,43 @@ pub struct GitHubConfig {
     pub stub_codes: Option<String>,
 }
 
+/// CLI flags for remote-codebase mode (`--remote-daemon-url`, `--remote-session-id`, etc.).
+#[derive(Debug, Clone, Default)]
+pub struct RemoteConfig {
+    pub daemon_url: Option<String>,
+    pub session_id: Option<String>,
+    pub session_token: Option<String>,
+    pub daemon_instance_id: Option<String>,
+}
+
+impl RemoteConfig {
+    /// Convert this config into a [`tddy_core::backend::RemoteToolEnv`].
+    ///
+    /// Returns `Err` when any required field (`daemon_url`, `session_id`, `session_token`)
+    /// is absent.
+    pub fn to_remote_tool_env(&self) -> anyhow::Result<tddy_core::backend::RemoteToolEnv> {
+        use anyhow::Context;
+        Ok(tddy_core::backend::RemoteToolEnv {
+            daemon_url: self
+                .daemon_url
+                .clone()
+                .context("daemon_url is required")?,
+            session_id: self
+                .session_id
+                .clone()
+                .context("session_id is required")?,
+            session_token: self
+                .session_token
+                .clone()
+                .context("session_token is required")?,
+            daemon_instance_id: self.daemon_instance_id.clone(),
+            livekit_url: None,
+            livekit_room: None,
+            server_identity: None,
+        })
+    }
+}
+
 /// Load a config file from the given path.
 pub fn load_config(path: &Path) -> anyhow::Result<Config> {
     let contents = std::fs::read_to_string(path)
@@ -342,6 +379,7 @@ github:
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
             tddy_data_dir: Some(cli_base.clone()),
         };
         merge_config_into_args(&mut args, config);
@@ -389,6 +427,7 @@ github:
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
@@ -438,6 +477,7 @@ github:
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: Some("tdd".to_string()),
+            remote: false,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
@@ -484,6 +524,7 @@ github:
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
@@ -593,6 +634,7 @@ log:
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);

@@ -93,6 +93,16 @@ impl Status {
             message: msg.into(),
         }
     }
+
+    /// Returns the status code. Accessor method for use in tests and trait impls.
+    pub fn code(&self) -> Code {
+        self.code
+    }
+
+    /// Returns the status message.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 impl fmt::Display for Status {

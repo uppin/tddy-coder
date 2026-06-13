@@ -118,6 +118,7 @@ impl Task for PlanTask {
                 extra_allowed_tools: context.get_sync("allowed_tools"),
                 socket_path: context.get_sync("socket_path"),
                 session_dir: context.get_sync("session_dir"),
+                remote: None,
             };
 
             let response = self.backend.invoke(request).await.map_err(

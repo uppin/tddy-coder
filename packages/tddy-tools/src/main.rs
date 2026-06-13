@@ -5,12 +5,13 @@
 
 mod cli;
 mod pty_relay;
-mod server;
+mod remote_cli;
 mod session_hook;
 
 use anyhow::Result;
 use clap::Parser;
 use rmcp::ServiceExt;
+use tddy_tools::server::PermissionServer;
 
 #[derive(Parser)]
 #[command(name = "tddy-tools")]
@@ -57,6 +58,9 @@ enum Subcommand {
     /// Example: tddy-tools pty-relay -- claude --model claude-opus-4-8
     PtyRelay(Box<pty_relay::PtyRelayArgs>),
 
+    /// Remote codebase mode helpers: list-tools, etc.
+    Remote(remote_cli::RemoteArgs),
+
     /// Report granular session activity status to the daemon (invoked by Claude Code hooks).
     /// Reads hook event JSON from stdin; fails quietly — always exits 0.
     SessionHook(session_hook::SessionHookArgs),
@@ -83,6 +87,7 @@ async fn main() -> Result<()> {
         Some(Subcommand::ListActions(s)) => cli::run_list_actions(s)?,
         Some(Subcommand::InvokeAction(s)) => cli::run_invoke_action(s)?,
         Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
+        Some(Subcommand::Remote(s)) => remote_cli::run_remote(s).await?,
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
@@ -93,7 +98,7 @@ async fn main() -> Result<()> {
 }
 
 async fn run_mcp_server() -> Result<()> {
-    let service = server::PermissionServer::new();
+    let service = PermissionServer::new();
     let server = service.serve(rmcp::transport::stdio()).await?;
     server.waiting().await?;
     Ok(())

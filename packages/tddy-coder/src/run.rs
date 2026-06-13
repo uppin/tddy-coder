@@ -237,6 +237,17 @@ pub fn run_main(mut args: Args) {
     }
 
     // Validate args before any stderr redirect (daemon redirects stderr to a file).
+    if args.remote {
+        let recipe = args.recipe.as_deref().unwrap_or("free-prompting");
+        if args.goal.is_some() || recipe != "free-prompting" {
+            eprintln!(
+                "Error: --remote is only supported with --recipe free-prompting (no --goal). \
+                Pass --recipe free-prompting to use remote-codebase mode."
+            );
+            std::process::exit(1);
+        }
+    }
+
     if let Err(e) = validate_web_args(&args)
         .and_then(|_| validate_livekit_args(&args))
         .and_then(|_| validate_recipe_cli(&args))
@@ -392,6 +403,10 @@ pub struct Args {
     pub codex_oauth_login: bool,
     /// Workflow recipe name (`tdd`, `tdd-small`, `bugfix`, `free-prompting`, `grill-me`, `review`, `merge-pr`). `None` means default `free-prompting` or recipe from changeset on resume.
     pub recipe: Option<String>,
+
+    /// Enable remote-codebase mode. When true, native filesystem tools are excluded and the agent
+    /// uses `mcp__tddy-tools__*` instead. Requires `--recipe free-prompting`.
+    pub remote: bool,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -552,6 +567,11 @@ pub struct CoderArgs {
     /// hook) and waits until login finishes. Requires `--session-dir` or `--session-id`.
     #[arg(long)]
     pub codex_oauth_login: bool,
+
+    /// Enable remote-codebase mode. The real codebase is on a remote daemon; native filesystem
+    /// tools are replaced by `mcp__tddy-tools__*` MCP tools. Requires `--recipe free-prompting`.
+    #[arg(long)]
+    pub remote: bool,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -769,6 +789,7 @@ impl From<CoderArgs> for Args {
             codex_acp_cli_path: a.codex_acp_cli_path,
             codex_oauth_login: a.codex_oauth_login,
             recipe: a.recipe,
+            remote: a.remote,
         }
     }
 }
@@ -813,6 +834,7 @@ impl From<DemoArgs> for Args {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: a.recipe,
+            remote: false,
         }
     }
 }
@@ -2881,6 +2903,22 @@ fn read_feature_input(args: &Args) -> anyhow::Result<String> {
     Ok(buf)
 }
 
+/// Entry point for remote-codebase mode.
+///
+/// Shells out to `tddy-tools remote {start|connect}-session`, creates a `RemoteContextDir`,
+/// builds the allowlist from `tddy-tools remote list-tools` output, and passes a fully
+/// populated `InvokeRequest` (with `remote: Some(RemoteToolEnv)`) to the backend.
+///
+/// # Note
+/// Full bootstrap is not yet implemented; this function is a placeholder that ensures the
+/// correct public signature is exported for downstream use. The e2e integration is covered
+/// by acceptance tests against a real relay daemon.
+// TODO: implement full bootstrap (subprocess coordination, session sync, run_goal)
+pub fn run_remote(args: &Args) -> anyhow::Result<()> {
+    let _ = args;
+    anyhow::bail!("remote mode not yet fully implemented")
+}
+
 #[cfg(test)]
 mod resume_session_config_tests {
     use super::merge_session_coder_config_for_resume;
@@ -2943,6 +2981,7 @@ mod resume_session_config_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
         };
 
         merge_session_coder_config_for_resume(&mut args).expect("merge");
@@ -3004,6 +3043,7 @@ mod resume_session_identity_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
         };
 
         assign_default_session_id(&mut args);
@@ -3068,6 +3108,7 @@ mod session_dir_sync_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
         };
 
         sync_session_dir_from_args(&mut args).expect("apply");
@@ -3146,6 +3187,7 @@ mod changeset_agent_resume_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
         };
 
         apply_agent_from_changeset_if_needed(&mut args).expect("apply");
@@ -3241,6 +3283,7 @@ mod post_tui_workflow_exit_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
         }
     }
 

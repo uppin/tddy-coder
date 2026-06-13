@@ -36,7 +36,8 @@ bytes = "1"
 # daemon-rpc: Connect-protocol RPC client used by session-hook (default-on).
 tddy-service = { path = "../tddy-service" }
 prost = { version = "0.13" }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# Relay dispatch: HTTP forwarding for dispatch_dynamic_tool.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 # LiveKit connect mode (tddy-tools pty-relay --livekit-url ...)
 tddy-livekit = { path = "../tddy-livekit", optional = true }
 livekit = { version = "0.7", optional = true }
