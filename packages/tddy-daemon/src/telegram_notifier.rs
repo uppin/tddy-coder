@@ -311,6 +311,8 @@ pub struct TelegramSessionWatcher {
     last_presenter_elicitation: HashMap<String, bool>,
     /// Latest user-elicitation [`ModeChanged`] per session — used to re-send the prompt with a primary keyboard when a queued session is promoted.
     last_elicitation_mc: HashMap<String, ModeChanged>,
+    /// Last seen activity status per session for claude-cli Telegram alerts.
+    last_activity_status: HashMap<String, String>,
 }
 
 impl TelegramSessionWatcher {
@@ -391,6 +393,7 @@ impl TelegramSessionWatcher {
             telegram_tracked,
             last_presenter_elicitation: HashMap::new(),
             last_elicitation_mc: HashMap::new(),
+            last_activity_status: HashMap::new(),
         }
     }
 
@@ -405,6 +408,94 @@ impl TelegramSessionWatcher {
                 log::error!(
                     target: "tddy_daemon::telegram",
                     "bind_telegram_tracked_session_for_chat: telegram_tracked mutex poisoned: {e}"
+                );
+            }
+        }
+    }
+
+    /// Invoked when `report_session_status` receives a claude-cli activity status update.
+    ///
+    /// Alerts tracked Telegram chats when the status transitions to `WaitingForInput` or `Done`.
+    /// Repeated identical status calls are deduplicated — only the first occurrence sends.
+    /// Non-alerting statuses (e.g. `Running`, `Started`) are silently ignored.
+    pub async fn on_claude_cli_activity_status_changed(
+        &mut self,
+        sender: &(dyn TelegramSender + Send + Sync),
+        session_id: &str,
+        new_status: &str,
+    ) {
+        let alerting = matches!(new_status, "WaitingForInput" | "Done");
+        if !alerting {
+            return;
+        }
+
+        // Dedupe: skip if the last recorded status for this session is already `new_status`.
+        if self
+            .last_activity_status
+            .get(session_id)
+            .map(|s| s.as_str())
+            == Some(new_status)
+        {
+            log::debug!(
+                target: "tddy_daemon::telegram",
+                "on_claude_cli_activity_status_changed: status unchanged — no alert session_id={} status={}",
+                session_id,
+                new_status
+            );
+            return;
+        }
+
+        self.last_activity_status
+            .insert(session_id.to_string(), new_status.to_string());
+
+        // Resolve which chats are tracking this session.
+        let chat_ids = match self.telegram_tracked.lock() {
+            Ok(g) => g.chats_tracking_session(session_id),
+            Err(e) => {
+                log::error!(
+                    target: "tddy_daemon::telegram",
+                    "on_claude_cli_activity_status_changed: telegram_tracked mutex poisoned: {e}"
+                );
+                return;
+            }
+        };
+
+        if chat_ids.is_empty() {
+            log::debug!(
+                target: "tddy_daemon::telegram",
+                "on_claude_cli_activity_status_changed: no chats tracking session_id={} — no alert",
+                session_id
+            );
+            return;
+        }
+
+        let label = session_telegram_label(session_id).unwrap_or_else(|| session_id.to_string());
+
+        let text = match new_status {
+            "WaitingForInput" => format!(
+                "🔔 Session {label}: Claude Code needs your input (permission, question, or your next prompt). Attach via the web UI or `tddy-tools pty-relay`."
+            ),
+            "Done" => format!(
+                "✅ Session {label}: Claude Code finished this turn. Attach to continue."
+            ),
+            _ => unreachable!("already guarded by alerting check above"),
+        };
+
+        log::info!(
+            target: "tddy_daemon::telegram",
+            "on_claude_cli_activity_status_changed: sending alert session_id={} status={} chats={}",
+            session_id,
+            new_status,
+            chat_ids.len()
+        );
+
+        for cid in chat_ids {
+            if let Err(e) = sender.send_message(cid, &text).await {
+                log::warn!(
+                    target: "tddy_daemon::telegram",
+                    "on_claude_cli_activity_status_changed: send_message failed chat_id={} session_id={}: {e:#}",
+                    cid,
+                    session_id
                 );
             }
         }
@@ -1917,5 +2008,188 @@ mod acceptance_unit_tests {
         );
         let joined: String = mem.recorded().into_iter().map(|(_, t)| t).collect();
         assert_eq!(joined.matches('Z').count(), 5000);
+    }
+
+    // ---------------------------------------------------------------------------
+    // on_claude_cli_activity_status_changed unit tests
+    // ---------------------------------------------------------------------------
+
+    /// Build a `TelegramSessionWatcher` with a shared tracked coordinator.
+    fn watcher_with_shared_tracked(
+        tracked: SharedTelegramTrackedSessionCoordinator,
+    ) -> TelegramSessionWatcher {
+        TelegramSessionWatcher::with_elicitation_select_options_coordinator_and_tracked(
+            Arc::new(StdMutex::new(HashMap::new())),
+            Arc::new(StdMutex::new(ActiveElicitationCoordinator::new())),
+            tracked,
+        )
+    }
+
+    const SID: &str = "01900000-0000-7000-8000-000000000001";
+    const CHAT: i64 = 555_i64;
+
+    fn shared_tracked_with_bound_chat() -> SharedTelegramTrackedSessionCoordinator {
+        let tracked = Arc::new(StdMutex::new(
+            crate::telegram_tracked_session::TelegramTrackedSessionCoordinator::new(),
+        ));
+        tracked
+            .lock()
+            .unwrap()
+            .bind_chat_to_session_for_telegram_tracking(CHAT, SID);
+        tracked
+    }
+
+    /// **activity_alert_on_first_waiting_for_input**: fresh watcher with one bound chat,
+    /// `WaitingForInput` → exactly one message sent to that chat.
+    #[tokio::test]
+    async fn activity_alert_on_first_waiting_for_input() {
+        let sender = Arc::new(InMemoryTelegramSender::new());
+        let mut watcher = watcher_with_shared_tracked(shared_tracked_with_bound_chat());
+
+        watcher
+            .on_claude_cli_activity_status_changed(&*sender, SID, "WaitingForInput")
+            .await;
+
+        let recorded = sender.recorded();
+        assert_eq!(
+            recorded.len(),
+            1,
+            "WaitingForInput must send exactly one Telegram message; got {recorded:?}"
+        );
+        assert_eq!(
+            recorded[0].0, CHAT,
+            "message must go to the bound chat; got chat_id={}",
+            recorded[0].0
+        );
+        assert!(
+            recorded[0].1.contains("input") || recorded[0].1.contains("needs"),
+            "WaitingForInput message must mention input/needs; got {:?}",
+            recorded[0].1
+        );
+    }
+
+    /// **activity_alert_on_done**: `Done` status → one message mentioning "finished" or "turn".
+    #[tokio::test]
+    async fn activity_alert_on_done() {
+        let sender = Arc::new(InMemoryTelegramSender::new());
+        let mut watcher = watcher_with_shared_tracked(shared_tracked_with_bound_chat());
+
+        watcher
+            .on_claude_cli_activity_status_changed(&*sender, SID, "Done")
+            .await;
+
+        let recorded = sender.recorded();
+        assert_eq!(
+            recorded.len(),
+            1,
+            "Done must send exactly one Telegram message; got {recorded:?}"
+        );
+        assert!(
+            recorded[0].1.contains("finished") || recorded[0].1.contains("turn"),
+            "Done message must mention finished/turn; got {:?}",
+            recorded[0].1
+        );
+    }
+
+    /// **no_alert_on_unchanged_status**: calling `WaitingForInput` twice without a status change
+    /// in between must produce only one message (dedupe on repeated same status).
+    #[tokio::test]
+    async fn no_alert_on_unchanged_status() {
+        let sender = Arc::new(InMemoryTelegramSender::new());
+        let mut watcher = watcher_with_shared_tracked(shared_tracked_with_bound_chat());
+
+        watcher
+            .on_claude_cli_activity_status_changed(&*sender, SID, "WaitingForInput")
+            .await;
+        watcher
+            .on_claude_cli_activity_status_changed(&*sender, SID, "WaitingForInput")
+            .await;
+
+        assert_eq!(
+            sender.recorded().len(),
+            1,
+            "repeated same status must not send a second alert; got {:?}",
+            sender.recorded()
+        );
+    }
+
+    /// **no_alert_for_running_or_started**: `Running` and `Started` statuses must never send a
+    /// Telegram alert.
+    #[tokio::test]
+    async fn no_alert_for_running_or_started() {
+        let sender = Arc::new(InMemoryTelegramSender::new());
+        let mut watcher = watcher_with_shared_tracked(shared_tracked_with_bound_chat());
+
+        watcher
+            .on_claude_cli_activity_status_changed(&*sender, SID, "Running")
+            .await;
+        watcher
+            .on_claude_cli_activity_status_changed(&*sender, SID, "Started")
+            .await;
+
+        assert!(
+            sender.recorded().is_empty(),
+            "Running and Started must never produce a Telegram alert; got {:?}",
+            sender.recorded()
+        );
+    }
+
+    /// **no_alert_when_session_untracked**: `WaitingForInput` with no chat tracking the session
+    /// must not send any message.
+    #[tokio::test]
+    async fn no_alert_when_session_untracked() {
+        let sender = Arc::new(InMemoryTelegramSender::new());
+        let tracked = Arc::new(StdMutex::new(
+            crate::telegram_tracked_session::TelegramTrackedSessionCoordinator::new(),
+        ));
+        // No bind — session is untracked.
+        let mut watcher = watcher_with_shared_tracked(tracked);
+
+        watcher
+            .on_claude_cli_activity_status_changed(&*sender, SID, "WaitingForInput")
+            .await;
+
+        assert!(
+            sender.recorded().is_empty(),
+            "untracked session must not produce any Telegram message; got {:?}",
+            sender.recorded()
+        );
+    }
+
+    /// **alert_routes_only_to_tracking_chat**: chat A tracks session S, chat B tracks session T;
+    /// `WaitingForInput` for S must alert only chat A.
+    #[tokio::test]
+    async fn alert_routes_only_to_tracking_chat() {
+        let sender = Arc::new(InMemoryTelegramSender::new());
+        let sid_s = "01900000-0000-7000-8000-000000000002";
+        let sid_t = "01900000-0000-7000-8000-000000000003";
+        let chat_a = 100_i64;
+        let chat_b = 200_i64;
+
+        let tracked = Arc::new(StdMutex::new(
+            crate::telegram_tracked_session::TelegramTrackedSessionCoordinator::new(),
+        ));
+        {
+            let mut g = tracked.lock().unwrap();
+            g.bind_chat_to_session_for_telegram_tracking(chat_a, sid_s);
+            g.bind_chat_to_session_for_telegram_tracking(chat_b, sid_t);
+        }
+        let mut watcher = watcher_with_shared_tracked(Arc::clone(&tracked));
+
+        watcher
+            .on_claude_cli_activity_status_changed(&*sender, sid_s, "WaitingForInput")
+            .await;
+
+        let recorded = sender.recorded();
+        assert_eq!(
+            recorded.len(),
+            1,
+            "exactly one message must be sent; got {recorded:?}"
+        );
+        assert_eq!(
+            recorded[0].0, chat_a,
+            "message must go to chat_a (tracking S), not chat_b; got chat_id={}",
+            recorded[0].0
+        );
     }
 }

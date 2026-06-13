@@ -57,7 +57,12 @@ pub struct PtyHandle {
 impl PtyHandle {
     /// Resize the PTY to the given dimensions and signal the child with SIGWINCH.
     pub fn resize(&self, rows: u16, cols: u16) {
-        let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
+        let size = PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
         if let Ok(m) = self.master.lock() {
             let _ = m.resize(size);
         }
@@ -72,16 +77,12 @@ impl PtyHandle {
     /// initial render: after subscribing, call this so claude repaints to the live channel.
     pub fn trigger_redraw(&self) {
         if let Ok(m) = self.master.lock() {
-            let size = self
-                .current_size
-                .lock()
-                .map(|s| *s)
-                .unwrap_or(PtySize {
-                    rows: DEFAULT_TERM_ROWS,
-                    cols: DEFAULT_TERM_COLS,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                });
+            let size = self.current_size.lock().map(|s| *s).unwrap_or(PtySize {
+                rows: DEFAULT_TERM_ROWS,
+                cols: DEFAULT_TERM_COLS,
+                pixel_width: 0,
+                pixel_height: 0,
+            });
             let _ = m.resize(size);
         }
     }

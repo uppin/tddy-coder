@@ -151,6 +151,21 @@ impl TelegramTrackedSessionCoordinator {
         }
     }
 
+    /// Return all `chat_id`s whose tracked session equals `session_id` (reverse lookup).
+    pub fn chats_tracking_session(&self, session_id: &str) -> Vec<i64> {
+        let needle = session_id.trim();
+        self.tracked
+            .iter()
+            .filter_map(|(&cid, sid)| {
+                if sid.trim() == needle {
+                    Some(cid)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Drop tracking on every chat that was bound to `session_id` (workflow finished / deleted).
     pub fn clear_all_chats_tracked_to_session(&mut self, session_id: &str) {
         let needle = session_id.trim().to_string();
@@ -259,6 +274,43 @@ mod unit_tests {
                 "01900000-0000-7000-8000-000000000001"
             ),
             "green: Enter session must signal elicitation replay scheduling"
+        );
+    }
+
+    /// **chats_tracking_session_returns_all_bound_chats**: two chats bound to session S,
+    /// one chat bound to session T — `chats_tracking_session(S)` returns both bound chats and
+    /// does not include the chat bound to T.
+    #[test]
+    fn chats_tracking_session_returns_all_bound_chats() {
+        let mut c = TelegramTrackedSessionCoordinator::new();
+        let sid_s = "01900000-0000-7000-8000-0000000000AA";
+        let sid_t = "01900000-0000-7000-8000-0000000000BB";
+        let chat_a = 11_i64;
+        let chat_b = 22_i64;
+        let chat_c = 33_i64;
+
+        c.bind_chat_to_session_for_telegram_tracking(chat_a, sid_s);
+        c.bind_chat_to_session_for_telegram_tracking(chat_b, sid_s);
+        c.bind_chat_to_session_for_telegram_tracking(chat_c, sid_t);
+
+        let mut result = c.chats_tracking_session(sid_s);
+        result.sort(); // order-insensitive
+        assert_eq!(
+            result,
+            vec![chat_a, chat_b],
+            "chats_tracking_session must return exactly the chats bound to the target session"
+        );
+    }
+
+    /// **chats_tracking_session_empty_when_untracked**: when no chat has been bound to a session,
+    /// `chats_tracking_session` returns an empty vec.
+    #[test]
+    fn chats_tracking_session_empty_when_untracked() {
+        let c = TelegramTrackedSessionCoordinator::new();
+        let result = c.chats_tracking_session("01900000-0000-7000-8000-0000000000CC");
+        assert!(
+            result.is_empty(),
+            "chats_tracking_session must return empty vec for a session with no bound chats; got {result:?}"
         );
     }
 }

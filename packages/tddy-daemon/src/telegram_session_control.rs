@@ -2376,19 +2376,15 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         //   since we are always starting fresh; the branch callback reads and preserves this.
         {
             let trimmed = cmd.prompt.trim().to_string();
-            let mut cs = Changeset::default();
             // Always set cs.name — needed by claude_cli_branch_name_from_changeset to derive
             // wf.new_branch_name (required by validate_workflow_branch_intent).
             // Fall back to the short session id when the user sent /start-claude with no text.
-            cs.name = Some(if !trimmed.is_empty() {
-                trimmed
-                    .split_whitespace()
-                    .take(6)
-                    .collect::<Vec<_>>()
-                    .join(" ")
+            let cs_name = if !trimmed.is_empty() {
+                trimmed.split_whitespace().take(6).collect::<Vec<_>>().join(" ")
             } else {
                 format!("claude-{}", &session_id[..8.min(session_id.len())])
-            });
+            };
+            let mut cs = Changeset { name: Some(cs_name), ..Default::default() };
             if !trimmed.is_empty() {
                 cs.initial_prompt = Some(trimmed);
             }

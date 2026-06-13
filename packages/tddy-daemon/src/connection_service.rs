@@ -1824,6 +1824,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             req.status
         );
 
+        if let Some(ref telegram) = self.telegram {
+            let mut w = telegram.watcher.lock().await;
+            w.on_claude_cli_activity_status_changed(
+                &*telegram.sender,
+                &req.session_id,
+                &req.status,
+            )
+            .await;
+        }
+
         Ok(Response::new(ReportSessionStatusResponse { ok: true }))
     }
 }
