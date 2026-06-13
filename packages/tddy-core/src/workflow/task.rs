@@ -12,6 +12,7 @@ use crate::workflow::action_cache::{
 };
 use crate::workflow::context::Context;
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -347,7 +348,24 @@ impl Task for BackendInvokeTask {
                 extra_allowed_tools: context.get_sync("allowed_tools"),
                 socket_path: context.get_sync("socket_path"),
                 session_dir: session_dir.clone(),
-                remote: None,
+                remote: {
+                    const REMOTE_CTX_KEYS: &[&str] = &[
+                        "remote_daemon_url",
+                        "remote_session_id",
+                        "remote_session_token",
+                        "remote_daemon_instance_id",
+                        "remote_livekit_url",
+                        "remote_livekit_room",
+                        "remote_server_identity",
+                    ];
+                    let mut remote_map: HashMap<String, String> = HashMap::new();
+                    for key in REMOTE_CTX_KEYS {
+                        if let Some(val) = context.get_sync::<String>(key) {
+                            remote_map.insert(key.to_string(), val);
+                        }
+                    }
+                    crate::workflow::extract_remote_env_from_ctx(&remote_map)
+                },
             };
 
             let response = self

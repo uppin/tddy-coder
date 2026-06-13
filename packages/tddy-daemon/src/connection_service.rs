@@ -182,6 +182,8 @@ pub struct ConnectionServiceImpl {
     claude_cli_manager: Arc<ClaudeCliSessionManager>,
     /// Registry for background shell jobs spawned by the `Shell` tool (block_until_ms=0).
     shell_jobs: Arc<ShellJobRegistry>,
+    /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
+    idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
 }
 
 impl ConnectionServiceImpl {
@@ -217,6 +219,26 @@ impl ConnectionServiceImpl {
             worktree_stats_cache,
             claude_cli_manager,
             shell_jobs,
+            idle_tracker: None,
+        }
+    }
+
+    /// Attach an idle-timeout tracker to this service (builder pattern).
+    ///
+    /// When set, every RPC handler calls `tracker.record_activity()` so the relay daemon does
+    /// not self-terminate while a client is actively using the service.
+    pub fn with_idle_tracker(
+        mut self,
+        tracker: Arc<crate::relay_idle::IdleTimeoutTracker>,
+    ) -> Self {
+        self.idle_tracker = Some(tracker);
+        self
+    }
+
+    /// Record RPC activity in the idle-timeout tracker, if one is attached.
+    fn record_rpc_activity(&self) {
+        if let Some(ref tracker) = self.idle_tracker {
+            tracker.record_activity();
         }
     }
 
@@ -613,6 +635,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         &self,
         _request: Request<ListToolsRequest>,
     ) -> Result<Response<ListToolsResponse>, Status> {
+        self.record_rpc_activity();
         let tools: Vec<ToolInfo> = self
             .config
             .allowed_tools()
@@ -1809,6 +1832,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         &self,
         request: Request<ExecuteToolRequest>,
     ) -> Result<Response<ExecuteToolResponse>, Status> {
+        self.record_rpc_activity();
         let req = request.into_inner();
 
         // Authenticate caller.

@@ -119,20 +119,17 @@ fn main() -> anyhow::Result<()> {
     // Apply env overrides (e.g. from .env loaded by web-dev)
     apply_env_overrides(&mut config);
 
-    let port = config
-        .listen
-        .web_port
-        .ok_or_else(|| anyhow::anyhow!("config.listen.web_port is required"))?;
+    let (port, bundle_path_opt) =
+        tddy_daemon::startup::startup_config_check(&config, args.relay)?;
     let host = config
         .listen
         .web_host
         .clone()
         .unwrap_or_else(|| "0.0.0.0".to_string());
     log::info!("tddy-daemon listening on {}:{}", host, port);
-    let bundle_path = config
-        .web_bundle_path
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("config.web_bundle_path is required"))?;
+    // In relay mode bundle_path is None; in non-relay mode startup_config_check already
+    // guaranteed it is Some (returning Err otherwise). Unwrap is safe for non-relay path.
+    let bundle_path = bundle_path_opt.unwrap_or_else(|| PathBuf::from(""));
 
     let livekit_url = config
         .livekit

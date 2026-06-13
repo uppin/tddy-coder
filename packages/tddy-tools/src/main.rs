@@ -87,7 +87,7 @@ async fn main() -> Result<()> {
         Some(Subcommand::ListActions(s)) => cli::run_list_actions(s)?,
         Some(Subcommand::InvokeAction(s)) => cli::run_invoke_action(s)?,
         Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
-        Some(Subcommand::Remote(s)) => remote_cli::run_remote(s)?,
+        Some(Subcommand::Remote(s)) => remote_cli::run_remote(s).await?,
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");

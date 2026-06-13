@@ -37,3 +37,4 @@ pub mod user_sessions_path;
 pub mod workspace_session;
 pub mod worktrees;
 pub mod relay_idle;
+pub mod startup;

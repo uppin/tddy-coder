@@ -97,3 +97,63 @@ fn idle_timeout_tracker_expired_after_timeout_duration() {
         "should_shutdown must be true after idle timeout expires"
     );
 }
+
+/// Phase 3 AC: when `relay=true`, `startup_config_check` does NOT require `web_bundle_path`.
+///
+/// Tests the library function that main() calls — avoids the fork/process environment
+/// masking the real gap (args.relay is never checked).
+#[test]
+fn relay_mode_startup_config_check_skips_bundle_path() {
+    use tddy_daemon::startup::startup_config_check;
+    use tddy_daemon::config::DaemonConfig;
+
+    let yaml = r#"
+relay:
+  idle_timeout_secs: 300
+daemon_instance_id: relay-test
+listen:
+  web_port: 0
+"#;
+    let config: DaemonConfig = serde_yaml::from_str(yaml).expect("must parse");
+    assert!(config.web_bundle_path.is_none(), "precondition: no bundle path");
+
+    let result = startup_config_check(&config, true);
+    assert!(
+        result.is_ok(),
+        "startup_config_check(relay=true) must not require web_bundle_path; got: {:?}",
+        result.err()
+    );
+    let (_port, bundle) = result.unwrap();
+    assert!(
+        bundle.is_none(),
+        "relay mode must return None for bundle_path; got: {:?}",
+        bundle
+    );
+}
+
+/// Phase 3 AC: when `relay=false`, `startup_config_check` returns Err when `web_bundle_path`
+/// is absent — non-relay mode must serve static files.
+#[test]
+fn non_relay_startup_config_check_requires_bundle_path() {
+    use tddy_daemon::startup::startup_config_check;
+    use tddy_daemon::config::DaemonConfig;
+
+    let yaml = r#"
+listen:
+  web_port: 8080
+"#;
+    let config: DaemonConfig = serde_yaml::from_str(yaml).expect("must parse");
+    assert!(config.web_bundle_path.is_none(), "precondition: no bundle path");
+
+    let result = startup_config_check(&config, false);
+    assert!(
+        result.is_err(),
+        "startup_config_check(relay=false) must require web_bundle_path; got Ok"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("web_bundle_path"),
+        "error must mention web_bundle_path; got: {}",
+        err
+    );
+}
