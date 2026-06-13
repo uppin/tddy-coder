@@ -92,6 +92,16 @@ pub struct PtyRelayArgs {
     #[arg(long, default_value = "claude-cli")]
     pub session_type: String,
 
+    /// Seed the first user prompt for the new session (e.g. "opusplan").
+    /// Passed as a positional argument to `claude` so it runs immediately on start.
+    #[arg(long)]
+    pub initial_prompt: Option<String>,
+
+    /// Permission mode for claude-cli sessions (e.g. "auto", "bypassPermissions", "plan").
+    /// Passed as `--permission-mode <mode>` to the claude binary. Empty defaults to "auto".
+    #[arg(long)]
+    pub permission_mode: Option<String>,
+
     // -- Local PTY mode -------------------------------------------------------
     /// Command and arguments to relay in local PTY mode (after `--`).
     #[arg(last = true)]
@@ -161,7 +171,7 @@ fn run_local_pty(args: PtyRelayArgs) -> Result<()> {
     let reader_thread = std::thread::spawn(move || {
         let reader = master_reader.lock().unwrap().try_clone_reader();
         match reader {
-            Err(e) => eprintln!("pty-relay: clone reader: {}", e),
+            Err(e) => log::warn!(target: "tddy_tools::pty_relay", "clone reader: {}", e),
             Ok(mut r) => {
                 let mut buf = [0u8; 4096];
                 let mut stdout = std::io::stdout();
@@ -182,7 +192,7 @@ fn run_local_pty(args: PtyRelayArgs) -> Result<()> {
     let _writer_thread = std::thread::spawn(move || {
         let writer = master_writer.lock().unwrap().take_writer();
         match writer {
-            Err(e) => eprintln!("pty-relay: take writer: {}", e),
+            Err(e) => log::warn!(target: "tddy_tools::pty_relay", "take writer: {}", e),
             Ok(mut w) => {
                 let mut buf = [0u8; 256];
                 let mut stdin = std::io::stdin();
@@ -234,10 +244,7 @@ async fn run_session(args: PtyRelayArgs) -> Result<()> {
     let session_token = match args.session_token.as_deref().filter(|s| !s.is_empty()) {
         Some(t) => t.to_string(),
         None => {
-            eprintln!(
-                "[pty-relay] no --session-token; exchanging via {}",
-                args.daemon_url
-            );
+            log::info!(target: "tddy_tools::pty_relay", "no --session-token; exchanging via {}", args.daemon_url);
             exchange_stub_session_token(&args.daemon_url)
                 .await
                 .map_err(|e| anyhow::anyhow!("auto-auth: {}", e))?
@@ -250,13 +257,12 @@ async fn run_session(args: PtyRelayArgs) -> Result<()> {
         agent: args.agent.clone().unwrap_or_default(),
         session_type: args.session_type.clone(),
         model: args.model.clone(),
+        initial_prompt: args.initial_prompt.clone().unwrap_or_default(),
+        permission_mode: args.permission_mode.clone().unwrap_or_default(),
         ..Default::default()
     };
 
-    eprintln!(
-        "[pty-relay] calling StartSession via HTTP {}…",
-        args.daemon_url
-    );
+    log::info!(target: "tddy_tools::pty_relay", "calling StartSession via HTTP {}…", args.daemon_url);
     let resp_bytes = connectrpc_post(
         &reqwest::Client::new(),
         &args.daemon_url,
@@ -269,14 +275,15 @@ async fn run_session(args: PtyRelayArgs) -> Result<()> {
     let resp = StartSessionResponse::decode(resp_bytes.as_slice())
         .map_err(|e| anyhow::anyhow!("decode StartSessionResponse: {}", e))?;
 
-    eprintln!(
-        "[pty-relay] session started: id={} server_identity={}",
+    log::info!(
+        target: "tddy_tools::pty_relay",
+        "session started: id={} server_identity={}",
         resp.session_id, resp.livekit_server_identity
     );
 
     if !resp.livekit_server_identity.is_empty() {
         if let Some(livekit_url) = args.livekit_url.as_deref() {
-            eprintln!("[pty-relay] connecting via LiveKit");
+            log::info!(target: "tddy_tools::pty_relay", "connecting via LiveKit");
             return run_livekit_terminal(
                 &args,
                 livekit_url.to_string(),
@@ -287,7 +294,7 @@ async fn run_session(args: PtyRelayArgs) -> Result<()> {
         }
     }
 
-    eprintln!("[pty-relay] connecting via gRPC");
+    log::info!(target: "tddy_tools::pty_relay", "connecting via gRPC");
     run_grpc_terminal(&args.daemon_url, &resp.session_id, &session_token).await
 }
 
@@ -328,10 +335,7 @@ async fn run_livekit_terminal(
     let room = Arc::new(raw_room);
 
     let target: ParticipantIdentity = server_identity.clone().into();
-    eprintln!(
-        "[pty-relay] waiting for session server participant \"{}\"…",
-        server_identity
-    );
+    log::info!(target: "tddy_tools::pty_relay", "waiting for session server participant \"{}\"…", server_identity);
     if !room.remote_participants().contains_key(&target) {
         tokio::time::timeout(Duration::from_secs(30), async {
             while let Some(ev) = room_events.recv().await {
@@ -346,7 +350,7 @@ async fn run_livekit_terminal(
         .map_err(|_| anyhow::anyhow!("timed out waiting for session server participant"))?;
     }
 
-    eprintln!("[pty-relay] server visible — starting terminal bidi stream");
+    log::info!(target: "tddy_tools::pty_relay", "server visible — starting terminal bidi stream");
 
     let rpc_events_term = room.subscribe();
     let (key_tx, mut key_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
@@ -360,7 +364,7 @@ async fn run_livekit_terminal(
         let (mut sender, mut rx) = match bidi {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("[pty-relay] start_bidi_stream: {}", e);
+                log::error!(target: "tddy_tools::pty_relay", "start_bidi_stream: {}", e);
                 shutdown_bidi.store(true, Ordering::Relaxed);
                 return;
             }
@@ -393,7 +397,7 @@ async fn run_livekit_terminal(
                                 let _ = output_tx.send(out.data);
                             }
                         }
-                        Some(Err(e)) => { eprintln!("[pty-relay] recv: {}", e); break; }
+                        Some(Err(e)) => { log::warn!(target: "tddy_tools::pty_relay", "recv: {}", e); break; }
                         None => break, // bidi stream closed (server side)
                     }
                 }
@@ -501,10 +505,7 @@ async fn exchange_stub_session_token(daemon_url: &str) -> anyhow::Result<String>
     let exchange_resp = ExchangeCodeResponse::decode(exchange_resp_bytes.as_slice())
         .map_err(|e| anyhow::anyhow!("decode ExchangeCodeResponse: {}", e))?;
 
-    eprintln!(
-        "[pty-relay] authenticated as: {}",
-        exchange_resp.user.map(|u| u.login).unwrap_or_default()
-    );
+    log::info!(target: "tddy_tools::pty_relay", "authenticated as: {}", exchange_resp.user.map(|u| u.login).unwrap_or_default());
     Ok(exchange_resp.session_token)
 }
 
@@ -659,7 +660,7 @@ async fn run_grpc_terminal(
             }
             Ok(Ok(None)) => break, // stream ended
             Ok(Err(e)) => {
-                eprintln!("[pty-relay] stream error: {}", e);
+                log::warn!(target: "tddy_tools::pty_relay", "stream error: {}", e);
                 break;
             }
             Err(_) => {} // timeout — check shutdown and loop
@@ -757,6 +758,7 @@ impl Drop for RawMode {
 
 #[cfg(all(test, feature = "livekit"))]
 mod tests {
+    #[cfg(feature = "livekit")]
     use super::*;
 
     /// Reproduces: pty-relay encodes resize as DECSLPP xterm format `\x1b[8;{rows};{cols}t`
@@ -764,6 +766,7 @@ mod tests {
     /// With the wrong format the TUI never receives valid dimensions, stays at the 80x24 default,
     /// and renders separator lines and the status bar at the wrong width — producing doubled
     /// separators and a split `● high · /effort` line when viewed in a wider relay terminal.
+    #[cfg(feature = "livekit")]
     #[test]
     fn test_encode_resize_uses_osc_format_matching_virtual_tui() {
         let bytes = encode_resize().expect("encode_resize must return Some");

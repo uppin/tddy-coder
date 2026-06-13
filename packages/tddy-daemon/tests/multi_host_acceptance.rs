@@ -211,6 +211,7 @@ async fn start_session_unknown_daemon_instance_id_returns_clear_error() {
         selected_integration_base_ref: String::new(),
         selected_branch_to_work_on: String::new(),
         initial_prompt: String::new(),
+        permission_mode: String::new(),
     });
     let err = service
         .start_session(request)
@@ -400,6 +401,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         selected_integration_base_ref: String::new(),
         selected_branch_to_work_on: String::new(),
         initial_prompt: String::new(),
+        permission_mode: String::new(),
     });
     let response = service_a.start_session(request).await.unwrap_or_else(|e| {
         panic!(

@@ -2,6 +2,10 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-13 — Claude Code CLI permission mode selection
+
+- **`tddy-service`**: `StartSessionRequest.permission_mode` (proto field 14, string).
+- **`tddy-daemon`**: `build_claude_argv` appends `--permission-mode <mode>` (5th param; `None`/empty/whitespace → `auto`); `ClaudeCliSessionManager::start()` accepts `permission_mode: Option<&str>` (6th param); `connection_service::start_session` extracts and trims `req.permission_mode`, passes through `start_claude_cli_session` → `manager.start` → `build_claude_argv`. Tests: `claude_cli_permission_mode_acceptance` (16 tests). **`tddy-tools`**: `pty-relay --permission-mode` optional CLI arg wired into `StartSessionRequest`. Feature: [claude-cli-permission-mode.md](claude-cli-permission-mode.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
 ## 2026-06-13 — Per-worktree hooks: claude-cli session activity status
 
 - **`tddy-core`**: **`session_activity`** — **`SessionActivityStatus`** enum (`Started`, `Running`, `ExecutingTool`, `WaitingForInput`, `Done`, `Ended`) with `as_wire()`/`from_wire()`; **`activity_status_from_hook(event, notif_type)`** maps Claude Code hook events; **`HookEvent`** serde struct + `parse_hook_event`; 15 unit tests. **`claude_hooks`** — **`HookCommandParams`**, **`build_claude_hooks_settings()`** builds the 6-event settings JSON; 4 unit tests. **`session_metadata`** — **`activity_status: Option<String>`** and **`hook_token: Option<String>`** on **`SessionMetadata`** (serde-default, backward-compat); **`update_activity_status()`** read-modify-write helper.
