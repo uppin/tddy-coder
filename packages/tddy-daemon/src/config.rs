@@ -307,6 +307,18 @@ impl DaemonConfig {
         );
     }
 
+    /// Validate that this config is suitable for relay mode.
+    ///
+    /// Relay mode requires the `relay:` section to be present. It does not require
+    /// `web_bundle_path` — relay daemons do not serve static files.
+    pub fn validate_for_relay(&self) -> anyhow::Result<()> {
+        if self.relay.is_some() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("relay section is required in relay mode"))
+        }
+    }
+
     /// Override [`Self::codex_oauth_loopback_proxy_eligible`] from `TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE`
     /// (`true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off`, case-insensitive). Call after YAML load.
     pub fn apply_oauth_loopback_proxy_env_override(&mut self) {

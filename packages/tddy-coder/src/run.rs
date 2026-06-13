@@ -2894,6 +2894,22 @@ fn read_feature_input(args: &Args) -> anyhow::Result<String> {
     Ok(buf)
 }
 
+/// Entry point for remote-codebase mode.
+///
+/// Shells out to `tddy-tools remote {start|connect}-session`, creates a `RemoteContextDir`,
+/// builds the allowlist from `tddy-tools remote list-tools` output, and passes a fully
+/// populated `InvokeRequest` (with `remote: Some(RemoteToolEnv)`) to the backend.
+///
+/// # Note
+/// Full bootstrap is not yet implemented; this function is a placeholder that ensures the
+/// correct public signature is exported for downstream use. The e2e integration is covered
+/// by acceptance tests against a real relay daemon.
+// TODO: implement full bootstrap (subprocess coordination, session sync, run_goal)
+pub fn run_remote(args: &Args) -> anyhow::Result<()> {
+    let _ = args;
+    anyhow::bail!("remote mode not yet fully implemented")
+}
+
 #[cfg(test)]
 mod resume_session_config_tests {
     use super::merge_session_coder_config_for_resume;

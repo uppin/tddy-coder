@@ -4,7 +4,7 @@ pub mod config;
 pub mod plain;
 pub mod recipe;
 pub mod remote;
-mod run;
+pub mod run;
 mod tty;
 pub mod web_server;
 

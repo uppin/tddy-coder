@@ -50,6 +50,7 @@ portable-pty = "0.9"
 libc = "0.2"
 
 [dev-dependencies]
+assert_cmd = "2"
 tempfile = "3"
 tddy-github = { path = "../tddy-github" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }

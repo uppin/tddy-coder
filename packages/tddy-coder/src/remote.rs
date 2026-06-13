@@ -108,3 +108,13 @@ pub fn build_remote_allowlist(discovered_tools: &[&str]) -> Vec<String> {
     allowlist.push("AskUserQuestion".to_string());
     allowlist
 }
+
+/// Parse a JSON array of tool names (as produced by `tddy-tools remote list-tools`) and
+/// return the remote allowlist built by [`build_remote_allowlist`].
+///
+/// Returns `Err` when `tools_json` is not valid JSON or not a JSON array of strings.
+pub fn run_remote_with_tools_output(tools_json: &str) -> anyhow::Result<Vec<String>> {
+    let names: Vec<String> = serde_json::from_str(tools_json)?;
+    let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+    Ok(build_remote_allowlist(&refs))
+}

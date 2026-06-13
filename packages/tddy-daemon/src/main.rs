@@ -75,6 +75,11 @@ struct Args {
     /// Path to config file (YAML)
     #[arg(short, long, env = "TDDY_DAEMON_CONFIG")]
     config: Option<PathBuf>,
+
+    /// Run in relay mode: no web bundle required, idle-timeout auto-shutdown,
+    /// forwards RPCs to a remote peer via LiveKit.
+    #[arg(long)]
+    relay: bool,
 }
 
 fn main() -> anyhow::Result<()> {

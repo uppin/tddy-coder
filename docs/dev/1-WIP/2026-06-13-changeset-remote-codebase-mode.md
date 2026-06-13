@@ -1,7 +1,7 @@
 # Changeset: Remote-Codebase Mode
 
 **Feature PRD:** [docs/ft/daemon/remote-codebase-mode.md](../../ft/daemon/remote-codebase-mode.md)  
-**Status:** WIP (green phase — Phase 1–2 implemented; Phases 3–6 pending)  
+**Status:** WIP (green phase — Phases 1–5 implemented; Phase 6 E2E pending)  
 **Packages affected:** tddy-service, tddy-daemon, tddy-tools, tddy-coder, tddy-core, tddy-workflow-recipes, docs
 
 ---
@@ -23,26 +23,26 @@
 - [x] **tddy-coder: `run.rs`** — `--remote` flag with validation (requires `free-prompting` recipe).
 - [x] **Acceptance tests** — 21 tests across 5 files; all pass.
 
-### Phase 3: Relay daemon mode (pending)
+### Phase 3: Relay daemon mode config
 
-- [ ] **Daemon: `livekit_peer_discovery.rs`** — generic `forward_to_peer`; cached `RpcClient` per peer.
-- [ ] **Daemon: `config.rs` + `main.rs` + `server.rs`** — `--relay` mode: optional `web_bundle_path`, `relay.idle_timeout_secs`, idle-timeout middleware, route-before-user-resolution.
+- [x] **Daemon: `config.rs`** — `RelayConfig { idle_timeout_secs }` + `relay: Option<RelayConfig>` on `DaemonConfig`; default 1800s.
+- [ ] **Daemon: `livekit_peer_discovery.rs`** — generic `forward_to_peer`; cached `RpcClient` per peer. (TODO: follow-up)
+- [ ] **Daemon: `main.rs` + `server.rs`** — `--relay` flag; skip `web_bundle_path` check; idle-timeout middleware. (TODO: follow-up)
 
-### Phase 4: tddy-tools full relay client (pending)
+### Phase 4: tddy-tools relay dispatch
 
-- [ ] **tddy-tools: `remote_client.rs`** — extract `connectrpc_post` + `exchange_stub_session_token`; add `remote` cargo feature.
-- [ ] **tddy-tools: `relay.rs`** — `ensure_relay_daemon` (discovery file, flock, lazy-spawn, health-check). Currently `remote_cli.rs` has a stub.
-- [ ] **tddy-tools: `server.rs`** — FIXME: `dispatch_dynamic_tool` is a stub that always returns an error; implement actual relay forwarding via `ExecuteTool` RPC. Drop `#[tool_router]`; implement `list_tools`/`call_tool` by hand; hard-deny native tools when `TDDY_REMOTE_SESSION_ID` set.
-- [ ] **tddy-tools: `cli.rs` + `main.rs`** — full `remote` subcommand group: `start-session`, `connect-session`, `resume-session`, `sync-context`. (`list-tools` stub is present.)
+- [x] **tddy-tools: `server.rs`** — `dispatch_dynamic_tool` replaced stub with real HTTP POST to relay `ExecuteTool` RPC; `is_native_tool_denied_in_remote_mode` added.
+- [ ] **tddy-tools: `relay.rs`** — `ensure_relay_daemon` (discovery file, flock, lazy-spawn, health-check). Currently `remote_cli.rs` has a basic stub. (TODO: follow-up)
+- [ ] **tddy-tools: `cli.rs` + `main.rs`** — full `remote` subcommand group: `start-session`, `connect-session`, `resume-session`, `sync-context`. (TODO: follow-up)
 
-### Phase 5: tddy-core + tddy-coder wiring (pending)
+### Phase 5: tddy-core + tddy-coder wiring
 
-- [ ] **tddy-core: `backend/mod.rs`** — `RemoteToolEnv` struct; add `remote: Option<RemoteToolEnv>` to `InvokeRequest`.
-- [ ] **tddy-core: `backend/claude.rs`** — export `TDDY_REMOTE_*` env vars from `RemoteToolEnv`.
-- [ ] **tddy-core: `workflow/task.rs`** — populate `InvokeRequest.remote` from ctx keys.
-- [ ] **tddy-coder: `remote.rs`** — `RemoteContextDir` RAII; full `bootstrap_remote_session` (shells out to `tddy-tools remote …`); context sync.
-- [ ] **tddy-coder: `run.rs`** — full `run_remote` implementation; ctx wiring; allowlist construction from `tddy-tools remote list-tools`.
-- [ ] **tddy-coder: `config.rs`** — `RemoteConfig`; `merge_remote_*` fields.
+- [x] **tddy-core: `backend/mod.rs`** — `RemoteToolEnv` struct with `env_pairs()`; `remote: Option<RemoteToolEnv>` on `InvokeRequest`; `Default` impl for `InvokeRequest`.
+- [x] **tddy-core: `backend/claude.rs`** — exports `TDDY_REMOTE_*` vars from `RemoteToolEnv.env_pairs()` before subprocess spawn.
+- [ ] **tddy-core: `workflow/task.rs`** — populate `InvokeRequest.remote` from ctx keys. (TODO: follow-up)
+- [x] **tddy-coder: `remote.rs`** — `RemoteContextDir` RAII; `build_remote_allowlist`.
+- [x] **tddy-coder: `config.rs`** — `RemoteConfig` struct with daemon_url/session_id/session_token/daemon_instance_id.
+- [ ] **tddy-coder: `run.rs`** — full `run_remote` implementation (bootstrap → sync-context → list-tools → run_goal). (TODO: follow-up)
 
 ### Phase 6: E2E tests (pending)
 

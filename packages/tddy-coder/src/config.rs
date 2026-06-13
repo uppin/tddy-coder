@@ -121,6 +121,34 @@ pub struct RemoteConfig {
     pub daemon_instance_id: Option<String>,
 }
 
+impl RemoteConfig {
+    /// Convert this config into a [`tddy_core::backend::RemoteToolEnv`].
+    ///
+    /// Returns `Err` when any required field (`daemon_url`, `session_id`, `session_token`)
+    /// is absent.
+    pub fn to_remote_tool_env(&self) -> anyhow::Result<tddy_core::backend::RemoteToolEnv> {
+        use anyhow::Context;
+        Ok(tddy_core::backend::RemoteToolEnv {
+            daemon_url: self
+                .daemon_url
+                .clone()
+                .context("daemon_url is required")?,
+            session_id: self
+                .session_id
+                .clone()
+                .context("session_id is required")?,
+            session_token: self
+                .session_token
+                .clone()
+                .context("session_token is required")?,
+            daemon_instance_id: self.daemon_instance_id.clone(),
+            livekit_url: None,
+            livekit_room: None,
+            server_identity: None,
+        })
+    }
+}
+
 /// Load a config file from the given path.
 pub fn load_config(path: &Path) -> anyhow::Result<Config> {
     let contents = std::fs::read_to_string(path)
