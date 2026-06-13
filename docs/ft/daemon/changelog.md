@@ -2,6 +2,11 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-13 — Claude Code CLI permission mode selection
+
+- **`tddy-service`**: `StartSessionRequest.permission_mode` (proto field 14, string).
+- **`tddy-daemon`**: `build_claude_argv` appends `--permission-mode <mode>` (5th param; `None`/empty/whitespace → `auto`); `ClaudeCliSessionManager::start()` accepts `permission_mode: Option<&str>` (6th param); `connection_service::start_session` extracts and trims `req.permission_mode`, passes through `start_claude_cli_session` → `manager.start` → `build_claude_argv`. Tests: `claude_cli_permission_mode_acceptance` (16 tests). **`tddy-tools`**: `pty-relay --permission-mode` optional CLI arg wired into `StartSessionRequest`. Feature: [claude-cli-permission-mode.md](claude-cli-permission-mode.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-06-06 — Session chaining: stable parent id in Telegram callback
 
 - **`tddy-daemon`**: **`telegram_session_control`** — **`tcp:`** chain callback format changed from `tcp:<idx>|s:<child>` to `tcp:p:<parent_tail8>|s:<child>` (last 8 chars of parent session id); **`handle_chain_parent_callback`** scans candidates by tail instead of index position — stable across session churn between keyboard render and tap; **`session_tail8()`** helper; **`parse_telegram_chain_parent_callback`** signature updated to return `(String, String)`. Unit tests: **`parse_chain_workflow_prompt`** (strip/trim/wrong-prefix), **`parse_telegram_chain_parent_callback`** round-trip, empty-tail rejection, **`session_tail8`** boundary cases. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).

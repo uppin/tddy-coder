@@ -54,7 +54,7 @@ enum Subcommand {
     /// Spawn a command in a PTY and relay keyboard+output — same wiring as the daemon uses
     /// for claude-cli sessions. Useful for verifying the PTY pipeline independently.
     /// Example: tddy-tools pty-relay -- claude --model claude-opus-4-8
-    PtyRelay(pty_relay::PtyRelayArgs),
+    PtyRelay(Box<pty_relay::PtyRelayArgs>),
 }
 
 #[tokio::main]
@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
         Some(Subcommand::PersistChangesetWorkflow(s)) => cli::run_persist_changeset_workflow(s)?,
         Some(Subcommand::ListActions(s)) => cli::run_list_actions(s)?,
         Some(Subcommand::InvokeAction(s)) => cli::run_invoke_action(s)?,
-        Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(s).await?,
+        Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);

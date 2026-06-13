@@ -19,7 +19,7 @@
 
 use anyhow::Result;
 use clap::Args;
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 
@@ -34,7 +34,6 @@ pub struct PtyRelayArgs {
     pub dir: std::path::PathBuf,
 
     // -- LiveKit shared args (requires --features livekit) --------------------
-
     /// LiveKit server URL (e.g. ws://127.0.0.1:7880). Enables LiveKit mode.
     #[arg(long)]
     pub livekit_url: Option<String>,
@@ -56,14 +55,12 @@ pub struct PtyRelayArgs {
     pub client_identity: String,
 
     // -- Connect-only mode (--server-identity) --------------------------------
-
     /// Connect to an already-running session's terminal server. The identity is
     /// `daemon-<instance_id>-<session_id>` (from StartSessionResponse or daemon logs).
     #[arg(long)]
     pub server_identity: Option<String>,
 
     // -- Start-and-connect mode (--daemon-identity) ---------------------------
-
     /// Daemon's own LiveKit identity in the common room (e.g. udoo-1780828020298).
     /// Triggers start-and-connect: calls StartSession via LiveKit RPC, then connects terminal.
     #[arg(long)]
@@ -95,8 +92,17 @@ pub struct PtyRelayArgs {
     #[arg(long, default_value = "claude-cli")]
     pub session_type: String,
 
-    // -- Local PTY mode -------------------------------------------------------
+    /// Seed the first user prompt for the new session (e.g. "opusplan").
+    /// Passed as a positional argument to `claude` so it runs immediately on start.
+    #[arg(long)]
+    pub initial_prompt: Option<String>,
 
+    /// Permission mode for claude-cli sessions (e.g. "auto", "bypassPermissions", "plan").
+    /// Passed as `--permission-mode <mode>` to the claude binary. Empty defaults to "auto".
+    #[arg(long)]
+    pub permission_mode: Option<String>,
+
+    // -- Local PTY mode -------------------------------------------------------
     /// Command and arguments to relay in local PTY mode (after `--`).
     #[arg(last = true)]
     pub cmd: Vec<String>,
@@ -136,16 +142,25 @@ fn run_local_pty(args: PtyRelayArgs) -> Result<()> {
 
     let pty_system = native_pty_system();
     let pair = pty_system
-        .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .map_err(|e| anyhow::anyhow!("openpty: {}", e))?;
 
     let mut cmd = CommandBuilder::new(&args.cmd[0]);
-    for arg in &args.cmd[1..] { cmd.arg(arg); }
+    for arg in &args.cmd[1..] {
+        cmd.arg(arg);
+    }
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
 
-    let mut child = pair.slave.spawn_command(cmd)
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
         .map_err(|e| anyhow::anyhow!("spawn: {}", e))?;
     drop(pair.slave);
 
@@ -156,14 +171,17 @@ fn run_local_pty(args: PtyRelayArgs) -> Result<()> {
     let reader_thread = std::thread::spawn(move || {
         let reader = master_reader.lock().unwrap().try_clone_reader();
         match reader {
-            Err(e) => eprintln!("pty-relay: clone reader: {}", e),
+            Err(e) => log::warn!(target: "tddy_tools::pty_relay", "clone reader: {}", e),
             Ok(mut r) => {
                 let mut buf = [0u8; 4096];
                 let mut stdout = std::io::stdout();
                 loop {
                     match r.read(&mut buf) {
                         Ok(0) | Err(_) => break,
-                        Ok(n) => { let _ = stdout.write_all(&buf[..n]); let _ = stdout.flush(); }
+                        Ok(n) => {
+                            let _ = stdout.write_all(&buf[..n]);
+                            let _ = stdout.flush();
+                        }
                     }
                 }
             }
@@ -174,14 +192,18 @@ fn run_local_pty(args: PtyRelayArgs) -> Result<()> {
     let _writer_thread = std::thread::spawn(move || {
         let writer = master_writer.lock().unwrap().take_writer();
         match writer {
-            Err(e) => eprintln!("pty-relay: take writer: {}", e),
+            Err(e) => log::warn!(target: "tddy_tools::pty_relay", "take writer: {}", e),
             Ok(mut w) => {
                 let mut buf = [0u8; 256];
                 let mut stdin = std::io::stdin();
                 loop {
                     match stdin.read(&mut buf) {
                         Ok(0) | Err(_) => break,
-                        Ok(n) => { if w.write_all(&buf[..n]).is_err() { break; } }
+                        Ok(n) => {
+                            if w.write_all(&buf[..n]).is_err() {
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -211,7 +233,9 @@ async fn run_session(args: PtyRelayArgs) -> Result<()> {
 
     // Connect-only path: no StartSession, just connect to the given LiveKit identity.
     if let Some(server_identity) = args.server_identity.clone() {
-        let livekit_url = args.livekit_url.as_deref()
+        let livekit_url = args
+            .livekit_url
+            .as_deref()
             .ok_or_else(|| anyhow::anyhow!("--server-identity requires --livekit-url"))?;
         return run_livekit_terminal(&args, livekit_url.to_string(), server_identity, None).await;
     }
@@ -220,8 +244,9 @@ async fn run_session(args: PtyRelayArgs) -> Result<()> {
     let session_token = match args.session_token.as_deref().filter(|s| !s.is_empty()) {
         Some(t) => t.to_string(),
         None => {
-            eprintln!("[pty-relay] no --session-token; exchanging via {}", args.daemon_url);
-            exchange_stub_session_token(&args.daemon_url).await
+            log::info!(target: "tddy_tools::pty_relay", "no --session-token; exchanging via {}", args.daemon_url);
+            exchange_stub_session_token(&args.daemon_url)
+                .await
                 .map_err(|e| anyhow::anyhow!("auto-auth: {}", e))?
         }
     };
@@ -232,36 +257,44 @@ async fn run_session(args: PtyRelayArgs) -> Result<()> {
         agent: args.agent.clone().unwrap_or_default(),
         session_type: args.session_type.clone(),
         model: args.model.clone(),
+        initial_prompt: args.initial_prompt.clone().unwrap_or_default(),
+        permission_mode: args.permission_mode.clone().unwrap_or_default(),
         ..Default::default()
     };
 
-    eprintln!("[pty-relay] calling StartSession via HTTP {}…", args.daemon_url);
+    log::info!(target: "tddy_tools::pty_relay", "calling StartSession via HTTP {}…", args.daemon_url);
     let resp_bytes = connectrpc_post(
         &reqwest::Client::new(),
         &args.daemon_url,
         "connection.ConnectionService",
         "StartSession",
         req.encode_to_vec(),
-    ).await?;
+    )
+    .await?;
 
     let resp = StartSessionResponse::decode(resp_bytes.as_slice())
         .map_err(|e| anyhow::anyhow!("decode StartSessionResponse: {}", e))?;
 
-    eprintln!(
-        "[pty-relay] session started: id={} server_identity={}",
+    log::info!(
+        target: "tddy_tools::pty_relay",
+        "session started: id={} server_identity={}",
         resp.session_id, resp.livekit_server_identity
     );
 
     if !resp.livekit_server_identity.is_empty() {
         if let Some(livekit_url) = args.livekit_url.as_deref() {
-            eprintln!("[pty-relay] connecting via LiveKit");
+            log::info!(target: "tddy_tools::pty_relay", "connecting via LiveKit");
             return run_livekit_terminal(
-                &args, livekit_url.to_string(), resp.livekit_server_identity, Some(session_token),
-            ).await;
+                &args,
+                livekit_url.to_string(),
+                resp.livekit_server_identity,
+                Some(session_token),
+            )
+            .await;
         }
     }
 
-    eprintln!("[pty-relay] connecting via gRPC");
+    log::info!(target: "tddy_tools::pty_relay", "connecting via gRPC");
     run_grpc_terminal(&args.daemon_url, &resp.session_id, &session_token).await
 }
 
@@ -280,7 +313,11 @@ async fn run_livekit_terminal(
     use tddy_livekit::{RpcClient, TokenGenerator};
     use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
 
-    let room_name = args.livekit_room.as_deref().unwrap_or("tddy-lobby").to_string();
+    let room_name = args
+        .livekit_room
+        .as_deref()
+        .unwrap_or("tddy-lobby")
+        .to_string();
     let client_token = TokenGenerator::new(
         args.livekit_api_key.clone(),
         args.livekit_api_secret.clone(),
@@ -291,18 +328,21 @@ async fn run_livekit_terminal(
     .generate()
     .map_err(|e| anyhow::anyhow!("token: {}", e))?;
 
-    let (raw_room, mut room_events) = Room::connect(&livekit_url, &client_token, RoomOptions::default())
-        .await
-        .map_err(|e| anyhow::anyhow!("room connect: {}", e))?;
+    let (raw_room, mut room_events) =
+        Room::connect(&livekit_url, &client_token, RoomOptions::default())
+            .await
+            .map_err(|e| anyhow::anyhow!("room connect: {}", e))?;
     let room = Arc::new(raw_room);
 
     let target: ParticipantIdentity = server_identity.clone().into();
-    eprintln!("[pty-relay] waiting for session server participant \"{}\"…", server_identity);
+    log::info!(target: "tddy_tools::pty_relay", "waiting for session server participant \"{}\"…", server_identity);
     if !room.remote_participants().contains_key(&target) {
         tokio::time::timeout(Duration::from_secs(30), async {
             while let Some(ev) = room_events.recv().await {
                 if let RoomEvent::ParticipantConnected(p) = ev {
-                    if p.identity().to_string() == server_identity { return; }
+                    if p.identity().to_string() == server_identity {
+                        return;
+                    }
                 }
             }
         })
@@ -310,7 +350,7 @@ async fn run_livekit_terminal(
         .map_err(|_| anyhow::anyhow!("timed out waiting for session server participant"))?;
     }
 
-    eprintln!("[pty-relay] server visible — starting terminal bidi stream");
+    log::info!(target: "tddy_tools::pty_relay", "server visible — starting terminal bidi stream");
 
     let rpc_events_term = room.subscribe();
     let (key_tx, mut key_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
@@ -324,17 +364,23 @@ async fn run_livekit_terminal(
         let (mut sender, mut rx) = match bidi {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("[pty-relay] start_bidi_stream: {}", e);
+                log::error!(target: "tddy_tools::pty_relay", "start_bidi_stream: {}", e);
                 shutdown_bidi.store(true, Ordering::Relaxed);
                 return;
             }
         };
-        let _ = sender.send(TerminalInput { data: vec![] }.encode_to_vec(), false).await;
+        let _ = sender
+            .send(TerminalInput { data: vec![] }.encode_to_vec(), false)
+            .await;
         if let Some(resize) = encode_resize() {
-            let _ = sender.send(TerminalInput { data: resize }.encode_to_vec(), false).await;
+            let _ = sender
+                .send(TerminalInput { data: resize }.encode_to_vec(), false)
+                .await;
         }
         loop {
-            if shutdown_bidi.load(Ordering::Relaxed) { break; }
+            if shutdown_bidi.load(Ordering::Relaxed) {
+                break;
+            }
             tokio::select! {
                 bytes = key_rx.recv() => {
                     match bytes {
@@ -351,7 +397,7 @@ async fn run_livekit_terminal(
                                 let _ = output_tx.send(out.data);
                             }
                         }
-                        Some(Err(e)) => { eprintln!("[pty-relay] recv: {}", e); break; }
+                        Some(Err(e)) => { log::warn!(target: "tddy_tools::pty_relay", "recv: {}", e); break; }
                         None => break, // bidi stream closed (server side)
                     }
                 }
@@ -367,19 +413,31 @@ async fn run_livekit_terminal(
         let mut buf = [0u8; 256];
         let mut stdin = std::io::stdin();
         loop {
-            if shutdown_stdin.load(Ordering::Relaxed) { break; }
+            if shutdown_stdin.load(Ordering::Relaxed) {
+                break;
+            }
             match stdin.read(&mut buf) {
-                Ok(0) | Err(_) => { shutdown_stdin.store(true, Ordering::Relaxed); break; }
-                Ok(n) => { let _ = key_tx.blocking_send(buf[..n].to_vec()); }
+                Ok(0) | Err(_) => {
+                    shutdown_stdin.store(true, Ordering::Relaxed);
+                    break;
+                }
+                Ok(n) => {
+                    let _ = key_tx.blocking_send(buf[..n].to_vec());
+                }
             }
         }
     });
 
     let mut stdout = std::io::stdout();
     loop {
-        if shutdown.load(Ordering::Relaxed) { break; }
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
         match tokio::time::timeout(Duration::from_millis(50), output_rx.recv()).await {
-            Ok(Some(bytes)) => { let _ = stdout.write_all(&bytes); let _ = stdout.flush(); }
+            Ok(Some(bytes)) => {
+                let _ = stdout.write_all(&bytes);
+                let _ = stdout.flush();
+            }
             Ok(None) => break,
             Err(_timeout) => {}
         }
@@ -397,12 +455,21 @@ async fn run_livekit_terminal(
 #[cfg(feature = "livekit")]
 async fn exchange_stub_session_token(daemon_url: &str) -> anyhow::Result<String> {
     use prost::Message as _;
-    use tddy_service::proto::auth::{ExchangeCodeRequest, ExchangeCodeResponse, GetAuthUrlRequest, GetAuthUrlResponse};
+    use tddy_service::proto::auth::{
+        ExchangeCodeRequest, ExchangeCodeResponse, GetAuthUrlRequest, GetAuthUrlResponse,
+    };
 
     let client = reqwest::Client::new();
 
     let url_req_bytes = GetAuthUrlRequest {}.encode_to_vec();
-    let url_resp_bytes = connectrpc_post(&client, daemon_url, "auth.AuthService", "GetAuthUrl", url_req_bytes).await?;
+    let url_resp_bytes = connectrpc_post(
+        &client,
+        daemon_url,
+        "auth.AuthService",
+        "GetAuthUrl",
+        url_req_bytes,
+    )
+    .await?;
     let url_resp = GetAuthUrlResponse::decode(url_resp_bytes.as_slice())
         .map_err(|e| anyhow::anyhow!("decode GetAuthUrlResponse: {}", e))?;
 
@@ -412,7 +479,11 @@ async fn exchange_stub_session_token(daemon_url: &str) -> anyhow::Result<String>
     let mut state = url_resp.state.clone();
     for pair in query.split('&') {
         if let Some((k, v)) = pair.split_once('=') {
-            match k { "code" => code = v.to_string(), "state" => state = v.to_string(), _ => {} }
+            match k {
+                "code" => code = v.to_string(),
+                "state" => state = v.to_string(),
+                _ => {}
+            }
         }
     }
     if code.is_empty() {
@@ -423,11 +494,18 @@ async fn exchange_stub_session_token(daemon_url: &str) -> anyhow::Result<String>
     }
 
     let exchange_req_bytes = ExchangeCodeRequest { code, state }.encode_to_vec();
-    let exchange_resp_bytes = connectrpc_post(&client, daemon_url, "auth.AuthService", "ExchangeCode", exchange_req_bytes).await?;
+    let exchange_resp_bytes = connectrpc_post(
+        &client,
+        daemon_url,
+        "auth.AuthService",
+        "ExchangeCode",
+        exchange_req_bytes,
+    )
+    .await?;
     let exchange_resp = ExchangeCodeResponse::decode(exchange_resp_bytes.as_slice())
         .map_err(|e| anyhow::anyhow!("decode ExchangeCodeResponse: {}", e))?;
 
-    eprintln!("[pty-relay] authenticated as: {}", exchange_resp.user.map(|u| u.login).unwrap_or_default());
+    log::info!(target: "tddy_tools::pty_relay", "authenticated as: {}", exchange_resp.user.map(|u| u.login).unwrap_or_default());
     Ok(exchange_resp.session_token)
 }
 
@@ -450,7 +528,11 @@ async fn connectrpc_post(
     if !resp.status().is_success() {
         anyhow::bail!("POST {} → HTTP {}", url, resp.status());
     }
-    Ok(resp.bytes().await.map_err(|e| anyhow::anyhow!("read response: {}", e))?.to_vec())
+    Ok(resp
+        .bytes()
+        .await
+        .map_err(|e| anyhow::anyhow!("read response: {}", e))?
+        .to_vec())
 }
 
 // ---------------------------------------------------------------------------
@@ -461,10 +543,16 @@ async fn connectrpc_post(
 /// Uses `StreamTerminalOutput` (server-streaming) for output and `SendTerminalInput`
 /// (unary) for input — the same path the web UI's `GhosttyTerminalGrpc` uses.
 #[cfg(feature = "livekit")]
-async fn run_grpc_terminal(daemon_url: &str, session_id: &str, session_token: &str) -> anyhow::Result<()> {
+async fn run_grpc_terminal(
+    daemon_url: &str,
+    session_id: &str,
+    session_token: &str,
+) -> anyhow::Result<()> {
     use prost::Message as _;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use tddy_service::proto::connection::{SessionTerminalInput, SessionTerminalOutput, StreamTerminalOutputRequest};
+    use tddy_service::proto::connection::{
+        SessionTerminalInput, SessionTerminalOutput, StreamTerminalOutputRequest,
+    };
 
     let http_client = reqwest::Client::new();
 
@@ -479,7 +567,8 @@ async fn run_grpc_terminal(daemon_url: &str, session_id: &str, session_token: &s
         "connection.ConnectionService",
         "StreamTerminalOutput",
         stream_req.encode_to_vec(),
-    ).await?;
+    )
+    .await?;
 
     let (key_tx, mut key_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -492,7 +581,9 @@ async fn run_grpc_terminal(daemon_url: &str, session_id: &str, session_token: &s
     let shutdown_input = Arc::clone(&shutdown);
     tokio::spawn(async move {
         while let Some(data) = key_rx.recv().await {
-            if shutdown_input.load(Ordering::Relaxed) { break; }
+            if shutdown_input.load(Ordering::Relaxed) {
+                break;
+            }
             let req = SessionTerminalInput {
                 session_token: input_session_token.clone(),
                 session_id: input_session_id.clone(),
@@ -504,7 +595,8 @@ async fn run_grpc_terminal(daemon_url: &str, session_id: &str, session_token: &s
                 "connection.ConnectionService",
                 "SendTerminalInput",
                 req.encode_to_vec(),
-            ).await;
+            )
+            .await;
         }
     });
 
@@ -515,10 +607,17 @@ async fn run_grpc_terminal(daemon_url: &str, session_id: &str, session_token: &s
         let mut buf = [0u8; 256];
         let mut stdin = std::io::stdin();
         loop {
-            if shutdown_stdin.load(Ordering::Relaxed) { break; }
+            if shutdown_stdin.load(Ordering::Relaxed) {
+                break;
+            }
             match stdin.read(&mut buf) {
-                Ok(0) | Err(_) => { shutdown_stdin.store(true, Ordering::Relaxed); break; }
-                Ok(n) => { let _ = key_tx.blocking_send(buf[..n].to_vec()); }
+                Ok(0) | Err(_) => {
+                    shutdown_stdin.store(true, Ordering::Relaxed);
+                    break;
+                }
+                Ok(n) => {
+                    let _ = key_tx.blocking_send(buf[..n].to_vec());
+                }
             }
         }
     });
@@ -528,19 +627,26 @@ async fn run_grpc_terminal(daemon_url: &str, session_id: &str, session_token: &s
     let mut stdout = std::io::stdout();
     let mut buf = Vec::<u8>::new();
     'outer: loop {
-        if shutdown.load(Ordering::Relaxed) { break; }
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
         match tokio::time::timeout(std::time::Duration::from_millis(100), resp.chunk()).await {
             Ok(Ok(Some(chunk))) => {
                 buf.extend_from_slice(chunk.as_ref());
                 // Parse all complete envelope frames from buf.
                 loop {
-                    if buf.len() < 5 { break; }
+                    if buf.len() < 5 {
+                        break;
+                    }
                     let flags = buf[0];
                     let len = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
-                    if buf.len() < 5 + len { break; }
+                    if buf.len() < 5 + len {
+                        break;
+                    }
                     let payload = buf[5..5 + len].to_vec();
                     buf.drain(0..5 + len);
-                    if flags & 0x02 != 0 { // end-stream flag
+                    if flags & 0x02 != 0 {
+                        // end-stream flag
                         shutdown.store(true, Ordering::Relaxed);
                         break 'outer;
                     }
@@ -553,7 +659,10 @@ async fn run_grpc_terminal(daemon_url: &str, session_id: &str, session_token: &s
                 }
             }
             Ok(Ok(None)) => break, // stream ended
-            Ok(Err(e)) => { eprintln!("[pty-relay] stream error: {}", e); break; }
+            Ok(Err(e)) => {
+                log::warn!(target: "tddy_tools::pty_relay", "stream error: {}", e);
+                break;
+            }
             Err(_) => {} // timeout — check shutdown and loop
         }
     }
@@ -605,7 +714,8 @@ fn terminal_size_or_default() -> (u16, u16) {
     unsafe {
         let mut ws: libc::winsize = std::mem::zeroed();
         if libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) == 0
-            && ws.ws_row > 0 && ws.ws_col > 0
+            && ws.ws_row > 0
+            && ws.ws_col > 0
         {
             return (ws.ws_row, ws.ws_col);
         }
@@ -630,19 +740,25 @@ impl RawMode {
                 return Self { saved };
             }
         }
-        Self { #[cfg(unix)] saved: unsafe { std::mem::zeroed() } }
+        Self {
+            #[cfg(unix)]
+            saved: unsafe { std::mem::zeroed() },
+        }
     }
 }
 
 impl Drop for RawMode {
     fn drop(&mut self) {
         #[cfg(unix)]
-        unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &self.saved); }
+        unsafe {
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &self.saved);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "livekit")]
     use super::*;
 
     /// Reproduces: pty-relay encodes resize as DECSLPP xterm format `\x1b[8;{rows};{cols}t`
@@ -650,6 +766,7 @@ mod tests {
     /// With the wrong format the TUI never receives valid dimensions, stays at the 80x24 default,
     /// and renders separator lines and the status bar at the wrong width — producing doubled
     /// separators and a split `● high · /effort` line when viewed in a wider relay terminal.
+    #[cfg(feature = "livekit")]
     #[test]
     fn test_encode_resize_uses_osc_format_matching_virtual_tui() {
         let bytes = encode_resize().expect("encode_resize must return Some");
