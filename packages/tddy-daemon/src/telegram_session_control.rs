@@ -617,6 +617,7 @@ fn session_list_status_or_placeholders(session_dir: &Path) -> SessionListStatusD
             elapsed_display: "—".to_string(),
             agent: "—".to_string(),
             model: "—".to_string(),
+            activity_status: String::new(),
         },
     }
 }
@@ -2617,6 +2618,8 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             previous_session_id: None,
             session_type: Some("claude-cli".to_string()),
             model: Some(model.clone()),
+            activity_status: None,
+            hook_token: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;

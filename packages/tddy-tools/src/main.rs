@@ -6,6 +6,7 @@
 mod cli;
 mod pty_relay;
 mod server;
+mod session_hook;
 
 use anyhow::Result;
 use clap::Parser;
@@ -55,6 +56,10 @@ enum Subcommand {
     /// for claude-cli sessions. Useful for verifying the PTY pipeline independently.
     /// Example: tddy-tools pty-relay -- claude --model claude-opus-4-8
     PtyRelay(Box<pty_relay::PtyRelayArgs>),
+
+    /// Report granular session activity status to the daemon (invoked by Claude Code hooks).
+    /// Reads hook event JSON from stdin; fails quietly — always exits 0.
+    SessionHook(session_hook::SessionHookArgs),
 }
 
 #[tokio::main]
@@ -78,6 +83,7 @@ async fn main() -> Result<()> {
         Some(Subcommand::ListActions(s)) => cli::run_list_actions(s)?,
         Some(Subcommand::InvokeAction(s)) => cli::run_invoke_action(s)?,
         Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
+        Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);

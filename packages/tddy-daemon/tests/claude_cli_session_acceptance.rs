@@ -321,6 +321,8 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
         previous_session_id: None,
         session_type: Some("claude-cli".to_string()),
         model: Some(TEST_MODEL.to_string()),
+        activity_status: None,
+        hook_token: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
     // No changeset.yaml — intentionally absent to test the claude-cli fallback path.
@@ -400,6 +402,8 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
         previous_session_id: None,
         session_type: Some("claude-cli".to_string()),
         model: Some(TEST_MODEL.to_string()),
+        activity_status: None,
+        hook_token: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 

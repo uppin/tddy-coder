@@ -96,6 +96,7 @@ pub struct ClaudeCliSessionManager {
 }
 
 impl ClaudeCliSessionManager {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             registry: Arc::new(RwLock::new(HashMap::new())),
