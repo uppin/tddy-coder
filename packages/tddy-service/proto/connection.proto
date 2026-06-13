@@ -137,6 +137,10 @@ message StartSessionRequest {
   // (e.g. `claude "build feature X"`). Only used when session_type = "claude-cli". Empty = no prompt.
   // The session is still started interactively; the prompt seeds the first user turn.
   string initial_prompt = 13;
+  // Permission mode for claude-cli sessions. Empty string defaults to "auto".
+  // Valid values: "auto", "default", "acceptEdits", "plan", "bypassPermissions".
+  // Passed as `--permission-mode <mode>` to the claude binary.
+  string permission_mode = 14;
 }
 message StartSessionResponse {
   string session_id = 1;

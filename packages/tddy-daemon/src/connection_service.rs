@@ -269,6 +269,7 @@ impl ConnectionServiceImpl {
         selected_integration_base_ref: &str,
         selected_branch_to_work_on: &str,
         initial_prompt: &str,
+        permission_mode: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -447,6 +448,14 @@ impl ConnectionServiceImpl {
                 Some(p.to_string())
             }
         };
+        let permission_mode_opt = {
+            let m = permission_mode.trim();
+            if m.is_empty() {
+                None
+            } else {
+                Some(m.to_string())
+            }
+        };
         let handle = manager
             .start(
                 &session_id_owned,
@@ -454,6 +463,7 @@ impl ConnectionServiceImpl {
                 &model_owned,
                 &binary_owned,
                 initial_prompt_opt.as_deref(),
+                permission_mode_opt.as_deref(),
             )
             .await
             .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
@@ -960,6 +970,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     req.selected_integration_base_ref.trim(),
                     req.selected_branch_to_work_on.trim(),
                     req.initial_prompt.trim(),
+                    req.permission_mode.trim(),
                 )
                 .await;
         }
@@ -1705,6 +1716,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::not_found("claude-cli session not found or not running"))?;
 
         if !req.data.is_empty() {
+            log::trace!(
+                target: "tddy_daemon::connection_service",
+                "send_terminal_input: session_id={} {} bytes: {:?}",
+                session_id,
+                req.data.len(),
+                String::from_utf8_lossy(&req.data)
+            );
             let _ = handle.stdin_tx.send(bytes::Bytes::from(req.data));
         }
         Ok(Response::new(SendTerminalInputResponse {}))
@@ -1956,6 +1974,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             req.session_id,
             req.status
         );
+
+        if let Some(ref telegram) = self.telegram {
+            let mut w = telegram.watcher.lock().await;
+            w.on_claude_cli_activity_status_changed(
+                &*telegram.sender,
+                &req.session_id,
+                &req.status,
+            )
+            .await;
+        }
 
         Ok(Response::new(ReportSessionStatusResponse { ok: true }))
     }

@@ -183,6 +183,7 @@ async fn claude_cli_session_metadata_fields_persisted() {
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
             initial_prompt: String::new(),
+            permission_mode: String::new(),
         }))
         .await
         .expect("StartSession with session_type=claude-cli must succeed");
@@ -268,6 +269,7 @@ async fn claude_cli_session_livekit_fields_empty() {
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
             initial_prompt: String::new(),
+            permission_mode: String::new(),
         }))
         .await
         .expect("StartSession must succeed")
@@ -471,6 +473,7 @@ users:
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
             initial_prompt: String::new(),
+            permission_mode: String::new(),
         }))
         .await
         .expect_err("StartSession with claude-cli and empty model must fail");
@@ -518,6 +521,7 @@ async fn claude_cli_start_session_requires_project() {
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
             initial_prompt: String::new(),
+            permission_mode: String::new(),
         }))
         .await
         .expect_err("StartSession with empty project_id must fail");
@@ -544,6 +548,7 @@ async fn claude_cli_start_session_requires_project() {
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
             initial_prompt: String::new(),
+            permission_mode: String::new(),
         }))
         .await
         .expect_err("StartSession with unknown project_id must fail");
@@ -568,6 +573,7 @@ fn build_claude_argv_includes_positional_prompt_when_present() {
         "claude-opus-4-8",
         "test-session-id",
         Some("build a hello world app"),
+        None,
     );
 
     assert_eq!(
@@ -578,9 +584,11 @@ fn build_claude_argv_includes_positional_prompt_when_present() {
             "claude-opus-4-8",
             "--session-id",
             "test-session-id",
+            "--permission-mode",
+            "auto",
             "build a hello world app",
         ],
-        "argv must be: binary --model <m> --session-id <id> <prompt>"
+        "argv must be: binary --model <m> --session-id <id> --permission-mode auto <prompt>"
     );
 }
 
@@ -594,6 +602,8 @@ fn build_claude_argv_omits_when_empty_or_none() {
         "claude-opus-4-8".to_string(),
         "--session-id".to_string(),
         "sid".to_string(),
+        "--permission-mode".to_string(),
+        "auto".to_string(),
     ];
 
     assert_eq!(
@@ -601,6 +611,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
             "/usr/local/bin/claude",
             "claude-opus-4-8",
             "sid",
+            None,
             None
         ),
         expected,
@@ -611,7 +622,8 @@ fn build_claude_argv_omits_when_empty_or_none() {
             "/usr/local/bin/claude",
             "claude-opus-4-8",
             "sid",
-            Some("")
+            Some(""),
+            None
         ),
         expected,
         "empty string must produce no positional arg"
@@ -621,7 +633,8 @@ fn build_claude_argv_omits_when_empty_or_none() {
             "/usr/local/bin/claude",
             "claude-opus-4-8",
             "sid",
-            Some("   ")
+            Some("   "),
+            None
         ),
         expected,
         "whitespace-only must produce no positional arg (trimmed to empty)"
@@ -645,6 +658,7 @@ async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
             "claude-opus-4-8",
             stub_path.to_str().unwrap(),
             Some("build a hello world app"),
+            None,
         )
         .await
         .expect("start with echo-argv stub and initial_prompt must succeed");
@@ -686,6 +700,7 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
             "claude-opus-4-8",
             stub_path.to_str().unwrap(),
             Some(""), // empty — must not add a stray positional arg
+            None,
         )
         .await
         .expect("start with empty initial_prompt must succeed");
@@ -709,11 +724,11 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
         "ARGV line must not be empty; full output: {:?}",
         output
     );
-    // Without a prompt, the last element must be the session-id, not an empty string.
+    // Without a prompt, the last element must be "auto" (the --permission-mode value), not an empty string.
     assert_eq!(
         parts.last().copied(),
-        Some("test-session-empty-prompt"),
-        "last ARGV element must be the session-id when prompt is empty; ARGV line: {:?}",
+        Some("auto"),
+        "last ARGV element must be 'auto' (permission-mode default) when prompt is empty; ARGV line: {:?}",
         argv_line
     );
 }
@@ -760,6 +775,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
             initial_prompt: "hello from rpc".to_string(),
+            permission_mode: String::new(),
         }))
         .await
         .expect("StartSession with initial_prompt must succeed");
@@ -808,6 +824,7 @@ async fn resume_does_not_replay_initial_prompt() {
             "claude-opus-4-8",
             stub_path.to_str().unwrap(),
             Some("original prompt"),
+            None,
         )
         .await
         .expect("initial start must succeed");

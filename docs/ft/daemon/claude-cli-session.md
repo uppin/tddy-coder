@@ -57,7 +57,7 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
 ## Non-goals (out of scope)
 
 - TDD/bugfix workflow integration — Claude Code CLI sessions have no recipe.
-- Telegram elicitation — not routed through the existing elicitation mechanism.
+- Telegram elicitation via the structured `PresenterObserver` / `ModeChanged` pipeline (that path is for tddy-coder workflow sessions only). Claude Code CLI elicitation alerts are delivered via the `ReportSessionStatus` / `WaitingForInput` path — see [telegram-notifications.md § Claude Code CLI session activity alerts](telegram-notifications.md#claude-code-cli-session-activity-alerts).
 - Model switching after session start.
 - Session chaining (`previous_session_id`) for Claude Code CLI sessions.
 - LiveKit presence for Claude Code CLI session processes (no `--livekit-*` args passed).
