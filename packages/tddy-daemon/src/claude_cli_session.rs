@@ -50,21 +50,39 @@ pub struct PtyHandle {
     master: Arc<std::sync::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     /// Becomes true (and sender drops) when the PTY reader thread exits — signals no more output.
     pub pty_done: watch::Receiver<bool>,
+    /// Current PTY dimensions, updated by `resize()`.
+    current_size: Arc<std::sync::Mutex<PtySize>>,
 }
 
 impl PtyHandle {
+    /// Resize the PTY to the given dimensions and signal the child with SIGWINCH.
+    pub fn resize(&self, rows: u16, cols: u16) {
+        let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
+        if let Ok(m) = self.master.lock() {
+            let _ = m.resize(size);
+        }
+        if let Ok(mut s) = self.current_size.lock() {
+            *s = size;
+        }
+    }
+
     /// Send a SIGWINCH (window resize) to the child process to force a full-screen redraw.
     ///
     /// Useful when a new `streamSessionTerminalIO` subscriber connects and has missed the
     /// initial render: after subscribing, call this so claude repaints to the live channel.
     pub fn trigger_redraw(&self) {
         if let Ok(m) = self.master.lock() {
-            let _ = m.resize(PtySize {
-                rows: DEFAULT_TERM_ROWS,
-                cols: DEFAULT_TERM_COLS,
-                pixel_width: 0,
-                pixel_height: 0,
-            });
+            let size = self
+                .current_size
+                .lock()
+                .map(|s| *s)
+                .unwrap_or(PtySize {
+                    rows: DEFAULT_TERM_ROWS,
+                    cols: DEFAULT_TERM_COLS,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
+            let _ = m.resize(size);
         }
     }
 }
@@ -133,6 +151,12 @@ impl ClaudeCliSessionManager {
             pid,
             master,
             pty_done,
+            current_size: Arc::new(std::sync::Mutex::new(PtySize {
+                rows: DEFAULT_TERM_ROWS,
+                cols: DEFAULT_TERM_COLS,
+                pixel_width: 0,
+                pixel_height: 0,
+            })),
         });
 
         // Insert into the registry BEFORE returning so that a racing streamSessionTerminalIO
@@ -343,6 +367,51 @@ impl ClaudeCliSessionManager {
 }
 
 // ---------------------------------------------------------------------------
+// Resize escape parsing
+// ---------------------------------------------------------------------------
+
+/// Strip an OSC resize sequence (`\x1b]resize;{cols};{rows}\x07`) from `data`.
+///
+/// Returns `(Some((cols, rows)), remaining)` when found, or `(None, original)` otherwise.
+/// The escape sequence is removed from the returned bytes so it is not forwarded to the PTY stdin.
+fn strip_resize(data: &[u8]) -> (Option<(u16, u16)>, Bytes) {
+    let prefix = b"\x1b]resize;";
+    let start = match (0..data.len().saturating_sub(prefix.len()))
+        .find(|&i| data[i..].starts_with(prefix))
+    {
+        Some(i) => i,
+        None => return (None, Bytes::copy_from_slice(data)),
+    };
+    let after = &data[start + prefix.len()..];
+    let bel = match after.iter().position(|&b| b == 0x07) {
+        Some(i) => i,
+        None => return (None, Bytes::copy_from_slice(data)),
+    };
+    let inner = &after[..bel];
+    let semi = match inner.iter().position(|&b| b == b';') {
+        Some(i) => i,
+        None => return (None, Bytes::copy_from_slice(data)),
+    };
+    let parsed = std::str::from_utf8(&inner[..semi])
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok())
+        .zip(
+            std::str::from_utf8(&inner[semi + 1..])
+                .ok()
+                .and_then(|s| s.parse::<u16>().ok()),
+        );
+    match parsed {
+        Some((cols, rows)) => {
+            let end = start + prefix.len() + bel + 1;
+            let mut remaining = data[..start].to_vec();
+            remaining.extend_from_slice(&data[end..]);
+            (Some((cols, rows)), Bytes::from(remaining))
+        }
+        None => (None, Bytes::copy_from_slice(data)),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // LiveKit bridge: expose a PtyHandle as a LiveKit RPC server
 // ---------------------------------------------------------------------------
 
@@ -415,13 +484,21 @@ impl RpcService for PtyLiveKitService {
             }
         });
 
-        // Bidi input stream → PTY stdin.
+        // Bidi input stream → PTY stdin. Resize escape sequences are intercepted and applied
+        // to the PTY via SIGWINCH rather than forwarded as raw bytes.
         let stdin_tx = self.handle.stdin_tx.clone();
+        let handle_for_input = Arc::clone(&self.handle);
         tokio::spawn(async move {
             while let Some(msg) = input_rx.recv().await {
                 if let Ok(input) = TerminalInput::decode(&msg.payload[..]) {
                     if !input.data.is_empty() {
-                        let _ = stdin_tx.send(Bytes::from(input.data));
+                        let (resize, remaining) = strip_resize(&input.data);
+                        if let Some((cols, rows)) = resize {
+                            handle_for_input.resize(rows, cols);
+                        }
+                        if !remaining.is_empty() {
+                            let _ = stdin_tx.send(remaining);
+                        }
                     }
                 }
             }
