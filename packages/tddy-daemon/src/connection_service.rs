@@ -183,6 +183,7 @@ impl ConnectionServiceImpl {
         spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
         livekit_discovery: Option<LiveKitDiscoveryHandles>,
         telegram: Option<Arc<TelegramDaemonHooks>>,
+        claude_cli_manager: Arc<ClaudeCliSessionManager>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
         let (eligible_daemon_source, common_room_livekit_room) = match livekit_discovery {
@@ -195,7 +196,6 @@ impl ConnectionServiceImpl {
         let worktree_stats_cache = Arc::new(WorktreeStatsCache::new(
             worktrees::projects_stats_cache_root(),
         ));
-        let claude_cli_manager = Arc::new(ClaudeCliSessionManager::new());
         Self {
             config,
             sessions_base_for_user,
@@ -220,6 +220,9 @@ impl ConnectionServiceImpl {
     /// Requires a valid, registered project. Creates a real git worktree under the project's
     /// main repo (via `tddy_core::setup_worktree_for_session_with_optional_chain_base`), then
     /// spawns the `claude` binary in a PTY.
+    ///
+    /// `initial_prompt` — when non-empty, passed as a positional argument to `claude` so it
+    /// receives the first user turn on startup (e.g. `claude "build feature X"`).
     #[allow(clippy::too_many_arguments)]
     async fn start_claude_cli_session(
         &self,
@@ -232,6 +235,7 @@ impl ConnectionServiceImpl {
         new_branch_name: &str,
         selected_integration_base_ref: &str,
         selected_branch_to_work_on: &str,
+        initial_prompt: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -402,12 +406,21 @@ impl ConnectionServiceImpl {
         let binary_owned = binary_path.to_string();
         let worktree_clone = worktree_path.clone();
 
+        let initial_prompt_opt = {
+            let p = initial_prompt.trim();
+            if p.is_empty() {
+                None
+            } else {
+                Some(p.to_string())
+            }
+        };
         let handle = manager
             .start(
                 &session_id_owned,
                 worktree_clone,
                 &model_owned,
                 &binary_owned,
+                initial_prompt_opt.as_deref(),
             )
             .await
             .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
@@ -896,6 +909,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     req.new_branch_name.trim(),
                     req.selected_integration_base_ref.trim(),
                     req.selected_branch_to_work_on.trim(),
+                    req.initial_prompt.trim(),
                 )
                 .await;
         }
@@ -1860,6 +1874,7 @@ mod signal_session_unit_tests {
             None,
             None,
             None,
+            Arc::new(ClaudeCliSessionManager::new()),
         )
     }
 
@@ -1980,6 +1995,7 @@ mod delete_session_unit_tests {
             None,
             None,
             None,
+            Arc::new(ClaudeCliSessionManager::new()),
         )
     }
 
@@ -2040,6 +2056,7 @@ mod report_session_status_unit_tests {
             None,
             None,
             None,
+            Arc::new(ClaudeCliSessionManager::new()),
         )
     }
 

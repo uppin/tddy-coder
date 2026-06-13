@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_core::session_metadata::{read_session_metadata, write_session_metadata, SessionMetadata};
+use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, PtyHandle};
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::user_sessions_path::TDDY_PROJECTS_DIR_ENV;
@@ -45,6 +46,18 @@ claude_cli:
 }
 
 fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
+    minimal_service_with_manager(
+        config,
+        sessions_base,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
+    )
+}
+
+fn minimal_service_with_manager(
+    config: DaemonConfig,
+    sessions_base: PathBuf,
+    manager: Arc<tddy_daemon::claude_cli_session::ClaudeCliSessionManager>,
+) -> ConnectionServiceImpl {
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver = Arc::new(|token| {
@@ -61,6 +74,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionSe
         None,
         None,
         None,
+        manager,
     )
 }
 
@@ -101,6 +115,38 @@ fn register_project(projects_dir: &std::path::Path, repo_path: &std::path::Path)
     std::fs::write(projects_dir.join("projects.yaml"), yaml).unwrap();
 }
 
+/// Write an executable shell script that echoes all CLI arguments.
+/// Used as a stub for `claude` in PTY tests — avoids the `/bin/cat` trap (a positional arg
+/// makes `cat` open it as a file rather than printing it).
+fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
+    let script_path = dir.join("stub_claude.sh");
+    std::fs::write(&script_path, "#!/bin/sh\necho \"ARGV: $@\"\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    script_path
+}
+
+/// Poll `handle.capture` until its UTF-8 contents contain `needle` or the timeout elapses.
+/// Returns `true` if `needle` was found within the timeout.
+async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeout_ms: u64) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+    loop {
+        {
+            let cap = handle.capture.lock().unwrap();
+            if String::from_utf8_lossy(&cap).contains(needle) {
+                return true;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
 /// **claude_cli_session_metadata_fields_persisted**: after `StartSession` with
 /// `session_type = "claude-cli"` succeeds, `.session.yaml` under the new session directory must
 /// contain `session_type = "claude-cli"` and `model = TEST_MODEL`. The `repo_path` must point to
@@ -136,6 +182,7 @@ async fn claude_cli_session_metadata_fields_persisted() {
             new_branch_name: String::new(),
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
+            initial_prompt: String::new(),
         }))
         .await
         .expect("StartSession with session_type=claude-cli must succeed");
@@ -220,6 +267,7 @@ async fn claude_cli_session_livekit_fields_empty() {
             new_branch_name: String::new(),
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
+            initial_prompt: String::new(),
         }))
         .await
         .expect("StartSession must succeed")
@@ -422,6 +470,7 @@ users:
             new_branch_name: String::new(),
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
+            initial_prompt: String::new(),
         }))
         .await
         .expect_err("StartSession with claude-cli and empty model must fail");
@@ -468,6 +517,7 @@ async fn claude_cli_start_session_requires_project() {
             new_branch_name: String::new(),
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
+            initial_prompt: String::new(),
         }))
         .await
         .expect_err("StartSession with empty project_id must fail");
@@ -493,6 +543,7 @@ async fn claude_cli_start_session_requires_project() {
             new_branch_name: String::new(),
             selected_integration_base_ref: String::new(),
             selected_branch_to_work_on: String::new(),
+            initial_prompt: String::new(),
         }))
         .await
         .expect_err("StartSession with unknown project_id must fail");
@@ -501,5 +552,295 @@ async fn claude_cli_start_session_requires_project() {
         err2.code,
         Code::NotFound,
         "unknown project_id for claude-cli must yield NOT_FOUND"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// initial_prompt tests
+// ---------------------------------------------------------------------------
+
+/// **build_claude_argv_includes_positional_prompt_when_present**: the pure argv-builder appends
+/// the initial prompt as the last positional argument when non-empty.
+#[test]
+fn build_claude_argv_includes_positional_prompt_when_present() {
+    let argv = ClaudeCliSessionManager::build_claude_argv(
+        "/usr/local/bin/claude",
+        "claude-opus-4-8",
+        "test-session-id",
+        Some("build a hello world app"),
+    );
+
+    assert_eq!(
+        argv,
+        vec![
+            "/usr/local/bin/claude",
+            "--model",
+            "claude-opus-4-8",
+            "--session-id",
+            "test-session-id",
+            "build a hello world app",
+        ],
+        "argv must be: binary --model <m> --session-id <id> <prompt>"
+    );
+}
+
+/// **build_claude_argv_omits_when_empty_or_none**: `None`, `Some("")`, and `Some("   ")` must
+/// all produce the same argv without a trailing positional argument.
+#[test]
+fn build_claude_argv_omits_when_empty_or_none() {
+    let expected = vec![
+        "/usr/local/bin/claude".to_string(),
+        "--model".to_string(),
+        "claude-opus-4-8".to_string(),
+        "--session-id".to_string(),
+        "sid".to_string(),
+    ];
+
+    assert_eq!(
+        ClaudeCliSessionManager::build_claude_argv(
+            "/usr/local/bin/claude",
+            "claude-opus-4-8",
+            "sid",
+            None
+        ),
+        expected,
+        "None initial_prompt must produce no positional arg"
+    );
+    assert_eq!(
+        ClaudeCliSessionManager::build_claude_argv(
+            "/usr/local/bin/claude",
+            "claude-opus-4-8",
+            "sid",
+            Some("")
+        ),
+        expected,
+        "empty string must produce no positional arg"
+    );
+    assert_eq!(
+        ClaudeCliSessionManager::build_claude_argv(
+            "/usr/local/bin/claude",
+            "claude-opus-4-8",
+            "sid",
+            Some("   ")
+        ),
+        expected,
+        "whitespace-only must produce no positional arg (trimmed to empty)"
+    );
+}
+
+/// **claude_cli_session_passes_initial_prompt_as_positional_arg**: `manager.start(.., Some("…"))`
+/// results in the prompt appearing in the child process's `$@`.
+#[tokio::test]
+async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
+    let stub_dir = tempfile::tempdir().unwrap();
+    let stub_path = write_echo_argv_script(stub_dir.path());
+
+    let worktree_dir = tempfile::tempdir().unwrap();
+    let manager = ClaudeCliSessionManager::new();
+
+    let handle = manager
+        .start(
+            "test-session-with-prompt",
+            worktree_dir.path().to_path_buf(),
+            "claude-opus-4-8",
+            stub_path.to_str().unwrap(),
+            Some("build a hello world app"),
+        )
+        .await
+        .expect("start with echo-argv stub and initial_prompt must succeed");
+
+    let found = wait_for_capture_contains(&handle, "ARGV:", 2000).await;
+    assert!(
+        found,
+        "stub script must write ARGV: to PTY output within 2s"
+    );
+
+    let cap = handle.capture.lock().unwrap();
+    let output = String::from_utf8_lossy(&cap);
+    assert!(
+        output.contains("build a hello world app"),
+        "initial_prompt must appear in ARGV output; got: {:?}",
+        output
+    );
+    assert!(
+        output.contains("--session-id"),
+        "--session-id must appear in ARGV output; got: {:?}",
+        output
+    );
+}
+
+/// **claude_cli_session_empty_prompt_adds_no_positional_arg**: `Some("")` produces the same argv
+/// as `None` — no empty positional arg appended.
+#[tokio::test]
+async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
+    let stub_dir = tempfile::tempdir().unwrap();
+    let stub_path = write_echo_argv_script(stub_dir.path());
+
+    let worktree_dir = tempfile::tempdir().unwrap();
+    let manager = ClaudeCliSessionManager::new();
+
+    let handle = manager
+        .start(
+            "test-session-empty-prompt",
+            worktree_dir.path().to_path_buf(),
+            "claude-opus-4-8",
+            stub_path.to_str().unwrap(),
+            Some(""), // empty — must not add a stray positional arg
+        )
+        .await
+        .expect("start with empty initial_prompt must succeed");
+
+    let found = wait_for_capture_contains(&handle, "ARGV:", 2000).await;
+    assert!(
+        found,
+        "stub script must write ARGV: to PTY output within 2s"
+    );
+
+    let cap = handle.capture.lock().unwrap();
+    let output = String::from_utf8_lossy(&cap);
+    let argv_line = output
+        .lines()
+        .find(|l| l.trim_start().starts_with("ARGV:"))
+        .unwrap_or("");
+
+    let parts: Vec<&str> = argv_line.trim().split_whitespace().collect();
+    assert!(
+        !parts.is_empty(),
+        "ARGV line must not be empty; full output: {:?}",
+        output
+    );
+    // Without a prompt, the last element must be the session-id, not an empty string.
+    assert_eq!(
+        parts.last().copied(),
+        Some("test-session-empty-prompt"),
+        "last ARGV element must be the session-id when prompt is empty; ARGV line: {:?}",
+        argv_line
+    );
+}
+
+/// **start_session_claude_cli_threads_initial_prompt_from_request**: the `StartSession` RPC
+/// threads `initial_prompt` down to the PTY process; the shared manager registry holds the
+/// session (proving it is attachable via terminal-stream RPCs).
+#[tokio::test]
+#[serial_test::serial]
+async fn start_session_claude_cli_threads_initial_prompt_from_request() {
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+
+    let projects_tmp = tempfile::tempdir().unwrap();
+    register_project(projects_tmp.path(), repo_dir.path());
+    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
+    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
+
+    let stub_dir = tempfile::tempdir().unwrap();
+    let stub_path = write_echo_argv_script(stub_dir.path());
+
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub_path.to_str().unwrap());
+
+    let shared_manager = Arc::new(ClaudeCliSessionManager::new());
+    let service = minimal_service_with_manager(
+        config,
+        sessions_tmp.path().to_path_buf(),
+        Arc::clone(&shared_manager),
+    );
+
+    let resp = service
+        .start_session(Request::new(StartSessionRequest {
+            session_token: VALID_TOKEN.to_string(),
+            tool_path: String::new(),
+            project_id: TEST_PROJECT_ID.to_string(),
+            agent: String::new(),
+            daemon_instance_id: String::new(),
+            recipe: String::new(),
+            session_type: "claude-cli".to_string(),
+            model: TEST_MODEL.to_string(),
+            branch_worktree_intent: String::new(),
+            new_branch_name: String::new(),
+            selected_integration_base_ref: String::new(),
+            selected_branch_to_work_on: String::new(),
+            initial_prompt: "hello from rpc".to_string(),
+        }))
+        .await
+        .expect("StartSession with initial_prompt must succeed");
+
+    let session_id = resp.into_inner().session_id;
+    assert!(!session_id.is_empty(), "session_id must be non-empty");
+
+    // The shared manager must hold the session — proves attachability via terminal-stream RPCs.
+    let handle = shared_manager
+        .get(&session_id)
+        .await
+        .expect("session must be present in the shared ClaudeCliSessionManager after start");
+
+    let found = wait_for_capture_contains(&handle, "ARGV:", 2000).await;
+    assert!(
+        found,
+        "stub script must write ARGV: within 2s; session_id={}",
+        session_id
+    );
+
+    let cap = handle.capture.lock().unwrap();
+    let output = String::from_utf8_lossy(&cap);
+    assert!(
+        output.contains("hello from rpc"),
+        "initial_prompt from StartSession RPC must appear in ARGV output; got: {:?}",
+        output
+    );
+}
+
+/// **resume_does_not_replay_initial_prompt**: `manager.resume()` always passes `initial_prompt =
+/// None`; the resumed process must start without a seeded prompt (re-injecting it would create a
+/// duplicate user turn in the claude session history).
+#[tokio::test]
+async fn resume_does_not_replay_initial_prompt() {
+    let stub_dir = tempfile::tempdir().unwrap();
+    let stub_path = write_echo_argv_script(stub_dir.path());
+
+    let worktree_dir = tempfile::tempdir().unwrap();
+    let manager = ClaudeCliSessionManager::new();
+
+    // Initial start — seeds a prompt.
+    let _handle1 = manager
+        .start(
+            "test-session-resume-noreplay",
+            worktree_dir.path().to_path_buf(),
+            "claude-opus-4-8",
+            stub_path.to_str().unwrap(),
+            Some("original prompt"),
+        )
+        .await
+        .expect("initial start must succeed");
+
+    // Resume — must NOT replay the initial_prompt.
+    let handle2 = manager
+        .resume(
+            "test-session-resume-noreplay",
+            worktree_dir.path().to_path_buf(),
+            "claude-opus-4-8",
+            stub_path.to_str().unwrap(),
+        )
+        .await
+        .expect("resume must succeed");
+
+    let found = wait_for_capture_contains(&handle2, "ARGV:", 2000).await;
+    assert!(found, "stub script must write ARGV: within 2s on resume");
+
+    let cap = handle2.capture.lock().unwrap();
+    let output = String::from_utf8_lossy(&cap);
+    let argv_line = output
+        .lines()
+        .find(|l| l.trim_start().starts_with("ARGV:"))
+        .unwrap_or("");
+
+    assert!(
+        !argv_line.contains("original prompt"),
+        "resume must NOT replay the initial_prompt; ARGV line: {:?}",
+        argv_line
+    );
+    assert!(
+        argv_line.contains("--session-id"),
+        "--session-id must be present in resumed session ARGV; ARGV line: {:?}",
+        argv_line
     );
 }

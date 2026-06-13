@@ -170,8 +170,33 @@ message SessionTerminalOutput {
 
 `StartSessionResponse`, `ConnectSessionResponse`, and `ResumeSessionResponse` are unchanged — LiveKit fields are returned as empty strings for Claude CLI sessions. The web client detects `agent == "claude-cli"` from `ListSessions` to decide which terminal component to mount.
 
+## Seeding a first prompt
+
+Both the RPC path and the Telegram path support an optional **initial prompt** passed directly to the `claude` binary as a positional argument:
+
+```
+claude --model <model> --session-id <id> "build feature X"
+```
+
+### RPC: `StartSessionRequest.initial_prompt`
+
+`StartSessionRequest` has a `string initial_prompt = 13;` field. When non-empty, `start_claude_cli_session` passes it as a positional CLI argument to `claude`. An empty string is treated as absent (no extra arg). This lets programmatic callers seed the first user turn without requiring interactive input.
+
+### Telegram: `/start-claude <prompt>`
+
+The Telegram `/start-claude <prompt>` flow (see [telegram-session-control.md](telegram-session-control.md)) seeds the session with the user's message. After project → branch → model selection, `spawn_telegram_claude_cli` reads `initial_prompt` from `changeset.yaml` and passes it to `ClaudeCliSessionManager::start(…, initial_prompt)`.
+
+### Resume does not replay
+
+`ResumeSession` always calls `ClaudeCliSessionManager::resume`, which **does not** pass the original `initial_prompt`. This prevents the first user message from being re-injected as a duplicate turn when `claude` is restarted inside an existing session.
+
+### Implementation note
+
+Argv construction is isolated in `build_claude_argv(binary, model, session_id, initial_prompt: Option<&str>) -> Vec<String>` in `claude_cli_session.rs`. The positional arg is appended after `--session-id` only when the trimmed prompt is non-empty.
+
 ## See also
 
+- [Telegram session control](telegram-session-control.md) — `/start-claude` Telegram flow
 - [Web terminal](../web/web-terminal.md) — GhosttyTerminal, connection chrome, session table
 - [Connection service](../../../packages/tddy-daemon/docs/connection-service.md) — daemon RPC implementation
 - [Worktrees](../web/worktrees.md) — worktree lifecycle, `create_worktree_with_retry`
