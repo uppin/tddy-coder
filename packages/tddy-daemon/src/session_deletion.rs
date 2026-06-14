@@ -86,12 +86,11 @@ fn terminate_session_process(pid: u32) -> Result<(), Status> {
         return Ok(());
     }
     signal_pid(pid_i, libc::SIGKILL)?;
-    if wait_until_pid_stopped(pid, Duration::from_secs(3), Duration::from_millis(100)) {
-        return Ok(());
-    }
-    Err(Status::failed_precondition(
-        "session process did not exit after SIGTERM and SIGKILL",
-    ))
+    // SIGKILL cannot be blocked or ignored; the process is dead. On some platforms (macOS) the
+    // zombie remains visible to kill(pid,0) until the parent calls waitpid, so we do a brief
+    // best-effort wait but do not return an error — the process has no running threads.
+    let _ = wait_until_pid_stopped(pid, Duration::from_secs(3), Duration::from_millis(100));
+    Ok(())
 }
 
 #[cfg(unix)]

@@ -24,7 +24,12 @@ struct CapturingBackend {
 impl CapturingBackend {
     fn new() -> (Self, Arc<std::sync::Mutex<Option<InvokeRequest>>>) {
         let captured = Arc::new(std::sync::Mutex::new(None));
-        (Self { captured: Arc::clone(&captured) }, captured)
+        (
+            Self {
+                captured: Arc::clone(&captured),
+            },
+            captured,
+        )
     }
 }
 

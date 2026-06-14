@@ -5,7 +5,7 @@
 //! use file-locking to avoid spawning two daemons.
 
 use std::path::PathBuf;
-use tddy_tools::relay::{RelayEndpoint, ensure_relay_daemon, RelayConfig};
+use tddy_tools::relay::{ensure_relay_daemon, RelayConfig, RelayEndpoint};
 
 /// AC20: `RelayEndpoint` has a `port` field and a `base_url()` helper.
 #[test]
@@ -51,8 +51,8 @@ fn ensure_relay_daemon_fails_gracefully_when_no_binary() {
 /// its port to the discovery file.
 #[tokio::test]
 async fn ensure_relay_daemon_reuses_running_relay_from_discovery_file() {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     let relay_dir = tempfile::tempdir().unwrap();
 
@@ -68,9 +68,7 @@ async fn ensure_relay_daemon_reuses_running_relay_from_discovery_file() {
             // Write a minimal HTTP 200 response and close.
             use tokio::io::AsyncWriteExt;
             let _ = stream
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}",
-                )
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}")
                 .await;
         }
     });
@@ -100,5 +98,8 @@ async fn ensure_relay_daemon_reuses_running_relay_from_discovery_file() {
         result.err()
     );
     let ep = result.unwrap();
-    assert_eq!(ep.port, port, "returned endpoint must match the seeded port");
+    assert_eq!(
+        ep.port, port,
+        "returned endpoint must match the seeded port"
+    );
 }

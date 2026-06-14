@@ -12,7 +12,9 @@ use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::relay_idle::IdleTimeoutTracker;
 use tddy_rpc::Request;
-use tddy_service::proto::connection::{ConnectionService as ConnectionServiceTrait, ListToolsRequest};
+use tddy_service::proto::connection::{
+    ConnectionService as ConnectionServiceTrait, ListToolsRequest,
+};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -51,9 +53,7 @@ async fn rpc_call_bumps_idle_tracker_so_shutdown_is_not_triggered() {
     let service = minimal_service_with_tracker(Arc::clone(&tracker));
 
     // Make any RPC — ListTools is the simplest (no auth required).
-    let _ = service
-        .list_tools(Request::new(ListToolsRequest {}))
-        .await;
+    let _ = service.list_tools(Request::new(ListToolsRequest {})).await;
 
     // After the RPC, activity must have been recorded.
     assert!(

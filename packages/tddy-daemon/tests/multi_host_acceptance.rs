@@ -29,6 +29,15 @@ const REMOTE_LK_API_KEY: &str = "devkey";
 const REMOTE_LK_API_SECRET: &str = "secret";
 const REMOTE_ROUTING_PROJECT_ID: &str = "remote-routing-proj";
 
+/// Returns the path to the `true` binary — `/usr/bin/true` on macOS, `/bin/true` on Linux.
+fn true_bin() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "/usr/bin/true"
+    } else {
+        "/bin/true"
+    }
+}
+
 fn write_livekit_daemon_yaml(
     ws_url: &str,
     daemon_instance_id: Option<&str>,
@@ -39,13 +48,14 @@ fn write_livekit_daemon_yaml(
     let id_block = daemon_instance_id
         .map(|id| format!("daemon_instance_id: {id}\n"))
         .unwrap_or_default();
+    let true_path = true_bin();
     let yaml = format!(
         r#"
 {id_block}users:
   - github_user: "testuser"
     os_user: "{os_user}"
 allowed_tools:
-  - path: /bin/true
+  - path: {true_path}
     label: t
 livekit:
   url: {ws_url}
@@ -389,7 +399,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
 
     let request = Request::new(StartSessionRequest {
         session_token: "valid-token".to_string(),
-        tool_path: "/bin/true".to_string(),
+        tool_path: true_bin().to_string(),
         project_id: REMOTE_ROUTING_PROJECT_ID.to_string(),
         agent: String::new(),
         daemon_instance_id: REMOTE_PEER_INSTANCE_ID.to_string(),

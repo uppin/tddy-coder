@@ -41,7 +41,10 @@ daemon_instance_id: "relay-test"
 "#;
     let cfg: DaemonConfig = serde_yaml::from_str(yaml).expect("must parse");
     assert!(cfg.relay.is_some(), "relay must be set");
-    assert!(cfg.web_bundle_path.is_none(), "web_bundle_path must be absent");
+    assert!(
+        cfg.web_bundle_path.is_none(),
+        "web_bundle_path must be absent"
+    );
 
     // validate_for_relay must return Ok — no web_bundle_path required in relay mode.
     cfg.validate_for_relay()
@@ -70,8 +73,8 @@ listen:
 /// Phase 3 AC: `IdleTimeoutTracker` reports `should_shutdown()` = false when activity is recent.
 #[test]
 fn idle_timeout_tracker_not_expired_when_recently_active() {
-    use tddy_daemon::relay_idle::IdleTimeoutTracker;
     use std::time::Duration;
+    use tddy_daemon::relay_idle::IdleTimeoutTracker;
 
     let tracker = IdleTimeoutTracker::new(Duration::from_secs(300));
     tracker.record_activity();
@@ -85,8 +88,8 @@ fn idle_timeout_tracker_not_expired_when_recently_active() {
 /// Phase 3 AC: `IdleTimeoutTracker` reports `should_shutdown()` = true when idle past the timeout.
 #[test]
 fn idle_timeout_tracker_expired_after_timeout_duration() {
-    use tddy_daemon::relay_idle::IdleTimeoutTracker;
     use std::time::Duration;
+    use tddy_daemon::relay_idle::IdleTimeoutTracker;
 
     // Use a 1ms timeout — any real code path will exceed it.
     let tracker = IdleTimeoutTracker::new(Duration::from_millis(1));
@@ -104,8 +107,8 @@ fn idle_timeout_tracker_expired_after_timeout_duration() {
 /// masking the real gap (args.relay is never checked).
 #[test]
 fn relay_mode_startup_config_check_skips_bundle_path() {
-    use tddy_daemon::startup::startup_config_check;
     use tddy_daemon::config::DaemonConfig;
+    use tddy_daemon::startup::startup_config_check;
 
     let yaml = r#"
 relay:
@@ -115,7 +118,10 @@ listen:
   web_port: 0
 "#;
     let config: DaemonConfig = serde_yaml::from_str(yaml).expect("must parse");
-    assert!(config.web_bundle_path.is_none(), "precondition: no bundle path");
+    assert!(
+        config.web_bundle_path.is_none(),
+        "precondition: no bundle path"
+    );
 
     let result = startup_config_check(&config, true);
     assert!(
@@ -135,15 +141,18 @@ listen:
 /// is absent — non-relay mode must serve static files.
 #[test]
 fn non_relay_startup_config_check_requires_bundle_path() {
-    use tddy_daemon::startup::startup_config_check;
     use tddy_daemon::config::DaemonConfig;
+    use tddy_daemon::startup::startup_config_check;
 
     let yaml = r#"
 listen:
   web_port: 8080
 "#;
     let config: DaemonConfig = serde_yaml::from_str(yaml).expect("must parse");
-    assert!(config.web_bundle_path.is_none(), "precondition: no bundle path");
+    assert!(
+        config.web_bundle_path.is_none(),
+        "precondition: no bundle path"
+    );
 
     let result = startup_config_check(&config, false);
     assert!(

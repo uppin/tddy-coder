@@ -119,8 +119,7 @@ fn main() -> anyhow::Result<()> {
     // Apply env overrides (e.g. from .env loaded by web-dev)
     apply_env_overrides(&mut config);
 
-    let (port, bundle_path_opt) =
-        tddy_daemon::startup::startup_config_check(&config, args.relay)?;
+    let (port, bundle_path_opt) = tddy_daemon::startup::startup_config_check(&config, args.relay)?;
     let host = config
         .listen
         .web_host
@@ -270,6 +269,16 @@ fn main() -> anyhow::Result<()> {
 
     let user_resolver_for_connection = auth_result.user_resolver.clone();
 
+    // In relay mode, wire up the idle-timeout tracker + monitor task + external shutdown channel.
+    let relay_idle_timeout: Option<std::time::Duration> = if args.relay {
+        config
+            .relay
+            .as_ref()
+            .map(|r| std::time::Duration::from_secs(r.idle_timeout_secs))
+    } else {
+        None
+    };
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
@@ -281,6 +290,22 @@ fn main() -> anyhow::Result<()> {
         )
     });
     rt.block_on(async move {
+        // Relay mode: create idle tracker + external shutdown channel.
+        // Must be in the outer scope so idle_rx_opt and idle_tx_opt are accessible after the
+        // `if let Some(user_resolver)` block (which pushes rpc_entries before run_server).
+        let (idle_tracker_opt, idle_rx_opt, idle_tx_opt) = if let Some(timeout) = relay_idle_timeout
+        {
+            let tracker = Arc::new(tddy_daemon::relay_idle::IdleTimeoutTracker::new(timeout));
+            let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+            (Some(tracker), Some(rx), Some(tx))
+        } else {
+            (
+                None::<Arc<tddy_daemon::relay_idle::IdleTimeoutTracker>>,
+                None::<tokio::sync::oneshot::Receiver<()>>,
+                None::<tokio::sync::oneshot::Sender<()>>,
+            )
+        };
+
         if let Some(user_resolver) = user_resolver_for_connection {
             let config_arc = Arc::new(config.clone());
             let livekit_discovery: Option<
@@ -337,7 +362,7 @@ fn main() -> anyhow::Result<()> {
                     None
                 }
             };
-            let connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
+            let mut connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
                 config.clone(),
                 Arc::new(tddy_daemon::user_sessions_path::sessions_base_for_user),
                 user_resolver,
@@ -346,12 +371,33 @@ fn main() -> anyhow::Result<()> {
                 telegram_hooks.clone(),
                 Arc::clone(&shared_claude_cli_manager),
             );
+            if let Some(ref tracker) = idle_tracker_opt {
+                connection_impl = connection_impl.with_idle_tracker(tracker.clone());
+            }
             let connection_server = tddy_service::ConnectionServiceServer::new(connection_impl);
             rpc_entries.push(tddy_rpc::ServiceEntry {
                 name: "connection.ConnectionService",
                 service: Arc::new(connection_server) as Arc<dyn tddy_rpc::RpcService>,
             });
         }
+
+        // Relay mode: spawn idle-monitor task that fires the shutdown channel on timeout.
+        let idle_monitor_task = idle_tx_opt.map(|tx| {
+            let tracker = idle_tracker_opt.expect("tx implies tracker");
+            tokio::spawn(async move {
+                let check_interval = std::time::Duration::from_secs(30);
+                loop {
+                    tokio::time::sleep(check_interval).await;
+                    if tracker.should_shutdown() {
+                        log::info!(
+                            "relay daemon: idle timeout expired — triggering graceful shutdown"
+                        );
+                        let _ = tx.send(());
+                        return;
+                    }
+                }
+            })
+        });
 
         let inbound_task = if let Some((bot, harness)) = telegram_inbound {
             Some(tokio::spawn(async move {
@@ -375,11 +421,15 @@ fn main() -> anyhow::Result<()> {
             common_room,
             allowed_agents,
             lifecycle_telegram,
+            idle_rx_opt, // Some(rx) in relay mode; None otherwise
         )
         .await;
 
         if let Some(t) = inbound_task {
             t.abort();
+        }
+        if let Some(m) = idle_monitor_task {
+            m.abort();
         }
         res
     })

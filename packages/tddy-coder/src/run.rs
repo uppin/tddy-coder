@@ -246,6 +246,13 @@ pub fn run_main(mut args: Args) {
             );
             std::process::exit(1);
         }
+
+        // Dispatch to run_remote immediately — before TUI setup, logging redirect, etc.
+        if let Err(e) = run_remote(&args) {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+        return;
     }
 
     if let Err(e) = validate_web_args(&args)
@@ -407,6 +414,15 @@ pub struct Args {
     /// Enable remote-codebase mode. When true, native filesystem tools are excluded and the agent
     /// uses `mcp__tddy-tools__*` instead. Requires `--recipe free-prompting`.
     pub remote: bool,
+
+    /// URL of the remote relay daemon. Required when `remote` is true.
+    pub remote_daemon_url: Option<String>,
+
+    /// Session token for the remote relay daemon.
+    pub remote_session_token: Option<String>,
+
+    /// Target daemon instance ID on the relay.
+    pub remote_daemon_id: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -572,6 +588,18 @@ pub struct CoderArgs {
     /// tools are replaced by `mcp__tddy-tools__*` MCP tools. Requires `--recipe free-prompting`.
     #[arg(long)]
     pub remote: bool,
+
+    /// URL of the remote relay daemon (e.g. `http://192.168.1.10:8765`). Required with `--remote`.
+    #[arg(long, requires = "remote")]
+    pub remote_daemon_url: Option<String>,
+
+    /// Session token for authenticating with the remote relay daemon.
+    #[arg(long, requires = "remote")]
+    pub remote_session_token: Option<String>,
+
+    /// Target daemon instance ID on the relay (routes tool calls to a specific peer).
+    #[arg(long, requires = "remote")]
+    pub remote_daemon_id: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -790,6 +818,9 @@ impl From<CoderArgs> for Args {
             codex_oauth_login: a.codex_oauth_login,
             recipe: a.recipe,
             remote: a.remote,
+            remote_daemon_url: a.remote_daemon_url,
+            remote_session_token: a.remote_session_token,
+            remote_daemon_id: a.remote_daemon_id,
         }
     }
 }
@@ -835,6 +866,9 @@ impl From<DemoArgs> for Args {
             codex_oauth_login: false,
             recipe: a.recipe,
             remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
         }
     }
 }
@@ -2905,18 +2939,102 @@ fn read_feature_input(args: &Args) -> anyhow::Result<String> {
 
 /// Entry point for remote-codebase mode.
 ///
-/// Shells out to `tddy-tools remote {start|connect}-session`, creates a `RemoteContextDir`,
-/// builds the allowlist from `tddy-tools remote list-tools` output, and passes a fully
-/// populated `InvokeRequest` (with `remote: Some(RemoteToolEnv)`) to the backend.
+/// Validates that `--remote-daemon-url` is set, then contacts the relay daemon to enumerate
+/// available tools, starts or reuses a remote session, and prepares the workflow context.
 ///
-/// # Note
-/// Full bootstrap is not yet implemented; this function is a placeholder that ensures the
-/// correct public signature is exported for downstream use. The e2e integration is covered
-/// by acceptance tests against a real relay daemon.
-// TODO: implement full bootstrap (subprocess coordination, session sync, run_goal)
+/// # Current implementation
+/// This v1 implementation validates the required flags and attempts to contact the relay daemon
+/// via `tddy-tools remote list-tools`. A real daemon connection failure produces a meaningful
+/// error message. The full session bootstrap (start-session → connect-session → run_goal) is
+/// tracked in the feature backlog.
+// TODO: implement full session bootstrap: start-session → connect-session → run_goal
 pub fn run_remote(args: &Args) -> anyhow::Result<()> {
-    let _ = args;
-    anyhow::bail!("remote mode not yet fully implemented")
+    let daemon_url = match &args.remote_daemon_url {
+        Some(url) => url.clone(),
+        None => anyhow::bail!(
+            "--remote-daemon-url is required when using --remote mode. \
+             Pass the relay daemon URL, e.g. --remote-daemon-url http://192.168.1.10:8765"
+        ),
+    };
+
+    log::info!("remote mode: connecting to relay daemon at {}", daemon_url);
+
+    // Attempt to contact the relay daemon to validate connectivity.
+    // We shell out to `tddy-tools remote list-tools` so the same discovery logic is reused.
+    // If the daemon is unreachable, this produces a clear error from tddy-tools.
+    let tddy_tools = which_tddy_tools();
+    let mut cmd = std::process::Command::new(&tddy_tools);
+    cmd.args(["remote", "list-tools"]);
+    // Provide a minimal discovery by pointing at the daemon URL's port directly.
+    // Parse the port from the URL and write a temporary daemon.json.
+    let tmp_relay_dir =
+        std::env::temp_dir().join(format!("tddy-remote-relay-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&tmp_relay_dir);
+    let port = parse_port_from_url(&daemon_url)?;
+    let discovery = serde_json::json!({ "port": port, "pid": 0, "started_at": 0 });
+    std::fs::write(tmp_relay_dir.join("daemon.json"), discovery.to_string())
+        .map_err(|e| anyhow::anyhow!("failed to write relay discovery file: {}", e))?;
+    cmd.env("TDDY_RELAY_BASE_DIR", &tmp_relay_dir);
+
+    if let Some(token) = &args.remote_session_token {
+        cmd.args(["--session-token", token.as_str()]);
+    }
+
+    let status = cmd.status().map_err(|e| {
+        anyhow::anyhow!(
+            "failed to run tddy-tools to contact relay daemon at {}: {}",
+            daemon_url,
+            e
+        )
+    })?;
+
+    let _ = std::fs::remove_dir_all(&tmp_relay_dir);
+
+    if !status.success() {
+        anyhow::bail!(
+            "could not connect to relay daemon at {} — ensure the relay is running and the URL is correct",
+            daemon_url
+        );
+    }
+
+    // TODO: implement full session bootstrap (start-session → connect-session → run_goal)
+    anyhow::bail!(
+        "remote mode: successfully contacted relay at {} but full session bootstrap is not yet implemented",
+        daemon_url
+    )
+}
+
+/// Resolve the path to the `tddy-tools` binary.
+///
+/// Looks for a sibling binary next to the running process, then falls back to `PATH`.
+fn which_tddy_tools() -> std::path::PathBuf {
+    // Check next to the running binary first (installed layout).
+    if let Ok(exe) = std::env::current_exe() {
+        let sibling = exe.with_file_name("tddy-tools");
+        if sibling.exists() {
+            return sibling;
+        }
+    }
+    std::path::PathBuf::from("tddy-tools")
+}
+
+/// Parse the port number from a URL string (e.g. `http://127.0.0.1:19999` → `19999`).
+fn parse_port_from_url(url: &str) -> anyhow::Result<u16> {
+    // Strip scheme
+    let without_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
+    // Take the host:port part (before any path)
+    let host_port = without_scheme.split('/').next().unwrap_or(without_scheme);
+    // Take the port after the last ':'
+    if let Some((_, port_str)) = host_port.rsplit_once(':') {
+        port_str
+            .parse::<u16>()
+            .map_err(|e| anyhow::anyhow!("invalid port in daemon URL {:?}: {}", url, e))
+    } else {
+        anyhow::bail!(
+            "could not parse port from daemon URL {:?} — expected http://host:port format",
+            url
+        )
+    }
 }
 
 #[cfg(test)]
@@ -2982,6 +3100,9 @@ mod resume_session_config_tests {
             codex_oauth_login: false,
             recipe: None,
             remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
         };
 
         merge_session_coder_config_for_resume(&mut args).expect("merge");
@@ -3044,6 +3165,9 @@ mod resume_session_identity_tests {
             codex_oauth_login: false,
             recipe: None,
             remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
         };
 
         assign_default_session_id(&mut args);
@@ -3109,6 +3233,9 @@ mod session_dir_sync_tests {
             codex_oauth_login: false,
             recipe: None,
             remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
         };
 
         sync_session_dir_from_args(&mut args).expect("apply");
@@ -3188,6 +3315,9 @@ mod changeset_agent_resume_tests {
             codex_oauth_login: false,
             recipe: None,
             remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
         };
 
         apply_agent_from_changeset_if_needed(&mut args).expect("apply");
@@ -3284,6 +3414,9 @@ mod post_tui_workflow_exit_tests {
             codex_oauth_login: false,
             recipe: None,
             remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
         }
     }
 

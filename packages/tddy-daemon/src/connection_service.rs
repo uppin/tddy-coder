@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use futures_util::stream::{Stream, StreamExt};
 use livekit::prelude::Room;
+use prost::Message as _;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
@@ -1853,6 +1854,54 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         self.record_rpc_activity();
         let req = request.into_inner();
 
+        // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
+        let requested_daemon = req.daemon_instance_id.trim();
+        if !requested_daemon.is_empty() {
+            let local_id = local_instance_id_for_config(&self.config);
+            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
+            let eligible_ids: Vec<String> = eligible_rows
+                .iter()
+                .map(|e| e.instance_id.0.clone())
+                .collect();
+            match crate::livekit_peer_discovery::classify_peer_route(
+                &local_id,
+                requested_daemon,
+                &eligible_ids,
+            ) {
+                Err(msg) => {
+                    log::info!("ExecuteTool: rejected daemon routing: {}", msg);
+                    return Err(Status::invalid_argument(msg));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
+                    log::info!(
+                        "ExecuteTool: forwarding RPC to remote daemon_instance_id={}",
+                        peer_instance_id
+                    );
+                    let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                        Status::failed_precondition(
+                            "cannot forward ExecuteTool: this process has no LiveKit common-room connection",
+                        )
+                    })?;
+                    let body = req.encode_to_vec();
+                    let out = crate::livekit_peer_discovery::forward_to_peer(
+                        slot,
+                        &peer_instance_id,
+                        "connection.ConnectionService",
+                        "ExecuteTool",
+                        body,
+                    )
+                    .await?;
+                    let inner = ExecuteToolResponse::decode(out.as_slice()).map_err(|e| {
+                        Status::internal(format!("decode ExecuteToolResponse: {e}"))
+                    })?;
+                    return Ok(Response::new(inner));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
+                    // Fall through to local execution below.
+                }
+            }
+        }
+
         // Authenticate caller.
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
@@ -1913,6 +1962,54 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         request: Request<ListExecToolsRequest>,
     ) -> Result<Response<ListExecToolsResponse>, Status> {
         let req = request.into_inner();
+
+        // Route BEFORE auth so a relay (which has no local user table) can forward.
+        let requested_daemon = req.daemon_instance_id.trim();
+        if !requested_daemon.is_empty() {
+            let local_id = local_instance_id_for_config(&self.config);
+            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
+            let eligible_ids: Vec<String> = eligible_rows
+                .iter()
+                .map(|e| e.instance_id.0.clone())
+                .collect();
+            match crate::livekit_peer_discovery::classify_peer_route(
+                &local_id,
+                requested_daemon,
+                &eligible_ids,
+            ) {
+                Err(msg) => {
+                    log::info!("ListExecTools: rejected daemon routing: {}", msg);
+                    return Err(Status::invalid_argument(msg));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
+                    log::info!(
+                        "ListExecTools: forwarding RPC to remote daemon_instance_id={}",
+                        peer_instance_id
+                    );
+                    let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                        Status::failed_precondition(
+                            "cannot forward ListExecTools: this process has no LiveKit common-room connection",
+                        )
+                    })?;
+                    let body = req.encode_to_vec();
+                    let out = crate::livekit_peer_discovery::forward_to_peer(
+                        slot,
+                        &peer_instance_id,
+                        "connection.ConnectionService",
+                        "ListExecTools",
+                        body,
+                    )
+                    .await?;
+                    let inner = ListExecToolsResponse::decode(out.as_slice()).map_err(|e| {
+                        Status::internal(format!("decode ListExecToolsResponse: {e}"))
+                    })?;
+                    return Ok(Response::new(inner));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
+                    // Fall through to local execution below.
+                }
+            }
+        }
 
         // Minimal auth — verify caller is a known user.
         let github_user = (self.user_resolver)(&req.session_token)

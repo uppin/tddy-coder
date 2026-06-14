@@ -129,14 +129,8 @@ impl RemoteConfig {
     pub fn to_remote_tool_env(&self) -> anyhow::Result<tddy_core::backend::RemoteToolEnv> {
         use anyhow::Context;
         Ok(tddy_core::backend::RemoteToolEnv {
-            daemon_url: self
-                .daemon_url
-                .clone()
-                .context("daemon_url is required")?,
-            session_id: self
-                .session_id
-                .clone()
-                .context("session_id is required")?,
+            daemon_url: self.daemon_url.clone().context("daemon_url is required")?,
+            session_id: self.session_id.clone().context("session_id is required")?,
             session_token: self
                 .session_token
                 .clone()
@@ -380,6 +374,9 @@ github:
             codex_oauth_login: false,
             recipe: None,
             remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
             tddy_data_dir: Some(cli_base.clone()),
         };
         merge_config_into_args(&mut args, config);
@@ -428,6 +425,9 @@ github:
             codex_oauth_login: false,
             recipe: None,
             remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
@@ -478,6 +478,9 @@ github:
             codex_oauth_login: false,
             recipe: Some("tdd".to_string()),
             remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
@@ -525,6 +528,9 @@ github:
             codex_oauth_login: false,
             recipe: None,
             remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
@@ -635,6 +641,9 @@ log:
             codex_oauth_login: false,
             recipe: None,
             remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);
