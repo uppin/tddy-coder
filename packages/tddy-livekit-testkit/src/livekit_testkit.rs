@@ -86,14 +86,17 @@ impl LiveKitTestkit {
             .with_port(LIVEKIT_PORT.tcp())
             .with_expected_status_code(200u16);
 
-        // Use ephemeral host ports to avoid conflicts when 7880 is already in use
-        // (e.g. from ./run-livekit-testkit-server). Set LIVEKIT_TESTKIT_WS_URL to reuse.
+        // Pin host ports to fixed values matching the container ports.
+        // LiveKit advertises --node-ip 127.0.0.1 in ICE candidates, so the mapped host
+        // port must equal the container port for WebRTC to reach the container.
+        // If these ports are already in use, set LIVEKIT_TESTKIT_WS_URL to reuse a
+        // running server instead of starting a new container.
         let image = GenericImage::new(LIVEKIT_IMAGE, LIVEKIT_TAG)
-            .with_exposed_port(LIVEKIT_PORT.tcp())
-            .with_exposed_port(LIVEKIT_ICE_TCP_PORT.tcp())
-            .with_exposed_port(LIVEKIT_ICE_UDP_PORT.udp())
             .with_wait_for(WaitFor::from(http_wait))
-            .with_cmd(["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1"]);
+            .with_cmd(["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1"])
+            .with_mapped_port(LIVEKIT_PORT, LIVEKIT_PORT.tcp())
+            .with_mapped_port(LIVEKIT_ICE_TCP_PORT, LIVEKIT_ICE_TCP_PORT.tcp())
+            .with_mapped_port(LIVEKIT_ICE_UDP_PORT, LIVEKIT_ICE_UDP_PORT.udp());
 
         let container: testcontainers::ContainerAsync<GenericImage> = image.start().await?;
         let host_port = container.get_host_port_ipv4(LIVEKIT_PORT.tcp()).await?;

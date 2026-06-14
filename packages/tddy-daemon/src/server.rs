@@ -12,6 +12,10 @@ use crate::livekit_peer_discovery::local_instance_id_for_config;
 use crate::telegram_notifier::{send_daemon_lifecycle_message, TelegramSender};
 
 /// Start the web server with static bundle and RPC services.
+///
+/// The optional `shutdown_rx` channel allows an external task (e.g. an idle-timeout monitor)
+/// to trigger graceful shutdown without ctrl_c or SIGTERM. When `None`, only OS signals shut
+/// the server down (existing behaviour).
 #[allow(clippy::too_many_arguments)] // Server bootstrap threads many handles; grouping is churn for little gain.
 pub async fn run_server(
     host: &str,
@@ -22,6 +26,7 @@ pub async fn run_server(
     common_room: Option<String>,
     allowed_agents: Vec<ClientAllowedAgent>,
     lifecycle_telegram: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
+    shutdown_rx: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> anyhow::Result<()> {
     if let Some((ref cfg, ref sender)) = lifecycle_telegram {
         let instance_id = local_instance_id_for_config(cfg);
@@ -46,7 +51,15 @@ pub async fn run_server(
 
     let shutdown_copy = lifecycle_telegram.clone();
     let shutdown = async move {
-        shutdown_signal().await;
+        // Either an OS signal or an external channel fires the shutdown.
+        if let Some(rx) = shutdown_rx {
+            tokio::select! {
+                _ = shutdown_signal() => {}
+                _ = async { let _ = rx.await; } => {}
+            }
+        } else {
+            shutdown_signal().await;
+        }
         if let Some((cfg, sender)) = shutdown_copy {
             let _ =
                 send_daemon_lifecycle_message(&cfg, sender.as_ref(), "tddy-daemon stopped").await;

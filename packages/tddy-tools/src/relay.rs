@@ -109,7 +109,10 @@ pub fn ensure_relay_daemon(cfg: &RelayConfig) -> Result<RelayEndpoint> {
             break;
         }
         if std::time::Instant::now() >= deadline {
-            anyhow::bail!("relay daemon did not become reachable within 5 seconds on port {}", port);
+            anyhow::bail!(
+                "relay daemon did not become reachable within 5 seconds on port {}",
+                port
+            );
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }

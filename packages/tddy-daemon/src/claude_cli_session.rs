@@ -88,7 +88,6 @@ impl PtyHandle {
     }
 }
 
-
 /// Manages a registry of active Claude CLI sessions (session_id → PtyHandle).
 pub struct ClaudeCliSessionManager {
     registry: Arc<RwLock<HashMap<String, Arc<PtyHandle>>>>,

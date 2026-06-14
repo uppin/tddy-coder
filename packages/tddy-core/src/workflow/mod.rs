@@ -3,8 +3,8 @@
 pub mod ids;
 pub mod recipe;
 
-use std::collections::HashMap;
 use crate::backend::RemoteToolEnv;
+use std::collections::HashMap;
 
 /// Extract a [`RemoteToolEnv`] from a context map.
 ///

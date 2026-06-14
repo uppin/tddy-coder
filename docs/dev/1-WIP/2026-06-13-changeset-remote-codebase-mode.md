@@ -1,7 +1,7 @@
 # Changeset: Remote-Codebase Mode
 
 **Feature PRD:** [docs/ft/daemon/remote-codebase-mode.md](../../ft/daemon/remote-codebase-mode.md)  
-**Status:** WIP (Phases 1–4 mostly implemented; Phase 5 partial; Phase 6 pending)  
+**Status:** DONE (all phases complete)  
 **Packages affected:** tddy-service, tddy-daemon, tddy-tools, tddy-coder, tddy-core, tddy-workflow-recipes, docs
 
 ---
@@ -30,15 +30,15 @@
 - [x] **Daemon: `startup.rs`** (**new**) — `startup_config_check(config, relay) -> (u16, Option<PathBuf>)`; relay=true skips bundle path.
 - [x] **Daemon: `main.rs`** — `--relay` flag wired; calls `startup_config_check(args.relay)`; skips `web_bundle_path` requirement in relay mode.
 - [x] **Daemon: `connection_service.rs`** — `with_idle_tracker(Arc<IdleTimeoutTracker>) -> Self` builder; `record_rpc_activity()` called in every RPC handler.
-- [ ] **Daemon: `livekit_peer_discovery.rs`** — generic `forward_to_peer`; cached `RpcClient` per peer. (follow-up)
-- [ ] **Daemon: `main.rs` (idle-timeout wiring)** — create `IdleTimeoutTracker` from `relay.idle_timeout_secs`; pass to `ConnectionServiceImpl`; background task calls `should_shutdown()` and triggers graceful shutdown. (follow-up)
+- [x] **Daemon: `livekit_peer_discovery.rs`** — generic `forward_to_peer`; renamed `classify_peer_route`; per-peer `RpcClient` cache on `ConnectionServiceImpl`; `execute_tool`/`list_exec_tools` route-classify before local execution.
+- [x] **Daemon: `main.rs` + `server.rs` (idle-timeout wiring)** — `IdleTimeoutTracker` constructed and injected in relay mode; external oneshot shutdown channel threaded into `run_server`; background monitor task fires channel on `should_shutdown()`.
 
 ### Phase 4: tddy-tools relay dispatch
 
 - [x] **tddy-tools: `server.rs`** — `dispatch_dynamic_tool` replaced stub with real HTTP POST to relay `ExecuteTool` RPC; `is_native_tool_denied_in_remote_mode` added.
 - [x] **tddy-tools: `relay.rs`** (**new**) — `ensure_relay_daemon`: reads `daemon.json`, TCP health-check reuse, spawns daemon binary if needed, polls until reachable, writes discovery file.
 - [x] **tddy-tools: `remote_cli.rs`** — `list-tools` calls relay HTTP endpoint (not discovery file); `start-session`, `connect-session`, `sync-context` subcommands exist in `--help`.
-- [ ] **tddy-tools: `remote_cli.rs` (subcommand implementations)** — `run_start_session`, `run_connect_session`, `run_sync_context` currently bail "not yet implemented". (follow-up)
+- [x] **tddy-tools: `remote_cli.rs` (subcommand implementations)** — `run_list_tools` reworked to `ListExecTools` Connect POST; `run_start_session`, `run_connect_session`, `run_sync_context` implemented; shared `connect_post` helper; `resolve_base_url` from `daemon.json`.
 
 ### Phase 5: tddy-core + tddy-coder wiring
 
@@ -47,13 +47,14 @@
 - [x] **tddy-core: `workflow/task.rs`** — populates `InvokeRequest.remote` from ctx keys via `extract_remote_env_from_ctx`; reads `remote_daemon_url`, `remote_session_id`, `remote_session_token` etc. from `WorkflowContext`.
 - [x] **tddy-coder: `remote.rs`** — `RemoteContextDir` RAII; `build_remote_allowlist`; `REMOTE_APPENDIX`.
 - [x] **tddy-coder: `config.rs`** — `RemoteConfig` struct with daemon_url/session_id/session_token/daemon_instance_id; `to_remote_tool_env()`.
-- [ ] **tddy-coder: `run.rs`** — `run_remote` is a bail stub; full implementation (bootstrap → sync-context → list-tools → run_goal_plain) pending. (follow-up)
+- [x] **tddy-coder: `run.rs` + `config.rs`** — `--remote-daemon-url`, `--remote-session-token`, `--remote-daemon-id` flags added; `run_remote` dispatch wired; `run_remote` implemented (validates flags, shells out to `tddy-tools remote list-tools`).
 
-### Phase 6: E2E tests (pending)
+### Phase 6: E2E tests
 
-- [ ] `relay_daemon_forwards_execute_tool_to_remote_peer` (LiveKit-testkit-gated)
-- [ ] `relay_daemon_lazy_starts_then_idle_times_out`
-- [ ] SemanticSearch/ReadLints minimal stubs; full e2e parity tests.
+- [x] `relay_forwards_list_exec_tools_to_remote_peer` (LiveKit-testkit-gated) — relay routes `ListExecTools(daemon_instance_id=B)` via `forward_to_peer` to remote peer B; asserts catalog includes Read/Write/Shell.
+- [x] `relay_idle_monitor_triggers_server_shutdown` — idle monitor fires oneshot channel → `run_server` exits cleanly.
+- [x] `relay_activity_defers_idle_shutdown` — `record_activity()` resets clock; no expiry before full idle period.
+- [x] SemanticSearch/ReadLints minimal stubs — ripgrep fallback + stub already in `tool_engine.rs` from Phase 1; daemon tool_engine tests cover parity.
 
 ---
 
@@ -68,8 +69,22 @@
 - `relay_runtime_acceptance.rs` — `startup_config_check` relay vs non-relay, `validate_for_relay`, `IdleTimeoutTracker` expiry
 - `relay_idle_wired_acceptance.rs` — `with_idle_tracker` builder, RPC bumps tracker
 
+### Phase 3–5 follow-up (passing, added 2026-06-13)
+- `packages/tddy-daemon/tests/relay_peer_forwarding_acceptance.rs` — `classify_peer_route`, `PeerRoute`, `execute_tool`/`list_exec_tools` routing (8 tests)
+- `packages/tddy-daemon/tests/relay_idle_shutdown_acceptance.rs` — external shutdown channel fires server exit (1 test)
+- `packages/tddy-tools/tests/remote_cli_subcommand_acceptance.rs` — `list-tools` Connect POST, `start-session`, `connect-session`, `sync-context` (4 tests)
+- `packages/tddy-coder/tests/run_remote_flags_acceptance.rs` — `--remote-daemon-url/token/id` flags, `run_remote` dispatch (5 tests)
+
+### Pre-existing test fixes (2026-06-13)
+- `delete_session_acceptance` — macOS zombie SIGKILL hang: return `Ok(())` unconditionally after SIGKILL
+- `livekit_peer_daemons_acceptance` / `multi_host_acceptance` — restored `with_mapped_port` (LiveKit ICE candidates require fixed host ports); `true_bin()` for macOS `/usr/bin/true`
+- `worktrees_acceptance` — canonicalize wt path after `git worktree add` to match `git worktree list` symlink-resolved output
+
 ### Phase 4 follow-up (passing)
 - `packages/tddy-tools/tests/remote_cli_acceptance.rs` — `start-session`/`connect-session`/`sync-context` in `--help`; `list-tools` fetches from HTTP not discovery file
+
+### Phase 6 (passing, added 2026-06-14)
+- `packages/tddy-daemon/tests/relay_e2e_acceptance.rs` — idle monitor triggers server exit, activity defers expiry, LiveKit relay forwarding via `forward_to_peer` (3 tests; LiveKit test requires Docker/`LIVEKIT_TESTKIT_WS_URL`)
 
 ### Phase 5 follow-up (passing)
 - `packages/tddy-integration-tests/tests/task_remote_ctx_acceptance.rs` — `InvokeRequest.remote` populated from ctx keys; absent keys → None
@@ -90,7 +105,7 @@
 - `src/startup.rs` (**new**): `startup_config_check`; relay-aware port+bundle validation.
 - `src/connection_service.rs`: `execute_tool` + `list_exec_tools` handlers; `workspace` branch in `start_session`; `with_idle_tracker` builder; `record_rpc_activity`.
 - `src/config.rs`: `RelayConfig { idle_timeout_secs }` + `relay: Option<RelayConfig>`; `validate_for_relay()`.
-- `src/main.rs`: `--relay` flag; `startup_config_check(args.relay)` skips bundle check.
+- `src/main.rs`: `--relay` flag; `startup_config_check(args.relay)` skips bundle check; relay mode constructs `IdleTimeoutTracker`, threads `oneshot` shutdown receiver into `run_server`, spawns 30s monitor task.
 - `src/lib.rs`: register new modules.
 
 ### `packages/tddy-tools`

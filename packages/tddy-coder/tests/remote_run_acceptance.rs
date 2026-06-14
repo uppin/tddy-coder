@@ -4,8 +4,8 @@
 //! `RemoteContextDir`, builds the allowlist from `tddy-tools remote list-tools` output, and
 //! passes a fully populated `InvokeRequest` (with `remote: Some(RemoteToolEnv)`) to the backend.
 
-use tddy_coder::remote::run_remote_with_tools_output;
 use tddy_coder::config::RemoteConfig;
+use tddy_coder::remote::run_remote_with_tools_output;
 
 /// Phase 5 AC: `run_remote_with_tools_output` builds an allowlist from a JSON tool-name array.
 ///
@@ -85,9 +85,9 @@ fn remote_config_converts_to_remote_tool_env() {
 #[test]
 fn remote_config_to_remote_tool_env_fails_on_incomplete_config() {
     let cfg = RemoteConfig {
-        daemon_url: None,          // missing — required
-        session_id: None,          // missing — required
-        session_token: None,       // missing — required
+        daemon_url: None,    // missing — required
+        session_id: None,    // missing — required
+        session_token: None, // missing — required
         daemon_instance_id: None,
     };
 
