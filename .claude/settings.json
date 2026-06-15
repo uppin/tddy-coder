@@ -5,11 +5,11 @@
       "Bash(tddy-tools invoke-action*)",
       "Bash(./test*)",
       "Bash(./verify*)",
-      "Bash(cargo check*)",
-      "Bash(cargo build*)",
-      "Bash(cargo test*)",
-      "Bash(cargo clippy*)",
-      "Bash(cargo fmt*)"
+      "Bash(./dev cargo check*)",
+      "Bash(./dev cargo build*)",
+      "Bash(./dev cargo test*)",
+      "Bash(./dev cargo clippy*)",
+      "Bash(./dev cargo fmt*)"
     ]
   }
 }
