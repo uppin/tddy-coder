@@ -1261,7 +1261,10 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
 
         let (toolcall_socket_path, tool_call_rx) =
-            match tddy_core::toolcall::start_toolcall_listener() {
+            match tddy_core::toolcall::start_toolcall_listener(
+                Some(session_artifact_dir.clone()),
+                std::env::current_dir().ok(),
+            ) {
                 Ok((path, rx)) => (Some(path), Some(rx)),
                 Err(_) => (None, None),
             };
@@ -2103,7 +2106,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
     }
 
-    let (socket_path, tool_call_rx) = match tddy_core::toolcall::start_toolcall_listener() {
+    let (socket_path, tool_call_rx) = match tddy_core::toolcall::start_toolcall_listener(
+        args.session_dir.clone(),
+        std::env::current_dir().ok(),
+    ) {
         Ok((path, rx)) => (Some(path), Some(rx)),
         Err(_) => (None, None),
     };

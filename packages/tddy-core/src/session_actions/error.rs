@@ -56,3 +56,18 @@ pub enum SessionActionsError {
     #[error("session actions: manifest program `{program}` ({detail})")]
     CommandSpawn { program: String, detail: String },
 }
+
+/// Map a `SessionActionsError` to the appropriate CLI exit code.
+///
+/// Exit code 3 signals a caller error (bad arguments / schema / path) rather than a runtime
+/// fault, matching the contract documented in the `invoke-action` PRD.
+pub fn classify_session_actions_exit_code(e: &SessionActionsError) -> i32 {
+    match e {
+        SessionActionsError::ArgumentsViolateSchema(_)
+        | SessionActionsError::InvalidSchemaShape(_)
+        | SessionActionsError::PathOutsideAllowlist { .. }
+        | SessionActionsError::PathTraversalAttempt { .. }
+        | SessionActionsError::InvalidInvokeJson(_) => 3,
+        _ => 1,
+    }
+}

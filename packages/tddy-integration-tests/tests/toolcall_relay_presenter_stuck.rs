@@ -15,7 +15,7 @@ use tokio::time::timeout;
 #[tokio::test]
 #[cfg(unix)]
 async fn relay_accepts_submit_when_presenter_never_polls() {
-    let (socket_path, _hold_tool_rx) = start_toolcall_listener().expect("start listener");
+    let (socket_path, _hold_tool_rx) = start_toolcall_listener(None, None).expect("start listener");
 
     let path = socket_path.clone();
     let client = tokio::spawn(async move {
