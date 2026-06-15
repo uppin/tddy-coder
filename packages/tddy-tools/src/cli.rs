@@ -75,23 +75,47 @@ pub struct PersistChangesetWorkflowArgs {
 }
 
 /// List session action manifests (JSON printed to stdout).
+///
+/// When `TDDY_SOCKET` is set the request is relayed to the session-owning process (which may be a
+/// remote host); `--session-dir` is then ignored. Without `TDDY_SOCKET` the local `--session-dir`
+/// is used for backward-compatible direct discovery.
 #[derive(Parser)]
 #[command(name = "list-actions")]
 pub struct ListActionsArgs {
-    /// Directory containing session artifacts (`actions/` subtree).
+    /// Directory containing session artifacts (`actions/` subtree). Used only in local
+    /// (non-relay) mode when `TDDY_SOCKET` is not set.
     #[arg(long)]
-    pub session_dir: PathBuf,
+    pub session_dir: Option<PathBuf>,
+
+    /// Filter by relative-path prefix (e.g. `packages/foo`).
+    #[arg(long)]
+    pub path: Option<String>,
+
+    /// Case-insensitive substring filter on action id, summary, or path.
+    #[arg(long)]
+    pub query: Option<String>,
+
+    /// Maximum actions to return.
+    #[arg(long)]
+    pub limit: Option<usize>,
+
+    /// Zero-based offset into the result set (for pagination).
+    #[arg(long, default_value_t = 0)]
+    pub offset: usize,
 }
 
 /// Invoke one session action with validated JSON (`--data`).
+///
+/// When `TDDY_SOCKET` is set the request is relayed to the session-owning process; `--session-dir`
+/// is then ignored. Without `TDDY_SOCKET`, `--session-dir` is required.
 #[derive(Parser)]
 #[command(name = "invoke-action")]
 pub struct InvokeActionArgs {
-    /// Directory containing session artifacts.
+    /// Directory containing session artifacts. Used only in local (non-relay) mode.
     #[arg(long)]
-    pub session_dir: PathBuf,
+    pub session_dir: Option<PathBuf>,
 
-    /// Action manifest id (filename stem under `actions/`).
+    /// Relative path identifier of the action (e.g. `packages/foo/build` or `run-tests`).
     #[arg(long)]
     pub action: String,
 
@@ -472,12 +496,205 @@ pub fn run_set_session_context(args: SetSessionContextArgs) -> Result<()> {
     session_context::apply_session_context_merge(&workflow_dir, &session_id, &patch)
 }
 
+/// Wire format for `list-actions` relay request (sent to TDDY_SOCKET).
+#[derive(Debug, Serialize)]
+struct ListActionsRelayRequest {
+    r#type: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path_prefix: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    limit: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    offset: Option<usize>,
+}
+
+/// Wire format for `list-actions` relay response.
+#[derive(Debug, Deserialize)]
+struct ListActionsRelayResponse {
+    status: String,
+    #[serde(default)]
+    actions: Option<serde_json::Value>,
+    #[serde(default)]
+    total: Option<usize>,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+/// Wire format for `invoke-action` relay request.
+#[derive(Debug, Serialize)]
+struct InvokeActionRelayRequest {
+    r#type: &'static str,
+    action: String,
+    data: String,
+}
+
+/// Wire format for `invoke-action` relay response.
+#[derive(Debug, Deserialize)]
+struct InvokeActionRelayResponse {
+    status: String,
+    #[serde(default)]
+    record: Option<serde_json::Value>,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    exit_code: Option<i32>,
+}
+
 pub fn run_list_actions(args: ListActionsArgs) -> Result<()> {
-    session_actions_cli::run_list_actions(&args.session_dir)
+    if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
+        relay_list_actions(std::path::Path::new(&socket_path), &args)?;
+    } else {
+        let session_dir = args.session_dir.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "--session-dir is required when TDDY_SOCKET is not set"
+            )
+        })?;
+        session_actions_cli::run_list_actions(
+            session_dir,
+            args.path.as_deref(),
+            args.query.as_deref(),
+            args.limit,
+            args.offset,
+        )?;
+    }
+    Ok(())
 }
 
 pub fn run_invoke_action(args: InvokeActionArgs) -> Result<()> {
-    session_actions_cli::run_invoke_action(&args.session_dir, &args.action, &args.data)
+    if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
+        relay_invoke_action(std::path::Path::new(&socket_path), &args)?;
+    } else {
+        let session_dir = args.session_dir.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "--session-dir is required when TDDY_SOCKET is not set"
+            )
+        })?;
+        session_actions_cli::run_invoke_action(session_dir, &args.action, &args.data)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn relay_list_actions(socket_path: &std::path::Path, args: &ListActionsArgs) -> Result<()> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+
+    let mut stream = UnixStream::connect(socket_path).with_context(|| {
+        format!(
+            "failed to connect to TDDY_SOCKET: {}",
+            socket_path.display()
+        )
+    })?;
+
+    let req = ListActionsRelayRequest {
+        r#type: "list-actions",
+        path_prefix: args.path.clone(),
+        query: args.query.clone(),
+        limit: args.limit,
+        offset: if args.offset > 0 { Some(args.offset) } else { None },
+    };
+    let line = serde_json::to_string(&req)?;
+    stream.write_all(line.as_bytes())?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+
+    let mut reader = BufReader::new(&mut stream);
+    let mut response_line = String::new();
+    reader.read_line(&mut response_line)?;
+    let response_line = response_line.trim();
+
+    let response: ListActionsRelayResponse = serde_json::from_str(response_line)
+        .with_context(|| format!("invalid response from relay: {}", response_line))?;
+
+    if response.status == "ok" {
+        let out = serde_json::json!({
+            "actions": response.actions.unwrap_or(serde_json::Value::Array(vec![])),
+            "total": response.total.unwrap_or(0),
+            "offset": args.offset,
+            "limit": args.limit,
+        });
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        let msg = response.message.as_deref().unwrap_or("list-actions relay failed");
+        output_error(msg, 1);
+    }
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn relay_list_actions(_socket_path: &std::path::Path, args: &ListActionsArgs) -> Result<()> {
+    // No relay available; fall back to local path (will re-check session_dir).
+    if let Some(ref session_dir) = args.session_dir {
+        session_actions_cli::run_list_actions(
+            session_dir,
+            args.path.as_deref(),
+            args.query.as_deref(),
+            args.limit,
+            args.offset,
+        )?;
+    } else {
+        output_error("--session-dir required on this platform", 1);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn relay_invoke_action(socket_path: &std::path::Path, args: &InvokeActionArgs) -> Result<()> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+
+    let mut stream = UnixStream::connect(socket_path).with_context(|| {
+        format!(
+            "failed to connect to TDDY_SOCKET: {}",
+            socket_path.display()
+        )
+    })?;
+
+    let req = InvokeActionRelayRequest {
+        r#type: "invoke-action",
+        action: args.action.clone(),
+        data: args.data.clone(),
+    };
+    let line = serde_json::to_string(&req)?;
+    stream.write_all(line.as_bytes())?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+
+    let mut reader = BufReader::new(&mut stream);
+    let mut response_line = String::new();
+    reader.read_line(&mut response_line)?;
+    let response_line = response_line.trim();
+
+    let response: InvokeActionRelayResponse = serde_json::from_str(response_line)
+        .with_context(|| format!("invalid response from relay: {}", response_line))?;
+
+    if response.status == "ok" {
+        if let Some(record) = response.record {
+            println!("{}", serde_json::to_string(&record)?);
+        } else {
+            println!("{{}}");
+        }
+    } else {
+        let msg = response.message.as_deref().unwrap_or("invoke-action relay failed");
+        let exit_code = response.exit_code.unwrap_or(1);
+        eprintln!("{}", msg);
+        std::process::exit(exit_code);
+    }
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn relay_invoke_action(_socket_path: &std::path::Path, args: &InvokeActionArgs) -> Result<()> {
+    if let Some(ref session_dir) = args.session_dir {
+        session_actions_cli::run_invoke_action(session_dir, &args.action, &args.data)?;
+    } else {
+        output_error("--session-dir required on this platform", 1);
+    }
+    Ok(())
 }
 
 pub fn run_get_schema(args: GetSchemaArgs) -> Result<()> {

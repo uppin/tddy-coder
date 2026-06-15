@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tddy-tools list-actions*)",
+      "Bash(tddy-tools invoke-action*)",
+      "Bash(./test*)",
+      "Bash(./verify*)",
+      "Bash(./dev cargo check*)",
+      "Bash(./dev cargo build*)",
+      "Bash(./dev cargo test*)",
+      "Bash(./dev cargo clippy*)",
+      "Bash(./dev cargo fmt*)"
+    ]
+  }
+}

@@ -7,7 +7,7 @@ use serde_json::json;
 use tddy_core::session_actions::{
     ensure_action_architecture, list_action_summaries, parse_action_manifest_yaml,
     parse_test_summary_from_process_output, resolve_allowlisted_path, run_manifest_command,
-    validate_action_arguments_json, ActionManifest, TestSummary,
+    validate_action_arguments_json, ActionManifest, DiscoveryQuery, TestSummary,
 };
 
 fn unique_temp_session_dir(label: &str) -> std::path::PathBuf {
@@ -44,8 +44,9 @@ fn list_action_summaries_must_be_sorted_ascending_by_id() {
         "alpha.yaml",
         "version: 1\nid: alpha\nsummary: A\narchitecture: native\ncommand: ['/bin/true']\n",
     );
-    let list = list_action_summaries(session).expect("discovery");
-    let ids: Vec<&str> = list.iter().map(|s| s.id.as_str()).collect();
+    let result = list_action_summaries(Some(session), None, &DiscoveryQuery::default())
+        .expect("discovery");
+    let ids: Vec<&str> = result.actions.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(
         ids,
         vec!["alpha", "zeta"],

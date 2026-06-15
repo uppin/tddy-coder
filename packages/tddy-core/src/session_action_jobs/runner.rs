@@ -77,7 +77,7 @@ fn resolve_invoke(
     action_id: &str,
     args: &Value,
 ) -> Result<(ActionManifest, Option<PathBuf>), SessionActionJobsError> {
-    let manifest_path = resolve_action_manifest_path(session_dir, action_id)?;
+    let manifest_path = resolve_action_manifest_path(Some(session_dir), None, action_id)?;
     let manifest = parse_action_manifest_file(&manifest_path)?;
     validate_action_arguments_json(&manifest.input_schema, args)?;
 
