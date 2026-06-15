@@ -161,38 +161,47 @@ pub fn merge_discovered_peers_ordered(
     Ok(out)
 }
 
-/// Whether **StartSession** should run locally or be forwarded to a discovered peer.
+/// Whether an RPC should run locally or be forwarded to a discovered peer.
+///
+/// Previously named `StartSessionPeerRoute`; renamed to `PeerRoute` to reflect that this
+/// routing logic is now applied to all eligible RPCs (StartSession, ExecuteTool, ListExecTools, …).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StartSessionPeerRoute {
+pub enum PeerRoute {
     Local,
     Forward { peer_instance_id: String },
 }
 
+/// Backwards-compatible alias kept so that the internal `StartSession` handler (which references
+/// the old name) continues to compile without a separate refactor pass.
+pub type StartSessionPeerRoute = PeerRoute;
+
 /// Decide routing from the requested `daemon_instance_id`, local id, and currently eligible peer ids.
-pub fn classify_start_session_peer_route(
+///
+/// Generic rename of `classify_start_session_peer_route`; the latter is now a thin wrapper.
+pub fn classify_peer_route(
     local_instance_id: &str,
     requested_instance_id: &str,
     eligible_instance_ids: &[String],
-) -> Result<StartSessionPeerRoute, String> {
+) -> Result<PeerRoute, String> {
     let req = requested_instance_id.trim();
     if req.is_empty() {
         log::debug!(
-            "classify_start_session_peer_route: empty requested id → Local (local_instance_id={})",
+            "classify_peer_route: empty requested id → Local (local_instance_id={})",
             local_instance_id
         );
-        return Ok(StartSessionPeerRoute::Local);
+        return Ok(PeerRoute::Local);
     }
     let local = local_instance_id.trim();
     if req == local {
-        log::debug!("classify_start_session_peer_route: requested matches local → Local");
-        return Ok(StartSessionPeerRoute::Local);
+        log::debug!("classify_peer_route: requested matches local → Local");
+        return Ok(PeerRoute::Local);
     }
     if eligible_instance_ids.iter().any(|id| id.trim() == req) {
         log::info!(
-            "classify_start_session_peer_route: forwarding StartSession to peer instance_id={}",
+            "classify_peer_route: forwarding RPC to peer instance_id={}",
             req
         );
-        return Ok(StartSessionPeerRoute::Forward {
+        return Ok(PeerRoute::Forward {
             peer_instance_id: req.to_string(),
         });
     }
@@ -200,6 +209,19 @@ pub fn classify_start_session_peer_route(
         "unknown or not connected daemon_instance_id {:?}: peer is not in the current eligible daemon list (configure livekit.common_room and ensure the peer is in the same LiveKit room)",
         req
     ))
+}
+
+/// Backwards-compatible wrapper around [`classify_peer_route`].
+pub fn classify_start_session_peer_route(
+    local_instance_id: &str,
+    requested_instance_id: &str,
+    eligible_instance_ids: &[String],
+) -> Result<StartSessionPeerRoute, String> {
+    classify_peer_route(
+        local_instance_id,
+        requested_instance_id,
+        eligible_instance_ids,
+    )
 }
 
 /// Registry of remote daemons observed in the shared common room (excludes the local row).
@@ -879,34 +901,59 @@ async fn common_room_discovery_cycle(
     Ok(end)
 }
 
-/// Forward **StartSession** to another daemon in the common room via LiveKit data-channel RPC.
+/// Forward a generic RPC to a peer daemon in the common room via LiveKit data-channel RPC.
 ///
-/// See module docs: each call subscribes to room events and spawns a [`tddy_livekit::RpcClient`] background loop.
-pub async fn forward_start_session_via_livekit(
+/// This is the generic building block for all peer-forwarding. It:
+/// 1. Reads the room slot (returns `failed_precondition` if no room is connected).
+/// 2. Subscribes to room events and creates an [`tddy_livekit::RpcClient`] background loop.
+/// 3. Calls `{service}/{method}` with the given `body` bytes.
+///
+/// See module docs: each call spawns a [`tddy_livekit::RpcClient`] background task. For hot paths
+/// (e.g. `ExecuteTool`) callers should maintain a per-peer client cache.
+pub async fn forward_to_peer(
     room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
-    peer_instance_id: &str,
-    request: &StartSessionRequest,
-) -> Result<StartSessionResponse, tddy_rpc::Status> {
+    peer_id: &str,
+    service: &str,
+    method: &str,
+    body: Vec<u8>,
+) -> Result<Vec<u8>, tddy_rpc::Status> {
     let room_arc = {
         let g = room_slot.read().await;
         g.clone()
     }
     .ok_or_else(|| {
         tddy_rpc::Status::failed_precondition(
-            "LiveKit common room is not connected on this daemon; cannot forward StartSession to a peer",
+            "LiveKit common room is not connected on this daemon; cannot forward RPC to a peer",
         )
     })?;
     log::debug!(
-        "forward_start_session_via_livekit: peer_instance_id={} (new Room::subscribe + RpcClient)",
-        peer_instance_id
+        "forward_to_peer: peer_id={} service={} method={} (new Room::subscribe + RpcClient)",
+        peer_id,
+        service,
+        method
     );
     let rpc_events = room_arc.subscribe();
-    let client =
-        tddy_livekit::RpcClient::new_shared(room_arc, peer_instance_id.to_string(), rpc_events);
+    let client = tddy_livekit::RpcClient::new_shared(room_arc, peer_id.to_string(), rpc_events);
+    client.call_unary(service, method, body).await
+}
+
+/// Forward **StartSession** to another daemon in the common room via LiveKit data-channel RPC.
+///
+/// Thin encode/decode wrapper around [`forward_to_peer`].
+pub async fn forward_start_session_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &StartSessionRequest,
+) -> Result<StartSessionResponse, tddy_rpc::Status> {
     let body = request.encode_to_vec();
-    let out = client
-        .call_unary("connection.ConnectionService", "StartSession", body)
-        .await?;
+    let out = forward_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "StartSession",
+        body,
+    )
+    .await?;
     StartSessionResponse::decode(out.as_slice())
         .map_err(|e| tddy_rpc::Status::internal(format!("decode StartSessionResponse: {e}")))
 }

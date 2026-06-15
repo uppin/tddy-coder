@@ -3,7 +3,8 @@
 pub mod config;
 pub mod plain;
 pub mod recipe;
-mod run;
+pub mod remote;
+pub mod run;
 mod tty;
 pub mod web_server;
 

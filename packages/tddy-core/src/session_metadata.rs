@@ -35,6 +35,15 @@ pub struct SessionMetadata {
     /// Model id for claude-cli sessions (e.g. "claude-opus-4-8"). Absent in legacy files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Granular activity status reported by per-worktree claude-cli hooks (e.g. "Running",
+    /// "WaitingForInput"). Absent for tool sessions and legacy files. Set by `ReportSessionStatus`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_status: Option<String>,
+    /// Per-session token authorising claude-cli hooks to call `ReportSessionStatus`. Generated at
+    /// session-start, persisted here, and baked into the worktree hook command. Absent for tool
+    /// sessions and legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook_token: Option<String>,
 }
 
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
@@ -53,6 +62,10 @@ pub struct InitialToolSessionMetadataOpts {
     pub session_type: Option<String>,
     /// Model id for claude-cli sessions.
     pub model: Option<String>,
+    /// Initial granular activity status for claude-cli sessions. Usually `None` for tool sessions.
+    pub activity_status: Option<String>,
+    /// Per-session hook token for claude-cli sessions. `None` for tool sessions.
+    pub hook_token: Option<String>,
 }
 
 /// Writes `.session.yaml` for a newly created session directory.
@@ -89,6 +102,8 @@ pub fn write_initial_tool_session_metadata(
         previous_session_id: opts.previous_session_id,
         session_type: opts.session_type,
         model: opts.model,
+        activity_status: opts.activity_status,
+        hook_token: opts.hook_token,
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -104,6 +119,22 @@ pub fn write_session_metadata(
     std::fs::write(&path, contents)
         .map_err(|e| crate::WorkflowError::WriteFailed(e.to_string()))?;
     Ok(())
+}
+
+/// Atomically update the `activity_status` field in an existing `.session.yaml`.
+///
+/// Reads the metadata, sets `activity_status = Some(status.to_string())`, bumps `updated_at`,
+/// and writes it back. All other fields are preserved.
+///
+/// Used by the `ReportSessionStatus` gRPC handler to record the latest hook-reported status.
+pub fn update_activity_status(
+    session_dir: &Path,
+    status: &str,
+) -> Result<(), crate::WorkflowError> {
+    let mut metadata = read_session_metadata(session_dir)?;
+    metadata.activity_status = Some(status.to_string());
+    metadata.updated_at = chrono::Utc::now().to_rfc3339();
+    write_session_metadata(session_dir, &metadata)
 }
 
 /// Read session metadata from the session directory.
@@ -139,6 +170,9 @@ mod tests {
                 previous_session_id: None,
                 session_type: None,
                 model: None,
+
+                activity_status: None,
+                hook_token: None,
             },
         )
         .unwrap();
@@ -159,13 +193,12 @@ mod tests {
 
     /// **claude_cli_metadata_round_trip** — `.session.yaml` must preserve `session_type` and
     /// `model` through a write/read cycle.
-    ///
-    /// FAILS: `SessionMetadata` has no `session_type` / `model` fields yet; the struct literal
-    /// below does not compile until both are added with `#[serde(default)]`.
     #[test]
     fn claude_cli_metadata_round_trip() {
-        let tmp = std::env::temp_dir()
-            .join(format!("tddy-session-meta-claude-cli-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "tddy-session-meta-claude-cli-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&tmp);
         let sid = "01900000-0000-7000-8000-000000000cli";
         let session_dir = tmp.join("sessions").join(sid);
@@ -182,6 +215,9 @@ mod tests {
                 previous_session_id: None,
                 session_type: Some("claude-cli".to_string()), // NEW FIELD — compile error
                 model: Some("claude-sonnet-4-6".to_string()), // NEW FIELD — compile error
+
+                activity_status: None,
+                hook_token: None,
             },
         )
         .unwrap();
@@ -217,6 +253,136 @@ status: active
         assert!(
             legacy.model.is_none(),
             "model must default to None for legacy sessions"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// `activity_status` survives a write/read round-trip through `.session.yaml`.
+    #[test]
+    fn activity_status_round_trips_through_session_yaml() {
+        let tmp =
+            std::env::temp_dir().join(format!("tddy-activity-status-rt-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sessions").join("sess-act-rt");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        write_initial_tool_session_metadata(
+            &session_dir,
+            InitialToolSessionMetadataOpts {
+                project_id: "proj-rt".to_string(),
+                session_type: Some("claude-cli".to_string()),
+                model: Some("claude-sonnet-4-6".to_string()),
+                activity_status: Some("Running".to_string()),
+                hook_token: None,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let read = read_session_metadata(&session_dir).unwrap();
+        assert_eq!(
+            read.activity_status.as_deref(),
+            Some("Running"),
+            "activity_status must survive write/read round-trip"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// `hook_token` is omitted from the YAML when `None` (no key present in file).
+    #[test]
+    fn hook_token_omitted_when_none() {
+        let tmp = std::env::temp_dir().join(format!("tddy-hook-token-none-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sessions").join("sess-ht-none");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        write_initial_tool_session_metadata(
+            &session_dir,
+            InitialToolSessionMetadataOpts {
+                project_id: "proj-ht".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let yaml_text =
+            std::fs::read_to_string(session_dir.join(SESSION_METADATA_FILENAME)).unwrap();
+        assert!(
+            !yaml_text.contains("hook_token"),
+            "hook_token must not appear in YAML when None; got:\n{yaml_text}"
+        );
+        assert!(
+            !yaml_text.contains("activity_status"),
+            "activity_status must not appear in YAML when None; got:\n{yaml_text}"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Legacy `.session.yaml` without `activity_status` or `hook_token` must still deserialise
+    /// (both fields have `#[serde(default)]`).
+    #[test]
+    fn legacy_session_yaml_without_new_fields_deserializes() {
+        let yaml = r#"session_id: old-sess
+project_id: proj-legacy
+created_at: "2026-01-01T00:00:00Z"
+updated_at: "2026-01-01T00:00:00Z"
+status: active
+"#;
+        let meta: SessionMetadata =
+            serde_yaml::from_str(yaml).expect("legacy YAML must deserialise");
+        assert!(
+            meta.activity_status.is_none(),
+            "activity_status must default to None"
+        );
+        assert!(meta.hook_token.is_none(), "hook_token must default to None");
+    }
+
+    /// `update_activity_status` must overwrite only `activity_status` and bump `updated_at`;
+    /// all other fields (including `status`) must be unchanged.
+    #[test]
+    fn update_activity_status_overwrites_only_status_and_bumps_updated_at() {
+        let tmp = std::env::temp_dir().join(format!("tddy-upd-act-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sessions").join("sess-upd");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let original_updated_at = "2026-06-13T10:00:00Z";
+        write_initial_tool_session_metadata(
+            &session_dir,
+            InitialToolSessionMetadataOpts {
+                project_id: "proj-upd".to_string(),
+                session_type: Some("claude-cli".to_string()),
+                activity_status: Some("Started".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // Manually set a known `updated_at` for comparison.
+        {
+            let mut meta = read_session_metadata(&session_dir).unwrap();
+            meta.updated_at = original_updated_at.to_string();
+            write_session_metadata(&session_dir, &meta).unwrap();
+        }
+
+        update_activity_status(&session_dir, "WaitingForInput")
+            .expect("update_activity_status must succeed");
+
+        let updated = read_session_metadata(&session_dir).unwrap();
+        assert_eq!(
+            updated.activity_status.as_deref(),
+            Some("WaitingForInput"),
+            "activity_status must be updated to WaitingForInput"
+        );
+        assert_eq!(
+            updated.status, "active",
+            "session status field must remain 'active'"
+        );
+        assert_ne!(
+            updated.updated_at, original_updated_at,
+            "updated_at must be bumped by update_activity_status"
         );
 
         let _ = fs::remove_dir_all(&tmp);

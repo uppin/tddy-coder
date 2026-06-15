@@ -112,6 +112,8 @@ fn write_minimal_running_session(sessions_base: &std::path::Path, session_id: &s
         previous_session_id: None,
         session_type: None,
         model: None,
+        activity_status: None,
+        hook_token: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 }

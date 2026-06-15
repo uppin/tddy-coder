@@ -36,6 +36,8 @@ tddy-connectrpc = { path = "../tddy-connectrpc" }
 tddy-github = { path = "../tddy-github" }
 tonic = "0.12"
 tokio-stream = "0.1"
+tempfile = "3"
+walkdir = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -46,3 +48,4 @@ serial_test = "3"
 assert_cmd = "2"
 ctor = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking"] }
+tempfile = "3"

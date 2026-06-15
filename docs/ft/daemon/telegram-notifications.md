@@ -48,6 +48,52 @@ Secrets: full bot tokens do not belong in log lines; helpers return **masked** r
 
 When the daemon spawns a **`tddy-coder --daemon`** session, it connects to the child’s gRPC **`PresenterObserver.ObserveEvents`** stream (see **`tddy-service`** proto) and maps **`ServerMessage`** events to Telegram text (state transitions, workflow completion, goal started, backend selected, and presenter **`ModeChanged`** when the mode requires user input or approval—see **Presenter stream: elicitation** below). Daemon startup and graceful shutdown also send short lifecycle messages when Telegram is enabled.
 
+## Claude Code CLI session activity alerts
+
+When a **claude-cli** session's activity status transitions to **`WaitingForInput`** or **`Done`**,
+the daemon sends a Telegram alert to each chat that is currently **tracking** that session (bound via
+the **Enter session** flow or the `/start-claude` command). If no chat tracks the session, no message
+is sent.
+
+### Trigger conditions
+
+| New status | Meaning | Message sent? |
+|------------|---------|---------------|
+| **`WaitingForInput`** | Claude Code hit a permission prompt, MCP elicitation dialog, or is idle waiting for the next user prompt | ✓ |
+| **`Done`** | Claude Code finished responding for this turn | ✓ |
+| `Started` / `Running` / `ExecutingTool` / `Ended` | Startup, agentic loop, tool execution, session end | — |
+
+Repeated delivery of the **same status** (e.g. `WaitingForInput` sent again without a status
+change in between) does **not** send a second message. Only a genuine transition triggers a send.
+
+### Message copy
+
+- **`WaitingForInput`**: `"🔔 Session <label>: Claude Code needs your input (permission, question, or your next prompt). Attach via the web UI or \`tddy-tools pty-relay\`."`
+- **`Done`**: `"✅ Session <label>: Claude Code finished this turn. Attach to continue."`
+
+`<label>` is the first two hyphen-separated segments of the session id (e.g. `018f1234-5678`).
+
+### Routing
+
+Routing uses the **tracked session** binding — the same `SharedTelegramTrackedSessionCoordinator`
+used for workflow keyboard suppression. A chat must have the session marked as tracked (via
+`/start-claude` completion or **Enter session**) to receive an alert.
+
+### Source of the `WaitingForInput` signal
+
+The status arrives via the **`ReportSessionStatus`** gRPC RPC, which the per-worktree
+`tddy-tools session-hook` calls whenever Claude Code fires a `Notification` hook event with
+`notification_type` of `permission_prompt`, `elicitation_dialog`, or `idle_prompt`. See
+[claude-cli-session.md § Activity status](claude-cli-session.md#session-activity-status-via-per-worktree-hooks).
+No PTY/ANSI scraping is involved.
+
+### Implementation surface
+
+**`TelegramSessionWatcher::on_claude_cli_activity_status_changed`** — called from
+**`connection_service::report_session_status`** after `update_activity_status` succeeds, when
+`self.telegram` is configured. Holds `last_activity_status: HashMap<session_id, String>` to detect
+transitions. Routes via `chats_tracking_session(session_id)` on the shared tracked coordinator.
+
 ## Presenter stream: elicitation (`ModeChanged`)
 
 With Telegram enabled, **`TelegramSessionWatcher::on_server_message`** classifies **`ServerMessage`** **`ModeChanged`** payloads from **`PresenterObserver.ObserveEvents`**. Modes that require a human gate—document review, markdown viewer, feature input, clarification (**`Select`** / **`MultiSelect`**), and free-text **`TextInput`**—produce Telegram traffic per qualifying event. Autonomous modes **`Running`** and **`Done`** do not produce elicitation Telegram lines. Identical **`ModeChanged`** signatures per session id dedupe repeat sends so stream replays do not flood configured chats. Module **`tddy_daemon::elicitation`** centralizes classification, dedupe key material, and line templates; **[telegram-notifier.md](../../../packages/tddy-daemon/docs/telegram-notifier.md)** records the public hooks.

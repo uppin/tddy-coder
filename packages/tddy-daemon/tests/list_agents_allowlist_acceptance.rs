@@ -40,6 +40,7 @@ fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> Connecti
         None,
         None,
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     )
 }
 
@@ -182,6 +183,8 @@ allowed_agents:
         new_branch_name: String::new(),
         selected_integration_base_ref: String::new(),
         selected_branch_to_work_on: String::new(),
+        initial_prompt: String::new(),
+        permission_mode: String::new(),
     });
     let err = service
         .start_session(request)

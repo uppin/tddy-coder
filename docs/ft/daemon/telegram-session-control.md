@@ -22,6 +22,7 @@ Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`T
 
 | Command | Description |
 |---------|-------------|
+| **`/start-claude <prompt>`** | Start a **Claude Code CLI** session seeded with `<prompt>`. Skips recipe/intent steps entirely; routes through **project → branch → model** keyboards, then spawns `claude --model <model> --session-id <id> "<prompt>"` in a real git worktree. See [/start-claude flow](#start-claude-flow) below. |
 | **`/start-workflow <prompt>`** | Create a new session. Bot presents **Recipe: tdd-small** and **More recipes…**; **More recipes** sends a second message with **tdd**, **bugfix**, **free-prompting**, and **grill-me** (compact `mr:` callbacks). Choosing a recipe writes **`changeset.yaml`**, then the operator picks **branch/worktree intent** (new branch from integration base vs work on an existing branch — see below), then a **project**, then an **integration base** (see below), then an **agent** when the daemon **`allowed_agents`** list is non-empty. |
 | **`/chain-workflow <prompt>`** | Create a **child** session for stacked work: the first outbound step is a **parent session picker** (other sessions under the same **`sessions_base`**, newest first, excluding the new child id). Inline buttons use **`tcp:p:<parent_tail8>|s:<child_session_id>`** ( **`CB_TELEGRAM_CHAIN_PARENT`** prefix **`tcp:`**; `parent_tail8` = last 8 chars of parent session id — stable across list churn) within Telegram’s **64-byte** `callback_data` limit. A follow-on message presents the same **recipe** keyboard pattern as **`/start-workflow`**. Authorization and optional **Telegram ↔ GitHub** linking match **`handle_start_workflow`**. **`parse_telegram_chain_parent_callback`** decodes **`tcp:`** payloads (returns `(parent_tail8, child_session_id)`); **`handle_chain_parent_callback`** scans candidates by tail and persists **`previous_session_id`** on the child session. The live **`telegram_bot`** path routes **`tcp:`** callbacks through **`maybe_dispatch_tcp_chain_parent_callback`** (same harness behavior as integration tests). |
 | **`/sessions`** | List sessions (10 at a time). Each session shows status, elapsed time, and workflow state. Paginated with a **"More"** inline keyboard button when more sessions exist. |
@@ -109,6 +110,51 @@ The harness takes an **allowed chat id list** and a **sessions base directory** 
 
 The daemon binary runs **long-polling** inbound handling (see above). Durable **chat ↔ session** registry across restarts and full **`ConnectionService` / `StartSession`** automation from Telegram remain follow-up work where needed.
 
+## /start-claude flow
+
+`/start-claude <prompt>` launches a **Claude Code CLI** session directly from Telegram, seeded with the user's first message. It reuses the existing **project → branch** keyboard infrastructure and adds a **model** picker step before spawning `claude`.
+
+### Steps
+
+1. **`handle_start_claude`**: auth + optional GitHub-link gate (same as `/start-workflow`). Creates `session_dir`, writes `changeset.yaml` with:
+   - `initial_prompt: <prompt>`
+   - `name: <first 6 words of prompt>` — used to derive the git branch name
+   - `workflow.branch_worktree_intent: new_branch_from_base` — pre-set so the branch callback knows the intent
+   - `session_type: claude-cli` (raw YAML merge, not in the `Changeset` struct)
+   
+   Sends the **project keyboard** (`tp:` callbacks — same as `/start-workflow`).
+
+2. **Project callback** (`handle_telegram_project_callback`): shows the **branch keyboard** (unchanged).
+
+3. **Branch callback** (`handle_telegram_branch_callback`): sets `workflow.selected_integration_base_ref`. For `claude-cli` sessions, also sets `workflow.new_branch_name` derived from `changeset.name` via `claude_cli_branch_name_from_changeset` (since `validate_workflow_branch_intent` requires `new_branch_name` when `intent == new_branch_from_base`). Detects `session_type == "claude-cli"` from the routing snapshot and sends the **model keyboard** instead of the agent/tddy-coder keyboard.
+
+4. **Model keyboard** (`tcm:` callbacks). Three static models:
+   - `claude-opus-4-8` → "Claude Opus 4"
+   - `claude-sonnet-4-6` → "Claude Sonnet 4.5"
+   - `claude-haiku-4-5-20251001` → "Claude Haiku 4.5"
+   
+   Encoded as `tcm:<model_idx>|p:<proj_idx>|s:<session_id>` (≤64 bytes).
+
+5. **`handle_telegram_claude_model_callback`**: raw-merges `model` into `changeset.yaml`, calls `spawn_telegram_claude_cli`.
+
+6. **`spawn_telegram_claude_cli`**: reads `initial_prompt`, `model`, branch intent from `changeset.yaml`; resolves `repo_root` via `project_storage`; calls `setup_worktree_for_session_with_optional_chain_base` (blocking, via `tokio::task::spawn_blocking`); launches `claude --model <model> --session-id <id> "<initial_prompt>"` via the shared `Arc<ClaudeCliSessionManager>`; writes `.session.yaml`; optionally bridges LiveKit (non-fatal if unavailable); replies with short session id and attach instructions.
+
+### Changeset routing
+
+The `session_type: claude-cli` raw YAML field is the routing signal. It lives alongside the `Changeset` struct fields in `changeset.yaml`. Since `write_changeset` serializes only the `Changeset` struct (which has no `session_type` field), `handle_telegram_branch_callback` saves the routing snapshot **before** calling `write_changeset` and re-applies `session_type` (and `model`) via raw YAML merge after.
+
+### Shared manager (attachability)
+
+`TelegramWorkflowSpawn.claude_cli_manager` is an `Arc<ClaudeCliSessionManager>` shared with the daemon's `ConnectionServiceImpl`. Sessions spawned via Telegram are therefore immediately attachable via the existing **`StreamSessionTerminalIO`** gRPC stream and the web terminal / `tddy-tools pty-relay`.
+
+### LiveKit
+
+LiveKit bridging is **optional** for `/start-claude` (unlike the tddy-coder path). If `livekit_creds_from_config` returns `None`, the session is still launched — attach via gRPC only.
+
+### Launch-only
+
+The current implementation is **launch-only**: `claude`'s PTY output is not streamed back into Telegram. The operator attaches via the web terminal or `pty-relay`.
+
 ## Tests
 
 - **Unit tests** live in **`telegram_session_control.rs`** (`#[cfg(test)]`): parsers, chunking, presenter bytes.
@@ -119,6 +165,7 @@ The daemon binary runs **long-polling** inbound handling (see above). Durable **
 - **Concurrent elicitation** scenarios (single chat, multiple sessions, active token) live in **`packages/tddy-daemon/tests/telegram_concurrent_elicitation_integration.rs`**.
 - **Multi-select shortcuts** (outbound keyboards, parser, metadata gating) live in **`packages/tddy-daemon/tests/telegram_multi_select_acceptance.rs`**.
 - **Telegram-tracked session gate and replay** live in **`packages/tddy-daemon/tests/telegram_tracked_session_acceptance.rs`**.
+- **`/start-claude` acceptance** (`project → branch → model → PTY spawn`) lives in **`packages/tddy-daemon/tests/telegram_start_claude_acceptance.rs`**: `start_claude_creates_session_with_initial_prompt_and_marker`, `start_claude_project_then_branch_routes_to_model_keyboard`, `start_claude_model_callback_launches_claude_cli`, `start_claude_uses_shared_manager`.
 
 ## Related documentation
 

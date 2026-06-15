@@ -7,8 +7,10 @@
 //! - [`schema_manifest`] — goal registry from `schema-manifest.json` (`list-schemas`).
 
 pub mod github_pr;
+pub mod relay;
 pub mod review_persist;
 pub mod schema;
 pub mod schema_manifest;
+pub mod server;
 pub mod session_actions_cli;
 pub mod session_context;

@@ -86,12 +86,11 @@ fn terminate_session_process(pid: u32) -> Result<(), Status> {
         return Ok(());
     }
     signal_pid(pid_i, libc::SIGKILL)?;
-    if wait_until_pid_stopped(pid, Duration::from_secs(3), Duration::from_millis(100)) {
-        return Ok(());
-    }
-    Err(Status::failed_precondition(
-        "session process did not exit after SIGTERM and SIGKILL",
-    ))
+    // SIGKILL cannot be blocked or ignored; the process is dead. On some platforms (macOS) the
+    // zombie remains visible to kill(pid,0) until the parent calls waitpid, so we do a brief
+    // best-effort wait but do not return an error — the process has no running threads.
+    let _ = wait_until_pid_stopped(pid, Duration::from_secs(3), Duration::from_millis(100));
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -269,6 +268,8 @@ mod tests {
             previous_session_id: None,
             session_type: None,
             model: None,
+            activity_status: None,
+            hook_token: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }
@@ -277,10 +278,7 @@ mod tests {
     #[test]
     fn validate_accepts_typical_session_id() {
         let r = validate_session_id_for_delete("inactive-delete-me");
-        assert!(
-            r.is_ok(),
-            "expected valid session id to pass validation (green phase)"
-        );
+        assert!(r.is_ok(), "expected valid session id to pass validation");
     }
 
     /// Lower-level: resolution should yield a directory under the base for safe ids.
@@ -343,7 +341,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let base = temp.path().join("sessions_this_daemon");
         std::fs::create_dir_all(&base).unwrap();
-        let err = delete_session_directory(&base, "session-owned-on-another-daemon", None).unwrap_err();
+        let err =
+            delete_session_directory(&base, "session-owned-on-another-daemon", None).unwrap_err();
         assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
     }
 }

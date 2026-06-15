@@ -6604,11 +6604,13 @@ dependencies = [
  "tddy-service",
  "tddy-tui",
  "tddy-workflow-recipes",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tonic 0.12.3",
  "tower-http",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]
@@ -6664,6 +6666,7 @@ name = "tddy-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_cmd",
  "async-trait",
  "axum 0.8.8",
  "base64 0.22.1",
@@ -6671,6 +6674,7 @@ dependencies = [
  "chrono",
  "clap",
  "futures-util",
+ "glob",
  "hmac",
  "libc",
  "livekit",

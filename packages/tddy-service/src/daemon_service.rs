@@ -386,6 +386,8 @@ impl DaemonStreamHandler {
                 previous_session_id: None,
                 session_type: None,
                 model: None,
+                activity_status: None,
+                hook_token: None,
             },
         ) {
             send_workflow_complete(&self.tx, false, format!("write session metadata: {}", e)).await;
