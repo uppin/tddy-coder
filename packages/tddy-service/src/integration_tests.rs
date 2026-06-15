@@ -950,3 +950,314 @@ mod workflow_artifact_acceptance {
         );
     }
 }
+
+/// RPC Playground reflection acceptance tests.
+///
+/// These tests verify the standard gRPC ServerReflection implementation that enables the
+/// browser-based RPC Playground to discover services and fetch descriptors on demand.
+///
+/// ALL tests in this module fail to compile until the implementation is added:
+///   - `crate::proto::reflection` (needs reflection.proto + TddyServiceGenerator codegen)
+///   - `crate::reflection_service::ServerReflectionImpl` (needs reflection_service.rs)
+///   - `crate::SERVICE_DESCRIPTOR_BYTES` (needs build.rs descriptor-only pass)
+///   - `MultiRpcService::service_names()` (needs tddy-rpc change)
+#[cfg(test)]
+mod reflection_acceptance {
+    use prost::Message;
+    use tokio::sync::mpsc;
+
+    use tddy_rpc::{RequestMetadata, ResponseBody, RpcMessage};
+
+    // These imports will fail to compile until the implementation exists.
+    use crate::proto::reflection::ServerReflectionServer;
+    use crate::proto::reflection::{
+        server_reflection_request::MessageRequest, server_reflection_response::MessageResponse,
+        ServerReflectionRequest, ServerReflectionResponse,
+    };
+    use crate::reflection_service::ServerReflectionImpl;
+    // SERVICE_DESCRIPTOR_BYTES is a &'static [u8] embedding the combined FileDescriptorSet.
+    use crate::SERVICE_DESCRIPTOR_BYTES;
+
+    fn make_reflection_service(
+        service_names: &[&str],
+    ) -> ServerReflectionServer<ServerReflectionImpl> {
+        let names: Vec<String> = service_names.iter().map(|s| s.to_string()).collect();
+        ServerReflectionServer::new(ServerReflectionImpl::new(names, SERVICE_DESCRIPTOR_BYTES))
+    }
+
+    fn make_reflection_bridge(
+        service_names: &[&str],
+    ) -> tddy_rpc::RpcBridge<ServerReflectionServer<ServerReflectionImpl>> {
+        tddy_rpc::RpcBridge::new(make_reflection_service(service_names))
+    }
+
+    fn list_services_request() -> RpcMessage {
+        let req = ServerReflectionRequest {
+            host: String::new(),
+            message_request: Some(MessageRequest::ListServices(String::new())),
+        };
+        RpcMessage {
+            payload: req.encode_to_vec(),
+            metadata: RequestMetadata::default(),
+        }
+    }
+
+    fn file_containing_symbol_request(symbol: &str) -> RpcMessage {
+        let req = ServerReflectionRequest {
+            host: String::new(),
+            message_request: Some(MessageRequest::FileContainingSymbol(symbol.to_string())),
+        };
+        RpcMessage {
+            payload: req.encode_to_vec(),
+            metadata: RequestMetadata::default(),
+        }
+    }
+
+    fn file_by_filename_request(filename: &str) -> RpcMessage {
+        let req = ServerReflectionRequest {
+            host: String::new(),
+            message_request: Some(MessageRequest::FileByFilename(filename.to_string())),
+        };
+        RpcMessage {
+            payload: req.encode_to_vec(),
+            metadata: RequestMetadata::default(),
+        }
+    }
+
+    fn decode_response(bytes: &[u8]) -> ServerReflectionResponse {
+        ServerReflectionResponse::decode(bytes).expect("decode ServerReflectionResponse")
+    }
+
+    #[test]
+    fn service_descriptor_set_embeds_all_registered_services() {
+        use prost_types::FileDescriptorSet;
+        let fds = FileDescriptorSet::decode(SERVICE_DESCRIPTOR_BYTES)
+            .expect("SERVICE_DESCRIPTOR_BYTES must decode as a valid FileDescriptorSet");
+        let filenames: Vec<_> = fds
+            .file
+            .iter()
+            .map(|f| f.name.as_deref().unwrap_or(""))
+            .collect();
+        // Must contain at minimum echo, token, auth, terminal, connection service files.
+        assert!(
+            filenames.iter().any(|n| n.contains("echo")),
+            "FileDescriptorSet must include echo service proto; found: {:?}",
+            filenames
+        );
+        assert!(
+            filenames.iter().any(|n| n.contains("token")),
+            "FileDescriptorSet must include token service proto; found: {:?}",
+            filenames
+        );
+        assert!(
+            filenames.iter().any(|n| n.contains("connection")),
+            "FileDescriptorSet must include connection service proto; found: {:?}",
+            filenames
+        );
+    }
+
+    #[tokio::test]
+    async fn reflection_list_services_returns_only_registered() {
+        let bridge = make_reflection_bridge(&["test.EchoService", "token.TokenService"]);
+        let (tx, rx) = mpsc::channel::<RpcMessage>(8);
+
+        tx.send(list_services_request()).await.unwrap();
+        drop(tx);
+
+        let handle = bridge
+            .start_bidi_stream(
+                "grpc.reflection.v1.ServerReflection",
+                "ServerReflectionInfo",
+                rx,
+            )
+            .await
+            .expect("start_bidi_stream must succeed for ServerReflectionInfo");
+
+        let mut output_rx = match handle.output {
+            ResponseBody::Streaming(rx) => rx,
+            ResponseBody::Complete(_) => panic!("expected Streaming response from bidi"),
+        };
+
+        let chunk = output_rx
+            .recv()
+            .await
+            .expect("must receive at least one response");
+        let bytes = chunk.expect("response chunk must not be an error");
+        let resp = decode_response(&bytes);
+
+        let services = match resp.message_response {
+            Some(MessageResponse::ListServicesResponse(r)) => r,
+            other => panic!("expected ListServicesResponse, got: {:?}", other),
+        };
+
+        let names: Vec<&str> = services.service.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"test.EchoService"),
+            "list_services must include test.EchoService; got: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"token.TokenService"),
+            "list_services must include token.TokenService; got: {:?}",
+            names
+        );
+        // Must NOT return services that are compiled but not registered.
+        assert_eq!(
+            names.len(),
+            2,
+            "list_services must return ONLY registered services, not all compiled protos; got: {:?}", names
+        );
+    }
+
+    #[tokio::test]
+    async fn reflection_file_containing_symbol_returns_file_and_deps() {
+        use prost_types::FileDescriptorProto;
+        let bridge = make_reflection_bridge(&["test.EchoService"]);
+        let (tx, rx) = mpsc::channel::<RpcMessage>(8);
+
+        tx.send(file_containing_symbol_request("test.EchoService"))
+            .await
+            .unwrap();
+        drop(tx);
+
+        let handle = bridge
+            .start_bidi_stream(
+                "grpc.reflection.v1.ServerReflection",
+                "ServerReflectionInfo",
+                rx,
+            )
+            .await
+            .expect("start_bidi_stream must succeed");
+
+        let mut output_rx = match handle.output {
+            ResponseBody::Streaming(rx) => rx,
+            ResponseBody::Complete(_) => panic!("expected Streaming"),
+        };
+
+        let chunk = output_rx
+            .recv()
+            .await
+            .expect("must receive response")
+            .expect("no error");
+        let resp = decode_response(&chunk);
+
+        let file_bytes = match resp.message_response {
+            Some(MessageResponse::FileDescriptorResponse(r)) => r,
+            Some(MessageResponse::ErrorResponse(e)) => panic!(
+                "got error response for file_containing_symbol test.EchoService: {:?}",
+                e
+            ),
+            other => panic!("expected FileDescriptorResponse, got: {:?}", other),
+        };
+
+        assert!(
+            !file_bytes.file_descriptor_proto.is_empty(),
+            "file_descriptor_response must contain at least one FileDescriptorProto"
+        );
+        // Each element must be a valid FileDescriptorProto.
+        for bytes in &file_bytes.file_descriptor_proto {
+            FileDescriptorProto::decode(&bytes[..])
+                .expect("each element must decode as FileDescriptorProto");
+        }
+    }
+
+    #[tokio::test]
+    async fn reflection_file_by_filename_returns_requested_file() {
+        use prost_types::FileDescriptorProto;
+        let bridge = make_reflection_bridge(&["test.EchoService"]);
+        let (tx, rx) = mpsc::channel::<RpcMessage>(8);
+
+        // The filename must match the .proto `option` or the filename used in prost-build.
+        tx.send(file_by_filename_request("test/echo_service.proto"))
+            .await
+            .unwrap();
+        drop(tx);
+
+        let handle = bridge
+            .start_bidi_stream(
+                "grpc.reflection.v1.ServerReflection",
+                "ServerReflectionInfo",
+                rx,
+            )
+            .await
+            .expect("start_bidi_stream must succeed");
+
+        let mut output_rx = match handle.output {
+            ResponseBody::Streaming(rx) => rx,
+            ResponseBody::Complete(_) => panic!("expected Streaming"),
+        };
+
+        let chunk = output_rx
+            .recv()
+            .await
+            .expect("must receive response")
+            .expect("no error");
+        let resp = decode_response(&chunk);
+
+        let file_bytes = match resp.message_response {
+            Some(MessageResponse::FileDescriptorResponse(r)) => r,
+            other => panic!("expected FileDescriptorResponse, got: {:?}", other),
+        };
+
+        assert!(
+            !file_bytes.file_descriptor_proto.is_empty(),
+            "file_by_filename must return at least one FileDescriptorProto"
+        );
+        let fdp = FileDescriptorProto::decode(&file_bytes.file_descriptor_proto[0][..])
+            .expect("must decode as FileDescriptorProto");
+        assert!(
+            fdp.name.as_deref().unwrap_or("").contains("echo"),
+            "returned file must be the echo service proto; got: {:?}",
+            fdp.name
+        );
+    }
+
+    #[tokio::test]
+    async fn reflection_unknown_symbol_returns_error_response() {
+        let bridge = make_reflection_bridge(&["test.EchoService"]);
+        let (tx, rx) = mpsc::channel::<RpcMessage>(8);
+
+        tx.send(file_containing_symbol_request(
+            "nonexistent.VeryFakeService",
+        ))
+        .await
+        .unwrap();
+        drop(tx);
+
+        let handle = bridge
+            .start_bidi_stream(
+                "grpc.reflection.v1.ServerReflection",
+                "ServerReflectionInfo",
+                rx,
+            )
+            .await
+            .expect("start_bidi_stream must succeed even for unknown symbols");
+
+        let mut output_rx = match handle.output {
+            ResponseBody::Streaming(rx) => rx,
+            ResponseBody::Complete(_) => panic!("expected Streaming"),
+        };
+
+        let chunk = output_rx
+            .recv()
+            .await
+            .expect("must receive response")
+            .expect("no error");
+        let resp = decode_response(&chunk);
+
+        match resp.message_response {
+            Some(MessageResponse::ErrorResponse(e)) => {
+                // gRPC reflection uses code 5 = NOT_FOUND for unknown symbols.
+                assert_eq!(
+                    e.error_code, 5,
+                    "error_code must be NOT_FOUND (5) for unknown symbol; got: {}",
+                    e.error_code
+                );
+            }
+            other => panic!(
+                "expected ErrorResponse for unknown symbol, got: {:?}",
+                other
+            ),
+        }
+    }
+}

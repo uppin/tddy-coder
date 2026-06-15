@@ -357,6 +357,9 @@ fn main() -> anyhow::Result<()> {
             None
         };
 
+        let service_name_strs: Vec<&str> = rpc_entries.iter().map(|e| e.name).collect();
+        rpc_entries.push(tddy_service::reflection_entry_from(&service_name_strs));
+
         let res = tddy_daemon::server::run_server(
             host.as_str(),
             port,

@@ -134,15 +134,17 @@ async fn handle_rpc<S: tddy_rpc::RpcService>(
             // Stream frames to the client as they arrive rather than buffering everything first.
             // Without this, long-lived streams (e.g. terminal output) never deliver data until
             // the session ends.
-            let (body_tx, body_rx) =
-                tokio::sync::mpsc::unbounded_channel::<Result<bytes::Bytes, std::convert::Infallible>>();
+            let (body_tx, body_rx) = tokio::sync::mpsc::unbounded_channel::<
+                Result<bytes::Bytes, std::convert::Infallible>,
+            >();
             tokio::spawn(async move {
                 let mut had_error = false;
                 let mut stream = ReceiverStream::new(rx);
                 while let Some(item) = stream.next().await {
                     match item {
                         Ok(payload) => {
-                            let _ = body_tx.send(Ok(bytes::Bytes::from(wrap_envelope(&payload, false))));
+                            let _ = body_tx
+                                .send(Ok(bytes::Bytes::from(wrap_envelope(&payload, false))));
                         }
                         Err(status) => {
                             had_error = true;
@@ -152,9 +154,9 @@ async fn handle_rpc<S: tddy_rpc::RpcService>(
                                     "message": status.message
                                 }
                             });
-                            let _ = body_tx.send(Ok(bytes::Bytes::from(
-                                wrap_end_stream(err_json.to_string().as_bytes()),
-                            )));
+                            let _ = body_tx.send(Ok(bytes::Bytes::from(wrap_end_stream(
+                                err_json.to_string().as_bytes(),
+                            ))));
                             break;
                         }
                     }
@@ -170,7 +172,9 @@ async fn handle_rpc<S: tddy_rpc::RpcService>(
                     header::CONTENT_TYPE,
                     protocol.streaming_response_content_type(),
                 )],
-                Body::from_stream(tokio_stream::wrappers::UnboundedReceiverStream::new(body_rx)),
+                Body::from_stream(tokio_stream::wrappers::UnboundedReceiverStream::new(
+                    body_rx,
+                )),
             )
                 .into_response()
         }

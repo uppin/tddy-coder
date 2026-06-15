@@ -46,7 +46,11 @@ import { UserAvatar } from "./components/UserAvatar";
 import { Button } from "./components/ui/button";
 import { ConnectionScreen } from "./components/ConnectionScreen";
 import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
-import { parseTerminalSessionIdFromPathname } from "./routing/appRoutes";
+import { RpcPlaygroundAppPage } from "./rpc-playground/RpcPlaygroundAppPage";
+import {
+  isRpcPlaygroundPath,
+  parseTerminalSessionIdFromPathname,
+} from "./routing/appRoutes";
 
 function usePathname(): [string, (path: string) => void] {
   const [path, setPath] = useState(
@@ -393,7 +397,9 @@ export function App() {
       ) : daemonMode === null ? (
         <div style={{ padding: 24 }}>Loading…</div>
       ) : daemonMode === true ? (
-        path === "/worktrees" ? (
+        isRpcPlaygroundPath(path) ? (
+          <RpcPlaygroundAppPage onNavigate={navigate} />
+        ) : path === "/worktrees" ? (
           <WorktreesAppPage onNavigate={navigate} />
         ) : (
           <ConnectionScreen

@@ -12,6 +12,7 @@ pub mod echo_service;
 pub mod loopback_tunnel_service;
 pub mod observer_service;
 pub mod presenter_intent_service;
+pub mod reflection_service;
 pub mod service;
 pub mod terminal_service;
 pub mod token_service;
@@ -28,9 +29,11 @@ pub use presenter_intent_service::PresenterIntentService;
 pub use proto::auth::AuthServiceServer;
 pub use proto::connection::ConnectionServiceServer;
 pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
+pub use proto::reflection::ServerReflectionServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
+pub use reflection_service::{reflection_entry_from, ServerReflectionImpl};
 pub use service::TddyRemoteService;
 pub use tddy_rpc::Status;
 pub use terminal_service::{
@@ -64,7 +67,15 @@ pub mod proto {
     pub mod loopback_tunnel {
         include!(concat!(env!("OUT_DIR"), "/loopback_tunnel.rs"));
     }
+    pub mod reflection {
+        include!(concat!(env!("OUT_DIR"), "/grpc.reflection.v1.rs"));
+    }
 }
+
+/// Combined `FileDescriptorSet` (serialized) for all service protos, used by the
+/// gRPC `ServerReflection` service to serve descriptors at runtime.
+pub static SERVICE_DESCRIPTOR_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/service_descriptors.bin"));
 
 /// Tonic-generated gRPC server/client for terminal.proto.
 /// Uses the same message types as `proto::terminal` (via extern_path).

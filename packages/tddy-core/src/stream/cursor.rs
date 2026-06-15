@@ -198,29 +198,27 @@ where
                     }
                 }
             }
-            "tool_call" => {
-                if event.subtype == "started" {
-                    if let Some(ref tool_call) = event.tool_call {
-                        // Extract AskUserQuestion/AskQuestion for Q&A flow (askUserQuestionToolCall or askQuestionToolCall)
-                        let obj = tool_call.as_object();
-                        if let Some(obj) = obj {
-                            for tool_key in ["askUserQuestionToolCall", "askQuestionToolCall"] {
-                                if let Some(inner) = obj.get(tool_key) {
-                                    if let Some(args) = inner.get("args") {
-                                        for q in parse_ask_user_question(args) {
-                                            let dedup_key = (q.header.clone(), q.question.clone());
-                                            if seen_questions.insert(dedup_key) {
-                                                questions.push(q);
-                                            }
+            "tool_call" if event.subtype == "started" => {
+                if let Some(ref tool_call) = event.tool_call {
+                    // Extract AskUserQuestion/AskQuestion for Q&A flow (askUserQuestionToolCall or askQuestionToolCall)
+                    let obj = tool_call.as_object();
+                    if let Some(obj) = obj {
+                        for tool_key in ["askUserQuestionToolCall", "askQuestionToolCall"] {
+                            if let Some(inner) = obj.get(tool_key) {
+                                if let Some(args) = inner.get("args") {
+                                    for q in parse_ask_user_question(args) {
+                                        let dedup_key = (q.header.clone(), q.question.clone());
+                                        if seen_questions.insert(dedup_key) {
+                                            questions.push(q);
                                         }
                                     }
-                                    break;
                                 }
+                                break;
                             }
                         }
-                        if let Some((name, detail)) = extract_tool_call_name_and_detail(tool_call) {
-                            on_progress(&ProgressEvent::ToolUse { name, detail });
-                        }
+                    }
+                    if let Some((name, detail)) = extract_tool_call_name_and_detail(tool_call) {
+                        on_progress(&ProgressEvent::ToolUse { name, detail });
                     }
                 }
             }

@@ -7,9 +7,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tddy_core::session_metadata::{
-    read_session_metadata, write_session_metadata, SessionMetadata,
-};
+use tddy_core::session_metadata::{read_session_metadata, write_session_metadata, SessionMetadata};
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::user_sessions_path::TDDY_PROJECTS_DIR_ENV;
@@ -56,7 +54,14 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionSe
             None
         }
     });
-    ConnectionServiceImpl::new(config, sessions_base_resolver, user_resolver, None, None, None)
+    ConnectionServiceImpl::new(
+        config,
+        sessions_base_resolver,
+        user_resolver,
+        None,
+        None,
+        None,
+    )
 }
 
 /// Create a git repo with an origin remote pointing at itself so that
@@ -81,10 +86,7 @@ fn create_test_repo_with_origin(dir: &std::path::Path) {
     run(&["config", "user.name", "Test"], &[]);
     run(&["commit", "--allow-empty", "-m", "init"], author_env);
     // Add the repo itself as origin so git fetch origin works without a real server.
-    run(
-        &["remote", "add", "origin", dir.to_str().unwrap()],
-        &[],
-    );
+    run(&["remote", "add", "origin", dir.to_str().unwrap()], &[]);
     run(&["push", "-u", "origin", "main"], &[]);
 }
 
@@ -143,10 +145,7 @@ async fn claude_cli_session_metadata_fields_persisted() {
 
     // sessions_base_resolver returns sessions_tmp.path() directly (no username segment);
     // the daemon appends SESSIONS_SUBDIR ("sessions") and session_id.
-    let session_dir = sessions_tmp
-        .path()
-        .join("sessions")
-        .join(&session_id);
+    let session_dir = sessions_tmp.path().join("sessions").join(&session_id);
     let meta = read_session_metadata(&session_dir)
         .expect(".session.yaml must be written for claude-cli session");
 
@@ -377,8 +376,8 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
     );
 
     // After resume, metadata must be updated to active with a fresh PID.
-    let updated_meta = read_session_metadata(&session_dir)
-        .expect(".session.yaml must be readable after resume");
+    let updated_meta =
+        read_session_metadata(&session_dir).expect(".session.yaml must be readable after resume");
     assert_eq!(
         updated_meta.status, "active",
         "session must be marked active after resume"

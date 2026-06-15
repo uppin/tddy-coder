@@ -3186,7 +3186,10 @@ mod unit_tests {
 
     #[test]
     fn session_tail8_returns_last_8_chars() {
-        assert_eq!(session_tail8("018fbbba-1234-7abc-9abc-123456789abc"), "56789abc");
+        assert_eq!(
+            session_tail8("018fbbba-1234-7abc-9abc-123456789abc"),
+            "56789abc"
+        );
         assert_eq!(session_tail8("sess-0001"), "ess-0001");
         assert_eq!(session_tail8("short"), "short"); // shorter than 8 → full string
     }

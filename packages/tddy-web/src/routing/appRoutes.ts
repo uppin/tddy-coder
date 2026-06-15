@@ -42,3 +42,10 @@ export function isSessionListPath(pathname: string): boolean {
 export function isAuthCallbackPath(pathname: string): boolean {
   return pathname === "/auth/callback";
 }
+
+/** Canonical path for the RPC Playground screen. */
+export const RPC_PLAYGROUND_ROUTE = "/rpc-playground";
+
+export function isRpcPlaygroundPath(pathname: string): boolean {
+  return pathname === RPC_PLAYGROUND_ROUTE;
+}

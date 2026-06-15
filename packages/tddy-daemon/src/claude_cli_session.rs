@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use prost::Message as _;
 use tddy_livekit::{LiveKitParticipant, RpcResult, RpcService, TokenGenerator};
 use tddy_rpc::{BidiStreamOutput, ResponseBody, RpcMessage};
@@ -57,7 +57,12 @@ pub struct PtyHandle {
 impl PtyHandle {
     /// Resize the PTY to the given dimensions and signal the child with SIGWINCH.
     pub fn resize(&self, rows: u16, cols: u16) {
-        let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
+        let size = PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
         if let Ok(m) = self.master.lock() {
             let _ = m.resize(size);
         }
@@ -72,16 +77,12 @@ impl PtyHandle {
     /// initial render: after subscribing, call this so claude repaints to the live channel.
     pub fn trigger_redraw(&self) {
         if let Ok(m) = self.master.lock() {
-            let size = self
-                .current_size
-                .lock()
-                .map(|s| *s)
-                .unwrap_or(PtySize {
-                    rows: DEFAULT_TERM_ROWS,
-                    cols: DEFAULT_TERM_COLS,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                });
+            let size = self.current_size.lock().map(|s| *s).unwrap_or(PtySize {
+                rows: DEFAULT_TERM_ROWS,
+                cols: DEFAULT_TERM_COLS,
+                pixel_width: 0,
+                pixel_height: 0,
+            });
             let _ = m.resize(size);
         }
     }
@@ -202,7 +203,11 @@ impl ClaudeCliSessionManager {
         stdout_tx: broadcast::Sender<Bytes>,
         capture: Arc<std::sync::Mutex<Vec<u8>>>,
         reg: Arc<RwLock<HashMap<String, Arc<PtyHandle>>>>,
-    ) -> anyhow::Result<(u32, Arc<std::sync::Mutex<Box<dyn portable_pty::MasterPty + Send>>>, watch::Receiver<bool>)> {
+    ) -> anyhow::Result<(
+        u32,
+        Arc<std::sync::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+        watch::Receiver<bool>,
+    )> {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -227,10 +232,9 @@ impl ClaudeCliSessionManager {
 
         // Spawn the child on the slave side. The slave is consumed/closed after spawn so the
         // master sees EOF when the child exits.
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| anyhow::anyhow!("failed to spawn claude-cli binary {:?}: {}", binary_path, e))?;
+        let child = pair.slave.spawn_command(cmd).map_err(|e| {
+            anyhow::anyhow!("failed to spawn claude-cli binary {:?}: {}", binary_path, e)
+        })?;
         // Drop slave so master sees EOF on child exit.
         drop(pair.slave);
 
@@ -437,7 +441,10 @@ impl RpcService for PtyLiveKitService {
         mut input_rx: mpsc::Receiver<RpcMessage>,
     ) -> Result<BidiStreamOutput, tddy_rpc::Status> {
         if service != "terminal.TerminalService" || method != "StreamTerminalIO" {
-            return Err(tddy_rpc::Status::not_found(format!("{}/{}", service, method)));
+            return Err(tddy_rpc::Status::not_found(format!(
+                "{}/{}",
+                service, method
+            )));
         }
 
         let (out_tx, out_rx) = mpsc::channel::<Result<Vec<u8>, tddy_rpc::Status>>(256);
