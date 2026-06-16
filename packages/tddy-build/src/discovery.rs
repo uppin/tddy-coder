@@ -32,8 +32,11 @@ pub fn discover_build_manifests(
     paths.sort();
     paths.dedup();
 
+    log::debug!("discovered {} build manifest(s)", paths.len());
+
     let mut manifests = Vec::with_capacity(paths.len());
     for path in paths {
+        log::trace!("build manifest: {}", path.display());
         let yaml = std::fs::read_to_string(&path)
             .map_err(|e| BuildError::Io(format!("{}: {}", path.display(), e)))?;
         let manifest = load_build_manifest(&yaml)

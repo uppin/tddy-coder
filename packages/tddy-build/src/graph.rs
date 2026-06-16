@@ -40,6 +40,8 @@ impl BuildGraph {
             }
         }
 
+        log::debug!("build graph: {} target(s)", order.len());
+
         let graph = Self { targets, order };
         graph.check_target_cycles()?;
         Ok(graph)
@@ -85,6 +87,7 @@ impl BuildGraph {
             return Ok(());
         }
         if on_stack.iter().any(|v| v == id) {
+            log::warn!("build graph cycle detected through target {id}");
             return Err(BuildError::Cycle(format!("cycle through target {id}")));
         }
         on_stack.push(id.to_string());

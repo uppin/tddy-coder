@@ -42,5 +42,20 @@ pub fn lower_target(
         }
     }
 
+    if let Some(config) = &target.config {
+        log::debug!(
+            "lowered target {} (type {}) into {} action(s)",
+            target.id,
+            config.r#type,
+            actions.len()
+        );
+    } else {
+        log::debug!(
+            "lowered target {} into {} explicit action(s)",
+            target.id,
+            actions.len()
+        );
+    }
+
     Ok(actions)
 }
