@@ -100,8 +100,12 @@ impl log::Log for CaptureLogger {
     fn flush(&self) {}
 }
 
+static LOGGER: CaptureLogger = CaptureLogger;
+
 fn install_logger() {
-    let _ = log::set_boxed_logger(Box::new(CaptureLogger));
+    // `log`'s `set_boxed_logger` needs the `std` feature; `set_logger` with a
+    // `&'static` logger works without changing the engine's dependency.
+    let _ = log::set_logger(&LOGGER);
     log::set_max_level(log::LevelFilter::Trace);
 }
 
