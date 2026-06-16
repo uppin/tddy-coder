@@ -20,6 +20,9 @@ struct RustBinary {
     features: Vec<String>,
     profile: String,
     target_triple: String,
+    srcs: Vec<String>,
+    outputs: Vec<tddy_build::OutputSpec>,
+    working_dir: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -28,6 +31,9 @@ struct RustLibrary {
     package: String,
     features: Vec<String>,
     profile: String,
+    srcs: Vec<String>,
+    outputs: Vec<tddy_build::OutputSpec>,
+    working_dir: String,
 }
 
 impl BuildPlugin for RustPlugin {
@@ -37,8 +43,14 @@ impl BuildPlugin for RustPlugin {
 
     fn lower(&self, ctx: &LowerContext) -> Result<Vec<BuildAction>, BuildError> {
         let action = match ctx.type_name {
-            "rust_binary" => rust_binary_action(parse(ctx)?),
-            "rust_library" => rust_library_action(parse(ctx)?),
+            "rust_binary" => {
+                let rb: RustBinary = parse(ctx)?;
+                rust_binary_action(rb)?
+            }
+            "rust_library" => {
+                let rl: RustLibrary = parse(ctx)?;
+                rust_library_action(rl)?
+            }
             other => {
                 return Err(BuildError::Manifest(format!(
                     "tddy-build-rust does not handle target type {other}"
@@ -57,7 +69,7 @@ where
         .map_err(|e| BuildError::Manifest(format!("invalid {} config: {e}", ctx.type_name)))
 }
 
-fn rust_binary_action(rb: RustBinary) -> BuildAction {
+fn rust_binary_action(rb: RustBinary) -> Result<BuildAction, BuildError> {
     let description = format!("cargo build {}", rb.package);
     let mut command = vec![
         "cargo".to_string(),
@@ -75,10 +87,17 @@ fn rust_binary_action(rb: RustBinary) -> BuildAction {
         command.push("--target".to_string());
         command.push(rb.target_triple);
     }
-    command_action("rust-binary", description, command)
+    finish(
+        "rust-binary",
+        description,
+        command,
+        rb.srcs,
+        rb.outputs,
+        rb.working_dir,
+    )
 }
 
-fn rust_library_action(rl: RustLibrary) -> BuildAction {
+fn rust_library_action(rl: RustLibrary) -> Result<BuildAction, BuildError> {
     let description = format!("cargo build {}", rl.package);
     let mut command = vec![
         "cargo".to_string(),
@@ -88,7 +107,14 @@ fn rust_library_action(rl: RustLibrary) -> BuildAction {
     ];
     push_features(&mut command, rl.features);
     push_profile(&mut command, &rl.profile);
-    command_action("rust-library", description, command)
+    finish(
+        "rust-library",
+        description,
+        command,
+        rl.srcs,
+        rl.outputs,
+        rl.working_dir,
+    )
 }
 
 fn push_features(command: &mut Vec<String>, features: Vec<String>) {
@@ -104,14 +130,24 @@ fn push_profile(command: &mut Vec<String>, profile: &str) {
     }
 }
 
-fn command_action(id: &str, description: String, command: Vec<String>) -> BuildAction {
-    BuildAction {
+fn finish(
+    id: &str,
+    description: String,
+    command: Vec<String>,
+    srcs: Vec<String>,
+    outputs: Vec<tddy_build::OutputSpec>,
+    working_dir: String,
+) -> Result<BuildAction, BuildError> {
+    Ok(BuildAction {
         id: id.to_string(),
         description,
         r#type: ActionType::Command as i32,
         command,
+        inputs: tddy_build::srcs_to_inputs(&srcs, ""),
+        outputs: tddy_build::outputs_to_decls(&outputs)?,
+        working_dir,
         ..Default::default()
-    }
+    })
 }
 
 #[cfg(test)]
@@ -182,5 +218,35 @@ mod tests {
             RustPlugin.lower(&ctx),
             Err(BuildError::Manifest(_))
         ));
+    }
+
+    #[test]
+    fn rust_binary_emits_declared_inputs_and_outputs() {
+        let config: serde_yaml::Value = serde_yaml::from_str(
+            "package: mathapp\nbin_name: mathapp\nprofile: debug\n\
+             srcs: [\"mathapp/src/main.rs\", \"mathapp/Cargo.toml\"]\n\
+             outputs:\n  - path: \"target/debug/mathapp\"\n    kind: file\n",
+        )
+        .expect("valid yaml");
+        let ctx = LowerContext {
+            type_name: "rust_binary",
+            target_id: "t",
+            target_name: "",
+            deps: &[],
+            config: &config,
+        };
+        let actions = RustPlugin.lower(&ctx).expect("lower");
+        let action = &actions[0];
+        assert_eq!(
+            action.command,
+            vec!["cargo", "build", "-p", "mathapp", "--bin", "mathapp"]
+        );
+        assert_eq!(action.inputs.len(), 1);
+        assert_eq!(
+            action.inputs[0].include,
+            vec!["mathapp/src/main.rs", "mathapp/Cargo.toml"]
+        );
+        assert_eq!(action.outputs.len(), 1);
+        assert_eq!(action.outputs[0].path, "target/debug/mathapp");
     }
 }
