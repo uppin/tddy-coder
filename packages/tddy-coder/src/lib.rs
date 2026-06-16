@@ -1,5 +1,6 @@
 //! tddy-coder library — shared by tddy-coder and tddy-demo binaries.
 
+pub mod build_executor;
 pub mod config;
 pub mod plain;
 pub mod recipe;

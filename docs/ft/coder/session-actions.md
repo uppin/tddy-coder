@@ -125,7 +125,7 @@ When a workflow run uses a **`session_dir`**, the engine may **reuse a prior suc
 
 ## Related tests
 
-Library coverage: **`packages/tddy-core/tests/session_actions_red.rs`**, **`packages/tddy-core/tests/toolcall_jobs.rs`**. Integration coverage: **`packages/tddy-tools/tests/actions_cli_acceptance.rs`**, **`packages/tddy-tools/tests/session_action_jobs_acceptance.rs`**.
+Library coverage: **`packages/tddy-core/tests/session_actions_acceptance.rs`**, **`packages/tddy-core/tests/toolcall_jobs.rs`**. Integration coverage: **`packages/tddy-tools/tests/actions_cli_acceptance.rs`**, **`packages/tddy-tools/tests/session_action_jobs_acceptance.rs`**.
 
 ## Related documentation
 

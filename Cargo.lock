@@ -6569,6 +6569,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-build"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "glob",
+ "hex",
+ "log",
+ "prost 0.13.5",
+ "prost-build 0.13.5",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-codegen"
 version = "0.1.0"
 dependencies = [
@@ -6596,6 +6616,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
+ "tddy-build",
  "tddy-connectrpc",
  "tddy-core",
  "tddy-github",
@@ -6909,6 +6930,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "tddy-build",
  "tddy-core",
  "tddy-livekit",
  "tddy-service",

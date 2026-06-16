@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "packages/tddy-acp-stub",
+    "packages/tddy-build",
     "packages/tddy-core",
     "packages/tddy-rpc",
     "packages/tddy-coder",

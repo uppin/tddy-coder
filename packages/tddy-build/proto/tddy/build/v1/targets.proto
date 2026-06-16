@@ -1,0 +1,46 @@
+syntax = "proto3";
+package tddy.build.v1;
+
+message RustBinaryTarget {
+  string package  = 1;               // cargo -p <package>
+  string bin_name = 2;               // --bin <name>
+  repeated string features = 3;      // --features
+  string profile  = 4;               // "debug" | "release"
+  string target_triple = 5;          // e.g. "x86_64-unknown-linux-gnu" (optional)
+}
+
+message RustLibraryTarget {
+  string package = 1;
+  repeated string features = 2;
+  string profile = 3;
+}
+
+message TypeScriptTarget {
+  string package_dir = 1;            // path to package.json dir
+  string build_script = 2;           // e.g. "build" (runs bun run <script>)
+  repeated string output_dirs = 3;   // e.g. ["dist"]
+}
+
+message DockerImageTarget {
+  string dockerfile = 1;
+  string context    = 2;
+  string tag        = 3;
+  repeated string build_args = 4;
+}
+
+message ScriptTarget {
+  repeated string command = 1;
+  map<string, string> env = 2;
+  repeated string working_dir_rel = 3;
+}
+
+// ToolTarget: provides executable tools to other targets' build actions.
+// Analogous to maker-build ExecuteAspect — adds bin_dir to PATH.
+message ToolTarget {
+  string bin_dir = 1;                       // relative path containing binaries
+  map<string, string> commands = 2;         // logical name → relative binary path
+}
+
+message TargetGroupTarget {
+  repeated string member_ids = 1;
+}
