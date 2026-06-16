@@ -1,0 +1,14 @@
+schema_version: 1
+targets:
+  - id: "codegen:gen"
+    name: "Generate sources"
+    actions:
+      - id: "gen"
+        type: command
+        command: ["sh", "-c", "echo generated > generated.txt"]
+        inputs:
+          - include: ["codegen/seed.txt"]
+            root: "."
+        outputs:
+          - path: "generated.txt"
+            kind: file
