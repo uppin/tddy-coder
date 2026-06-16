@@ -1,0 +1,13 @@
+schema_version: 1
+targets:
+  - id: "base:image"
+    name: "Base image"
+    config:
+      type: docker_image
+      tag: example-base
+      dockerfile: base/Dockerfile
+      context: base
+      srcs: ["base/Dockerfile"]
+      outputs:
+        - path: ".tddy-build/iid/base.txt"
+          kind: file

@@ -181,6 +181,14 @@ async fn run_action(
         )));
     }
 
+    // Ensure declared output parent directories exist. Many tools (e.g. compilers,
+    // `docker build --iidfile`) do not create the directory for a declared output.
+    for output in &action.outputs {
+        if let Some(parent) = repo_root.join(&output.path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
     let cwd = if action.working_dir.is_empty() {
         repo_root.to_path_buf()
     } else {

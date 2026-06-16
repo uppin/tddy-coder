@@ -1,0 +1,14 @@
+schema_version: 1
+targets:
+  - id: "api:image"
+    name: "API image"
+    deps: ["base:image"]
+    config:
+      type: docker_image
+      tag: example-api
+      dockerfile: api/Dockerfile
+      context: api
+      srcs: ["api/Dockerfile"]
+      outputs:
+        - path: ".tddy-build/iid/api.txt"
+          kind: file

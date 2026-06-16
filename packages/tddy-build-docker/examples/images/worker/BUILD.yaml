@@ -1,0 +1,14 @@
+schema_version: 1
+targets:
+  - id: "worker:image"
+    name: "Worker image"
+    deps: ["base:image"]
+    config:
+      type: docker_image
+      tag: example-worker
+      dockerfile: worker/Dockerfile
+      context: worker
+      srcs: ["worker/Dockerfile"]
+      outputs:
+        - path: ".tddy-build/iid/worker.txt"
+          kind: file
