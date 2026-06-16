@@ -2,9 +2,12 @@
 
 use std::collections::HashMap;
 
+use crate::builtin::{self, GROUP};
 use crate::error::BuildError;
 use crate::lower::lower_target;
-use crate::proto::{build_target::Config, BuildAction, BuildManifest, BuildTarget};
+use crate::manifest::{BuildManifest, BuildTarget};
+use crate::plugin::PluginRegistry;
+use crate::proto::BuildAction;
 
 /// Global build graph assembled from all discovered manifests.
 ///
@@ -48,12 +51,16 @@ impl BuildGraph {
     }
 
     /// All lowered actions for `target_id`, in declaration order.
-    pub fn actions_for(&self, target_id: &str) -> Result<Vec<BuildAction>, BuildError> {
+    pub fn actions_for(
+        &self,
+        target_id: &str,
+        registry: &PluginRegistry,
+    ) -> Result<Vec<BuildAction>, BuildError> {
         let target = self
             .targets
             .get(target_id)
             .ok_or_else(|| BuildError::UnknownTarget(target_id.to_string()))?;
-        lower_target(target)
+        lower_target(target, registry)
     }
 
     /// Targets to build for `target_id`, dependencies (and group members) first,
@@ -82,7 +89,7 @@ impl BuildGraph {
         }
         on_stack.push(id.to_string());
         if let Some(target) = self.targets.get(id) {
-            for dep in self.target_edges(target) {
+            for dep in self.target_edges(target)? {
                 self.visit_build_order(&dep, visited, on_stack)?;
             }
         }
@@ -93,14 +100,14 @@ impl BuildGraph {
 
     /// Topologically-ordered execution waves of global action node ids; actions
     /// in the same wave may run in parallel.
-    pub fn waves(&self) -> Result<Vec<Vec<String>>, BuildError> {
+    pub fn waves(&self, registry: &PluginRegistry) -> Result<Vec<Vec<String>>, BuildError> {
         // Collect all actions across all targets in stable order.
         let mut nodes: Vec<String> = Vec::new();
         let mut node_index: HashMap<String, usize> = HashMap::new();
         let mut actions: Vec<BuildAction> = Vec::new();
         let mut owner: Vec<String> = Vec::new();
         for target_id in &self.order {
-            for action in self.actions_for(target_id)? {
+            for action in self.actions_for(target_id, registry)? {
                 let node = format!("{target_id}::{}", action.id);
                 node_index.insert(node.clone(), nodes.len());
                 nodes.push(node);
@@ -115,7 +122,7 @@ impl BuildGraph {
         // action of the dependent target.
         for (dependent_idx, dependent_target) in owner.iter().enumerate() {
             if let Some(target) = self.targets.get(dependent_target) {
-                for dep in self.target_edges(target) {
+                for dep in self.target_edges(target)? {
                     for (producer_idx, producer_target) in owner.iter().enumerate() {
                         if producer_target == &dep {
                             edges.push((producer_idx, dependent_idx));
@@ -146,12 +153,14 @@ impl BuildGraph {
     }
 
     /// Target-level predecessors: declared deps plus group members.
-    fn target_edges(&self, target: &BuildTarget) -> Vec<String> {
+    fn target_edges(&self, target: &BuildTarget) -> Result<Vec<String>, BuildError> {
         let mut edges = target.deps.clone();
-        if let Some(Config::Group(g)) = &target.config {
-            edges.extend(g.member_ids.iter().cloned());
+        if let Some(config) = &target.config {
+            if config.r#type == GROUP {
+                edges.extend(builtin::group_member_ids(&config.fields)?);
+            }
         }
-        edges
+        Ok(edges)
     }
 }
 
@@ -245,19 +254,22 @@ fn kahn_waves(n: usize, edges: &[(usize, usize)]) -> Result<Vec<Vec<usize>>, Bui
 mod tests {
     use super::{action_waves, BuildGraph};
     use crate::error::BuildError;
-    use crate::proto::{
-        build_target::Config, ActionType, BuildAction, BuildManifest, BuildTarget, FileSet,
-        OutputDecl, OutputKind, ScriptTarget, TargetGroupTarget,
-    };
+    use crate::manifest::{BuildManifest, BuildTarget, TargetConfig};
+    use crate::plugin::PluginRegistry;
+    use crate::proto::{ActionType, BuildAction, FileSet, OutputDecl, OutputKind};
+
+    fn config(type_name: &str, fields_yaml: &str) -> TargetConfig {
+        TargetConfig {
+            r#type: type_name.to_string(),
+            fields: serde_yaml::from_str(fields_yaml).expect("valid config fields"),
+        }
+    }
 
     fn script_target(id: &str, deps: Vec<&str>) -> BuildTarget {
         BuildTarget {
             id: id.to_string(),
             deps: deps.into_iter().map(String::from).collect(),
-            config: Some(Config::Script(ScriptTarget {
-                command: vec!["true".to_string()],
-                ..Default::default()
-            })),
+            config: Some(config("script", "command: [\"true\"]")),
             ..Default::default()
         }
     }
@@ -330,9 +342,7 @@ mod tests {
     fn group_members_are_treated_as_build_order_predecessors() {
         let group = BuildTarget {
             id: "all".to_string(),
-            config: Some(Config::Group(TargetGroupTarget {
-                member_ids: vec!["core".to_string()],
-            })),
+            config: Some(config("group", "member_ids: [core]")),
             ..Default::default()
         };
         let graph =
@@ -391,7 +401,7 @@ mod tests {
             ..Default::default()
         }])])
         .unwrap();
-        let waves = graph.waves().unwrap();
+        let waves = graph.waves(&PluginRegistry::new()).unwrap();
         assert_eq!(waves.len(), 2);
         assert_eq!(waves[0].len(), 2);
         assert_eq!(waves[1].len(), 1);

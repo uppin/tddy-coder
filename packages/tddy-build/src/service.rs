@@ -10,7 +10,8 @@ use crate::discovery::discover_build_manifests;
 use crate::error::BuildError;
 use crate::executor::{execute_target, ExecuteOptions};
 use crate::graph::BuildGraph;
-use crate::proto::{build_target::Config, BuildTarget};
+use crate::manifest::BuildTarget;
+use crate::plugin::PluginRegistry;
 
 /// Filters for [`build_list_json`].
 #[derive(Debug, Clone, Default)]
@@ -64,6 +65,7 @@ pub async fn build_json(
     target: &str,
     no_cache: bool,
     dry_run: bool,
+    registry: &PluginRegistry,
 ) -> Result<Value, BuildError> {
     let manifests = discover_build_manifests(repo_root)?
         .into_iter()
@@ -75,7 +77,7 @@ pub async fn build_json(
         dry_run,
         ..ExecuteOptions::default()
     };
-    let record = execute_target(repo_root, &graph, target, &opts).await?;
+    let record = execute_target(repo_root, &graph, target, &opts, registry).await?;
 
     let mut value =
         serde_json::to_value(&record).map_err(|e| BuildError::Manifest(e.to_string()))?;
@@ -98,15 +100,10 @@ fn target_id(summary: &Value) -> &str {
     summary.get("id").and_then(Value::as_str).unwrap_or("")
 }
 
-fn target_type_name(target: &BuildTarget) -> &'static str {
-    match &target.config {
-        Some(Config::RustBinary(_)) => "rust_binary",
-        Some(Config::RustLibrary(_)) => "rust_library",
-        Some(Config::Typescript(_)) => "typescript",
-        Some(Config::DockerImage(_)) => "docker_image",
-        Some(Config::Script(_)) => "script",
-        Some(Config::Tool(_)) => "tool",
-        Some(Config::Group(_)) => "group",
-        None => "actions",
-    }
+fn target_type_name(target: &BuildTarget) -> &str {
+    target
+        .config
+        .as_ref()
+        .map(|c| c.r#type.as_str())
+        .unwrap_or("actions")
 }

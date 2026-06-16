@@ -3,6 +3,9 @@ resolver = "2"
 members = [
     "packages/tddy-acp-stub",
     "packages/tddy-build",
+    "packages/tddy-build-rust",
+    "packages/tddy-build-typescript",
+    "packages/tddy-build-docker",
     "packages/tddy-core",
     "packages/tddy-rpc",
     "packages/tddy-coder",

@@ -190,7 +190,7 @@ mod tests {
         BuildAction {
             id: "compile".to_string(),
             r#type: ActionType::Command as i32,
-            command: vec!["cargo".to_string(), "build".to_string()],
+            command: vec!["build-tool".to_string(), "build".to_string()],
             outputs: vec![OutputDecl {
                 path: "out/bin".to_string(),
                 kind: OutputKind::File as i32,

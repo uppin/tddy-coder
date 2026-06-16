@@ -6589,6 +6589,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-build-docker"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml",
+ "tddy-build",
+]
+
+[[package]]
+name = "tddy-build-rust"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml",
+ "tddy-build",
+]
+
+[[package]]
+name = "tddy-build-typescript"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml",
+ "tddy-build",
+]
+
+[[package]]
 name = "tddy-codegen"
 version = "0.1.0"
 dependencies = [
@@ -6617,6 +6644,9 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tddy-build",
+ "tddy-build-docker",
+ "tddy-build-rust",
+ "tddy-build-typescript",
  "tddy-connectrpc",
  "tddy-core",
  "tddy-github",
@@ -6931,6 +6961,9 @@ dependencies = [
  "serde_json",
  "serial_test",
  "tddy-build",
+ "tddy-build-docker",
+ "tddy-build-rust",
+ "tddy-build-typescript",
  "tddy-core",
  "tddy-livekit",
  "tddy-service",

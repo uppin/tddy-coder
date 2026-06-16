@@ -19,6 +19,9 @@ path = "src/main.rs"
 [dependencies]
 tddy-core = { path = "../tddy-core" }
 tddy-build = { path = "../tddy-build" }
+tddy-build-rust = { path = "../tddy-build-rust" }
+tddy-build-typescript = { path = "../tddy-build-typescript" }
+tddy-build-docker = { path = "../tddy-build-docker" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 log = "0.4"
 env_logger = "0.11"

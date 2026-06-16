@@ -8,8 +8,20 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use tddy_build::plugin::PluginRegistry;
 use tddy_build::service::{build_json, build_list_json, BuildListQuery};
+
+/// Assemble the build-plugin registry from the recipe crates. This is the wiring
+/// point: `tddy-build` knows no target types; the binary chooses the plugin set.
+fn plugin_registry() -> PluginRegistry {
+    let mut registry = PluginRegistry::new();
+    registry.register(Arc::new(tddy_build_rust::RustPlugin));
+    registry.register(Arc::new(tddy_build_typescript::TypeScriptPlugin));
+    registry.register(Arc::new(tddy_build_docker::DockerPlugin));
+    registry
+}
 
 /// List build targets from `BUILD.yaml` manifests in a repository.
 #[derive(Parser)]
@@ -72,9 +84,16 @@ pub async fn run_build(args: BuildArgs) -> Result<()> {
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
         return relay_build(Path::new(&socket_path), &args);
     }
-    let value = build_json(&args.repo_dir, &args.target, args.no_cache, args.dry_run)
-        .await
-        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let registry = plugin_registry();
+    let value = build_json(
+        &args.repo_dir,
+        &args.target,
+        args.no_cache,
+        args.dry_run,
+        &registry,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     println!("{}", serde_json::to_string(&value)?);
     Ok(())
 }

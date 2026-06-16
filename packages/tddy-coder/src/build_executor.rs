@@ -8,9 +8,20 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use tddy_build::plugin::PluginRegistry;
 use tddy_core::toolcall::{register_build_executor, BuildExecutor, BuildListQuery, BuildOptions};
 
 struct TddyBuildExecutor;
+
+/// Assemble the build-plugin registry from the recipe crates. `tddy-build` knows no
+/// target types; this binary chooses the plugin set.
+fn plugin_registry() -> PluginRegistry {
+    let mut registry = PluginRegistry::new();
+    registry.register(Arc::new(tddy_build_rust::RustPlugin));
+    registry.register(Arc::new(tddy_build_typescript::TypeScriptPlugin));
+    registry.register(Arc::new(tddy_build_docker::DockerPlugin));
+    registry
+}
 
 impl BuildExecutor for TddyBuildExecutor {
     fn build_list(
@@ -34,12 +45,14 @@ impl BuildExecutor for TddyBuildExecutor {
     ) -> Result<serde_json::Value, String> {
         // We are called from `spawn_blocking`; block on the async build path using
         // the surrounding runtime.
+        let registry = plugin_registry();
         tokio::runtime::Handle::current()
             .block_on(tddy_build::service::build_json(
                 repo_dir,
                 target,
                 opts.no_cache,
                 opts.dry_run,
+                &registry,
             ))
             .map_err(|e| e.to_string())
     }

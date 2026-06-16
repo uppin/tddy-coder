@@ -1,58 +1,53 @@
-//! YAML → proto deserialization for `BUILD.yaml` manifests.
+//! Open `BUILD.yaml` schema and manifest loading.
+//!
+//! `BuildManifest`/`BuildTarget` are plain serde structs (not prost types) so that
+//! a target's `config` is open: `type` selects a handler — a built-in structural
+//! type (`script`/`tool`/`group`) or a registered [`crate::plugin::BuildPlugin`] —
+//! and the remaining keys are an opaque payload that handler interprets. The engine
+//! itself models no specific target type.
+
+use serde::Deserialize;
 
 use crate::error::BuildError;
-use crate::proto::BuildManifest;
+use crate::proto::BuildAction;
 
-/// Deserialize a `BUILD.yaml` document directly into a [`BuildManifest`] proto.
-///
-/// Hard Requirement #2: YAML maps straight onto the prost-generated types — there
-/// is no parallel serde struct layer.
-pub fn load_build_manifest(yaml: &str) -> Result<BuildManifest, BuildError> {
-    serde_yaml::from_str(yaml).map_err(|e| BuildError::Yaml(e.to_string()))
+/// Root of a `BUILD.yaml` document.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BuildManifest {
+    /// Must be `1`.
+    pub schema_version: u32,
+    pub targets: Vec<BuildTarget>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::load_build_manifest;
-    use crate::error::BuildError;
-    use crate::proto::build_target::Config;
+/// A named build artifact. It produces actions by lowering its typed `config` and/or
+/// by carrying explicit `actions`; both may be present (explicit actions run first).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BuildTarget {
+    /// Unique within the repo, e.g. `"packages/foo:binary"`.
+    pub id: String,
+    /// Human label.
+    pub name: String,
+    /// Other target ids this target depends on (declare-time edges).
+    pub deps: Vec<String>,
+    /// Explicit actions, used directly (run before any lowered config action).
+    pub actions: Vec<BuildAction>,
+    /// Typed config, dispatched by [`TargetConfig::type`].
+    pub config: Option<TargetConfig>,
+}
 
-    #[test]
-    fn omitted_optional_fields_default_rather_than_erroring() {
-        // Only `id` + the typed config are provided; deps/name/actions default.
-        let manifest = load_build_manifest(
-            "schema_version: 1\ntargets:\n  - id: \"a:bin\"\n    config:\n      type: rust_binary\n      package: a\n",
-        )
-        .expect("minimal manifest must parse via serde defaults");
-        let target = &manifest.targets[0];
-        assert_eq!(target.name, "");
-        assert!(target.deps.is_empty());
-        match target.config.as_ref().unwrap() {
-            Config::RustBinary(rb) => {
-                assert_eq!(rb.package, "a");
-                assert_eq!(rb.profile, "");
-            }
-            _ => panic!("expected rust_binary"),
-        }
-    }
+/// A target's open config: a `type` tag plus arbitrary handler-specific fields.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TargetConfig {
+    /// Dispatch tag, e.g. `script`, `rust_binary`. Selects the built-in or plugin.
+    pub r#type: String,
+    /// Everything else under `config:` — interpreted by the handler, not the engine.
+    #[serde(flatten)]
+    pub fields: serde_yaml::Value,
+}
 
-    #[test]
-    fn unknown_config_variant_tag_is_rejected() {
-        let err = load_build_manifest(
-            "schema_version: 1\ntargets:\n  - id: x\n    config:\n      type: nonsense\n",
-        )
-        .expect_err("unknown oneof tag must error");
-        assert!(matches!(err, BuildError::Yaml(_)));
-    }
-
-    #[test]
-    fn explicit_actions_parse_with_enum_strings() {
-        let manifest = load_build_manifest(
-            "schema_version: 1\ntargets:\n  - id: t\n    actions:\n      - id: step\n        type: command\n        command: [echo, hi]\n        outputs:\n          - path: out.txt\n            kind: file\n",
-        )
-        .expect("explicit actions must parse");
-        let action = &manifest.targets[0].actions[0];
-        assert_eq!(action.command, vec!["echo".to_string(), "hi".to_string()]);
-        assert_eq!(action.outputs[0].path, "out.txt");
-    }
+/// Deserialize a `BUILD.yaml` document into a [`BuildManifest`].
+pub fn load_build_manifest(yaml: &str) -> Result<BuildManifest, BuildError> {
+    serde_yaml::from_str(yaml).map_err(|e| BuildError::Yaml(e.to_string()))
 }

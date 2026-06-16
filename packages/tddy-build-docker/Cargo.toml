@@ -1,0 +1,14 @@
+[package]
+name = "tddy-build-docker"
+version = "0.1.0"
+edition = "2021"
+description = "Docker build plugin for tddy-build: lowers docker_image targets to `docker build`."
+
+[lib]
+name = "tddy_build_docker"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-build = { path = "../tddy-build" }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
