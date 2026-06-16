@@ -6595,6 +6595,8 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tddy-build",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -6604,6 +6606,8 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tddy-build",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -6613,6 +6617,8 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tddy-build",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

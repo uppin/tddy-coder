@@ -73,7 +73,9 @@ fn rust_targets_depend_on_each_other_deps_first() {
 #[test]
 fn rust_plugin_lowers_expected_cargo_argv() {
     let graph = load(&example_root());
-    let actions = graph.actions_for("mathapp:bin", &registry()).expect("lower");
+    let actions = graph
+        .actions_for("mathapp:bin", &registry())
+        .expect("lower");
     assert_eq!(
         actions[0].command,
         vec!["cargo", "build", "-p", "mathapp", "--bin", "mathapp"]

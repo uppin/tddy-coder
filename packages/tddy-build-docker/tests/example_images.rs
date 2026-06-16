@@ -39,7 +39,11 @@ fn copy_dir(src: &std::path::Path, dst: &std::path::Path) {
     for entry in std::fs::read_dir(src).expect("read_dir") {
         let entry = entry.expect("entry");
         let from = entry.path();
-        if from.file_name().map(|n| n == ".tddy-build").unwrap_or(false) {
+        if from
+            .file_name()
+            .map(|n| n == ".tddy-build")
+            .unwrap_or(false)
+        {
             continue;
         }
         let to = dst.join(entry.file_name());

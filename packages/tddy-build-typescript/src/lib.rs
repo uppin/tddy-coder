@@ -104,7 +104,10 @@ mod tests {
         assert_eq!(action.working_dir, "packages/shared");
         assert_eq!(action.inputs.len(), 1);
         assert_eq!(action.inputs[0].root, "packages/shared");
-        assert_eq!(action.inputs[0].include, vec!["src/index.ts", "package.json"]);
+        assert_eq!(
+            action.inputs[0].include,
+            vec!["src/index.ts", "package.json"]
+        );
         assert_eq!(action.outputs.len(), 1);
         assert_eq!(action.outputs[0].path, "packages/shared/dist");
         assert_eq!(

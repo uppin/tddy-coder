@@ -102,7 +102,10 @@ async fn cache_hits_on_rerun_and_misses_after_input_edit() {
     let third = execute_target(dir.path(), &graph, "codegen:gen", &opts, &registry)
         .await
         .expect("third");
-    assert!(!third.actions[0].cached, "edited input invalidates the cache");
+    assert!(
+        !third.actions[0].cached,
+        "edited input invalidates the cache"
+    );
 }
 
 #[test]
@@ -110,7 +113,10 @@ fn group_membership_orders_the_whole_pipeline() {
     let graph = load(&example_root());
     let order = graph.build_order("pipeline:all").expect("group order");
     for member in ["codegen:gen", "lib:build", "app:build"] {
-        assert!(order.contains(&member.to_string()), "{member} in group order");
+        assert!(
+            order.contains(&member.to_string()),
+            "{member} in group order"
+        );
     }
 }
 

@@ -74,7 +74,9 @@ fn ts_targets_depend_on_each_other_deps_first() {
 #[test]
 fn ts_plugin_lowers_expected_bun_argv_and_workdir() {
     let graph = load(&example_root());
-    let actions = graph.actions_for("shared:build", &registry()).expect("lower");
+    let actions = graph
+        .actions_for("shared:build", &registry())
+        .expect("lower");
     assert_eq!(actions[0].command, vec!["bun", "run", "build"]);
     assert_eq!(actions[0].working_dir, "packages/shared");
 }
