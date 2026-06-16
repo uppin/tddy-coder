@@ -255,7 +255,7 @@ mod tests {
         let action = sample_action();
         let base = compute_cache_key(&action, &fps());
         let mut other = sample_action();
-        other.command.push("--release".to_string());
+        other.command.push("--extra-arg".to_string());
         assert_ne!(base, compute_cache_key(&other, &fps()));
     }
 
