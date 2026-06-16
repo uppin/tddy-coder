@@ -1,6 +1,6 @@
 # RPC Playground — dynamic discovery and invocation
 
-**Status:** WIP (feature/host-rpcs)  
+**Status:** Complete (merged 2026-06-16)  
 **Product area:** Daemon, Web, Coder sessions
 
 ## Summary
