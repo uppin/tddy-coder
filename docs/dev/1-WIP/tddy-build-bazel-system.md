@@ -36,8 +36,8 @@ Add `tddy-build`: a standalone, content-addressed, Bazel-inspired build system. 
 - [x] Green: `tddy-tools` `build`/`build-list` subcommands + relay client
 - [x] Green: `tddy-core` `BuildExecutor` trait + registry + wire types + listener handlers
 - [x] Green: `tddy-coder` executor impl + registration (`build_executor::register`)
-- [ ] Write failing unit/integration tests — manifest, cache, graph, lower, tddy-core toolcall (deferred; acceptance suite covers behavior)
-- [ ] Update changelog / docs
+- [x] Unit tests — `manifest`, `serde_helpers`, `cache`, `lower`, `graph` (inline), tddy-core toolcall wire types (`build_wire_tests`)
+- [x] Update changelog / docs (wrapped)
 
 ## Acceptance tests (red — all failing)
 
@@ -71,7 +71,7 @@ Add `tddy-build`: a standalone, content-addressed, Bazel-inspired build system. 
 
 ## Verification results
 
-- `tddy-build` tests: **10/10** acceptance pass (`build_acceptance.rs`).
+- `tddy-build` tests: **10/10** acceptance (`build_acceptance.rs`) + **30** inline unit tests (manifest/serde_helpers/cache/lower/graph) pass.
 - `tddy-tools` CLI: **3/3** pass (`build_cli_acceptance.rs`).
 - `tddy-core` `session_actions_acceptance`: **7/7** pass (validates the test rename + portable `true` fixture).
 - `cargo clippy -D warnings`: clean on `tddy-build`, `tddy-tools` (bins), `tddy-coder` (bins), `tddy-core` (lib). `cargo fmt`: changeset files clean.

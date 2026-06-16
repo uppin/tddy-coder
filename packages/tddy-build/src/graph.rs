@@ -11,6 +11,7 @@ use crate::proto::{build_target::Config, BuildAction, BuildManifest, BuildTarget
 /// Action nodes are identified globally as `"{target_id}::{action_id}"`. Edges
 /// come from target-level `deps`/group membership and action-level input/output
 /// overlap.
+#[derive(Debug)]
 pub struct BuildGraph {
     targets: HashMap<String, BuildTarget>,
     /// Insertion order of target ids (stable iteration for waves/output).
@@ -238,4 +239,161 @@ fn kahn_waves(n: usize, edges: &[(usize, usize)]) -> Result<Vec<Vec<usize>>, Bui
         ));
     }
     Ok(waves)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{action_waves, BuildGraph};
+    use crate::error::BuildError;
+    use crate::proto::{
+        build_target::Config, ActionType, BuildAction, BuildManifest, BuildTarget, FileSet,
+        OutputDecl, OutputKind, ScriptTarget, TargetGroupTarget,
+    };
+
+    fn script_target(id: &str, deps: Vec<&str>) -> BuildTarget {
+        BuildTarget {
+            id: id.to_string(),
+            deps: deps.into_iter().map(String::from).collect(),
+            config: Some(Config::Script(ScriptTarget {
+                command: vec!["true".to_string()],
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+    }
+
+    fn manifest(targets: Vec<BuildTarget>) -> BuildManifest {
+        BuildManifest {
+            schema_version: 1,
+            targets,
+        }
+    }
+
+    fn action(id: &str, inputs: &[&str], outputs: &[&str]) -> BuildAction {
+        BuildAction {
+            id: id.to_string(),
+            r#type: ActionType::Command as i32,
+            command: vec!["true".to_string()],
+            inputs: inputs
+                .iter()
+                .map(|p| FileSet {
+                    include: vec![p.to_string()],
+                    root: ".".to_string(),
+                    ..Default::default()
+                })
+                .collect(),
+            outputs: outputs
+                .iter()
+                .map(|p| OutputDecl {
+                    path: p.to_string(),
+                    kind: OutputKind::File as i32,
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn duplicate_target_ids_are_rejected() {
+        let err = BuildGraph::from_manifests(vec![manifest(vec![
+            script_target("dup", vec![]),
+            script_target("dup", vec![]),
+        ])])
+        .expect_err("duplicate ids must error");
+        assert!(matches!(err, BuildError::Manifest(_)));
+    }
+
+    #[test]
+    fn dependency_cycle_is_detected() {
+        let err = BuildGraph::from_manifests(vec![manifest(vec![
+            script_target("a", vec!["b"]),
+            script_target("b", vec!["a"]),
+        ])])
+        .expect_err("a<->b cycle must error");
+        assert!(matches!(err, BuildError::Cycle(_)));
+    }
+
+    #[test]
+    fn build_order_lists_dependencies_before_dependents() {
+        let graph = BuildGraph::from_manifests(vec![manifest(vec![
+            script_target("app", vec!["core"]),
+            script_target("core", vec![]),
+        ])])
+        .unwrap();
+        let order = graph.build_order("app").unwrap();
+        let core = order.iter().position(|t| t == "core").unwrap();
+        let app = order.iter().position(|t| t == "app").unwrap();
+        assert!(core < app, "core must build before app: {order:?}");
+    }
+
+    #[test]
+    fn group_members_are_treated_as_build_order_predecessors() {
+        let group = BuildTarget {
+            id: "all".to_string(),
+            config: Some(Config::Group(TargetGroupTarget {
+                member_ids: vec!["core".to_string()],
+            })),
+            ..Default::default()
+        };
+        let graph =
+            BuildGraph::from_manifests(vec![manifest(vec![group, script_target("core", vec![])])])
+                .unwrap();
+        let order = graph.build_order("all").unwrap();
+        assert!(
+            order.iter().position(|t| t == "core").unwrap()
+                < order.iter().position(|t| t == "all").unwrap()
+        );
+    }
+
+    #[test]
+    fn unknown_target_build_order_errors() {
+        let graph =
+            BuildGraph::from_manifests(vec![manifest(vec![script_target("a", vec![])])]).unwrap();
+        assert!(matches!(
+            graph.build_order("missing"),
+            Err(BuildError::UnknownTarget(_))
+        ));
+    }
+
+    #[test]
+    fn action_waves_group_parallel_then_dependent() {
+        // a, b independent; c consumes both outputs.
+        let actions = vec![
+            action("a", &[], &["a.out"]),
+            action("b", &[], &["b.out"]),
+            action("c", &["a.out", "b.out"], &["c.out"]),
+        ];
+        let waves = action_waves(&actions).unwrap();
+        assert_eq!(waves.len(), 2);
+        assert_eq!(waves[0], vec![0, 1]);
+        assert_eq!(waves[1], vec![2]);
+    }
+
+    #[test]
+    fn action_waves_detect_internal_cycle() {
+        // Two actions each consuming the other's output.
+        let actions = vec![
+            action("x", &["y.out"], &["x.out"]),
+            action("y", &["x.out"], &["y.out"]),
+        ];
+        assert!(matches!(action_waves(&actions), Err(BuildError::Cycle(_))));
+    }
+
+    #[test]
+    fn global_waves_span_all_target_actions() {
+        let graph = BuildGraph::from_manifests(vec![manifest(vec![BuildTarget {
+            id: "fan".to_string(),
+            actions: vec![
+                action("a", &[], &["a.out"]),
+                action("b", &[], &["b.out"]),
+                action("c", &["a.out", "b.out"], &["c.out"]),
+            ],
+            ..Default::default()
+        }])])
+        .unwrap();
+        let waves = graph.waves().unwrap();
+        assert_eq!(waves.len(), 2);
+        assert_eq!(waves[0].len(), 2);
+        assert_eq!(waves[1].len(), 1);
+    }
 }

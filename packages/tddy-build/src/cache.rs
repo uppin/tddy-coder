@@ -179,3 +179,152 @@ fn output_kind_str(value: i32) -> &'static str {
         _ => "unspecified",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proto::{ActionType, OutputDecl, OutputKind};
+    use std::collections::HashMap;
+
+    fn sample_action() -> BuildAction {
+        BuildAction {
+            id: "compile".to_string(),
+            r#type: ActionType::Command as i32,
+            command: vec!["cargo".to_string(), "build".to_string()],
+            outputs: vec![OutputDecl {
+                path: "out/bin".to_string(),
+                kind: OutputKind::File as i32,
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn fps() -> Vec<FileFingerprint> {
+        vec![
+            FileFingerprint {
+                path: "src/a.rs".to_string(),
+                size: 10,
+                mtime_ms: 1,
+            },
+            FileFingerprint {
+                path: "src/b.rs".to_string(),
+                size: 20,
+                mtime_ms: 2,
+            },
+        ]
+    }
+
+    #[test]
+    fn key_is_deterministic_and_sha256_prefixed() {
+        let action = sample_action();
+        let k1 = compute_cache_key(&action, &fps());
+        let k2 = compute_cache_key(&action, &fps());
+        assert_eq!(k1, k2);
+        assert!(k1.starts_with("sha256:"));
+        assert_eq!(k1.len(), "sha256:".len() + 64);
+    }
+
+    #[test]
+    fn key_is_independent_of_input_and_env_ordering() {
+        let mut a = sample_action();
+        a.env = HashMap::from([
+            ("Z".to_string(), "1".to_string()),
+            ("A".to_string(), "2".to_string()),
+        ]);
+        let mut fps_forward = fps();
+        let key_forward = compute_cache_key(&a, &fps_forward);
+        fps_forward.reverse();
+        let key_reversed = compute_cache_key(&a, &fps_forward);
+        assert_eq!(
+            key_forward, key_reversed,
+            "input order must not affect the key"
+        );
+    }
+
+    #[test]
+    fn key_changes_when_input_fingerprint_changes() {
+        let action = sample_action();
+        let base = compute_cache_key(&action, &fps());
+        let mut changed = fps();
+        changed[0].size = 999;
+        assert_ne!(base, compute_cache_key(&action, &changed));
+    }
+
+    #[test]
+    fn key_changes_with_command_or_outputs() {
+        let action = sample_action();
+        let base = compute_cache_key(&action, &fps());
+        let mut other = sample_action();
+        other.command.push("--release".to_string());
+        assert_ne!(base, compute_cache_key(&other, &fps()));
+    }
+
+    #[test]
+    fn persist_then_lookup_round_trips_and_leaves_no_tmp_file() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        // The declared output must exist for a lookup to count as a hit.
+        std::fs::create_dir_all(root.join("out")).unwrap();
+        std::fs::write(root.join("out/bin"), b"x").unwrap();
+
+        let action = sample_action();
+        let key = compute_cache_key(&action, &fps());
+        let entry = ActionCacheEntry {
+            schema_version: 1,
+            cache_key: key.clone(),
+            output_paths: vec!["out/bin".to_string()],
+            action_id: action.id.clone(),
+            target_id: "pkg:bin".to_string(),
+            ..Default::default()
+        };
+        persist_cache(root, "pkg:bin", &entry).expect("persist");
+
+        let hit = lookup_cache(root, "pkg:bin", &action.id, &key);
+        assert!(hit.is_some(), "matching key with existing output is a hit");
+
+        // No leftover .tmp staging files.
+        let cache_dir = root.join(CACHE_DIR).join("pkg_bin");
+        let tmp = std::fs::read_dir(&cache_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|e| e.file_name().to_string_lossy().contains(".tmp"));
+        assert!(!tmp, "atomic write must not leave .tmp files");
+    }
+
+    #[test]
+    fn lookup_misses_on_key_mismatch_or_missing_output() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        std::fs::create_dir_all(root.join("out")).unwrap();
+        std::fs::write(root.join("out/bin"), b"x").unwrap();
+        let action = sample_action();
+        let key = compute_cache_key(&action, &fps());
+        let entry = ActionCacheEntry {
+            schema_version: 1,
+            cache_key: key.clone(),
+            output_paths: vec!["out/bin".to_string()],
+            action_id: action.id.clone(),
+            target_id: "pkg:bin".to_string(),
+            ..Default::default()
+        };
+        persist_cache(root, "pkg:bin", &entry).unwrap();
+
+        assert!(
+            lookup_cache(root, "pkg:bin", &action.id, "sha256:deadbeef").is_none(),
+            "stale key must miss"
+        );
+        std::fs::remove_file(root.join("out/bin")).unwrap();
+        assert!(
+            lookup_cache(root, "pkg:bin", &action.id, &key).is_none(),
+            "missing declared output must miss"
+        );
+    }
+
+    #[test]
+    fn cache_mode_write_policy() {
+        assert!(CacheMode::ReadWrite.writes());
+        assert!(!CacheMode::ReadOnly.writes());
+        assert!(!CacheMode::Offline.writes());
+        assert_eq!(CacheMode::default(), CacheMode::ReadWrite);
+    }
+}

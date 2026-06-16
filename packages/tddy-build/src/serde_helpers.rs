@@ -69,3 +69,54 @@ where
     };
     Ok(value as i32)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::proto::{ActionType, BuildAction, OutputDecl, OutputKind};
+
+    #[test]
+    fn action_type_deserializes_each_string_variant() {
+        let cases = [
+            ("command", ActionType::Command),
+            ("copy", ActionType::Copy),
+            ("tool", ActionType::Tool),
+            ("unspecified", ActionType::Unspecified),
+        ];
+        for (text, expected) in cases {
+            let action: BuildAction =
+                serde_json::from_str(&format!(r#"{{"id":"a","type":"{text}"}}"#)).unwrap();
+            assert_eq!(action.r#type, expected as i32, "type={text}");
+        }
+    }
+
+    #[test]
+    fn action_type_rejects_unknown_string() {
+        let err = serde_json::from_str::<BuildAction>(r#"{"id":"a","type":"bogus"}"#)
+            .expect_err("unknown action type must error");
+        assert!(err.to_string().contains("unknown action type"), "{err}");
+    }
+
+    #[test]
+    fn output_kind_deserializes_file_directory_and_dir_alias() {
+        let file: OutputDecl = serde_json::from_str(r#"{"path":"p","kind":"file"}"#).unwrap();
+        assert_eq!(file.kind, OutputKind::File as i32);
+        let dir: OutputDecl = serde_json::from_str(r#"{"path":"p","kind":"directory"}"#).unwrap();
+        assert_eq!(dir.kind, OutputKind::Directory as i32);
+        let alias: OutputDecl = serde_json::from_str(r#"{"path":"p","kind":"dir"}"#).unwrap();
+        assert_eq!(alias.kind, OutputKind::Directory as i32);
+    }
+
+    #[test]
+    fn output_kind_rejects_unknown_string() {
+        let err = serde_json::from_str::<OutputDecl>(r#"{"path":"p","kind":"weird"}"#)
+            .expect_err("unknown output kind must error");
+        assert!(err.to_string().contains("unknown output kind"), "{err}");
+    }
+
+    #[test]
+    fn action_type_round_trips_through_serialize() {
+        let action: BuildAction = serde_json::from_str(r#"{"id":"a","type":"copy"}"#).unwrap();
+        let json = serde_json::to_value(&action).unwrap();
+        assert_eq!(json["type"], "copy");
+    }
+}

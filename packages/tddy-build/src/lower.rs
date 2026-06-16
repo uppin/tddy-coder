@@ -142,3 +142,146 @@ fn push_profile(command: &mut Vec<String>, profile: &str) {
         command.push("--release".to_string());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::lower_target;
+    use crate::proto::{
+        build_target::Config, ActionType, BuildAction, BuildTarget, DockerImageTarget,
+        RustBinaryTarget, RustLibraryTarget, ScriptTarget, TargetGroupTarget, ToolTarget,
+        TypeScriptTarget,
+    };
+
+    fn target(config: Config) -> BuildTarget {
+        BuildTarget {
+            id: "t".to_string(),
+            config: Some(config),
+            ..Default::default()
+        }
+    }
+
+    fn only(config: Config) -> BuildAction {
+        let mut actions = lower_target(&target(config)).unwrap();
+        assert_eq!(actions.len(), 1, "expected exactly one lowered action");
+        actions.pop().unwrap()
+    }
+
+    #[test]
+    fn rust_binary_builds_cargo_argv_with_features_profile_and_triple() {
+        let action = only(Config::RustBinary(RustBinaryTarget {
+            package: "app".to_string(),
+            bin_name: "app".to_string(),
+            features: vec!["a".to_string(), "b".to_string()],
+            profile: "release".to_string(),
+            target_triple: "x86_64-unknown-linux-gnu".to_string(),
+        }));
+        assert_eq!(
+            action.command,
+            vec![
+                "cargo",
+                "build",
+                "-p",
+                "app",
+                "--bin",
+                "app",
+                "--features",
+                "a,b",
+                "--release",
+                "--target",
+                "x86_64-unknown-linux-gnu",
+            ]
+        );
+        assert_eq!(action.r#type, ActionType::Command as i32);
+    }
+
+    #[test]
+    fn rust_library_omits_release_for_debug_profile() {
+        let action = only(Config::RustLibrary(RustLibraryTarget {
+            package: "core".to_string(),
+            profile: "debug".to_string(),
+            ..Default::default()
+        }));
+        assert_eq!(action.command, vec!["cargo", "build", "-p", "core"]);
+    }
+
+    #[test]
+    fn typescript_runs_bun_in_package_dir() {
+        let action = only(Config::Typescript(TypeScriptTarget {
+            package_dir: "packages/web".to_string(),
+            build_script: "build".to_string(),
+            ..Default::default()
+        }));
+        assert_eq!(action.command, vec!["bun", "run", "build"]);
+        assert_eq!(action.working_dir, "packages/web");
+    }
+
+    #[test]
+    fn docker_builds_with_dockerfile_tag_args_and_context() {
+        let action = only(Config::DockerImage(DockerImageTarget {
+            dockerfile: "Dockerfile".to_string(),
+            context: "ctx".to_string(),
+            tag: "img:latest".to_string(),
+            build_args: vec!["A=1".to_string()],
+        }));
+        assert_eq!(
+            action.command,
+            vec![
+                "docker",
+                "build",
+                "-f",
+                "Dockerfile",
+                "-t",
+                "img:latest",
+                "--build-arg",
+                "A=1",
+                "ctx",
+            ]
+        );
+    }
+
+    #[test]
+    fn script_passes_command_env_and_working_dir() {
+        let action = only(Config::Script(ScriptTarget {
+            command: vec!["echo".to_string(), "hi".to_string()],
+            env: std::collections::HashMap::from([("K".to_string(), "V".to_string())]),
+            working_dir_rel: vec!["sub".to_string(), "dir".to_string()],
+        }));
+        assert_eq!(action.command, vec!["echo", "hi"]);
+        assert_eq!(action.working_dir, "sub/dir");
+        assert_eq!(action.env.get("K").map(String::as_str), Some("V"));
+    }
+
+    #[test]
+    fn tool_and_group_produce_no_own_actions() {
+        assert!(lower_target(&target(Config::Tool(ToolTarget {
+            bin_dir: "bin".to_string(),
+            ..Default::default()
+        })))
+        .unwrap()
+        .is_empty());
+        assert!(lower_target(&target(Config::Group(TargetGroupTarget {
+            member_ids: vec!["a".to_string()],
+        })))
+        .unwrap()
+        .is_empty());
+    }
+
+    #[test]
+    fn explicit_actions_precede_lowered_config_action() {
+        let explicit = BuildAction {
+            id: "pre".to_string(),
+            r#type: ActionType::Command as i32,
+            command: vec!["true".to_string()],
+            ..Default::default()
+        };
+        let mut t = target(Config::Script(ScriptTarget {
+            command: vec!["echo".to_string()],
+            ..Default::default()
+        }));
+        t.actions = vec![explicit];
+        let actions = lower_target(&t).unwrap();
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].id, "pre");
+        assert_eq!(actions[1].command, vec!["echo"]);
+    }
+}
