@@ -1,8 +1,10 @@
 //! Unix domain socket listener for tddy-tools relay.
 
+use super::build::BuildListQuery;
 use super::{
-    store_submit_result, ApproveRequestWire, AskRequestWire, InvokeActionRequestWire,
-    ListActionsRequestWire, SubmitRequestWire, ToolCallRequest, ToolCallResponse,
+    build_executor, store_submit_result, ApproveRequestWire, AskRequestWire, BuildListRequestWire,
+    BuildOptions, BuildRequestWire, InvokeActionRequestWire, ListActionsRequestWire,
+    SubmitRequestWire, ToolCallRequest, ToolCallResponse,
 };
 use crate::session_actions::{
     classify_session_actions_exit_code, derive_repo_key, invoke_action_core, list_action_summaries,
@@ -52,7 +54,13 @@ pub fn set_toolcall_log_dir(log_dir: &std::path::Path) {
 pub fn start_toolcall_listener(
     session_dir: Option<PathBuf>,
     repo_root: Option<PathBuf>,
-) -> Result<(std::path::PathBuf, std::sync::mpsc::Receiver<ToolCallRequest>), std::io::Error> {
+) -> Result<
+    (
+        std::path::PathBuf,
+        std::sync::mpsc::Receiver<ToolCallRequest>,
+    ),
+    std::io::Error,
+> {
     let dir = std::env::temp_dir();
     let socket_path = dir.join(format!("tddy-toolcall-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&socket_path);
@@ -84,7 +92,13 @@ pub fn start_toolcall_listener(
 pub fn start_toolcall_listener(
     _session_dir: Option<PathBuf>,
     _repo_root: Option<PathBuf>,
-) -> Result<(std::path::PathBuf, std::sync::mpsc::Receiver<ToolCallRequest>), std::io::Error> {
+) -> Result<
+    (
+        std::path::PathBuf,
+        std::sync::mpsc::Receiver<ToolCallRequest>,
+    ),
+    std::io::Error,
+> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "Unix socket not available on this platform",
@@ -205,12 +219,8 @@ async fn handle_connection(
                     .map(|d| repo_actions_root(&d, &key))
             });
 
-            list_action_summaries(
-                sd.as_deref(),
-                rr.as_deref(),
-                &discovery_query,
-            )
-            .map(|result| (result, store_root))
+            list_action_summaries(sd.as_deref(), rr.as_deref(), &discovery_query)
+                .map(|result| (result, store_root))
         })
         .await;
 
@@ -305,6 +315,19 @@ async fn handle_connection(
         return Ok(());
     }
 
+    // build-list / build: served by the registered BuildExecutor (set by tddy-coder).
+    // tddy-core has no tddy-build dependency — only this extension point.
+    if req_type == "build-list" || req_type == "build" {
+        let response = handle_build_request(&req_type, request).await;
+        let response_line = response.to_json_line();
+        toolcall_log(&format!("[send] {}", response_line));
+        writer
+            .write_all(format!("{}\n", response_line).as_bytes())
+            .await?;
+        writer.flush().await?;
+        return Ok(());
+    }
+
     let (tool_request, response_rx) = if req_type == "ask" {
         let wire: AskRequestWire =
             serde_json::from_value(request).map_err(|e| format!("invalid ask request: {}", e))?;
@@ -367,4 +390,50 @@ async fn handle_connection(
     writer.flush().await?;
 
     Ok(())
+}
+
+/// Serve a `build-list` / `build` request via the registered [`BuildExecutor`].
+/// Returns a descriptive error when no executor has been registered.
+async fn handle_build_request(req_type: &str, request: serde_json::Value) -> ToolCallResponse {
+    let Some(executor) = build_executor() else {
+        return ToolCallResponse::Error {
+            message: "build support not enabled".to_string(),
+        };
+    };
+
+    let is_list = req_type == "build-list";
+    let result = tokio::task::spawn_blocking(move || {
+        if is_list {
+            let wire: BuildListRequestWire = serde_json::from_value(request)
+                .map_err(|e| format!("invalid build-list request: {}", e))?;
+            executor.build_list(
+                std::path::Path::new(&wire.repo_dir),
+                &BuildListQuery {
+                    query: wire.query,
+                    limit: wire.limit,
+                    offset: wire.offset.unwrap_or(0),
+                },
+            )
+        } else {
+            let wire: BuildRequestWire = serde_json::from_value(request)
+                .map_err(|e| format!("invalid build request: {}", e))?;
+            executor.build(
+                std::path::Path::new(&wire.repo_dir),
+                &wire.target,
+                &BuildOptions {
+                    no_cache: wire.no_cache,
+                    dry_run: wire.dry_run,
+                },
+            )
+        }
+    })
+    .await;
+
+    match result {
+        Ok(Ok(value)) => ToolCallResponse::BuildJson { value },
+        Ok(Err(message)) => ToolCallResponse::Error { message },
+        Err(e) => ToolCallResponse::Error {
+            message: format!("build task failed: {}", e),
+        },
+    }
 }

@@ -27,6 +27,7 @@ uuid = { version = "1", features = ["v4", "v7"] }
 ctrlc = { version = "3", features = ["termination"] }
 crossterm = "0.29"
 tddy-core = { path = "../tddy-core" }
+tddy-build = { path = "../tddy-build" }
 tddy-tui = { path = "../tddy-tui" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-rpc = { path = "../tddy-rpc" }

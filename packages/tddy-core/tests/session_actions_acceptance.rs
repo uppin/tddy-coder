@@ -1,4 +1,4 @@
-//! Red-phase granular tests for `tddy_core::session_actions`.
+//! Granular acceptance tests for `tddy_core::session_actions`.
 
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,7 +16,7 @@ fn unique_temp_session_dir(label: &str) -> std::path::PathBuf {
         .expect("clock")
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "session_actions_red_{label}_{}_{}",
+        "session_actions_acceptance_{label}_{}_{}",
         std::process::id(),
         nanos
     ))
@@ -37,24 +37,24 @@ fn list_action_summaries_must_be_sorted_ascending_by_id() {
     write_fixture_action(
         session,
         "zeta.yaml",
-        "version: 1\nid: zeta\nsummary: Z\narchitecture: native\ncommand: ['/bin/true']\n",
+        "version: 1\nid: zeta\nsummary: Z\narchitecture: native\ncommand: ['true']\n",
     );
     write_fixture_action(
         session,
         "alpha.yaml",
-        "version: 1\nid: alpha\nsummary: A\narchitecture: native\ncommand: ['/bin/true']\n",
+        "version: 1\nid: alpha\nsummary: A\narchitecture: native\ncommand: ['true']\n",
     );
-    let result = list_action_summaries(Some(session), None, &DiscoveryQuery::default())
-        .expect("discovery");
+    let result =
+        list_action_summaries(Some(session), None, &DiscoveryQuery::default()).expect("discovery");
     let ids: Vec<&str> = result.actions.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(
         ids,
         vec!["alpha", "zeta"],
-        "expected ascending order; refactor list_action_summaries when turning Green"
+        "summaries must be ascending by id"
     );
 }
 
-/// Unknown manifest keys must be rejected once serde `deny_unknown_fields` is enabled (manifest version contract).
+/// Unknown manifest keys must be rejected by serde `deny_unknown_fields` (manifest version contract).
 #[test]
 fn manifest_must_reject_unknown_top_level_yaml_keys() {
     let yaml = r#"
@@ -67,7 +67,7 @@ extra_unknown_field_must_fail_parse: true
 "#;
     assert!(
         parse_action_manifest_yaml(yaml).is_err(),
-        "YAML with unknown keys must error after deny_unknown_fields; skeleton still accepts extras"
+        "YAML with unknown keys must error under deny_unknown_fields"
     );
 }
 
@@ -77,7 +77,7 @@ fn cargo_style_test_totals_must_parse_into_test_summary() {
         "running 0 tests\n\n",
         "test result: ok. 12 passed; 3 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s\n",
     );
-    let got = parse_test_summary_from_process_output(stdout).expect("parse test totals when Green");
+    let got = parse_test_summary_from_process_output(stdout).expect("parse test totals");
     assert_eq!(
         got,
         TestSummary {
@@ -93,7 +93,7 @@ fn native_architecture_guard_must_allow_native_label() {
     ensure_action_architecture("native").expect("`native` should match runtime host architecture");
 }
 
-/// Safe relative binding under the session directory must resolve once path sandbox is implemented.
+/// Safe relative binding under the session directory must resolve inside the path sandbox.
 #[test]
 fn resolve_allowlisted_path_must_accept_destination_inside_session_tree() {
     let dir = unique_temp_session_dir("paths");
@@ -102,7 +102,7 @@ fn resolve_allowlisted_path_must_accept_destination_inside_session_tree() {
     let got = resolve_allowlisted_path(session, None, "out/artifact.txt", "output_binding");
     assert!(
         got.is_ok(),
-        "paths inside session must resolve when sandbox is Green; got {got:?}"
+        "paths inside the session tree must resolve; got {got:?}"
     );
 }
 
@@ -125,9 +125,10 @@ fn validate_arguments_must_reject_integer_for_string_property() {
     );
 }
 
-/// Invocation executor stub must eventually return a structured JSON record (stdout/stderr/exit_code).
+/// The invocation executor must run the declared command and return a structured JSON record
+/// (stdout/stderr/exit_code).
 #[test]
-fn run_manifest_command_must_return_ok_with_invocation_record_when_green() {
+fn run_manifest_command_must_return_ok_with_invocation_record() {
     let session = unique_temp_session_dir("invoke");
     fs::create_dir_all(&session).expect("mkdir session");
     let manifest: ActionManifest = parse_action_manifest_yaml(
@@ -136,13 +137,13 @@ version: 1
 id: noop
 summary: N
 architecture: native
-command: ["/bin/true"]
+command: ["true"]
 "#,
     )
     .expect("fixture manifest");
     let out = run_manifest_command(session.as_path(), None, &manifest, &json!({}));
     assert!(
         out.is_ok(),
-        "Green phase runs process and returns JSON record; Red skeleton returns Err: {out:?}"
+        "running the command must return a JSON invocation record; got {out:?}"
     );
 }

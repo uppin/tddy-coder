@@ -1,0 +1,32 @@
+syntax = "proto3";
+package tddy.build.v1;
+
+import "tddy/build/v1/targets.proto";
+import "tddy/build/v1/actions.proto";
+
+// Root of a BUILD.yaml file.
+message BuildManifest {
+  uint32 schema_version = 1;  // must be 1
+  repeated BuildTarget targets = 2;
+}
+
+// A named build artifact.
+//
+// A target produces actions either by lowering its typed `config` (rust_binary,
+// typescript, …) or by carrying explicit `actions`. Both may be present.
+message BuildTarget {
+  string id = 1;            // unique within repo, e.g. "packages/foo:binary"
+  string name = 2;          // human label
+  repeated string deps = 3; // other BuildTarget ids (declare-time dep edges)
+  repeated BuildAction actions = 4; // explicit actions (used directly)
+
+  oneof config {
+    RustBinaryTarget   rust_binary   = 10;
+    RustLibraryTarget  rust_library  = 11;
+    TypeScriptTarget   typescript    = 12;
+    DockerImageTarget  docker_image  = 13;
+    ScriptTarget       script        = 14;
+    ToolTarget         tool          = 15;
+    TargetGroupTarget  group         = 16;
+  }
+}

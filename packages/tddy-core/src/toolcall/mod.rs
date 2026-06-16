@@ -6,8 +6,12 @@
 //! **`approve`** block until the presenter responds via oneshot channels (requires
 //! [`crate::presenter::Presenter::poll_tool_calls`]).
 
+pub mod build;
 mod listener;
 
+pub use build::{
+    build_executor, register_build_executor, BuildExecutor, BuildListQuery, BuildOptions,
+};
 pub use listener::{set_toolcall_log_dir, start_toolcall_listener};
 
 use std::sync::{Arc, Mutex};
@@ -130,17 +134,40 @@ pub enum ToolCallRequest {
 /// Response to tddy-tools (internal enum; serialized to wire format).
 #[derive(Debug, Clone)]
 pub enum ToolCallResponse {
-    SubmitOk { goal: String },
-    SubmitError { errors: Vec<String> },
-    AskAnswer { answers: String },
-    ApproveResult { allow: bool },
-    Error { message: String },
+    SubmitOk {
+        goal: String,
+    },
+    SubmitError {
+        errors: Vec<String>,
+    },
+    AskAnswer {
+        answers: String,
+    },
+    ApproveResult {
+        allow: bool,
+    },
+    Error {
+        message: String,
+    },
     /// Successful `list-actions` relay response.
-    ActionsList { actions: serde_json::Value, total: usize },
+    ActionsList {
+        actions: serde_json::Value,
+        total: usize,
+    },
     /// Successful `invoke-action` relay response.
-    ActionInvokeOk { record: serde_json::Value },
+    ActionInvokeOk {
+        record: serde_json::Value,
+    },
     /// Failed `invoke-action` relay response (carries exit_code for the client).
-    ActionInvokeError { message: String, exit_code: i32 },
+    ActionInvokeError {
+        message: String,
+        exit_code: i32,
+    },
+    /// Successful `build` / `build-list` relay response (carries the full JSON
+    /// object produced by the build executor; `status:"ok"` is ensured here).
+    BuildJson {
+        value: serde_json::Value,
+    },
 }
 
 impl ToolCallResponse {
@@ -169,6 +196,14 @@ impl ToolCallResponse {
             }
             ToolCallResponse::ActionInvokeError { message, exit_code } => {
                 serde_json::json!({"status":"error","message":message,"exit_code":exit_code})
+            }
+            ToolCallResponse::BuildJson { value } => {
+                let mut value = value.clone();
+                if let serde_json::Value::Object(map) = &mut value {
+                    map.entry("status".to_string())
+                        .or_insert_with(|| serde_json::Value::String("ok".to_string()));
+                }
+                value
             }
         };
         wire.to_string()
@@ -224,4 +259,32 @@ pub struct InvokeActionRequestWire {
     pub action: String,
     /// JSON-encoded arguments object.
     pub data: String,
+}
+
+/// Wire format for `build-list` request (from tddy-tools).
+#[derive(Debug, Deserialize)]
+pub struct BuildListRequestWire {
+    pub r#type: String,
+    /// Repository root to discover `BUILD.yaml` manifests in.
+    pub repo_dir: String,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub offset: Option<usize>,
+}
+
+/// Wire format for `build` request (from tddy-tools).
+#[derive(Debug, Deserialize)]
+pub struct BuildRequestWire {
+    pub r#type: String,
+    /// Repository root to discover `BUILD.yaml` manifests in.
+    pub repo_dir: String,
+    /// Target id to build.
+    pub target: String,
+    #[serde(default)]
+    pub no_cache: bool,
+    #[serde(default)]
+    pub dry_run: bool,
 }

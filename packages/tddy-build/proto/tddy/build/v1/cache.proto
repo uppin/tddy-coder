@@ -1,0 +1,18 @@
+syntax = "proto3";
+package tddy.build.v1;
+
+message ActionCacheEntry {
+  uint32 schema_version = 1;      // 1
+  string cache_key      = 2;      // "sha256:<hex64>"
+  uint64 created_at_ms  = 3;      // unix epoch ms
+  repeated FileFingerprint input_fingerprints = 4;
+  repeated string output_paths = 5;
+  string action_id     = 6;
+  string target_id     = 7;
+}
+
+message FileFingerprint {
+  string path     = 1;
+  uint64 size     = 2;
+  uint64 mtime_ms = 3;
+}

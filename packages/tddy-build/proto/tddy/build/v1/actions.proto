@@ -1,0 +1,40 @@
+syntax = "proto3";
+package tddy.build.v1;
+
+// A build action is an atomic execution step within a target.
+// Actions across all targets form the global build DAG.
+message BuildAction {
+  string id          = 1;     // unique within target
+  string description = 2;
+  ActionType type    = 3;
+  repeated string command = 4;          // argv[0] = program, rest = args
+  map<string, string> env = 5;
+  repeated FileSet    inputs  = 6;
+  repeated OutputDecl outputs = 7;
+  repeated string tool_dep_ids = 8;    // ToolTarget ids whose bin_dirs go on PATH
+  string working_dir = 9;              // run cwd, relative to repo root (empty = repo root)
+}
+
+enum ActionType {
+  ACTION_TYPE_UNSPECIFIED = 0;
+  ACTION_TYPE_COMMAND     = 1;  // arbitrary shell command
+  ACTION_TYPE_COPY        = 2;  // file/dir copy
+  ACTION_TYPE_TOOL        = 3;  // invoke a ToolTarget's named command
+}
+
+message FileSet {
+  repeated string include = 1; // glob patterns
+  repeated string exclude = 2;
+  string root = 3;             // base path for pattern resolution
+}
+
+message OutputDecl {
+  string path = 1;
+  OutputKind kind = 2;
+}
+
+enum OutputKind {
+  OUTPUT_KIND_UNSPECIFIED = 0;
+  OUTPUT_KIND_FILE        = 1;
+  OUTPUT_KIND_DIRECTORY   = 2;
+}

@@ -1318,6 +1318,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         let logs = session_artifact_dir.join("logs");
         let _ = std::fs::create_dir_all(&logs);
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
+        crate::build_executor::register();
 
         let (toolcall_socket_path, tool_call_rx) =
             match tddy_core::toolcall::start_toolcall_listener(
@@ -2168,6 +2169,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
     }
 
+    crate::build_executor::register();
     let (socket_path, tool_call_rx) = match tddy_core::toolcall::start_toolcall_listener(
         args.session_dir.clone(),
         std::env::current_dir().ok(),

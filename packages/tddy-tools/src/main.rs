@@ -3,6 +3,7 @@
 //! - CLI mode (default): `submit` and `ask` subcommands relay to tddy-coder via Unix socket
 //! - MCP mode (`--mcp`): Retains approval_prompt MCP server for backwards compatibility
 
+mod build_cli;
 mod cli;
 mod pty_relay;
 mod remote_cli;
@@ -53,6 +54,12 @@ enum Subcommand {
     /// Invoke a session action by id with JSON arguments (`--data`).
     InvokeAction(cli::InvokeActionArgs),
 
+    /// List build targets from `BUILD.yaml` manifests (machine-readable JSON).
+    BuildList(build_cli::BuildListArgs),
+
+    /// Build a target from a `BUILD.yaml` manifest.
+    Build(build_cli::BuildArgs),
+
     /// Spawn a command in a PTY and relay keyboard+output — same wiring as the daemon uses
     /// for claude-cli sessions. Useful for verifying the PTY pipeline independently.
     /// Example: tddy-tools pty-relay -- claude --model claude-opus-4-8
@@ -86,6 +93,8 @@ async fn main() -> Result<()> {
         Some(Subcommand::PersistChangesetWorkflow(s)) => cli::run_persist_changeset_workflow(s)?,
         Some(Subcommand::ListActions(s)) => cli::run_list_actions(s)?,
         Some(Subcommand::InvokeAction(s)) => cli::run_invoke_action(s)?,
+        Some(Subcommand::BuildList(s)) => build_cli::run_build_list(s)?,
+        Some(Subcommand::Build(s)) => build_cli::run_build(s).await?,
         Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
         Some(Subcommand::Remote(s)) => remote_cli::run_remote(s).await?,
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
