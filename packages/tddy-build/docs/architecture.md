@@ -1,26 +1,32 @@
 # tddy-build architecture
 
-Standalone, Bazel-inspired, content-addressed build system for repository artifacts. No `tddy-*` dependencies — `tddy-tools` and `tddy-coder` depend on it; `tddy-core` only exposes an extension point.
+Standalone, Bazel-inspired, content-addressed build **engine** plus a wiring point for build plugins. No `tddy-*` dependencies and **no knowledge of any specific ecosystem target type** — `tddy-tools` and `tddy-coder` depend on it; `tddy-core` only exposes an extension point. The recipe crates (`tddy-build-rust`, `tddy-build-typescript`, `tddy-build-docker`) depend on it and implement its plugin trait.
 
-## Manifests → proto types
+## Manifests → open serde schema
 
-`BUILD.yaml` files deserialize **directly into prost-generated proto types** (`src/proto`, compiled by `build.rs`). There is no parallel serde struct layer:
+`BUILD.yaml` files deserialize into plain **serde structs** in `src/manifest.rs` — `BuildManifest` / `BuildTarget` / `TargetConfig`. A target's `config` is open: a `type` tag plus a `#[serde(flatten)] fields: serde_yaml::Value` payload the handler (not the engine) interprets.
 
-- `build.rs` attaches `serde::{Serialize, Deserialize}` to every message via `type_attribute(".")`, adds per-message `default` + `deny_unknown_fields`, marks the `BuildTarget.config` oneof internally tagged (`#[serde(tag = "type")]`), and routes enum fields through `serde_helpers`.
-- `serde_helpers`: string↔`i32` converters for `ActionType` (`command`/`copy`/`tool`) and `OutputKind` (`file`/`directory`, `dir` alias).
-- `manifest::load_build_manifest(yaml) -> BuildManifest` is the entry point.
+- `manifest::load_build_manifest(yaml) -> BuildManifest` is the entry point; `BuildManifest`/`BuildTarget` carry `default` + `deny_unknown_fields`.
+- `TargetConfig` = `{ r#type: String, #[serde(flatten)] fields }`; the `type` key is extracted into `r#type`, so `fields` holds only the handler's keys.
+- Only `BuildAction` (the engine↔plugin contract + cache-key input) and the cache types stay proto, compiled by `build.rs`.
+- `serde_helpers`: string↔`i32` converters for `ActionType` (`command`/`copy`/`tool`) and `OutputKind` (`file`/`directory`, `dir` alias), wired onto the proto `BuildAction`/`OutputDecl` fields.
 
 ### Proto schema (`proto/tddy/build/v1/`)
-- `manifest.proto`: `BuildManifest`, `BuildTarget` (`oneof config` over the 7 target types, plus explicit `actions`).
-- `targets.proto`: `RustBinaryTarget`, `RustLibraryTarget`, `TypeScriptTarget`, `DockerImageTarget`, `ScriptTarget`, `ToolTarget`, `TargetGroupTarget`.
 - `actions.proto`: `BuildAction`, `FileSet`, `OutputDecl`, `ActionType`, `OutputKind`.
 - `cache.proto`: `ActionCacheEntry`, `FileFingerprint`.
+
+(The former `manifest.proto`/`targets.proto` were removed — the manifest is serde, and there is no closed `oneof` of target types.)
+
+## Plugins and built-ins
+
+- **`plugin.rs`** — the `BuildPlugin` trait (`type_names()` + `lower(&LowerContext)`), `LowerContext` (type tag, target id/name, deps, config fields), and `PluginRegistry` (maps `config.type` → plugin; last registration wins). The binaries assemble the registry and pass `&PluginRegistry` into the engine.
+- **`builtin.rs`** — the three structural types the engine keeps built in: `script` (generic command), `tool` (provides `bin_dir` on dependents' `PATH`), `group` (member ids become build-order predecessors). Their config is parsed on demand from the open `TargetConfig.fields`.
 
 ## Pipeline
 
 1. **discovery** — glob `**/{BUILD,build}.{yaml,yml}` under the repo root; parse each into a `BuildManifest`.
-2. **lower** — `lower_target` turns a target into concrete `BuildAction`s: `rust_binary`/`rust_library`→`cargo build`, `typescript`→`bun run` (cwd = `package_dir`), `docker_image`→`docker build`, `script`→declared command, `tool`/`group`→no own action. Explicit `actions` are kept and run before the lowered one.
-3. **graph** — `BuildGraph::from_manifests` flattens targets (rejecting duplicate ids), detects target-level cycles (deps + group members), and exposes `build_order` (deps-first) and `waves` (Kahn topological levels). Action-level edges are inferred from input-glob/output-path overlap.
+2. **lower** — `lower_target(target, &registry)` dispatches by `config.type`: `script`→declared command (built-in); `tool`/`group`→no own action (built-in); any other type→the registered `BuildPlugin` (`unknown target type: <name>` if none). Explicit `actions` are kept and run before the lowered one.
+3. **graph** — `BuildGraph::from_manifests` flattens targets (rejecting duplicate ids), detects target-level cycles (deps + group members, read from the open config), and exposes `build_order` (deps-first) and `waves(&registry)` (Kahn topological levels). Action-level edges are inferred from input-glob/output-path overlap.
 4. **cache** — `compute_cache_key` = `sha256:` over action id/type/command/working-dir/env(sorted)/input fingerprints(sorted)/outputs(sorted)/tool deps(sorted); order-independent. `lookup_cache` is a hit only when the recorded key matches and every declared output still exists. `persist_cache` writes atomically (tmp + `sync_all` + rename). `CacheMode`: `ReadWrite` (default) / `ReadOnly` / `Offline`.
 5. **executor** — `execute_target` builds dependencies/group members first, runs each target's actions wave-by-wave in parallel (`futures::join_all`), checks/populates the cache, supports `--dry-run` (emit argv only), and prepends each `ToolTarget`'s `bin_dir` onto the action's `PATH`.
 
