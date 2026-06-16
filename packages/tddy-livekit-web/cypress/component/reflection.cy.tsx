@@ -5,21 +5,12 @@
  * over the existing LiveKitTransport, and that the resulting runtime descriptor
  * allows invoking EchoService methods dynamically (no compiled ConnectES client).
  *
- * Requires LIVEKIT_TESTKIT_WS_URL env var (same as transport.cy.tsx).
- * Uses a new `startEchoServerWithReflection` task that registers both EchoService
- * and the ServerReflection service — the task will be added in the green phase.
- *
- * All tests in this file will FAIL until:
- *   1. The `startEchoServerWithReflection` Cypress task is implemented (green phase)
- *   2. The reflection.ts and registry.ts modules exist in tddy-livekit-web or tddy-web
- *   3. The ServerReflection service is registered on the echo server
+ * A LiveKit server is started automatically when LIVEKIT_TESTKIT_WS_URL is not set
+ * (Docker required). Set LIVEKIT_TESTKIT_WS_URL=ws://... to reuse an existing instance.
  */
 
 import React from "react";
 import { ReflectionTestHarness } from "./support/ReflectionTestHarness";
-
-const livekitTestkitWsUrl = String(Cypress.env("LIVEKIT_TESTKIT_WS_URL") ?? "").trim();
-const describeReflection = livekitTestkitWsUrl ? describe : describe.skip;
 
 /** Deduplicate logs while preserving order (React Strict Mode safety). */
 function dedupeLogs(logs: string[]): string[] {
@@ -31,7 +22,7 @@ function dedupeLogs(logs: string[]): string[] {
   });
 }
 
-describeReflection("ServerReflection over LiveKit", () => {
+describe("ServerReflection over LiveKit", () => {
   let serverUrl: string;
   let clientToken: string;
 

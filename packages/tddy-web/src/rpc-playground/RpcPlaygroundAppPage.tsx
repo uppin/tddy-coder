@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient, type Transport } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
+import { createClient } from "@connectrpc/connect";
 import { create, type Registry } from "@bufbuild/protobuf";
+import { createLiveKitTransport } from "tddy-livekit-web";
 import {
   ServerReflection,
   ServerReflectionRequestSchema,
@@ -10,6 +10,9 @@ import { GitHubLoginButton } from "../components/GitHubLoginButton";
 import { UserAvatar } from "../components/UserAvatar";
 import { DaemonNavMenu } from "../components/shell/DaemonNavMenu";
 import { useAuth } from "../hooks/useAuth";
+import { useCommonRoom } from "../hooks/useCommonRoom";
+import { useRoomParticipants } from "../hooks/useRoomParticipants";
+import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import { buildRegistry, findMethod } from "./registry";
 import { invokeRpc, type InvokeResult } from "./invoke";
 import {
@@ -21,15 +24,6 @@ import {
 const screenShellClassName =
   "min-h-svh w-full min-w-0 box-border px-4 py-6 sm:px-6 font-sans text-foreground";
 
-function createRpcTransport(): Transport {
-  return createConnectTransport({
-    baseUrl:
-      typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-  });
-}
-
-/** Drive the ServerReflection bidi stream with a single request and collect responses. */
 async function* once<T>(value: T): AsyncIterable<T> {
   yield value;
 }
@@ -41,7 +35,6 @@ const METHOD_KINDS: ServiceMethodKind[] = [
   "bidi_streaming",
 ];
 
-/** Map a registry into the presentational ServiceInfo[] shape. */
 function servicesFromRegistry(
   registry: Registry,
   serviceNames: string[],
@@ -64,80 +57,139 @@ function servicesFromRegistry(
 }
 
 /**
- * RPC Playground shell: authenticates, reflects the hosted services over the local
- * `/rpc` Connect transport, and renders the presentational {@link RpcPlaygroundScreen}.
+ * RPC Playground shell: joins the common LiveKit room, discovers the services
+ * hosted by any selected participant via gRPC ServerReflection, and renders the
+ * presentational {@link RpcPlaygroundScreen}.
+ *
+ * All RPCs (reflection + invocation) go over the existing LiveKit data channel —
+ * no HTTP Connect transport is used, so every streaming method kind works.
  */
 export function RpcPlaygroundAppPage({
+  livekitUrl,
+  commonRoom,
   onNavigate,
 }: {
+  livekitUrl?: string;
+  commonRoom?: string;
   onNavigate: (path: string) => void;
 }) {
-  const { user, isAuthenticated, login, logout } = useAuth();
-  const transport = useMemo(() => createRpcTransport(), []);
-  const reflectionClient = useMemo(
-    () => createClient(ServerReflection, transport),
-    [transport],
+  const { user, isAuthenticated, login, logout, sessionToken } = useAuth();
+
+  const identity = useMemo(
+    () => (user ? presenceIdentityForUser(user.login) : undefined),
+    [user],
   );
+
+  const { room } = useCommonRoom(
+    livekitUrl,
+    commonRoom,
+    isAuthenticated ? identity : undefined,
+  );
+
+  const allParticipants = useRoomParticipants(room);
+
+  const [selectedParticipantId, setSelectedParticipantId] = useState<
+    string | null
+  >(null);
+
+  // Auto-select the first coder participant (active session / daemon RPC server) when the room populates.
+  useEffect(() => {
+    if (selectedParticipantId) return;
+    const target = allParticipants.find(
+      (p) => p.role === "coder" && p.identity !== identity,
+    );
+    if (target) setSelectedParticipantId(target.identity);
+  }, [allParticipants, identity, selectedParticipantId]);
+
+  // LiveKit transport for the selected participant — rebuilt on participant change.
+  const transport = useMemo(() => {
+    if (!room || !selectedParticipantId) return null;
+    return createLiveKitTransport({ room, targetIdentity: selectedParticipantId });
+  }, [room, selectedParticipantId]);
 
   const [registry, setRegistry] = useState<Registry | null>(null);
   const [services, setServices] = useState<ServiceInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const reflect = useCallback(async () => {
+  // Re-run reflection whenever the transport changes (participant switched or room first ready).
+  useEffect(() => {
+    if (!transport) {
+      setRegistry(null);
+      setServices([]);
+      return;
+    }
+
+    let cancelled = false;
     setError(null);
-    try {
-      // 1. List the hosted services.
-      const listReq = create(ServerReflectionRequestSchema, {
-        messageRequest: { case: "listServices", value: "*" },
-      });
-      const serviceNames: string[] = [];
-      for await (const resp of reflectionClient.serverReflectionInfo(
-        once(listReq),
-      )) {
-        if (resp.messageResponse.case === "listServicesResponse") {
-          for (const s of resp.messageResponse.value.service) {
-            serviceNames.push(s.name);
+
+    const reflect = async () => {
+      try {
+        const reflectionClient = createClient(ServerReflection, transport);
+
+        const listReq = create(ServerReflectionRequestSchema, {
+          messageRequest: { case: "listServices", value: "*" },
+        });
+        const serviceNames: string[] = [];
+        for await (const resp of reflectionClient.serverReflectionInfo(
+          once(listReq),
+        )) {
+          if (resp.messageResponse.case === "listServicesResponse") {
+            for (const s of resp.messageResponse.value.service) {
+              serviceNames.push(s.name);
+            }
           }
         }
-      }
 
-      // 2. Fetch descriptors for each service and accumulate file descriptor protos.
-      const fileProtos: Uint8Array[] = [];
-      const seen = new Set<string>();
-      for (const name of serviceNames) {
-        const symReq = create(ServerReflectionRequestSchema, {
-          messageRequest: { case: "fileContainingSymbol", value: name },
-        });
-        for await (const resp of reflectionClient.serverReflectionInfo(
-          once(symReq),
-        )) {
-          if (resp.messageResponse.case === "fileDescriptorResponse") {
-            for (const bytes of resp.messageResponse.value.fileDescriptorProto) {
-              const key = bytesKey(bytes);
-              if (!seen.has(key)) {
-                seen.add(key);
-                fileProtos.push(bytes);
+        const fileProtos: Uint8Array[] = [];
+        const seen = new Set<string>();
+        for (const name of serviceNames) {
+          const symReq = create(ServerReflectionRequestSchema, {
+            messageRequest: { case: "fileContainingSymbol", value: name },
+          });
+          for await (const resp of reflectionClient.serverReflectionInfo(
+            once(symReq),
+          )) {
+            if (resp.messageResponse.case === "fileDescriptorResponse") {
+              for (const bytes of resp.messageResponse.value.fileDescriptorProto) {
+                const key = bytesKey(bytes);
+                if (!seen.has(key)) {
+                  seen.add(key);
+                  fileProtos.push(bytes);
+                }
               }
             }
           }
         }
+
+        if (cancelled) return;
+
+        const reg = buildRegistry(encodeFileDescriptorSet(fileProtos));
+        setRegistry(reg);
+        setServices(servicesFromRegistry(reg, serviceNames));
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+          setRegistry(null);
+          setServices([]);
+        }
       }
+    };
 
-      // 3. Build a FileDescriptorSet and registry from the collected protos.
-      const reg = buildRegistry(encodeFileDescriptorSet(fileProtos));
-      setRegistry(reg);
-      setServices(servicesFromRegistry(reg, serviceNames));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setRegistry(null);
-      setServices([]);
-    }
-  }, [reflectionClient]);
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
     void reflect();
-  }, [isAuthenticated, reflect]);
+    return () => {
+      cancelled = true;
+    };
+  }, [transport]);
+
+  // Only show participants that serve RPC via LiveKit data channels (role "coder").
+  // The "daemon" role is the common-room discovery participant which does not serve LiveKit RPC.
+  const participants = useMemo(
+    () =>
+      allParticipants
+        .filter((p) => p.identity !== identity && p.role === "coder")
+        .map((p) => ({ id: p.identity, label: p.identity })),
+    [allParticipants, identity],
+  );
 
   const handleInvoke = useCallback(
     async (
@@ -145,17 +197,17 @@ export function RpcPlaygroundAppPage({
       methodName: string,
       requestJson: string,
     ): Promise<InvokeResult> => {
-      if (!registry) {
+      if (!registry || !transport) {
         return {
           kind: "error",
           code: "failed_precondition",
-          message: "Reflection registry not loaded yet.",
+          message: "No participant selected or room not connected.",
         };
       }
       const method = findMethod(registry, serviceName, methodName);
-      return invokeRpc(transport, method, requestJson);
+      return invokeRpc(transport, method, requestJson, sessionToken ?? undefined);
     },
-    [registry, transport],
+    [registry, transport, sessionToken],
   );
 
   if (!isAuthenticated) {
@@ -188,6 +240,9 @@ export function RpcPlaygroundAppPage({
       ) : null}
       <RpcPlaygroundScreen
         services={services}
+        participants={participants}
+        selectedParticipant={selectedParticipantId ?? undefined}
+        onSelectParticipant={setSelectedParticipantId}
         onInvoke={handleInvoke}
         onNavigate={onNavigate}
       />
@@ -196,7 +251,6 @@ export function RpcPlaygroundAppPage({
 }
 
 function bytesKey(bytes: Uint8Array): string {
-  // Cheap content key for de-duplication of file descriptor protos.
   let s = "";
   for (let i = 0; i < bytes.length; i += 1) {
     s += String.fromCharCode(bytes[i]);
@@ -204,14 +258,10 @@ function bytesKey(bytes: Uint8Array): string {
   return s;
 }
 
-/**
- * Encode a list of serialized `FileDescriptorProto` bytes as a serialized
- * `FileDescriptorSet` (a single repeated field #1 of LEN-delimited entries).
- */
 function encodeFileDescriptorSet(fileProtos: Uint8Array[]): Uint8Array {
   const parts: number[] = [];
   for (const proto of fileProtos) {
-    parts.push(0x0a); // field 1, wire type 2 (LEN)
+    parts.push(0x0a);
     appendVarint(parts, proto.length);
     for (let i = 0; i < proto.length; i += 1) {
       parts.push(proto[i]);

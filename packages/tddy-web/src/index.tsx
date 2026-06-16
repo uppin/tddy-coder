@@ -52,18 +52,20 @@ import {
   parseTerminalSessionIdFromPathname,
 } from "./routing/appRoutes";
 
+function getHashPath(): string {
+  return (typeof window !== "undefined" ? window.location.hash.slice(1) : "") || "/";
+}
+
 function usePathname(): [string, (path: string) => void] {
-  const [path, setPath] = useState(
-    () => (typeof window !== "undefined" ? window.location.pathname : "/")
-  );
+  const [path, setPath] = useState(() => getHashPath());
   useEffect(() => {
-    const onPop = () => setPath(window.location.pathname);
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
+    const onHash = () => setPath(getHashPath());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const navigate = useCallback((to: string) => {
     if (typeof window === "undefined") return;
-    window.history.pushState(null, "", to);
+    window.location.hash = to;
     setPath(to);
   }, []);
   return [path, navigate];
@@ -382,23 +384,27 @@ export function App() {
 
   const daemonMode = appConfig.daemonMode;
 
-  // Standalone mode uses query params for LiveKit fields, not `/terminal/:id`. Strip misleading paths.
+  // Standalone mode uses query params for LiveKit fields, not `/terminal/:id`. Strip misleading hash paths.
   useEffect(() => {
     if (daemonMode !== false || typeof window === "undefined") return;
-    if (parseTerminalSessionIdFromPathname(window.location.pathname) !== null) {
-      window.history.replaceState(null, "", "/");
+    if (parseTerminalSessionIdFromPathname(getHashPath()) !== null) {
+      window.history.replaceState(null, "", "#/");
     }
   }, [daemonMode]);
 
   return (
     <>
-      {path === "/auth/callback" ? (
+      {(typeof window !== "undefined" ? window.location.pathname : "/") === "/auth/callback" ? (
         <AuthCallback />
       ) : daemonMode === null ? (
         <div style={{ padding: 24 }}>Loading…</div>
       ) : daemonMode === true ? (
         isRpcPlaygroundPath(path) ? (
-          <RpcPlaygroundAppPage onNavigate={navigate} />
+          <RpcPlaygroundAppPage
+            livekitUrl={appConfig.livekitUrl}
+            commonRoom={appConfig.commonRoom}
+            onNavigate={navigate}
+          />
         ) : path === "/worktrees" ? (
           <WorktreesAppPage onNavigate={navigate} />
         ) : (

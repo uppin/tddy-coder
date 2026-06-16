@@ -24,9 +24,21 @@ export async function invokeRpc(
   transport: Transport,
   method: DescMethod,
   requestJson: string,
+  sessionToken?: string,
 ): Promise<InvokeResult> {
   try {
     const parsed = JSON.parse(requestJson.trim() === "" ? "{}" : requestJson);
+
+    // Auto-inject sessionToken when the request type has a session_token field.
+    if (sessionToken && parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const hasField = (method.methodKind === "unary"
+        ? (method as DescMethodUnary).input
+        : (method as DescMethodStreaming).input
+      ).fields.some((f) => f.name === "session_token");
+      if (hasField && !parsed.sessionToken && !parsed.session_token) {
+        parsed.sessionToken = sessionToken;
+      }
+    }
 
     if (method.methodKind === "unary") {
       const unaryMethod = method as DescMethodUnary;

@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-15  
 **Branch:** feature/host-rpcs  
-**Status:** WIP — red phase (failing tests written; implementation pending)
+**Status:** Complete — all tests passing; PR #207 open for review; follow-up fixes applied 2026-06-16
 
 ## Summary
 
@@ -78,6 +78,14 @@ Add a "RPC Playground" web UI screen and the backend reflection infrastructure t
 - `invokeRpc unary passes correct service typeName and method name to transport` — assert mock saw `parent.typeName === "test.EchoService"` and `name === "Echo"`.
 - `invokeRpc maps ConnectError to { code, message }` — fake transport throws `ConnectError(NOT_FOUND)`, asserts error object returned.
 - `invokeRpc server-streaming collects multiple decoded chunks` — fake transport yields 3 response frames, asserts 3 decoded JSON strings.
+
+## 2026-06-16 follow-up fixes
+
+- **Hash-based routing**: All client-side routing switched from `pushState`/`pathname` to `#`-based hash routing. Page reloads at any route (e.g., `/#/rpc-playground`, `/#/terminal/session-id`) no longer return 404. Auth callback still uses `window.location.pathname` (real redirect from GitHub OAuth).
+- **Daemon LiveKit RPC participant**: `tddy-daemon/src/main.rs` now spawns a `LiveKitParticipant` for the common room with the full set of daemon RPC services (identity: `daemon-{local_id}`). The RPC Playground can now inspect daemon services via LiveKit transport without HTTP streaming issues.
+- **LiveKit test auto-start**: Cypress tests in `tddy-livekit-web` and `tddy-web` now auto-start a Docker LiveKit container when `LIVEKIT_TESTKIT_WS_URL` is not set. Skipped tests converted to unconditional `describe` blocks.
+- **Fix pty_relay test cfg guard**: `test_encode_resize_uses_osc_format_matching_virtual_tui` was missing `#[cfg(feature = "livekit")]` — added to match the function it tests.
+- **RPC Playground participant filter**: Only `coder`-role participants (active sessions + the new daemon RPC participant) are shown in the host selector. The `daemon`-role discovery participant (which doesn't serve LiveKit RPC) is hidden.
 
 ## Files created / modified
 

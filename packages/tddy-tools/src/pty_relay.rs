@@ -764,6 +764,7 @@ mod tests {
     /// With the wrong format the TUI never receives valid dimensions, stays at the 80x24 default,
     /// and renders separator lines and the status bar at the wrong width — producing doubled
     /// separators and a split `● high · /effort` line when viewed in a wider relay terminal.
+    #[cfg(feature = "livekit")]
     #[test]
     fn test_encode_resize_uses_osc_format_matching_virtual_tui() {
         let bytes = encode_resize().expect("encode_resize must return Some");

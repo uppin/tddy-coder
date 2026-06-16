@@ -360,6 +360,48 @@ fn main() -> anyhow::Result<()> {
         let service_name_strs: Vec<&str> = rpc_entries.iter().map(|e| e.name).collect();
         rpc_entries.push(tddy_service::reflection_entry_from(&service_name_strs));
 
+        // If LiveKit is configured with a common room, serve the daemon's RPC services via LiveKit
+        // data channel so the RPC Playground can discover and invoke them without HTTP streaming issues.
+        if let Some(lk) = config.livekit.as_ref() {
+            let cr = lk.common_room.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            let url_ok = lk.url.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            let key_ok = lk.api_key.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            let sec_ok = lk.api_secret.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            if let (Some(common_room_name), Some(url_str), Some(key_str), Some(sec_str)) =
+                (cr, url_ok, key_ok, sec_ok)
+            {
+                let livekit_entries: Vec<tddy_rpc::ServiceEntry> = rpc_entries
+                    .iter()
+                    .map(|e| tddy_rpc::ServiceEntry { name: e.name, service: e.service.clone() })
+                    .collect();
+                let lk_multi = tddy_rpc::MultiRpcService::new(livekit_entries);
+                let local_id =
+                    tddy_daemon::livekit_peer_discovery::local_instance_id_for_config(&config);
+                let rpc_identity = format!("daemon-{local_id}");
+                let token_gen = tddy_livekit::TokenGenerator::new(
+                    key_str.to_string(),
+                    sec_str.to_string(),
+                    common_room_name.to_string(),
+                    rpc_identity,
+                    std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
+                );
+                let url_owned = url_str.to_string();
+                let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                tokio::spawn(async move {
+                    tddy_livekit::LiveKitParticipant::run_with_reconnect(
+                        &url_owned,
+                        &token_gen,
+                        lk_multi,
+                        Default::default(),
+                        shutdown,
+                        None,
+                        None,
+                    )
+                    .await;
+                });
+            }
+        }
+
         let res = tddy_daemon::server::run_server(
             host.as_str(),
             port,
