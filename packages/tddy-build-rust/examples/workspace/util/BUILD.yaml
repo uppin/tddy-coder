@@ -1,0 +1,13 @@
+schema_version: 1
+targets:
+  - id: "mathutil:lib"
+    name: "mathutil library"
+    deps: ["mathcore:lib"]
+    config:
+      type: rust_library
+      package: mathutil
+      profile: debug
+      srcs: ["mathutil/src/lib.rs", "mathutil/Cargo.toml"]
+      outputs:
+        - path: "target/debug/libmathutil.rlib"
+          kind: file
