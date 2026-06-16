@@ -423,19 +423,18 @@ impl ViewState {
         }
 
         match key.code {
-            KeyCode::Backspace | KeyCode::Left | KeyCode::Right => {
-                if self.handle_plan_refinement_prompt_key_local(key) {
-                    return true;
-                }
+            KeyCode::Backspace | KeyCode::Left | KeyCode::Right
+                if self.handle_plan_refinement_prompt_key_local(key) =>
+            {
+                return true;
             }
             KeyCode::Char(c)
                 if !c.is_control()
                     && !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+                    && !key.modifiers.contains(KeyModifiers::ALT)
+                    && self.handle_plan_refinement_prompt_key_local(key) =>
             {
-                if self.handle_plan_refinement_prompt_key_local(key) {
-                    return true;
-                }
+                return true;
             }
             _ => {}
         }
@@ -835,30 +834,24 @@ impl ViewState {
         };
 
         match key.code {
-            KeyCode::Up => {
-                if !self.multiselect_typing_other {
-                    self.multiselect_cursor = if self.multiselect_cursor == 0 {
-                        max_idx
-                    } else {
-                        self.multiselect_cursor - 1
-                    };
-                    true
+            KeyCode::Up if !self.multiselect_typing_other => {
+                self.multiselect_cursor = if self.multiselect_cursor == 0 {
+                    max_idx
                 } else {
-                    false
-                }
+                    self.multiselect_cursor - 1
+                };
+                true
             }
-            KeyCode::Down => {
-                if !self.multiselect_typing_other {
-                    self.multiselect_cursor = if self.multiselect_cursor >= max_idx {
-                        0
-                    } else {
-                        self.multiselect_cursor + 1
-                    };
-                    true
+            KeyCode::Up => false,
+            KeyCode::Down if !self.multiselect_typing_other => {
+                self.multiselect_cursor = if self.multiselect_cursor >= max_idx {
+                    0
                 } else {
-                    false
-                }
+                    self.multiselect_cursor + 1
+                };
+                true
             }
+            KeyCode::Down => false,
             KeyCode::Char(' ') if !self.multiselect_typing_other => {
                 if self.multiselect_cursor < other_idx {
                     if let Some(c) = self.multiselect_checked.get_mut(self.multiselect_cursor) {

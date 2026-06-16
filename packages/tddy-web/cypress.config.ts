@@ -6,6 +6,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { execSync, spawn } from "child_process";
 import { AccessToken } from "livekit-server-sdk";
+import { LivekitDockerTestkit } from "./cypress/support/livekitDockerTestkit.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -44,6 +45,8 @@ function getWebBundlePath(): string {
   return path.join(__dirname, "dist");
 }
 
+const testkit = new LivekitDockerTestkit();
+
 export default defineConfig({
   component: {
     devServer: {
@@ -57,10 +60,13 @@ export default defineConfig({
     baseUrl: process.env.CYPRESS_BASE_URL ?? "http://localhost:6006",
     specPattern: "cypress/e2e/**/*.cy.{ts,tsx}",
     supportFile: "cypress/support/e2e.ts",
-    env: {
-      LIVEKIT_TESTKIT_WS_URL: process.env.LIVEKIT_TESTKIT_WS_URL ?? "",
-    },
-    setupNodeEvents(on) {
+    async setupNodeEvents(on, config) {
+      // Start LiveKit eagerly so Cypress.env("LIVEKIT_TESTKIT_WS_URL") is populated
+      // before any spec's before() hook runs. Tests skip when the var is empty; this
+      // ensures they always run (with a container auto-started if not pre-set).
+      const livekitWsUrl = await testkit.start();
+      config.env = { ...config.env, LIVEKIT_TESTKIT_WS_URL: livekitWsUrl };
+
       let terminalServerProcess: ReturnType<typeof spawn> | null = null;
       let tddyCoderProcess: ReturnType<typeof spawn> | null = null;
       let echoTerminalProcess: ReturnType<typeof spawn> | null = null;
@@ -118,16 +124,12 @@ export default defineConfig({
         stopTddyCoder();
         stopEchoTerminal();
         stopAuthFlow();
+        testkit.stop();
       });
 
       on("task", {
         async startTerminalServer(options?: { prompt?: string } | null) {
-          const wsUrl = process.env.LIVEKIT_TESTKIT_WS_URL;
-          if (!wsUrl || wsUrl.trim() === "") {
-            throw new Error(
-              "LIVEKIT_TESTKIT_WS_URL must be set. Run ./run-livekit-testkit-server and export the URL."
-            );
-          }
+          const wsUrl = await testkit.start();
 
           const serverToken = new AccessToken(DEV_API_KEY, DEV_API_SECRET, {
             identity: SERVER_IDENTITY,
@@ -258,12 +260,7 @@ export default defineConfig({
         },
 
         async startEchoTerminal(options?: { roomName?: string } | null) {
-          const wsUrl = process.env.LIVEKIT_TESTKIT_WS_URL;
-          if (!wsUrl || wsUrl.trim() === "") {
-            throw new Error(
-              "LIVEKIT_TESTKIT_WS_URL must be set. Run ./run-livekit-testkit-server and export the URL."
-            );
-          }
+          const wsUrl = await testkit.start();
 
           const room = options?.roomName ?? ROOM_NAME;
 
@@ -409,12 +406,7 @@ export default defineConfig({
         },
 
         async startTddyCoderForConnectFlow() {
-          const wsUrl = process.env.LIVEKIT_TESTKIT_WS_URL;
-          if (!wsUrl || wsUrl.trim() === "") {
-            throw new Error(
-              "LIVEKIT_TESTKIT_WS_URL must be set. Run ./run-livekit-testkit-server and export the URL."
-            );
-          }
+          const wsUrl = await testkit.start();
 
           const binaryPath = getTddyCoderPath();
           if (!fs.existsSync(binaryPath)) {
@@ -508,12 +500,7 @@ export default defineConfig({
         },
 
         async startTddyCoderForAuthFlow() {
-          const wsUrl = process.env.LIVEKIT_TESTKIT_WS_URL;
-          if (!wsUrl || wsUrl.trim() === "") {
-            throw new Error(
-              "LIVEKIT_TESTKIT_WS_URL must be set. Run ./run-livekit-testkit-server and export the URL."
-            );
-          }
+          const wsUrl = await testkit.start();
 
           const binaryPath = getTddyCoderPath();
           if (!fs.existsSync(binaryPath)) {
@@ -603,6 +590,8 @@ export default defineConfig({
           return null;
         },
       });
+
+      return config;
     },
   },
   video: false,

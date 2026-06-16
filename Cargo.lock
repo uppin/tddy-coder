@@ -6888,6 +6888,7 @@ dependencies = [
  "log",
  "prost 0.13.5",
  "prost-build 0.13.5",
+ "prost-types 0.13.5",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
