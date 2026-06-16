@@ -2,7 +2,7 @@
 
 **Product area:** Build
 **Updated:** 2026-06-16
-**Status:** In development (TDD red phase)
+**Status:** Implemented
 
 ## Summary
 
@@ -71,6 +71,6 @@ Distributed/parent-fallback cache; hermetic sandboxing; full remote build execut
 
 ## Related
 
-- `docs/dev/1-WIP/tddy-build-bazel-system.md` — changeset
+- `packages/tddy-build/docs/architecture.md` — crate architecture; `docs/dev/changesets.md` — cross-package changeset history
 - `packages/tddy-build/` — implementation
 - Prior art: `~/Code/makers-lt/maker-build` (two-phase TypeScript build system)
