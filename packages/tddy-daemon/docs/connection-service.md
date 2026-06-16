@@ -84,11 +84,15 @@ A background task monitors the child with `child.wait()`; on exit the entry is r
 
 **`DeleteSession` for claude-cli**: After PID termination (SIGTERM / SIGKILL), the daemon also calls `remove_dir_all` on the worktree path stored in `metadata.repo_path`. The session directory is then removed as usual.
 
+**`ReportSessionStatus`**: Hook-driven RPC. `tddy-tools session-hook` calls this after mapping a Claude Code lifecycle event to a `SessionActivityStatus`. The handler validates `session_id` (path traversal guard), resolves `sessions_base` from `os_user` directly (no web-token path), reads `.session.yaml`, requires `session_type == "claude-cli"`, constant-time-compares `hook_token`, then calls `update_activity_status(session_dir, status)`. Sessions with `hook_token: None` (e.g. Telegram-started) return `PermissionDenied`. See [claude-cli-session.md](../../../docs/ft/daemon/claude-cli-session.md#session-activity-status-via-per-worktree-hooks) for the full hook flow.
+
 **`config.rs`**: Optional `claude_cli:` block:
 
 ```yaml
 claude_cli:
   binary_path: /usr/local/bin/claude   # default: "claude" (PATH lookup)
+  tddy_tools_path: /usr/local/bin/tddy-tools  # default: current_exe sibling → "tddy-tools"
+  daemon_url: http://127.0.0.1:8899    # default: http://127.0.0.1:{web_port}
 ```
 
 ## Spawn worker

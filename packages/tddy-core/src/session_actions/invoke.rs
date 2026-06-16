@@ -7,8 +7,12 @@ use log::{debug, info};
 use serde_json::{json, Value};
 
 use super::error::SessionActionsError;
-use super::manifest::ActionManifest;
+use super::manifest::{parse_action_manifest_file, ActionManifest};
+use super::paths::resolve_action_manifest_path;
 use super::summary::{invocation_record_summary_value, parse_test_summary_from_process_output};
+use super::validate::validate_action_arguments_json;
+use crate::session_actions::arch::ensure_action_architecture;
+use crate::session_actions::paths::{resolve_allowlisted_path};
 
 /// Apply **`result_kind: test_summary`** post-processing to an invoke record (same contract as CLI).
 pub fn finalize_invocation_record(
@@ -29,6 +33,57 @@ pub fn finalize_invocation_record(
         );
     }
     Ok(())
+}
+
+/// Resolve, validate, and execute one action — the full invoke pipeline.
+///
+/// This consolidates the CLI `invoke_action_inner` logic so it can be called from both the
+/// `tddy-tools` CLI (local fallback) and the `TDDY_SOCKET` relay listener (relay path).
+///
+/// - `session_dir`: session directory (for session-overlay manifest lookup and allowlist root).
+/// - `store_root`: per-repo store root (e.g. `~/.tddy/actions/<repo-key>/`); `None` disables store lookup.
+/// - `repo_root`: working directory for the command subprocess and second allowlist root.
+/// - `action_id`: relative path identifier (e.g. `packages/foo/build` or just `run-tests`).
+/// - `data_json`: JSON-encoded arguments object (validated against `input_schema`).
+pub fn invoke_action_core(
+    session_dir: Option<&Path>,
+    store_root: Option<&Path>,
+    repo_root: Option<&Path>,
+    action_id: &str,
+    data_json: &str,
+) -> Result<serde_json::Value, SessionActionsError> {
+    let manifest_path = resolve_action_manifest_path(session_dir, store_root, action_id)?;
+    let manifest = parse_action_manifest_file(&manifest_path)?;
+    let args: serde_json::Value = serde_json::from_str(data_json)
+        .map_err(|e| SessionActionsError::InvalidInvokeJson(e.to_string()))?;
+
+    validate_action_arguments_json(&manifest.input_schema, &args)?;
+
+    if let Some(bind) = manifest.output_path_arg.as_deref() {
+        let v = args.get(bind).and_then(|x| x.as_str()).ok_or_else(|| {
+            SessionActionsError::ArgumentsViolateSchema(format!(
+                "missing string field `{bind}` for output path binding (required by manifest)"
+            ))
+        })?;
+        let session_for_allowlist = session_dir
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        resolve_allowlisted_path(
+            &session_for_allowlist,
+            repo_root,
+            v,
+            "output_binding",
+        )?;
+    }
+
+    ensure_action_architecture(&manifest.architecture)?;
+
+    run_manifest_command(
+        session_dir.unwrap_or_else(|| Path::new(".")),
+        repo_root,
+        &manifest,
+        &args,
+    )
 }
 
 /// Execute the manifest’s declared `command` after arguments are validated and paths resolved.

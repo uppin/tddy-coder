@@ -485,6 +485,8 @@ fn run_start_goal_without_output_dir(
                 previous_session_id: None,
                 session_type: None,
                 model: None,
+                activity_status: None,
+                hook_token: None,
             },
         ) {
             log::warn!("write_initial_tool_session_metadata: {}", e);

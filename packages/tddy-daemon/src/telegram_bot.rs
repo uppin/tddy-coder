@@ -15,11 +15,12 @@ use crate::telegram_session_control::{
     parse_delete_command, parse_document_review_callback, parse_elicitation_multi_select_shortcut,
     parse_elicitation_other_callback, parse_elicitation_select_callback,
     parse_recipe_callback_session_dir, parse_session_control_callback, parse_sessions_command,
-    parse_start_workflow_prompt, parse_submit_feature_command, parse_telegram_agent_callback,
-    parse_telegram_branch_callback, parse_telegram_branch_more_callback,
-    parse_telegram_chain_parent_callback, parse_telegram_intent_callback,
+    parse_start_claude_prompt, parse_start_workflow_prompt, parse_submit_feature_command,
+    parse_telegram_agent_callback, parse_telegram_branch_callback,
+    parse_telegram_branch_more_callback, parse_telegram_chain_parent_callback,
+    parse_telegram_claude_model_callback, parse_telegram_intent_callback,
     parse_telegram_project_callback, ChainWorkflowCommand, SessionControlCallback,
-    StartWorkflowCommand, TelegramCallback, TelegramSessionControlHarness,
+    StartClaudeCommand, StartWorkflowCommand, TelegramCallback, TelegramSessionControlHarness,
     CB_TELEGRAM_CHAIN_PARENT,
 };
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
@@ -252,6 +253,21 @@ async fn telegram_message_handler(bot: Bot, harness: Harness, msg: Message) -> H
             h.handle_start_workflow(cmd).await?;
         }
         // Not configured for this chat: ignore (multi-daemon — each instance has its own allowlist).
+        return Ok(());
+    }
+
+    if let Some(prompt) = parse_start_claude_prompt(&text) {
+        let cmd = StartClaudeCommand {
+            chat_id,
+            user_id,
+            prompt,
+        };
+        let mut h = harness.lock().await;
+        if h.is_authorized(chat_id) {
+            if let Err(e) = h.handle_start_claude(cmd).await {
+                bot.send_message(ChatId(chat_id), format!("{e:#}")).await?;
+            }
+        }
         return Ok(());
     }
 
@@ -505,6 +521,28 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
         let h = harness.lock().await;
         match h
             .handle_telegram_agent_callback(chat_id, agent_idx, proj_idx, &session_id)
+            .await
+        {
+            Ok(()) => {}
+            Err(e) => {
+                bot.send_message(
+                    ChatId(chat_id),
+                    telegram_workflow_error_message(format!("{e:#}")),
+                )
+                .await?;
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some((model_idx, proj_idx, session_id)) = parse_telegram_claude_model_callback(&data) {
+        if workflow_callback_gate_authorized(&bot, &harness, chat_id, qid.clone()).await {
+            return Ok(());
+        }
+        let _ = bot.answer_callback_query(qid.clone()).await;
+        let h = harness.lock().await;
+        match h
+            .handle_telegram_claude_model_callback(chat_id, model_idx, proj_idx, &session_id)
             .await
         {
             Ok(()) => {}

@@ -40,6 +40,11 @@ fn init_repo_with_secondary_worktree() -> (tempfile::TempDir, std::path::PathBuf
             "acceptance-branch",
         ],
     );
+    // Canonicalize after creation so the path matches what `git worktree list` reports
+    // (macOS resolves /tmp -> /private/tmp, so tempdir() and git produce different strings).
+    let wt = wt
+        .canonicalize()
+        .expect("wt dir must exist after git worktree add");
     (tmp, repo, wt)
 }
 

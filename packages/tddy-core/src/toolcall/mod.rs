@@ -135,6 +135,12 @@ pub enum ToolCallResponse {
     AskAnswer { answers: String },
     ApproveResult { allow: bool },
     Error { message: String },
+    /// Successful `list-actions` relay response.
+    ActionsList { actions: serde_json::Value, total: usize },
+    /// Successful `invoke-action` relay response.
+    ActionInvokeOk { record: serde_json::Value },
+    /// Failed `invoke-action` relay response (carries exit_code for the client).
+    ActionInvokeError { message: String, exit_code: i32 },
 }
 
 impl ToolCallResponse {
@@ -154,6 +160,15 @@ impl ToolCallResponse {
             }
             ToolCallResponse::Error { message } => {
                 serde_json::json!({"status":"error","message":message})
+            }
+            ToolCallResponse::ActionsList { actions, total } => {
+                serde_json::json!({"status":"ok","actions":actions,"total":total})
+            }
+            ToolCallResponse::ActionInvokeOk { record } => {
+                serde_json::json!({"status":"ok","record":record})
+            }
+            ToolCallResponse::ActionInvokeError { message, exit_code } => {
+                serde_json::json!({"status":"error","message":message,"exit_code":exit_code})
             }
         };
         wire.to_string()
@@ -181,4 +196,32 @@ pub struct ApproveRequestWire {
     pub r#type: String,
     pub tool_name: String,
     pub input: serde_json::Value,
+}
+
+/// Wire format for `list-actions` request (from tddy-tools).
+#[derive(Debug, Deserialize)]
+pub struct ListActionsRequestWire {
+    pub r#type: String,
+    /// Filter by relative-path prefix (e.g. `"packages/foo"`).
+    #[serde(default)]
+    pub path_prefix: Option<String>,
+    /// Case-insensitive substring filter on id, summary, or path.
+    #[serde(default)]
+    pub query: Option<String>,
+    /// Maximum actions to return (pagination).
+    #[serde(default)]
+    pub limit: Option<usize>,
+    /// Zero-based offset into the sorted, filtered result.
+    #[serde(default)]
+    pub offset: Option<usize>,
+}
+
+/// Wire format for `invoke-action` request (from tddy-tools).
+#[derive(Debug, Deserialize)]
+pub struct InvokeActionRequestWire {
+    pub r#type: String,
+    /// Relative path identifier of the action (e.g. `packages/foo/build` or `run-tests`).
+    pub action: String,
+    /// JSON-encoded arguments object.
+    pub data: String,
 }

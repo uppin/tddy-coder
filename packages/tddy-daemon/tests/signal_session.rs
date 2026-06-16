@@ -51,6 +51,7 @@ fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
         None,
         None,
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     )
 }
 
@@ -75,6 +76,8 @@ fn write_session_yaml(session_dir: &std::path::Path, pid: u32) {
         previous_session_id: None,
         session_type: None,
         model: None,
+        activity_status: None,
+        hook_token: None,
     };
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }

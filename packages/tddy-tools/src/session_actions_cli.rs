@@ -1,35 +1,61 @@
 //! `list-actions` / `invoke-action` CLI orchestration (Session Actions PRD).
+//!
+//! These functions are used as the LOCAL FALLBACK when `TDDY_SOCKET` is not set.
+//! The relay path (when the socket is available) is handled in `cli.rs` directly.
 
 use std::path::{Path, PathBuf};
 
 use log::{debug, info};
 use serde::Serialize;
-use serde_json::Value;
 
 use tddy_core::session_actions::{
-    ensure_action_architecture, list_action_summaries, parse_action_manifest_file,
-    resolve_action_manifest_path, resolve_allowlisted_path, run_manifest_command,
-    validate_action_arguments_json, SessionActionsError,
+    classify_session_actions_exit_code, derive_repo_key, invoke_action_core, list_action_summaries,
+    repo_actions_root, ActionSummary, DiscoveryQuery, SessionActionsError,
 };
 use tddy_core::{read_changeset, WorkflowError};
 
 #[derive(Debug, Serialize)]
 pub struct ListActionsResponse {
-    pub actions: Vec<tddy_core::session_actions::ActionSummary>,
+    pub actions: Vec<ActionSummary>,
+    pub total: usize,
+    pub offset: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
 }
 
-pub fn run_list_actions(session_dir: &Path) -> anyhow::Result<()> {
+/// Local (non-relay) `list-actions` implementation.
+pub fn run_list_actions(
+    session_dir: &Path,
+    path_prefix: Option<&str>,
+    query_str: Option<&str>,
+    limit: Option<usize>,
+    offset: usize,
+) -> anyhow::Result<()> {
     info!(
         target: "tddy_tools::session_actions_cli",
-        "list-actions session_dir={}",
+        "list-actions (local) session_dir={}",
         session_dir.display()
     );
-    let actions = list_action_summaries(session_dir).map_err(anyhow::Error::from)?;
-    let out = ListActionsResponse { actions };
+    let repo_root = load_repo_root(session_dir).map_err(anyhow::Error::from)?;
+    let query = DiscoveryQuery {
+        path_prefix: path_prefix.map(str::to_owned),
+        query: query_str.map(str::to_owned),
+        limit,
+        offset,
+    };
+    let result = list_action_summaries(Some(session_dir), repo_root.as_deref(), &query)
+        .map_err(anyhow::Error::from)?;
+    let out = ListActionsResponse {
+        actions: result.actions,
+        total: result.total,
+        offset,
+        limit,
+    };
     println!("{}", serde_json::to_string(&out)?);
     Ok(())
 }
 
+/// Local (non-relay) `invoke-action` implementation.
 pub fn run_invoke_action(
     session_dir: &Path,
     action_id: &str,
@@ -37,63 +63,37 @@ pub fn run_invoke_action(
 ) -> anyhow::Result<()> {
     debug!(
         target: "tddy_tools::session_actions_cli",
-        "invoke-action begin action_id={} session_dir={}",
+        "invoke-action (local) action_id={} session_dir={}",
         action_id,
         session_dir.display()
     );
 
-    match invoke_action_inner(session_dir, action_id, data_json) {
+    let repo_root = load_repo_root(session_dir).map_err(anyhow::Error::from)?;
+    let store_root = repo_root.as_ref().and_then(|r| {
+        let canon = std::fs::canonicalize(r).unwrap_or_else(|_| r.clone());
+        let key = derive_repo_key(&canon);
+        tddy_core::output::tddy_data_dir_path()
+            .ok()
+            .map(|d| repo_actions_root(&d, &key))
+    });
+
+    match invoke_action_core(
+        Some(session_dir),
+        store_root.as_deref(),
+        repo_root.as_deref(),
+        action_id,
+        data_json,
+    ) {
         Ok(v) => {
             println!("{}", serde_json::to_string(&v)?);
             Ok(())
         }
         Err(e) => {
-            let code = classify_session_actions_exit(&e);
+            let code = classify_session_actions_exit_code(&e);
             eprintln!("{e}");
             std::process::exit(code);
         }
     }
-}
-
-fn classify_session_actions_exit(e: &SessionActionsError) -> i32 {
-    match e {
-        SessionActionsError::ArgumentsViolateSchema(_)
-        | SessionActionsError::InvalidSchemaShape(_)
-        | SessionActionsError::PathOutsideAllowlist { .. }
-        | SessionActionsError::PathTraversalAttempt { .. }
-        | SessionActionsError::InvalidInvokeJson(_) => 3,
-        _ => 1,
-    }
-}
-
-fn invoke_action_inner(
-    session_dir: &Path,
-    action_id: &str,
-    data_json: &str,
-) -> Result<Value, SessionActionsError> {
-    let manifest_path = resolve_action_manifest_path(session_dir, action_id)?;
-    let manifest = parse_action_manifest_file(&manifest_path)?;
-    let args: Value = serde_json::from_str(data_json)
-        .map_err(|e| SessionActionsError::InvalidInvokeJson(e.to_string()))?;
-
-    validate_action_arguments_json(&manifest.input_schema, &args)?;
-
-    let repo_cached = load_repo_root(session_dir)?;
-
-    if let Some(bind) = manifest.output_path_arg.as_deref() {
-        let v = args.get(bind).and_then(|x| x.as_str()).ok_or_else(|| {
-            SessionActionsError::ArgumentsViolateSchema(format!(
-                "missing string field `{bind}` for output path binding (required by manifest)"
-            ))
-        })?;
-        resolve_allowlisted_path(session_dir, repo_cached.as_deref(), v, "output_binding")?;
-    }
-
-    ensure_action_architecture(&manifest.architecture)?;
-
-    let record = run_manifest_command(session_dir, repo_cached.as_deref(), &manifest, &args)?;
-
-    Ok(record)
 }
 
 fn load_repo_root(session_dir: &Path) -> Result<Option<PathBuf>, SessionActionsError> {
@@ -121,3 +121,4 @@ fn load_repo_root(session_dir: &Path) -> Result<Option<PathBuf>, SessionActionsE
         Err(e) => Err(SessionActionsError::ChangesetRead(e.to_string())),
     }
 }
+

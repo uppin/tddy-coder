@@ -54,6 +54,15 @@ pub struct StartWorkflowCommand {
     pub prompt: String,
 }
 
+/// Simulated Telegram `/start-claude <prompt>` command to launch a Claude Code CLI session.
+#[derive(Debug, Clone)]
+pub struct StartClaudeCommand {
+    pub chat_id: i64,
+    pub user_id: u64,
+    /// Full text after `/start-claude` (trimmed) — seeds the first user prompt for the CLI.
+    pub prompt: String,
+}
+
 /// Simulated Telegram `/chain-workflow` (stacked session) with feature text; parent session is
 /// selected in a first step before project / integration base / agent (PRD).
 #[derive(Debug, Clone)]
@@ -88,8 +97,15 @@ pub struct StartWorkflowOutcome {
     pub messages: Vec<CapturedTelegramMessage>,
 }
 
+/// Result of handling `/start-claude`: session id + anything sent to Telegram.
+#[derive(Debug, Clone)]
+pub struct StartClaudeOutcome {
+    pub session_id: String,
+    pub messages: Vec<CapturedTelegramMessage>,
+}
+
 /// Parsed `changeset.yaml` fields relevant to Telegram-driven routing (subset).
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Default, Deserialize, PartialEq)]
 pub struct ChangesetRoutingSnapshot {
     pub recipe: Option<String>,
     #[serde(default)]
@@ -100,6 +116,13 @@ pub struct ChangesetRoutingSnapshot {
     pub run_optional_step_x: Option<bool>,
     #[serde(default)]
     pub workflow: Option<WorkflowRoutingSnapshot>,
+    /// Set to `"claude-cli"` by [`TelegramSessionControlHarness::handle_start_claude`] so the
+    /// branch → model callbacks can route to the claude-cli spawn path instead of tddy-coder.
+    #[serde(default)]
+    pub session_type: Option<String>,
+    /// Chosen Claude model for claude-cli sessions, written by the model-picker callback.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// Subset of `workflow` from `changeset.yaml` for tests and snapshots.
@@ -161,6 +184,9 @@ pub struct EnterSessionOutcome {
 
 const START_WORKFLOW_CMD: &str = "/start-workflow";
 const CHAIN_WORKFLOW_CMD: &str = "/chain-workflow";
+/// Start a Claude Code CLI session with the first user prompt: `/start-claude <prompt>`.
+/// Follows project → branch → model keyboard flow; skips recipe (tddy-coder only).
+pub const START_CLAUDE_CMD: &str = "/start-claude";
 /// Submit feature text to a running child `tddy-coder` presenter: `/submit-feature <session_id_or_prefix> <description…>`
 pub const SUBMIT_FEATURE_CMD: &str = "/submit-feature";
 const SESSIONS_CMD: &str = "/sessions";
@@ -207,6 +233,16 @@ pub const CB_TELEGRAM_INTENT: &str = "intent:";
 /// `parent_tail8` = last 8 chars of the parent session id — stable regardless of list order.
 /// The child session id is validated by [`validate_session_id_segment`] on callback dispatch.
 pub const CB_TELEGRAM_CHAIN_PARENT: &str = "tcp:";
+/// Claude Code CLI model picker: `tcm:<model_idx>|p:<proj_idx>|s:<session_id>`.
+/// Model index refers to [`CLAUDE_CLI_MODELS`].
+pub const CB_TELEGRAM_CLAUDE_MODEL: &str = "tcm:";
+/// Available Claude models for Claude Code CLI sessions (Telegram model-picker keyboard).
+/// Per `docs/ft/daemon/claude-cli-session.md`.
+pub const CLAUDE_CLI_MODELS: [(&str, &str); 3] = [
+    ("claude-opus-4-8", "Claude Opus 4"),
+    ("claude-sonnet-4-6", "Claude Sonnet 4.5"),
+    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
+];
 
 // ---------------------------------------------------------------------------
 // Session chaining Phase 2 — chain integration base merge
@@ -347,6 +383,35 @@ pub fn parse_start_workflow_prompt(message_text: &str) -> Option<String> {
     let trimmed = message_text.trim();
     let rest = trimmed.strip_prefix(START_WORKFLOW_CMD)?;
     Some(rest.trim().to_string())
+}
+
+/// Parse `/start-claude <prompt>` from a message body (prompt only; chat/user come from the update envelope).
+pub fn parse_start_claude_prompt(message_text: &str) -> Option<String> {
+    log::debug!(
+        target: "tddy_daemon::telegram_session_control",
+        "parse_start_claude_prompt: len={}",
+        message_text.len()
+    );
+    let trimmed = message_text.trim();
+    let rest = trimmed.strip_prefix(START_CLAUDE_CMD)?;
+    Some(rest.trim().to_string())
+}
+
+/// Decode `tcm:<model_idx>|p:<proj_idx>|s:<session_id>` (Claude model pick after branch).
+pub fn parse_telegram_claude_model_callback(callback_data: &str) -> Option<(usize, usize, String)> {
+    let rest = callback_data.strip_prefix(CB_TELEGRAM_CLAUDE_MODEL)?;
+    let (model_part, after_p) = rest.split_once("|p:")?;
+    let model_idx: usize = model_part.parse().ok()?;
+    if model_idx >= CLAUDE_CLI_MODELS.len() {
+        return None;
+    }
+    let (proj_part, sess_part) = after_p.split_once("|s:")?;
+    let proj_idx: usize = proj_part.parse().ok()?;
+    let session_id = sess_part.trim().to_string();
+    if session_id.is_empty() {
+        return None;
+    }
+    Some((model_idx, proj_idx, session_id))
 }
 
 /// Parse `/sessions` command (with optional offset from callback data).
@@ -552,6 +617,7 @@ fn session_list_status_or_placeholders(session_dir: &Path) -> SessionListStatusD
             elapsed_display: "—".to_string(),
             agent: "—".to_string(),
             model: "—".to_string(),
+            activity_status: String::new(),
         },
     }
 }
@@ -891,6 +957,9 @@ pub struct TelegramWorkflowSpawn {
     pub elicitation_multi_select_meta: ElicitationMultiSelectMetaCache,
     /// Chat id → session id (full) when the user tapped "Other" and we await a free-text follow-up message.
     pub pending_elicitation_other: Arc<Mutex<HashMap<i64, String>>>,
+    /// Shared registry of active Claude Code CLI sessions, injected so Telegram-launched sessions
+    /// are attachable via the terminal-stream RPCs (same `Arc` as `ConnectionServiceImpl`).
+    pub claude_cli_manager: Arc<crate::claude_cli_session::ClaudeCliSessionManager>,
 }
 
 impl TelegramWorkflowSpawn {
@@ -1485,6 +1554,18 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         };
         let intent = cs.workflow.as_ref().and_then(|w| w.branch_worktree_intent);
         let projects_dir = projects_dir_for_telegram_workflow_spawn(deps)?;
+        // Read routing snapshot before modifying cs — we need session_type to set new_branch_name
+        // for claude-cli sessions (NewBranchFromBase requires new_branch_name to be set before
+        // setup_worktree_for_session_with_optional_chain_base is called).
+        let pre_snap = read_changeset_routing_snapshot(&session_dir).unwrap_or_default();
+        let is_claude_cli = pre_snap.session_type.as_deref() == Some("claude-cli");
+        // Compute the derived branch name now while cs is still immutable (before get_or_insert_with
+        // takes a mutable borrow).
+        let derived_claude_cli_branch = if is_claude_cli {
+            claude_cli_branch_name_from_changeset(&cs)
+        } else {
+            None
+        };
         if branch_idx == 0 {
             cs.worktree_integration_base_ref = None;
             if intent == Some(BranchWorktreeIntent::WorkOnSelectedBranch) {
@@ -1498,6 +1579,12 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 let wf = cs.workflow.get_or_insert_with(Default::default);
                 wf.selected_integration_base_ref = Some(default_ref);
                 wf.selected_branch_to_work_on = None;
+                // For claude-cli sessions, derive new_branch_name from cs.name so
+                // validate_workflow_branch_intent / setup_worktree can proceed without waiting for
+                // tddy-coder to produce a branch_suggestion.
+                if wf.new_branch_name.is_none() {
+                    wf.new_branch_name = derived_claude_cli_branch.clone();
+                }
             }
         } else {
             let global_idx = list_offset
@@ -1521,9 +1608,29 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 let wf = cs.workflow.get_or_insert_with(Default::default);
                 wf.selected_integration_base_ref = Some(chain.clone());
                 wf.selected_branch_to_work_on = None;
+                // Same: derive new_branch_name for claude-cli when the user picked a base branch.
+                if wf.new_branch_name.is_none() {
+                    wf.new_branch_name = derived_claude_cli_branch.clone();
+                }
             }
         }
+        // pre_snap was already captured above (before cs modifications).
         write_changeset(&session_dir, &cs).map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
+        // Re-apply raw routing fields that write_changeset doesn't know about.
+        if let Some(ref st) = pre_snap.session_type {
+            self.persist_changeset_session_type_marker(&session_dir, st)?;
+        }
+        if let Some(ref m) = pre_snap.model {
+            self.persist_changeset_model(&session_dir, m)?;
+        }
+
+        // Route to the claude-cli model picker when the session was started via /start-claude.
+        if pre_snap.session_type.as_deref() == Some("claude-cli") {
+            return self
+                .send_claude_model_pick_keyboard(chat_id, proj_idx, session_id)
+                .await;
+        }
+
         let allowed = deps.config.allowed_agents();
         if allowed.is_empty() {
             self.spawn_telegram_workflow(chat_id, session_id, &project.project_id, None)
@@ -1552,6 +1659,29 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         );
         self.sender
             .send_message_with_keyboard(chat_id, &intro, rows)
+            .await?;
+        Ok(())
+    }
+
+    /// Send the Claude model pick keyboard (`tcm:` callbacks).
+    async fn send_claude_model_pick_keyboard(
+        &self,
+        chat_id: i64,
+        proj_idx: usize,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        let mut rows: InlineKeyboardRows = Vec::new();
+        for (i, (_model_id, label)) in CLAUDE_CLI_MODELS.iter().enumerate() {
+            let data = format!("{CB_TELEGRAM_CLAUDE_MODEL}{i}|p:{proj_idx}|s:{session_id}");
+            debug_assert!(
+                data.len() <= 64,
+                "Telegram callback_data exceeds 64 bytes: len={} data={data:?}",
+                data.len()
+            );
+            rows.push(vec![(label.to_string(), data)]);
+        }
+        self.sender
+            .send_message_with_keyboard(chat_id, "Choose a model for the Claude CLI session:", rows)
             .await?;
         Ok(())
     }
@@ -2207,6 +2337,346 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         })
     }
 
+    /// `/start-claude <prompt>`: start a Claude Code CLI session seeded with `prompt`.
+    ///
+    /// Skips the recipe keyboard (recipes are tddy-coder-specific). Writes `session_type: claude-cli`
+    /// and `initial_prompt` into `changeset.yaml`, then immediately shows the **project** keyboard.
+    /// Subsequent project → branch → model callbacks complete the flow and call
+    /// [`Self::spawn_telegram_claude_cli`].
+    pub async fn handle_start_claude(
+        &mut self,
+        cmd: StartClaudeCommand,
+    ) -> anyhow::Result<StartClaudeOutcome> {
+        log::info!(
+            target: "tddy_daemon::telegram_session_control",
+            "handle_start_claude: chat_id={} user_id={} prompt_len={}",
+            cmd.chat_id,
+            cmd.user_id,
+            cmd.prompt.len()
+        );
+        self.ensure_authorized(cmd.chat_id)?;
+
+        if let Some(ref map_path) = self.telegram_github_mapping_path {
+            let store = TelegramGithubMappingStore::open(map_path)?;
+            if store.get_github_login(cmd.user_id).is_none() {
+                anyhow::bail!(
+                    "Telegram account is not linked to GitHub. Use the bot's /link-github flow (or web OAuth) to connect your GitHub identity before starting a session."
+                );
+            }
+        }
+
+        let session_id = Uuid::new_v4().to_string();
+        let session_dir = unified_session_dir_path(&self.sessions_base, &session_id);
+        std::fs::create_dir_all(&session_dir)?;
+
+        // Write initial_prompt, derived name, and branch intent into the changeset.
+        // - name: needed so setup_worktree_for_session_with_optional_chain_base can derive a
+        //   branch name (feature/<slug>) when NewBranchFromBase intent is selected.
+        // - branch_worktree_intent: NewBranchFromBase is the sensible default for /start-claude
+        //   since we are always starting fresh; the branch callback reads and preserves this.
+        {
+            let trimmed = cmd.prompt.trim().to_string();
+            // Always set name — needed by claude_cli_branch_name_from_changeset to derive
+            // wf.new_branch_name (required by validate_workflow_branch_intent).
+            // Fall back to the short session id when the user sent /start-claude with no text.
+            let name = if !trimmed.is_empty() {
+                trimmed
+                    .split_whitespace()
+                    .take(6)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                format!("claude-{}", &session_id[..8.min(session_id.len())])
+            };
+            let initial_prompt = if !trimmed.is_empty() {
+                Some(trimmed)
+            } else {
+                None
+            };
+            let workflow = Some(tddy_core::ChangesetWorkflow {
+                branch_worktree_intent: Some(BranchWorktreeIntent::NewBranchFromBase),
+                ..Default::default()
+            });
+            let cs = Changeset {
+                name: Some(name),
+                initial_prompt,
+                workflow,
+                ..Default::default()
+            };
+            write_changeset(&session_dir, &cs)
+                .map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
+        }
+
+        // Write the claude-cli marker so the branch callback routes to claude-cli spawn.
+        self.persist_changeset_session_type_marker(&session_dir, "claude-cli")?;
+
+        log::debug!(
+            target: "tddy_daemon::telegram_session_control",
+            "handle_start_claude: created session_dir={}",
+            session_dir.display()
+        );
+
+        if let Ok(mut g) = self.telegram_tracked.lock() {
+            g.bind_chat_to_session_for_telegram_tracking(cmd.chat_id, &session_id);
+        }
+
+        // Send the project pick keyboard — the existing project/branch callbacks are reused.
+        self.send_project_pick_keyboard(cmd.chat_id, &session_id)
+            .await?;
+
+        // messages is empty here — the project keyboard was sent via self.sender.
+        // In tests, callers hold an Arc<InMemoryTelegramSender> and use collect_outbound_messages
+        // externally to inspect what was sent; the outcome only carries the session_id.
+        Ok(StartClaudeOutcome {
+            session_id,
+            messages: vec![],
+        })
+    }
+
+    /// Write `session_type: <value>` into `changeset.yaml` (raw-YAML merge, preserves other fields).
+    fn persist_changeset_session_type_marker(
+        &self,
+        session_dir: &Path,
+        session_type: &str,
+    ) -> anyhow::Result<()> {
+        let path = session_dir.join("changeset.yaml");
+        let raw = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut root: serde_yaml::Value = if raw.trim().is_empty() {
+            serde_yaml::Mapping::new().into()
+        } else {
+            serde_yaml::from_str(&raw)?
+        };
+        let map = root
+            .as_mapping_mut()
+            .ok_or_else(|| anyhow::anyhow!("changeset.yaml root must be a mapping"))?;
+        map.insert(
+            serde_yaml::Value::String("session_type".into()),
+            serde_yaml::Value::String(session_type.to_string()),
+        );
+        let out = serde_yaml::to_string(&root)?;
+        std::fs::write(&path, out)?;
+        Ok(())
+    }
+
+    /// Write `model: <value>` into `changeset.yaml` (raw-YAML merge, preserves other fields).
+    fn persist_changeset_model(&self, session_dir: &Path, model: &str) -> anyhow::Result<()> {
+        let path = session_dir.join("changeset.yaml");
+        let raw = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut root: serde_yaml::Value = if raw.trim().is_empty() {
+            serde_yaml::Mapping::new().into()
+        } else {
+            serde_yaml::from_str(&raw)?
+        };
+        let map = root
+            .as_mapping_mut()
+            .ok_or_else(|| anyhow::anyhow!("changeset.yaml root must be a mapping"))?;
+        map.insert(
+            serde_yaml::Value::String("model".into()),
+            serde_yaml::Value::String(model.to_string()),
+        );
+        let out = serde_yaml::to_string(&root)?;
+        std::fs::write(&path, out)?;
+        Ok(())
+    }
+
+    /// Handle the model-picker callback (`tcm:<model_idx>|p:<proj_idx>|s:<session_id>`).
+    ///
+    /// Persists the chosen model into `changeset.yaml`, then triggers
+    /// [`Self::spawn_telegram_claude_cli`] to set up the worktree and launch `claude`.
+    pub async fn handle_telegram_claude_model_callback(
+        &self,
+        chat_id: i64,
+        model_idx: usize,
+        proj_idx: usize,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        self.ensure_authorized(chat_id)?;
+        let (model_id, _label) = CLAUDE_CLI_MODELS
+            .get(model_idx)
+            .ok_or_else(|| anyhow::anyhow!("invalid claude model index {model_idx}"))?;
+        let Some(ref deps) = self.workflow_spawn else {
+            anyhow::bail!("Telegram workflow spawn is not configured");
+        };
+        let projects = sorted_projects_for_workflow_spawn(deps)?;
+        let project = projects
+            .get(proj_idx)
+            .ok_or_else(|| anyhow::anyhow!("invalid project index {proj_idx}"))?;
+        let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
+        self.persist_changeset_model(&session_dir, model_id)?;
+        self.spawn_telegram_claude_cli(chat_id, session_id, &project.project_id)
+            .await
+    }
+
+    /// Spawn a Claude Code CLI session for an already-configured changeset (branch intent +
+    /// `initial_prompt` + `model` written by previous keyboard callbacks).
+    ///
+    /// Creates the git worktree, launches `claude --model <m> --session-id <id> [<prompt>]` via
+    /// [`crate::claude_cli_session::ClaudeCliSessionManager`], writes `.session.yaml`, and replies
+    /// with the session id and attach instructions.
+    async fn spawn_telegram_claude_cli(
+        &self,
+        chat_id: i64,
+        session_id: &str,
+        project_id: &str,
+    ) -> anyhow::Result<()> {
+        let deps = self
+            .workflow_spawn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?
+            .clone();
+
+        let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
+        let snap = read_changeset_routing_snapshot(&session_dir).unwrap_or_else(|_| {
+            ChangesetRoutingSnapshot {
+                recipe: None,
+                initial_prompt: None,
+                demo_options: None,
+                run_optional_step_x: None,
+                workflow: None,
+                session_type: None,
+                model: None,
+            }
+        });
+
+        let model = snap.model.clone().unwrap_or_default();
+        if model.trim().is_empty() {
+            anyhow::bail!("model not set for claude-cli session (model keyboard not completed)");
+        }
+        let initial_prompt = snap.initial_prompt.clone();
+
+        let projects_dir = projects_dir_for_telegram_workflow_spawn(&deps)?;
+        let project = project_storage::find_project(&projects_dir, project_id)?
+            .ok_or_else(|| anyhow::anyhow!("project not found: {project_id}"))?;
+        let repo_root = std::path::Path::new(&project.main_repo_path);
+        if !repo_root.exists() {
+            anyhow::bail!(
+                "project main repo path does not exist: {}",
+                repo_root.display()
+            );
+        }
+
+        // The changeset on disk already has the correct branch intent (written by the branch
+        // callback) and model (raw-merged by persist_changeset_model).
+        // setup_worktree_for_session_with_optional_chain_base reads it from session_dir directly.
+
+        // Setup the worktree (blocking: involves git fetch + git worktree add).
+        let repo_root_owned = repo_root.to_path_buf();
+        let session_dir_clone = session_dir.clone();
+        let worktree_path: std::path::PathBuf = tokio::task::spawn_blocking(move || {
+            tddy_core::setup_worktree_for_session_with_optional_chain_base(
+                &repo_root_owned,
+                &session_dir_clone,
+                None,
+            )
+            .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("worktree join error: {e}"))?
+        .map_err(|e| anyhow::anyhow!("worktree setup error: {e}"))?;
+
+        let binary_path = deps
+            .config
+            .claude_cli
+            .as_ref()
+            .map(|c| c.binary_path.as_str())
+            .unwrap_or("claude")
+            .to_string();
+
+        let manager = Arc::clone(&deps.claude_cli_manager);
+        let session_id_owned = session_id.to_string();
+        let model_owned = model.clone();
+        let initial_prompt_owned = initial_prompt.clone();
+        let worktree_clone = worktree_path.clone();
+
+        let handle = manager
+            .start(
+                &session_id_owned,
+                worktree_clone,
+                &model_owned,
+                &binary_path,
+                initial_prompt_owned.as_deref(),
+                None,
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to spawn claude-cli: {e}"))?;
+
+        let pid = handle.pid;
+
+        // Write .session.yaml.
+        let now = chrono::Utc::now().to_rfc3339();
+        let meta = tddy_core::SessionMetadata {
+            session_id: session_id.to_string(),
+            project_id: project_id.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            status: "active".to_string(),
+            repo_path: Some(worktree_path.to_string_lossy().to_string()),
+            pid: Some(pid),
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some(model.clone()),
+            activity_status: None,
+            hook_token: None,
+        };
+        tddy_core::write_session_metadata(&session_dir, &meta)
+            .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;
+
+        // Optionally bridge to LiveKit.
+        let (lk_room, _lk_url, lk_server_identity) = if let Some(lk) =
+            crate::spawner::livekit_creds_from_config(&deps.config)
+        {
+            let room_name =
+                crate::spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id);
+            let server_identity = crate::spawner::livekit_server_identity_for_session(
+                lk.daemon_instance_id.as_deref(),
+                session_id,
+            );
+            match crate::claude_cli_session::spawn_livekit_bridge(
+                Arc::clone(&handle),
+                &lk.url,
+                &room_name,
+                &lk.api_key,
+                &lk.api_secret,
+                &server_identity,
+            )
+            .await
+            {
+                Ok(()) => (room_name, lk.url.clone(), server_identity),
+                Err(e) => {
+                    log::warn!(
+                        target: "tddy_daemon::telegram_session_control",
+                        "spawn_telegram_claude_cli: LiveKit bridge failed ({e}); gRPC path still works"
+                    );
+                    (String::new(), String::new(), String::new())
+                }
+            }
+        } else {
+            (String::new(), String::new(), String::new())
+        };
+
+        log::info!(
+            target: "tddy_daemon::telegram_session_control",
+            "spawn_telegram_claude_cli: started session {} pid={} worktree={} project={}",
+            session_id,
+            pid,
+            worktree_path.display(),
+            project_id,
+        );
+
+        let sid_short = &session_id[..8.min(session_id.len())];
+        let attach_hint = if lk_room.is_empty() {
+            "Attach via the web UI or `tddy-tools pty-relay`.".to_string()
+        } else {
+            format!("LiveKit room `{lk_room}`. Attach via the web UI or `tddy-tools pty-relay --server-identity {lk_server_identity}`.")
+        };
+        let done = format!("Claude Code CLI session started ({sid_short}…). {attach_hint}");
+        self.sender.send_message(chat_id, &done).await?;
+        Ok(())
+    }
+
     /// `/chain-workflow`: first step is parent session selection, then the same project → base →
     /// agent flow as [`Self::handle_start_workflow`] (PRD: session chaining).
     pub async fn handle_chain_workflow(
@@ -2709,6 +3179,26 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     }
 }
 
+/// Derive a git branch name for a `/start-claude` session from the changeset `name` field.
+///
+/// Returns `Some("feature/<slug>")` when `cs.name` is set, `None` otherwise.
+/// The slug replaces non-alphanumeric characters with hyphens and collapses consecutive hyphens —
+/// matching the logic in `tddy_core::worktree::slugify_for_branch`.
+fn claude_cli_branch_name_from_changeset(cs: &Changeset) -> Option<String> {
+    cs.name.as_deref().map(|name| {
+        let slug: String = name
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect::<String>()
+            .split('-')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("-");
+        format!("feature/{}", slug)
+    })
+}
+
 /// Read `changeset.yaml` after Telegram-driven updates (for test assertions).
 pub fn read_changeset_routing_snapshot(
     session_dir: &Path,
@@ -2759,6 +3249,26 @@ mod unit_tests {
             Some("build feature X"),
             "parser must trim and capture text after /start-workflow"
         );
+    }
+
+    #[test]
+    fn parse_start_claude_extracts_prompt() {
+        let prompt = parse_start_claude_prompt("/start-claude   build a hello world CLI  ");
+        assert_eq!(
+            prompt.as_deref(),
+            Some("build a hello world CLI"),
+            "parser must trim and capture text after /start-claude"
+        );
+        // Empty prompt (no text after command)
+        let empty = parse_start_claude_prompt("/start-claude");
+        assert_eq!(
+            empty.as_deref(),
+            Some(""),
+            "bare /start-claude must yield Some(empty)"
+        );
+        // Non-matching prefix must return None
+        assert!(parse_start_claude_prompt("/start-workflow foo").is_none());
+        assert!(parse_start_claude_prompt("hello").is_none());
     }
 
     #[test]

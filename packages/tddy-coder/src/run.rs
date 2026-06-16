@@ -237,6 +237,24 @@ pub fn run_main(mut args: Args) {
     }
 
     // Validate args before any stderr redirect (daemon redirects stderr to a file).
+    if args.remote {
+        let recipe = args.recipe.as_deref().unwrap_or("free-prompting");
+        if args.goal.is_some() || recipe != "free-prompting" {
+            eprintln!(
+                "Error: --remote is only supported with --recipe free-prompting (no --goal). \
+                Pass --recipe free-prompting to use remote-codebase mode."
+            );
+            std::process::exit(1);
+        }
+
+        // Dispatch to run_remote immediately — before TUI setup, logging redirect, etc.
+        if let Err(e) = run_remote(&args) {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
     if let Err(e) = validate_web_args(&args)
         .and_then(|_| validate_livekit_args(&args))
         .and_then(|_| validate_recipe_cli(&args))
@@ -392,6 +410,19 @@ pub struct Args {
     pub codex_oauth_login: bool,
     /// Workflow recipe name (`tdd`, `tdd-small`, `bugfix`, `free-prompting`, `grill-me`, `review`, `merge-pr`). `None` means default `free-prompting` or recipe from changeset on resume.
     pub recipe: Option<String>,
+
+    /// Enable remote-codebase mode. When true, native filesystem tools are excluded and the agent
+    /// uses `mcp__tddy-tools__*` instead. Requires `--recipe free-prompting`.
+    pub remote: bool,
+
+    /// URL of the remote relay daemon. Required when `remote` is true.
+    pub remote_daemon_url: Option<String>,
+
+    /// Session token for the remote relay daemon.
+    pub remote_session_token: Option<String>,
+
+    /// Target daemon instance ID on the relay.
+    pub remote_daemon_id: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -552,6 +583,23 @@ pub struct CoderArgs {
     /// hook) and waits until login finishes. Requires `--session-dir` or `--session-id`.
     #[arg(long)]
     pub codex_oauth_login: bool,
+
+    /// Enable remote-codebase mode. The real codebase is on a remote daemon; native filesystem
+    /// tools are replaced by `mcp__tddy-tools__*` MCP tools. Requires `--recipe free-prompting`.
+    #[arg(long)]
+    pub remote: bool,
+
+    /// URL of the remote relay daemon (e.g. `http://192.168.1.10:8765`). Required with `--remote`.
+    #[arg(long, requires = "remote")]
+    pub remote_daemon_url: Option<String>,
+
+    /// Session token for authenticating with the remote relay daemon.
+    #[arg(long, requires = "remote")]
+    pub remote_session_token: Option<String>,
+
+    /// Target daemon instance ID on the relay (routes tool calls to a specific peer).
+    #[arg(long, requires = "remote")]
+    pub remote_daemon_id: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -769,6 +817,10 @@ impl From<CoderArgs> for Args {
             codex_acp_cli_path: a.codex_acp_cli_path,
             codex_oauth_login: a.codex_oauth_login,
             recipe: a.recipe,
+            remote: a.remote,
+            remote_daemon_url: a.remote_daemon_url,
+            remote_session_token: a.remote_session_token,
+            remote_daemon_id: a.remote_daemon_id,
         }
     }
 }
@@ -813,6 +865,10 @@ impl From<DemoArgs> for Args {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: a.recipe,
+            remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
         }
     }
 }
@@ -1127,6 +1183,9 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             previous_session_id: None,
             session_type: None,
             model: None,
+
+            activity_status: None,
+            hook_token: None,
         },
     )
     .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
@@ -1261,7 +1320,10 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
 
         let (toolcall_socket_path, tool_call_rx) =
-            match tddy_core::toolcall::start_toolcall_listener() {
+            match tddy_core::toolcall::start_toolcall_listener(
+                Some(session_artifact_dir.clone()),
+                std::env::current_dir().ok(),
+            ) {
                 Ok((path, rx)) => (Some(path), Some(rx)),
                 Err(_) => (None, None),
             };
@@ -1279,6 +1341,9 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 previous_session_id: None,
                 session_type: None,
                 model: None,
+
+                activity_status: None,
+                hook_token: None,
             },
         )
         .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
@@ -2110,7 +2175,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
     }
 
-    let (socket_path, tool_call_rx) = match tddy_core::toolcall::start_toolcall_listener() {
+    let (socket_path, tool_call_rx) = match tddy_core::toolcall::start_toolcall_listener(
+        args.session_dir.clone(),
+        std::env::current_dir().ok(),
+    ) {
         Ok((path, rx)) => (Some(path), Some(rx)),
         Err(_) => (None, None),
     };
@@ -2756,6 +2824,9 @@ fn run_plan_bootstrap_in_session_dir(
             previous_session_id: None,
             session_type: None,
             model: None,
+
+            activity_status: None,
+            hook_token: None,
         },
     )
     .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
@@ -2889,6 +2960,106 @@ fn read_feature_input(args: &Args) -> anyhow::Result<String> {
     Ok(buf)
 }
 
+/// Entry point for remote-codebase mode.
+///
+/// Validates that `--remote-daemon-url` is set, then contacts the relay daemon to enumerate
+/// available tools, starts or reuses a remote session, and prepares the workflow context.
+///
+/// # Current implementation
+/// This v1 implementation validates the required flags and attempts to contact the relay daemon
+/// via `tddy-tools remote list-tools`. A real daemon connection failure produces a meaningful
+/// error message. The full session bootstrap (start-session → connect-session → run_goal) is
+/// tracked in the feature backlog.
+// TODO: implement full session bootstrap: start-session → connect-session → run_goal
+pub fn run_remote(args: &Args) -> anyhow::Result<()> {
+    let daemon_url = match &args.remote_daemon_url {
+        Some(url) => url.clone(),
+        None => anyhow::bail!(
+            "--remote-daemon-url is required when using --remote mode. \
+             Pass the relay daemon URL, e.g. --remote-daemon-url http://192.168.1.10:8765"
+        ),
+    };
+
+    log::info!("remote mode: connecting to relay daemon at {}", daemon_url);
+
+    // Attempt to contact the relay daemon to validate connectivity.
+    // We shell out to `tddy-tools remote list-tools` so the same discovery logic is reused.
+    // If the daemon is unreachable, this produces a clear error from tddy-tools.
+    let tddy_tools = which_tddy_tools();
+    let mut cmd = std::process::Command::new(&tddy_tools);
+    cmd.args(["remote", "list-tools"]);
+    // Provide a minimal discovery by pointing at the daemon URL's port directly.
+    // Parse the port from the URL and write a temporary daemon.json.
+    let tmp_relay_dir =
+        std::env::temp_dir().join(format!("tddy-remote-relay-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&tmp_relay_dir);
+    let port = parse_port_from_url(&daemon_url)?;
+    let discovery = serde_json::json!({ "port": port, "pid": 0, "started_at": 0 });
+    std::fs::write(tmp_relay_dir.join("daemon.json"), discovery.to_string())
+        .map_err(|e| anyhow::anyhow!("failed to write relay discovery file: {}", e))?;
+    cmd.env("TDDY_RELAY_BASE_DIR", &tmp_relay_dir);
+
+    if let Some(token) = &args.remote_session_token {
+        cmd.args(["--session-token", token.as_str()]);
+    }
+
+    let status = cmd.status().map_err(|e| {
+        anyhow::anyhow!(
+            "failed to run tddy-tools to contact relay daemon at {}: {}",
+            daemon_url,
+            e
+        )
+    })?;
+
+    let _ = std::fs::remove_dir_all(&tmp_relay_dir);
+
+    if !status.success() {
+        anyhow::bail!(
+            "could not connect to relay daemon at {} — ensure the relay is running and the URL is correct",
+            daemon_url
+        );
+    }
+
+    // TODO: implement full session bootstrap (start-session → connect-session → run_goal)
+    anyhow::bail!(
+        "remote mode: successfully contacted relay at {} but full session bootstrap is not yet implemented",
+        daemon_url
+    )
+}
+
+/// Resolve the path to the `tddy-tools` binary.
+///
+/// Looks for a sibling binary next to the running process, then falls back to `PATH`.
+fn which_tddy_tools() -> std::path::PathBuf {
+    // Check next to the running binary first (installed layout).
+    if let Ok(exe) = std::env::current_exe() {
+        let sibling = exe.with_file_name("tddy-tools");
+        if sibling.exists() {
+            return sibling;
+        }
+    }
+    std::path::PathBuf::from("tddy-tools")
+}
+
+/// Parse the port number from a URL string (e.g. `http://127.0.0.1:19999` → `19999`).
+fn parse_port_from_url(url: &str) -> anyhow::Result<u16> {
+    // Strip scheme
+    let without_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
+    // Take the host:port part (before any path)
+    let host_port = without_scheme.split('/').next().unwrap_or(without_scheme);
+    // Take the port after the last ':'
+    if let Some((_, port_str)) = host_port.rsplit_once(':') {
+        port_str
+            .parse::<u16>()
+            .map_err(|e| anyhow::anyhow!("invalid port in daemon URL {:?}: {}", url, e))
+    } else {
+        anyhow::bail!(
+            "could not parse port from daemon URL {:?} — expected http://host:port format",
+            url
+        )
+    }
+}
+
 #[cfg(test)]
 mod resume_session_config_tests {
     use super::merge_session_coder_config_for_resume;
@@ -2951,6 +3122,10 @@ mod resume_session_config_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
         };
 
         merge_session_coder_config_for_resume(&mut args).expect("merge");
@@ -3012,6 +3187,10 @@ mod resume_session_identity_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
         };
 
         assign_default_session_id(&mut args);
@@ -3076,6 +3255,10 @@ mod session_dir_sync_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
         };
 
         sync_session_dir_from_args(&mut args).expect("apply");
@@ -3154,6 +3337,10 @@ mod changeset_agent_resume_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
         };
 
         apply_agent_from_changeset_if_needed(&mut args).expect("apply");
@@ -3249,6 +3436,10 @@ mod post_tui_workflow_exit_tests {
             codex_acp_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
+            remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
         }
     }
 

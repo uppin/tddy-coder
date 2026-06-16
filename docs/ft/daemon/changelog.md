@@ -2,6 +2,26 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-14 — Remote-codebase mode
+
+- **Remote daemon**: workspace sessions (`session_type:"workspace"`) with git worktree, no PTY; `ExecuteTool` (Read, Write, StrReplace, Delete, Grep, Glob, Shell, Await, SemanticSearch, ReadLints) + `ListExecTools` RPCs; `contain_path` security; background shell jobs + Await polling.
+- **Relay daemon** (`--relay`): joins LiveKit common room; `forward_to_peer` + per-peer `RpcClient` cache routes `ExecuteTool`/`ListExecTools` to named remote peer; `IdleTimeoutTracker` triggers graceful shutdown after idle timeout; external oneshot shutdown channel in `run_server`.
+- **`tddy-tools remote`**: `list-tools` via `ListExecTools` Connect POST; `start-session`, `connect-session`, `sync-context` subcommands; lazy relay daemon startup via `ensure_relay_daemon`.
+- **`tddy-coder --remote`**: `--remote-daemon-url`/`--remote-session-token`/`--remote-daemon-id` flags; `run_remote` shells out to `tddy-tools remote list-tools`, builds dynamic `mcp__tddy-tools__*` allowlist, runs free-prompting workflow with remote ctx keys and read-only local ctx dir.
+- Feature: [remote-codebase-mode.md](remote-codebase-mode.md). Cross-package: [docs/dev/changesets.md](../../dev/changesets.md).
+
+## 2026-06-13 — Claude Code CLI permission mode selection
+
+- **`tddy-service`**: `StartSessionRequest.permission_mode` (proto field 14, string).
+- **`tddy-daemon`**: `build_claude_argv` appends `--permission-mode <mode>` (5th param; `None`/empty/whitespace → `auto`); `ClaudeCliSessionManager::start()` accepts `permission_mode: Option<&str>` (6th param); `connection_service::start_session` extracts and trims `req.permission_mode`, passes through `start_claude_cli_session` → `manager.start` → `build_claude_argv`. Tests: `claude_cli_permission_mode_acceptance` (16 tests). **`tddy-tools`**: `pty-relay --permission-mode` optional CLI arg wired into `StartSessionRequest`. Feature: [claude-cli-permission-mode.md](claude-cli-permission-mode.md). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+## 2026-06-13 — Per-worktree hooks: claude-cli session activity status
+
+- **`tddy-core`**: **`session_activity`** — **`SessionActivityStatus`** enum (`Started`, `Running`, `ExecutingTool`, `WaitingForInput`, `Done`, `Ended`) with `as_wire()`/`from_wire()`; **`activity_status_from_hook(event, notif_type)`** maps Claude Code hook events; **`HookEvent`** serde struct + `parse_hook_event`; 15 unit tests. **`claude_hooks`** — **`HookCommandParams`**, **`build_claude_hooks_settings()`** builds the 6-event settings JSON; 4 unit tests. **`session_metadata`** — **`activity_status: Option<String>`** and **`hook_token: Option<String>`** on **`SessionMetadata`** (serde-default, backward-compat); **`update_activity_status()`** read-modify-write helper.
+- **`tddy-service`**: **`connection.proto`** — **`ReportSessionStatus`** RPC; **`ReportSessionStatusRequest/Response`** messages; **`SessionEntry.activity_status`** (field 15); **`StartSessionRequest.initial_prompt`** (field 13).
+- **`tddy-daemon`**: **`connection_service`** — **`report_session_status`** handler (path-traversal guard, `os_user` sessions_base, constant-time `hook_token` check, `update_activity_status`); hook wiring in **`start_claude_cli_session`** (UUID token, resolves `tddy_tools_path`/`daemon_url`, writes `<worktree>/.claude/settings.local.json`, persists `hook_token` in metadata); **`session_list_enrichment`** surfaces `activity_status` via **`ListSessions`**. **`config`** — `tddy_tools_path`, `daemon_url` on **`ClaudeCliConfig`**. 6 handler unit tests. **`ClaudeCliSessionManager`** extracted as constructor parameter; `build_claude_argv()` helper; **`PtyHandle::resize()`** + `current_size`.
+- **`tddy-tools`**: **`session-hook`** subcommand — reads stdin JSON, maps event, POSTs **`ReportSessionStatus`**; fail-quiet (always exit 0, 2s timeout); 5 CLI acceptance tests. **`pty_relay`** — `encode_resize()` corrected to OSC format `\x1b]resize;{cols};{rows}\x07`.
+- **Feature docs**: [claude-cli-session.md](claude-cli-session.md#session-activity-status-via-per-worktree-hooks); technical: [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md#claude-code-cli-sessions). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-06-06 — Session chaining: stable parent id in Telegram callback
 
 - **`tddy-daemon`**: **`telegram_session_control`** — **`tcp:`** chain callback format changed from `tcp:<idx>|s:<child>` to `tcp:p:<parent_tail8>|s:<child>` (last 8 chars of parent session id); **`handle_chain_parent_callback`** scans candidates by tail instead of index position — stable across session churn between keyboard render and tap; **`session_tail8()`** helper; **`parse_telegram_chain_parent_callback`** signature updated to return `(String, String)`. Unit tests: **`parse_chain_workflow_prompt`** (strip/trim/wrong-prefix), **`parse_telegram_chain_parent_callback`** round-trip, empty-tail rejection, **`session_tail8`** boundary cases. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).

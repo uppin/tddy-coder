@@ -61,6 +61,7 @@ fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
         None,
         None,
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     )
 }
 
@@ -90,6 +91,8 @@ async fn daemon_finds_sessions_created_by_tddy_coder() {
         previous_session_id: None,
         session_type: None,
         model: None,
+        activity_status: None,
+        hook_token: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 

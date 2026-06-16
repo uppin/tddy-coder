@@ -6,24 +6,79 @@ use log::debug;
 
 use super::error::SessionActionsError;
 
-/// Locate `actions/<action_id>.{yaml,yml}` under a session directory (same rules as `invoke-action` CLI).
+/// Derive a stable, filesystem-safe directory key from a canonical repo root path.
+///
+/// Strips the leading `/` and replaces `/` with `--` so the result is a safe single directory
+/// name under `~/.tddy/actions/`.
+///
+/// Example: `/home/user/projects/myrepo` → `home--user--projects--myrepo`.
+pub fn derive_repo_key(canonical_repo_root: &Path) -> String {
+    canonical_repo_root
+        .to_string_lossy()
+        .trim_start_matches('/')
+        .replace('/', "--")
+}
+
+/// Per-repo action store root: `<tddy_data_dir>/actions/<repo_key>/`.
+///
+/// `tddy_data_dir` is typically `~/.tddy/` (from [`crate::output::tddy_data_dir_path`]).
+pub fn repo_actions_root(tddy_data_dir: &Path, repo_key: &str) -> PathBuf {
+    tddy_data_dir.join("actions").join(repo_key)
+}
+
+/// Locate `actions/<action_id>.{yaml,yml}` under one or more roots.
+///
+/// Lookup order:
+/// 1. Per-repo store: `<store_root>/<action_id>.{yaml,yml}` (if `store_root` is provided).
+/// 2. Session overlay: `<session_dir>/actions/<action_id>.{yaml,yml}` (if `session_dir` is provided).
+///
+/// `action_id` may contain subdirectory components (e.g. `packages/foo/build`); the traversal-safe
+/// helpers below prevent escape outside each root.
 pub fn resolve_action_manifest_path(
-    session_dir: &Path,
+    session_dir: Option<&Path>,
+    store_root: Option<&Path>,
     action_id: &str,
 ) -> Result<PathBuf, SessionActionsError> {
     debug!(
         target: "tddy_core::session_actions::paths",
-        "resolve_action_manifest_path action_id={} session_dir={}",
+        "resolve_action_manifest_path action_id={} session_dir={:?} store_root={:?}",
         action_id,
-        session_dir.display()
+        session_dir.map(|p| p.display().to_string()),
+        store_root.map(|p| p.display().to_string()),
     );
-    let actions_dir = session_dir.join("actions");
-    for ext in ["yaml", "yml"] {
-        let cand = actions_dir.join(format!("{action_id}.{ext}"));
-        if cand.is_file() {
-            return Ok(cand);
+
+    // Validate that the action_id doesn't attempt traversal (it may contain '/' for subdirs
+    // but must not contain '..' components).
+    for part in action_id.split('/') {
+        if part == ".." || part == "." {
+            return Err(SessionActionsError::PathTraversalAttempt {
+                purpose: "action_id",
+                reason: format!("action_id segment `{part}` is not allowed"),
+            });
         }
     }
+
+    // 1. Try per-repo store first.
+    if let Some(store) = store_root {
+        for ext in ["yaml", "yml"] {
+            let cand = store.join(format!("{action_id}.{ext}"));
+            if cand.is_file() {
+                return Ok(cand);
+            }
+        }
+    }
+
+    // 2. Try session overlay (legacy flat or nested).
+    if let Some(session) = session_dir {
+        let actions_dir = session.join("actions");
+        for ext in ["yaml", "yml"] {
+            let cand = actions_dir.join(format!("{action_id}.{ext}"));
+            if cand.is_file() {
+                return Ok(cand);
+            }
+        }
+    }
+
     Err(SessionActionsError::UnknownActionId(action_id.to_string()))
 }
 

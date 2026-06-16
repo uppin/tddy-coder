@@ -57,7 +57,7 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
 ## Non-goals (out of scope)
 
 - TDD/bugfix workflow integration — Claude Code CLI sessions have no recipe.
-- Telegram elicitation — not routed through the existing elicitation mechanism.
+- Telegram elicitation via the structured `PresenterObserver` / `ModeChanged` pipeline (that path is for tddy-coder workflow sessions only). Claude Code CLI elicitation alerts are delivered via the `ReportSessionStatus` / `WaitingForInput` path — see [telegram-notifications.md § Claude Code CLI session activity alerts](telegram-notifications.md#claude-code-cli-session-activity-alerts).
 - Model switching after session start.
 - Session chaining (`previous_session_id`) for Claude Code CLI sessions.
 - LiveKit presence for Claude Code CLI session processes (no `--livekit-*` args passed).
@@ -145,6 +145,48 @@ New `GhosttyTerminalGrpc` component wraps `GhosttyTerminal` and connects `onData
 | Model | selected model label |
 | Elapsed | `—` |
 | Status | `active` / `inactive` |
+| Activity | `Started` / `Running` / `ExecutingTool` / `WaitingForInput` / `Done` / `Ended` (see below) |
+
+## Session activity status via per-worktree hooks
+
+When the daemon starts a claude-cli session it writes `.claude/settings.local.json` into the git
+worktree configuring six Claude Code lifecycle hooks. Each hook invokes
+`tddy-tools session-hook` which maps the event to a granular `SessionActivityStatus` and calls the
+new `ReportSessionStatus` gRPC RPC. The daemon validates the per-session `hook_token`, writes
+`activity_status` to `.session.yaml`, and surfaces it via `ListSessions.SessionEntry.activity_status`.
+
+### Status mapping
+
+| Claude hook event | `notification_type` | `activity_status` |
+|---|---|---|
+| `SessionStart` | — | `Started` |
+| `UserPromptSubmit` | — | `Running` |
+| `PostToolUse` | — | `ExecutingTool` |
+| `Notification` | `permission_prompt` / `elicitation_dialog` / `idle_prompt` | `WaitingForInput` |
+| `Stop` | — | `Done` |
+| `SessionEnd` | — | `Ended` |
+| anything else | — | no-op (hook exits 0, no RPC) |
+
+### Hook wiring
+
+`start_claude_cli_session` generates a per-session UUID `hook_token` and calls
+`tddy_core::build_claude_hooks_settings(&HookCommandParams { tddy_tools_path, daemon_url, session_id, os_user, hook_token })`.
+The resulting JSON is written to `<worktree>/.claude/settings.local.json`. The `hook_token` is also
+stored in `.session.yaml` for validation on inbound `ReportSessionStatus` calls.
+
+Config (`claude_cli:` block) may override `tddy_tools_path` (default: `current_exe` sibling → `"tddy-tools"`) and `daemon_url` (default: `http://127.0.0.1:{web_port}`).
+
+### Fail-quiet contract
+
+`tddy-tools session-hook` always exits 0. A 2-second reqwest timeout prevents a dead daemon from blocking Claude. On no-op events (unrecognized event names, unrecognized `notification_type`) the tool exits immediately without making any network call.
+
+### Auth model
+
+The hook has no web session token. A per-session random `hook_token` (UUID) is generated at session start, persisted in `.session.yaml`, and baked into each hook command line. `ReportSessionStatus` resolves `sessions_base` directly from `os_user` (bypasses the GitHub OAuth path) and constant-time-compares the token. Sessions with no `hook_token` (e.g. Telegram-started) silently ignore inbound hook reports.
+
+### Web UI
+
+Web-side rendering of `activity_status` (badge in the session list) is a follow-up; this changeset surfaces the field in the `ListSessions` response but does not yet display it in the UI.
 
 ## Proto delta (connection.proto)
 
@@ -166,12 +208,54 @@ message SessionTerminalInput {
 message SessionTerminalOutput {
   bytes data = 1;
 }
+
+// --- Activity status hooks ---
+rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);
+
+message ReportSessionStatusRequest {
+  string session_id  = 1;
+  string hook_token  = 2;
+  string os_user     = 3;
+  string status      = 4;  // one of the SessionActivityStatus wire strings
+}
+
+message ReportSessionStatusResponse {
+  bool ok = 1;
+}
+
+// SessionEntry (in ListSessionsResponse) gains:
+//   string activity_status = 15;
 ```
 
 `StartSessionResponse`, `ConnectSessionResponse`, and `ResumeSessionResponse` are unchanged — LiveKit fields are returned as empty strings for Claude CLI sessions. The web client detects `agent == "claude-cli"` from `ListSessions` to decide which terminal component to mount.
 
+## Seeding a first prompt
+
+Both the RPC path and the Telegram path support an optional **initial prompt** passed directly to the `claude` binary as a positional argument:
+
+```
+claude --model <model> --session-id <id> "build feature X"
+```
+
+### RPC: `StartSessionRequest.initial_prompt`
+
+`StartSessionRequest` has a `string initial_prompt = 13;` field. When non-empty, `start_claude_cli_session` passes it as a positional CLI argument to `claude`. An empty string is treated as absent (no extra arg). This lets programmatic callers seed the first user turn without requiring interactive input.
+
+### Telegram: `/start-claude <prompt>`
+
+The Telegram `/start-claude <prompt>` flow (see [telegram-session-control.md](telegram-session-control.md)) seeds the session with the user's message. After project → branch → model selection, `spawn_telegram_claude_cli` reads `initial_prompt` from `changeset.yaml` and passes it to `ClaudeCliSessionManager::start(…, initial_prompt)`.
+
+### Resume does not replay
+
+`ResumeSession` always calls `ClaudeCliSessionManager::resume`, which **does not** pass the original `initial_prompt`. This prevents the first user message from being re-injected as a duplicate turn when `claude` is restarted inside an existing session.
+
+### Implementation note
+
+Argv construction is isolated in `build_claude_argv(binary, model, session_id, initial_prompt: Option<&str>) -> Vec<String>` in `claude_cli_session.rs`. The positional arg is appended after `--session-id` only when the trimmed prompt is non-empty.
+
 ## See also
 
+- [Telegram session control](telegram-session-control.md) — `/start-claude` Telegram flow
 - [Web terminal](../web/web-terminal.md) — GhosttyTerminal, connection chrome, session table
 - [Connection service](../../../packages/tddy-daemon/docs/connection-service.md) — daemon RPC implementation
 - [Worktrees](../web/worktrees.md) — worktree lifecycle, `create_worktree_with_retry`

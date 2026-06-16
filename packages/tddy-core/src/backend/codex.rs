@@ -540,6 +540,7 @@ mod tests {
             extra_allowed_tools: None,
             socket_path: None,
             session_dir: None,
+            remote: None,
         }
     }
 

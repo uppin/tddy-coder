@@ -13,7 +13,7 @@ use tddy_core::toolcall::start_toolcall_listener;
 #[test]
 #[cfg(unix)]
 fn submit_exits_ok_when_presenter_never_polls() {
-    let (socket_path, _hold_tool_rx) = start_toolcall_listener().expect("start listener");
+    let (socket_path, _hold_tool_rx) = start_toolcall_listener(None, None).expect("start listener");
     let sock = socket_path.clone();
     let bin = cargo_bin_cmd!("tddy-tools").get_program().to_owned();
 

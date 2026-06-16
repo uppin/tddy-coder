@@ -91,6 +91,7 @@ pub fn stub_invoke_request(prompt: impl Into<String>, goal_id: &str) -> InvokeRe
         extra_allowed_tools: None,
         socket_path: None,
         session_dir: None,
+        remote: None,
     }
 }
 
@@ -121,6 +122,7 @@ pub fn bugfix_stub_invoke_request(prompt: impl Into<String>, goal_id: &str) -> I
         extra_allowed_tools: None,
         socket_path: None,
         session_dir: None,
+        remote: None,
     }
 }
 

@@ -29,6 +29,15 @@ const REMOTE_LK_API_KEY: &str = "devkey";
 const REMOTE_LK_API_SECRET: &str = "secret";
 const REMOTE_ROUTING_PROJECT_ID: &str = "remote-routing-proj";
 
+/// Returns the path to the `true` binary — `/usr/bin/true` on macOS, `/bin/true` on Linux.
+fn true_bin() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "/usr/bin/true"
+    } else {
+        "/bin/true"
+    }
+}
+
 fn write_livekit_daemon_yaml(
     ws_url: &str,
     daemon_instance_id: Option<&str>,
@@ -39,13 +48,14 @@ fn write_livekit_daemon_yaml(
     let id_block = daemon_instance_id
         .map(|id| format!("daemon_instance_id: {id}\n"))
         .unwrap_or_default();
+    let true_path = true_bin();
     let yaml = format!(
         r#"
 {id_block}users:
   - github_user: "testuser"
     os_user: "{os_user}"
 allowed_tools:
-  - path: /bin/true
+  - path: {true_path}
     label: t
 livekit:
   url: {ws_url}
@@ -101,6 +111,7 @@ fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
         None,
         None,
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     )
 }
 
@@ -119,6 +130,8 @@ fn write_exited_session(session_dir: &std::path::Path, session_id: &str, pid: u3
         previous_session_id: None,
         session_type: None,
         model: None,
+        activity_status: None,
+        hook_token: None,
     };
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }
@@ -207,6 +220,8 @@ async fn start_session_unknown_daemon_instance_id_returns_clear_error() {
         new_branch_name: String::new(),
         selected_integration_base_ref: String::new(),
         selected_branch_to_work_on: String::new(),
+        initial_prompt: String::new(),
+        permission_mode: String::new(),
     });
     let err = service
         .start_session(request)
@@ -302,6 +317,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         None,
         None,
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     );
 
     let token_b = livekit
@@ -356,6 +372,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
             },
         ),
         None,
+        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     );
 
     tokio::time::timeout(Duration::from_secs(45), async {
@@ -382,7 +399,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
 
     let request = Request::new(StartSessionRequest {
         session_token: "valid-token".to_string(),
-        tool_path: "/bin/true".to_string(),
+        tool_path: true_bin().to_string(),
         project_id: REMOTE_ROUTING_PROJECT_ID.to_string(),
         agent: String::new(),
         daemon_instance_id: REMOTE_PEER_INSTANCE_ID.to_string(),
@@ -393,6 +410,8 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         new_branch_name: String::new(),
         selected_integration_base_ref: String::new(),
         selected_branch_to_work_on: String::new(),
+        initial_prompt: String::new(),
+        permission_mode: String::new(),
     });
     let response = service_a.start_session(request).await.unwrap_or_else(|e| {
         panic!(

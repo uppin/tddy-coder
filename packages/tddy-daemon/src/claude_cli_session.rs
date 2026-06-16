@@ -93,23 +93,79 @@ pub struct ClaudeCliSessionManager {
     registry: Arc<RwLock<HashMap<String, Arc<PtyHandle>>>>,
 }
 
+impl Default for ClaudeCliSessionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClaudeCliSessionManager {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             registry: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
+    /// Build the argv for the `claude` process.
+    ///
+    /// Exported so tests can assert the argument list without spawning a real PTY.
+    ///
+    /// Arg order: `[binary, "--model", model, "--session-id", id, "--permission-mode", mode, prompt?]`.
+    /// `model` is omitted when empty. `initial_prompt` is appended as a positional arg only
+    /// when non-empty (trimmed); an empty/whitespace prompt is treated as absent so the
+    /// process is started interactively without an injected first turn.
+    /// `permission_mode` defaults to `"auto"` when `None` or empty/whitespace.
+    pub fn build_claude_argv(
+        binary_path: &str,
+        model: &str,
+        session_id: &str,
+        initial_prompt: Option<&str>,
+        permission_mode: Option<&str>,
+    ) -> Vec<String> {
+        let mut argv = vec![binary_path.to_string()];
+        if !model.is_empty() {
+            argv.push("--model".to_string());
+            argv.push(model.to_string());
+        }
+        argv.push("--session-id".to_string());
+        argv.push(session_id.to_string());
+        let mode = permission_mode
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("auto");
+        argv.push("--permission-mode".to_string());
+        argv.push(mode.to_string());
+        if let Some(p) = initial_prompt {
+            let p = p.trim();
+            if !p.is_empty() {
+                argv.push(p.to_string());
+            }
+        }
+        argv
+    }
+
     /// Spawn a new claude CLI process for `session_id` in `worktree_path`.
     ///
     /// Returns an `Arc<PtyHandle>` on success. The child process is monitored in a background
     /// std thread; when it exits the session is removed from the registry.
+    ///
+    /// `initial_prompt` — when `Some` and non-empty, appended as a positional CLI argument so
+    /// that `claude` receives it as the first user turn. Pass `None` (or `Some("")`) for an
+    /// interactive session with no seeded prompt. **Resume** (`resume()`) always passes `None`
+    /// because the session is continued via `--session-id`; re-injecting the original prompt
+    /// would create a duplicate user turn.
+    ///
+    /// `permission_mode` — forwarded as `--permission-mode <mode>` to the claude binary.
+    /// `None` or empty/whitespace defaults to `"auto"`.
     pub async fn start(
         &self,
         session_id: &str,
         worktree_path: PathBuf,
         model: &str,
         binary_path: &str,
+        initial_prompt: Option<&str>,
+        permission_mode: Option<&str>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<Bytes>();
         let (stdout_tx, _stdout_rx) = broadcast::channel::<Bytes>(OUTPUT_BROADCAST_CAPACITY);
@@ -118,6 +174,8 @@ impl ClaudeCliSessionManager {
         let session_id_owned = session_id.to_string();
         let model_owned = model.to_string();
         let binary_owned = binary_path.to_string();
+        let initial_prompt_owned = initial_prompt.map(str::to_owned);
+        let permission_mode_owned = permission_mode.map(str::to_owned);
         let worktree_clone = worktree_path.clone();
         let stdout_tx_clone = stdout_tx.clone();
         let capture_clone = Arc::clone(&capture);
@@ -131,6 +189,8 @@ impl ClaudeCliSessionManager {
                 worktree_clone,
                 &model_owned,
                 &binary_owned,
+                initial_prompt_owned.as_deref(),
+                permission_mode_owned.as_deref(),
                 stdin_rx,
                 stdout_tx_clone,
                 capture_clone,
@@ -171,6 +231,9 @@ impl ClaudeCliSessionManager {
     }
 
     /// Resume (relaunch) an existing session by spawning a new process in the same worktree.
+    ///
+    /// Always passes `initial_prompt = None`: a resumed session continues via `--session-id`
+    /// and must not replay the original prompt (that would inject a duplicate user turn).
     pub async fn resume(
         &self,
         session_id: &str,
@@ -178,8 +241,9 @@ impl ClaudeCliSessionManager {
         model: &str,
         binary_path: &str,
     ) -> anyhow::Result<Arc<PtyHandle>> {
-        // Start a fresh process in the same worktree.
-        self.start(session_id, worktree_path, model, binary_path)
+        // Start a fresh process in the same worktree; never replay the initial prompt on resume,
+        // and never carry over a prior permission_mode (resume always uses the default "auto").
+        self.start(session_id, worktree_path, model, binary_path, None, None)
             .await
     }
 
@@ -194,11 +258,14 @@ impl ClaudeCliSessionManager {
     ///
     /// Returns `(pid, Arc<Mutex<MasterPty>>)` on success. Launches background threads for I/O
     /// forwarding and exit monitoring. The registry `Arc` is used for cleanup on exit.
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     fn spawn_in_pty(
         session_id: &str,
         worktree_path: PathBuf,
         model: &str,
         binary_path: &str,
+        initial_prompt: Option<&str>,
+        permission_mode: Option<&str>,
         stdin_rx: mpsc::UnboundedReceiver<Bytes>,
         stdout_tx: broadcast::Sender<Bytes>,
         capture: Arc<std::sync::Mutex<Vec<u8>>>,
@@ -218,13 +285,18 @@ impl ClaudeCliSessionManager {
             })
             .map_err(|e| anyhow::anyhow!("openpty failed: {}", e))?;
 
-        let mut cmd = CommandBuilder::new(binary_path);
-        if !model.is_empty() {
-            cmd.arg("--model");
-            cmd.arg(model);
+        // Build argv via the shared helper so it is testable without a real PTY.
+        let argv = Self::build_claude_argv(
+            binary_path,
+            model,
+            session_id,
+            initial_prompt,
+            permission_mode,
+        );
+        let mut cmd = CommandBuilder::new(&argv[0]);
+        for arg in &argv[1..] {
+            cmd.arg(arg);
         }
-        cmd.arg("--session-id");
-        cmd.arg(session_id);
         cmd.cwd(&worktree_path);
         // Ensure the child sees a proper terminal type for TUI rendering.
         cmd.env("TERM", "xterm-256color");
@@ -270,6 +342,12 @@ impl ClaudeCliSessionManager {
                         match std::io::Read::read(&mut r, &mut buf) {
                             Ok(0) => break,
                             Ok(n) => {
+                                log::trace!(
+                                    target: "tddy_daemon::claude_cli_session",
+                                    "PTY output: {} bytes: {:?}",
+                                    n,
+                                    String::from_utf8_lossy(&buf[..n])
+                                );
                                 // Append to the capture ring (trimmed to CAPTURE_LIMIT_BYTES)
                                 // so late-connecting subscribers can replay all output so far.
                                 if let Ok(mut cap) = capture.lock() {
@@ -320,6 +398,12 @@ impl ClaudeCliSessionManager {
                                 match data {
                                     None => break,
                                     Some(bytes) => {
+                                        log::trace!(
+                                            target: "tddy_daemon::claude_cli_session",
+                                            "PTY input: {} bytes: {:?}",
+                                            bytes.len(),
+                                            String::from_utf8_lossy(&bytes)
+                                        );
                                         if std::io::Write::write_all(&mut w, &bytes).is_err() {
                                             break;
                                         }
@@ -330,6 +414,12 @@ impl ClaudeCliSessionManager {
                     } else {
                         // No tokio context — use a simple busy approach
                         while let Some(bytes) = stdin_rx_thread.blocking_recv() {
+                            log::trace!(
+                                target: "tddy_daemon::claude_cli_session",
+                                "PTY input: {} bytes: {:?}",
+                                bytes.len(),
+                                String::from_utf8_lossy(&bytes)
+                            );
                             if std::io::Write::write_all(&mut w, &bytes).is_err() {
                                 break;
                             }

@@ -90,6 +90,9 @@ async fn session_yaml_and_changeset_yaml_must_be_in_same_directory() {
             previous_session_id: None,
             session_type: None,
             model: None,
+
+            activity_status: None,
+            hook_token: None,
         },
     )
     .expect("write .session.yaml");
@@ -201,6 +204,9 @@ async fn changeset_yaml_must_be_written_on_prompt_submission_not_deferred_to_bef
             previous_session_id: None,
             session_type: None,
             model: None,
+
+            activity_status: None,
+            hook_token: None,
         },
     )
     .expect("write .session.yaml");
