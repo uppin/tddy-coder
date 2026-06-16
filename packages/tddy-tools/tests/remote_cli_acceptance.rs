@@ -67,7 +67,10 @@ fn remote_sync_context_subcommand_exists_in_help() {
 ///
 /// Seed a `daemon.json` with a port pointing to a minimal HTTP server that serves a
 /// `ListExecToolsResponse`-compatible JSON. Verify the output contains the tool names.
-#[tokio::test]
+// Multi-threaded: the mock relay runs as a spawned task while the test thread blocks
+// in assert_cmd's synchronous `.output()`. A current-thread runtime would starve the
+// server task (the subprocess would connect but never get a response) and hang.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_list_tools_fetches_catalog_from_relay_daemon_not_from_discovery_file() {
     // Start a minimal HTTP server that responds to the ListExecTools endpoint.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -75,15 +78,22 @@ async fn remote_list_tools_fetches_catalog_from_relay_daemon_not_from_discovery_
 
     tokio::spawn(async move {
         if let Ok((mut stream, _)) = listener.accept().await {
-            use tokio::io::AsyncWriteExt;
-            // Minimal HTTP 200 with JSON body resembling a tool-name array.
-            let body = r#"["Read","Write","Grep","Shell"]"#;
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            // Drain the incoming request first: closing a socket that still has an unread
+            // request RSTs the connection and surfaces in the client as a send error.
+            let mut buf = [0u8; 2048];
+            let _ = stream.read(&mut buf).await;
+            // ListExecToolsResponse-shaped body — `run_list_tools` reads `tools[].name`.
+            let body =
+                r#"{"tools":[{"name":"Read"},{"name":"Write"},{"name":"Grep"},{"name":"Shell"}]}"#;
             let resp = format!(
                 "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                 body.len(),
                 body
             );
             let _ = stream.write_all(resp.as_bytes()).await;
+            let _ = stream.flush().await;
+            let _ = stream.shutdown().await;
         }
     });
 
