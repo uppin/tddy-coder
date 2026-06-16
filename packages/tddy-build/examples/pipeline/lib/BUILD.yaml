@@ -1,0 +1,15 @@
+schema_version: 1
+targets:
+  - id: "lib:build"
+    name: "Build lib"
+    deps: ["codegen:gen"]
+    actions:
+      - id: "build"
+        type: command
+        command: ["sh", "-c", "cat generated.txt > lib.txt"]
+        inputs:
+          - include: ["generated.txt"]
+            root: "."
+        outputs:
+          - path: "lib.txt"
+            kind: file

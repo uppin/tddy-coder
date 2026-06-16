@@ -12,3 +12,7 @@ path = "src/lib.rs"
 tddy-build = { path = "../tddy-build" }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }

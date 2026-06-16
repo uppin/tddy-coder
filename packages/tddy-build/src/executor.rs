@@ -72,6 +72,7 @@ pub async fn execute_target(
         if actions.is_empty() {
             continue;
         }
+        log::info!("building target {}", current_target);
         let outcomes = run_target_actions(repo_root, graph, current_target, &actions, opts).await?;
         if current_target == target_id {
             record.actions = outcomes;
@@ -131,6 +132,7 @@ async fn run_one(
     let cache_key = compute_cache_key(action, &fingerprints);
 
     if use_cache && lookup_cache(repo_root, target_id, &action.id, &cache_key).is_some() {
+        log::debug!("cache hit for action {} (target {})", action.id, target_id);
         return Ok(ActionOutcome {
             action_id: action.id.clone(),
             cached: true,
@@ -140,6 +142,8 @@ async fn run_one(
             stderr: String::new(),
         });
     }
+    log::debug!("cache miss for action {} (target {})", action.id, target_id);
+    log::debug!("running action {}: {:?}", action.id, action.command);
 
     let outcome = run_action(repo_root, graph, action).await?;
 
@@ -154,6 +158,11 @@ async fn run_one(
             target_id: target_id.to_string(),
         };
         persist_cache(repo_root, target_id, &entry)?;
+        log::debug!(
+            "persisted cache entry for action {} (target {})",
+            action.id,
+            target_id
+        );
     }
 
     Ok(outcome)
@@ -170,6 +179,14 @@ async fn run_action(
             "action {} has an empty command",
             action.id
         )));
+    }
+
+    // Ensure declared output parent directories exist. Many tools (e.g. compilers,
+    // `docker build --iidfile`) do not create the directory for a declared output.
+    for output in &action.outputs {
+        if let Some(parent) = repo_root.join(&output.path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
     }
 
     let cwd = if action.working_dir.is_empty() {

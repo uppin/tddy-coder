@@ -18,6 +18,8 @@ struct DockerImage {
     context: String,
     tag: String,
     build_args: Vec<String>,
+    srcs: Vec<String>,
+    outputs: Vec<tddy_build::OutputSpec>,
 }
 
 impl BuildPlugin for DockerPlugin {
@@ -43,6 +45,11 @@ impl BuildPlugin for DockerPlugin {
             command.push("--build-arg".to_string());
             command.push(arg);
         }
+        let outputs = tddy_build::outputs_to_decls(&d.outputs)?;
+        if let Some(first) = outputs.first() {
+            command.push("--iidfile".to_string());
+            command.push(first.path.clone());
+        }
         command.push(if d.context.is_empty() {
             ".".to_string()
         } else {
@@ -54,6 +61,8 @@ impl BuildPlugin for DockerPlugin {
             description,
             r#type: ActionType::Command as i32,
             command,
+            inputs: tddy_build::srcs_to_inputs(&d.srcs, ""),
+            outputs,
             ..Default::default()
         }])
     }
@@ -101,5 +110,39 @@ mod tests {
     fn docker_defaults_context_to_current_dir() {
         let command = lower("tag: img:latest\n");
         assert_eq!(command, vec!["docker", "build", "-t", "img:latest", "."]);
+    }
+
+    #[test]
+    fn docker_emits_iidfile_inputs_and_outputs() {
+        let config: serde_yaml::Value = serde_yaml::from_str(
+            "tag: example-base\ndockerfile: base/Dockerfile\ncontext: base\n\
+             srcs: [\"base/Dockerfile\"]\n\
+             outputs:\n  - path: \".tddy-build/iid/base.txt\"\n    kind: file\n",
+        )
+        .expect("valid yaml");
+        let ctx = LowerContext {
+            type_name: "docker_image",
+            target_id: "t",
+            target_name: "",
+            deps: &[],
+            config: &config,
+        };
+        let action = DockerPlugin.lower(&ctx).expect("lower").remove(0);
+        assert_eq!(
+            action.command,
+            vec![
+                "docker",
+                "build",
+                "-f",
+                "base/Dockerfile",
+                "-t",
+                "example-base",
+                "--iidfile",
+                ".tddy-build/iid/base.txt",
+                "base"
+            ]
+        );
+        assert_eq!(action.inputs[0].include, vec!["base/Dockerfile"]);
+        assert_eq!(action.outputs[0].path, ".tddy-build/iid/base.txt");
     }
 }

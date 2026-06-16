@@ -1,0 +1,13 @@
+[package]
+name = "mathapp"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "mathapp"
+path = "src/main.rs"
+
+[dependencies]
+mathcore = { path = "../mathcore" }
+mathutil = { path = "../mathutil" }

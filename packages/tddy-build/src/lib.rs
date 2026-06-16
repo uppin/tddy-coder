@@ -22,6 +22,7 @@ pub mod discovery;
 pub mod error;
 pub mod executor;
 pub mod graph;
+pub mod io;
 pub mod lower;
 pub mod manifest;
 pub mod plugin;
@@ -29,6 +30,7 @@ pub mod serde_helpers;
 pub mod service;
 
 pub use error::BuildError;
+pub use io::{outputs_to_decls, srcs_to_inputs, OutputSpec};
 pub use manifest::{load_build_manifest, BuildManifest, BuildTarget, TargetConfig};
 pub use plugin::{BuildPlugin, LowerContext, PluginRegistry};
 

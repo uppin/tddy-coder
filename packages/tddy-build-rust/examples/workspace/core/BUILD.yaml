@@ -1,0 +1,12 @@
+schema_version: 1
+targets:
+  - id: "mathcore:lib"
+    name: "mathcore library"
+    config:
+      type: rust_library
+      package: mathcore
+      profile: debug
+      srcs: ["mathcore/src/lib.rs", "mathcore/Cargo.toml"]
+      outputs:
+        - path: "target/debug/libmathcore.rlib"
+          kind: file

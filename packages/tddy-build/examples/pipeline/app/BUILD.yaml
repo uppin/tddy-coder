@@ -1,0 +1,27 @@
+schema_version: 1
+targets:
+  - id: "tools:bin"
+    name: "Tools"
+    config:
+      type: tool
+      bin_dir: tools/bin
+      commands: { stamp: stamp }
+  - id: "app:build"
+    name: "Build app"
+    deps: ["lib:build"]
+    actions:
+      - id: "package"
+        type: command
+        command: ["sh", "-c", "stamp < lib.txt > app.txt"]
+        tool_dep_ids: ["tools:bin"]
+        inputs:
+          - include: ["lib.txt"]
+            root: "."
+        outputs:
+          - path: "app.txt"
+            kind: file
+  - id: "pipeline:all"
+    name: "Whole pipeline"
+    config:
+      type: group
+      member_ids: ["codegen:gen", "lib:build", "app:build"]

@@ -91,7 +91,9 @@ pub fn compute_cache_key(action: &BuildAction, input_fingerprints: &[FileFingerp
         hasher.update(b";");
     }
 
-    format!("sha256:{}", hex::encode(hasher.finalize()))
+    let key = format!("sha256:{}", hex::encode(hasher.finalize()));
+    log::trace!("cache key for action {}: {}", action.id, key);
+    key
 }
 
 /// Load the cache entry for `{target_id}/{action_id}`, returning it only when its

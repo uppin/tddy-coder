@@ -1,0 +1,11 @@
+schema_version: 1
+targets:
+  - id: "ui:build"
+    name: "Build ui"
+    deps: ["shared:build"]
+    config:
+      type: typescript
+      package_dir: packages/ui
+      build_script: build
+      srcs: ["src/index.ts", "package.json"]
+      output_dirs: ["dist"]

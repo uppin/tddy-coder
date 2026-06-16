@@ -26,3 +26,8 @@ members = [
     "packages/tddy-integration-tests",
     "packages/tddy-livekit-screen-capture",
 ]
+exclude = [
+    # Real cargo workspace used as a tddy-build example fixture; built by the
+    # tddy-build-rust integration tests, not a member of this workspace.
+    "packages/tddy-build-rust/examples/workspace",
+]

@@ -1,0 +1,14 @@
+schema_version: 1
+targets:
+  - id: "mathapp:bin"
+    name: "mathapp binary"
+    deps: ["mathcore:lib", "mathutil:lib"]
+    config:
+      type: rust_binary
+      package: mathapp
+      bin_name: mathapp
+      profile: debug
+      srcs: ["mathapp/src/main.rs", "mathapp/Cargo.toml"]
+      outputs:
+        - path: "target/debug/mathapp"
+          kind: file
