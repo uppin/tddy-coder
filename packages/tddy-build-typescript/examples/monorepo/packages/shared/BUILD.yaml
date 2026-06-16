@@ -1,0 +1,10 @@
+schema_version: 1
+targets:
+  - id: "shared:build"
+    name: "Build shared"
+    config:
+      type: typescript
+      package_dir: packages/shared
+      build_script: build
+      srcs: ["src/index.ts", "package.json"]
+      output_dirs: ["dist"]

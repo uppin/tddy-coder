@@ -1,0 +1,11 @@
+schema_version: 1
+targets:
+  - id: "web:build"
+    name: "Build web"
+    deps: ["shared:build", "ui:build"]
+    config:
+      type: typescript
+      package_dir: apps/web
+      build_script: build
+      srcs: ["src/index.ts", "package.json"]
+      output_dirs: ["dist"]
