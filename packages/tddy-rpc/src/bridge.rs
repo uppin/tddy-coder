@@ -85,6 +85,10 @@ impl MultiRpcService {
         Self { entries }
     }
 
+    pub fn service_names(&self) -> Vec<&str> {
+        self.entries.iter().map(|e| e.name).collect()
+    }
+
     fn find_service(&self, service: &str) -> Option<&Arc<dyn RpcService>> {
         self.entries
             .iter()
@@ -193,5 +197,50 @@ impl<S: RpcService> RpcBridge<S> {
             RpcResult::ServerStream(Ok(rx)) => Ok(ResponseBody::Streaming(rx)),
             RpcResult::ServerStream(Err(status)) => Err(status),
         }
+    }
+}
+
+/// RPC Playground acceptance: MultiRpcService must expose registered service names so the
+/// reflection service can enumerate only what is actually hosted.
+///
+/// This test will fail to compile until `MultiRpcService::service_names()` is added.
+#[cfg(test)]
+mod multi_service_names_acceptance {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::message::RpcMessage;
+    use crate::status::Status;
+
+    struct StubService;
+
+    #[async_trait::async_trait]
+    impl RpcService for StubService {
+        async fn handle_rpc(
+            &self,
+            _service: &str,
+            _method: &str,
+            _message: &RpcMessage,
+        ) -> RpcResult {
+            RpcResult::Unary(Err(Status::unimplemented("stub")))
+        }
+    }
+
+    #[test]
+    fn multi_rpc_service_exposes_service_names() {
+        let entries = vec![
+            ServiceEntry {
+                name: "test.EchoService",
+                service: Arc::new(StubService),
+            },
+            ServiceEntry {
+                name: "token.TokenService",
+                service: Arc::new(StubService),
+            },
+        ];
+        let multi = MultiRpcService::new(entries);
+        // service_names() does not exist yet — this test fails to compile until it is added.
+        let names = multi.service_names();
+        assert_eq!(names, vec!["test.EchoService", "token.TokenService"]);
     }
 }

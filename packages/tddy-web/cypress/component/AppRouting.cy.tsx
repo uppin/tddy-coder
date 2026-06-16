@@ -263,7 +263,7 @@ describe("App routing (daemon mode, acceptance)", () => {
     interceptConnectSessionSuccess();
     interceptTokenForPresence();
     cy.window().then((win) => {
-      win.history.replaceState(null, "", "/");
+      win.location.hash = "/";
     });
     cy.mount(<App />);
     waitForDaemonSessionShell();
@@ -274,7 +274,7 @@ describe("App routing (daemon mode, acceptance)", () => {
     cy.get("[data-testid='terminal-reconnect-overlay-root']", { timeout: 15000 }).should("be.visible");
     cy.get("[data-testid='terminal-reconnect-expand']", { timeout: 15000 }).should("be.visible").click();
     cy.window()
-      .its("location.pathname")
+      .its("location.hash")
       .should("contain", `${TERMINAL_SESSION_ROUTE_PREFIX}/${ACTIVE_SESSION.sessionId}`);
   });
 
@@ -284,7 +284,7 @@ describe("App routing (daemon mode, acceptance)", () => {
     interceptConnectSessionSuccess();
     interceptTokenForPresence();
     cy.window().then((win) => {
-      win.history.replaceState(null, "", "/");
+      win.location.hash = "/";
     });
     cy.mount(<App />);
     waitForDaemonSessionShell();
@@ -307,7 +307,7 @@ describe("App routing (daemon mode, acceptance)", () => {
     interceptConnectSessionSuccess();
     interceptTokenForPresence();
     cy.window().then((win) => {
-      win.history.replaceState(null, "", `${TERMINAL_SESSION_ROUTE_PREFIX}/does-not-exist-999`);
+      win.location.hash = `${TERMINAL_SESSION_ROUTE_PREFIX}/does-not-exist-999`;
     });
     cy.mount(<App />);
     waitForDaemonSessionShell();

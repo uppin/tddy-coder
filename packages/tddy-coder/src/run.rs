@@ -1473,6 +1473,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 if let Some(auth_entry) = build_auth_service_entry(args) {
                     entries.push(auth_entry);
                 }
+                let names: Vec<&str> = entries.iter().map(|e| e.name).collect();
+                entries.push(tddy_service::reflection_entry_from(&names));
                 let multi = tddy_rpc::MultiRpcService::new(entries);
                 Some(tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
                     multi,
@@ -1488,6 +1490,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 if let Some(auth_entry) = build_auth_service_entry(args) {
                     entries.push(auth_entry);
                 }
+                let names: Vec<&str> = entries.iter().map(|e| e.name).collect();
+                entries.push(tddy_service::reflection_entry_from(&names));
                 let multi = tddy_rpc::MultiRpcService::new(entries);
                 Some(tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
                     multi,
@@ -1524,7 +1528,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 .expect("factory set when livekit_enabled");
             let (terminal_service, _metadata_tx, metadata_rx) =
                 terminal_and_codex_oauth_for_livekit(factory, args.mouse);
-            let livekit_multi = tddy_rpc::MultiRpcService::new(vec![
+            let mut livekit_entries = vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
                     service: std::sync::Arc::new(tddy_service::TerminalServiceServer::new(
@@ -1539,7 +1543,10 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         tddy_service::LoopbackTunnelServiceImpl,
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
-            ]);
+            ];
+            let livekit_names: Vec<&str> = livekit_entries.iter().map(|e| e.name).collect();
+            livekit_entries.push(tddy_service::reflection_entry_from(&livekit_names));
+            let livekit_multi = tddy_rpc::MultiRpcService::new(livekit_entries);
             if has_key_secret {
                 let token_generator = tddy_livekit::TokenGenerator::new(
                     args.livekit_api_key.as_ref().unwrap().clone(),
@@ -2330,7 +2337,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             let tunnel_server = tddy_service::LoopbackTunnelServiceServer::new(
                 tddy_service::LoopbackTunnelServiceImpl,
             );
-            let multi_service = tddy_rpc::MultiRpcService::new(vec![
+            let mut multi_entries = vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
                     service: std::sync::Arc::new(terminal_server)
@@ -2348,7 +2355,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     service: std::sync::Arc::new(tunnel_server)
                         as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
-            ]);
+            ];
+            let multi_names: Vec<&str> = multi_entries.iter().map(|e| e.name).collect();
+            multi_entries.push(tddy_service::reflection_entry_from(&multi_names));
+            let multi_service = tddy_rpc::MultiRpcService::new(multi_entries);
             let codex_oauth_watch_for_reconnect = codex_oauth_watch.clone();
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_multi_thread()
@@ -2371,7 +2381,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             });
         } else {
             let token = args.livekit_token.clone().unwrap();
-            let livekit_multi = tddy_rpc::MultiRpcService::new(vec![
+            let mut livekit_entries2 = vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
                     service: std::sync::Arc::new(tddy_service::TerminalServiceServer::new(
@@ -2386,7 +2396,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         tddy_service::LoopbackTunnelServiceImpl,
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
-            ]);
+            ];
+            let livekit_names2: Vec<&str> = livekit_entries2.iter().map(|e| e.name).collect();
+            livekit_entries2.push(tddy_service::reflection_entry_from(&livekit_names2));
+            let livekit_multi = tddy_rpc::MultiRpcService::new(livekit_entries2);
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
@@ -2454,6 +2467,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             if let Some(auth_entry) = build_auth_service_entry(args) {
                 entries.push(auth_entry);
             }
+            let names: Vec<&str> = entries.iter().map(|e| e.name).collect();
+            entries.push(tddy_service::reflection_entry_from(&names));
             let multi = tddy_rpc::MultiRpcService::new(entries);
             Some(tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
                 multi,
@@ -2468,6 +2483,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             if let Some(auth_entry) = build_auth_service_entry(args) {
                 entries.push(auth_entry);
             }
+            let names: Vec<&str> = entries.iter().map(|e| e.name).collect();
+            entries.push(tddy_service::reflection_entry_from(&names));
             let multi = tddy_rpc::MultiRpcService::new(entries);
             Some(tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
                 multi,

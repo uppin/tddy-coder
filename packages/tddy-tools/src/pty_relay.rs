@@ -758,35 +758,6 @@ impl Drop for RawMode {
 
 #[cfg(all(test, feature = "livekit"))]
 mod tests {
-    #[cfg(feature = "livekit")]
-    use super::*;
-
-    /// Reproduces: pty-relay encodes resize as DECSLPP xterm format `\x1b[8;{rows};{cols}t`
-    /// but VirtualTUI's `parse_resize_from_buf` expects OSC format `\x1b]resize;{cols};{rows}\x07`.
-    /// With the wrong format the TUI never receives valid dimensions, stays at the 80x24 default,
-    /// and renders separator lines and the status bar at the wrong width — producing doubled
-    /// separators and a split `● high · /effort` line when viewed in a wider relay terminal.
-    #[cfg(feature = "livekit")]
-    #[test]
-    fn test_encode_resize_uses_osc_format_matching_virtual_tui() {
-        let bytes = encode_resize().expect("encode_resize must return Some");
-        // VirtualTUI parse_resize_from_buf expects: \x1b]resize;{cols};{rows}\x07
-        assert!(
-            bytes.starts_with(b"\x1b]resize;"),
-            "resize must use OSC format \\x1b]resize;… (cols;rows\\x07) \
-             but pty_relay produced: {:?}",
-            String::from_utf8_lossy(&bytes)
-        );
-        assert!(
-            bytes.ends_with(b"\x07"),
-            "resize must terminate with BEL (\\x07) but got: {:?}",
-            String::from_utf8_lossy(&bytes)
-        );
-    }
-}
-
-#[cfg(test)]
-mod tests {
     use super::*;
 
     /// Reproduces: pty-relay encodes resize as DECSLPP xterm format `\x1b[8;{rows};{cols}t`

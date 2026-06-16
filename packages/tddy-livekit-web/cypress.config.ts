@@ -4,6 +4,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 import { AccessToken } from "livekit-server-sdk";
+import { LivekitDockerTestkit } from "./cypress/support/livekitDockerTestkit.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,11 +19,9 @@ function getEchoServerPath(): string {
   return path.join(repoRoot, "target", "debug", "examples", "echo_server");
 }
 
+const testkit = new LivekitDockerTestkit();
+
 export default defineConfig({
-  env: {
-    /** Forwarded for specs; transport tests skip when unset (see `transport.cy.tsx`). */
-    LIVEKIT_TESTKIT_WS_URL: process.env.LIVEKIT_TESTKIT_WS_URL ?? "",
-  },
   defaultCommandTimeout: 15000,
   component: {
     devServer: {
@@ -42,8 +41,88 @@ export default defineConfig({
         }
       };
 
+      const startEchoServerImpl = async (
+        withReflection: boolean
+      ): Promise<{ url: string; roomName: string; clientToken: string }> => {
+        const wsUrl = await testkit.start();
+
+        const serverToken = new AccessToken(DEV_API_KEY, DEV_API_SECRET, {
+          identity: SERVER_IDENTITY,
+        });
+        serverToken.addGrant({
+          roomJoin: true,
+          room: ROOM_NAME,
+          canPublish: true,
+          canSubscribe: true,
+        });
+        const token = await serverToken.toJwt();
+
+        const binaryPath = getEchoServerPath();
+        if (!fs.existsSync(binaryPath)) {
+          throw new Error(
+            `Echo server binary not found at ${binaryPath}. Run: cargo build -p tddy-livekit --example echo_server`
+          );
+        }
+
+        const spawnArgs = ["--url", wsUrl, "--token", token];
+        if (withReflection) {
+          spawnArgs.push("--reflection");
+        }
+
+        return new Promise<{ url: string; roomName: string; clientToken: string }>(
+          (resolve, reject) => {
+            echoServerProcess = spawn(binaryPath, spawnArgs, {
+              stdio: ["ignore", "pipe", "pipe"],
+              env: { ...process.env, RUST_LOG: "info" },
+            });
+
+            let stdout = "";
+            let resolved = false;
+            echoServerProcess.stdout?.on("data", (data) => {
+              stdout += data.toString();
+              if (stdout.includes("READY") && !resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                const clientToken = new AccessToken(DEV_API_KEY, DEV_API_SECRET, {
+                  identity: CLIENT_IDENTITY,
+                });
+                clientToken.addGrant({
+                  roomJoin: true,
+                  room: ROOM_NAME,
+                  canPublish: true,
+                  canSubscribe: true,
+                });
+                clientToken.toJwt().then((clientJwt) => {
+                  resolve({
+                    url: wsUrl,
+                    roomName: ROOM_NAME,
+                    clientToken: clientJwt,
+                  });
+                });
+              }
+            });
+
+            echoServerProcess.stderr?.on("data", (data) => {
+              const msg = data.toString();
+              console.error("[echo_server]", msg);
+              fs.appendFileSync(logFile, `[echo_server] ${msg}`);
+            });
+
+            echoServerProcess.on("error", reject);
+
+            const timeout = setTimeout(() => {
+              if (!resolved) {
+                resolved = true;
+                reject(new Error("Echo server did not print READY within 10s"));
+              }
+            }, 10000);
+          }
+        );
+      };
+
       on("after:run", () => {
         stopEchoServer();
+        testkit.stop();
       });
 
       on("task", {
@@ -53,80 +132,12 @@ export default defineConfig({
           return null;
         },
         async startEchoServer() {
-          const wsUrl = process.env.LIVEKIT_TESTKIT_WS_URL;
-          if (!wsUrl || wsUrl.trim() === "") {
-            throw new Error(
-              "LIVEKIT_TESTKIT_WS_URL must be set. Run ./run-livekit-testkit-server and export the URL."
-            );
-          }
-
-          const serverToken = new AccessToken(DEV_API_KEY, DEV_API_SECRET, {
-            identity: SERVER_IDENTITY,
-          });
-          serverToken.addGrant({
-            roomJoin: true,
-            room: ROOM_NAME,
-            canPublish: true,
-            canSubscribe: true,
-          });
-          const token = await serverToken.toJwt();
-
-          const binaryPath = getEchoServerPath();
-          if (!fs.existsSync(binaryPath)) {
-            throw new Error(
-              `Echo server binary not found at ${binaryPath}. Run: cargo build -p tddy-livekit --example echo_server`
-            );
-          }
-
-          return new Promise<{ url: string; roomName: string; clientToken: string }>(
-            (resolve, reject) => {
-              echoServerProcess = spawn(binaryPath, ["--url", wsUrl, "--token", token], {
-                stdio: ["ignore", "pipe", "pipe"],
-                env: { ...process.env, RUST_LOG: "info" },
-              });
-
-              let stdout = "";
-              let resolved = false;
-              echoServerProcess.stdout?.on("data", (data) => {
-                stdout += data.toString();
-                if (stdout.includes("READY") && !resolved) {
-                  resolved = true;
-                  clearTimeout(timeout);
-                  const clientToken = new AccessToken(DEV_API_KEY, DEV_API_SECRET, {
-                    identity: CLIENT_IDENTITY,
-                  });
-                  clientToken.addGrant({
-                    roomJoin: true,
-                    room: ROOM_NAME,
-                    canPublish: true,
-                    canSubscribe: true,
-                  });
-                  clientToken.toJwt().then((clientJwt) => {
-                    resolve({
-                      url: wsUrl,
-                      roomName: ROOM_NAME,
-                      clientToken: clientJwt,
-                    });
-                  });
-                }
-              });
-
-              echoServerProcess.stderr?.on("data", (data) => {
-                const msg = data.toString();
-                console.error("[echo_server]", msg);
-                fs.appendFileSync(logFile, `[echo_server] ${msg}`);
-              });
-
-              echoServerProcess.on("error", reject);
-
-              const timeout = setTimeout(() => {
-                if (!resolved) {
-                  resolved = true;
-                  reject(new Error("Echo server did not print READY within 10s"));
-                }
-              }, 10000);
-            }
-          );
+          return startEchoServerImpl(false);
+        },
+        async startEchoServerWithReflection() {
+          // Same as startEchoServer, but the participant also hosts the gRPC
+          // ServerReflection service (echo_server --reflection).
+          return startEchoServerImpl(true);
         },
         stopEchoServer() {
           stopEchoServer();

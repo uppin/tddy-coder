@@ -1267,7 +1267,7 @@ export function ConnectionScreen({
     () => new Map(),
   );
   const [routePath, setRoutePath] = useState(
-    () => (typeof window !== "undefined" ? window.location.pathname : "/"),
+    () => (typeof window !== "undefined" ? window.location.hash.slice(1) || "/" : "/"),
   );
   const [sessionsListHydrated, setSessionsListHydrated] = useState(false);
   const [terminalRouteUnknown, setTerminalRouteUnknown] = useState(false);
@@ -1282,12 +1282,10 @@ export function ConnectionScreen({
       if (typeof window === "undefined") return;
       if (mode === "push" && onNavigate) {
         onNavigate(path);
+      } else if (mode === "replace") {
+        window.history.replaceState(null, "", "#" + path);
       } else {
-        if (mode === "push") {
-          window.history.pushState(null, "", path);
-        } else {
-          window.history.replaceState(null, "", path);
-        }
+        window.location.hash = path;
       }
       setRoutePath(path);
     },
@@ -1309,7 +1307,7 @@ export function ConnectionScreen({
             setTerminalPresentation("hidden");
             navigatePath("/", "replace");
           } else {
-            const p = typeof window !== "undefined" ? window.location.pathname : "/";
+            const p = typeof window !== "undefined" ? window.location.hash.slice(1) || "/" : "/";
             const focus = focusedSessionIdFromPathname(p, next);
             if (focus) {
               navigatePath(terminalPathForSessionId(focus), "replace");
@@ -1329,8 +1327,8 @@ export function ConnectionScreen({
   }, [sessionAttachments.size]);
 
   useEffect(() => {
-    const onPopState = () => {
-      const p = window.location.pathname;
+    const onHashChange = () => {
+      const p = window.location.hash.slice(1) || "/";
       setRoutePath(p);
       if (isSessionListPath(p)) {
         setSessionAttachments(new Map());
@@ -1338,8 +1336,8 @@ export function ConnectionScreen({
         setTerminalPresentation("hidden");
       }
     };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
   const presenceReady =
@@ -1661,7 +1659,7 @@ export function ConnectionScreen({
           setTerminalPresentation("hidden");
           navigatePath("/", "replace");
         } else {
-          const p = typeof window !== "undefined" ? window.location.pathname : "/";
+          const p = typeof window !== "undefined" ? window.location.hash.slice(1) || "/" : "/";
           const focus = focusedSessionIdFromPathname(p, pruned);
           if (focus) {
             navigatePath(terminalPathForSessionId(focus), "replace");

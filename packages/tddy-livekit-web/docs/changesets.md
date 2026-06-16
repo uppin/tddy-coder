@@ -4,6 +4,7 @@ Wrapped changeset history for tddy-livekit-web.
 
 **Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
 
+- **2026-06-15** [Feature] **RPC Playground — reflection proto codegen + Cypress LiveKit testkit** — `reflection_pb.ts` generated via buf (`buf.gen.yaml`); exported from `index.ts`; `ReflectionTestHarness.tsx` Cypress support; auto-start LiveKit Docker container (`livekitDockerTestkit.ts`) when `LIVEKIT_TESTKIT_WS_URL` not set; `reflection.cy.tsx` (4 tests: list_services, file descriptor fetch, server-streaming, bidi-streaming). Feature [rpc-playground.md](../../../docs/ft/daemon/rpc-playground.md). (tddy-livekit-web)
 - **2026-04-11** [Feature] **Loopback tunnel Connect codegen** — **`loopback_tunnel_pb`** (Buf / **`bun run generate`**), exported for desktop tunnel clients; operator OAuth path no longer depends on **`codex_oauth_pb`** for callback delivery. Feature **[tddy-desktop-electrobun.md](../../../docs/ft/desktop/tddy-desktop-electrobun.md)**. (tddy-livekit-web)
 - **2026-04-10** [Feature] **Codex OAuth proto codegen** — `codex_oauth_pb.ts` generated; re-exported from `index.ts`. (tddy-livekit-web)
 - **2026-03-13** [Feature] Ghostty Terminal Proto Codegen — terminal.proto codegen. TerminalInputSchema, TerminalOutputSchema, TerminalService. Exported from index.ts. (tddy-livekit-web)

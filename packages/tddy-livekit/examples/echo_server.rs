@@ -9,8 +9,11 @@
 //! Requires LIVEKIT_TESTKIT_WS_URL to be set or --url provided. Token must be generated
 //! externally (e.g. by livekit-server-sdk in Node.js).
 
+use std::sync::Arc;
+
 use tddy_livekit::{LiveKitParticipant, RoomOptions};
-use tddy_service::{EchoServiceImpl, EchoServiceServer};
+use tddy_rpc::{MultiRpcService, ServiceEntry};
+use tddy_service::{reflection_entry_from, EchoServiceImpl, EchoServiceServer};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,11 +25,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let mut url = std::env::var("LIVEKIT_TESTKIT_WS_URL").ok();
     let mut token = None;
+    let mut with_reflection = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--url" => url = args.next(),
             "--token" => token = args.next(),
+            "--reflection" => with_reflection = true,
             "--room" => {
                 args.next();
             }
@@ -37,18 +42,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let url = url.ok_or("Missing --url or LIVEKIT_TESTKIT_WS_URL")?;
     let token = token.ok_or("Missing --token")?;
 
-    log::info!("[echo_server] connecting to {}", url);
+    log::info!(
+        "[echo_server] connecting to {} (reflection={})",
+        url,
+        with_reflection
+    );
 
-    let participant = LiveKitParticipant::connect(
-        &url,
-        &token,
-        EchoServiceServer::new(EchoServiceImpl),
-        RoomOptions::default(),
-        None,
-        None,
-    )
-    .await
-    .map_err(|e| format!("Connect failed: {}", e))?;
+    // Build a MultiRpcService with EchoService, optionally exposing ServerReflection so
+    // dynamic clients (RPC Playground) can enumerate and invoke methods.
+    let mut entries: Vec<ServiceEntry> = vec![ServiceEntry {
+        name: "test.EchoService",
+        service: Arc::new(EchoServiceServer::new(EchoServiceImpl)),
+    }];
+    if with_reflection {
+        let names: Vec<&str> = entries.iter().map(|e| e.name).collect();
+        entries.push(reflection_entry_from(&names));
+    }
+    let service = MultiRpcService::new(entries);
+
+    let participant =
+        LiveKitParticipant::connect(&url, &token, service, RoomOptions::default(), None, None)
+            .await
+            .map_err(|e| format!("Connect failed: {}", e))?;
 
     log::info!("[echo_server] connected, identity=server, event loop starting");
     // Print READY to stdout (not via log::info which goes to stderr)

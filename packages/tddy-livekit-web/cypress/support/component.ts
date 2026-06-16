@@ -10,7 +10,7 @@ beforeEach(() => {
       const message = args
         .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))
         .join(" ");
-      if (message.includes("[LiveKitTransport]") || message.includes("[TEST]")) {
+      if (message.includes("[LiveKitTransport]") || message.includes("[TEST]") || message.includes("[REFLECTION]")) {
         (win as unknown as { cypressLogs: string[] }).cypressLogs.push(message);
       }
       originalLog.apply((win as Window).console, args);
