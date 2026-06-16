@@ -190,7 +190,7 @@ mod tests {
         BuildAction {
             id: "compile".to_string(),
             r#type: ActionType::Command as i32,
-            command: vec!["cargo".to_string(), "build".to_string()],
+            command: vec!["build-tool".to_string(), "build".to_string()],
             outputs: vec![OutputDecl {
                 path: "out/bin".to_string(),
                 kind: OutputKind::File as i32,
@@ -255,7 +255,7 @@ mod tests {
         let action = sample_action();
         let base = compute_cache_key(&action, &fps());
         let mut other = sample_action();
-        other.command.push("--release".to_string());
+        other.command.push("--extra-arg".to_string());
         assert_ne!(base, compute_cache_key(&other, &fps()));
     }
 

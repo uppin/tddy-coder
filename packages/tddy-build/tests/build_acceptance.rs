@@ -1,54 +1,73 @@
 //! Acceptance tests for the tddy-build crate.
 //!
-//! These pin the externally-observable contract: YAML→proto deserialization, the
-//! content-addressed action cache, DAG construction, and target execution.
+//! These pin the externally-observable contract after `tddy-build` became a generic
+//! engine + plugin wiring point: an open `BUILD.yaml` config schema, dispatch of
+//! ecosystem target types to registered `BuildPlugin`s, the built-in structural types
+//! (`script`/`tool`/`group`), the content-addressed action cache, and DAG execution.
+//!
+//! `tddy-build` carries no recipe knowledge and depends on no plugin crate, so the
+//! plugin path is exercised here via an inline test-only `DemoPlugin`.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tddy_build::cache::compute_cache_key;
 use tddy_build::executor::{execute_target, ExecuteOptions};
 use tddy_build::graph::BuildGraph;
-use tddy_build::load_build_manifest;
-use tddy_build::proto::{build_target, ActionType, BuildAction, FileFingerprint};
+use tddy_build::manifest::TargetConfig;
+use tddy_build::plugin::{BuildPlugin, LowerContext, PluginRegistry};
+use tddy_build::proto::{ActionType, BuildAction, FileFingerprint};
+use tddy_build::service::{build_list_json, BuildListQuery};
+use tddy_build::{load_build_manifest, BuildError};
 
-/// A manifest exercising one of each of the seven target types.
-const ALL_TYPES_YAML: &str = r#"
+/// A test-only plugin handling `type: demo`. It lowers to a single command action
+/// `["demo-tool", <message>]`, reading `message` from the target's open config. This
+/// stands in for the real recipe crates (`tddy-build-rust`, …) which `tddy-build`
+/// must not depend on.
+struct DemoPlugin;
+
+impl BuildPlugin for DemoPlugin {
+    fn type_names(&self) -> &'static [&'static str] {
+        &["demo"]
+    }
+
+    fn lower(&self, ctx: &LowerContext) -> Result<Vec<BuildAction>, BuildError> {
+        let message = ctx
+            .config
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default")
+            .to_string();
+        Ok(vec![BuildAction {
+            id: "demo".to_string(),
+            r#type: ActionType::Command as i32,
+            command: vec!["demo-tool".to_string(), message],
+            ..Default::default()
+        }])
+    }
+}
+
+fn registry_with_demo() -> PluginRegistry {
+    let mut registry = PluginRegistry::new();
+    registry.register(Arc::new(DemoPlugin));
+    registry
+}
+
+/// A manifest mixing the three built-in structural types (`script`/`tool`/`group`)
+/// with a plugin-provided type (`demo`).
+const MIXED_YAML: &str = r#"
 schema_version: 1
 targets:
-  - id: "app:bin"
-    name: "App Binary"
-    config:
-      type: rust_binary
-      package: app
-      bin_name: app
-      features: [foo]
-      profile: release
-  - id: "lib:core"
-    name: "Core Lib"
-    config:
-      type: rust_library
-      package: core
-      features: []
-      profile: debug
-  - id: "web:dist"
-    name: "Web"
-    config:
-      type: typescript
-      package_dir: packages/web
-      build_script: build
-      output_dirs: [dist]
-  - id: "img:app"
-    name: "Image"
-    config:
-      type: docker_image
-      dockerfile: Dockerfile
-      context: "."
-      tag: "app:latest"
   - id: "foo:script"
     name: "Script"
     config:
       type: script
       command: [echo, hello]
+  - id: "demo:thing"
+    name: "Demo Thing"
+    config:
+      type: demo
+      message: hi-from-demo
   - id: "tools:bin"
     name: "Tools"
     config:
@@ -59,16 +78,16 @@ targets:
     name: "Group"
     config:
       type: group
-      member_ids: ["app:bin", "lib:core"]
+      member_ids: ["foo:script", "demo:thing"]
 "#;
 
 #[test]
-fn build_manifest_yaml_round_trips_all_target_types() {
-    let manifest = load_build_manifest(ALL_TYPES_YAML).expect("manifest must parse");
+fn manifest_round_trips_builtin_and_plugin_configs() {
+    let manifest = load_build_manifest(MIXED_YAML).expect("manifest must parse");
     assert_eq!(manifest.schema_version, 1);
-    assert_eq!(manifest.targets.len(), 7);
+    assert_eq!(manifest.targets.len(), 4);
 
-    let by_id = |id: &str| {
+    let config = |id: &str| -> &TargetConfig {
         manifest
             .targets
             .iter()
@@ -79,56 +98,192 @@ fn build_manifest_yaml_round_trips_all_target_types() {
             .unwrap_or_else(|| panic!("target {id} has no config"))
     };
 
-    match by_id("app:bin") {
-        build_target::Config::RustBinary(rb) => {
-            assert_eq!(rb.package, "app");
-            assert_eq!(rb.bin_name, "app");
-            assert_eq!(rb.features, vec!["foo".to_string()]);
-            assert_eq!(rb.profile, "release");
-        }
-        _ => panic!("app:bin must be rust_binary"),
+    // `type` is captured as the dispatch tag; the engine knows nothing more.
+    assert_eq!(config("foo:script").r#type, "script");
+    assert_eq!(config("tools:bin").r#type, "tool");
+    assert_eq!(config("all:group").r#type, "group");
+    assert_eq!(config("demo:thing").r#type, "demo");
+
+    // The remaining config keys are preserved verbatim for the plugin to interpret —
+    // the engine does not model them.
+    assert_eq!(
+        config("demo:thing")
+            .fields
+            .get("message")
+            .and_then(|v| v.as_str()),
+        Some("hi-from-demo"),
+        "plugin config fields must round-trip for the plugin to read"
+    );
+}
+
+#[test]
+fn registered_plugin_lowers_target_actions() {
+    let manifest = load_build_manifest(MIXED_YAML).expect("parse manifest");
+    let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
+    let registry = registry_with_demo();
+
+    let actions = graph
+        .actions_for("demo:thing", &registry)
+        .expect("registered plugin must lower its target");
+    assert_eq!(actions.len(), 1, "demo plugin lowers to one action");
+    assert_eq!(
+        actions[0].command,
+        vec!["demo-tool".to_string(), "hi-from-demo".to_string()],
+        "the action argv must come from the plugin, not the engine"
+    );
+}
+
+#[test]
+fn unknown_target_type_without_plugin_errors() {
+    let manifest = load_build_manifest(MIXED_YAML).expect("parse manifest");
+    let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
+    let empty = PluginRegistry::new(); // no `demo` plugin registered
+
+    let err = graph
+        .actions_for("demo:thing", &empty)
+        .expect_err("an unregistered, non-built-in type must error");
+    let message = err.to_string();
+    assert!(
+        message.contains("unknown target type"),
+        "error must explain the cause, got: {message}"
+    );
+    assert!(
+        message.contains("demo"),
+        "error must name the offending type, got: {message}"
+    );
+}
+
+#[test]
+fn builtin_script_tool_group_lower_without_any_plugin() {
+    let manifest = load_build_manifest(MIXED_YAML).expect("parse manifest");
+    let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
+    let empty = PluginRegistry::new();
+
+    // `script` is the engine's generic command escape hatch.
+    let script = graph
+        .actions_for("foo:script", &empty)
+        .expect("script is built-in");
+    assert_eq!(script.len(), 1);
+    assert_eq!(
+        script[0].command,
+        vec!["echo".to_string(), "hello".to_string()]
+    );
+
+    // `tool` and `group` are structural — no own build action.
+    assert!(
+        graph
+            .actions_for("tools:bin", &empty)
+            .expect("tool is built-in")
+            .is_empty(),
+        "tool target has no own action"
+    );
+    assert!(
+        graph
+            .actions_for("all:group", &empty)
+            .expect("group is built-in")
+            .is_empty(),
+        "group target has no own action"
+    );
+}
+
+#[test]
+fn group_membership_drives_build_order_without_plugins() {
+    let manifest = load_build_manifest(MIXED_YAML).expect("parse manifest");
+    let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
+
+    let order = graph
+        .build_order("all:group")
+        .expect("group build order resolves");
+    let pos = |id: &str| {
+        order
+            .iter()
+            .position(|t| t == id)
+            .unwrap_or_else(|| panic!("{id} missing from build order: {order:?}"))
+    };
+    assert!(
+        pos("foo:script") < pos("all:group"),
+        "group members build before the group"
+    );
+    assert!(
+        pos("demo:thing") < pos("all:group"),
+        "group members build before the group"
+    );
+}
+
+#[tokio::test]
+async fn tool_bin_dir_is_prepended_to_action_path() {
+    let yaml = r#"
+schema_version: 1
+targets:
+  - id: "mytool:tool"
+    name: "My Tool"
+    config:
+      type: tool
+      bin_dir: toolbin
+      commands: { greet: greet }
+  - id: "uses:tool"
+    name: "Uses Tool"
+    deps: ["mytool:tool"]
+    actions:
+      - id: "run-greet"
+        description: "invoke the tool-provided binary"
+        type: command
+        command: ["greet"]
+        tool_dep_ids: ["mytool:tool"]
+"#;
+    let repo = tempfile::tempdir().expect("tempdir");
+    let root = repo.path();
+    let bin_dir = root.join("toolbin");
+    std::fs::create_dir_all(&bin_dir).expect("mkdir toolbin");
+    let greet = bin_dir.join("greet");
+    std::fs::write(&greet, "#!/bin/sh\necho GREETED-BY-TOOL\n").expect("write greet");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&greet, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod greet");
     }
-    match by_id("lib:core") {
-        build_target::Config::RustLibrary(rl) => assert_eq!(rl.package, "core"),
-        _ => panic!("lib:core must be rust_library"),
-    }
-    match by_id("web:dist") {
-        build_target::Config::Typescript(ts) => {
-            assert_eq!(ts.package_dir, "packages/web");
-            assert_eq!(ts.build_script, "build");
-            assert_eq!(ts.output_dirs, vec!["dist".to_string()]);
-        }
-        _ => panic!("web:dist must be typescript"),
-    }
-    match by_id("img:app") {
-        build_target::Config::DockerImage(d) => {
-            assert_eq!(d.dockerfile, "Dockerfile");
-            assert_eq!(d.tag, "app:latest");
-        }
-        _ => panic!("img:app must be docker_image"),
-    }
-    match by_id("foo:script") {
-        build_target::Config::Script(s) => {
-            assert_eq!(s.command, vec!["echo".to_string(), "hello".to_string()]);
-        }
-        _ => panic!("foo:script must be script"),
-    }
-    match by_id("tools:bin") {
-        build_target::Config::Tool(t) => {
-            assert_eq!(t.bin_dir, "tools/bin");
-            assert_eq!(t.commands.get("greet").map(String::as_str), Some("greet"));
-        }
-        _ => panic!("tools:bin must be tool"),
-    }
-    match by_id("all:group") {
-        build_target::Config::Group(g) => {
-            assert_eq!(
-                g.member_ids,
-                vec!["app:bin".to_string(), "lib:core".to_string()]
-            );
-        }
-        _ => panic!("all:group must be group"),
-    }
+
+    let manifest = load_build_manifest(yaml).expect("parse manifest");
+    let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
+
+    let record = execute_target(
+        root,
+        &graph,
+        "uses:tool",
+        &ExecuteOptions::default(),
+        &PluginRegistry::new(),
+    )
+    .await
+    .expect("run tool-dependent target");
+    assert!(
+        record.actions[0].stdout.contains("GREETED-BY-TOOL"),
+        "built-in tool bin_dir must be on PATH, got: {:?}",
+        record.actions[0].stdout
+    );
+}
+
+#[test]
+fn service_list_reports_raw_type_string_for_plugin_target() {
+    let repo = tempfile::tempdir().expect("tempdir");
+    std::fs::write(repo.path().join("BUILD.yaml"), MIXED_YAML).expect("write BUILD.yaml");
+
+    // Listing reads the `type` tag directly — it neither lowers nor needs a registry.
+    let value = build_list_json(repo.path(), &BuildListQuery::default()).expect("list targets");
+    let targets = value
+        .get("targets")
+        .and_then(|t| t.as_array())
+        .expect("list output must have a `targets` array");
+
+    let demo = targets
+        .iter()
+        .find(|t| t.get("id").and_then(|v| v.as_str()) == Some("demo:thing"))
+        .expect("demo:thing must be listed");
+    assert_eq!(
+        demo.get("type").and_then(|v| v.as_str()),
+        Some("demo"),
+        "the listed type must be the raw config type string"
+    );
 }
 
 #[test]
@@ -159,7 +314,7 @@ fn cache_key_is_deterministic() {
         working_dir: String::new(),
     };
     let fingerprints = vec![FileFingerprint {
-        path: "src/a.rs".to_string(),
+        path: "src/a.txt".to_string(),
         size: 10,
         mtime_ms: 123,
     }];
@@ -201,13 +356,14 @@ async fn cache_hit_skips_execution() {
     let manifest = load_build_manifest(CACHE_DEMO_YAML).expect("parse manifest");
     let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
     let opts = ExecuteOptions::default();
+    let registry = PluginRegistry::new();
 
-    let first = execute_target(root, &graph, "cache:demo", &opts)
+    let first = execute_target(root, &graph, "cache:demo", &opts, &registry)
         .await
         .expect("first run");
     assert!(!first.actions[0].cached, "first run must execute");
 
-    let second = execute_target(root, &graph, "cache:demo", &opts)
+    let second = execute_target(root, &graph, "cache:demo", &opts, &registry)
         .await
         .expect("second run");
     assert!(second.actions[0].cached, "second run must be a cache hit");
@@ -224,8 +380,9 @@ async fn cache_miss_on_input_mtime_change() {
     let manifest = load_build_manifest(CACHE_DEMO_YAML).expect("parse manifest");
     let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
     let opts = ExecuteOptions::default();
+    let registry = PluginRegistry::new();
 
-    let first = execute_target(root, &graph, "cache:demo", &opts)
+    let first = execute_target(root, &graph, "cache:demo", &opts, &registry)
         .await
         .expect("first run");
     assert!(!first.actions[0].cached);
@@ -233,7 +390,7 @@ async fn cache_miss_on_input_mtime_change() {
     // Change the input so its fingerprint differs.
     std::fs::write(root.join("input.txt"), "seed-changed-larger").expect("rewrite input");
 
-    let second = execute_target(root, &graph, "cache:demo", &opts)
+    let second = execute_target(root, &graph, "cache:demo", &opts, &registry)
         .await
         .expect("second run");
     assert!(
@@ -269,6 +426,7 @@ targets:
         &graph,
         "hello:script",
         &ExecuteOptions::default(),
+        &PluginRegistry::new(),
     )
     .await
     .expect("run script target");
@@ -276,53 +434,6 @@ targets:
     assert!(
         record.actions[0].stdout.contains("hello-from-script"),
         "stdout must capture the script output, got: {:?}",
-        record.actions[0].stdout
-    );
-}
-
-#[tokio::test]
-async fn build_respects_tool_target_bin_dir() {
-    let yaml = r#"
-schema_version: 1
-targets:
-  - id: "mytool:tool"
-    name: "My Tool"
-    config:
-      type: tool
-      bin_dir: toolbin
-      commands: { greet: greet }
-  - id: "uses:tool"
-    name: "Uses Tool"
-    deps: ["mytool:tool"]
-    actions:
-      - id: "run-greet"
-        description: "invoke the tool-provided binary"
-        type: command
-        command: ["greet"]
-        tool_dep_ids: ["mytool:tool"]
-"#;
-    let repo = tempfile::tempdir().expect("tempdir");
-    let root = repo.path();
-    let bin_dir = root.join("toolbin");
-    std::fs::create_dir_all(&bin_dir).expect("mkdir toolbin");
-    let greet = bin_dir.join("greet");
-    std::fs::write(&greet, "#!/bin/sh\necho GREETED-BY-TOOL\n").expect("write greet");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&greet, std::fs::Permissions::from_mode(0o755))
-            .expect("chmod greet");
-    }
-
-    let manifest = load_build_manifest(yaml).expect("parse manifest");
-    let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
-
-    let record = execute_target(root, &graph, "uses:tool", &ExecuteOptions::default())
-        .await
-        .expect("run tool-dependent target");
-    assert!(
-        record.actions[0].stdout.contains("GREETED-BY-TOOL"),
-        "tool bin_dir must be on PATH, got: {:?}",
         record.actions[0].stdout
     );
 }
@@ -383,7 +494,7 @@ targets:
 "#;
     let manifest = load_build_manifest(yaml).expect("parse manifest");
     let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
-    let waves = graph.waves().expect("compute waves");
+    let waves = graph.waves(&PluginRegistry::new()).expect("compute waves");
 
     assert_eq!(waves.len(), 2, "expected two waves: [a,b] then [c]");
     assert_eq!(
@@ -392,52 +503,4 @@ targets:
         "a and b run in parallel in the first wave"
     );
     assert_eq!(waves[1].len(), 1, "c runs alone after a and b");
-}
-
-#[tokio::test]
-async fn dry_run_emits_argv_for_all_seven_target_types() {
-    let repo = tempfile::tempdir().expect("tempdir");
-    let manifest = load_build_manifest(ALL_TYPES_YAML).expect("parse manifest");
-    let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
-    let opts = ExecuteOptions {
-        dry_run: true,
-        ..ExecuteOptions::default()
-    };
-
-    // Command-producing types: assert the lowered program (argv[0]).
-    let expectations: &[(&str, &str)] = &[
-        ("app:bin", "cargo"),
-        ("lib:core", "cargo"),
-        ("web:dist", "bun"),
-        ("img:app", "docker"),
-        ("foo:script", "echo"),
-    ];
-    for (target_id, program) in expectations {
-        let record = execute_target(repo.path(), &graph, target_id, &opts)
-            .await
-            .unwrap_or_else(|e| panic!("dry-run {target_id} failed: {e}"));
-        assert!(
-            !record.actions.is_empty(),
-            "{target_id} must lower to at least one action"
-        );
-        assert_eq!(
-            record.actions[0].argv.first().map(String::as_str),
-            Some(*program),
-            "{target_id} argv[0] should be {program}"
-        );
-    }
-
-    // tool / group do not themselves emit a build command — they must still
-    // dry-run without error.
-    for target_id in ["tools:bin", "all:group"] {
-        execute_target(repo.path(), &graph, target_id, &opts)
-            .await
-            .unwrap_or_else(|e| panic!("dry-run {target_id} failed: {e}"));
-    }
-
-    // dry-run must not execute anything.
-    assert!(
-        !repo.path().join("marker.txt").exists(),
-        "dry-run must not produce build artifacts"
-    );
 }

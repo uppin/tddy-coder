@@ -28,6 +28,9 @@ ctrlc = { version = "3", features = ["termination"] }
 crossterm = "0.29"
 tddy-core = { path = "../tddy-core" }
 tddy-build = { path = "../tddy-build" }
+tddy-build-rust = { path = "../tddy-build-rust" }
+tddy-build-typescript = { path = "../tddy-build-typescript" }
+tddy-build-docker = { path = "../tddy-build-docker" }
 tddy-tui = { path = "../tddy-tui" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-rpc = { path = "../tddy-rpc" }

@@ -1,0 +1,14 @@
+[package]
+name = "tddy-build-rust"
+version = "0.1.0"
+edition = "2021"
+description = "Rust build plugin for tddy-build: lowers rust_binary / rust_library targets to `cargo build`."
+
+[lib]
+name = "tddy_build_rust"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-build = { path = "../tddy-build" }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"

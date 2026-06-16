@@ -2,7 +2,7 @@
 name = "tddy-build"
 version = "0.1.0"
 edition = "2021"
-description = "Bazel-inspired, content-addressed build system for repo artifacts (BUILD.yaml → proto targets). Standalone — no tddy-* deps."
+description = "Bazel-inspired, content-addressed build engine + plugin wiring point (open BUILD.yaml config → BuildPlugin). Standalone — no tddy-* deps, no target-type knowledge."
 
 [lib]
 name = "tddy_build"

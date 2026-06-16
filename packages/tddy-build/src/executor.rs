@@ -4,10 +4,12 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::builtin::{self, TOOL};
 use crate::cache::{compute_cache_key, lookup_cache, persist_cache, CacheMode};
 use crate::error::BuildError;
 use crate::graph::{action_waves, BuildGraph};
-use crate::proto::{build_target::Config, ActionCacheEntry, BuildAction, FileFingerprint};
+use crate::plugin::PluginRegistry;
+use crate::proto::{ActionCacheEntry, BuildAction, FileFingerprint};
 
 /// Options controlling a build run.
 #[derive(Debug, Clone)]
@@ -57,6 +59,7 @@ pub async fn execute_target(
     graph: &BuildGraph,
     target_id: &str,
     opts: &ExecuteOptions,
+    registry: &PluginRegistry,
 ) -> Result<BuildRecord, BuildError> {
     let order = graph.build_order(target_id)?;
     let mut record = BuildRecord {
@@ -65,7 +68,7 @@ pub async fn execute_target(
     };
 
     for current_target in &order {
-        let actions = graph.actions_for(current_target)?;
+        let actions = graph.actions_for(current_target, registry)?;
         if actions.is_empty() {
             continue;
         }
@@ -184,7 +187,7 @@ async fn run_action(
     for (key, value) in &action.env {
         command.env(key, value);
     }
-    if let Some(path) = tool_path(repo_root, graph, action) {
+    if let Some(path) = tool_path(repo_root, graph, action)? {
         command.env("PATH", path);
     }
 
@@ -205,25 +208,32 @@ async fn run_action(
 
 /// Build a `PATH` value with each tool dep's `bin_dir` prepended, or `None` when
 /// the action has no tool deps.
-fn tool_path(repo_root: &Path, graph: &BuildGraph, action: &BuildAction) -> Option<String> {
+fn tool_path(
+    repo_root: &Path,
+    graph: &BuildGraph,
+    action: &BuildAction,
+) -> Result<Option<String>, BuildError> {
     if action.tool_dep_ids.is_empty() {
-        return None;
+        return Ok(None);
     }
     let mut dirs: Vec<String> = Vec::new();
     for tool_id in &action.tool_dep_ids {
         if let Some(target) = graph.target(tool_id) {
-            if let Some(Config::Tool(tool)) = &target.config {
-                dirs.push(repo_root.join(&tool.bin_dir).to_string_lossy().into_owned());
+            if let Some(config) = &target.config {
+                if config.r#type == TOOL {
+                    let bin_dir = builtin::tool_bin_dir(&config.fields)?;
+                    dirs.push(repo_root.join(&bin_dir).to_string_lossy().into_owned());
+                }
             }
         }
     }
     if dirs.is_empty() {
-        return None;
+        return Ok(None);
     }
     if let Ok(existing) = std::env::var("PATH") {
         dirs.push(existing);
     }
-    Some(dirs.join(":"))
+    Ok(Some(dirs.join(":")))
 }
 
 fn fingerprint_inputs(repo_root: &Path, action: &BuildAction) -> Vec<FileFingerprint> {

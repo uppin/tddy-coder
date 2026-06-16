@@ -1,23 +1,20 @@
-//! prost-build: compiles `proto/` into `$OUT_DIR/tddy.build.v1.rs`.
+//! prost-build: compiles the action + cache protos into `$OUT_DIR/tddy.build.v1.rs`.
 //!
-//! Hard Requirement #2 — BUILD.yaml deserializes *directly* into the generated
-//! proto types. serde derives are attached to every generated message via
-//! `type_attribute(".")`; per-message `default` + `deny_unknown_fields`, the
-//! internally-tagged `BuildTarget.config` oneof, and string↔i32 enum converters
-//! complete the mapping.
+//! Only `BuildAction` (the engine↔plugin contract) and the cache types are proto.
+//! The `BUILD.yaml` manifest schema (`BuildManifest`/`BuildTarget`/`TargetConfig`)
+//! lives in `src/manifest.rs` as open serde structs so target `config` is plugin-
+//! extensible. serde derives are attached to the generated messages; per-message
+//! `default` + `deny_unknown_fields` and string↔i32 enum converters complete the
+//! mapping for `BuildAction` fields authored in `BUILD.yaml`.
 
 fn main() {
     let mut cfg = prost_build::Config::new();
 
-    // Attach serde derives to every generated message and oneof/enum type.
+    // Attach serde derives to every generated message and enum type.
     cfg.type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]");
 
     // Messages: tolerate omitted fields, reject unknown keys.
-    // (The seven `config` variant structs are handled below — they must NOT carry
-    // `deny_unknown_fields` because the internal tag key flows into them.)
     for msg in [
-        "BuildManifest",
-        "BuildTarget",
         "BuildAction",
         "FileSet",
         "OutputDecl",
@@ -29,25 +26,6 @@ fn main() {
             "#[serde(default, deny_unknown_fields)]",
         );
     }
-
-    // Target config variant structs: defaults only (tag key passes through them).
-    for msg in [
-        "RustBinaryTarget",
-        "RustLibraryTarget",
-        "TypeScriptTarget",
-        "DockerImageTarget",
-        "ScriptTarget",
-        "ToolTarget",
-        "TargetGroupTarget",
-    ] {
-        cfg.type_attribute(format!("tddy.build.v1.{msg}"), "#[serde(default)]");
-    }
-
-    // The `config` oneof: internally tagged by `type`, snake_case variant names.
-    cfg.type_attribute(
-        "tddy.build.v1.BuildTarget.config",
-        "#[serde(tag = \"type\", rename_all = \"snake_case\")]",
-    );
 
     // Enum fields authored as snake_case strings ↔ prost `i32`.
     cfg.field_attribute(
@@ -63,8 +41,6 @@ fn main() {
 
     cfg.compile_protos(
         &[
-            "proto/tddy/build/v1/manifest.proto",
-            "proto/tddy/build/v1/targets.proto",
             "proto/tddy/build/v1/actions.proto",
             "proto/tddy/build/v1/cache.proto",
         ],

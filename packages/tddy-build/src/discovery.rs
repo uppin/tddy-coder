@@ -3,8 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::BuildError;
-use crate::manifest::load_build_manifest;
-use crate::proto::BuildManifest;
+use crate::manifest::{load_build_manifest, BuildManifest};
 
 const MANIFEST_GLOBS: &[&str] = &[
     "**/BUILD.yaml",

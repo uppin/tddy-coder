@@ -1,0 +1,14 @@
+[package]
+name = "tddy-build-typescript"
+version = "0.1.0"
+edition = "2021"
+description = "TypeScript build plugin for tddy-build: lowers typescript targets to `bun run <script>`."
+
+[lib]
+name = "tddy_build_typescript"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-build = { path = "../tddy-build" }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
