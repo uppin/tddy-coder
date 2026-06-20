@@ -1,0 +1,13 @@
+schema_version: 1
+targets:
+  - id: "tddy-livekit:lib"
+    name: "tddy-livekit"
+    deps:
+      - "tddy-rpc:lib"
+      - "tddy-service:lib"
+    config:
+      type: rust_library
+      package: tddy-livekit
+      srcs:
+        - "packages/tddy-livekit/src/**/*.rs"
+        - "packages/tddy-livekit/Cargo.toml"

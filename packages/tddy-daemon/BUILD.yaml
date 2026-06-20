@@ -1,0 +1,22 @@
+schema_version: 1
+targets:
+  - id: "tddy-daemon:bin"
+    name: "tddy-daemon"
+    deps:
+      - "tddy-coder:bin"
+      - "tddy-core:lib"
+      - "tddy-github:lib"
+      - "tddy-livekit:lib"
+      - "tddy-rpc:lib"
+      - "tddy-service:lib"
+      - "tddy-connectrpc:lib"
+    config:
+      type: rust_binary
+      package: tddy-daemon
+      bin_name: tddy-daemon
+      srcs:
+        - "packages/tddy-daemon/src/**/*.rs"
+        - "packages/tddy-daemon/Cargo.toml"
+      outputs:
+        - path: "target/debug/tddy-daemon"
+          kind: file

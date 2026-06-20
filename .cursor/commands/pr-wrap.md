@@ -73,6 +73,7 @@ cargo test
 **Run Command**: `/wrap-context-docs`
 - Update changeset progress
 - Wrap documentation if all complete
+- Also cleans up `docs/superpowers/specs/` and `docs/superpowers/plans/` working docs once implementation is complete
 
 ### 8. Display Summary
 

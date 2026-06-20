@@ -25,6 +25,7 @@ The changeset/PRD knowledge must be **transferred into** the documentation befor
 1. **Find relevant documentation**:
    - Changesets: `docs/dev/1-WIP/`
    - PRDs: `docs/ft/*/1-WIP/`
+   - Superpowers working docs: `docs/superpowers/specs/` and `docs/superpowers/plans/`
 
 2. **Update or wrap** based on status.
 
@@ -89,6 +90,12 @@ Update milestone checkboxes as work completes:
    - **Merge operations**: Replacement, addition, enhancement, or removal of sections
    - **Update change history**: Add release note-style entry to `docs/ft/{product-area}/changelog.md`
    - **Delete source**: Remove PRD from `docs/ft/1-WIP/` (not archived)
+
+3. **For Superpowers Working Docs** (`docs/superpowers/specs/`, `docs/superpowers/plans/`):
+   - Design specs (from `superpowers:brainstorming`) and implementation plans (from `superpowers:writing-plans`) are working documents
+   - **Verify implementation is complete** — confirm the feature was built and related changesets/PRDs wrapped
+   - **No knowledge transfer needed** — content was already transferred via changeset/PRD wrapping
+   - **Delete source**: Remove the file (not archived); no separate changelog entry needed
 
 **Changelog / changeset index format (merge hygiene)** — follow [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md): **prepend** one new **`##`** (product changelog) or **one new bullet line** (indexes); **single-line** bullets; **do not** rewrite existing shipped lines in the same PR as unrelated work; optional **`docs/dev/changesets.d/YYYY-MM-DD-slug.md`** for long cross-package notes plus one line in `docs/dev/changesets.md`.
 

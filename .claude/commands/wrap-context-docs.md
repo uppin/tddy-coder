@@ -74,10 +74,26 @@ For PRDs in `docs/ft/*/1-WIP/`:
 3. **Add changelog entry** to `docs/ft/{area}/changelog.md`: **new** top `## YYYY-MM-DD — Title` section with single-line bullets (see merge hygiene above). Do not reference deleted PRD filenames.
 4. **Delete** the PRD file from `docs/ft/*/1-WIP/` (not archived)
 
+## Wrapping Superpowers Working Docs
+
+Design specs (`docs/superpowers/specs/`) and implementation plans (`docs/superpowers/plans/`) are working documents produced by the `superpowers:brainstorming` and `superpowers:writing-plans` skills. Once the implementation is complete, their knowledge is fully captured in the code and permanent docs — they have no permanent documentation role.
+
+For files in `docs/superpowers/specs/` and `docs/superpowers/plans/`:
+
+1. **Verify implementation is complete** — confirm the feature was built and the relevant changesets/PRDs have already been wrapped
+2. **No knowledge transfer needed** — the spec/plan content was already transferred into permanent docs via the changeset/PRD wrapping step
+3. **Delete** the file (not archived) — its purpose is fulfilled
+
+These files do **not** get their own changelog entries; the changeset/PRD wrap already captures the audit trail.
+
 ## Process
 
-1. Identify documents to wrap (check `docs/dev/1-WIP/` and `docs/ft/*/1-WIP/`)
-2. For each document, check completion status
+1. Identify documents to wrap:
+   - Changesets: `docs/dev/1-WIP/`
+   - PRDs: `docs/ft/*/1-WIP/`
+   - Superpowers working docs: `docs/superpowers/specs/` and `docs/superpowers/plans/`
+2. For each changeset/PRD, check completion status
 3. Apply decision logic (complete vs incomplete)
 4. Execute the wrap: extract -> update docs -> prepend index/changelog lines -> delete source
-5. Report what was wrapped and where knowledge was transferred
+5. For superpowers working docs, verify implementation complete then delete
+6. Report what was wrapped and where knowledge was transferred

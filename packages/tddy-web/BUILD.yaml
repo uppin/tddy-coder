@@ -1,0 +1,15 @@
+schema_version: 1
+targets:
+  - id: "tddy-web:build"
+    name: "tddy-web"
+    config:
+      type: typescript
+      package_dir: packages/tddy-web
+      build_script: build
+      srcs:
+        - "src/**/*.ts"
+        - "src/**/*.tsx"
+        - "src/**/*.css"
+        - "index.html"
+        - "package.json"
+      output_dirs: [dist]

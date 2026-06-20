@@ -1,0 +1,18 @@
+schema_version: 1
+targets:
+  - id: "tddy-e2e:lib"
+    name: "tddy-e2e"
+    deps:
+      - "tddy-core:lib"
+      - "tddy-workflow-recipes:lib"
+      - "tddy-rpc:lib"
+      - "tddy-service:lib"
+      - "tddy-tui:lib"
+      - "tddy-tui-testkit:lib"
+      - "tddy-livekit:lib"
+    config:
+      type: rust_library
+      package: tddy-e2e
+      srcs:
+        - "packages/tddy-e2e/src/**/*.rs"
+        - "packages/tddy-e2e/Cargo.toml"

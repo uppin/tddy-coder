@@ -1,0 +1,13 @@
+schema_version: 1
+targets:
+  - id: "tddy-workflow-recipes:lib"
+    name: "tddy-workflow-recipes"
+    deps:
+      - "tddy-core:lib"
+      - "tddy-workflow:lib"
+    config:
+      type: rust_library
+      package: tddy-workflow-recipes
+      srcs:
+        - "packages/tddy-workflow-recipes/src/**/*.rs"
+        - "packages/tddy-workflow-recipes/Cargo.toml"

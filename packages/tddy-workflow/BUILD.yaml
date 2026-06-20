@@ -1,0 +1,10 @@
+schema_version: 1
+targets:
+  - id: "tddy-workflow:lib"
+    name: "tddy-workflow"
+    config:
+      type: rust_library
+      package: tddy-workflow
+      srcs:
+        - "packages/tddy-workflow/src/**/*.rs"
+        - "packages/tddy-workflow/Cargo.toml"

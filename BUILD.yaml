@@ -1,0 +1,11 @@
+schema_version: 1
+targets:
+  - id: "all:build"
+    name: "Build all deliverables"
+    config:
+      type: group
+      member_ids:
+        - "tddy-coder:bin"
+        - "tddy-tools:bin"
+        - "tddy-daemon:bin"
+        - "tddy-web:build"
