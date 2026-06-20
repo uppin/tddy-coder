@@ -56,6 +56,7 @@ mod livekit_tests {
     #[tokio::test]
     #[serial]
     async fn two_livekit_clients_get_independent_terminal_streams() -> Result<()> {
+        // Given
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
         let room_name = "terminal-two-clients-test";
@@ -107,6 +108,7 @@ mod livekit_tests {
             client2_rpc_events,
         );
 
+        // When — both clients open independent StreamTerminalIO streams
         let request = TerminalInput { data: vec![] };
         let request_bytes = request.encode_to_vec();
 
@@ -155,6 +157,7 @@ mod livekit_tests {
 
         server_handle.abort();
 
+        // Then — each client receives its own ANSI byte stream
         assert!(
             received1.len() > 50,
             "client1 should receive ANSI bytes, got {}",
@@ -173,6 +176,7 @@ mod livekit_tests {
     #[tokio::test]
     #[serial]
     async fn daemon_with_livekit_serves_stream_terminal_io() -> Result<()> {
+        // Given
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
         let room_name = "daemon-stream-test";
@@ -224,6 +228,7 @@ mod livekit_tests {
         }
         let _guard = KillOnDrop(daemon);
 
+        // When — client connects and calls StreamTerminalIO on the daemon
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         let (client_room, mut client_events) =
@@ -269,6 +274,7 @@ mod livekit_tests {
             }
         }
 
+        // Then — daemon streams ANSI TUI output (not an EchoService response)
         assert!(
             received.len() > 50,
             "daemon VirtualTui should stream ANSI bytes to client, got {} bytes (0 = headless/TTY bug)",

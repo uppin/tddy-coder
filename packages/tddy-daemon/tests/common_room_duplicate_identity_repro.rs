@@ -102,15 +102,16 @@ async fn wait_until_room_slot_cleared(
 #[tokio::test]
 #[serial]
 async fn common_room_room_slot_recovers_after_duplicate_identity_client_leaves() {
+    // Given
     let livekit = LiveKitTestkit::start()
         .await
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
     let (_cfg_dir, cfg_path) = write_livekit_config(&livekit.get_ws_url());
     let config = DaemonConfig::load(&cfg_path).expect("daemon yaml");
     let room_slot = spawn_common_room_discovery(config);
-
     wait_until_room_slot_populated(&room_slot, Duration::from_secs(60)).await;
 
+    // When
     let url = livekit.get_ws_url();
     let token = livekit
         .generate_token(COMMON_ROOM, SHARED_IDENTITY)
@@ -118,10 +119,9 @@ async fn common_room_room_slot_recovers_after_duplicate_identity_client_leaves()
     let (dup_room, _dup_ev) = Room::connect(&url, &token, RoomOptions::default())
         .await
         .expect("second client joins common room with same identity as daemon");
-
     wait_until_room_slot_cleared(&room_slot, Duration::from_secs(45)).await;
-
     let _ = dup_room.close().await;
 
+    // Then
     wait_until_room_slot_populated(&room_slot, Duration::from_secs(90)).await;
 }

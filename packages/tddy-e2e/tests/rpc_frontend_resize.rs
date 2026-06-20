@@ -9,7 +9,10 @@ use tddy_e2e::rpc_frontend::{encode_resize, event_to_bytes};
 
 #[test]
 fn encode_resize_produces_correct_osc_sequence() {
+    // When
     let bytes = encode_resize(120, 30);
+
+    // Then
     let expected = b"\x1b]resize;120;30\x07";
     assert_eq!(
         bytes, expected,
@@ -19,9 +22,14 @@ fn encode_resize_produces_correct_osc_sequence() {
 
 #[test]
 fn event_to_bytes_returns_resize_sequence_for_resize_event() {
+    // Given
     let event = Event::Resize(120, 30);
-    let bytes = event_to_bytes(&event);
     let expected = encode_resize(120, 30);
+
+    // When
+    let bytes = event_to_bytes(&event);
+
+    // Then
     assert!(
         bytes.as_ref() == Some(&expected),
         "event_to_bytes(Event::Resize) must return resize sequence so RPC client sends it to VirtualTui; got {:?}",

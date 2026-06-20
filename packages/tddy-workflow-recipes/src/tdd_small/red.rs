@@ -95,7 +95,10 @@ mod tests {
 
     #[test]
     fn merged_red_system_prompt_identifies_recipe() {
+        // When
         let p = merged_red_system_prompt();
+
+        // Then
         assert!(
             p.contains("tdd-small merged red"),
             "merged red must identify tdd-small"
@@ -105,6 +108,7 @@ mod tests {
     #[test]
     #[serial]
     fn merged_red_omits_github_section_without_token() {
+        // Given
         struct Restore(Option<String>, Option<String>);
         impl Drop for Restore {
             fn drop(&mut self) {
@@ -124,7 +128,11 @@ mod tests {
         );
         std::env::remove_var("GITHUB_TOKEN");
         std::env::remove_var("GH_TOKEN");
+
+        // When
         let p = merged_red_system_prompt();
+
+        // Then
         assert!(
             !p.contains("## GitHub PR tools"),
             "without token, merged red must not claim GitHub PR tools section; got: {p}"
@@ -134,6 +142,7 @@ mod tests {
     #[test]
     #[serial]
     fn merged_red_includes_github_section_with_token() {
+        // Given
         struct Restore(Option<String>, Option<String>);
         impl Drop for Restore {
             fn drop(&mut self) {
@@ -152,10 +161,19 @@ mod tests {
             std::env::var("GH_TOKEN").ok(),
         );
         std::env::set_var("GITHUB_TOKEN", "ghp_test_not_real");
+
+        // When
         let p = merged_red_system_prompt();
+
+        // Then
         assert!(
-            p.contains("## GitHub PR tools") && p.contains(TDD_SMALL_GITHUB_PR_TOOLS_AWARENESS),
-            "with token, merged red must include awareness; got len {}",
+            p.contains("## GitHub PR tools"),
+            "with token, merged red must include GitHub PR tools section; got len {}",
+            p.len()
+        );
+        assert!(
+            p.contains(TDD_SMALL_GITHUB_PR_TOOLS_AWARENESS),
+            "with token, merged red must include awareness text; got len {}",
             p.len()
         );
     }

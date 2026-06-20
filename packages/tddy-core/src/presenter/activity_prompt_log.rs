@@ -33,16 +33,26 @@ mod tests {
 
     #[test]
     fn format_user_prompt_line_returns_submitted_text() {
+        // Given
         let text = "Build auth for unit test";
+
+        // When
         let got = format_user_prompt_line(text);
+
+        // Then
         assert_eq!(got, text);
     }
 
     #[test]
     fn format_queued_prompt_line_includes_stable_prefix_and_text() {
+        // Given
         let text = "queued follow-up";
-        let got = format_queued_prompt_line(text);
         let expected = format!("{}{}", QUEUED_PROMPT_ACTIVITY_PREFIX, text);
+
+        // When
+        let got = format_queued_prompt_line(text);
+
+        // Then
         assert_eq!(
             got, expected,
             "PRD contract: queued prompts must log with prefix {:?}",

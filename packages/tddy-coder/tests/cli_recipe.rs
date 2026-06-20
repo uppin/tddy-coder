@@ -6,14 +6,20 @@ use tddy_core::workflow::ids::WorkflowState;
 /// CLI/config must resolve `bugfix` to BugfixRecipe (`name` = bugfix).
 #[test]
 fn cli_recipe_bugfix_selects_bugfix_recipe() {
+    // When
     let r = WorkflowRecipeResolver::from_cli_name("bugfix").expect("resolve bugfix recipe");
+
+    // Then
     assert_eq!(r.name(), "bugfix");
 }
 
 /// Acceptance: bugfix recipe starts at `interview`, then `analyze` / `reproduce`.
 #[test]
 fn cli_recipe_bugfix_start_goal_is_interview() {
+    // When
     let r = WorkflowRecipeResolver::from_cli_name("bugfix").expect("resolve bugfix recipe");
+
+    // Then
     assert_eq!(r.start_goal().as_str(), "interview");
     assert_eq!(r.plan_refinement_goal().as_str(), "analyze");
     assert_eq!(
@@ -31,7 +37,10 @@ fn cli_recipe_bugfix_start_goal_is_interview() {
 /// CLI default `tdd` uses **interview** as the first workflow goal (then **plan**).
 #[test]
 fn cli_recipe_tdd_defaults_match_legacy() {
+    // When
     let r = WorkflowRecipeResolver::from_cli_name("tdd").expect("resolve tdd recipe");
+
+    // Then
     assert_eq!(r.name(), "tdd");
     assert_eq!(r.start_goal().as_str(), "interview");
 }
@@ -39,7 +48,10 @@ fn cli_recipe_tdd_defaults_match_legacy() {
 /// `--recipe grill-me` resolves to GrillMeRecipe (`grill-me` name, `grill` start goal).
 #[test]
 fn cli_recipe_grill_me_selects_grill_me_recipe() {
+    // When
     let r = WorkflowRecipeResolver::from_cli_name("grill-me").expect("resolve grill-me recipe");
+
+    // Then
     assert_eq!(r.name(), "grill-me");
     assert_eq!(r.start_goal().as_str(), "grill");
 }
@@ -47,7 +59,10 @@ fn cli_recipe_grill_me_selects_grill_me_recipe() {
 /// `--recipe review` resolves to ReviewRecipe (`review` name).
 #[test]
 fn cli_recipe_review_selects_review_recipe() {
+    // When
     let r = WorkflowRecipeResolver::from_cli_name("review").expect("resolve review recipe");
+
+    // Then
     assert_eq!(r.name(), "review");
     assert_eq!(
         r.start_goal().as_str(),

@@ -56,6 +56,7 @@ async fn mock_backend_writes_conversation_to_file_when_path_set() {
 /// When conversation_output_path is None, no file is created.
 #[tokio::test]
 async fn mock_backend_creates_no_file_when_path_not_set() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-conv-output-none");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
@@ -73,8 +74,10 @@ async fn mock_backend_creates_no_file_when_path_not_set() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+    // When
     let _ = run_plan_with_conversation_output(&engine, "Build auth", &tmp, None, None).await;
 
+    // Then
     assert!(
         !output_file.exists(),
         "no conversation file should be created when path not set"

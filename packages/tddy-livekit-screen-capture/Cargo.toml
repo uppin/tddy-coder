@@ -34,3 +34,5 @@ objc2-core-graphics = { version = "0.3.2", features = ["CGWindow"] }
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }

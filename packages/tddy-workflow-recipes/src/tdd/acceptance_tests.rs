@@ -63,7 +63,10 @@ mod tests {
 
     #[test]
     fn system_prompt_includes_instructions_for_test_creation_and_verification() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             prompt.contains("Testing Plan") || prompt.contains("acceptance test"),
             "system prompt must instruct Claude to create tests and verify they fail"
@@ -72,7 +75,10 @@ mod tests {
 
     #[test]
     fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             prompt.contains("tddy-tools get-schema acceptance-tests"),
             "system prompt must reference get-schema for acceptance-tests"
@@ -89,7 +95,10 @@ mod tests {
     /// finish with a prose summary instead of `tddy-tools submit`, or the workflow cannot proceed.
     #[test]
     fn system_prompt_mandates_tddy_tools_submit_for_workflow_delivery() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             prompt.contains("if you do not call it, the workflow fails"),
             "acceptance-tests system prompt must state that omitting tddy-tools submit fails the workflow (same contract as plan and update-docs)"

@@ -83,23 +83,32 @@ mod tests {
 
     #[test]
     fn typescript_runs_bun_in_package_dir() {
+        // Given / When
         let action = lower("package_dir: packages/web\nbuild_script: build\noutput_dirs: [dist]\n");
+
+        // Then
         assert_eq!(action.command, vec!["bun", "run", "build"]);
         assert_eq!(action.working_dir, "packages/web");
     }
 
     #[test]
     fn typescript_defaults_build_script() {
+        // Given / When
         let action = lower("package_dir: packages/web\n");
+
+        // Then
         assert_eq!(action.command, vec!["bun", "run", "build"]);
     }
 
     #[test]
     fn typescript_emits_srcs_rooted_at_package_dir_and_output_dirs() {
+        // Given / When
         let action = lower(
             "package_dir: packages/shared\nbuild_script: build\n\
              srcs: [\"src/index.ts\", \"package.json\"]\noutput_dirs: [dist]\n",
         );
+
+        // Then
         assert_eq!(action.command, vec!["bun", "run", "build"]);
         assert_eq!(action.working_dir, "packages/shared");
         assert_eq!(action.inputs.len(), 1);

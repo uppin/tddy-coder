@@ -249,7 +249,10 @@ mod tests {
 
     #[test]
     fn analyze_prompt_mentions_read_only_and_conflicts() {
+        // When
         let p = analyze_system_prompt("_diff_", None);
+
+        // Then
         assert!(p.contains("read-only") || p.contains("Read-only"));
         assert!(p.contains("conflict"));
         assert!(p.contains("## Branch changes (deterministic scope)"));
@@ -258,7 +261,10 @@ mod tests {
 
     #[test]
     fn analyze_prompt_includes_target_branch_when_set() {
+        // When
         let p = analyze_system_prompt("_diff_", Some("feature/other"));
+
+        // Then
         assert!(
             p.contains("feature/other"),
             "analyze prompt must include the target branch; got: {p}"
@@ -268,7 +274,10 @@ mod tests {
 
     #[test]
     fn analyze_prompt_omits_target_branch_section_when_none() {
+        // When
         let p = analyze_system_prompt("_diff_", None);
+
+        // Then
         assert!(
             !p.contains("Target branch"),
             "no target-branch section when branch is None"
@@ -277,7 +286,10 @@ mod tests {
 
     #[test]
     fn sync_main_prompt_mentions_merge_and_scope() {
+        // When
         let p = sync_main_system_prompt("_diff_");
+
+        // Then
         assert!(p.contains("Merge"));
         assert!(p.contains("## Branch changes (deterministic scope)"));
         assert!(p.ends_with("_diff_"));
@@ -285,18 +297,23 @@ mod tests {
 
     #[test]
     fn finalize_prompt_mentions_merge_pr_report() {
+        // When
         let p = finalize_system_prompt();
+
+        // Then
         assert!(p.contains("merge-pr-report"));
         assert!(p.contains("finalize"));
     }
 
     #[test]
     fn system_prompt_for_task_unknown_returns_none() {
+        // When / Then
         assert!(super::system_prompt_for_task("end", "x", None).is_none());
     }
 
     #[test]
     fn system_prompt_for_task_all_known_goals() {
+        // When / Then — all known goal prompts must be non-None
         assert!(super::system_prompt_for_task(TASK_ANALYZE, "g", None).is_some());
         assert!(super::system_prompt_for_task(TASK_SYNC_MAIN, "g", None).is_some());
         assert!(super::system_prompt_for_task(TASK_FINALIZE, "g", None).is_some());

@@ -132,14 +132,17 @@ mod tests {
 
     #[test]
     fn materialize_unified_session_directory_matches_cli_sessions_subtree() {
+        // Given
         let base =
             std::env::temp_dir().join(format!("tddy-slc-materialize-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
 
+        // When
         let got = materialize_unified_session_directory(&base, PROC_ID).expect("materialize");
         let expected = create_session_dir_with_id(&base, PROC_ID).expect("with_id");
 
+        // Then
         assert_eq!(
             got, expected,
             "unified materialization must match create_session_dir_with_id (sessions/{{id}})"
@@ -150,7 +153,10 @@ mod tests {
 
     #[test]
     fn resolve_effective_session_id_keeps_process_id_when_backend_differs() {
+        // When
         let got = resolve_effective_session_id(Some(PROC_ID), Some(AGENT_ID));
+
+        // Then
         assert_eq!(
             got.as_deref(),
             Some(PROC_ID),
@@ -160,16 +166,20 @@ mod tests {
 
     #[test]
     fn unified_tree_bootstrap_matches_unified_path() {
+        // Given
         let base =
             std::env::temp_dir().join(format!("tddy-slc-unified-tree-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
-
         let bootstrap = UnifiedSessionTreeBootstrap;
+
+        // When
         let got = bootstrap
             .ensure_session_directory(&base, PROC_ID)
             .expect("ensure");
         let expected = unified_session_dir_path(&base, PROC_ID);
+
+        // Then
         assert_eq!(
             got, expected,
             "bootstrap must resolve to unified_session_dir_path"
@@ -180,6 +190,7 @@ mod tests {
 
     #[test]
     fn validate_session_id_segment_rejects_traversal_and_separators() {
+        // When / Then
         assert_eq!(
             validate_session_id_segment("..").unwrap_err(),
             SessionIdValidationError::InvalidDot

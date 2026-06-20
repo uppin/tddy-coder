@@ -9,6 +9,8 @@ pub mod envelope;
 pub mod participant;
 mod projects_registry;
 pub mod rpc_log;
+#[cfg(test)]
+pub mod test_util;
 pub mod token;
 
 pub mod proto {

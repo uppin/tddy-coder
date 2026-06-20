@@ -76,14 +76,19 @@ telegram:
 
 #[tokio::test]
 async fn telegram_config_disabled_skips_notifier() {
+    // Given
     let mut watcher = TelegramSessionWatcher::new();
     let config = telegram_disabled_config();
     let mock = MockTelegramSender::default();
     let sid = "018f1234-5678-7abc-8def-123456789abc";
+
+    // When
     watcher
         .on_metadata_tick(&config, &mock, sid, "active", true)
         .await
         .unwrap();
+
+    // Then
     assert_eq!(
         mock.call_count(),
         0,
@@ -93,10 +98,13 @@ async fn telegram_config_disabled_skips_notifier() {
 
 #[tokio::test]
 async fn status_transition_triggers_single_telegram_message_mock() {
+    // Given
     let mut watcher = TelegramSessionWatcher::new();
     let config = telegram_enabled_config();
     let mock = MockTelegramSender::default();
     let sid = "018f1234-5678-7abc-8def-123456789abc";
+
+    // When
     watcher
         .on_metadata_tick(&config, &mock, sid, "active", true)
         .await
@@ -105,6 +113,8 @@ async fn status_transition_triggers_single_telegram_message_mock() {
         .on_metadata_tick(&config, &mock, sid, "paused", true)
         .await
         .unwrap();
+
+    // Then
     assert_eq!(
         mock.call_count(),
         1,
@@ -119,10 +129,13 @@ async fn status_transition_triggers_single_telegram_message_mock() {
 
 #[tokio::test]
 async fn terminal_session_not_spammed() {
+    // Given
     let mut watcher = TelegramSessionWatcher::new();
     let config = telegram_enabled_config();
     let mock = MockTelegramSender::default();
     let sid = "018f1234-5678-7abc-8def-123456789abc";
+
+    // When
     watcher
         .on_metadata_tick(&config, &mock, sid, "active", true)
         .await
@@ -135,6 +148,8 @@ async fn terminal_session_not_spammed() {
         .on_metadata_tick(&config, &mock, sid, "completed", true)
         .await
         .unwrap();
+
+    // Then
     assert_eq!(
         mock.call_count(),
         1,

@@ -392,6 +392,7 @@ impl ThreeParticipantHarness {
 #[tokio::test]
 #[serial]
 async fn rpc_scenarios() -> Result<()> {
+    // Given a LiveKit server and participants wired with the Echo/LoopbackTunnel services
     let rpc_log_dir = std::env::temp_dir().join("tddy-livekit-test-logs");
     let inner = env_logger::Builder::new()
         .parse_default_env()
@@ -405,6 +406,7 @@ async fn rpc_scenarios() -> Result<()> {
         rpc_log_dir.join("rpc-traffic.log")
     );
 
+    // When each RPC scenario runs in sequence against the shared server
     log::debug!("rpc_scenarios: starting LiveKit container");
     let livekit = LiveKitTestkit::start().await?;
 
@@ -1078,6 +1080,7 @@ async fn rpc_scenarios() -> Result<()> {
         server_handle.abort();
     }
 
+    // Then all scenarios pass and the container is cleaned up
     log::debug!("rpc_scenarios: all scenarios passed, container will be cleaned up");
     // `livekit` dropped here — ContainerAsync::Drop stops and removes the container
     Ok(())
@@ -1088,6 +1091,7 @@ async fn rpc_scenarios() -> Result<()> {
 #[tokio::test]
 #[serial]
 async fn bidi_stream_survives_delay_without_app_reconnect() -> Result<()> {
+    // Given a server participant using run_with_reconnect and a client with an open bidi stream
     let inner = env_logger::Builder::new()
         .parse_default_env()
         .is_test(true)
@@ -1097,6 +1101,7 @@ async fn bidi_stream_survives_delay_without_app_reconnect() -> Result<()> {
         .expect("RPC traffic collector init");
     let _ = collector.install();
 
+    // When sending a message, waiting 2 seconds, then sending another message
     let livekit = LiveKitTestkit::start().await?;
     let url = livekit.get_ws_url();
     let room_name = "bidi-token-refresh";
@@ -1212,6 +1217,7 @@ async fn bidi_stream_survives_delay_without_app_reconnect() -> Result<()> {
             handler_count.load(Ordering::SeqCst)
         )
     })??;
+    // Then both echoes are received, proving the bidi stream remains alive across the delay
     let second_response = EchoResponse::decode(&second_echo[..])?;
     assert!(
         second_response.message.contains("after-delay"),

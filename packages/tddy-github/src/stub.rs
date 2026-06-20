@@ -110,8 +110,13 @@ mod tests {
 
     #[test]
     fn authorize_url_returns_valid_url_and_state() {
+        // Given a stub provider configured with a known client_id
         let stub = StubGitHubProvider::new("https://github.com", "my-client-id");
+
+        // When generating an authorize URL
         let (url, state) = stub.authorize_url();
+
+        // Then the URL contains the expected OAuth parameters and the state is non-empty
         assert!(url.contains("https://github.com/login/oauth/authorize"));
         assert!(url.contains("client_id=my-client-id"));
         assert!(url.contains(&format!("state={}", state)));
@@ -120,19 +125,28 @@ mod tests {
 
     #[test]
     fn authorize_url_generates_unique_states() {
+        // Given a stub provider
         let stub = StubGitHubProvider::new("https://github.com", "id");
+
+        // When generating two authorize URLs
         let (_, s1) = stub.authorize_url();
         let (_, s2) = stub.authorize_url();
+
+        // Then each has a distinct state token (CSRF protection)
         assert_ne!(s1, s2);
     }
 
     #[tokio::test]
     async fn exchange_code_with_registered_code_returns_user() {
+        // Given a stub with a pre-registered code→user mapping
         let stub = StubGitHubProvider::new("https://github.com", "id");
         stub.register_code("test-code", test_user());
         let (_, state) = stub.authorize_url();
 
+        // When exchanging the registered code with the valid state
         let result = stub.exchange_code("test-code", &state).await;
+
+        // Then the exchange succeeds and returns the expected user and a stub token
         assert!(result.is_ok());
         let (token, user) = result.unwrap();
         assert!(token.starts_with("stub-access-token-"));
@@ -142,34 +156,44 @@ mod tests {
 
     #[tokio::test]
     async fn exchange_code_with_unknown_code_returns_error() {
+        // Given a stub with no registered codes
         let stub = StubGitHubProvider::new("https://github.com", "id");
         let (_, state) = stub.authorize_url();
 
+        // When exchanging an unregistered code
         let result = stub.exchange_code("unknown-code", &state).await;
+
+        // Then the exchange fails with a descriptive error
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown authorization code"));
     }
 
     #[tokio::test]
     async fn exchange_code_with_invalid_state_returns_error() {
+        // Given a stub with a registered code
         let stub = StubGitHubProvider::new("https://github.com", "id");
         stub.register_code("test-code", test_user());
 
+        // When exchanging with a bogus (unregistered) state
         let result = stub.exchange_code("test-code", "bogus-state").await;
+
+        // Then the exchange is rejected
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("invalid or expired state"));
     }
 
     #[tokio::test]
     async fn state_is_single_use() {
+        // Given a stub and a valid authorize flow
         let stub = StubGitHubProvider::new("https://github.com", "id");
         stub.register_code("test-code", test_user());
         let (_, state) = stub.authorize_url();
 
+        // When exchanging once — succeeds
         let first = stub.exchange_code("test-code", &state).await;
         assert!(first.is_ok());
 
-        // Re-register code since user was consumed
+        // Then re-using the same state fails (state is consumed after first use)
         stub.register_code("test-code", test_user());
         let second = stub.exchange_code("test-code", &state).await;
         assert!(second.is_err(), "state should be consumed after first use");

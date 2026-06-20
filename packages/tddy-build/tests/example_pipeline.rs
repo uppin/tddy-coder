@@ -51,17 +51,25 @@ fn load(root: &std::path::Path) -> BuildGraph {
 
 #[test]
 fn targets_reference_each_other_and_resolve_deps_first() {
+    // Given
     let graph = load(&example_root());
+
+    // When
     let order = graph.build_order("app:build").expect("build order");
     let pos = |id: &str| order.iter().position(|t| t == id).expect("present");
+
+    // Then
     assert!(pos("codegen:gen") < pos("lib:build"));
     assert!(pos("lib:build") < pos("app:build"));
 }
 
 #[tokio::test]
 async fn pipeline_builds_successfully_through_a_tool_target() {
+    // Given
     let dir = staged();
     let graph = load(dir.path());
+
+    // When
     let record = execute_target(
         dir.path(),
         &graph,
@@ -71,6 +79,8 @@ async fn pipeline_builds_successfully_through_a_tool_target() {
     )
     .await
     .expect("build app");
+
+    // Then
     assert_eq!(record.actions[0].exit_code, 0);
     let app = std::fs::read_to_string(dir.path().join("app.txt")).expect("app.txt");
     assert!(app.contains("STAMPED:"), "tool stub must run, got: {app:?}");
@@ -82,26 +92,37 @@ async fn pipeline_builds_successfully_through_a_tool_target() {
 
 #[tokio::test]
 async fn cache_hits_on_rerun_and_misses_after_input_edit() {
+    // Given
     let dir = staged();
     let opts = ExecuteOptions::default();
     let registry = PluginRegistry::new();
-
     let graph = load(dir.path());
+
+    // When
     let first = execute_target(dir.path(), &graph, "codegen:gen", &opts, &registry)
         .await
         .expect("first");
+
+    // Then
     assert!(!first.actions[0].cached, "first run executes");
 
+    // When
     let second = execute_target(dir.path(), &graph, "codegen:gen", &opts, &registry)
         .await
         .expect("second");
+
+    // Then
     assert!(second.actions[0].cached, "rerun is a cache hit");
 
-    // Edit a declared input → fingerprint changes → miss.
+    // Given — edit a declared input → fingerprint changes → miss.
     std::fs::write(dir.path().join("codegen/seed.txt"), "seed-changed").expect("edit seed");
+
+    // When
     let third = execute_target(dir.path(), &graph, "codegen:gen", &opts, &registry)
         .await
         .expect("third");
+
+    // Then
     assert!(
         !third.actions[0].cached,
         "edited input invalidates the cache"
@@ -110,8 +131,13 @@ async fn cache_hits_on_rerun_and_misses_after_input_edit() {
 
 #[test]
 fn group_membership_orders_the_whole_pipeline() {
+    // Given
     let graph = load(&example_root());
+
+    // When
     let order = graph.build_order("pipeline:all").expect("group order");
+
+    // Then
     for member in ["codegen:gen", "lib:build", "app:build"] {
         assert!(
             order.contains(&member.to_string()),
@@ -122,7 +148,7 @@ fn group_membership_orders_the_whole_pipeline() {
 
 #[test]
 fn engine_detects_self_loop_and_multi_node_cycles() {
-    // Self-loop: a target depending on itself.
+    // Given — self-loop: a target depending on itself.
     let self_loop = r#"
 schema_version: 1
 targets:
@@ -132,12 +158,14 @@ targets:
     config: { type: script, command: ["true"] }
 "#;
     let m = tddy_build::load_build_manifest(self_loop).expect("parse self loop");
+
+    // When / Then
     assert!(
         BuildGraph::from_manifests(vec![m]).is_err(),
         "self-loop is a cycle"
     );
 
-    // Three-node cycle: a -> b -> c -> a.
+    // Given — three-node cycle: a -> b -> c -> a.
     let three = r#"
 schema_version: 1
 targets:
@@ -155,6 +183,8 @@ targets:
     config: { type: script, command: ["true"] }
 "#;
     let m = tddy_build::load_build_manifest(three).expect("parse 3-cycle");
+
+    // When / Then
     assert!(
         BuildGraph::from_manifests(vec![m]).is_err(),
         "3-node cycle is rejected"

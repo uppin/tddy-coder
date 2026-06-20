@@ -29,7 +29,8 @@ fn setup_session_ready_for_green(session_dir: &std::path::Path) {
 }
 
 #[tokio::test]
-async fn green_missing_submit_is_followed_by_retry_invoke_carrying_error_and_successful_submit() {
+async fn missing_submit_is_followed_by_retry_invoke_carrying_error_and_successful_submit() {
+    // Given
     let session_dir = std::env::temp_dir().join(format!(
         "tddy-green-submit-remediation-{}",
         std::process::id()
@@ -53,6 +54,8 @@ async fn green_missing_submit_is_followed_by_retry_invoke_carrying_error_and_suc
     );
 
     let ctx_green = common::ctx_green(session_dir.clone(), None, false);
+
+    // When
     let outcome = engine.run_goal(&GoalId::new("green"), ctx_green).await;
 
     let green_invokes: Vec<_> = backend
@@ -61,6 +64,7 @@ async fn green_missing_submit_is_followed_by_retry_invoke_carrying_error_and_suc
         .filter(|r| r.goal_id.as_str() == "green")
         .collect();
 
+    // Then
     assert!(
         green_invokes.len() >= 2,
         "expected at least two green backend invokes (retry after missing submit); got {}",

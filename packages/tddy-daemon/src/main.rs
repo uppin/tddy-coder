@@ -418,16 +418,31 @@ fn main() -> anyhow::Result<()> {
         // If LiveKit is configured with a common room, serve the daemon's RPC services via LiveKit
         // data channel so the RPC Playground can discover and invoke them without HTTP streaming issues.
         if let Some(lk) = config.livekit.as_ref() {
-            let cr = lk.common_room.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            let cr = lk
+                .common_room
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
             let url_ok = lk.url.as_deref().map(str::trim).filter(|s| !s.is_empty());
-            let key_ok = lk.api_key.as_deref().map(str::trim).filter(|s| !s.is_empty());
-            let sec_ok = lk.api_secret.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            let key_ok = lk
+                .api_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let sec_ok = lk
+                .api_secret
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
             if let (Some(common_room_name), Some(url_str), Some(key_str), Some(sec_str)) =
                 (cr, url_ok, key_ok, sec_ok)
             {
                 let livekit_entries: Vec<tddy_rpc::ServiceEntry> = rpc_entries
                     .iter()
-                    .map(|e| tddy_rpc::ServiceEntry { name: e.name, service: e.service.clone() })
+                    .map(|e| tddy_rpc::ServiceEntry {
+                        name: e.name,
+                        service: e.service.clone(),
+                    })
                     .collect();
                 let lk_multi = tddy_rpc::MultiRpcService::new(livekit_entries);
                 let local_id =

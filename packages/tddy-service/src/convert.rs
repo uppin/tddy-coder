@@ -302,7 +302,10 @@ mod acceptance_plan_approval_rpc {
     /// [`AppMode::DocumentReview`] from the presenter.
     #[test]
     fn service_mode_changed_still_serializes_plan_approval() {
+        // Given
         let prd = "# Shared PRD body\n".to_string();
+
+        // When
         let from_workflow =
             workflow_event_to_server_message(WorkflowEvent::SessionDocumentApprovalNeeded {
                 content: prd.clone(),
@@ -316,6 +319,8 @@ mod acceptance_plan_approval_rpc {
                 plan_refinement_pending: false,
                 skills_project_root: None,
             }));
+
+        // Then
         assert_eq!(
             from_workflow.encode_to_vec(),
             from_document_review.encode_to_vec(),

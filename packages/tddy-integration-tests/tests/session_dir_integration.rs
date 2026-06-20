@@ -18,13 +18,16 @@ const PLANNING_OUTPUT: &str = r##"{"goal":"plan","name":"Auth Feature","prd":"# 
 /// create_session_dir_in(base) creates base/sessions/{uuid}/ — directory exists and dirname is a
 /// 36-char UUID with exactly 4 hyphens.
 #[test]
-fn test_create_session_dir_creates_under_base() {
+fn create_session_dir_creates_uuid_directory_under_sessions_subdir() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-session-dir-creates");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
 
+    // When
     let session_dir = create_session_dir_in(&tmp).expect("create_session_dir_in should succeed");
 
+    // Then
     let sessions_parent = tmp.join("sessions");
     assert!(
         session_dir.starts_with(&sessions_parent),
@@ -58,13 +61,17 @@ fn test_create_session_dir_creates_under_base() {
 
 /// Two calls to create_session_dir_in produce different paths (unique UUIDs).
 #[test]
-fn test_create_session_dir_returns_unique_ids() {
+fn create_session_dir_returns_a_different_uuid_on_each_call() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-session-dir-unique");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
 
+    // When
     let dir1 = create_session_dir_in(&tmp).expect("first create_session_dir_in call");
     let dir2 = create_session_dir_in(&tmp).expect("second create_session_dir_in call");
+
+    // Then
 
     assert_ne!(
         dir1, dir2,
@@ -78,7 +85,8 @@ fn test_create_session_dir_returns_unique_ids() {
 
 /// Running plan goal creates artifacts in a sessions/{uuid}/ path, not output_dir/YYYY-MM-DD-slug/.
 #[tokio::test]
-async fn test_plan_goal_uses_session_dir() {
+async fn plan_goal_keeps_the_pre_created_session_dir() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLANNING_OUTPUT);
 
@@ -119,6 +127,7 @@ async fn test_plan_goal_uses_session_dir() {
         serde_json::to_value(&session_dir).unwrap(),
     );
 
+    // When
     let result = engine
         .run_goal(&GoalId::new("plan"), ctx)
         .await

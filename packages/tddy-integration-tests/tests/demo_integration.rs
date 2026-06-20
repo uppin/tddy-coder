@@ -114,6 +114,7 @@ async fn setup_session_dir_with_green_complete(
 /// Demo should parse the structured response and return DemoOutput.
 #[tokio::test]
 async fn demo_completes_and_returns_demo_output() {
+    // Given
     let (session_dir, engine, backend) = setup_session_dir_with_green_complete("demo-output").await;
 
     std::fs::write(
@@ -125,7 +126,11 @@ async fn demo_completes_and_returns_demo_output() {
     backend.push_ok(DEMO_OUTPUT);
 
     let ctx = ctx_demo(session_dir.clone());
+
+    // When
     let result = engine.run_goal(&GoalId::new("demo"), ctx).await.unwrap();
+
+    // Then
     assert!(
         matches!(result.status, ExecutionStatus::Paused { .. }),
         "demo: {:?}",
@@ -153,6 +158,7 @@ async fn demo_completes_and_returns_demo_output() {
 /// After demo completes, state should be DemoComplete.
 #[tokio::test]
 async fn demo_sets_state_to_demo_complete() {
+    // Given
     let (session_dir, engine, backend) = setup_session_dir_with_green_complete("demo-state").await;
 
     std::fs::write(
@@ -164,7 +170,11 @@ async fn demo_sets_state_to_demo_complete() {
     backend.push_ok(DEMO_OUTPUT);
 
     let ctx = ctx_demo(session_dir.clone());
+
+    // When
     let r = engine.run_goal(&GoalId::new("demo"), ctx).await.unwrap();
+
+    // Then
     assert!(
         matches!(r.status, ExecutionStatus::Paused { .. }),
         "demo: {:?}",
@@ -185,8 +195,11 @@ async fn demo_sets_state_to_demo_complete() {
 /// next_goal_for_state: GreenComplete should map to "demo" (not None).
 #[test]
 fn next_goal_green_complete_maps_to_demo() {
+    // Given
     let recipe = common::tdd_recipe();
     let result = recipe.next_goal_for_state(&WorkflowState::new("GreenComplete"));
+
+    // Then
     assert_eq!(
         result,
         Some(GoalId::new("demo")),
@@ -198,8 +211,11 @@ fn next_goal_green_complete_maps_to_demo() {
 /// next_goal_for_state: DemoComplete should map to "evaluate".
 #[test]
 fn next_goal_demo_complete_maps_to_evaluate() {
+    // Given
     let recipe = common::tdd_recipe();
     let result = recipe.next_goal_for_state(&WorkflowState::new("DemoComplete"));
+
+    // Then
     assert_eq!(
         result,
         Some(GoalId::new("evaluate")),
@@ -211,14 +227,18 @@ fn next_goal_demo_complete_maps_to_evaluate() {
 /// Recipe default_models includes "demo"; resolve_model falls back when changeset has no entry.
 #[test]
 fn default_models_includes_demo() {
+    // Given
     let changeset = tddy_core::Changeset::default();
     let defaults = tdd_recipe_default_models_str();
+
+    // Then
     assert!(
         defaults.contains_key("demo"),
         "TDD recipe default_models should include 'demo', got keys: {:?}",
         defaults.keys().collect::<Vec<_>>()
     );
     assert!(
+        // When
         tddy_core::resolve_model(Some(&changeset), "demo", None, Some(&defaults)).is_some(),
         "resolve_model should fall back to recipe defaults for demo"
     );
@@ -227,6 +247,7 @@ fn default_models_includes_demo() {
 /// evaluate() should accept GreenComplete state (needed for full workflow).
 #[tokio::test]
 async fn evaluate_accepts_green_complete_state() {
+    // Given
     let (session_dir, engine, backend) =
         setup_session_dir_with_green_complete("eval-from-green").await;
 
@@ -239,8 +260,11 @@ async fn evaluate_accepts_green_complete_state() {
         session_dir.clone(),
         Some(std::path::Path::new(".").to_path_buf()),
     );
+
+    // When
     let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
+    // Then
     assert!(
         result.is_ok(),
         "evaluate should accept GreenComplete state for full workflow, got {:?}",
@@ -253,6 +277,7 @@ async fn evaluate_accepts_green_complete_state() {
 /// evaluate() should accept DemoComplete state (needed for full workflow after demo).
 #[tokio::test]
 async fn evaluate_accepts_demo_complete_state() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-demo-eval-accepts-dc");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create dir");
@@ -279,8 +304,11 @@ async fn evaluate_accepts_demo_complete_state() {
         session_dir.clone(),
         Some(std::path::Path::new(".").to_path_buf()),
     );
+
+    // When
     let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
+    // Then
     assert!(
         result.is_ok(),
         "evaluate should accept DemoComplete state, got {:?}",
@@ -294,6 +322,7 @@ async fn evaluate_accepts_demo_complete_state() {
 /// contract so agents finish the goal (evaluate/validate set system_prompt the same way).
 #[tokio::test]
 async fn before_demo_hook_sets_system_prompt_with_submit_contract() {
+    // Given
     let session_dir =
         std::env::temp_dir().join(format!("tddy-demo-hook-sys-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&session_dir);
@@ -302,6 +331,8 @@ async fn before_demo_hook_sets_system_prompt_with_submit_contract() {
 
     let mut cs = Changeset::default();
     cs.state.session_id = Some("hook-test-agent-session".to_string());
+
+    // When
     write_changeset(&session_dir, &cs).expect("write changeset for resolve_agent_session_id");
 
     let hooks = TddWorkflowHooks::new(common::tdd_recipe(), common::tdd_manifest());
@@ -313,6 +344,8 @@ async fn before_demo_hook_sets_system_prompt_with_submit_contract() {
     let sys: Option<String> = ctx.get_sync("system_prompt");
     let prompt = sys
         .expect("demo goal must set system_prompt on context (mirrors evaluate/validate/refactor)");
+
+    // Then
     assert!(
         prompt.contains("tddy-tools submit") && prompt.contains("--goal demo"),
         "system_prompt must include tddy-tools submit --goal demo, got {:?}",
@@ -329,6 +362,7 @@ async fn before_demo_hook_sets_system_prompt_with_submit_contract() {
 /// Demo backend invocation should use goal_id "demo".
 #[tokio::test]
 async fn demo_backend_invocation_uses_goal_demo() {
+    // Given
     let (session_dir, engine, backend) = setup_session_dir_with_green_complete("goal-demo").await;
 
     std::fs::write(
@@ -340,8 +374,11 @@ async fn demo_backend_invocation_uses_goal_demo() {
     backend.push_ok(DEMO_OUTPUT);
 
     let ctx = ctx_demo(session_dir.clone());
+
+    // When
     let result = engine.run_goal(&GoalId::new("demo"), ctx).await;
 
+    // Then
     assert!(result.is_ok(), "demo should succeed, got {:?}", result);
 
     let invocations = backend.invocations();
@@ -360,6 +397,7 @@ async fn demo_backend_invocation_uses_goal_demo() {
 /// workflow engine storage id.
 #[tokio::test]
 async fn demo_after_cli_resume_passes_persisted_session_for_agent_resume() {
+    // Given
     let session_dir =
         std::env::temp_dir().join(format!("tddy-resume-demo-cli-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&session_dir);
@@ -373,6 +411,8 @@ async fn demo_after_cli_resume_passes_persisted_session_for_agent_resume() {
     let mut cs = Changeset::default();
     cs.state.current = WorkflowState::new("GreenComplete");
     cs.state.session_id = Some("persisted-agent-thread-for-resume".to_string());
+
+    // When
     write_changeset(&session_dir, &cs).expect("write changeset");
 
     let backend = Arc::new(MockBackend::new());
@@ -392,6 +432,8 @@ async fn demo_after_cli_resume_passes_persisted_session_for_agent_resume() {
         .run_goal(&GoalId::new("demo"), ctx)
         .await
         .expect("demo run");
+
+    // Then
     assert!(
         matches!(result.status, ExecutionStatus::Paused { .. }),
         "expected Paused after demo, got {:?}",
@@ -424,9 +466,14 @@ async fn demo_after_cli_resume_passes_persisted_session_for_agent_resume() {
 /// Changeset should include "demo" in default_models for model resolution.
 #[test]
 fn changeset_default_models_has_demo_key() {
+    // Given
     let cs = tddy_core::Changeset::default();
     let defaults = tdd_recipe_default_models_str();
+
+    // When
     let demo_model = tddy_core::resolve_model(Some(&cs), "demo", None, Some(&defaults));
+
+    // Then
     assert!(
         demo_model.is_some(),
         "resolve_model for 'demo' should return a model from recipe default_models, got None"

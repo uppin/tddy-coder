@@ -79,20 +79,17 @@ impl TokenGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const DEV_API_KEY: &str = "devkey";
-    const DEV_API_SECRET: &str = "secret";
+    use crate::test_util::test_util::{a_token_generator, a_token_generator_with_ttl};
 
     #[test]
     fn token_generator_generates_valid_jwt() {
-        let gen = TokenGenerator::new(
-            DEV_API_KEY.to_string(),
-            DEV_API_SECRET.to_string(),
-            "test-room".to_string(),
-            "test-identity".to_string(),
-            Duration::from_secs(120),
-        );
+        // Given a token generator with valid credentials
+        let gen = a_token_generator();
+
+        // When generating a token
         let token = gen.generate().expect("generate must succeed");
+
+        // Then the token is a non-empty JWT with 3 dot-separated parts
         assert!(!token.is_empty());
         assert!(
             token.matches('.').count() >= 2,
@@ -102,40 +99,35 @@ mod tests {
 
     #[test]
     fn token_generator_time_until_refresh_returns_ttl_minus_60s() {
-        let gen = TokenGenerator::new(
-            DEV_API_KEY.to_string(),
-            DEV_API_SECRET.to_string(),
-            "room".to_string(),
-            "identity".to_string(),
-            Duration::from_secs(120),
-        );
+        // Given a generator with 120s TTL
+        let gen = a_token_generator();
+
+        // When computing time until refresh
+        // Then it is TTL minus 60 seconds
         assert_eq!(gen.time_until_refresh(), Duration::from_secs(60));
     }
 
     #[test]
     fn token_generator_time_until_refresh_saturates_when_ttl_short() {
-        let gen = TokenGenerator::new(
-            DEV_API_KEY.to_string(),
-            DEV_API_SECRET.to_string(),
-            "room".to_string(),
-            "identity".to_string(),
-            Duration::from_secs(30),
-        );
+        // Given a generator with a TTL shorter than 60 seconds
+        let gen = a_token_generator_with_ttl(Duration::from_secs(30));
+
+        // When computing time until refresh
+        // Then it saturates at zero (never negative)
         assert_eq!(gen.time_until_refresh(), Duration::ZERO);
     }
 
     #[test]
     fn token_generator_generate_for_uses_requested_room_and_identity() {
-        let gen = TokenGenerator::new(
-            DEV_API_KEY.to_string(),
-            DEV_API_SECRET.to_string(),
-            "default-room".to_string(),
-            "default-identity".to_string(),
-            Duration::from_secs(120),
-        );
+        // Given a token generator configured with default room/identity
+        let gen = a_token_generator();
+
+        // When generating for a different room and identity
         let token = gen
             .generate_for("other-room", "other-identity")
             .expect("generate_for must succeed");
+
+        // Then the result is a valid JWT
         assert!(!token.is_empty());
         assert!(
             token.matches('.').count() >= 2,
@@ -145,18 +137,19 @@ mod tests {
 
     #[test]
     fn token_generator_ttl_returns_configured_duration() {
-        let gen = TokenGenerator::new(
-            DEV_API_KEY.to_string(),
-            DEV_API_SECRET.to_string(),
-            "room".to_string(),
-            "identity".to_string(),
-            Duration::from_secs(90),
-        );
+        // Given a token generator with a specific TTL
+        let gen = a_token_generator_with_ttl(Duration::from_secs(90));
+
+        // When querying the TTL
+        // Then it returns the configured value
         assert_eq!(gen.ttl(), Duration::from_secs(90));
     }
 
     #[test]
     fn default_livekit_jwt_ttl_matches_livekit_api_default() {
+        // Given the SDK default TTL constant
+        // When comparing to the livekit-api crate default
+        // Then they are the same value (prevents drift on livekit-api upgrades)
         assert_eq!(
             DEFAULT_LIVEKIT_JWT_TTL_SECS,
             livekit_api::access_token::DEFAULT_TTL.as_secs()

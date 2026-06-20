@@ -35,7 +35,10 @@ fn make_request(prompt: &str, session: Option<tddy_core::SessionMode>) -> Invoke
 #[tokio::test]
 #[serial]
 async fn acp_backend_has_correct_name() {
+    // When
     let backend = ClaudeAcpBackend::new();
+
+    // Then
     assert_eq!(backend.name(), "claude-acp");
 }
 
@@ -43,8 +46,13 @@ async fn acp_backend_has_correct_name() {
 #[tokio::test]
 #[serial]
 async fn acp_backend_with_stub_path_constructs() {
+    // Given
     let path = stub_agent_path();
+
+    // When
     let _backend = ClaudeAcpBackend::with_agent_path(path);
+
+    // Then
     assert_eq!(
         ClaudeAcpBackend::with_agent_path(PathBuf::from("/tmp/stub")).name(),
         "claude-acp"

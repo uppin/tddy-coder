@@ -22,3 +22,6 @@ uuid = { version = "1", features = ["v7"] }
 [dev-dependencies]
 serial_test = "3"
 tempfile = "3"
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+tddy-testing-commons = { path = "../tddy-testing-commons" }

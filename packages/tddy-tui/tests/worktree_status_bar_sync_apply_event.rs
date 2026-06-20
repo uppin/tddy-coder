@@ -33,19 +33,19 @@ fn base_state() -> PresenterState {
     }
 }
 
-/// Basename for this path matches what `format_worktree_for_status_bar` returns (final component).
 #[test]
 fn worktree_switch_broadcast_keeps_status_bar_segment_in_view_state() {
+    // Given
     let mut state = base_state();
     let mut view = TuiView::new();
     let mut merge = AgentOutputActivityLogMerge::new();
-
     let worktree_path = std::path::Path::new("/tmp/tddy-worktree-sync-verify/my-wt-dir");
     let entry = ActivityEntry {
         text: format!("Worktree: {}", worktree_path.display()),
         kind: ActivityKind::Info,
     };
 
+    // When
     apply_event(
         &mut state,
         &mut view,
@@ -53,10 +53,15 @@ fn worktree_switch_broadcast_keeps_status_bar_segment_in_view_state() {
         PresenterEvent::ActivityLogged(entry),
     );
 
+    // Then
     assert_eq!(
         state.active_worktree_display.as_deref(),
         Some("my-wt-dir"),
         "view state must set active_worktree_display to the same short label the presenter uses for the status bar"
     );
-    assert_eq!(state.activity_log.len(), 1);
+    assert_eq!(
+        state.activity_log.len(),
+        1,
+        "activity log must record the entry"
+    );
 }

@@ -33,6 +33,7 @@ impl CodingBackend for RecordingStubBackend {
 
 #[tokio::test]
 async fn free_prompting_prompting_task_invokes_coding_backend() {
+    // Given
     let recipe = FreePromptingRecipe;
     let inner = Arc::new(StubBackend::new());
     let invoke_count = Arc::new(AtomicU32::new(0));
@@ -40,22 +41,22 @@ async fn free_prompting_prompting_task_invokes_coding_backend() {
         inner: inner.clone(),
         invoke_count: invoke_count.clone(),
     });
-
     let graph = recipe.build_graph(backend);
     let task = graph
         .get_task("prompting")
         .expect("free-prompting graph must expose a prompting task");
-
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello SKIP_QUESTIONS");
     ctx.set_sync("output_dir", std::env::temp_dir());
     ctx.set_sync("session_id", "test-session-free-prompting");
     ctx.set_sync("is_resume", false);
 
+    // When
     task.run(ctx)
         .await
         .expect("prompting task should complete without workflow error");
 
+    // Then
     let n = invoke_count.load(Ordering::SeqCst);
     assert!(
         n >= 1,

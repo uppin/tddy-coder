@@ -306,32 +306,27 @@ pub fn prepend_context_header(
 mod relocation_tests {
     use super::*;
     use std::fs;
-
-    fn temp_dir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("tddy-wr-{}", label));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use tddy_testing_commons::temp_session_dir;
 
     // ── R4: valid suggestion moves directory ─────────────────────────────────
 
     #[test]
-    fn test_relocate_valid_suggestion() {
-        let root = temp_dir("relocate-valid");
+    fn relocate_moves_session_dir_to_the_suggested_path() {
+        // Given
+        let root = temp_session_dir("relocate-valid");
         fs::create_dir_all(root.join(".git")).unwrap();
-
         let output_dir = root.join("output");
         fs::create_dir_all(&output_dir).unwrap();
-
         let dir_name = "2026-03-08-my-feature";
         let staging = output_dir.join(dir_name);
         fs::create_dir_all(&staging).unwrap();
         fs::write(staging.join("SessionDoc.md"), "# Doc").unwrap();
 
+        // When
         let result = relocate_session_dir(&staging, "docs/plans/", dir_name, &output_dir)
             .expect("valid suggestion should succeed");
 
+        // Then
         let expected = root.join("docs/plans").join(dir_name);
         assert_eq!(
             result, expected,
@@ -342,132 +337,136 @@ mod relocation_tests {
             expected.join("SessionDoc.md").exists(),
             "SessionDoc.md should be present at target"
         );
-
         let _ = fs::remove_dir_all(&root);
     }
 
     // ── R3: absolute-path suggestion falls back silently ──────────────────────
 
     #[test]
-    fn test_relocate_invalid_absolute_path() {
-        let root = temp_dir("relocate-absolute");
+    fn relocate_falls_back_to_staging_when_suggestion_is_an_absolute_path() {
+        // Given
+        let root = temp_session_dir("relocate-absolute");
         let output_dir = root.join("output");
         fs::create_dir_all(&output_dir).unwrap();
-
         let dir_name = "2026-03-08-my-feature";
         let staging = output_dir.join(dir_name);
         fs::create_dir_all(&staging).unwrap();
 
+        // When
         let result = relocate_session_dir(&staging, "/tmp/evil", dir_name, &output_dir)
             .expect("absolute path should fall back, not error");
 
+        // Then
         assert_eq!(result, staging, "should fall back to staging path");
-
         let _ = fs::remove_dir_all(&root);
     }
 
     // ── R3: path traversal (dotdot) rejected ─────────────────────────────────
 
     #[test]
-    fn test_relocate_dotdot_rejected() {
-        let root = temp_dir("relocate-dotdot");
+    fn relocate_falls_back_to_staging_when_suggestion_contains_dotdot() {
+        // Given
+        let root = temp_session_dir("relocate-dotdot");
         let output_dir = root.join("output");
         fs::create_dir_all(&output_dir).unwrap();
-
         let dir_name = "2026-03-08-my-feature";
         let staging = output_dir.join(dir_name);
         fs::create_dir_all(&staging).unwrap();
 
+        // When
         let result = relocate_session_dir(&staging, "../../outside", dir_name, &output_dir)
             .expect("dotdot path should fall back, not error");
 
+        // Then
         assert_eq!(result, staging, "dotdot path should fall back to staging");
-
         let _ = fs::remove_dir_all(&root);
     }
 
     // ── R3: empty / whitespace suggestion falls back ──────────────────────────
 
     #[test]
-    fn test_relocate_empty_suggestion() {
-        let root = temp_dir("relocate-empty");
+    fn relocate_falls_back_to_staging_when_suggestion_is_whitespace() {
+        // Given
+        let root = temp_session_dir("relocate-empty");
         let output_dir = root.join("output");
         fs::create_dir_all(&output_dir).unwrap();
-
         let dir_name = "2026-03-08-my-feature";
         let staging = output_dir.join(dir_name);
         fs::create_dir_all(&staging).unwrap();
 
+        // When
         let result = relocate_session_dir(&staging, "   ", dir_name, &output_dir)
             .expect("whitespace suggestion should fall back, not error");
 
+        // Then
         assert_eq!(
             result, staging,
             "whitespace-only suggestion should fall back"
         );
-
         let _ = fs::remove_dir_all(&root);
     }
 
     // ── R3: suggestion resolves to same path → no-op ──────────────────────────
 
     #[test]
-    fn test_relocate_same_path_noop() {
-        let root = temp_dir("relocate-same");
-        // No .git here → find_git_root falls back to output_dir.parent() == root.
+    fn relocate_returns_staging_unchanged_when_suggestion_resolves_to_same_path() {
+        // Given — no .git here → find_git_root falls back to output_dir.parent() == root.
         // Suggestion "output/" → root / "output" / dir_name == staging → noop.
+        let root = temp_session_dir("relocate-same");
         let output_dir = root.join("output");
         fs::create_dir_all(&output_dir).unwrap();
-
         let dir_name = "2026-03-08-my-feature";
         let staging = output_dir.join(dir_name);
         fs::create_dir_all(&staging).unwrap();
 
+        // When
         let result = relocate_session_dir(&staging, "output/", dir_name, &output_dir)
             .expect("same-path suggestion should be a noop, not error");
 
+        // Then
         assert_eq!(result, staging, "same-path should return staging unchanged");
         assert!(
             staging.is_dir(),
             "staging directory should still exist as a real dir"
         );
-
         let _ = fs::remove_dir_all(&root);
     }
 
     // ── R2: find_git_root locates .git ancestor ───────────────────────────────
 
     #[test]
-    fn test_find_git_root_finds_dot_git() {
-        let root = temp_dir("git-root-find");
+    fn find_git_root_returns_the_ancestor_containing_dot_git() {
+        // Given
+        let root = temp_session_dir("git-root-find");
         fs::create_dir_all(root.join(".git")).unwrap();
         let nested = root.join("a/b/c");
         fs::create_dir_all(&nested).unwrap();
 
+        // When
         let found = find_git_root(&nested);
 
+        // Then
         assert_eq!(found, root, "should return the ancestor that contains .git");
-
         let _ = fs::remove_dir_all(&root);
     }
 
     // ── R2: find_git_root falls back to parent when no .git found ─────────────
 
     #[test]
-    fn test_find_git_root_fallback() {
-        let root = temp_dir("git-root-fallback");
-        // `root` has no .git; temp dirs on supported platforms are outside any
+    fn find_git_root_falls_back_to_a_parent_directory_when_no_dot_git_exists() {
+        // Given — `root` has no .git; temp dirs on supported platforms are outside any
         // git repo, so walking up from `nested` will not find one.
+        let root = temp_session_dir("git-root-fallback");
         let nested = root.join("a");
         fs::create_dir_all(&nested).unwrap();
 
+        // When
         let found = find_git_root(&nested);
 
-        // Must not return `nested` itself — always walks at least one level up.
+        // Then — must not return `nested` itself; always walks at least one level up.
         assert_ne!(found, nested, "must not return the input directory itself");
         assert!(found.is_absolute(), "result must be an absolute path");
         assert!(found.is_dir(), "result must be an existing directory");
-
         let _ = fs::remove_dir_all(&root);
     }
 }
@@ -476,28 +475,25 @@ mod relocation_tests {
 mod context_header_tests {
     use super::*;
     use std::fs;
+    use tddy_testing_commons::temp_session_dir;
 
     /// Test-only basenames (production passes manifest-derived basenames from the workflow-recipes layer).
     const CTX_TEST_PRIMARY_DOC: &[&str] = &["SessionDoc.md"];
     const CTX_TEST_PRIMARY_DOC_AND_AT: &[&str] = &["SessionDoc.md", "acceptance-tests.md"];
     const CTX_TEST_REFACTOR: &[&str] = &["refactoring-plan.md"];
 
-    fn temp_dir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("tddy-ch-{}", label));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     // ── AC1: header lists existing .md files ─────────────────────────────────
 
     #[test]
-    fn test_context_header_lists_existing_md_files() {
-        let dir = temp_dir("lists-existing");
+    fn context_header_lists_existing_md_files() {
+        // Given
+        let dir = temp_session_dir("lists-existing");
         fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
 
+        // When
         let header = build_context_header(Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
+        // Then
         assert!(
             header.starts_with("**CRITICAL FOR CONTEXT AND SUMMARY**\n"),
             "header must start with the marker line, got: {:?}",
@@ -507,20 +503,21 @@ mod context_header_tests {
             header.contains("SessionDoc.md:"),
             "header must list SessionDoc.md"
         );
-
         let _ = fs::remove_dir_all(&dir);
     }
 
     // ── AC3: missing artifacts are silently omitted ───────────────────────────
 
     #[test]
-    fn test_context_header_omits_missing_files() {
-        let dir = temp_dir("omits-missing");
+    fn context_header_omits_missing_files() {
+        // Given — acceptance-tests.md is NOT created
+        let dir = temp_session_dir("omits-missing");
         fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
-        // acceptance-tests.md is NOT created
 
+        // When
         let header = build_context_header(Some(&dir), None, CTX_TEST_PRIMARY_DOC_AND_AT);
 
+        // Then
         assert!(
             header.contains("SessionDoc.md:"),
             "should list SessionDoc.md"
@@ -529,34 +526,36 @@ mod context_header_tests {
             !header.contains("acceptance-tests.md:"),
             "must not list missing acceptance-tests.md"
         );
-
         let _ = fs::remove_dir_all(&dir);
     }
 
     // ── AC2: empty plan directory → no header ────────────────────────────────
 
     #[test]
-    fn test_context_header_empty_for_no_md_files() {
-        let dir = temp_dir("empty-dir");
-        // No .md files
+    fn context_header_is_empty_when_no_md_files_exist() {
+        // Given — no .md files
+        let dir = temp_session_dir("empty-dir");
 
+        // When
         let header = build_context_header(Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
+        // Then
         assert!(
             header.is_empty(),
             "header must be empty when no md files exist, got: {:?}",
             header
         );
-
         let _ = fs::remove_dir_all(&dir);
     }
 
     // ── AC2: None session_dir → no header ────────────────────────────────────
 
     #[test]
-    fn test_context_header_empty_for_none_session_dir() {
+    fn context_header_is_empty_when_session_dir_is_none() {
+        // When
         let header = build_context_header(None, None, CTX_TEST_PRIMARY_DOC);
 
+        // Then
         assert!(
             header.is_empty(),
             "header must be empty when session_dir is None"
@@ -566,18 +565,20 @@ mod context_header_tests {
     // ── AC4: paths are absolute ───────────────────────────────────────────────
 
     #[test]
-    fn test_context_header_uses_absolute_paths() {
-        let dir = temp_dir("abs-paths");
+    fn context_header_uses_absolute_paths() {
+        // Given
+        let dir = temp_session_dir("abs-paths");
         fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
 
+        // When
         let header = build_context_header(Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
+        // Then
         let doc_line = header
             .lines()
             .find(|l| l.starts_with("SessionDoc.md:"))
             .expect("header must contain a SessionDoc.md line");
         let path_str = doc_line.trim_start_matches("SessionDoc.md:").trim();
-
         assert!(
             std::path::Path::new(path_str).is_absolute(),
             "SessionDoc.md path must be absolute, got: {}",
@@ -588,21 +589,23 @@ mod context_header_tests {
             "listed path must exist on disk: {}",
             path_str
         );
-
         let _ = fs::remove_dir_all(&dir);
     }
 
     // ── AC6: original prompt appears after header ─────────────────────────────
 
     #[test]
-    fn test_prepend_adds_header_before_prompt() {
-        let dir = temp_dir("prepend-adds");
+    fn prepend_places_the_context_header_before_the_prompt() {
+        // Given
+        let dir = temp_session_dir("prepend-adds");
         fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
-
         let original = "Do the task.".to_string();
+
+        // When
         let result =
             prepend_context_header(original.clone(), Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
+        // Then
         assert!(
             result.starts_with("<context-reminder>"),
             "result must start with context-reminder tag"
@@ -615,7 +618,6 @@ mod context_header_tests {
             result.contains("</context-reminder>"),
             "result must contain closing context-reminder tag"
         );
-
         let close_tag = "</context-reminder>";
         let close_pos = result.find(close_tag).expect("must find closing tag");
         let after_tag = &result[close_pos + close_tag.len()..];
@@ -624,20 +626,22 @@ mod context_header_tests {
             body, original,
             "original prompt must appear verbatim after the context-reminder block"
         );
-
         let _ = fs::remove_dir_all(&dir);
     }
 
     // ── context-reminder tags wrap the header block ────────────────────────────
 
     #[test]
-    fn test_prepend_wraps_header_in_context_reminder_tags() {
-        let dir = temp_dir("wrap-tags");
+    fn prepend_wraps_the_header_in_context_reminder_tags() {
+        // Given
+        let dir = temp_session_dir("wrap-tags");
         fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
 
+        // When
         let result =
             prepend_context_header("Task.".to_string(), Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
+        // Then
         assert!(
             result.starts_with("<context-reminder>\n"),
             "header block must start with <context-reminder> and newline"
@@ -652,49 +656,51 @@ mod context_header_tests {
             result.contains("\n</context-reminder>\n"),
             "closing tag must be followed by newline before prompt body"
         );
-
         let _ = fs::remove_dir_all(&dir);
     }
 
     // ── AC (R9): context header lists refactoring-plan.md when in the basename list ─
 
     #[test]
-    fn test_context_header_includes_refactoring_plan() {
-        let dir = temp_dir("includes-refactoring-plan");
+    fn context_header_includes_refactoring_plan_when_it_is_in_the_basename_list() {
+        // Given
+        let dir = temp_session_dir("includes-refactoring-plan");
         fs::write(
             dir.join("refactoring-plan.md"),
             "# Refactoring Plan\n## Tasks\n- Rename",
         )
         .unwrap();
 
+        // When
         let header = build_context_header(Some(&dir), None, CTX_TEST_REFACTOR);
 
+        // Then
         assert!(
             header.contains("refactoring-plan.md:"),
             "artifact list must include refactoring-plan.md so it appears in context headers, \
              got header: {:?}",
             header
         );
-
         let _ = fs::remove_dir_all(&dir);
     }
 
     // ── AC7: no-op when header is empty ──────────────────────────────────────
 
     #[test]
-    fn test_prepend_returns_original_when_no_header() {
-        let dir = temp_dir("prepend-noop");
-        // No .md files → build_context_header returns ""
-
+    fn prepend_returns_the_original_prompt_unchanged_when_no_header_exists() {
+        // Given — no .md files → build_context_header returns ""
+        let dir = temp_session_dir("prepend-noop");
         let original = "Do the task.".to_string();
+
+        // When
         let result =
             prepend_context_header(original.clone(), Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
+        // Then
         assert_eq!(
             result, original,
             "prompt must be unchanged when no header is needed"
         );
-
         let _ = fs::remove_dir_all(&dir);
     }
 }

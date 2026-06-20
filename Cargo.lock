@@ -5723,13 +5723,43 @@ dependencies = [
 
 [[package]]
 name = "rstest"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03e905296805ab93e13c1ec3a03f4b6c4f35e9498a3d5fa96dc626d22c03cd89"
+dependencies = [
+ "futures-timer",
+ "futures-util",
+ "rstest_macros 0.24.0",
+ "rustc_version",
+]
+
+[[package]]
+name = "rstest"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f5a3193c063baaa2a95a33f03035c8a72b83d97a54916055ba22d35ed3839d49"
 dependencies = [
  "futures-timer",
  "futures-util",
- "rstest_macros",
+ "rstest_macros 0.26.1",
+]
+
+[[package]]
+name = "rstest_macros"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef0053bbffce09062bee4bcc499b0fbe7a57b879f1efe088d6d8d4c7adcdef9b"
+dependencies = [
+ "cfg-if",
+ "glob",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "relative-path",
+ "rustc_version",
+ "syn 2.0.117",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -6576,12 +6606,15 @@ dependencies = [
  "glob",
  "hex",
  "log",
+ "pretty_assertions",
  "prost 0.13.5",
  "prost-build 0.13.5",
+ "rstest 0.24.0",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
+ "tddy-testing-commons",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -6592,9 +6625,12 @@ dependencies = [
 name = "tddy-build-buildroot"
 version = "0.1.0"
 dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
  "serde",
  "serde_yaml",
  "tddy-build",
+ "tddy-testing-commons",
  "tempfile",
  "tokio",
 ]
@@ -6603,9 +6639,12 @@ dependencies = [
 name = "tddy-build-docker"
 version = "0.1.0"
 dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
  "serde",
  "serde_yaml",
  "tddy-build",
+ "tddy-testing-commons",
  "tempfile",
  "tokio",
 ]
@@ -6614,9 +6653,12 @@ dependencies = [
 name = "tddy-build-qemu"
 version = "0.1.0"
 dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
  "serde",
  "serde_yaml",
  "tddy-build",
+ "tddy-testing-commons",
  "tempfile",
  "tokio",
 ]
@@ -6625,9 +6667,12 @@ dependencies = [
 name = "tddy-build-rust"
 version = "0.1.0"
 dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
  "serde",
  "serde_yaml",
  "tddy-build",
+ "tddy-testing-commons",
  "tempfile",
  "tokio",
 ]
@@ -6636,9 +6681,12 @@ dependencies = [
 name = "tddy-build-typescript"
 version = "0.1.0"
 dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
  "serde",
  "serde_yaml",
  "tddy-build",
+ "tddy-testing-commons",
  "tempfile",
  "tokio",
 ]
@@ -6666,7 +6714,9 @@ dependencies = [
  "ctrlc",
  "libc",
  "log",
+ "pretty_assertions",
  "reqwest 0.12.28",
+ "rstest 0.24.0",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -6681,6 +6731,7 @@ dependencies = [
  "tddy-livekit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-testing-commons",
  "tddy-tui",
  "tddy-workflow-recipes",
  "tempfile",
@@ -6703,7 +6754,9 @@ dependencies = [
  "http-body-util",
  "hyper 1.8.1",
  "log",
+ "pretty_assertions",
  "prost 0.13.5",
+ "rstest 0.24.0",
  "serde",
  "serde_json",
  "tddy-rpc",
@@ -6728,11 +6781,14 @@ dependencies = [
  "libc",
  "log",
  "once_cell",
+ "pretty_assertions",
  "regex",
+ "rstest 0.24.0",
  "serde",
  "serde_json",
  "serde_yaml",
  "serial_test",
+ "tddy-testing-commons",
  "tddy-workflow",
  "thiserror 2.0.18",
  "tokio",
@@ -6776,6 +6832,7 @@ dependencies = [
  "tddy-livekit-testkit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-testing-commons",
  "teloxide",
  "tempfile",
  "tokio",
@@ -6791,6 +6848,8 @@ dependencies = [
  "clap",
  "crossterm",
  "ctrlc",
+ "pretty_assertions",
+ "rstest 0.24.0",
  "tddy-coder",
 ]
 
@@ -6807,8 +6866,10 @@ dependencies = [
  "futures-util",
  "livekit",
  "log",
+ "pretty_assertions",
  "prost 0.13.5",
  "ratatui",
+ "rstest 0.24.0",
  "serial_test",
  "strip-ansi-escapes",
  "tddy-core",
@@ -6816,6 +6877,7 @@ dependencies = [
  "tddy-livekit-testkit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-testing-commons",
  "tddy-tui",
  "tddy-tui-testkit",
  "tddy-workflow-recipes",
@@ -6833,8 +6895,10 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "log",
+ "pretty_assertions",
  "prost 0.13.5",
  "reqwest 0.12.28",
+ "rstest 0.24.0",
  "serde",
  "serde_json",
  "tddy-rpc",
@@ -6852,11 +6916,14 @@ dependencies = [
  "chrono",
  "ctor",
  "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
  "serde_json",
  "serde_yaml",
  "serial_test",
  "tddy-core",
  "tddy-daemon",
+ "tddy-testing-commons",
  "tddy-workflow",
  "tddy-workflow-recipes",
  "tokio",
@@ -6877,8 +6944,10 @@ dependencies = [
  "livekit",
  "livekit-api",
  "log",
+ "pretty_assertions",
  "prost 0.13.5",
  "prost-build 0.13.5",
+ "rstest 0.24.0",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -6906,6 +6975,8 @@ dependencies = [
  "log",
  "objc2-core-graphics",
  "predicates",
+ "pretty_assertions",
+ "rstest 0.24.0",
  "serde",
  "serde_yaml",
  "tddy-livekit",
@@ -6921,6 +6992,8 @@ dependencies = [
  "anyhow",
  "livekit-api",
  "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
  "serial_test",
  "testcontainers",
  "tokio",
@@ -6932,6 +7005,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures-core",
+ "pretty_assertions",
+ "rstest 0.24.0",
  "tokio",
  "tonic 0.11.0",
 ]
@@ -6944,15 +7019,18 @@ dependencies = [
  "async-trait",
  "futures-util",
  "log",
+ "pretty_assertions",
  "prost 0.13.5",
  "prost-build 0.13.5",
  "prost-types 0.13.5",
  "reqwest 0.12.28",
+ "rstest 0.24.0",
  "serde",
  "serde_json",
  "tddy-codegen",
  "tddy-core",
  "tddy-rpc",
+ "tddy-testing-commons",
  "tddy-tui",
  "tddy-workflow",
  "tddy-workflow-recipes",
@@ -6961,6 +7039,16 @@ dependencies = [
  "tonic 0.12.3",
  "tonic-build",
  "url",
+ "uuid",
+]
+
+[[package]]
+name = "tddy-testing-commons"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "tddy-core",
+ "tempfile",
  "uuid",
 ]
 
@@ -6981,9 +7069,11 @@ dependencies = [
  "log",
  "portable-pty 0.9.0",
  "predicates",
+ "pretty_assertions",
  "prost 0.13.5",
  "reqwest 0.12.28",
  "rmcp",
+ "rstest 0.24.0",
  "schemars 1.2.1",
  "serde",
  "serde_json",
@@ -6995,6 +7085,7 @@ dependencies = [
  "tddy-core",
  "tddy-livekit",
  "tddy-service",
+ "tddy-testing-commons",
  "tddy-workflow-recipes",
  "tempfile",
  "tokio",
@@ -7008,9 +7099,12 @@ dependencies = [
  "crossterm",
  "libc",
  "log",
+ "pretty_assertions",
  "ratatui",
+ "rstest 0.24.0",
  "serial_test",
  "tddy-core",
+ "tddy-testing-commons",
  "tokio",
  "tui-markdown",
 ]
@@ -7023,6 +7117,8 @@ dependencies = [
  "crossterm",
  "env_logger",
  "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
  "tddy-core",
  "tddy-service",
  "tddy-workflow-recipes",
@@ -7036,6 +7132,8 @@ name = "tddy-workflow"
 version = "0.1.0"
 dependencies = [
  "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
 ]
 
 [[package]]
@@ -7045,11 +7143,14 @@ dependencies = [
  "async-trait",
  "chrono",
  "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
  "serde",
  "serde_json",
  "serde_yaml",
  "serial_test",
  "tddy-core",
+ "tddy-testing-commons",
  "tddy-workflow",
  "tempfile",
  "tokio",
@@ -7784,7 +7885,7 @@ dependencies = [
  "pretty_assertions",
  "pulldown-cmark",
  "ratatui-core",
- "rstest",
+ "rstest 0.26.1",
  "syntect",
  "tracing",
 ]

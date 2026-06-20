@@ -71,10 +71,12 @@ async fn collect_output_window(
 async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::Result<()> {
     std::env::set_var("TDDY_DISABLE_ANIMATIONS", "1");
     let _ = env_logger::builder().is_test(true).try_init();
+
+    // Given
     let (_handle, port, shutdown) =
         spawn_presenter_with_terminal_service(Some("Build auth".to_string()));
 
-    // --- Client 1: connect at default 80×24 ---
+    // When — Client 1: connect at default 80×24
     let mut client1 = connect_terminal_grpc(port).await?;
     let (input_tx1, input_rx1) = tokio::sync::mpsc::channel::<TerminalInput>(64);
     let input_stream1 = tokio_stream::wrappers::ReceiverStream::new(input_rx1);
@@ -95,7 +97,7 @@ async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::R
         screen1_before
     );
 
-    // --- Client 2: connect and resize to 60×16 ---
+    // When — Client 2: connect and resize to 60×16
     let mut client2 = connect_terminal_grpc(port).await?;
     let (input_tx2, input_rx2) = tokio::sync::mpsc::channel::<TerminalInput>(64);
     let input_stream2 = tokio_stream::wrappers::ReceiverStream::new(input_rx2);
@@ -120,7 +122,7 @@ async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::R
         screen2
     );
 
-    // --- Verify client 1 was not affected ---
+    // Then — verify client 1 was not affected
     let stream1_after_client2 =
         collect_output_window(&mut stream1, Duration::from_millis(1500)).await?;
     parser1.feed(&stream1_after_client2);

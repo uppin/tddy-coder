@@ -13,3 +13,7 @@ clap = { version = "4", features = ["derive"] }
 tddy-coder = { path = "../tddy-coder" }
 ctrlc = { version = "3", features = ["termination"] }
 crossterm = "0.29"
+
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }

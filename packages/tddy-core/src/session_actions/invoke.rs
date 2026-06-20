@@ -12,7 +12,7 @@ use super::paths::resolve_action_manifest_path;
 use super::summary::{invocation_record_summary_value, parse_test_summary_from_process_output};
 use super::validate::validate_action_arguments_json;
 use crate::session_actions::arch::ensure_action_architecture;
-use crate::session_actions::paths::{resolve_allowlisted_path};
+use crate::session_actions::paths::resolve_allowlisted_path;
 
 /// Apply **`result_kind: test_summary`** post-processing to an invoke record (same contract as CLI).
 pub fn finalize_invocation_record(
@@ -65,15 +65,8 @@ pub fn invoke_action_core(
                 "missing string field `{bind}` for output path binding (required by manifest)"
             ))
         })?;
-        let session_for_allowlist = session_dir
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
-        resolve_allowlisted_path(
-            &session_for_allowlist,
-            repo_root,
-            v,
-            "output_binding",
-        )?;
+        let session_for_allowlist = session_dir.unwrap_or_else(|| Path::new(".")).to_path_buf();
+        resolve_allowlisted_path(&session_for_allowlist, repo_root, v, "output_binding")?;
     }
 
     ensure_action_architecture(&manifest.architecture)?;

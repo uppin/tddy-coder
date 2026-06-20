@@ -16,10 +16,14 @@ fn tddy_coder_bin() -> Command {
 /// --web-port without --web-bundle-path exits with a clear error.
 #[test]
 fn web_port_alone_errors_with_clear_message() {
+    // Given
     let mut cmd = tddy_coder_bin();
     cmd.args(["--agent", "stub", "--web-port", "8080"]);
 
+    // When
     let output = cmd.output().expect("run tddy-coder");
+
+    // Then
 
     assert!(
         !output.status.success(),
@@ -36,6 +40,7 @@ fn web_port_alone_errors_with_clear_message() {
 /// --web-bundle-path without --web-port exits with a clear error.
 #[test]
 fn web_bundle_path_alone_errors_with_clear_message() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-web-bundle-path-alone");
     let _ = std::fs::create_dir_all(&tmp);
 
@@ -47,7 +52,10 @@ fn web_bundle_path_alone_errors_with_clear_message() {
         tmp.to_str().unwrap(),
     ]);
 
+    // When
     let output = cmd.output().expect("run tddy-coder");
+
+    // Then
 
     assert!(
         !output.status.success(),
@@ -66,11 +74,12 @@ fn web_bundle_path_alone_errors_with_clear_message() {
 /// --help shows --web-port, --web-bundle-path, and --web-host.
 #[test]
 fn help_shows_web_port_web_bundle_path_and_web_host() {
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.arg("--help");
-
     let output = cmd.output().expect("run tddy-coder --help");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("--web-port"),
@@ -119,6 +128,7 @@ impl Drop for KillOnDrop {
 #[test]
 #[cfg(unix)]
 fn daemon_with_web_flags_serves_index_html_at_root() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-web-daemon-serve-test");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
@@ -161,6 +171,7 @@ fn daemon_with_web_flags_serves_index_html_at_root() {
 
     let _guard = KillOnDrop(child);
 
+    // When / Then
     let url = format!("http://127.0.0.1:{}/", web_port);
     let body = retry_until_ready(|| reqwest::blocking::get(&url).and_then(|r| r.text()))
         .expect("HTTP GET / within timeout");

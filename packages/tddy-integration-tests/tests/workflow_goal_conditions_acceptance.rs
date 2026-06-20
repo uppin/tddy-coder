@@ -8,7 +8,10 @@
 /// `run_demo` is recipe/demo semantics and must not be the conditional key in the graph builder.
 #[test]
 fn conditional_edge_uses_session_context_key_not_hardcoded_demo_in_core() {
+    // Given
     let graph_rs = include_str!("../../tddy-workflow-recipes/src/tdd/graph.rs");
+
+    // Then
     assert!(
         !graph_rs.contains("\"run_demo\"") && !graph_rs.contains("'run_demo'"),
         "build_full_tdd_workflow_graph must use a generic context key (e.g. run_optional_step_x) for the post-green conditional edge, not run_demo"
@@ -19,7 +22,10 @@ fn conditional_edge_uses_session_context_key_not_hardcoded_demo_in_core() {
 /// special-case demo-plan.md / GreenComplete demo clarification.
 #[test]
 fn tdd_recipe_prompts_include_demo_branching_instructions_without_core_importing_demo_semantics() {
+    // Given
     let green_rs = include_str!("../../tddy-workflow-recipes/src/tdd/green.rs");
+
+    // Then
     assert!(
         green_rs.contains("demo") || green_rs.contains("Demo"),
         "tddy-workflow-recipes green prompt must document demo / optional demo behavior for agents"

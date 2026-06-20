@@ -24,6 +24,7 @@ members = [
     "packages/tddy-github",
     "packages/tddy-daemon",
     "packages/tddy-workflow-recipes",
+    "packages/tddy-testing-commons",
     "packages/tddy-workflow",
     "packages/tddy-integration-tests",
     "packages/tddy-livekit-screen-capture",
@@ -33,3 +34,7 @@ exclude = [
     # tddy-build-rust integration tests, not a member of this workspace.
     "packages/tddy-build-rust/examples/workspace",
 ]
+
+[workspace.dependencies]
+rstest = "0.24"
+pretty_assertions = "1"

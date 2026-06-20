@@ -10,6 +10,7 @@ use tddy_core::{
 /// Two prompts in order: GitHub PR intent first; worktree removal only after a successful PR path.
 #[test]
 fn post_workflow_elicitation_order_pr_then_worktree() {
+    // When / Then
     assert_eq!(
         post_workflow_elicitation_step_order(),
         vec!["github_pr", "session_worktree_removal"],
@@ -27,6 +28,7 @@ fn post_workflow_elicitation_order_pr_then_worktree() {
 
 #[test]
 fn session_worktree_removal_prompt_after_successful_pr_publish_only() {
+    // When / Then
     assert!(
         should_prompt_session_worktree_removal(true, "published"),
         "after successful PR publish, operator may be asked about worktree removal"
@@ -36,6 +38,7 @@ fn session_worktree_removal_prompt_after_successful_pr_publish_only() {
 /// Terminal persisted PR phases must not re-elicit on resume.
 #[test]
 fn resume_does_not_reprompt_terminal_pr_state() {
+    // When / Then
     for phase in ["published", "failed", "declined", "skipped_no_pr"] {
         assert!(
             !should_reprompt_github_pr_on_resume(Some(phase)),
@@ -55,28 +58,28 @@ fn resume_does_not_reprompt_terminal_pr_state() {
 /// Status transitions must be representable as operator-visible text (CLI / logs / presenter).
 #[test]
 fn pr_status_visible_in_events_or_cli() {
+    // When
     let pushing = post_workflow_pr_status_display_line("pushing_branch", None, None)
         .expect("pushing_branch phase must surface a non-empty status line for the operator");
-    let low = pushing.to_lowercase();
-    assert!(
-        low.contains("push") || low.contains("branch"),
-        "expected push progress in line: {pushing:?}"
-    );
-
     let published = post_workflow_pr_status_display_line(
         "published",
         Some("https://github.com/example/test/pull/42"),
         None,
     )
     .expect("published phase must surface success line");
+    let err_line =
+        post_workflow_pr_status_display_line("failed", None, Some("insufficient oauth scope"))
+            .expect("failed phase must surface actionable error text");
+
+    // Then
+    assert!(
+        pushing.to_lowercase().contains("push") || pushing.to_lowercase().contains("branch"),
+        "expected push progress in line: {pushing:?}"
+    );
     assert!(
         published.contains("42") || published.contains("github.com"),
         "expected URL or id in line: {published:?}"
     );
-
-    let err_line =
-        post_workflow_pr_status_display_line("failed", None, Some("insufficient oauth scope"))
-            .expect("failed phase must surface actionable error text");
     assert!(
         err_line.to_lowercase().contains("scope") || err_line.to_lowercase().contains("error"),
         "expected failure reason in line: {err_line:?}"

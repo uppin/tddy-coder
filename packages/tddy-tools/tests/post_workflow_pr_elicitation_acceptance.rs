@@ -2,11 +2,11 @@
 //! validate against `changeset-workflow`, merge into session `Context`.
 
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 
 use tddy_core::changeset::{merge_persisted_workflow_into_context, write_changeset, Changeset};
 use tddy_core::workflow::context::Context;
+use tddy_testing_commons::fs::temp_session_dir;
 use tddy_tools::schema::validate_output;
 
 /// Canonical extended payload: PR intent, conditional worktree removal, machine-readable PR status.
@@ -23,24 +23,17 @@ const POST_PR_WORKFLOW_JSON: &str = r#"{
   }
 }"#;
 
-fn temp_session_dir(label: &str) -> PathBuf {
-    let dir =
-        std::env::temp_dir().join(format!("tddy-post-pr-wf-{}-{}", label, std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).expect("mkdir");
-    dir
-}
-
 #[test]
 fn persist_and_merge_post_pr_workflow_fields() {
+    // Given
+    let dir = temp_session_dir("persist-merge");
+    write_changeset(&dir, &Changeset::default()).expect("seed changeset");
     assert!(
         validate_output("changeset-workflow", POST_PR_WORKFLOW_JSON).is_ok(),
         "extended post-PR workflow JSON must validate against changeset-workflow schema; payload:\n{POST_PR_WORKFLOW_JSON}"
     );
 
-    let dir = temp_session_dir("persist-merge");
-    write_changeset(&dir, &Changeset::default()).expect("seed changeset");
-
+    // When
     let status = Command::new(env!("CARGO_BIN_EXE_tddy-tools"))
         .args([
             "persist-changeset-workflow",
@@ -51,6 +44,8 @@ fn persist_and_merge_post_pr_workflow_fields() {
         ])
         .status()
         .expect("spawn tddy-tools");
+
+    // Then
     assert!(
         status.success(),
         "persist-changeset-workflow must exit 0 for post-PR workflow JSON; code={:?}",

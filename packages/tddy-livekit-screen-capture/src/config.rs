@@ -133,6 +133,7 @@ mod tests {
 
     #[test]
     fn resolve_uses_token_when_present() {
+        // Given a config file with a pre-generated token and fps=15
         let file = FileConfig {
             livekit: Some(LiveKitYaml {
                 url: Some("ws://localhost:7880".to_string()),
@@ -144,13 +145,18 @@ mod tests {
             }),
             fps: Some(15),
         };
+
+        // When resolving with no CLI overrides
         let r = resolve_stream_config(Some(&file), &CliOverrides::default()).unwrap();
+
+        // Then the token and fps come directly from the file
         assert_eq!(r.token, "jwt-here");
         assert_eq!(r.fps, 15);
     }
 
     #[test]
     fn resolve_cli_overrides_room_identity_fps() {
+        // Given a config file with yaml-defined room, identity, and fps
         let file = FileConfig {
             livekit: Some(LiveKitYaml {
                 url: Some("ws://localhost:7880".to_string()),
@@ -162,6 +168,8 @@ mod tests {
             }),
             fps: Some(10),
         };
+
+        // When resolving with CLI overrides for room, identity, and fps
         let r = resolve_stream_config(
             Some(&file),
             &CliOverrides {
@@ -171,6 +179,8 @@ mod tests {
             },
         )
         .unwrap();
+
+        // Then the CLI values take precedence over the file values
         assert_eq!(r.room, "cli-room");
         assert_eq!(r.identity, "cli-id");
         assert_eq!(r.fps, 60);
@@ -178,7 +188,10 @@ mod tests {
 
     #[test]
     fn resolve_errors_when_livekit_missing() {
+        // Given a config file with no livekit section
         let file = FileConfig::default();
+
+        // When / Then
         assert!(resolve_stream_config(Some(&file), &CliOverrides::default()).is_err());
     }
 }

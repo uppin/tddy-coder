@@ -3,28 +3,18 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
 
 use serde_json::json;
 use tddy_core::session_action_pipeline::{
     build_extended_channel_manifest, build_invocation_envelope_direct, merge_session_action_env,
     resolve_output_globs_sorted,
 };
-
-fn temp_base(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "tddy_session_action_resolve_{}_{}",
-        name,
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).expect("mkdir fixture base");
-    dir
-}
+use tddy_testing_commons::fs::temp_session_dir;
 
 /// PRD: invocation `env_override` merges with action defaults; override wins on key conflicts (deterministic).
 #[test]
 fn session_action_default_env_merge_respects_override_precedence() {
+    // Given
     let mut defaults = HashMap::new();
     defaults.insert("A".into(), "from_default".into());
     defaults.insert("B".into(), "only_default".into());
@@ -32,7 +22,10 @@ fn session_action_default_env_merge_respects_override_precedence() {
     overrides.insert("A".into(), "from_override".into());
     overrides.insert("C".into(), "only_override".into());
 
+    // When
     let merged = merge_session_action_env(&defaults, &overrides);
+
+    // Then
     assert_eq!(
         merged.get("A").map(String::as_str),
         Some("from_override"),
@@ -46,10 +39,15 @@ fn session_action_default_env_merge_respects_override_precedence() {
 /// PRD (granular): when the action defines no default env entries, merged env must still include override keys.
 #[test]
 fn session_action_merge_env_applies_overrides_when_defaults_empty() {
+    // Given
     let defaults = HashMap::new();
     let mut overrides = HashMap::new();
     overrides.insert("ONLY_OVERRIDE".into(), "1".into());
+
+    // When
     let merged = merge_session_action_env(&defaults, &overrides);
+
+    // Then
     assert_eq!(
         merged.get("ONLY_OVERRIDE").map(String::as_str),
         Some("1"),
@@ -61,11 +59,15 @@ fn session_action_merge_env_applies_overrides_when_defaults_empty() {
 /// PRD: without an input mapper, the canonical serialized invocation is exactly `args` + `env` (no extra keys).
 #[test]
 fn session_action_invocation_without_mapper_uses_args_env_envelope_directly() {
+    // Given
     let args = vec!["/bin/sh".into(), "-c".into(), "echo hi".into()];
     let mut env = HashMap::new();
     env.insert("PATH".into(), "/usr/bin".into());
 
+    // When
     let v = build_invocation_envelope_direct(&args, &env);
+
+    // Then
     assert_eq!(
         v,
         json!({
@@ -79,15 +81,19 @@ fn session_action_invocation_without_mapper_uses_args_env_envelope_directly() {
 /// PRD: declared output globs resolve against fixture layout; failures are explicit when rules are violated.
 #[test]
 fn session_action_outputs_glob_resolution_matches_fixture_layout() {
-    let base = temp_base("globs");
+    // Given
+    let base = temp_session_dir("session-action-resolve-globs");
     let out = base.join("out");
     fs::create_dir_all(&out).expect("mkdir out");
     fs::write(out.join("x.log"), b"x").expect("write x.log");
     fs::write(out.join("y.log"), b"y").expect("write y.log");
     fs::write(out.join("read.me"), b"z").expect("write read.me");
-
     let patterns = vec!["out/*.log".to_string()];
+
+    // When
     let got = resolve_output_globs_sorted(&base, &patterns).expect("resolution returns Result");
+
+    // Then
     let mut expected = vec![out.join("x.log"), out.join("y.log")];
     expected.sort();
     assert_eq!(
@@ -100,14 +106,17 @@ fn session_action_outputs_glob_resolution_matches_fixture_layout() {
 /// PRD: channel manifest includes at least `stdout`, `stderr`, and example `logs` for mapper/transform.
 #[test]
 fn session_action_mapper_receives_extended_channel_manifest_including_logs_dir() {
-    let session = temp_base("channels");
+    // Given
+    let session = temp_session_dir("session-action-resolve-channels");
     let logs = session.join("logs");
     fs::create_dir_all(&logs).expect("mkdir logs");
     fs::write(logs.join("app.log"), b"tick\n").expect("write app.log");
 
+    // When
     let manifest =
         build_extended_channel_manifest(&session, None, None).expect("channel manifest Ok");
 
+    // Then
     for key in ["stdout", "stderr", "logs"] {
         assert!(
             manifest.contains_key(key),

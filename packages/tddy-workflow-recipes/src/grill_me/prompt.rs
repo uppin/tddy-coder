@@ -105,10 +105,18 @@ mod tests {
 
     #[test]
     fn grill_prompt_requires_tddy_tools_ask() {
+        // When
         let p = grill_system_prompt();
+
+        // Then
         assert!(
-            p.contains("tddy-tools ask") && p.contains("TDDY_SOCKET"),
-            "grill prompt must require tddy-tools ask and socket: {}",
+            p.contains("tddy-tools ask"),
+            "grill prompt must require tddy-tools ask: {}",
+            p
+        );
+        assert!(
+            p.contains("TDDY_SOCKET"),
+            "grill prompt must reference TDDY_SOCKET: {}",
             p
         );
         assert!(
@@ -120,9 +128,14 @@ mod tests {
 
     #[test]
     fn create_plan_prompt_interpolates_paths_and_required_sections() {
+        // Given
         const SD: &str = "__PROMPT_TEST_SESSION_DIR__";
         const OD: &str = "__PROMPT_TEST_OUTPUT_DIR__";
+
+        // When
         let p = create_plan_system_prompt(SD, OD);
+
+        // Then
         assert!(p.contains(SD), "expected session_dir in prompt");
         assert!(p.contains(OD), "expected output_dir in prompt");
         assert!(p.contains(GRILL_ME_BRIEF_BASENAME), "{}", p);

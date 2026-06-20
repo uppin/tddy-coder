@@ -41,6 +41,7 @@ fn assert_uuid_v7(label: &str, s: &str) {
 /// Engine `session_id` must match the pre-created `{session_base}/sessions/{id}/` tree (UUID v7 dirname).
 #[tokio::test]
 async fn workflow_engine_session_id_is_uuid_v7_with_precreated_session_tree() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLANNING_OUTPUT);
 
@@ -85,6 +86,7 @@ async fn workflow_engine_session_id_is_uuid_v7_with_precreated_session_tree() {
         .await
         .expect("plan goal");
 
+    // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
         "plan should succeed: {:?}",
@@ -98,6 +100,7 @@ async fn workflow_engine_session_id_is_uuid_v7_with_precreated_session_tree() {
 
 #[tokio::test]
 async fn plan_task_allocated_session_dir_basename_is_uuid_v7() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLANNING_OUTPUT);
 
@@ -144,6 +147,7 @@ async fn plan_task_allocated_session_dir_basename_is_uuid_v7() {
         .await
         .expect("plan goal");
 
+    // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
         "plan should succeed: {:?}",
@@ -171,6 +175,7 @@ async fn plan_task_allocated_session_dir_basename_is_uuid_v7() {
 
 #[tokio::test]
 async fn before_acceptance_tests_hook_sets_uuid_v7_session_id_in_context() {
+    // Given
     let output_dir =
         std::env::temp_dir().join(format!("tddy-v7-at-hook-out-{}", std::process::id()));
     let session_dir = output_dir.join("session");
@@ -200,6 +205,7 @@ async fn before_acceptance_tests_hook_sets_uuid_v7_session_id_in_context() {
 
 #[tokio::test]
 async fn before_red_hook_sets_uuid_v7_session_id_in_context() {
+    // Given
     let session_dir = std::env::temp_dir().join(format!("tddy-v7-red-hook-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("mkdir");
@@ -227,6 +233,7 @@ async fn before_red_hook_sets_uuid_v7_session_id_in_context() {
 
 #[test]
 fn recipes_create_session_dir_in_uses_uuid_v7_dirname() {
+    // Given
     let base = std::env::temp_dir().join(format!("tddy-v7-recipes-writer-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(&base).unwrap();

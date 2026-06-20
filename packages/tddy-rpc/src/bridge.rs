@@ -228,6 +228,7 @@ mod multi_service_names_acceptance {
 
     #[test]
     fn multi_rpc_service_exposes_service_names() {
+        // Given a MultiRpcService with two registered service entries
         let entries = vec![
             ServiceEntry {
                 name: "test.EchoService",
@@ -239,8 +240,11 @@ mod multi_service_names_acceptance {
             },
         ];
         let multi = MultiRpcService::new(entries);
-        // service_names() does not exist yet — this test fails to compile until it is added.
+
+        // When listing service names (needed by reflection endpoint)
         let names = multi.service_names();
+
+        // Then both registered service names are returned in registration order
         assert_eq!(names, vec!["test.EchoService", "token.TokenService"]);
     }
 }

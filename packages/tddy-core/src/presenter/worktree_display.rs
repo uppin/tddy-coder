@@ -62,8 +62,13 @@ mod tests {
     /// Lower-level (PRD): non-empty display derived from the worktree path for the status segment.
     #[test]
     fn format_worktree_for_status_bar_includes_path_marker_segment() {
+        // Given
         let path = Path::new("/tmp/wt-acceptance-marker/my-branch");
+
+        // When
         let s = format_worktree_for_status_bar(path);
+
+        // Then
         assert!(
             s.contains("wt-acceptance-marker") || s.contains("my-branch"),
             "expected basename or marker segment in display; got {s:?}"

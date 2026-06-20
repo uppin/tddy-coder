@@ -248,6 +248,7 @@ mod tests {
 
     #[test]
     fn get_schema_returns_content_for_all_goals() {
+        // When / Then
         for (goal, _) in GOAL_SCHEMA_FILES {
             let content =
                 get_schema(goal).unwrap_or_else(|| panic!("schema for {} should exist", goal));
@@ -258,11 +259,13 @@ mod tests {
 
     #[test]
     fn get_schema_returns_none_for_unknown_goal() {
+        // When / Then
         assert!(get_schema("unknown").is_none());
     }
 
     #[test]
     fn common_schemas_load_successfully() {
+        // When / Then
         common_schemas_or_err().expect("all embedded common schemas must parse");
     }
 }

@@ -465,7 +465,10 @@ mod tests {
     /// Plan approval uses the activity region; the old four-line dynamic menu strip is not allocated.
     #[test]
     fn plan_review_real_layout_has_no_dynamic_menu_strip_80x24() {
+        // When
         let real = areas_from_real_layout_80x24_document_review();
+
+        // Then
         assert_eq!(
             real.dynamic_area.height, 0,
             "DocumentReview must not reserve a separate dynamic strip for View/Approve/Refine"
@@ -475,6 +478,7 @@ mod tests {
     /// When terminal sends row 19 for Approve click, caller must normalize before handle_mouse_event.
     #[test]
     fn click_row_19_when_terminal_sends_1_less_must_select_approve() {
+        // Given
         let mut vs = ViewState::new();
         let areas = legacy_plan_review_menu_strip_fixture_80x24();
         let ev = MouseEvent {
@@ -487,7 +491,11 @@ mod tests {
         let mode = AppMode::DocumentReview {
             content: "plan".to_string(),
         };
+
+        // When
         let intent = handle_mouse_event(ev_normalized, &mode, &mut vs, &areas, 0);
+
+        // Then
         assert_eq!(
             vs.document_review_selected, 1,
             "When terminal sends row 19 for Approve click, must select Approve (off-by-one bug)"
@@ -497,6 +505,7 @@ mod tests {
 
     #[test]
     fn scroll_in_activity_log_adjusts_scroll_offset() {
+        // Given
         let mut vs = ViewState::new();
         let areas = legacy_plan_review_menu_strip_fixture_80x24();
         let ev = MouseEvent {
@@ -505,13 +514,18 @@ mod tests {
             row: 5,
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
+
+        // When
         let intent = handle_mouse_event(ev, &AppMode::Running, &mut vs, &areas, 0);
+
+        // Then
         assert!(intent.is_none());
         assert_eq!(vs.scroll_offset, 1);
     }
 
     #[test]
     fn click_document_review_approve_produces_intent() {
+        // Given
         let mut vs = ViewState::new();
         let areas = legacy_plan_review_menu_strip_fixture_80x24();
         // dynamic_area.y=18: row 18=header, 19=View, 20=Approve, 21=Refine
@@ -524,13 +538,18 @@ mod tests {
         let mode = AppMode::DocumentReview {
             content: "plan".to_string(),
         };
+
+        // When
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+
+        // Then
         assert_eq!(vs.document_review_selected, 1);
         assert!(matches!(intent, Some(UserIntent::ApproveSessionDocument)));
     }
 
     #[test]
     fn scroll_in_dynamic_area_navigates_document_review() {
+        // Given
         let mut vs = ViewState::new();
         vs.document_review_selected = 1;
         let areas = legacy_plan_review_menu_strip_fixture_80x24();
@@ -543,7 +562,11 @@ mod tests {
         let mode = AppMode::DocumentReview {
             content: "plan".to_string(),
         };
+
+        // When
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+
+        // Then
         assert!(intent.is_none());
         assert_eq!(vs.document_review_selected, 0);
     }
@@ -552,6 +575,7 @@ mod tests {
     /// dynamic_area.y=18: row 18=header, 19=View, 20=Approve, 21=Refine.
     #[test]
     fn click_document_review_refine_selects_refine_not_approve() {
+        // Given
         let mut vs = ViewState::new();
         let areas = legacy_plan_review_menu_strip_fixture_80x24();
         let ev = MouseEvent {
@@ -563,7 +587,11 @@ mod tests {
         let mode = AppMode::DocumentReview {
             content: "plan".to_string(),
         };
+
+        // When
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+
+        // Then
         assert_eq!(
             vs.document_review_selected, 2,
             "clicking Refine row (21) must select option 2, not option 1 (off-by-one bug)"
@@ -577,6 +605,7 @@ mod tests {
     /// Regression: click on View (first option) must select View.
     #[test]
     fn click_document_review_view_selects_view() {
+        // Given
         let mut vs = ViewState::new();
         let areas = legacy_plan_review_menu_strip_fixture_80x24();
         let ev = MouseEvent {
@@ -588,7 +617,11 @@ mod tests {
         let mode = AppMode::DocumentReview {
             content: "plan".to_string(),
         };
+
+        // When
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+
+        // Then
         assert_eq!(vs.document_review_selected, 0);
         assert!(matches!(intent, Some(UserIntent::ViewSessionDocument)));
     }
@@ -598,6 +631,7 @@ mod tests {
     /// raw `dynamic_area.y + 2` becomes `y + 3` after normalize, which is the Continue line.
     #[test]
     fn click_error_recovery_continue_with_agent_after_normalize_matches_event_loop() {
+        // Given
         let areas = areas_from_real_layout_80x24_error_recovery();
         let continue_row_raw = areas.dynamic_area.y + 2;
         let mut vs = ViewState::new();
@@ -610,6 +644,8 @@ mod tests {
             row: continue_row_raw,
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
+
+        // When
         let intent = handle_mouse_event(
             normalize_mouse_coords_for_local(ev),
             &mode,
@@ -617,6 +653,8 @@ mod tests {
             &areas,
             0,
         );
+
+        // Then
         assert!(
             matches!(intent, Some(UserIntent::ContinueWithAgent)),
             "click Continue row after normalize must produce ContinueWithAgent; got {:?} (selection={})",
@@ -656,6 +694,7 @@ mod tests {
 
     #[test]
     fn single_click_in_select_mode_highlights_without_confirming() {
+        // Given
         let mut vs = ViewState::new();
         let (mode, areas) = select_mode_fixture_80x24();
         let option_row = areas.dynamic_area.y + 2;
@@ -665,7 +704,11 @@ mod tests {
             row: option_row,
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
+
+        // When
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
+
+        // Then
         assert_eq!(
             vs.select_selected, 0,
             "single click must highlight option 0"
@@ -678,6 +721,7 @@ mod tests {
 
     #[test]
     fn double_click_in_select_mode_confirms_selection() {
+        // Given
         let mut vs = ViewState::new();
         let (mode, areas) = select_mode_fixture_80x24();
         let option_row = areas.dynamic_area.y + 2;
@@ -690,6 +734,7 @@ mod tests {
         let _ = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
         assert_eq!(vs.select_selected, 0);
 
+        // When
         let ev2 = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 5,
@@ -697,6 +742,8 @@ mod tests {
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
         let intent = handle_mouse_event(ev2, &mode, &mut vs, &areas, 0);
+
+        // Then
         assert_eq!(
             intent,
             Some(UserIntent::AnswerSelect(0)),
@@ -706,6 +753,7 @@ mod tests {
 
     #[test]
     fn double_click_on_different_rows_does_not_confirm() {
+        // Given
         let mut vs = ViewState::new();
         let (mode, areas) = select_mode_fixture_80x24();
         let first_option_row = areas.dynamic_area.y + 2;
@@ -718,6 +766,7 @@ mod tests {
         };
         let _ = handle_mouse_event(ev1, &mode, &mut vs, &areas, 0);
 
+        // When
         let ev2 = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 5,
@@ -725,6 +774,8 @@ mod tests {
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
         let intent = handle_mouse_event(ev2, &mode, &mut vs, &areas, 0);
+
+        // Then
         assert_eq!(vs.select_selected, 1);
         assert!(
             intent.is_none(),
@@ -744,6 +795,7 @@ mod tests {
     /// `prompt_bar` cells.
     #[test]
     fn enter_button_rect_is_right_of_prompt_with_margin_and_disjoint_from_prompt_and_footer() {
+        // Given
         let sb = Rect::new(0, 20, 80, 1);
         // One-row gap below status (y=21); debug height 0 so prompt starts at 22.
         // 80 cols − 8 right chrome (Enter + Stop) = 72 prompt cols
@@ -758,7 +810,11 @@ mod tests {
             enter_pane: Rect::default(),
             stop_pane: Rect::default(),
         };
+
+        // When
         let r = super::enter_button_rect(&areas);
+
+        // Then
         let prompt_rows = if pb.height > 1 {
             pb.height - 1
         } else {
@@ -791,6 +847,7 @@ mod tests {
 
     #[test]
     fn click_enter_affordance_left_border_confirms_select() {
+        // Given
         let mut vs = ViewState::new();
         let (mode, areas) = select_mode_fixture_80x24();
         vs.select_selected = 0;
@@ -801,6 +858,8 @@ mod tests {
             row: r.y + 1,
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
+
+        // When / Then
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
         assert_eq!(
             intent,
@@ -811,6 +870,7 @@ mod tests {
 
     #[test]
     fn click_enter_affordance_corner_cell_confirms_select() {
+        // Given
         let mut vs = ViewState::new();
         let (mode, areas) = select_mode_fixture_80x24();
         vs.select_selected = 0;
@@ -821,6 +881,8 @@ mod tests {
             row: r.y,
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
+
+        // When / Then
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
         assert_eq!(
             intent,
@@ -831,6 +893,7 @@ mod tests {
 
     #[test]
     fn click_enter_affordance_return_symbol_cell_confirms_select() {
+        // Given
         let mut vs = ViewState::new();
         let (mode, areas) = select_mode_fixture_80x24();
         vs.select_selected = 0;
@@ -854,6 +917,8 @@ mod tests {
             row: return_row,
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
+
+        // When / Then
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
         assert_eq!(
             intent,
@@ -866,6 +931,7 @@ mod tests {
     /// With a normal layout, the footer is two lines; Approve is the upper line, Reject the lower.
     #[test]
     fn plan_approval_footer_buttons_in_activity_hit_test() {
+        // Given
         let mut vs = ViewState::new();
         let area = Rect::new(0, 0, 80, 24);
         let dynamic_h = 0u16;
@@ -889,6 +955,8 @@ mod tests {
         let footer_top = activity_log.y + h - footer_h;
         let approve_row = footer_top;
         let reject_row = footer_top + footer_h.saturating_sub(1);
+
+        // When / Then
         let ev_approve = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 5,
@@ -917,6 +985,7 @@ mod tests {
 
     #[test]
     fn stop_button_rect_empty_when_terminal_too_narrow_for_stop_strip() {
+        // Given
         let area = Rect::new(0, 0, 8, 24);
         let (activity_log, _sp, dynamic_area, status_bar, _g, _d, prompt_bar, footer_bar) =
             layout_chunks_with_inbox(area, 0, 0, 1);
@@ -929,15 +998,22 @@ mod tests {
             enter_pane: Rect::default(),
             stop_pane: Rect::default(),
         };
+
+        // When / Then
         assert_eq!(super::stop_button_rect(&areas).width, 0);
     }
 
     #[test]
     fn stop_button_rect_sits_right_of_enter_with_margin() {
+        // Given
         let (mode, areas) = select_mode_fixture_80x24();
         let _ = mode;
+
+        // When
         let er = super::enter_button_rect(&areas);
         let sr = super::stop_button_rect(&areas);
+
+        // Then
         assert!(sr.width > 0);
         assert_eq!(sr.x, er.x + er.width + super::STOP_STRIP_MARGIN_COLS);
         assert_eq!(sr.y, er.y);
@@ -946,6 +1022,7 @@ mod tests {
 
     #[test]
     fn click_stop_affordance_produces_interrupt() {
+        // Given
         let mut vs = ViewState::new();
         let (mode, areas) = select_mode_fixture_80x24();
         let sr = super::stop_button_rect(&areas);
@@ -957,6 +1034,8 @@ mod tests {
             row,
             modifiers: crossterm::event::KeyModifiers::empty(),
         };
+
+        // When / Then
         let intent = handle_mouse_event(ev, &mode, &mut vs, &areas, 0);
         assert_eq!(intent, Some(UserIntent::Interrupt));
     }

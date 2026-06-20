@@ -68,6 +68,7 @@ mod tests {
 
     #[test]
     fn generated_schema_manifest_exists_next_to_workflow_recipes() {
+        // When / Then
         assert!(
             schema_manifest_path().is_file(),
             "expected generated schema-manifest.json (proto → JSON Schema pipeline; PRD F2)"
@@ -76,6 +77,7 @@ mod tests {
 
     #[test]
     fn manifest_goal_names_match_goal_registry() {
+        // When
         let mut from_manifest: Vec<String> = list_registered_goals().expect("manifest must parse");
         let mut from_registry: Vec<String> = schema::goal_cli_names()
             .into_iter()
@@ -83,6 +85,8 @@ mod tests {
             .collect();
         from_manifest.sort();
         from_registry.sort();
+
+        // Then
         assert_eq!(
             from_manifest, from_registry,
             "goals.json → manifest and generated goal_registry.rs must list the same CLI names"

@@ -185,11 +185,14 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn tddy_data_dir_path_prefers_env_over_in_process_override() {
+        // Given
         let via_env = std::env::temp_dir().join(format!("tddy-sbp-env-{}", std::process::id()));
         let via_override =
             std::env::temp_dir().join(format!("tddy-sbp-override-{}", std::process::id()));
         std::env::set_var(TDDY_SESSIONS_DIR_ENV, &via_env);
         set_tddy_data_dir_override(Some(via_override));
+
+        // Then
         assert_eq!(tddy_data_dir_path().unwrap(), via_env);
         std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
         set_tddy_data_dir_override(None);
@@ -198,16 +201,20 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn tddy_data_dir_path_uses_override_when_env_unset() {
+        // Given
         std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
         let via_override =
             std::env::temp_dir().join(format!("tddy-sbp-only-override-{}", std::process::id()));
         set_tddy_data_dir_override(Some(via_override.clone()));
+
+        // Then
         assert_eq!(tddy_data_dir_path().unwrap(), via_override);
         set_tddy_data_dir_override(None);
     }
 
     #[test]
     fn plan_artifacts_root_is_under_session_dir() {
+        // Given
         let root = std::env::temp_dir().join(format!(
             "tddy-plan-artifact-sessions-{}",
             std::process::id()
@@ -216,12 +223,15 @@ mod tests {
         let sessions = root.join("sessions");
         let sid = sessions.join("a97addd3-c31b-442b-a6b0-a63abe99e11d");
         std::fs::create_dir_all(&sid).unwrap();
+
+        // When / Then
         assert_eq!(plan_artifacts_root(&sid), sid.join("artifacts"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn create_session_dir_in_uses_explicit_base_not_repo_path() {
+        // Given
         let sessions_home =
             std::env::temp_dir().join(format!("tddy-core-sessions-home-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&sessions_home);
@@ -229,7 +239,11 @@ mod tests {
             std::env::temp_dir().join(format!("tddy-plan-artifact-repo-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&repo);
         std::fs::create_dir_all(&repo).unwrap();
+
+        // When
         let got = create_session_dir_in(&sessions_home).unwrap();
+
+        // Then
         assert!(
             !got.starts_with(&repo),
             "session dir must not be derived from repo path"

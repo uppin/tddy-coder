@@ -1,0 +1,11 @@
+[package]
+name = "tddy-testing-commons"
+version = "0.1.0"
+edition = "2021"
+description = "Shared test builders, fakes, and assertion helpers for the tddy workspace"
+
+[dependencies]
+tddy-core = { path = "../tddy-core" }
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+pretty_assertions = { workspace = true }

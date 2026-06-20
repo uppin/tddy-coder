@@ -81,40 +81,47 @@ targets:
 
 #[tokio::test]
 async fn engine_logs_discovery_lowering_cache_and_cycles() {
+    // Given
     install_logger();
-
     let repo = tempfile::tempdir().expect("tempdir");
     let root = repo.path();
     std::fs::write(root.join("BUILD.yaml"), SCRIPT_YAML).expect("write BUILD.yaml");
     std::fs::write(root.join("input.txt"), "seed").expect("seed input");
 
-    // Discovery should log how many manifests it found.
+    // When — discovery
     let discovered = discover_build_manifests(root).expect("discover");
     let manifests = discovered.into_iter().map(|(_, m)| m).collect::<Vec<_>>();
+
+    // Then
     assert_logged("manifest");
 
+    // When — first run: lowering + cache miss + execution
     let graph = BuildGraph::from_manifests(manifests).expect("graph");
     let opts = ExecuteOptions::default();
     let registry = PluginRegistry::new();
-
-    // First run: lowering + cache miss + action execution.
     let first = execute_target(root, &graph, "log:demo", &opts, &registry)
         .await
         .expect("first run");
+
+    // Then
     assert!(!first.actions[0].cached);
     assert_logged("lowered target");
     assert_logged("building target");
     assert_logged("cache miss");
 
-    // Second run: cache hit.
+    // When — second run: cache hit
     let second = execute_target(root, &graph, "log:demo", &opts, &registry)
         .await
         .expect("second run");
+
+    // Then
     assert!(second.actions[0].cached);
     assert_logged("cache hit");
 
-    // Cycle detection must warn and name the cycle.
+    // When — cycle detection
     let cyclic = tddy_build::load_build_manifest(CYCLE_YAML).expect("parse cyclic");
     assert!(BuildGraph::from_manifests(vec![cyclic]).is_err());
+
+    // Then
     assert_logged("cycle");
 }

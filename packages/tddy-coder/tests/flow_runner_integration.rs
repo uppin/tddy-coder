@@ -23,6 +23,7 @@ fn temp_output_dir() -> PathBuf {
 #[test]
 #[cfg(unix)]
 fn run_plan_via_flow_runner_produces_session_directory() {
+    // Given
     let sessions_base = temp_output_dir();
     let sessions_base_str = sessions_base.to_str().expect("path");
 
@@ -40,8 +41,10 @@ fn run_plan_via_flow_runner_produces_session_directory() {
         ])
         .write_stdin("a\n");
 
+    // When
     cmd.assert().success();
 
+    // Then
     let sessions_dir = sessions_base.join(tddy_core::output::SESSIONS_SUBDIR);
     let session_dir = std::fs::read_dir(&sessions_dir)
         .expect("sessions dir should exist")

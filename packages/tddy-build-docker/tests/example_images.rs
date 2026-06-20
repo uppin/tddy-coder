@@ -67,16 +67,26 @@ fn load(root: &std::path::Path) -> BuildGraph {
 
 #[test]
 fn docker_targets_depend_on_base_first() {
+    // Given
     let graph = load(&example_root());
+
+    // When
     let order = graph.build_order("api:image").expect("order");
     let pos = |id: &str| order.iter().position(|t| t == id).expect("present");
+
+    // Then
     assert!(pos("base:image") < pos("api:image"));
 }
 
 #[test]
 fn docker_plugin_lowers_iidfile_argv() {
+    // Given
     let graph = load(&example_root());
+
+    // When
     let actions = graph.actions_for("base:image", &registry()).expect("lower");
+
+    // Then
     assert_eq!(
         actions[0].command,
         vec![
@@ -99,15 +109,20 @@ async fn docker_images_build_and_cache_when_daemon_available() {
         eprintln!("SKIP: docker daemon not reachable");
         return;
     }
+
+    // Given
     let dir = staged();
     let opts = ExecuteOptions::default();
     let reg = registry();
     let graph = load(dir.path());
 
+    // When
     // base + api build (deps-first); api is FROM example-base.
     let record = execute_target(dir.path(), &graph, "api:image", &opts, &reg)
         .await
         .expect("docker build");
+
+    // Then
     assert_eq!(
         record.actions[0].exit_code, 0,
         "stderr: {}",
@@ -118,13 +133,15 @@ async fn docker_images_build_and_cache_when_daemon_available() {
         "iidfile written"
     );
 
-    // Rerun base alone → cache hit.
+    // When (rerun base alone)
     let second = execute_target(dir.path(), &graph, "base:image", &opts, &reg)
         .await
         .expect("second base");
+
+    // Then
     assert!(second.actions[0].cached, "rerun is a cache hit");
 
-    // Edit the base Dockerfile → miss.
+    // When (edit the base Dockerfile)
     std::fs::write(
         dir.path().join("base/Dockerfile"),
         "FROM busybox:latest\nRUN echo \"base v2\" > /base.txt\n",
@@ -133,6 +150,8 @@ async fn docker_images_build_and_cache_when_daemon_available() {
     let third = execute_target(dir.path(), &graph, "base:image", &opts, &reg)
         .await
         .expect("third base");
+
+    // Then
     assert!(
         !third.actions[0].cached,
         "dockerfile edit invalidates the cache"

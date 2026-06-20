@@ -26,6 +26,7 @@ fn write_minimal_artifacts(session_dir: &std::path::Path) {
 /// update-docs() invokes backend with goal_id "update-docs".
 #[tokio::test]
 async fn update_docs_invokes_backend_with_update_docs_goal() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-update-docs-goal-test");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
@@ -45,8 +46,11 @@ async fn update_docs_invokes_backend_with_update_docs_goal() {
     );
 
     let ctx = ctx_update_docs(session_dir.clone());
+
+    // When
     let result = run_goal_until_done(&engine, "update-docs", ctx).await;
 
+    // Then
     assert!(
         result.is_ok(),
         "update-docs should succeed, got: {:?}",
@@ -68,6 +72,7 @@ async fn update_docs_invokes_backend_with_update_docs_goal() {
 /// update-docs() transitions workflow to DocsUpdated state on success.
 #[tokio::test]
 async fn update_docs_transitions_to_docs_updated() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-update-docs-state-test");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
@@ -87,11 +92,15 @@ async fn update_docs_transitions_to_docs_updated() {
     );
 
     let ctx = ctx_update_docs(session_dir.clone());
+
+    // When
     let _ = run_goal_until_done(&engine, "update-docs", ctx)
         .await
         .unwrap();
 
     let changeset = read_changeset(&session_dir).expect("changeset");
+
+    // Then
     assert_eq!(
         changeset.state.current,
         WorkflowState::new("DocsUpdated"),
@@ -105,6 +114,7 @@ async fn update_docs_transitions_to_docs_updated() {
 /// update-docs() parses structured response with summary and docs_updated.
 #[tokio::test]
 async fn update_docs_parses_structured_response() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-update-docs-parse-test");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
@@ -124,6 +134,8 @@ async fn update_docs_parses_structured_response() {
     );
 
     let ctx = ctx_update_docs(session_dir.clone());
+
+    // When
     let result = run_goal_until_done(&engine, "update-docs", ctx)
         .await
         .unwrap();
@@ -137,6 +149,7 @@ async fn update_docs_parses_structured_response() {
     let output =
         tddy_workflow_recipes::parse_update_docs_response(&output_str).expect("parse output");
 
+    // Then
     assert!(!output.summary.is_empty(), "summary must not be empty");
     assert_eq!(output.docs_updated, 3, "docs_updated should be 3");
 
@@ -146,15 +159,18 @@ async fn update_docs_parses_structured_response() {
 /// CursorBackend must accept update-docs goal (same `agent` invocation path as other goals).
 #[tokio::test]
 async fn cursor_backend_accepts_update_docs() {
+    // Given
     let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/agent"));
     let req = common::stub_invoke_request("update-docs", "update-docs");
 
+    // When
     let result = backend.invoke(req).await;
 
     // CursorBackend does NOT reject UpdateDocs. It may return BinaryNotFound
     // (agent CLI not installed) or InvocationFailed for other reasons, but must
     // NOT return InvocationFailed("update-docs is not supported").
     if let Err(tddy_core::BackendError::InvocationFailed(ref msg)) = result {
+        // Then
         assert!(
             !msg.to_lowercase().contains("update-docs")
                 || !msg.to_lowercase().contains("not supported"),

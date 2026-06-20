@@ -1612,6 +1612,7 @@ mod tests {
 
     #[test]
     fn progress_session_started_sets_workflow_session_id() {
+        // Given
         let mut p = make_presenter();
         let sid = "550e8400-e29b-41d4-a716-446655440000";
         inject_workflow_event(
@@ -1620,12 +1621,17 @@ mod tests {
                 session_id: sid.to_string(),
             }),
         );
+
+        // When
         p.poll_workflow();
+
+        // Then
         assert_eq!(p.state().workflow_session_id.as_deref(), Some(sid));
     }
 
     #[test]
     fn workflow_complete_ok_clears_workflow_session_id_after_session_started() {
+        // Given
         let mut p = make_presenter();
         inject_workflow_events(
             &mut p,
@@ -1639,7 +1645,11 @@ mod tests {
                 })),
             ],
         );
+
+        // When
         p.poll_workflow();
+
+        // Then
         assert!(
             p.state().workflow_session_id.is_none(),
             "expected workflow_session_id cleared after successful completion"
@@ -1648,6 +1658,7 @@ mod tests {
 
     #[test]
     fn workflow_complete_err_clears_workflow_session_id_after_session_started() {
+        // Given
         let mut p = make_presenter();
         inject_workflow_events(
             &mut p,
@@ -1658,7 +1669,11 @@ mod tests {
                 WorkflowEvent::WorkflowComplete(Err("boom".to_string())),
             ],
         );
+
+        // When
         p.poll_workflow();
+
+        // Then
         assert!(
             p.state().workflow_session_id.is_none(),
             "expected workflow_session_id cleared after error completion"
@@ -1666,13 +1681,18 @@ mod tests {
     }
 
     #[test]
-    fn test_workflow_error_transitions_to_error_recovery() {
+    fn workflow_error_transitions_to_error_recovery() {
+        // Given
         let mut p = make_presenter();
         inject_workflow_event(
             &mut p,
             WorkflowEvent::WorkflowComplete(Err("backend timeout".to_string())),
         );
+
+        // When
         p.poll_workflow();
+
+        // Then
         assert!(
             matches!(
                 p.state().mode,
@@ -1684,7 +1704,8 @@ mod tests {
     }
 
     #[test]
-    fn test_workflow_success_transitions_to_feature_input() {
+    fn workflow_success_transitions_to_feature_input() {
+        // Given
         let mut p = make_presenter();
         inject_workflow_event(
             &mut p,
@@ -1693,7 +1714,11 @@ mod tests {
                 session_dir: None,
             })),
         );
+
+        // When
         p.poll_workflow();
+
+        // Then
         assert!(
             matches!(p.state().mode, AppMode::FeatureInput),
             "Expected FeatureInput mode (ready for new workflow), got {:?}",
@@ -1703,9 +1728,14 @@ mod tests {
 
     #[test]
     fn awaiting_feature_input_event_switches_to_feature_input_mode() {
+        // Given
         let mut p = make_presenter();
         inject_workflow_event(&mut p, WorkflowEvent::AwaitingFeatureInput);
+
+        // When
         p.poll_workflow();
+
+        // Then
         assert!(
             matches!(p.state().mode, AppMode::FeatureInput),
             "Expected FeatureInput when plan awaits description, got {:?}",
@@ -1715,26 +1745,23 @@ mod tests {
 
     #[test]
     fn continue_with_agent_sets_exit_action_and_quits_when_session_available() {
+        // Given
         let mut p = make_presenter();
-
-        // Create a temp dir with a changeset that has a session_id.
         let tmp = std::env::temp_dir().join("tddy-test-continue-agent-exit");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let mut cs = crate::changeset::Changeset::default();
         cs.state.session_id = Some("agent-session-42".to_string());
         crate::changeset::write_changeset(&tmp, &cs).unwrap();
-
-        // Set up presenter with output_dir pointing to changeset location.
         p.workflow_output_dir = Some(tmp.clone());
-
-        // Put presenter in ErrorRecovery mode (precondition for this intent).
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "test error".to_string(),
         };
 
+        // When
         p.handle_intent(UserIntent::ContinueWithAgent);
 
+        // Then
         assert!(
             p.state().should_quit,
             "ContinueWithAgent should set should_quit when session is available"
@@ -1754,22 +1781,22 @@ mod tests {
 
     #[test]
     fn continue_with_agent_stays_in_error_recovery_when_no_session() {
+        // Given
         let mut p = make_presenter();
-
-        // Create a temp dir with a changeset that has NO session_id.
         let tmp = std::env::temp_dir().join("tddy-test-continue-agent-no-session");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let cs = crate::changeset::Changeset::default(); // session_id is None
         crate::changeset::write_changeset(&tmp, &cs).unwrap();
-
         p.workflow_output_dir = Some(tmp.clone());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "test error".to_string(),
         };
 
+        // When
         p.handle_intent(UserIntent::ContinueWithAgent);
 
+        // Then
         assert!(
             !p.state().should_quit,
             "ContinueWithAgent should NOT quit when no session_id is available"
@@ -1796,12 +1823,11 @@ mod tests {
     /// Continue with agent (exec resume).
     #[test]
     fn continue_with_agent_resolves_tagged_session_when_state_session_id_missing() {
+        // Given
         let mut p = make_presenter();
-
         let tmp = std::env::temp_dir().join("tddy-test-continue-agent-tag-fallback");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
-
         let cursor_thread = "019d105b-ac0f-78d3-9a89-409731145a36";
         let mut cs = crate::changeset::Changeset::default();
         cs.state.session_id = None;
@@ -1813,15 +1839,16 @@ mod tests {
             system_prompt_file: None,
         });
         crate::changeset::write_changeset(&tmp, &cs).unwrap();
-
         p.workflow_output_dir = Some(tmp.clone());
         p.state.current_goal = Some("evaluate".to_string());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "validate is not supported on the Cursor backend".to_string(),
         };
 
+        // When
         p.handle_intent(UserIntent::ContinueWithAgent);
 
+        // Then
         assert!(
             p.state().should_quit,
             "ContinueWithAgent should quit to exec claude --resume when a tagged session exists"
@@ -1844,12 +1871,11 @@ mod tests {
     /// from the changeset so Enter does not appear to do nothing.
     #[test]
     fn continue_with_agent_resolves_session_when_current_goal_tag_has_no_entry() {
+        // Given
         let mut p = make_presenter();
-
         let tmp = std::env::temp_dir().join("tddy-test-continue-agent-wrong-tag");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
-
         let sid = "session-from-prior-step";
         let mut cs = crate::changeset::Changeset::default();
         cs.state.session_id = None;
@@ -1861,15 +1887,16 @@ mod tests {
             system_prompt_file: None,
         });
         crate::changeset::write_changeset(&tmp, &cs).unwrap();
-
         p.workflow_output_dir = Some(tmp.clone());
         p.state.current_goal = Some("validate".to_string());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "validate is not supported on the Cursor backend".to_string(),
         };
 
+        // When
         p.handle_intent(UserIntent::ContinueWithAgent);
 
+        // Then
         assert!(
             p.state().should_quit,
             "ContinueWithAgent must quit with a resume session when any session exists in changeset"
@@ -1891,20 +1918,18 @@ mod tests {
     /// (`~/.tddy/sessions/...`). Continue with agent must read `changeset.yaml` from `session_dir`.
     #[test]
     fn continue_with_agent_reads_changeset_from_workflow_session_dir() {
+        // Given
         let mut p = make_presenter();
-
         let tmp_plan = std::env::temp_dir().join("tddy-test-continue-plan-dir");
         let tmp_wrong = std::env::temp_dir().join("tddy-test-continue-wrong-dir");
         let _ = std::fs::remove_dir_all(&tmp_plan);
         let _ = std::fs::remove_dir_all(&tmp_wrong);
         std::fs::create_dir_all(&tmp_plan).unwrap();
         std::fs::create_dir_all(&tmp_wrong).unwrap();
-
         let resume_id = "resume-from-plan-dir";
         let mut cs = crate::changeset::Changeset::default();
         cs.state.session_id = Some(resume_id.to_string());
         crate::changeset::write_changeset(&tmp_plan, &cs).unwrap();
-
         p.workflow_output_dir = Some(tmp_wrong.clone());
         p.workflow_session_dir = Some(tmp_plan.clone());
         p.state.mode = AppMode::ErrorRecovery {
@@ -1912,8 +1937,10 @@ mod tests {
                 .to_string(),
         };
 
+        // When
         p.handle_intent(UserIntent::ContinueWithAgent);
 
+        // Then
         assert!(p.state().should_quit);
         assert!(
             matches!(
@@ -1931,25 +1958,36 @@ mod tests {
 
     #[test]
     fn connect_view_returns_none_without_broadcast() {
+        // Given
         let p = make_presenter();
+
+        // Then
         assert!(p.connect_view().is_none());
     }
 
     #[test]
     fn connect_view_returns_none_without_intent_tx() {
+        // Given
         let (tx, _) = tokio::sync::broadcast::channel(16);
         let p = make_presenter().with_broadcast(tx);
+
+        // Then
         assert!(p.connect_view().is_none());
     }
 
     #[test]
     fn connect_view_returns_connection_with_matching_snapshot() {
+        // Given
         let (event_tx, _) = tokio::sync::broadcast::channel(16);
         let (intent_tx, _) = mpsc::channel();
         let p = make_presenter()
             .with_broadcast(event_tx)
             .with_intent_sender(intent_tx);
+
+        // When
         let conn = p.connect_view().expect("connect_view should return Some");
+
+        // Then
         assert_eq!(conn.state_snapshot.agent, "agent");
         assert_eq!(conn.state_snapshot.model, "model");
         assert!(matches!(conn.state_snapshot.mode, AppMode::FeatureInput));
@@ -1957,14 +1995,19 @@ mod tests {
 
     #[test]
     fn connect_view_event_rx_receives_broadcast_events() {
+        // Given
         let (event_tx, _) = tokio::sync::broadcast::channel(16);
         let (intent_tx, _) = mpsc::channel();
         let p = make_presenter()
             .with_broadcast(event_tx.clone())
             .with_intent_sender(intent_tx);
         let mut conn = p.connect_view().expect("connect_view should return Some");
+
+        // When
         let _ = event_tx.send(PresenterEvent::GoalStarted("plan".to_string()));
         let ev = conn.event_rx.try_recv();
+
+        // Then
         assert!(
             matches!(ev, Ok(PresenterEvent::GoalStarted(ref g)) if g == "plan"),
             "Expected GoalStarted event, got {:?}",
@@ -1974,9 +2017,14 @@ mod tests {
 
     #[test]
     fn show_backend_selection_transitions_to_select_mode() {
+        // Given
         let mut p = make_presenter();
         let q = crate::backend::backend_selection_question();
+
+        // When
         p.show_backend_selection(q, 0);
+
+        // Then
         assert!(matches!(p.state().mode, AppMode::Select { .. }));
         assert!(p.is_backend_selection_pending());
     }
@@ -1985,6 +2033,7 @@ mod tests {
     /// Presenter must leave DocumentReview and enter Select when clarification arrives.
     #[test]
     fn clarification_needed_after_document_review_enters_select_mode() {
+        // Given
         let mut p = make_presenter();
         p.state.mode = AppMode::DocumentReview {
             content: "# Plan".to_string(),
@@ -2004,7 +2053,11 @@ mod tests {
                 }],
             },
         );
+
+        // When
         p.poll_workflow();
+
+        // Then
         assert!(
             matches!(p.state().mode, AppMode::Select { .. }),
             "expected Select after ClarificationNeeded; got {:?}",
@@ -2015,6 +2068,7 @@ mod tests {
     /// Telegram alignment: Choose none only applies when `allow_other` indicates multi-select channel semantics permit empty submissions.
     #[test]
     fn presenter_empty_multi_select_semantics() {
+        // Given
         let mut p = make_presenter();
         inject_workflow_event(
             &mut p,
@@ -2043,7 +2097,10 @@ mod tests {
             "fixture must enter MultiSelect mode"
         );
 
+        // When
         p.handle_intent(UserIntent::AnswerMultiSelect(vec![], None));
+
+        // Then
         assert!(
             matches!(p.state().mode, AppMode::MultiSelect { .. }),
             "when allow_other is false the presenter must reject empty multi-select (no silent Choose-none semantics)"
@@ -2052,10 +2109,15 @@ mod tests {
 
     #[test]
     fn backend_selection_answer_transitions_to_feature_input() {
+        // Given
         let mut p = make_presenter();
         let q = crate::backend::backend_selection_question();
         p.show_backend_selection(q, 0);
+
+        // When
         p.handle_intent(UserIntent::AnswerSelect(2));
+
+        // Then
         assert!(matches!(p.state().mode, AppMode::FeatureInput));
         assert!(!p.is_backend_selection_pending());
         assert_eq!(p.state().agent, "cursor");
@@ -2064,16 +2126,22 @@ mod tests {
 
     #[test]
     fn backend_selection_answer_claude_acp() {
+        // Given
         let mut p = make_presenter();
         let q = crate::backend::backend_selection_question();
         p.show_backend_selection(q, 0);
+
+        // When
         p.handle_intent(UserIntent::AnswerSelect(1));
+
+        // Then
         assert_eq!(p.state().agent, "claude-acp");
         assert_eq!(p.state().model, "opus");
     }
 
     #[test]
     fn quit_broadcasts_intent_received_for_tui_should_quit_sync() {
+        // Given
         let (event_tx, _) = tokio::sync::broadcast::channel(16);
         let (intent_tx, _) = mpsc::channel();
         let mut p = make_presenter()
@@ -2083,7 +2151,11 @@ mod tests {
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "workflow failed".to_string(),
         };
+
+        // When
         p.handle_intent(UserIntent::Quit);
+
+        // Then
         assert!(
             p.state().should_quit,
             "presenter must set should_quit on Quit"
@@ -2101,6 +2173,7 @@ mod tests {
 
     #[test]
     fn view_session_document_markdown_viewer_shows_disk_not_stale_snapshot() {
+        // Given
         let tmp = std::env::temp_dir().join("tddy-test-view-doc-disk");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("artifacts")).unwrap();
@@ -2113,8 +2186,10 @@ mod tests {
             content: "STALE_SNAPSHOT_NOT_ON_DISK".to_string(),
         };
 
+        // When
         p.handle_intent(UserIntent::ViewSessionDocument);
 
+        // Then
         match &p.state().mode {
             AppMode::MarkdownViewer { content } => {
                 assert!(
@@ -2136,6 +2211,7 @@ mod tests {
 
     #[test]
     fn view_session_document_markdown_viewer_shows_uuid_root_when_workflow_dir_nested() {
+        // Given
         let root =
             std::env::temp_dir().join(format!("tddy-test-view-doc-nested-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -2161,8 +2237,10 @@ mod tests {
             content: "STALE".to_string(),
         };
 
+        // When
         p.handle_intent(UserIntent::ViewSessionDocument);
 
+        // Then
         match &p.state().mode {
             AppMode::MarkdownViewer { content } => {
                 assert!(
@@ -2219,12 +2297,17 @@ mod tests {
     /// log (or equivalent incremental state), not only after a newline flush.
     #[test]
     fn agent_output_chunk_visible_before_newline() {
+        // Given
         let mut p = make_presenter();
         inject_workflow_event(
             &mut p,
             WorkflowEvent::AgentOutput("partial_without_newline".to_string()),
         );
+
+        // When
         p.poll_workflow();
+
+        // Then
         let last_agent = p
             .state()
             .activity_log
@@ -2242,12 +2325,17 @@ mod tests {
     /// line in a way that duplicates full-line content for activity + remote consumers.
     #[test]
     fn agent_output_not_duplicated_across_activity_and_agent_output_events() {
+        // Given
         let (mut p, mut rx) = make_presenter_with_broadcast();
         inject_workflow_event(
             &mut p,
             WorkflowEvent::AgentOutput("single_line\n".to_string()),
         );
+
+        // When
         p.poll_workflow();
+
+        // Then
         let mut events = Vec::new();
         while let Ok(ev) = rx.try_recv() {
             events.push(ev);
@@ -2262,11 +2350,16 @@ mod tests {
 
     #[test]
     fn submit_start_slash_without_recipe_resolver_logs_as_normal_feature_input() {
+        // Given
         let mut p = make_presenter();
         assert!(matches!(p.state().mode, AppMode::FeatureInput));
+
+        // When
         p.handle_intent(UserIntent::SubmitFeatureInput(
             "/start-tdd a todo app".to_string(),
         ));
+
+        // Then
         let user_prompts: Vec<_> = p
             .state()
             .activity_log
@@ -2289,6 +2382,7 @@ mod tests {
         use crate::presenter::presenter_test_recipe::EmptyPresenterTestRecipe;
         use crate::{AnyBackend, StubBackend};
 
+        // Given
         let tmp = std::env::temp_dir().join(format!("tddy-restart-unblock-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
@@ -2312,6 +2406,7 @@ mod tests {
         );
         std::thread::sleep(std::time::Duration::from_millis(150));
 
+        // When / Then — handle_intent must return without deadlocking
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let _ = std::thread::spawn(move || {
             p.handle_intent(UserIntent::SubmitFeatureInput(

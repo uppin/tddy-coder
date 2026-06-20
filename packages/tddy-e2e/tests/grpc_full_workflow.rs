@@ -19,6 +19,7 @@ use tddy_service::gen::{
 
 #[tokio::test]
 async fn full_workflow_with_clarification_completes() {
+    // Given
     // Use None so workflow waits for SubmitFeatureInput; avoids race where events are
     // broadcast before the test connects and subscribes.
     let (presenter_handle, port, shutdown) = spawn_presenter_with_grpc(None);
@@ -26,6 +27,8 @@ async fn full_workflow_with_clarification_completes() {
     let mut client = connect_grpc(port).await.unwrap();
 
     let (tx, rx) = tokio::sync::mpsc::channel(64);
+
+    // When
     tx.send(ClientMessage {
         intent: Some(client_message::Intent::SubmitFeatureInput(
             SubmitFeatureInput {
@@ -130,6 +133,7 @@ async fn full_workflow_with_clarification_completes() {
     shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = presenter_handle.join();
 
+    // Then
     assert!(seen_goal_started, "Expected GoalStarted event");
     assert!(seen_workflow_complete, "Expected WorkflowComplete event");
     assert!(
@@ -138,6 +142,7 @@ async fn full_workflow_with_clarification_completes() {
         workflow_message
     );
 
+    // When — workflow completes, wait for FeatureInput mode
     // Acceptance: gRPC clients see FeatureInput after completion (not Done)
     let mut seen_feature_input_after_complete = false;
     for _ in 0..50 {
@@ -156,6 +161,7 @@ async fn full_workflow_with_clarification_completes() {
             _ => {}
         }
     }
+    // Then — FeatureInput mode is visible after completion
     assert!(
         seen_feature_input_after_complete,
         "gRPC clients should receive ModeChanged(FeatureInput) after WorkflowComplete"
@@ -224,12 +230,15 @@ async fn full_workflow_asserts_each_state_transition() {
         ("UpdatingDocs", "DocsUpdated"),
     ];
 
+    // Given
     let (presenter_handle, port, shutdown) =
         spawn_presenter_with_grpc(Some("Build auth".to_string()));
 
     let mut client = connect_grpc(port).await.unwrap();
 
     let (tx, rx) = tokio::sync::mpsc::channel(64);
+
+    // When
     tx.send(ClientMessage {
         intent: Some(client_message::Intent::SubmitFeatureInput(
             SubmitFeatureInput {
@@ -335,6 +344,7 @@ async fn full_workflow_asserts_each_state_transition() {
     shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = presenter_handle.join();
 
+    // Then
     assert!(
         seen_workflow_complete,
         "Expected WorkflowComplete event (got {} state transitions)",

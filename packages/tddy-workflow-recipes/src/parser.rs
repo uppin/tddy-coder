@@ -1175,36 +1175,52 @@ mod tests {
 
     #[test]
     fn parse_planning_response_accepts_valid_json() {
+        // Given
         let input = "{\"goal\":\"plan\",\"prd\":\"# PRD\\n\\n## Summary\\nFeature X\\n\\n## TODO\\n\\n- [ ] Task 1\"}";
+
+        // When
         let out = parse_planning_response(input).expect("should parse");
+
+        // Then
         assert!(out.prd.contains("Feature X"));
         assert!(out.prd.contains("Task 1"));
     }
 
     #[test]
     fn parse_planning_response_rejects_non_json() {
-        let input = "Some random text without JSON";
-        let err = parse_planning_response(input).unwrap_err();
+        // When
+        let err = parse_planning_response("Some random text without JSON").unwrap_err();
+
+        // Then
         assert!(matches!(err, ParseError::Malformed(_)));
     }
 
     #[test]
     fn parse_planning_response_rejects_wrong_goal() {
-        let input = "{\"goal\":\"red\",\"prd\":\"# PRD\\n\\n## TODO\\n\\n- [ ] T1\"}";
-        let err = parse_planning_response(input).unwrap_err();
+        // When
+        let err = parse_planning_response(
+            "{\"goal\":\"red\",\"prd\":\"# PRD\\n\\n## TODO\\n\\n- [ ] T1\"}",
+        )
+        .unwrap_err();
+
+        // Then
         assert!(matches!(err, ParseError::Malformed(_)));
     }
 
     #[test]
     fn parse_planning_response_rejects_empty_prd() {
-        let input = r#"{"goal":"plan","prd":"   "}"#;
-        let err = parse_planning_response(input).unwrap_err();
+        // When
+        let err = parse_planning_response(r#"{"goal":"plan","prd":"   "}"#).unwrap_err();
+
+        // Then
         assert!(matches!(err, ParseError::Malformed(_)));
     }
 
     #[test]
-    fn red_output_to_progress_markdown_produces_unfilled_checkboxes() {
+    fn converting_red_output_to_progress_markdown_produces_unfilled_checkboxes() {
         use super::{RedOutput, RedTestInfo, SkeletonInfo};
+
+        // Given
         let out = RedOutput {
             summary: "Created skeletons.".into(),
             tests: vec![
@@ -1238,7 +1254,11 @@ mod tests {
             metric_hooks: None,
             feedback_options: None,
         };
+
+        // When
         let md = out.to_progress_markdown();
+
+        // Then
         assert!(md.contains("## Failed Tests"));
         assert!(md.contains("## Skeletons"));
         assert!(md.contains("- [ ] test_foo (src/foo.rs:10)"));
@@ -1248,8 +1268,13 @@ mod tests {
 
     #[test]
     fn parse_red_response_extracts_summary_tests_skeletons() {
+        // Given
         let input = r#"{"goal":"red","summary":"Created 2 skeletons and 1 failing test.","tests":[{"name":"test_foo","file":"src/foo.rs","line":10,"status":"failing"}],"skeletons":[{"name":"Foo","file":"src/foo.rs","line":5,"kind":"struct"},{"name":"bar","file":"src/foo.rs","line":8,"kind":"method"}]}"#;
+
+        // When
         let out = super::parse_red_response(input).expect("should parse");
+
+        // Then
         assert!(out.summary.contains("2 skeletons"));
         assert_eq!(out.tests.len(), 1);
         assert_eq!(out.tests[0].name, "test_foo");
@@ -1265,8 +1290,13 @@ mod tests {
 
     #[test]
     fn parse_red_response_extracts_test_command_and_prerequisite_actions() {
+        // Given
         let input = r#"{"goal":"red","summary":"Created skeletons.","tests":[],"skeletons":[],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}"#;
+
+        // When
         let out = super::parse_red_response(input).expect("should parse");
+
+        // Then
         assert_eq!(out.test_command.as_deref(), Some("cargo test"));
         assert_eq!(out.prerequisite_actions.as_deref(), Some("None"));
         assert_eq!(
@@ -1277,6 +1307,7 @@ mod tests {
 
     #[test]
     fn validate_red_marker_source_paths_accepts_production_only_markers() {
+        // Given
         let out = RedOutput {
             summary: "s".into(),
             tests: vec![],
@@ -1298,14 +1329,22 @@ mod tests {
             metric_hooks: None,
             feedback_options: None,
         };
+
+        // When / Then — must not error
         validate_red_marker_source_paths(&out).expect("production-only markers should validate");
     }
 
     #[test]
     fn parse_acceptance_tests_response_extracts_summary_and_tests() {
         use super::parse_acceptance_tests_response;
+
+        // Given
         let input = r#"{"goal":"acceptance-tests","summary":"Created 2 acceptance tests. All failing (Red state) as expected.","tests":[{"name":"login_stores_session_token","file":"packages/auth/tests/session.it.rs","line":15,"status":"failing"},{"name":"logout_clears_session","file":"packages/auth/tests/session.it.rs","line":28,"status":"failing"}]}"#;
+
+        // When
         let out = parse_acceptance_tests_response(input).expect("should parse");
+
+        // Then
         assert!(out.summary.contains("Created 2 acceptance tests"));
         assert_eq!(out.tests.len(), 2);
         assert_eq!(out.tests[0].name, "login_stores_session_token");
@@ -1316,8 +1355,13 @@ mod tests {
 
     #[test]
     fn parse_acceptance_tests_response_extracts_test_command_and_prerequisite_actions() {
+        // Given
         let input = r#"{"goal":"acceptance-tests","summary":"Created 2 tests.","tests":[{"name":"t1","file":"t.rs","line":1,"status":"failing"}],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}"#;
+
+        // When
         let out = super::parse_acceptance_tests_response(input).expect("should parse");
+
+        // Then
         assert_eq!(out.test_command.as_deref(), Some("cargo test"));
         assert_eq!(out.prerequisite_actions.as_deref(), Some("None"));
         assert_eq!(
@@ -1328,8 +1372,13 @@ mod tests {
 
     #[test]
     fn parse_green_response_extracts_summary_tests_implementations() {
+        // Given
         let input = r#"{"goal":"green","summary":"Implemented 2 methods. All tests passing.","tests":[{"name":"test_foo","file":"src/foo.rs","line":10,"status":"passing"},{"name":"test_bar","file":"src/bar.rs","line":20,"status":"failing","reason":"timeout"}],"implementations":[{"name":"AuthService::validate","file":"src/service.rs","line":15,"kind":"method"}]}"#;
+
+        // When
         let out = parse_green_response(input).expect("should parse");
+
+        // Then
         assert!(out.summary.contains("All tests passing"));
         assert_eq!(out.tests.len(), 2);
         assert_eq!(out.tests[0].name, "test_foo");
@@ -1343,8 +1392,13 @@ mod tests {
 
     #[test]
     fn parse_green_response_extracts_test_command_fields() {
+        // Given
         let input = r#"{"goal":"green","summary":"Implemented.","tests":[],"implementations":[],"test_command":"cargo test","prerequisite_actions":"None","run_single_or_selected_tests":"cargo test <name>"}"#;
+
+        // When
         let out = parse_green_response(input).expect("should parse");
+
+        // Then
         assert_eq!(out.test_command.as_deref(), Some("cargo test"));
         assert_eq!(out.prerequisite_actions.as_deref(), Some("None"));
         assert_eq!(
@@ -1355,14 +1409,21 @@ mod tests {
 
     #[test]
     fn parse_green_response_errors_on_wrong_goal() {
-        let input = r#"{"goal":"red","summary":"Wrong goal.","tests":[],"implementations":[]}"#;
-        let err = parse_green_response(input).unwrap_err();
+        // When
+        let err = parse_green_response(
+            r#"{"goal":"red","summary":"Wrong goal.","tests":[],"implementations":[]}"#,
+        )
+        .unwrap_err();
+
+        // Then
         assert!(matches!(err, ParseError::Malformed(_)));
     }
 
     #[test]
-    fn green_output_to_updated_progress_markdown_marks_passing_and_failing() {
+    fn converting_green_output_to_progress_markdown_marks_passing_and_failing() {
         use super::{GreenOutput, GreenTestResult, ImplementationInfo};
+
+        // Given
         let out = GreenOutput {
             summary: "Implemented.".into(),
             tests: vec![
@@ -1392,7 +1453,11 @@ mod tests {
             run_single_or_selected_tests: None,
             demo_results: None,
         };
+
+        // When
         let md = out.to_updated_progress_markdown();
+
+        // Then
         assert!(md.contains("- [x] test_foo"));
         assert!(md.contains("- [!] test_bar"));
         assert!(md.contains("timeout"));

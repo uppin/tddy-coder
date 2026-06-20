@@ -23,3 +23,6 @@ libc = "0.2"
 [dev-dependencies]
 serial_test = "3"
 tokio = { version = "1", features = ["rt", "macros", "sync"] }
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+tddy-testing-commons = { path = "../tddy-testing-commons" }

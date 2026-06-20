@@ -121,4 +121,3 @@ fn load_repo_root(session_dir: &Path) -> Result<Option<PathBuf>, SessionActionsE
         Err(e) => Err(SessionActionsError::ChangesetRead(e.to_string())),
     }
 }
-

@@ -79,7 +79,10 @@ mod tests {
 
     #[test]
     fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             prompt.contains("tddy-tools get-schema evaluate-changes"),
             "system prompt must reference get-schema for evaluate-changes"

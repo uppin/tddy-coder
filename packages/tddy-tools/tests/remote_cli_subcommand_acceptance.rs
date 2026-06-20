@@ -75,18 +75,20 @@ fn spawn_stub_thread(response_body: &'static str) -> u16 {
 /// Currently `run_start_session` is `bail!("start-session: not yet implemented")`.
 #[test]
 fn start_session_prints_session_id_from_daemon_response() {
-    // Connect-protocol StartSessionResponse JSON (camelCase).
+    // Given
     let response = r#"{"sessionId":"sess-stub-abc","livekitRoom":"","livekitUrl":"","livekitServerIdentity":""}"#;
     let port = spawn_stub_thread(response);
     let relay_dir = tempfile::tempdir().unwrap();
     write_discovery(relay_dir.path(), port);
 
+    // When
     let output = tddy_tools_bin()
         .args(["remote", "start-session", "--session-token", "test-token"])
         .env("TDDY_RELAY_BASE_DIR", relay_dir.path())
         .output()
         .expect("remote start-session must not panic");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -104,10 +106,13 @@ fn start_session_prints_session_id_from_daemon_response() {
 /// AC: `remote start-session --help` lists `--session-token` as an accepted option.
 #[test]
 fn start_session_help_lists_session_token_flag() {
+    // When
     let output = tddy_tools_bin()
         .args(["remote", "start-session", "--help"])
         .output()
         .expect("remote start-session --help must not crash");
+
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("session-token"),
@@ -123,11 +128,13 @@ fn start_session_help_lists_session_token_flag() {
 /// Currently `run_connect_session` is `bail!("connect-session: not yet implemented")`.
 #[test]
 fn connect_session_prints_livekit_info_from_daemon_response() {
+    // Given
     let response = r#"{"livekitRoom":"room-stub","livekitUrl":"ws://stub:7880","livekitServerIdentity":"srv-identity"}"#;
     let port = spawn_stub_thread(response);
     let relay_dir = tempfile::tempdir().unwrap();
     write_discovery(relay_dir.path(), port);
 
+    // When
     let output = tddy_tools_bin()
         .args([
             "remote",
@@ -141,6 +148,7 @@ fn connect_session_prints_livekit_info_from_daemon_response() {
         .output()
         .expect("remote connect-session must not panic");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -160,10 +168,13 @@ fn connect_session_prints_livekit_info_from_daemon_response() {
 /// Currently `ConnectSessionArgs` only has `base_dir` and `session_id`.
 #[test]
 fn connect_session_help_lists_session_token_flag() {
+    // When
     let output = tddy_tools_bin()
         .args(["remote", "connect-session", "--help"])
         .output()
         .expect("remote connect-session --help must not crash");
+
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("session-token"),
@@ -180,14 +191,14 @@ fn connect_session_help_lists_session_token_flag() {
 /// Also, `SyncContextArgs` doesn't yet have a `--dest` flag.
 #[test]
 fn sync_context_writes_context_files_to_dest_directory() {
-    // ExecuteTool Read/Glob response: returns project docs content.
-    // Note: use a response without `"#` sequence so the r#"..."# raw string isn't terminated early.
+    // Given — ExecuteTool Read/Glob response: returns project docs content.
     let response = r#"{"resultJson":"{\"content\":\"Project docs\"}","isError":false}"#;
     let port = spawn_stub_thread(response);
     let relay_dir = tempfile::tempdir().unwrap();
     write_discovery(relay_dir.path(), port);
     let dest_dir = tempfile::tempdir().unwrap();
 
+    // When
     let output = tddy_tools_bin()
         .args([
             "remote",
@@ -201,6 +212,7 @@ fn sync_context_writes_context_files_to_dest_directory() {
         .output()
         .expect("remote sync-context must not panic");
 
+    // Then
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
@@ -224,10 +236,13 @@ fn sync_context_writes_context_files_to_dest_directory() {
 /// Currently `SyncContextArgs` has only `base_dir` — neither flag exists.
 #[test]
 fn sync_context_help_lists_dest_and_session_token_flags() {
+    // When
     let output = tddy_tools_bin()
         .args(["remote", "sync-context", "--help"])
         .output()
         .expect("remote sync-context --help must not crash");
+
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("dest"),
@@ -252,18 +267,20 @@ fn sync_context_help_lists_dest_and_session_token_flags() {
 /// object shape. This test serves a Connect response — it will fail until the transport is changed.
 #[test]
 fn list_tools_parses_connect_list_exec_tools_response() {
-    // Connect-protocol ListExecToolsResponse JSON.
+    // Given — Connect-protocol ListExecToolsResponse JSON.
     let response = r#"{"tools":[{"name":"Read","description":"Read a file","inputSchemaJson":"{}"},{"name":"Write","description":"Write a file","inputSchemaJson":"{}"},{"name":"Shell","description":"Run a shell command","inputSchemaJson":"{}"}]}"#;
     let port = spawn_stub_thread(response);
     let relay_dir = tempfile::tempdir().unwrap();
     write_discovery(relay_dir.path(), port);
 
+    // When
     let output = tddy_tools_bin()
         .args(["remote", "list-tools"])
         .env("TDDY_RELAY_BASE_DIR", relay_dir.path())
         .output()
         .expect("remote list-tools must not panic");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(

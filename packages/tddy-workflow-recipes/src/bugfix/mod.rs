@@ -233,10 +233,13 @@ mod tests {
     /// Graph: `interview` → `analyze` → `reproduce` → `end`.
     #[test]
     fn bugfix_graph_orders_analyze_before_reproduce() {
+        // Given
         let backend = Arc::new(StubBackend::new());
         let recipe = BugfixRecipe;
         let graph = recipe.build_graph(backend);
         let ctx = Context::new();
+
+        // When / Then
         assert_eq!(
             graph.next_task_id("interview", &ctx),
             Some("analyze".to_string()),
@@ -261,7 +264,10 @@ mod tests {
 
     #[test]
     fn bugfix_recipe_is_valid_plugin() {
+        // Given
         let r: std::sync::Arc<dyn WorkflowRecipe> = std::sync::Arc::new(BugfixRecipe);
+
+        // When / Then
         assert_eq!(r.name(), "bugfix");
         assert_eq!(r.start_goal().as_str(), "interview");
         assert_eq!(r.plan_refinement_goal().as_str(), "analyze");
@@ -281,7 +287,10 @@ mod tests {
 
     #[test]
     fn bugfix_reproduce_does_not_require_tddy_tools_submit() {
+        // Given
         let r = BugfixRecipe;
+
+        // When / Then
         assert!(
             !r.goal_requires_tddy_tools_submit(&GoalId::new("reproduce")),
             "reproduce goal should not require tddy-tools submit in demo"

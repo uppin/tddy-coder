@@ -62,8 +62,11 @@ fn workflow_recipes_generated_manifest() -> std::path::PathBuf {
 
 #[test]
 fn help_text_is_comprehensive() {
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.arg("--help");
+
+    // Then
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("submit"));
@@ -77,6 +80,7 @@ fn help_text_is_comprehensive() {
 
 #[test]
 fn submit_help_includes_examples() {
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args(["submit", "--help"]);
     cmd.assert()
@@ -90,6 +94,7 @@ fn submit_help_includes_examples() {
 /// AC3/F4: `list-schemas` must enumerate every registered goal (stable sort). Fails until implemented.
 #[test]
 fn list_schemas_prints_all_registered_goals() {
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args(["list-schemas"]);
     let assert = cmd.assert().success();
@@ -115,6 +120,7 @@ fn list_schemas_prints_all_registered_goals() {
 /// F2/F6 + AC2: generated manifest must exist; each `get-schema <goal>` must return parseable JSON Schema with keywords for that goal.
 #[test]
 fn get_schema_returns_non_empty_json_for_each_registered_goal() {
+    // Given
     let manifest_path = workflow_recipes_generated_manifest();
     assert!(
         manifest_path.is_file(),
@@ -149,8 +155,10 @@ fn get_schema_returns_non_empty_json_for_each_registered_goal() {
 /// AC4: invalid plan payload must fail with non-zero exit; errors must mention a concrete path/constraint; F4 discovery tip must mention `list-schemas`.
 #[test]
 fn submit_rejects_invalid_json_for_plan_goal() {
+    // Given
     let invalid_json = r#"{"goal":"plan","todo":"- [ ] Task 1"}"#;
 
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args(["submit", "--goal", "plan", "--data", invalid_json]);
     let assert = cmd.assert().code(3);
@@ -173,6 +181,7 @@ fn submit_rejects_invalid_json_for_plan_goal() {
 /// AC4 + AC3: minimal valid plan passes submit; registered goals are discoverable via `list-schemas`.
 #[test]
 fn submit_accepts_minimal_valid_plan_payload_matching_schema() {
+    // Given
     let valid_json = r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X"}"##;
 
     let mut cmd = tddy_tools_bin();
@@ -196,6 +205,7 @@ fn submit_accepts_minimal_valid_plan_payload_matching_schema() {
 
 #[test]
 fn submit_reads_from_stdin() {
+    // Given
     let valid_json =
         r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X","todo":"- [ ] Task 1"}"##;
 
@@ -209,6 +219,7 @@ fn submit_reads_from_stdin() {
 
 #[test]
 fn submit_data_stdin_reads_json_from_stdin() {
+    // Given
     let valid_json = r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X. Session state is logged for debugging.","todo":"- [ ] Task 1"}"##;
 
     let mut cmd = tddy_tools_bin();
@@ -222,6 +233,7 @@ fn submit_data_stdin_reads_json_from_stdin() {
 
 #[test]
 fn submit_malformed_json_returns_parse_error() {
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args(["submit", "--goal", "plan", "--data", "not valid json {"]);
     cmd.assert()
@@ -231,6 +243,7 @@ fn submit_malformed_json_returns_parse_error() {
 
 #[test]
 fn get_schema_unknown_goal_returns_error() {
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args(["get-schema", "unknown"]);
     cmd.assert()
@@ -240,6 +253,7 @@ fn get_schema_unknown_goal_returns_error() {
 
 #[test]
 fn ask_valid_questions_returns_success_when_no_socket() {
+    // Given
     let questions = r#"{"questions":[{"header":"Scope","question":"Which modules?","options":[{"label":"A","description":"Option A"}],"multiSelect":false}]}"#;
 
     let mut cmd = tddy_tools_bin();
@@ -251,6 +265,7 @@ fn ask_valid_questions_returns_success_when_no_socket() {
 
 #[test]
 fn ask_accepts_options_without_description() {
+    // Given
     let questions = r#"{"questions":[{"header":"Scope","question":"Pick one","options":[{"label":"Only label"}],"multiSelect":false}]}"#;
 
     let mut cmd = tddy_tools_bin();
@@ -262,6 +277,7 @@ fn ask_accepts_options_without_description() {
 
 #[test]
 fn ask_malformed_input_returns_error() {
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args(["ask", "--data", "not json"]);
     cmd.assert().code(1);
@@ -269,6 +285,7 @@ fn ask_malformed_input_returns_error() {
 
 #[test]
 fn ask_missing_questions_array_returns_error() {
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args(["ask", "--data", "{}"]);
     cmd.assert().code(2);
@@ -276,6 +293,7 @@ fn ask_missing_questions_array_returns_error() {
 
 #[test]
 fn mcp_mode_does_not_require_subcommand() {
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.arg("--mcp").write_stdin("");
     let output = cmd.output().expect("run tddy-tools --mcp");

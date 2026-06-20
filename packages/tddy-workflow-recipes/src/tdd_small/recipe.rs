@@ -243,12 +243,17 @@ mod tests {
 
     #[test]
     fn tdd_small_goal_ids_includes_post_green_review() {
+        // Given
         let r = TddSmallRecipe;
+
+        // When
         let ids: Vec<String> = r
             .goal_ids()
             .into_iter()
             .map(|g| g.as_str().to_string())
             .collect();
+
+        // Then
         assert!(
             ids.contains(&"post-green-review".to_string()),
             "expected post-green-review in goal_ids, got {:?}",

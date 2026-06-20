@@ -212,7 +212,10 @@ mod plan_refinement_tests {
 
     #[test]
     fn plan_refinement_goal_is_create_plan_not_grill() {
+        // Given
         let r = GrillMeRecipe;
+
+        // When / Then — refinement goal must be create-plan, not the entry grill goal
         assert_eq!(r.plan_refinement_goal(), GoalId::new("create-plan"));
         assert_ne!(r.plan_refinement_goal(), r.start_goal());
     }

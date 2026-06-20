@@ -546,9 +546,14 @@ mod tests {
 
     #[test]
     fn codex_exec_argv_fresh_includes_exec_json_and_prompt() {
+        // Given
         let req = stub_request("do the plan", "plan", hints_tdd_plan_goal());
         let merged = merge_codex_prompt(&req).expect("merge");
+
+        // When
         let args = build_codex_exec_argv(&req, &merged);
+
+        // Then
         assert_eq!(
             args.first().map(String::as_str),
             Some("exec"),
@@ -571,10 +576,15 @@ mod tests {
 
     #[test]
     fn codex_exec_argv_resume_includes_session_id() {
+        // Given
         let mut req = stub_request("continue", "plan", hints_tdd_plan_goal());
         req.session = Some(SessionMode::Resume("sess-resume-99".to_string()));
         let merged = merge_codex_prompt(&req).expect("merge");
+
+        // When
         let args = build_codex_exec_argv(&req, &merged);
+
+        // Then
         let pos_json = args.iter().position(|a| a == "--json").expect("--json");
         let pos_resume = args.iter().position(|a| a == "resume").expect("resume");
         let pos_sid = args
@@ -591,11 +601,16 @@ mod tests {
 
     #[test]
     fn codex_exec_argv_resume_model_before_session_id() {
+        // Given
         let mut req = stub_request("go", "red", hints_tdd_red_goal());
         req.session = Some(SessionMode::Resume("sid-1".to_string()));
         req.model = Some("gpt-5".to_string());
         let merged = merge_codex_prompt(&req).expect("merge");
+
+        // When
         let args = build_codex_exec_argv(&req, &merged);
+
+        // Then
         let pos_resume = args.iter().position(|a| a == "resume").expect("resume");
         let pos_m = args.iter().position(|a| a == "-m").expect("-m");
         let pos_sid = args.iter().position(|a| a == "sid-1").expect("sid");
@@ -608,10 +623,15 @@ mod tests {
 
     #[test]
     fn codex_exec_argv_includes_model_when_set() {
+        // Given
         let mut req = stub_request("hi", "red", hints_tdd_red_goal());
         req.model = Some("gpt-5".to_string());
         let merged = merge_codex_prompt(&req).expect("merge");
+
+        // When
         let args = build_codex_exec_argv(&req, &merged);
+
+        // Then
         let pos_m = args
             .iter()
             .position(|a| a == "-m")
@@ -621,9 +641,14 @@ mod tests {
 
     #[test]
     fn codex_merge_prompt_combines_system_like_cursor() {
+        // Given
         let mut req = stub_request("user line", "plan", hints_tdd_plan_goal());
         req.system_prompt = Some("system instruction".to_string());
+
+        // When
         let merged = merge_codex_prompt(&req).expect("merge");
+
+        // Then
         assert!(
             merged.contains("system instruction") && merged.contains("user line"),
             "expected system then user like CursorBackend, got {:?}",
@@ -631,12 +656,17 @@ mod tests {
         );
     }
 
-    /// `GoalHints::agent_cli_plan_mode` and permission must map to explicit Codex CLI flags (documented beside argv builder).
+    /// `GoalHints::agent_cli_plan_mode` and permission must map to explicit Codex CLI flags.
     #[test]
     fn codex_exec_argv_maps_plan_goal_hints_to_flags() {
+        // Given
         let req = stub_request("goal body", "plan", hints_tdd_plan_goal());
         let merged = merge_codex_prompt(&req).expect("merge");
+
+        // When
         let args = build_codex_exec_argv(&req, &merged);
+
+        // Then
         assert!(
             args.iter().any(|a| a == "-s") && args.iter().any(|a| a == "read-only"),
             "plan-mode read-only hints should produce -s read-only, got {:?}",
@@ -646,30 +676,52 @@ mod tests {
 
     #[test]
     fn scrape_codex_oauth_url_from_login_line() {
+        // Given
         let line = "https://auth.openai.com/oauth/authorize?x=1&y=2";
-        assert_eq!(
-            scrape_codex_oauth_authorize_url_from_text(line).as_deref(),
-            Some(line)
-        );
+
+        // When
+        let url = scrape_codex_oauth_authorize_url_from_text(line);
+
+        // Then
+        assert_eq!(url.as_deref(), Some(line));
     }
 
     #[test]
     fn scrape_codex_oauth_url_strips_trailing_punct() {
+        // Given
         let line = r#"See: https://auth.openai.com/x?y=1)"#;
-        assert_eq!(
-            scrape_codex_oauth_authorize_url_from_text(line).as_deref(),
-            Some("https://auth.openai.com/x?y=1")
-        );
+
+        // When
+        let url = scrape_codex_oauth_authorize_url_from_text(line);
+
+        // Then
+        assert_eq!(url.as_deref(), Some("https://auth.openai.com/x?y=1"));
     }
 
     #[test]
     fn codex_openai_auth_remediation_matches_401_missing_bearer() {
-        let d = "unexpected status 401 Unauthorized: Missing bearer or basic authentication";
-        assert!(super::codex_openai_auth_remediation(d).is_some());
+        // Given
+        let detail = "unexpected status 401 Unauthorized: Missing bearer or basic authentication";
+
+        // When
+        let hint = super::codex_openai_auth_remediation(detail);
+
+        // Then
+        assert!(
+            hint.is_some(),
+            "should produce a remediation hint for 401 Unauthorized"
+        );
     }
 
     #[test]
     fn codex_openai_auth_remediation_ignores_unrelated_401() {
-        assert!(super::codex_openai_auth_remediation("HTTP 401").is_none());
+        // When
+        let hint = super::codex_openai_auth_remediation("HTTP 401");
+
+        // Then
+        assert!(
+            hint.is_none(),
+            "bare '401' without auth keywords should produce no hint"
+        );
     }
 }

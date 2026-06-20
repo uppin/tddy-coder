@@ -7,3 +7,7 @@ description = "Workflow artifact layout and manifest wiring (decouples tddy-core
 
 [dependencies]
 log = "0.4"
+
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }

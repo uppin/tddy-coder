@@ -8,7 +8,10 @@ use tddy_workflow_recipes::{
 
 #[test]
 fn merge_pr_hooks_prompt_mentions_github_pr_tools_when_authenticated() {
+    // When
     let line = merge_pr_github_tools_awareness_line(true);
+
+    // Then
     assert!(
         !line.trim().is_empty(),
         "merge-pr hooks must inject non-empty GitHub PR tools awareness when authenticated"
@@ -30,6 +33,7 @@ fn merge_pr_hooks_prompt_mentions_github_pr_tools_when_authenticated() {
 #[test]
 #[serial]
 fn tdd_small_system_prompt_includes_github_pr_tools_awareness() {
+    // Given
     std::env::set_var("GITHUB_TOKEN", "ghp_acceptance_test_not_real");
     struct Clear;
     impl Drop for Clear {
@@ -39,9 +43,11 @@ fn tdd_small_system_prompt_includes_github_pr_tools_awareness() {
     }
     let _clear = Clear;
 
-    // Build merged prompt first so logging markers for both helpers are exercised before assertions.
+    // When — build merged prompt first so logging markers for both helpers are exercised before assertions
     let prompt = merged_red_system_prompt();
     let awareness = tdd_small_github_pr_tools_awareness_sentence();
+
+    // Then
     assert!(
         !awareness.trim().is_empty(),
         "tdd-small must expose non-empty GitHub PR tools awareness text for authenticated sessions"
@@ -51,8 +57,13 @@ fn tdd_small_system_prompt_includes_github_pr_tools_awareness() {
         "merged red system prompt must include the GitHub PR tools awareness sentence"
     );
     assert!(
-        prompt.contains("GitHub") && prompt.contains("tddy-tools"),
-        "merged red system prompt must mention GitHub and tddy-tools for PR tooling; got len {}",
+        prompt.contains("GitHub"),
+        "merged red system prompt must mention GitHub; got len {}",
+        prompt.len()
+    );
+    assert!(
+        prompt.contains("tddy-tools"),
+        "merged red system prompt must mention tddy-tools; got len {}",
         prompt.len()
     );
 }

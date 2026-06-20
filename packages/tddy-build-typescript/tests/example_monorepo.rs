@@ -64,19 +64,29 @@ fn load(root: &std::path::Path) -> BuildGraph {
 
 #[test]
 fn ts_targets_depend_on_each_other_deps_first() {
+    // Given
     let graph = load(&example_root());
+
+    // When
     let order = graph.build_order("web:build").expect("order");
     let pos = |id: &str| order.iter().position(|t| t == id).expect("present");
+
+    // Then
     assert!(pos("shared:build") < pos("ui:build"));
     assert!(pos("ui:build") < pos("web:build"));
 }
 
 #[test]
 fn ts_plugin_lowers_expected_bun_argv_and_workdir() {
+    // Given
     let graph = load(&example_root());
+
+    // When
     let actions = graph
         .actions_for("shared:build", &registry())
         .expect("lower");
+
+    // Then
     assert_eq!(actions[0].command, vec!["bun", "run", "build"]);
     assert_eq!(actions[0].working_dir, "packages/shared");
 }
@@ -87,8 +97,12 @@ async fn ts_monorepo_builds_with_real_bun() {
         eprintln!("SKIP: bun not available");
         return;
     }
+
+    // Given
     let dir = staged();
     let graph = load(dir.path());
+
+    // When
     let record = execute_target(
         dir.path(),
         &graph,
@@ -98,6 +112,8 @@ async fn ts_monorepo_builds_with_real_bun() {
     )
     .await
     .expect("bun build");
+
+    // Then
     assert_eq!(
         record.actions[0].exit_code, 0,
         "stderr: {}",
@@ -112,21 +128,30 @@ async fn ts_cache_hits_then_misses_after_source_edit() {
         eprintln!("SKIP: bun not available");
         return;
     }
+
+    // Given
     let dir = staged();
     let opts = ExecuteOptions::default();
     let reg = registry();
     let graph = load(dir.path());
 
+    // When
     let first = execute_target(dir.path(), &graph, "shared:build", &opts, &reg)
         .await
         .expect("first");
+
+    // Then
     assert!(!first.actions[0].cached);
 
+    // When (rerun without changes)
     let second = execute_target(dir.path(), &graph, "shared:build", &opts, &reg)
         .await
         .expect("second");
+
+    // Then
     assert!(second.actions[0].cached, "rerun is a cache hit");
 
+    // When (source file edited)
     std::fs::write(
         dir.path().join("packages/shared/src/index.ts"),
         "export const greeting = \"hello again\";\n",
@@ -135,6 +160,8 @@ async fn ts_cache_hits_then_misses_after_source_edit() {
     let third = execute_target(dir.path(), &graph, "shared:build", &opts, &reg)
         .await
         .expect("third");
+
+    // Then
     assert!(
         !third.actions[0].cached,
         "source edit invalidates the cache"

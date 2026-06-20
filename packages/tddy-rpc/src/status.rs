@@ -167,6 +167,7 @@ mod tests {
 
     #[test]
     fn code_from_str_roundtrip() {
+        // Given all defined Code variants
         let codes = [
             Code::Ok,
             Code::Cancelled,
@@ -186,6 +187,9 @@ mod tests {
             Code::DataLoss,
             Code::Unauthenticated,
         ];
+
+        // When converting each to string and back
+        // Then the original variant is recovered
         for code in codes {
             let s = code.as_str();
             assert_eq!(
@@ -199,6 +203,9 @@ mod tests {
 
     #[test]
     fn code_from_str_unknown_fallback() {
+        // Given unrecognized or empty code strings (including wrong case)
+        // When parsing
+        // Then Code::Unknown is returned as the fallback
         assert_eq!(Code::from_str(""), Code::Unknown);
         assert_eq!(Code::from_str("INVALID_CODE"), Code::Unknown);
         assert_eq!(Code::from_str("not_found"), Code::Unknown); // case-sensitive
@@ -206,6 +213,9 @@ mod tests {
 
     #[test]
     fn code_from_str_not_found() {
+        // Given the canonical NOT_FOUND string
+        // When parsing
+        // Then Code::NotFound is returned
         assert_eq!(Code::from_str("NOT_FOUND"), Code::NotFound);
     }
 }

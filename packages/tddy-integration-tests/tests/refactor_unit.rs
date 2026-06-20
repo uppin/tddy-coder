@@ -11,10 +11,12 @@
 /// Fails to compile until refactor_allowlist() is implemented in permission.rs.
 #[test]
 fn refactor_allowlist_includes_write_and_bash() {
+    // Given
     use tddy_workflow_recipes::refactor_allowlist;
 
     let list = refactor_allowlist();
 
+    // Then
     assert!(
         list.iter().any(|t| t == "Write"),
         "refactor_allowlist must include Write, got: {:?}",
@@ -42,11 +44,16 @@ fn refactor_allowlist_includes_write_and_bash() {
 /// Fails to compile until parse_refactor_response() and RefactorOutput exist.
 #[test]
 fn parse_refactor_response_extracts_fields() {
+    // Given
+
+    // When
     use tddy_workflow_recipes::parse_refactor_response;
 
     let input = r#"{"goal":"refactor","summary":"Executed 3 refactoring tasks from refactoring-plan.md. All tests pass.","tasks_completed":3,"tests_passing":true}"#;
 
     let result = parse_refactor_response(input);
+
+    // Then
     assert!(
         result.is_ok(),
         "parse_refactor_response should succeed, got: {:?}",
@@ -64,9 +71,14 @@ fn parse_refactor_response_extracts_fields() {
 /// Fails to compile until parse_refactor_response() exists.
 #[test]
 fn parse_refactor_response_fails_on_empty_input() {
+    // Given
+
+    // When
     use tddy_workflow_recipes::parse_refactor_response;
 
     let result = parse_refactor_response("");
+
+    // Then
     assert!(
         result.is_err(),
         "parse_refactor_response must fail on empty input"
@@ -78,12 +90,17 @@ fn parse_refactor_response_fails_on_empty_input() {
 /// Fails to compile until parse_refactor_response() exists.
 #[test]
 fn parse_refactor_response_fails_on_wrong_goal() {
+    // Given
+
+    // When
     use tddy_workflow_recipes::parse_refactor_response;
 
     let input =
         r#"{"goal":"green","summary":"Wrong goal.","tasks_completed":0,"tests_passing":false}"#;
 
     let result = parse_refactor_response(input);
+
+    // Then
     assert!(
         result.is_err(),
         "parse_refactor_response must fail when goal is not refactor"

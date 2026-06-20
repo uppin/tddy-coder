@@ -11,31 +11,14 @@
 //! "No sessions for this project."
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::SessionMetadata;
-use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListSessionsRequest,
 };
-
-type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
-type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
-
-fn test_config() -> DaemonConfig {
-    let yaml = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
-"#;
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.yaml");
-    std::fs::write(&path, yaml).unwrap();
-    DaemonConfig::load(&path).unwrap()
-}
+use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
 /// Simulates the path that `sessions_base_for_user` returns: `~/.tddy`.
 /// `list_sessions_in_dir` appends SESSIONS_SUBDIR ("sessions") to reach session dirs.
@@ -43,31 +26,9 @@ fn sessions_base_like_production(tddy_data_dir: &std::path::Path) -> PathBuf {
     tddy_data_dir.to_path_buf()
 }
 
-fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
-    let config = test_config();
-    let sessions_base_resolver: SessionsBaseResolver =
-        Arc::new(move |_| Some(sessions_base.clone()));
-    let user_resolver: UserResolver = Arc::new(|token| {
-        if token == "valid-token" {
-            Some("testuser".to_string())
-        } else {
-            None
-        }
-    });
-    ConnectionServiceImpl::new(
-        config,
-        sessions_base_resolver,
-        user_resolver,
-        None,
-        None,
-        None,
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
-}
-
 #[tokio::test]
 async fn daemon_finds_sessions_created_by_tddy_coder() {
-    // Simulate ~/.tddy (the data dir that tddy-coder uses).
+    // Given — simulate ~/.tddy (the data dir that tddy-coder uses)
     let tddy_data_dir = tempfile::tempdir().unwrap();
 
     // tddy-coder creates sessions at {data_dir}/sessions/{session_id}/.
@@ -77,39 +38,30 @@ async fn daemon_finds_sessions_created_by_tddy_coder() {
         .join("sess-path-test-1");
     std::fs::create_dir_all(&session_dir).unwrap();
 
-    let metadata = SessionMetadata {
-        session_id: "sess-path-test-1".to_string(),
-        project_id: "proj-abc".to_string(),
-        created_at: "2026-03-29T14:00:00Z".to_string(),
-        updated_at: "2026-03-29T14:00:00Z".to_string(),
-        status: "active".to_string(),
-        repo_path: Some("/var/tddy/Code/tddy-coder".to_string()),
-        pid: Some(99999),
-        tool: Some("tddy-coder".to_string()),
-        livekit_room: None,
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: None,
-        model: None,
-        activity_status: None,
-        hook_token: None,
-    };
-    tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
+    let metadata = a_session_metadata()
+        .with_session_id("sess-path-test-1")
+        .with_project_id("proj-abc")
+        .with_repo_path("/var/tddy/Code/tddy-coder")
+        .with_pid(99999)
+        .with_tool("tddy-coder")
+        .build();
+    write_session_yaml(&session_dir, &metadata);
 
     // The daemon uses sessions_base_for_user which returns ~/.tddy/sessions
     // (i.e., data_dir + "sessions").
     let sessions_base = sessions_base_like_production(tddy_data_dir.path());
-
     let service = test_service(sessions_base);
+
+    // When
     let response = service
         .list_sessions(Request::new(ListSessionsRequest {
-            session_token: "valid-token".to_string(),
+            session_token: TEST_TOKEN.to_string(),
         }))
         .await
         .expect("ListSessions RPC should succeed");
 
+    // Then
     let sessions = response.into_inner().sessions;
-
     assert_eq!(
         sessions.len(),
         1,

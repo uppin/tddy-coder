@@ -14,8 +14,12 @@ use tddy_workflow_recipes::{
 #[test]
 #[serial]
 fn default_recipe_is_free_prompting_when_unspecified() {
+    // When
+    let name = default_unspecified_workflow_recipe_cli_name();
+
+    // Then
     assert_eq!(
-        default_unspecified_workflow_recipe_cli_name(),
+        name,
         "free-prompting",
         "PRD: when --recipe is omitted and changeset has no recipe, default CLI name must be free-prompting"
     );
@@ -24,6 +28,7 @@ fn default_recipe_is_free_prompting_when_unspecified() {
 #[test]
 #[serial]
 fn start_slash_resolves_to_recipe_cli_name() {
+    // When / Then (pure input→output assertions)
     assert_eq!(
         parse_feature_start_slash_line("/start-bugfix"),
         Some(Ok("bugfix".to_string())),
@@ -39,7 +44,10 @@ fn start_slash_resolves_to_recipe_cli_name() {
 #[test]
 #[serial]
 fn slash_menu_lists_start_recipe_commands() {
+    // When
     let labels = feature_slash_menu_start_command_labels();
+
+    // Then
     for name in supported_workflow_recipe_cli_names() {
         let expected = format!("/start-{name}");
         assert!(
@@ -52,8 +60,12 @@ fn slash_menu_lists_start_recipe_commands() {
 #[test]
 #[serial]
 fn structured_workflow_completion_restores_free_prompting() {
+    // When
+    let name = next_session_recipe_cli_name_after_start_slash_structured_workflow_complete();
+
+    // Then
     assert_eq!(
-        next_session_recipe_cli_name_after_start_slash_structured_workflow_complete(),
+        name,
         "free-prompting",
         "PRD: after WorkflowComplete for a /start-* structured run, the next SubmitFeatureInput uses free-prompting"
     );
@@ -62,14 +74,21 @@ fn structured_workflow_completion_restores_free_prompting() {
 #[test]
 #[serial]
 fn invalid_start_slash_surfaces_supported_recipe_list() {
+    // When
     let parsed = parse_feature_start_slash_line("/start-not-a-real-recipe-xyz");
+
+    // Then
     assert!(
         parsed.is_some(),
         "invalid /start- suffix must parse as a start-slash command and yield an error (not None)"
     );
     let err = parsed.unwrap().unwrap_err();
     assert!(
-        err.contains("tdd") && err.contains("bugfix"),
-        "error must list supported names (e.g. tdd, bugfix); got: {err}"
+        err.contains("tdd"),
+        "error must list 'tdd' in supported names; got: {err}"
+    );
+    assert!(
+        err.contains("bugfix"),
+        "error must list 'bugfix' in supported names; got: {err}"
     );
 }

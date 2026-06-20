@@ -16,12 +16,15 @@ use tddy_workflow_recipes::TddWorkflowHooks;
 
 #[tokio::test]
 async fn changeset_persists_failed_when_runner_task_errors() {
+    // Given
     let dir = std::env::temp_dir().join("tddy-changeset-failed-on-error");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
 
     let mut cs = Changeset::default();
     cs.state.current = WorkflowState::new("GreenImplementing");
+
+    // When
     write_changeset(&dir, &cs).unwrap();
 
     let storage_dir = std::env::temp_dir().join("tddy-changeset-failed-storage");
@@ -49,6 +52,8 @@ async fn changeset_persists_failed_when_runner_task_errors() {
     ));
     let runner = FlowRunner::new_with_hooks(graph, storage.clone(), Some(hooks));
     let result = runner.run("s1").await;
+
+    // Then
     assert!(result.is_err());
 
     let cs = read_changeset(&dir).unwrap();

@@ -14,6 +14,7 @@ const CHANGESET_WORKFLOW_WITH_GITHUB_TOOLS: &str = r#"{
 
 #[test]
 fn persist_changeset_workflow_still_validates_after_github_tools_change() {
+    // When / Then
     validate_output("changeset-workflow", CHANGESET_WORKFLOW_WITH_GITHUB_TOOLS).unwrap_or_else(
         |e| {
             panic!(

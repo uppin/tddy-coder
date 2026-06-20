@@ -223,14 +223,19 @@ mod tests {
     /// Granular RED: success path must return `Ok` once the PlanDirInvalid gate is removed.
     #[test]
     fn unit_resolve_chain_returns_ok_when_parent_has_branch_and_matching_repo() {
+        // Given
         let (sessions_home, parent_id, repo) =
             tmp_sessions_parent_with_branch("ok", Some("feature/u1"));
+
+        // When
         let got = resolve_chain_integration_base_ref_from_parent_session(
             &sessions_home,
             &parent_id,
             &repo,
         );
         let _ = fs::remove_dir_all(sessions_home.parent().unwrap());
+
+        // Then
         assert_eq!(
             got.expect("resolver must return Ok(origin/...) for valid parent branch + repo"),
             "origin/feature/u1"
@@ -240,7 +245,10 @@ mod tests {
     /// Granular RED: operator-facing copy for missing branch (matches integration acceptance).
     #[test]
     fn unit_resolve_chain_no_branch_includes_prd_acceptance_message() {
+        // Given
         let (sessions_home, parent_id, repo) = tmp_sessions_parent_with_branch("no-branch", None);
+
+        // When
         let err = resolve_chain_integration_base_ref_from_parent_session(
             &sessions_home,
             &parent_id,
@@ -249,6 +257,8 @@ mod tests {
         .expect_err("missing branch must error");
         let msg = err.to_string();
         let _ = fs::remove_dir_all(sessions_home.parent().unwrap());
+
+        // Then
         assert!(
             msg.contains(
                 "PRD acceptance copy: parent session must record a branch before chaining (operators: push or persist branch name)"
@@ -260,6 +270,7 @@ mod tests {
     /// Worktree bootstrap integration delegates to `setup_worktree_for_session_with_optional_chain_base`.
     #[test]
     fn unit_integrate_chain_bootstrap_skeleton_succeeds() {
+        // Given
         let base =
             std::env::temp_dir().join(format!("tddy-chain-integ-skel-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
@@ -278,6 +289,7 @@ mod tests {
         };
         write_changeset(&child_session_dir, &cs).unwrap();
 
+        // When / Then
         integrate_chain_base_into_session_worktree_bootstrap(
             base.join("sessions-home").as_path(),
             "parent-sid",

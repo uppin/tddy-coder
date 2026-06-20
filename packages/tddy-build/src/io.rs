@@ -59,7 +59,13 @@ mod tests {
 
     #[test]
     fn srcs_become_one_rooted_fileset() {
-        let sets = srcs_to_inputs(&["src/lib.rs".into(), "Cargo.toml".into()], "crate");
+        // Given
+        let srcs = ["src/lib.rs".into(), "Cargo.toml".into()];
+
+        // When
+        let sets = srcs_to_inputs(&srcs, "crate");
+
+        // Then
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].include, vec!["src/lib.rs", "Cargo.toml"]);
         assert_eq!(sets[0].root, "crate");
@@ -67,11 +73,13 @@ mod tests {
 
     #[test]
     fn empty_srcs_make_no_inputs() {
+        // Given / When / Then
         assert!(srcs_to_inputs(&[], "").is_empty());
     }
 
     #[test]
     fn output_kinds_map_to_proto_and_default_to_file() {
+        // Given
         let specs = vec![
             OutputSpec {
                 path: "bin/app".into(),
@@ -82,7 +90,11 @@ mod tests {
                 kind: "directory".into(),
             },
         ];
+
+        // When
         let decls = outputs_to_decls(&specs).expect("valid kinds");
+
+        // Then
         assert_eq!(decls[0].kind, OutputKind::File as i32);
         assert_eq!(decls[0].path, "bin/app");
         assert_eq!(decls[1].kind, OutputKind::Directory as i32);
@@ -90,10 +102,13 @@ mod tests {
 
     #[test]
     fn invalid_output_kind_errors() {
+        // Given
         let specs = vec![OutputSpec {
             path: "x".into(),
             kind: "blob".into(),
         }];
+
+        // When / Then
         assert!(matches!(
             outputs_to_decls(&specs),
             Err(BuildError::Manifest(_))

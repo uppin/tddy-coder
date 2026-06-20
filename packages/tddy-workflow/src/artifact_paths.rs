@@ -102,11 +102,16 @@ mod tests {
 
     #[test]
     fn session_artifacts_root_appends_artifacts_segment() {
+        // Given a session directory
         let dir =
             std::env::temp_dir().join(format!("tddy-wf-artifacts-root-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
+
+        // When computing the artifacts root
         let root = session_artifacts_root(&dir);
+
+        // Then it is session_dir/artifacts/
         assert_eq!(
             root,
             dir.join("artifacts"),
@@ -117,11 +122,16 @@ mod tests {
 
     #[test]
     fn canonical_write_path_under_artifacts_subdir() {
+        // Given a session directory with an artifacts/ subdirectory
         let dir =
             std::env::temp_dir().join(format!("tddy-wf-canonical-artifact-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("artifacts")).unwrap();
+
+        // When computing the canonical write path for PRD.md
         let path = canonical_artifact_write_path(&dir, "PRD.md");
+
+        // Then it is session_dir/artifacts/PRD.md
         assert_eq!(
             path,
             dir.join("artifacts").join("PRD.md"),
@@ -132,6 +142,7 @@ mod tests {
 
     #[test]
     fn nested_under_sessions_uuid_prefers_uuid_root_when_no_artifacts_file() {
+        // Given a session nested under sessions/<uuid>/ with a PRD.md at the uuid root
         let root = std::env::temp_dir().join(format!(
             "tddy-session-artifact-nested-{}",
             std::process::id()
@@ -145,7 +156,10 @@ mod tests {
         fs::write(uuid.join("PRD.md"), "FULL\n").unwrap();
         fs::write(nested.join("PRD.md"), "legacy-nested-only\n").unwrap();
 
+        // When resolving from the nested subdirectory (no artifacts/ subdir)
         let path = resolve_existing_session_artifact(&nested, "PRD.md").unwrap();
+
+        // Then the uuid-root file wins over the nested copy
         assert_eq!(path, uuid.join("PRD.md"));
         assert_eq!(fs::read_to_string(&path).unwrap(), "FULL\n");
         let _ = fs::remove_dir_all(&root);
@@ -153,6 +167,7 @@ mod tests {
 
     #[test]
     fn session_dir_at_uuid_uses_that_file_when_no_artifacts() {
+        // Given a session directory directly at sessions/<uuid>/ with a flat PRD.md
         let root = std::env::temp_dir().join(format!(
             "tddy-session-artifact-at-uuid-{}",
             std::process::id()
@@ -162,42 +177,59 @@ mod tests {
         fs::create_dir_all(&uuid).unwrap();
         fs::write(uuid.join("PRD.md"), "at-uuid\n").unwrap();
 
+        // When resolving with no artifacts/ subdirectory present
         let path = resolve_existing_session_artifact(&uuid, "PRD.md").unwrap();
+
+        // Then the uuid-root file is returned
         assert_eq!(path, uuid.join("PRD.md"));
         let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
     fn path_without_sessions_segment_uses_session_root_file() {
+        // Given a session directory with a flat PRD.md and no sessions/ ancestor
         let root =
             std::env::temp_dir().join(format!("tddy-session-artifact-flat-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("PRD.md"), "only\n").unwrap();
+
+        // When resolving from the root
         let path = resolve_existing_session_artifact(&root, "PRD.md").unwrap();
+
+        // Then the flat session-root file is returned
         assert_eq!(path, root.join("PRD.md"));
         let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
     fn artifacts_subdir_wins_over_legacy_flat() {
+        // Given a session directory with PRD.md both in artifacts/ and at the root
         let dir =
             std::env::temp_dir().join(format!("tddy-wf-artifacts-wins-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("artifacts")).unwrap();
         fs::write(dir.join("artifacts").join("PRD.md"), "in-artifacts\n").unwrap();
         fs::write(dir.join("PRD.md"), "flat\n").unwrap();
+
+        // When resolving
         let path = resolve_existing_session_artifact(&dir, "PRD.md").unwrap();
+
+        // Then the artifacts/ copy takes priority
         assert_eq!(fs::read_to_string(&path).unwrap(), "in-artifacts\n");
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn read_session_artifact_utf8_matches_resolve_and_read() {
+        // Given an artifact file in artifacts/
         let dir = std::env::temp_dir().join(format!("tddy-wf-read-utf8-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("artifacts")).unwrap();
         fs::write(dir.join("artifacts").join("PRD.md"), "hello").unwrap();
+
+        // When reading via the helper
+        // Then the content matches what was written
         assert_eq!(
             read_session_artifact_utf8(&dir, "PRD.md").as_deref(),
             Some("hello")

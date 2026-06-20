@@ -3,8 +3,10 @@
 
 #[test]
 fn spawner_generates_uuid_v7_session_id() {
+    // Given
     let spawner_rs = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/spawner.rs"));
 
+    // When / Then
     assert!(
         !spawner_rs.contains("Uuid::new_v4"),
         "spawner must not use Uuid::new_v4 for session ID generation — use Uuid::now_v7 instead"
@@ -20,13 +22,14 @@ fn spawner_generates_uuid_v7_session_id() {
 /// Currently the 8th argument (session_id) is hardcoded to `None`.
 #[test]
 fn daemon_passes_session_id_to_presenter_start_workflow() {
+    // Given
     let run_rs = include_str!("../../tddy-coder/src/run.rs");
-
     let in_daemon_fn = run_rs
         .find("fn run_daemon(")
         .expect("run_daemon function must exist in run.rs");
     let daemon_body = &run_rs[in_daemon_fn..];
 
+    // When
     let start_workflow_call = daemon_body
         .find("presenter.start_workflow(")
         .expect("run_daemon must call presenter.start_workflow");
@@ -36,6 +39,7 @@ fn daemon_passes_session_id_to_presenter_start_workflow() {
         .expect("start_workflow call must have closing );");
     let call_text = &call_region[..closing_paren];
 
+    // Then
     assert!(
         call_text.contains("args.session_id"),
         "run_daemon must pass args.session_id to presenter.start_workflow \

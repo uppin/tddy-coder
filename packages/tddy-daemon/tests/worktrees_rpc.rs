@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::project_storage::{self, ProjectData};
+use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon::user_sessions_path::projects_path_for_user;
 use tddy_rpc::Code;
 use tddy_rpc::Request;
@@ -37,7 +38,7 @@ fn test_service(sessions_base: PathBuf, os_user: &str) -> ConnectionServiceImpl 
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver = Arc::new(|token| {
-        if token == "valid-token" {
+        if token == TEST_TOKEN {
             Some("testuser".to_string())
         } else {
             None
@@ -75,8 +76,11 @@ fn run_git(cwd: &std::path::Path, args: &[&str]) {
 /// Acceptance: invalid session token is rejected before project resolution.
 #[tokio::test]
 async fn list_worktrees_rejects_invalid_session() {
+    // Given
     let os_user = std::env::var("USER").expect("USER must be set");
     let service = test_service(tempfile::tempdir().unwrap().path().to_path_buf(), &os_user);
+
+    // When
     let err = service
         .list_worktrees_for_project(Request::new(ListWorktreesForProjectRequest {
             session_token: "bad".to_string(),
@@ -85,45 +89,58 @@ async fn list_worktrees_rejects_invalid_session() {
         }))
         .await
         .unwrap_err();
+
+    // Then
     assert_eq!(err.code, Code::Unauthenticated);
 }
 
 /// Acceptance: unknown `project_id` yields NOT_FOUND (requires valid passwd for `os_user`).
 #[tokio::test]
 async fn list_worktrees_unknown_project_not_found() {
+    // Given
     let os_user = std::env::var("USER").expect("USER must be set");
     projects_path_for_user(&os_user).expect("projects path for current user");
     let service = test_service(tempfile::tempdir().unwrap().path().to_path_buf(), &os_user);
+
+    // When
     let err = service
         .list_worktrees_for_project(Request::new(ListWorktreesForProjectRequest {
-            session_token: "valid-token".to_string(),
+            session_token: TEST_TOKEN.to_string(),
             project_id: "00000000-0000-0000-0000-000000000099".to_string(),
             refresh: false,
         }))
         .await
         .unwrap_err();
+
+    // Then
     assert_eq!(err.code, Code::NotFound);
 }
 
 /// Acceptance: empty `worktree_path` is INVALID_ARGUMENT.
 #[tokio::test]
 async fn remove_worktree_empty_path_invalid_argument() {
+    // Given
     let os_user = std::env::var("USER").expect("USER must be set");
     let service = test_service(tempfile::tempdir().unwrap().path().to_path_buf(), &os_user);
+
+    // When
     let err = service
         .remove_worktree(Request::new(RemoveWorktreeRequest {
-            session_token: "valid-token".to_string(),
+            session_token: TEST_TOKEN.to_string(),
             project_id: "any".to_string(),
             worktree_path: "".to_string(),
         }))
         .await
         .unwrap_err();
+
+    // Then
     assert_eq!(err.code, Code::InvalidArgument);
 }
 
 /// Acceptance: refresh lists worktrees for a registered project (git + projects registry).
 #[tokio::test]
 async fn list_worktrees_refresh_returns_git_worktree_rows() {
+    // Given — a git repo with a secondary worktree, registered in the project registry
     require_git();
     let os_user = std::env::var("USER").expect("USER must be set");
     let projects_dir = projects_path_for_user(&os_user).expect("projects dir");
@@ -179,14 +196,16 @@ async fn list_worktrees_refresh_returns_git_worktree_rows() {
     let prev_projects = project_storage::read_projects(&projects_dir).unwrap_or_default();
     project_storage::add_project(&projects_dir, project).unwrap();
 
+    // When
     let res = service
         .list_worktrees_for_project(Request::new(ListWorktreesForProjectRequest {
-            session_token: "valid-token".to_string(),
+            session_token: TEST_TOKEN.to_string(),
             project_id: project_id.clone(),
             refresh: true,
         }))
         .await
         .expect("ListWorktreesForProject");
+    // Then
     let paths: Vec<String> = res
         .into_inner()
         .worktrees

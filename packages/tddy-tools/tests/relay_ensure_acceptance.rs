@@ -10,7 +10,10 @@ use tddy_tools::relay::{ensure_relay_daemon, RelayConfig, RelayEndpoint};
 /// AC20: `RelayEndpoint` has a `port` field and a `base_url()` helper.
 #[test]
 fn relay_endpoint_has_port_and_base_url() {
+    // Given
     let ep = RelayEndpoint { port: 9321 };
+
+    // When / Then
     assert_eq!(ep.port, 9321);
     assert_eq!(
         ep.base_url(),
@@ -23,6 +26,7 @@ fn relay_endpoint_has_port_and_base_url() {
 /// `ensure_relay_daemon` returns an Err — not panics, not hangs.
 #[test]
 fn ensure_relay_daemon_fails_gracefully_when_no_binary() {
+    // Given
     let relay_dir = tempfile::tempdir().unwrap();
     let cfg = RelayConfig {
         base_dir: relay_dir.path().to_path_buf(),
@@ -31,7 +35,10 @@ fn ensure_relay_daemon_fails_gracefully_when_no_binary() {
         daemon_binary: PathBuf::from("/nonexistent/path/tddy-daemon"),
     };
 
+    // When
     let result = ensure_relay_daemon(&cfg);
+
+    // Then
     assert!(
         result.is_err(),
         "ensure_relay_daemon must return Err when daemon binary is not found; got Ok"
@@ -54,6 +61,7 @@ async fn ensure_relay_daemon_reuses_running_relay_from_discovery_file() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
+    // Given
     let relay_dir = tempfile::tempdir().unwrap();
 
     // Start a minimal HTTP server that responds 200 to GET /api/config.
@@ -91,7 +99,10 @@ async fn ensure_relay_daemon_reuses_running_relay_from_discovery_file() {
     // Give tokio a moment to bind.
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
+    // When
     let result = ensure_relay_daemon(&cfg);
+
+    // Then
     assert!(
         result.is_ok(),
         "ensure_relay_daemon must return Ok when relay is reachable; got: {:?}",

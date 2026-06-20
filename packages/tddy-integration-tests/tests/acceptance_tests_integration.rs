@@ -21,6 +21,7 @@ const ACCEPTANCE_TESTS_JSON_OUTPUT: &str = r#"{"goal":"acceptance-tests","summar
 
 #[tokio::test]
 async fn acceptance_tests_workflow_reads_session_dir_and_invokes_backend_with_resumed_session() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("at-plan-dir-1");
     std::fs::write(
         session_dir.join("PRD.md"),
@@ -47,6 +48,7 @@ async fn acceptance_tests_workflow_reads_session_dir_and_invokes_backend_with_re
         .await
         .unwrap();
 
+    // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
         "acceptance-tests should succeed: {:?}",
@@ -59,6 +61,8 @@ async fn acceptance_tests_workflow_reads_session_dir_and_invokes_backend_with_re
         .unwrap()
         .unwrap();
     let output_str: String = session.context.get_sync("output").unwrap();
+
+    // When
     let output = parse_acceptance_tests_response(&output_str).expect("parse output");
     assert!(output.summary.contains("Created 2 acceptance tests"));
     assert_eq!(output.tests.len(), 2);
@@ -71,6 +75,7 @@ async fn acceptance_tests_workflow_reads_session_dir_and_invokes_backend_with_re
 
 #[tokio::test]
 async fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_ready_states() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("at-plan-dir-2");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-456");
@@ -93,12 +98,14 @@ async fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_rea
         .await
         .unwrap();
 
+    // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
         "acceptance-tests should succeed: {:?}",
         result.status
     );
 
+    // When
     let changeset = read_changeset(&session_dir).expect("changeset should exist");
     assert_eq!(
         changeset.state.current,
@@ -111,6 +118,7 @@ async fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_rea
 
 #[tokio::test]
 async fn acceptance_tests_workflow_returns_error_when_session_dir_missing_prd() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("at-plan-dir-no-prd");
     std::fs::write(session_dir.join(".session"), "sess-789").expect("write .session");
 
@@ -129,6 +137,7 @@ async fn acceptance_tests_workflow_returns_error_when_session_dir_missing_prd() 
         .run_goal(&GoalId::new("acceptance-tests"), context)
         .await;
 
+    // Then
     assert!(result.is_err(), "expected Error when PRD missing, got Ok");
 
     let _ = std::fs::remove_dir_all(session_dir.parent().unwrap());
@@ -136,6 +145,7 @@ async fn acceptance_tests_workflow_returns_error_when_session_dir_missing_prd() 
 
 #[tokio::test]
 async fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("at-plan-dir-no-session");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
 
@@ -154,6 +164,7 @@ async fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
         .run_goal(&GoalId::new("acceptance-tests"), context)
         .await;
 
+    // Then
     assert!(
         result.is_err(),
         "expected Error when changeset missing, got Ok"
@@ -164,6 +175,7 @@ async fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
 
 #[tokio::test]
 async fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("at-allowlist-test");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-allowlist");
@@ -187,6 +199,8 @@ async fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
         .unwrap();
 
     let invocations = backend.invocations();
+
+    // Then
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
     assert_eq!(
@@ -200,6 +214,7 @@ async fn acceptance_tests_workflow_passes_goal_allowlist_to_invoke_request() {
 
 #[tokio::test]
 async fn plan_workflow_passes_goal_to_invoke_request() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON_OUTPUT);
 
@@ -216,11 +231,14 @@ async fn plan_workflow_passes_goal_to_invoke_request() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+    // When
     let _ = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .unwrap();
 
     let invocations = backend.invocations();
+
+    // Then
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let req = invocations.last().unwrap();
     assert_eq!(
@@ -234,6 +252,7 @@ async fn plan_workflow_passes_goal_to_invoke_request() {
 
 #[tokio::test]
 async fn acceptance_tests_workflow_writes_acceptance_tests_md_to_session_dir() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("at-writes-md");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-writes-md");
@@ -257,6 +276,8 @@ async fn acceptance_tests_workflow_writes_acceptance_tests_md_to_session_dir() {
         .unwrap();
 
     let md_path = session_dir.join("acceptance-tests.md");
+
+    // Then
     assert!(
         md_path.exists(),
         "acceptance-tests.md should be written to plan directory, path: {}",
@@ -289,6 +310,7 @@ async fn acceptance_tests_workflow_writes_acceptance_tests_md_to_session_dir() {
 
 #[tokio::test]
 async fn plan_workflow_writes_session_file_to_output_directory() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON_OUTPUT);
 
@@ -305,11 +327,14 @@ async fn plan_workflow_writes_session_file_to_output_directory() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+    // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .expect("planning should succeed");
 
     let changeset_path = output_path.join("changeset.yaml");
+
+    // Then
     assert!(changeset_path.exists(), "changeset.yaml should exist");
     let content = std::fs::read_to_string(&changeset_path).expect("read changeset.yaml");
     assert!(content.contains("sessions:"));

@@ -8,10 +8,13 @@ use tddy_workflow_recipes::{SessionArtifactManifest, TddSmallRecipe, TddSmallWor
 
 #[test]
 fn tdd_small_hooks_before_task_unknown_task_is_noop() {
+    // Given
     let recipe: Arc<dyn tddy_core::WorkflowRecipe> = Arc::new(TddSmallRecipe);
     let manifest: Arc<dyn SessionArtifactManifest> = Arc::new(TddSmallRecipe);
     let hooks = TddSmallWorkflowHooks::new(recipe, manifest);
     let ctx = Context::new();
+
+    // When / Then — must not error for unknown tasks
     hooks
         .before_task("nonexistent-task", &ctx)
         .expect("unknown task should be ignored");
