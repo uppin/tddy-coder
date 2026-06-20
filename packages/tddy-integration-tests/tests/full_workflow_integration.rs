@@ -34,6 +34,7 @@ const EVALUATE_OUTPUT_CHAIN: &str = r#"{"goal":"evaluate-changes","summary":"Eva
 /// Now expects ElicitationNeeded after plan, then resume completes the rest.
 #[tokio::test]
 async fn full_workflow_chains_all_steps() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("full-workflow-chain");
     let init_cs = Changeset {
         initial_prompt: Some("Build auth".to_string()),
@@ -58,6 +59,7 @@ async fn full_workflow_chains_all_steps() {
         storage_dir.clone(),
     );
 
+    // When
     let ctx = ctx_plan(
         "Build auth",
         output_dir.clone(),
@@ -68,6 +70,7 @@ async fn full_workflow_chains_all_steps() {
     let plan_gid = GoalId::new("plan");
     let result = engine.run_workflow_from(&plan_gid, ctx).await.unwrap();
 
+    // Then
     assert!(
         matches!(result.status, ExecutionStatus::ElicitationNeeded { .. }),
         "plan should trigger ElicitationNeeded, got {:?}",
@@ -101,6 +104,7 @@ async fn full_workflow_chains_all_steps() {
 /// StubBackend always asks clarification (plan) and permission (acceptance-tests).
 #[tokio::test]
 async fn full_workflow_with_stub_backend_reaches_green_complete() {
+    // Given
     let (output_dir, _) = temp_dir_with_git_repo("full-workflow-stub");
 
     let backend = Arc::new(StubBackend::new());
@@ -111,7 +115,10 @@ async fn full_workflow_with_stub_backend_reaches_green_complete() {
         storage_dir.clone(),
     );
 
+    // When
     let first = run_plan(&engine, "Add a feature", &output_dir, None).await;
+
+    // Then
     assert!(
         first.is_err(),
         "plan should ask clarification first (StubBackend)"
@@ -169,7 +176,10 @@ async fn full_workflow_with_stub_backend_reaches_green_complete() {
 /// next_goal_for_state maps each workflow state to the next goal.
 #[test]
 fn next_goal_for_state_maps_states_correctly() {
+    // Given
     let r = common::tdd_recipe();
+
+    // Then
     assert_eq!(
         r.next_goal_for_state(&WorkflowState::new("Init")),
         Some(GoalId::new("interview"))
@@ -204,6 +214,7 @@ fn next_goal_for_state_maps_states_correctly() {
 /// Resume from Planned: skip plan, run acceptance-tests -> red -> green -> evaluate -> validate -> refactor.
 #[tokio::test]
 async fn full_workflow_resume_from_planned() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("full-resume-planned");
     std::fs::write(
         session_dir.join("PRD.md"),
@@ -228,10 +239,13 @@ async fn full_workflow_resume_from_planned() {
         storage_dir.clone(),
     );
 
+    // When
     let ctx = ctx_acceptance_tests(session_dir.clone(), Some(output_dir), None, false);
     let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();
+
+    // Then
     assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
     assert_eq!(
@@ -246,6 +260,7 @@ async fn full_workflow_resume_from_planned() {
 /// Resume from AcceptanceTestsReady: skip plan and acceptance-tests, run red -> green -> evaluate -> validate -> refactor -> update-docs.
 #[tokio::test]
 async fn full_workflow_resume_from_acceptance_tests_ready() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-full-resume-at");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
@@ -272,8 +287,11 @@ async fn full_workflow_resume_from_acceptance_tests_ready() {
         storage_dir.clone(),
     );
 
+    // When
     let ctx = ctx_red(session_dir.clone(), None);
     let result = run_goal_until_done(&engine, "red", ctx).await.unwrap();
+
+    // Then
     assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
     assert_eq!(
@@ -288,6 +306,7 @@ async fn full_workflow_resume_from_acceptance_tests_ready() {
 /// When state is GreenComplete, next_goal_for_state returns "demo" (then evaluate).
 #[test]
 fn full_workflow_resume_from_green_complete_returns_demo() {
+    // Given / When / Then
     assert_eq!(
         common::tdd_recipe().next_goal_for_state(&WorkflowState::new("GreenComplete")),
         Some(GoalId::new("demo"))
@@ -303,6 +322,7 @@ const DEMO_OUTPUT: &str = r#"{"goal":"demo","summary":"Demo ran successfully. CL
 /// AC1, AC7: Full workflow chains plan → acceptance-tests → red → green → demo → evaluate → validate → refactor
 #[tokio::test]
 async fn full_workflow_includes_demo_and_evaluate() {
+    // Given
     let (output_dir, _) = temp_dir_with_git_repo("full-wf-demo-evaluate");
 
     let backend = Arc::new(MockBackend::new());
@@ -323,6 +343,7 @@ async fn full_workflow_includes_demo_and_evaluate() {
         storage_dir.clone(),
     );
 
+    // When
     let (session_dir, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .expect("plan should succeed");
@@ -337,6 +358,8 @@ async fn full_workflow_includes_demo_and_evaluate() {
     let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();
+
+    // Then
     assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
     assert_eq!(
@@ -351,6 +374,7 @@ async fn full_workflow_includes_demo_and_evaluate() {
 /// AC2, AC3: Full workflow where demo is skipped proceeds green → evaluate → validate → refactor → update-docs.
 #[tokio::test]
 async fn full_workflow_skip_demo_goes_to_evaluate() {
+    // Given
     let (output_dir, _) = temp_dir_with_git_repo("full-wf-skip-demo");
 
     let backend = Arc::new(MockBackend::new());
@@ -370,6 +394,7 @@ async fn full_workflow_skip_demo_goes_to_evaluate() {
         storage_dir.clone(),
     );
 
+    // When
     let (session_dir, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .expect("plan should succeed");
@@ -378,6 +403,8 @@ async fn full_workflow_skip_demo_goes_to_evaluate() {
     let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();
+
+    // Then
     assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
     assert_eq!(
@@ -392,7 +419,10 @@ async fn full_workflow_skip_demo_goes_to_evaluate() {
 /// AC7, AC8, AC9: Unit test for next_goal_for_state mapping.
 #[test]
 fn next_goal_for_state_includes_demo_and_evaluate() {
+    // Given
     let r = common::tdd_recipe();
+
+    // Then
     assert_eq!(
         r.next_goal_for_state(&WorkflowState::new("GreenComplete")),
         Some(GoalId::new("demo"))
@@ -410,6 +440,7 @@ fn next_goal_for_state_includes_demo_and_evaluate() {
 /// AC11: GoalOptions has no run_demo field (single options type for all goals).
 #[test]
 fn goal_options_no_run_demo_field() {
+    // Given
     use tddy_core::GoalOptions;
     let _explicit = GoalOptions {
         model: None,
@@ -420,13 +451,18 @@ fn goal_options_no_run_demo_field() {
         allowed_tools_extras: None,
         debug: false,
     };
+
+    // When
     let options = GoalOptions::default();
+
+    // Then
     assert!(options.model.is_none());
 }
 
 /// AC (R6): next_goal_for_state("Evaluated") returns Some("validate").
 #[test]
 fn next_goal_evaluated_returns_validate() {
+    // Given / When / Then
     assert_eq!(
         common::tdd_recipe().next_goal_for_state(&WorkflowState::new("Evaluated")),
         Some(GoalId::new("validate"))
@@ -436,6 +472,7 @@ fn next_goal_evaluated_returns_validate() {
 /// AC (R6): next_goal_for_state("ValidateComplete") returns Some("refactor").
 #[test]
 fn next_goal_validate_complete_returns_refactor() {
+    // Given / When / Then
     assert_eq!(
         common::tdd_recipe().next_goal_for_state(&WorkflowState::new("ValidateComplete")),
         Some(GoalId::new("refactor"))
@@ -445,6 +482,7 @@ fn next_goal_validate_complete_returns_refactor() {
 /// AC (R6): next_goal_for_state("RefactorComplete") returns Some("update-docs").
 #[test]
 fn next_goal_refactor_complete_returns_update_docs() {
+    // Given / When / Then
     assert_eq!(
         common::tdd_recipe().next_goal_for_state(&WorkflowState::new("RefactorComplete")),
         Some(GoalId::new("update-docs"))
@@ -454,6 +492,7 @@ fn next_goal_refactor_complete_returns_update_docs() {
 /// next_goal_for_state("DocsUpdated") returns None (terminal).
 #[test]
 fn next_goal_docs_updated_returns_none() {
+    // Given / When / Then
     assert_eq!(
         common::tdd_recipe().next_goal_for_state(&WorkflowState::new("DocsUpdated")),
         None
@@ -464,6 +503,7 @@ fn next_goal_docs_updated_returns_none() {
 /// With hook-triggered elicitation: plan returns ElicitationNeeded, then resume completes.
 #[tokio::test]
 async fn plain_full_workflow_uses_single_workflow_instance() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("single-instance-test");
 
     let backend = Arc::new(MockBackend::new());
@@ -495,6 +535,7 @@ async fn plain_full_workflow_uses_single_workflow_instance() {
     )
     .expect("write demo-plan.md");
 
+    // When
     let mut ctx = ctx_plan(
         "Build auth",
         output_dir.clone(),
@@ -506,6 +547,7 @@ async fn plain_full_workflow_uses_single_workflow_instance() {
     let plan_gid = GoalId::new("plan");
     let result = engine.run_workflow_from(&plan_gid, ctx).await.unwrap();
 
+    // Then
     assert!(
         matches!(result.status, ExecutionStatus::ElicitationNeeded { .. }),
         "plan should return ElicitationNeeded, got {:?}",
@@ -552,6 +594,7 @@ const UPDATE_DOCS_OUTPUT: &str =
 /// Phase 5 / PRD R7: Full workflow chains all 9 steps (plan through update-docs).
 #[tokio::test]
 async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
+    // Given
     let (output_dir, _) = temp_dir_with_git_repo("full-wf-8-steps");
 
     let backend = Arc::new(MockBackend::new());
@@ -572,6 +615,7 @@ async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
         storage_dir.clone(),
     );
 
+    // When
     let (session_dir, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .expect("plan should succeed");
@@ -586,6 +630,8 @@ async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
     let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();
+
+    // Then
     assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
     assert_eq!(
@@ -614,6 +660,7 @@ async fn full_workflow_chains_all_eight_steps_with_validate_and_refactor() {
 /// TddWorkflowHooks triggers DocumentApproval after plan task when PRD.md exists.
 #[tokio::test]
 async fn tdd_hooks_elicitation_returns_plan_approval_when_prd_exists() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-hooks-elicit-prd");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
@@ -630,7 +677,10 @@ async fn tdd_hooks_elicitation_returns_plan_approval_when_prd_exists() {
         status_message: None,
     };
 
+    // When
     let event = hooks.elicitation_after_task("plan", &ctx, &result);
+
+    // Then
     assert!(
         event.is_some(),
         "elicitation_after_task should return Some when PRD.md exists"
@@ -654,6 +704,7 @@ async fn tdd_hooks_elicitation_returns_plan_approval_when_prd_exists() {
 /// TddWorkflowHooks returns None for non-plan tasks.
 #[tokio::test]
 async fn tdd_hooks_elicitation_returns_none_for_non_plan_tasks() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-hooks-elicit-nonplan");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
@@ -670,6 +721,7 @@ async fn tdd_hooks_elicitation_returns_none_for_non_plan_tasks() {
         status_message: None,
     };
 
+    // When / Then
     assert!(
         hooks.elicitation_after_task("red", &ctx, &result).is_none(),
         "elicitation_after_task should return None for non-plan tasks"
@@ -687,6 +739,7 @@ async fn tdd_hooks_elicitation_returns_none_for_non_plan_tasks() {
 /// TddWorkflowHooks returns None when PRD.md doesn't exist.
 #[tokio::test]
 async fn tdd_hooks_elicitation_returns_none_when_no_prd() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-hooks-elicit-noprd");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
@@ -702,6 +755,7 @@ async fn tdd_hooks_elicitation_returns_none_when_no_prd() {
         status_message: None,
     };
 
+    // When / Then
     assert!(
         hooks
             .elicitation_after_task("plan", &ctx, &result)
@@ -715,6 +769,7 @@ async fn tdd_hooks_elicitation_returns_none_when_no_prd() {
 /// Full workflow with TddWorkflowHooks: engine returns ElicitationNeeded after plan.
 #[tokio::test]
 async fn full_workflow_returns_elicitation_needed_after_plan() {
+    // Given
     let output_dir = std::env::temp_dir().join("tddy-full-wf-elicit");
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
@@ -733,6 +788,7 @@ async fn full_workflow_returns_elicitation_needed_after_plan() {
     let _ = std::fs::remove_dir_all(&storage_dir);
     let engine = common::tdd_engine(SharedBackend::from_arc(backend), storage_dir.clone());
 
+    // When
     let ctx = ctx_plan(
         "Build auth",
         output_dir.clone(),
@@ -743,6 +799,7 @@ async fn full_workflow_returns_elicitation_needed_after_plan() {
     let plan_gid = GoalId::new("plan");
     let result = engine.run_workflow_from(&plan_gid, ctx).await.unwrap();
 
+    // Then
     assert!(
         matches!(result.status, ExecutionStatus::ElicitationNeeded { .. }),
         "full workflow should return ElicitationNeeded after plan, got {:?}",
@@ -767,6 +824,7 @@ async fn full_workflow_returns_elicitation_needed_after_plan() {
 /// Full workflow: after ElicitationNeeded, caller can resume and workflow continues.
 #[tokio::test]
 async fn full_workflow_resumes_after_elicitation_approval() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("full-wf-elicit-resume");
     let init_cs = Changeset {
         initial_prompt: Some("Build auth".to_string()),
@@ -791,6 +849,7 @@ async fn full_workflow_resumes_after_elicitation_approval() {
         storage_dir.clone(),
     );
 
+    // When
     let ctx = ctx_plan(
         "Build auth",
         output_dir.clone(),
@@ -819,6 +878,7 @@ async fn full_workflow_resumes_after_elicitation_approval() {
         }
     }
 
+    // Then
     assert_eq!(
         backend.invocations().len(),
         8,
@@ -832,6 +892,7 @@ async fn full_workflow_resumes_after_elicitation_approval() {
 /// Phase 5: Full workflow with skipped demo still includes validate, refactor, and update-docs.
 #[tokio::test]
 async fn full_workflow_skip_demo_includes_validate_and_refactor() {
+    // Given
     let (output_dir, _) = temp_dir_with_git_repo("full-wf-skip-demo-8");
 
     let backend = Arc::new(MockBackend::new());
@@ -851,6 +912,7 @@ async fn full_workflow_skip_demo_includes_validate_and_refactor() {
         storage_dir.clone(),
     );
 
+    // When
     let (session_dir, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .expect("plan");
@@ -859,6 +921,8 @@ async fn full_workflow_skip_demo_includes_validate_and_refactor() {
     let result = run_goal_until_done(&engine, "acceptance-tests", ctx)
         .await
         .unwrap();
+
+    // Then
     assert!(!matches!(result.status, ExecutionStatus::Error(_)));
 
     assert_eq!(
