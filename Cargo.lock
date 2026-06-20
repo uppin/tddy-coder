@@ -6589,7 +6589,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-build-buildroot"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml",
+ "tddy-build",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-build-docker"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml",
+ "tddy-build",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-build-qemu"
 version = "0.1.0"
 dependencies = [
  "serde",
